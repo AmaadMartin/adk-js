@@ -10,6 +10,7 @@ import {
   createEvent,
   createEventActions,
   createSession,
+  Event,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -17,7 +18,7 @@ import {
   Runner,
   State,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it, Mock, vi} from 'vitest';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   const actual =
@@ -28,9 +29,61 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
       appName: config?.appName,
       sessionService: config?.sessionService,
       runAsync: vi.fn(),
+      close: vi.fn(),
     })),
   };
 });
+
+type SubAgentRun = () => AsyncGenerator<Event, void, void>;
+
+/** An async generator that emits one model reply and completes. */
+function subAgentReplies(text: string): SubAgentRun {
+  return async function* () {
+    yield createEvent({
+      author: 'sub-agent',
+      content: {role: 'model', parts: [{text}]},
+    });
+  };
+}
+
+/** An AgentTool wired to a parent context, for the sub-runner tests. */
+function createSubRunnerHarness(abortSignal?: AbortSignal): {
+  tool: AgentTool;
+  toolContext: Context;
+} {
+  const agent = new LlmAgent({name: 'sub-agent'});
+  const invocationContext = new InvocationContext({
+    invocationId: 'test-invocation',
+    agent,
+    session: createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    }),
+    pluginManager: new PluginManager([]),
+    sessionService: new InMemorySessionService(),
+    abortSignal,
+  });
+  return {
+    tool: new AgentTool({agent}),
+    toolContext: new Context({invocationContext}),
+  };
+}
+
+/** Mocks the sub-runner and returns the spy standing in for its close(). */
+function mockSubRunner(runAsync: SubAgentRun): Mock {
+  const close = vi.fn();
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync,
+        close,
+      }) as unknown as Runner,
+  );
+  return close;
+}
 
 describe('AgentTool', () => {
   it('propagates session context and state delta', async () => {
@@ -79,6 +132,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -148,6 +202,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -203,6 +258,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -286,6 +342,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -342,6 +399,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -392,6 +450,7 @@ describe('AgentTool', () => {
           appName: config?.appName,
           sessionService: config?.sessionService,
           runAsync: mockRunAsync,
+          close: vi.fn(),
         }) as unknown as Runner,
     );
 
@@ -441,6 +500,7 @@ describe('AgentTool', () => {
           appName: config?.appName,
           sessionService: config?.sessionService,
           runAsync: mockRunAsync,
+          close: vi.fn(),
         }) as unknown as Runner,
     );
 
@@ -492,6 +552,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -512,5 +573,47 @@ describe('AgentTool', () => {
     expect(subAgentSession?.state).not.toHaveProperty(
       `${State.TEMP_PREFIX}tempKey`,
     );
+  });
+
+  it('closes the sub-runner after the tool call', async () => {
+    const {tool, toolContext} = createSubRunnerHarness();
+    const closeMock = mockSubRunner(subAgentReplies('hello'));
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('hello');
+    expect(closeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the sub-runner when the sub-agent throws', async () => {
+    const {tool, toolContext} = createSubRunnerHarness();
+    const failure = new Error('sub-agent boom');
+    const closeMock = mockSubRunner(async function* () {
+      yield* subAgentReplies('partial')();
+      throw failure;
+    });
+
+    await expect(
+      tool.runAsync({args: {request: 'hello'}, toolContext}),
+    ).rejects.toThrow(failure);
+    expect(closeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the sub-runner when the tool call is aborted', async () => {
+    const controller = new AbortController();
+    const {tool, toolContext} = createSubRunnerHarness(controller.signal);
+    const closeMock = mockSubRunner(subAgentReplies('never read'));
+    controller.abort();
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('');
+    expect(closeMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -157,56 +157,62 @@ export class AgentTool extends BaseTool {
       credentialService: toolContext.invocationContext.credentialService,
     });
 
-    const session = await runner.sessionService.getOrCreateSession({
-      appName: this.agent.name,
-      userId: toolContext.invocationContext.userId,
-      sessionId: toolContext.invocationContext.session.id,
-      state: toolContext.state.toRecord(),
-    });
+    // This runner exists only for this tool call, so it owns the sub-agent's
+    // toolsets and must release them on every exit path.
+    try {
+      const session = await runner.sessionService.getOrCreateSession({
+        appName: this.agent.name,
+        userId: toolContext.invocationContext.userId,
+        sessionId: toolContext.invocationContext.session.id,
+        state: toolContext.state.toRecord(),
+      });
 
-    if (toolContext.abortSignal?.aborted) {
-      return '';
-    }
-
-    let lastEvent: Event | undefined;
-    for await (const event of runner.runAsync({
-      userId: session.userId,
-      sessionId: session.id,
-      newMessage: content,
-      abortSignal: toolContext.abortSignal,
-    })) {
       if (toolContext.abortSignal?.aborted) {
-        return;
+        return '';
       }
 
-      if (event.actions.stateDelta) {
-        const filteredDelta = Object.fromEntries(
-          Object.entries(event.actions.stateDelta).filter(
-            ([key]) => !key.startsWith(State.TEMP_PREFIX),
-          ),
-        );
-        if (Object.keys(filteredDelta).length > 0) {
-          toolContext.state.update(filteredDelta);
+      let lastEvent: Event | undefined;
+      for await (const event of runner.runAsync({
+        userId: session.userId,
+        sessionId: session.id,
+        newMessage: content,
+        abortSignal: toolContext.abortSignal,
+      })) {
+        if (toolContext.abortSignal?.aborted) {
+          return;
         }
+
+        if (event.actions.stateDelta) {
+          const filteredDelta = Object.fromEntries(
+            Object.entries(event.actions.stateDelta).filter(
+              ([key]) => !key.startsWith(State.TEMP_PREFIX),
+            ),
+          );
+          if (Object.keys(filteredDelta).length > 0) {
+            toolContext.state.update(filteredDelta);
+          }
+        }
+
+        lastEvent = event;
       }
 
-      lastEvent = event;
+      if (!lastEvent?.content?.parts?.length) {
+        return '';
+      }
+
+      const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
+      // Exclude thoughts from the merged text.
+      const mergedText = lastEvent.content.parts
+        .filter((part) => !part.thought)
+        .map((part) => part.text)
+        .filter((text) => text)
+        .join('\n');
+
+      // TODO - b/425992518: In case of output schema, the output should be
+      // validated. Consider similar logic to one we have in Python ADK.
+      return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
+    } finally {
+      await runner.close();
     }
-
-    if (!lastEvent?.content?.parts?.length) {
-      return '';
-    }
-
-    const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
-    // Exclude thoughts from the merged text.
-    const mergedText = lastEvent.content.parts
-      .filter((part) => !part.thought)
-      .map((part) => part.text)
-      .filter((text) => text)
-      .join('\n');
-
-    // TODO - b/425992518: In case of output schema, the output should be
-    // validated. Consider similar logic to one we have in Python ADK.
-    return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
   }
 }

@@ -455,7 +455,6 @@ export class Runner {
       );
     } finally {
       span.end();
-      await closeToolsets(this.agent);
     }
   }
 
@@ -464,12 +463,16 @@ export class Runner {
    *
    * Closes the toolsets reachable from the agent tree, then closes every
    * registered plugin. Safe to call more than once; subsequent calls are
-   * no-ops. Toolsets are also closed at the end of each invocation, but the
-   * plugins are not, so a caller that never closes a runner leaks them.
+   * no-ops.
+   *
+   * A toolset lives for the runner's lifetime rather than for one invocation,
+   * so a stateful toolset such as an MCP session survives across calls to
+   * {@link runAsync}. Nothing else closes it, so a caller that never closes a
+   * runner leaks whatever its toolsets and plugins hold.
    *
    * @throws An `AggregateError` if one or more plugins fail to close. Every
    *     plugin is still closed before the error is raised. Toolset failures
-   *     are logged rather than thrown, matching the per-invocation cleanup.
+   *     are logged rather than thrown.
    */
   async close(): Promise<void> {
     if (this.closed) {
