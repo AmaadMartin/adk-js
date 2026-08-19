@@ -258,12 +258,9 @@ function structuredResumeInputs(
     if (fr.name !== REQUEST_INPUT_FUNCTION_CALL_NAME || !fr.id) {
       continue;
     }
-    const response = unwrapResponse(fr.response);
-    const mismatch = interruptResponseMismatch(
-      fr.id,
-      response,
-      responseSchemas.get(fr.id),
-    );
+    const schema = responseSchemas.get(fr.id);
+    const response = unwrapResponse(fr.response, schema);
+    const mismatch = interruptResponseMismatch(fr.id, response, schema);
     if (mismatch) {
       throw new Error(mismatch);
     }
@@ -292,10 +289,11 @@ function pendingInterruptIds(
       if (!fr.id) {
         continue;
       }
+      const schema = responseSchemas.get(fr.id);
       const mismatch = interruptResponseMismatch(
         fr.id,
-        unwrapResponse(fr.response),
-        responseSchemas.get(fr.id),
+        unwrapResponse(fr.response, schema),
+        schema,
       );
       if (!mismatch) {
         answered.add(fr.id);
