@@ -4,8 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it, vi} from 'vitest';
-import {buildAgentSkills} from '../../src/a2a/agent_card.js';
+import {AgentCard} from '@a2a-js/sdk';
+import {DefaultAgentCardResolver} from '@a2a-js/sdk/client';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  Mock,
+  vi,
+} from 'vitest';
+import {buildAgentSkills, resolveAgentCard} from '../../src/a2a/agent_card.js';
 import {node} from '../../src/workflow/node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 
@@ -234,6 +249,118 @@ describe('Agent Card', () => {
       const workflowSkill = skills.find((s) => s.name === 'workflow');
       expect(workflowSkill?.description).toBe('Runs a graph');
       expect(skills.find((s) => s.name === 'custom')).toBeUndefined();
+    });
+  });
+
+  describe('resolveAgentCard', () => {
+    const CARD_URL = 'https://example.com/card.json';
+    const card: AgentCard = {
+      name: 'Remote',
+      description: 'test',
+      protocolVersion: '1.0',
+      defaultInputModes: [],
+      defaultOutputModes: [],
+      capabilities: {},
+      skills: [],
+      url: 'https://example.com',
+      version: '1.0',
+    };
+
+    let tempDir: string;
+    let cardPath: string;
+    let fetchSpy: Mock<typeof fetch>;
+
+    beforeAll(async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-agent-card-'));
+      cardPath = path.join(tempDir, 'card.json');
+      await fs.writeFile(cardPath, JSON.stringify(card), 'utf-8');
+    });
+
+    afterAll(async () => {
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    beforeEach(() => {
+      fetchSpy = vi.fn().mockResolvedValue(new Response(JSON.stringify(card)));
+      vi.stubGlobal('fetch', fetchSpy);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    });
+
+    /**
+     * Resolves a card from a URL and returns the `fetchImpl` the resolver was
+     * built with, without letting the resolver reach the network.
+     */
+    async function captureFetchImpl(
+      headers?: Record<string, string>,
+    ): Promise<typeof fetch | undefined> {
+      let captured: typeof fetch | undefined;
+      vi.spyOn(
+        DefaultAgentCardResolver.prototype,
+        'resolve',
+      ).mockImplementation(async function (this: DefaultAgentCardResolver) {
+        captured = this.options?.fetchImpl;
+        return card;
+      });
+      await resolveAgentCard(CARD_URL, headers);
+      return captured;
+    }
+
+    it('sends the supplied headers on the card request', async () => {
+      const resolved = await resolveAgentCard(CARD_URL, {
+        Authorization: 'Bearer x',
+      });
+
+      expect(resolved).toEqual(card);
+      const [, init] = fetchSpy.mock.calls[0];
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer x');
+    });
+
+    it('keeps headers already present on the request init', async () => {
+      const fetchImpl = await captureFetchImpl({Authorization: 'Bearer x'});
+      if (!fetchImpl) {
+        expect.fail('the resolver was built without a fetchImpl');
+      }
+
+      await fetchImpl(CARD_URL, {
+        headers: new Headers({'X-Trace': 'from-headers'}),
+      });
+      await fetchImpl(CARD_URL, {headers: {'X-Trace': 'from-object'}});
+
+      const first = new Headers(fetchSpy.mock.calls[0][1]?.headers);
+      expect(first.get('X-Trace')).toBe('from-headers');
+      expect(first.get('Authorization')).toBe('Bearer x');
+
+      const second = new Headers(fetchSpy.mock.calls[1][1]?.headers);
+      expect(second.get('X-Trace')).toBe('from-object');
+      expect(second.get('Authorization')).toBe('Bearer x');
+    });
+
+    it('leaves the card request untouched when no headers are given', async () => {
+      await resolveAgentCard(CARD_URL);
+
+      // The resolver calls `fetch(url)` with no init unless it was given a
+      // fetchImpl, so a second argument means the wrapper was applied.
+      expect(fetchSpy.mock.calls[0]).toHaveLength(1);
+    });
+
+    it('reports the file it could not read', async () => {
+      await expect(
+        resolveAgentCard(path.join(tempDir, 'missing.json')),
+      ).rejects.toThrow('Failed to read agent card from file');
+    });
+
+    it('ignores headers for a loaded card and for a file path', async () => {
+      expect(await resolveAgentCard(card, {Authorization: 'Bearer x'})).toBe(
+        card,
+      );
+      expect(
+        await resolveAgentCard(cardPath, {Authorization: 'Bearer x'}),
+      ).toEqual(card);
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
   });
 });

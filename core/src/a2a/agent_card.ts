@@ -24,27 +24,61 @@ import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {isWorkflow} from '../workflow/workflow.js';
 
 /**
+ * Checks whether an agent card source is an http(s) URL rather than a loaded
+ * card or a local file path.
+ */
+export function isAgentCardUrl(
+  agentCard: AgentCard | string,
+): agentCard is string {
+  return (
+    typeof agentCard === 'string' &&
+    (agentCard.startsWith('http://') || agentCard.startsWith('https://'))
+  );
+}
+
+/**
+ * Returns a `fetch` that adds `headers` to every request it makes.
+ */
+function fetchWithHeaders(headers: Record<string, string>): typeof fetch {
+  return (input, init) => {
+    // `init.headers` may be a Headers instance or an entry array, so it has to
+    // be merged through Headers rather than an object spread.
+    const merged = new Headers(init?.headers);
+    for (const [name, value] of Object.entries(headers)) {
+      merged.set(name, value);
+    }
+    return fetch(input, {...init, headers: merged});
+  };
+}
+
+/**
  * Resolves the AgentCard from the provided source.
+ *
+ * @param agentCard - A loaded card, an http(s) URL, or a local file path.
+ * @param headers - Extra HTTP headers for the card request. Ignored for a
+ *   loaded card and for a file path.
  */
 export async function resolveAgentCard(
   agentCard: AgentCard | string,
+  headers?: Record<string, string>,
 ): Promise<AgentCard> {
   if (typeof agentCard === 'object') {
     return agentCard;
   }
 
-  const source = agentCard as string;
-  if (source.startsWith('http://') || source.startsWith('https://')) {
-    const resolver = new DefaultAgentCardResolver();
-    return await resolver.resolve(source);
+  if (isAgentCardUrl(agentCard)) {
+    const resolver = headers
+      ? new DefaultAgentCardResolver({fetchImpl: fetchWithHeaders(headers)})
+      : new DefaultAgentCardResolver();
+    return await resolver.resolve(agentCard);
   }
 
   try {
-    const content = await fs.readFile(source, 'utf-8');
+    const content = await fs.readFile(agentCard, 'utf-8');
     return JSON.parse(content) as AgentCard;
   } catch (err: unknown) {
     throw new Error(
-      `Failed to read agent card from file ${source}: ${(err as Error).message}`,
+      `Failed to read agent card from file ${agentCard}: ${(err as Error).message}`,
     );
   }
 }
