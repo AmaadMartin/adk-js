@@ -20,6 +20,11 @@ import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
+import {
+  createArtifactServiceFromOptions,
+  createSessionServiceFromOptions,
+  resolveAgentsRoot,
+} from '../utils/service_factory.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
@@ -66,6 +71,37 @@ function getArtifactServiceFromOptions(options: {
   return getArtifactServiceFromUri(
     options['artifact_service_uri'] || 'memory://',
   );
+}
+
+/**
+ * Builds the session service for `adk web` and `adk api_server`, which default
+ * to per-agent `.adk` storage rather than to memory.
+ */
+function getServerSessionService(
+  options: {session_service_uri?: string; use_local_storage?: string},
+  agentsRoot: string,
+): Promise<BaseSessionService> {
+  return createSessionServiceFromOptions({
+    baseDir: agentsRoot,
+    sessionServiceUri:
+      options['session_service_uri'] || process.env.DATABASE_URL,
+    useLocalStorage: getBoolean(options['use_local_storage']),
+  });
+}
+
+/**
+ * Builds the artifact service for `adk web` and `adk api_server`, which default
+ * to per-agent `.adk` storage rather than to memory.
+ */
+function getServerArtifactService(
+  options: {artifact_service_uri?: string; use_local_storage?: string},
+  agentsRoot: string,
+): Promise<BaseArtifactService> {
+  return createArtifactServiceFromOptions({
+    baseDir: agentsRoot,
+    artifactServiceUri: options['artifact_service_uri'],
+    useLocalStorage: getBoolean(options['use_local_storage']),
+  });
 }
 
 function getAgentFileOptions(options: {
@@ -124,6 +160,10 @@ const ARTIFACT_SERVICE_URI_OPTION = new Option(
   '--artifact_service_uri <string>',
   'Optional. The URI of the artifact service. Supported URIs: gs://<bucket name> for GCS artifact service.',
 );
+const USE_LOCAL_STORAGE_OPTION = new Option(
+  '--use_local_storage [boolean]',
+  "Optional. Whether to persist sessions and artifacts in each agent's .adk folder. Ignored when --session_service_uri or --artifact_service_uri is set. Default: true",
+).default(true);
 const OTEL_TO_CLOUD_OPTION = new Option(
   '--otel_to_cloud [boolean]',
   'Optional. Whether to send otel traces to cloud.',
@@ -218,6 +258,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(USE_LOCAL_STORAGE_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -230,15 +271,17 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(logLevel);
 
       try {
+        const resolvedAgentsDir = getAbsolutePath(agentsDir);
+        const agentsRoot = await resolveAgentsRoot(resolvedAgentsDir);
         const server = new AdkApiServer({
           logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
+          agentsDir: resolvedAgentsDir,
           host: options['host'],
           port: parseInt(options['port'], 10),
           serveDebugUI: true,
           allowOrigins: options['allow_origins'],
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
+          sessionService: await getServerSessionService(options, agentsRoot),
+          artifactService: await getServerArtifactService(options, agentsRoot),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
@@ -264,6 +307,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(USE_LOCAL_STORAGE_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -276,15 +320,17 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(logLevel);
 
       try {
+        const resolvedAgentsDir = getAbsolutePath(agentsDir);
+        const agentsRoot = await resolveAgentsRoot(resolvedAgentsDir);
         const server = new AdkApiServer({
           logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
+          agentsDir: resolvedAgentsDir,
           host: options['host'],
           port: parseInt(options['port'], 10),
           serveDebugUI: false,
           allowOrigins: options['allow_origins'],
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
+          sessionService: await getServerSessionService(options, agentsRoot),
+          artifactService: await getServerArtifactService(options, agentsRoot),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
