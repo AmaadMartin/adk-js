@@ -80,12 +80,9 @@ function parseModel(model: string): {prefix: string; actualModel: string} {
  * `lite` and `LiteLlm` name `LiteLlm`.
  */
 function matchPrefix(prefix: string, className: string): boolean {
+  const name = className.toLowerCase();
   const prefixLower = prefix.toLowerCase();
-  const classNameLower = className.toLowerCase();
-  const withoutLlmSuffix = classNameLower.endsWith('llm')
-    ? classNameLower.slice(0, -3)
-    : classNameLower;
-  return prefixLower === withoutLlmSuffix || prefixLower === classNameLower;
+  return prefixLower === name || prefixLower === name.replace(/llm$/, '');
 }
 
 /**
@@ -169,8 +166,6 @@ export class LLMRegistry {
     const {prefix} = parseModel(model);
     if (prefix) {
       for (const llmClass of LLMRegistry.llmRegistryDict.values()) {
-        // The prefix names a class, so the class's own name is what it must
-        // match. This is a string lookup, not an identity check.
         if (matchPrefix(prefix, llmClass.name)) {
           LLMRegistry.resolveCache.set(model, llmClass);
           return llmClass;
