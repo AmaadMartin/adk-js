@@ -290,6 +290,11 @@ const ADK_AGENT_NAME_LABEL_KEY = 'adk_agent_name';
 export interface LlmAgentConfig extends BaseAgentConfig {
   /**
    * The model to use for the agent.
+   *
+   * When not set, the agent inherits the model from its nearest LlmAgent
+   * ancestor. If no ancestor provides a model, the agent uses the default
+   * model configured via {@link LlmAgent.setDefaultModel}. The built-in
+   * default is {@link LlmAgent.DEFAULT_MODEL}.
    */
   model?: string | BaseLlm;
 
@@ -449,12 +454,50 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 }
 
 /**
+ * Rejects a default model that no agent could resolve. TypeScript rejects a
+ * wrong type at compile time; the type half of the guard is for untyped
+ * JavaScript callers.
+ */
+function validateDefaultModel(model: string | BaseLlm): void {
+  if (!isBaseLlm(model) && (typeof model !== 'string' || !model)) {
+    throw new Error(
+      'Default model must be a non-empty model name or a BaseLlm instance.',
+    );
+  }
+}
+
+/**
  * An agent that uses a large language model to generate responses.
  */
 export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   /** A unique symbol to identify ADK LLM agent class. */
   readonly [LLM_AGENT_SIGNATURE_SYMBOL] = true;
 
+  /** System default model used when no model is set on an agent. */
+  static readonly DEFAULT_MODEL = 'gemini-3.5-flash';
+
+  /**
+   * System default model used for live mode when no model is set on an agent.
+   */
+  static readonly DEFAULT_LIVE_MODEL = 'gemini-live-2.5-flash-native-audio';
+
+  /** Current default model used when an agent has no model set. */
+  private static currentDefaultModel: string | BaseLlm = LlmAgent.DEFAULT_MODEL;
+
+  /**
+   * Current default model used for live mode when an agent has no model set.
+   */
+  private static currentDefaultLiveModel: string | BaseLlm =
+    LlmAgent.DEFAULT_LIVE_MODEL;
+
+  /**
+   * The model to use for the agent.
+   *
+   * When not set, the agent inherits the model from its nearest LlmAgent
+   * ancestor. If no ancestor provides a model, the agent uses the default
+   * model configured via {@link LlmAgent.setDefaultModel}. The built-in
+   * default is {@link LlmAgent.DEFAULT_MODEL}.
+   */
   model?: string | BaseLlm;
   instruction: string | InstructionProvider;
   /** @deprecated Use GlobalInstructionPlugin instead. */
@@ -624,9 +667,28 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   /**
    * The resolved BaseLlm instance.
    *
-   * When not set, the agent will inherit the model from its ancestor.
+   * Resolution order: an explicit BaseLlm instance, this agent's own non-empty
+   * model name, the nearest LlmAgent ancestor, then the default set by
+   * {@link LlmAgent.setDefaultModel} (built-in {@link LlmAgent.DEFAULT_MODEL}).
    */
   get canonicalModel(): BaseLlm {
+    return this.resolveCanonicalModel(/* live= */ false);
+  }
+
+  /**
+   * The resolved BaseLlm instance for live mode.
+   *
+   * Live mode resolves separately because the model that serves turn-by-turn
+   * requests is not the model that serves a Live API session. Resolution order
+   * matches {@link canonicalModel}, but a model-less agent ends at the default
+   * set by {@link LlmAgent.setDefaultLiveModel} (built-in
+   * {@link LlmAgent.DEFAULT_LIVE_MODEL}).
+   */
+  get canonicalLiveModel(): BaseLlm {
+    return this.resolveCanonicalModel(/* live= */ true);
+  }
+
+  private resolveCanonicalModel(live: boolean): BaseLlm {
     if (isBaseLlm(this.model)) {
       return this.model;
     }
@@ -638,11 +700,41 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     let ancestorAgent = this.parentAgent;
     while (ancestorAgent) {
       if (isLlmAgent(ancestorAgent)) {
-        return ancestorAgent.canonicalModel;
+        return ancestorAgent.resolveCanonicalModel(live);
       }
       ancestorAgent = ancestorAgent.parentAgent;
     }
-    throw new Error(`No model found for ${this.name}.`);
+    return LlmAgent.resolveDefaultModel(live);
+  }
+
+  /**
+   * Overrides the default model used when an agent has no model set.
+   *
+   * The override is process-wide.
+   */
+  static setDefaultModel(model: string | BaseLlm): void {
+    validateDefaultModel(model);
+    LlmAgent.currentDefaultModel = model;
+  }
+
+  /**
+   * Overrides the default model used for live mode when an agent has no model
+   * set.
+   *
+   * The override is process-wide.
+   */
+  static setDefaultLiveModel(model: string | BaseLlm): void {
+    validateDefaultModel(model);
+    LlmAgent.currentDefaultLiveModel = model;
+  }
+
+  private static resolveDefaultModel(live: boolean): BaseLlm {
+    const defaultModel = live
+      ? LlmAgent.currentDefaultLiveModel
+      : LlmAgent.currentDefaultModel;
+    return isBaseLlm(defaultModel)
+      ? defaultModel
+      : LLMRegistry.newLlm(defaultModel);
   }
 
   /**
@@ -992,7 +1084,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // =========================================================================
     applyLiveRunConfig(invocationContext.runConfig, llmRequest);
 
-    const llm = this.canonicalModel;
+    const llm = this.canonicalLiveModel;
+    // Preprocess stamped the turn-by-turn model name on the request; live
+    // resolves its own model, and connect() reads the name from the request.
+    llmRequest.model = llm.model;
     let reconnectAttempts = 0;
 
     // Outer reconnect loop. Re-enters on recoverable failures when a session
