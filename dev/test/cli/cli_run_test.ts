@@ -249,6 +249,78 @@ describe('cli_run', () => {
     expect(runAsync).toHaveBeenCalledTimes(1);
   });
 
+  it('reuses one readline interface across prompts', async () => {
+    (mockRl.question as Mock)
+      .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+        cb('hello'),
+      )
+      .mockImplementationOnce((_p: string, cb: (a: string) => void) => cb('21'))
+      .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+        cb('exit'),
+      );
+
+    await runAgent({
+      agentPath: 'agent.ts',
+      sessionService: createMockSessionService(),
+    });
+
+    expect(readline.createInterface as Mock).toHaveBeenCalledTimes(1);
+    expect(mockRl.question as Mock).toHaveBeenCalledTimes(3);
+    expect(mockRl.close as Mock).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The REPL now catches a turn that throws, so the save step is the part of
+   * the run that still throws out. It must release the interface too.
+   */
+  it('closes the readline interface when the save step throws', async () => {
+    const sessionService = createMockSessionService();
+    (sessionService.getSession as Mock).mockRejectedValue(
+      new Error('save exploded'),
+    );
+
+    await expect(
+      runAgent({
+        agentPath: 'agent.ts',
+        saveSession: true,
+        sessionService,
+      }),
+    ).rejects.toThrow('save exploded');
+
+    expect(mockRl.close as Mock).toHaveBeenCalledTimes(1);
+  });
+
+  it('echoes the answer when stdin is not a terminal', async () => {
+    const isTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', {
+      value: false,
+      configurable: true,
+    });
+    try {
+      (mockRl.question as Mock)
+        .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+          cb('hi'),
+        )
+        .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+          cb('exit'),
+        );
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(
+        (console.log as Mock).mock.calls.map((c) => c.join(' ')),
+      ).toContain('hi');
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', {
+        value: isTTY,
+        configurable: true,
+      });
+    }
+  });
+
   it('should run from input file', async () => {
     const inputFileContent = {
       state: {foo: 'bar'},

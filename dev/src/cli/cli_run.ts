@@ -151,6 +151,46 @@ interface InputFile {
 }
 
 /**
+ * The one readline interface for the run, created on first prompt. A fresh
+ * interface per prompt discards the lines readline had already read ahead from
+ * a pipe.
+ */
+let sharedReadline: readline.Interface | undefined;
+
+/** True once the shared interface has closed, which is end of input. */
+let inputEnded = false;
+
+/** Settles the prompt in flight, if end of input arrives while it waits. */
+let pendingPrompt: ((answer: string | undefined) => void) | undefined;
+
+function getReadline(): readline.Interface {
+  if (!sharedReadline) {
+    sharedReadline = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    // End of input closes the interface without ever calling back into
+    // `question`, so 'close' is what settles a waiting prompt. The interface
+    // is shared, so this listener is registered once rather than per prompt.
+    sharedReadline.on('close', () => {
+      inputEnded = true;
+      pendingPrompt?.(undefined);
+      pendingPrompt = undefined;
+    });
+  }
+  return sharedReadline;
+}
+
+/** Releases the shared interface, so an idle stdin stops holding the process open. */
+function closeUserInput(): void {
+  sharedReadline?.close();
+  sharedReadline = undefined;
+  pendingPrompt = undefined;
+  // A later run gets a new interface, so it must not inherit this end of input.
+  inputEnded = false;
+}
+
+/**
  * Prompts for one line on stdin. Resolves to `undefined` at end of input —
  * Ctrl-D on a terminal, or a redirected stream that has run out — which
  * callers treat the way they treat `exit`. An empty string stays distinct: it
@@ -159,25 +199,23 @@ interface InputFile {
 async function getUserInput(prompt: string): Promise<string | undefined> {
   // An interface attached to a stream that has already ended never emits
   // 'close', so a prompt raised after end of input would wait forever.
-  if (process.stdin.readableEnded || process.stdin.destroyed) {
+  if (inputEnded || process.stdin.readableEnded || process.stdin.destroyed) {
     return undefined;
   }
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  return new Promise<string | undefined>((resolve) => {
-    // End of input closes the interface without ever calling back into
-    // `question`. Resolve the answer before `close()` emits 'close', because
-    // the first call to `resolve` is the one that settles the promise.
-    rl.on('close', () => resolve(undefined));
-    rl.question(prompt, (answer) => {
-      resolve(answer);
-      rl.close();
+  const rl = getReadline();
+  const answer = await new Promise<string | undefined>((resolve) => {
+    pendingPrompt = resolve;
+    rl.question(prompt, (line) => {
+      pendingPrompt = undefined;
+      resolve(line);
     });
   });
+
+  if (answer !== undefined && !process.stdin.isTTY) {
+    console.log(answer);
+  }
+  return answer;
 }
 
 interface RunFromInputFileOptions {
@@ -436,31 +474,34 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
           : undefined,
       });
     }
+
+    if (options.saveSession) {
+      // `||` rather than `??`: an empty answer at the prompt writes a file named
+      // `.session.json`, so it falls back to the live id too.
+      const sessionId =
+        options.sessionId ||
+        (await getUserInput('Session ID to save: ')) ||
+        session.id;
+      // Sibling of the agent file, not inside it: joining onto the agent path
+      // itself yields `<cwd>/agent.ts/<id>.session.json`, and saveToFile does
+      // no mkdir, so the write failed with ENOTDIR.
+      const sessionPath = path.join(
+        path.dirname(options.agentPath),
+        `${sessionId}.session.json`,
+      );
+      const sessionToStore = await sessionService.getSession({
+        appName: session.appName,
+        userId: session.userId,
+        sessionId: session.id,
+      });
+      await saveToFile(getAbsolutePath(sessionPath), sessionToStore);
+
+      console.log('Session saved to', sessionPath);
+    }
   } finally {
+    // A throw out of the run or the save step must still release these, or the
+    // shared interface holds stdin open for an in-process caller.
     watcher?.close();
-  }
-
-  if (options.saveSession) {
-    // `||` rather than `??`: an empty answer at the prompt writes a file named
-    // `.session.json`, so it falls back to the live id too.
-    const sessionId =
-      options.sessionId ||
-      (await getUserInput('Session ID to save: ')) ||
-      session.id;
-    // Sibling of the agent file, not inside it: joining onto the agent path
-    // itself yields `<cwd>/agent.ts/<id>.session.json`, and saveToFile does
-    // no mkdir, so the write failed with ENOTDIR.
-    const sessionPath = path.join(
-      path.dirname(options.agentPath),
-      `${sessionId}.session.json`,
-    );
-    const sessionToStore = await sessionService.getSession({
-      appName: session.appName,
-      userId: session.userId,
-      sessionId: session.id,
-    });
-    await saveToFile(getAbsolutePath(sessionPath), sessionToStore);
-
-    console.log('Session saved to', sessionPath);
+    closeUserInput();
   }
 }
