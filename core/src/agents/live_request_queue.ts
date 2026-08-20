@@ -18,6 +18,17 @@ export interface LiveRequest {
   activityStart?: ActivityStart;
   /** If set, signal the end of user activity to the model. */
   activityEnd?: ActivityEnd;
+  /**
+   * If set, signal that the audio input stream has ended, e.g. because the
+   * microphone was muted or switched off. The model stops expecting further
+   * audio chunks and flushes any audio it has buffered.
+   *
+   * This is not an end-of-turn marker. Under Voice Activity Detection the Live
+   * API already detects utterance boundaries, so do not send this after every
+   * conversational turn: doing so closes the audio stream each turn, and a new
+   * audio message is needed to reopen it.
+   */
+  audioStreamEnd?: boolean;
   /** If set, close the queue. */
   close?: boolean;
 }
@@ -144,6 +155,19 @@ export class LiveRequestQueue {
    */
   sendActivityEnd() {
     this.send({activityEnd: {}});
+  }
+
+  /**
+   * Sends an audio stream end signal to flush buffered audio.
+   *
+   * Use this when the audio input stream itself has finished, e.g. the
+   * microphone was muted or switched off. Do not use it at the end of every
+   * conversational turn: under Voice Activity Detection the Live API already
+   * detects utterance boundaries, and sending this per turn closes the audio
+   * stream each time, requiring a new audio message to reopen it.
+   */
+  sendAudioStreamEnd() {
+    this.send({audioStreamEnd: true});
   }
 
   /**

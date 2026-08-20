@@ -244,6 +244,20 @@ describe('GeminiLlmConnection', () => {
     });
   });
 
+  describe('sendAudioStreamEnd', () => {
+    it('should send audioStreamEnd client message', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      await connection.sendAudioStreamEnd();
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledTimes(1);
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        audioStreamEnd: true,
+      });
+    });
+  });
+
   describe('close', () => {
     it('should close the session', async () => {
       const connection = new GeminiLlmConnection(
