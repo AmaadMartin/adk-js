@@ -7,12 +7,8 @@ live sessions resolve their own default separately.
 ## Introduction
 
 An agent names its model as a string, or holds a `BaseLlm` instance. Neither is
-mandatory. An agent that names no model inherits from the nearest `LlmAgent`
-ancestor, so a sub-agent tree normally states the model once at the root. When
-no ancestor states one either, the agent uses the default model.
-
-Resolution runs in this order, and stops at the first step that produces a
-model.
+mandatory. Resolution runs in this order, and stops at the first step that
+produces a model.
 
 1. An explicit `BaseLlm` instance on `LlmAgent.model`.
 2. A non-empty model name on `LlmAgent.model`.
@@ -20,28 +16,27 @@ model.
    `SequentialAgent`, does not stop the walk.
 4. The effective default.
 
-The built-in default is `LlmAgent.DEFAULT_MODEL`. `LlmAgent.setDefaultModel`
-replaces it for every later resolution in the process, which is how you point a
-test suite, a local experiment, or a deployment at one model without editing
-each agent.
+Step 3 is why a sub-agent tree normally states its model once, at the root. Step
+4 is `LlmAgent.DEFAULT_MODEL` until `LlmAgent.setDefaultModel` replaces it,
+which is how you point a test suite, a local experiment, or a deployment at one
+model without editing each agent.
 
 Live mode resolves separately, through `canonicalLiveModel` and
 `LlmAgent.DEFAULT_LIVE_MODEL`. The model that serves turn-by-turn requests is
 not the model that serves a Live API session, so one default cannot serve both.
-Steps 1 to 3 above are shared: an agent that states a model uses that model in
-both modes.
+Steps 1 to 3 are shared: an agent that states a model uses that model in both
+modes.
 
 ## Get started
 
-The shortest agent that runs. It states a name and an instruction, and takes
-`LlmAgent.DEFAULT_MODEL`.
+The shortest agent that runs. It states a name and an instruction only.
 
 ```ts
 import {LlmAgent} from '@google/adk';
 
 const agent = new LlmAgent({name: 'helper', instruction: 'Be helpful.'});
 
-agent.canonicalModel.model; // 'gemini-3.5-flash'
+agent.canonicalModel.model === LlmAgent.DEFAULT_MODEL; // true
 ```
 
 ## Moving the default

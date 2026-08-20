@@ -490,14 +490,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   private static currentDefaultLiveModel: string | BaseLlm =
     LlmAgent.DEFAULT_LIVE_MODEL;
 
-  /**
-   * The model to use for the agent.
-   *
-   * When not set, the agent inherits the model from its nearest LlmAgent
-   * ancestor. If no ancestor provides a model, the agent uses the default
-   * model configured via {@link LlmAgent.setDefaultModel}. The built-in
-   * default is {@link LlmAgent.DEFAULT_MODEL}.
-   */
+  /** See {@link LlmAgentConfig.model}. */
   model?: string | BaseLlm;
   instruction: string | InstructionProvider;
   /** @deprecated Use GlobalInstructionPlugin instead. */
