@@ -22,6 +22,7 @@ import type {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {rendersAsEmptyJsonObject} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
+import {REQUEST_CONFIRMATION_FUNCTION_CALL_NAME} from './framework_function_calls.js';
 
 import {recordToolExecutionDuration} from '../telemetry/metrics.js';
 import {
@@ -53,10 +54,12 @@ export {
   generateClientFunctionCallId,
   populateClientFunctionCallId,
 } from '../events/event.js';
-export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
-export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
-export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
-  'adk_request_confirmation';
+export {
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+  REQUEST_INPUT_FUNCTION_CALL_NAME,
+  reservedFunctionCallName,
+} from './framework_function_calls.js';
 
 const TOOL_NOT_FOUND_DESCRIPTION = 'Tool not found';
 const UNNAMED_TOOL_NAME = '<unnamed>';

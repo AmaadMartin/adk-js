@@ -8,7 +8,15 @@ import type {FunctionCall} from '@google/genai';
 import {isEqual} from 'lodash-es';
 import type {Event} from '../../events/event.js';
 import {getFunctionCalls, getFunctionResponses} from '../../events/event.js';
-import {ToolConfirmation} from '../../tools/tool_confirmation.js';
+import type {BaseTool} from '../../tools/base_tool.js';
+import type {IntentMismatchReason} from '../../tools/tool_confirmation.js';
+import {
+  IntentMismatchError,
+  ToolConfirmation,
+} from '../../tools/tool_confirmation.js';
+import {isSegmentPrefix} from '../../utils/branch_trie.js';
+import {logger} from '../../utils/logger.js';
+import {Context} from '../context.js';
 import {
   handleFunctionCallList,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -21,6 +29,22 @@ import {
   TRANSFER_TO_AGENT_TOOL,
 } from './agent_transfer_llm_request_processor.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
+
+/** A pinned tool call an approval unlocked, with the decision it carries. */
+interface ResumableCall {
+  /** The pinned call to execute, exactly as it was presented for approval. */
+  call: FunctionCall;
+  /** The user's decision. */
+  confirmation: ToolConfirmation;
+}
+
+/** An agent-raised gate that an approval answers and nothing has spent yet. */
+interface GateCandidate {
+  /** The call pinned when the gate was raised. */
+  pinned: FunctionCall;
+  /** The decision the user gave for it. */
+  confirmation: ToolConfirmation;
+}
 
 /**
  * Resumes tool calls that were paused for user confirmation. Scans the session
@@ -44,322 +68,418 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
     if (!isLlmAgent(agent)) {
       return;
     }
-    const events = invocationContext.session.events;
-    if (!events || events.length === 0) {
+    const events = eventsInScope(invocationContext);
+    if (events.length === 0) {
       return;
     }
 
-    const requestConfirmationFunctionResponses: {
-      [key: string]: ToolConfirmation;
-    } = {};
-
-    let confirmationEventIndex = -1;
-    // Step 1: Find the FIRST confirmation event authored by user.
-    for (let i = events.length - 1; i >= 0; i--) {
-      const event = events[i];
-      if (event.author !== 'user') {
-        continue;
-      }
-      const responses = getFunctionResponses(event);
-      if (!responses) {
-        continue;
-      }
-
-      let foundConfirmation = false;
-      for (const functionResponse of responses) {
-        if (functionResponse.name !== REQUEST_CONFIRMATION_FUNCTION_CALL_NAME) {
-          continue;
-        }
-        foundConfirmation = true;
-
-        let toolConfirmation = null;
-
-        if (
-          functionResponse.response &&
-          Object.keys(functionResponse.response).length === 1 &&
-          'response' in functionResponse.response
-        ) {
-          toolConfirmation = JSON.parse(
-            functionResponse.response['response'] as string,
-          ) as ToolConfirmation;
-        } else if (functionResponse.response) {
-          toolConfirmation = new ToolConfirmation({
-            hint: functionResponse.response['hint'] as string,
-            payload: functionResponse.response['payload'],
-            confirmed: functionResponse.response['confirmed'] as boolean,
-          });
-        }
-
-        if (functionResponse.id && toolConfirmation) {
-          requestConfirmationFunctionResponses[functionResponse.id] =
-            toolConfirmation;
-        }
-      }
-      if (foundConfirmation) {
-        confirmationEventIndex = i;
-        break;
-      }
-    }
-
-    // Plain-text fallback: an interactive user (e.g. `adk run`) can approve or
-    // deny a pending confirmation by simply typing a reply (yes/no) instead of
-    // sending a structured confirmation response. Opt-in only
-    // (`runConfig.plainTextToolConfirmation`) so that on a web/API surface an
-    // ordinary chat message is never silently reinterpreted as a tool-gate
-    // decision — that binding is what the structured path exists to guarantee.
-    if (
-      Object.keys(requestConfirmationFunctionResponses).length === 0 &&
-      invocationContext.runConfig?.plainTextToolConfirmation
-    ) {
-      const fallback = mapPlainTextConfirmation(events);
-      Object.assign(requestConfirmationFunctionResponses, fallback.responses);
-      if (fallback.turnIndex >= 0) {
-        confirmationEventIndex = fallback.turnIndex;
-      }
-    }
-
-    if (Object.keys(requestConfirmationFunctionResponses).length === 0) {
+    // A human-in-the-loop gate cannot be satisfied by a message that arrived
+    // over A2A: the peer that sent it is not the operator whose judgement the
+    // gate is asking for. A deployment where the peer is a trusted relay for a
+    // real person opts back in explicitly.
+    const runConfig = invocationContext.runConfig;
+    if (runConfig?.remoteDelivered && !runConfig.allowRemoteToolConfirmation) {
+      logger.warn(
+        'Ignoring tool confirmation(s) delivered over A2A: a remote peer ' +
+          'cannot answer a human-in-the-loop gate. Set ' +
+          '`allowRemoteToolConfirmation` on the run config if the peer relays ' +
+          'a real operator decision.',
+      );
       return;
     }
 
-    const historyCalls = indexFunctionCallsById(events);
-
-    // Step 2: Find the system generated FunctionCall event requesting the tool
-    // confirmation
-    for (let i = confirmationEventIndex - 1; i >= 0; i--) {
-      const event = events[i];
-      const functionCalls = getFunctionCalls(event);
-      if (!functionCalls) {
-        continue;
-      }
-
-      const candidates = new Map<string, ConfirmationTarget>();
-
-      for (const functionCall of functionCalls) {
-        if (
-          functionCall.name !== REQUEST_CONFIRMATION_FUNCTION_CALL_NAME ||
-          !functionCall.id ||
-          !(functionCall.id in requestConfirmationFunctionResponses)
-        ) {
-          continue;
-        }
-
-        const originalFunctionCall = parseOriginalFunctionCall(
-          functionCall.args?.['originalFunctionCall'],
-        );
-        if (!originalFunctionCall) {
-          continue;
-        }
-
-        candidates.set(originalFunctionCall.id, {
-          call: originalFunctionCall,
-          confirmation: requestConfirmationFunctionResponses[functionCall.id],
-        });
-      }
-      if (candidates.size === 0) {
-        continue;
-      }
-
-      // Step 3: Remove the tools that have already been confirmed AND resumed.
-      // This runs before validation because the processor re-runs on every LLM
-      // step of the turn while the approval stays the last user event: a
-      // consumed confirmation must be dropped rather than re-validated against
-      // state that has already moved on.
-      for (let j = events.length - 1; j > confirmationEventIndex; j--) {
-        const eventToCheck = events[j];
-        const functionResponses = getFunctionResponses(eventToCheck);
-        if (!functionResponses) {
-          continue;
-        }
-
-        for (const fr of functionResponses) {
-          if (fr.id) {
-            candidates.delete(fr.id);
-          }
-        }
-        if (candidates.size === 0) {
-          break;
-        }
-      }
-
-      if (candidates.size === 0) {
-        continue;
-      }
-
-      // Step 4: Validate each confirmation against session history.
-      const toolsToResume = resolveConfirmationTargets(
-        candidates,
-        historyCalls,
-        agent.name,
-      );
-      if (toolsToResume.size === 0) {
-        continue;
-      }
-
-      const toolsList = await agent.canonicalTools(
-        new ReadonlyContext(invocationContext),
-      );
-      const toolsDict = Object.fromEntries(
-        toolsList.map((tool) => [tool.name, tool]),
-      );
-
-      // `transfer_to_agent` is synthesized by the agent-transfer processor
-      // rather than returned by `canonicalTools`, so resuming a confirmed
-      // transfer needs it registered here too.
-      if (getTransferTargets(agent).length) {
-        toolsDict[TRANSFER_TO_AGENT_TOOL.name] = TRANSFER_TO_AGENT_TOOL;
-      }
-
-      const functionResponseEvent = await handleFunctionCallList({
-        invocationContext: invocationContext,
-        functionCalls: [...toolsToResume.values()].map((target) => target.call),
-        toolsDict: toolsDict,
-        beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
-        afterToolCallbacks: agent.canonicalAfterToolCallbacks,
-        filters: new Set(toolsToResume.keys()),
-        toolConfirmationDict: Object.fromEntries(
-          [...toolsToResume].map(([id, target]) => [id, target.confirmation]),
-        ),
-      });
-
-      if (functionResponseEvent) {
-        // Put the response in the in-memory session before yielding it. The
-        // content builder runs immediately behind this processor in the same
-        // step and reads `session.events`, while a yielded event only reaches
-        // the runner — which is what durably appends it — once the step is
-        // done. Without this the model is rebuilt with neither the tool call
-        // nor its result in view, and re-issues the call every turn.
-        //
-        // In memory only, deliberately: the runner appends this same event
-        // through the session service, and `VertexAiSessionService` posts to
-        // the remote store unconditionally rather than deduping by event id,
-        // so appending here too would write it twice on Agent Engine.
-        const events = invocationContext.session.events;
-        const existing = events.findIndex(
-          (e) => e.id === functionResponseEvent.id,
-        );
-        if (existing >= 0) {
-          events[existing] = functionResponseEvent;
-        } else {
-          events.push(functionResponseEvent);
-        }
-        yield functionResponseEvent;
-      }
+    // Step 1: read the decisions out of the user's latest turn.
+    const approvals = collectApprovals(
+      events,
+      runConfig?.plainTextToolConfirmation ?? false,
+    );
+    if (approvals.size === 0) {
       return;
     }
-  }
-}
 
-/** An `originalFunctionCall` payload proven to carry an id and a name. */
-type OriginalFunctionCall = FunctionCall & {id: string; name: string};
-
-/** A tool call waiting to resume, with the decision the user gave for it. */
-interface ConfirmationTarget {
-  call: FunctionCall;
-  confirmation: ToolConfirmation;
-}
-
-/** A function call recorded in session history, with the author that made it. */
-interface HistoryCall {
-  call: FunctionCall;
-  author?: string;
-}
-
-/** Whether `value` is a plain object rather than an array or a primitive. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Narrows the `originalFunctionCall` payload read off a confirmation call.
- * The payload is client-supplied, so nothing about its shape is assumed.
- *
- * @param value - The raw `originalFunctionCall` entry of the confirmation call.
- * @returns The payload, or `undefined` when it is absent or malformed.
- */
-function parseOriginalFunctionCall(
-  value: unknown,
-): OriginalFunctionCall | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  const {id, name, args} = value;
-  if (typeof id !== 'string' || !id || typeof name !== 'string' || !name) {
-    return undefined;
-  }
-  if (args !== undefined && !isRecord(args)) {
-    return undefined;
-  }
-  return {id, name, args};
-}
-
-/**
- * Indexes every function call in the session by its id, so a confirmation can
- * be checked against the call the model actually issued. Confirmation requests
- * are excluded: they are never themselves resumable.
- *
- * @param events - The session event history.
- * @returns The last call recorded for each function call id.
- */
-function indexFunctionCallsById(events: Event[]): Map<string, HistoryCall> {
-  const historyCalls = new Map<string, HistoryCall>();
-  for (const event of events) {
-    for (const call of getFunctionCalls(event)) {
-      if (call.id && call.name !== REQUEST_CONFIRMATION_FUNCTION_CALL_NAME) {
-        historyCalls.set(call.id, {call, author: event.author});
-      }
+    // Step 2: map each decision back to the gate it answers, dropping any
+    // approval that has already been acted on. Cheap and non-committal — a
+    // spent approval must be dropped before the checks below, which are strict
+    // about a session that has since moved on.
+    const candidates = collectGateCandidates(events, approvals, agent.name);
+    if (candidates.length === 0) {
+      return;
     }
+
+    // Step 3: resolve the agent's tools. After the dedup above, deliberately:
+    // resolving a toolset can mean a remote call, and a spent approval should
+    // not pay for one.
+    const toolsList = await agent.canonicalTools(
+      new ReadonlyContext(invocationContext),
+    );
+    const toolsDict = Object.fromEntries(
+      toolsList.map((tool) => [tool.name, tool]),
+    );
+
+    // `transfer_to_agent` is synthesized by the agent-transfer processor rather
+    // than returned by `canonicalTools`, so resuming a confirmed transfer needs
+    // it registered here too. Injected only when the agent has somewhere to
+    // transfer to, the way adk-python guards it.
+    if (getTransferTargets(agent).length) {
+      toolsDict[TRANSFER_TO_AGENT_TOOL.name] = TRANSFER_TO_AGENT_TOOL;
+    }
+
+    // Step 4: check that each approval binds to the action it claims, and only
+    // then run it.
+    const resumable = await bindApprovedCalls({
+      candidates,
+      events,
+      toolsDict,
+      agentName: agent.name,
+      invocationContext,
+    });
+
+    const functionResponseEvent = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [...resumable.values()].map((entry) => entry.call),
+      toolsDict,
+      beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
+      afterToolCallbacks: agent.canonicalAfterToolCallbacks,
+      filters: new Set(resumable.keys()),
+      toolConfirmationDict: Object.fromEntries(
+        [...resumable].map(([id, entry]) => [id, entry.confirmation]),
+      ),
+    });
+
+    if (!functionResponseEvent) {
+      return;
+    }
+
+    // Put the response in the in-memory session before yielding it. The
+    // content builder runs immediately behind this processor in the same
+    // step and reads `session.events`, while a yielded event only reaches
+    // the runner — which is what durably appends it — once the step is
+    // done. Without this the model is rebuilt with neither the tool call
+    // nor its result in view, and re-issues the call every turn.
+    //
+    // In memory only, deliberately: the runner appends this same event
+    // through the session service, and `VertexAiSessionService` posts to
+    // the remote store unconditionally rather than deduping by event id,
+    // so appending here too would write it twice on Agent Engine.
+    const sessionEvents = invocationContext.session.events;
+    const existing = sessionEvents.findIndex(
+      (e) => e.id === functionResponseEvent.id,
+    );
+    if (existing >= 0) {
+      sessionEvents[existing] = functionResponseEvent;
+    } else {
+      sessionEvents.push(functionResponseEvent);
+    }
+    yield functionResponseEvent;
   }
-  return historyCalls;
 }
 
 /**
- * Validates each pending confirmation against session history and returns the
- * calls that may resume, keyed by original function call id. A call authored by
- * another agent is dropped, so that agent's processor resumes it instead.
+ * The session events this invocation may act on: those on the current branch.
  *
- * @param candidates - Pending confirmations keyed by original function call id.
- * @param historyCalls - The function calls recorded in the session.
- * @param agentName - The name of the agent running this processor.
- * @returns The confirmations that may resume, carrying the historical call.
- * @throws Error when a payload names a call that is absent from history, or
- *   describes it differently from the way the model issued it.
+ * A confirmation belongs to the branch that raised it. Without this an agent
+ * could resume a sibling branch's paused call — an approval that was never
+ * shown in this context, for a tool this agent may not even have. Mirrors
+ * Python's `_get_events(current_branch=True)`.
  */
-function resolveConfirmationTargets(
-  candidates: Map<string, ConfirmationTarget>,
-  historyCalls: Map<string, HistoryCall>,
-  agentName: string,
-): Map<string, ConfirmationTarget> {
-  const targets = new Map<string, ConfirmationTarget>();
-  for (const [id, candidate] of candidates) {
-    const historyCall = historyCalls.get(id);
-    if (!historyCall) {
-      throw new Error(
-        `Original function call for ID '${id}' not found in session history.`,
-      );
-    }
-    if (historyCall.author !== agentName) {
+function eventsInScope(invocationContext: InvocationContext): Event[] {
+  const events = invocationContext.session.events;
+  const currentBranch = invocationContext.branch;
+  if (!currentBranch) {
+    return events;
+  }
+  return events.filter(
+    (event) => !event.branch || isSegmentPrefix(currentBranch, event.branch),
+  );
+}
+
+/**
+ * The decisions carried by the user's latest turn, keyed by the id of the
+ * `adk_request_confirmation` call each one answers.
+ *
+ * Only the latest user turn is read. An approval answers a question the
+ * framework asked at that moment; letting an older, already-superseded turn
+ * supply one lets a decision be resurrected out of its context. Mirrors Python,
+ * which reads confirmations from the last user-authored event and stops there.
+ */
+function collectApprovals(
+  events: Event[],
+  allowPlainText: boolean,
+): Map<string, ToolConfirmation> {
+  const approvals = new Map<string, ToolConfirmation>();
+
+  const latestUserEvent = findLatestUserEvent(events);
+  if (!latestUserEvent) {
+    return approvals;
+  }
+
+  for (const functionResponse of getFunctionResponses(latestUserEvent)) {
+    if (functionResponse.name !== REQUEST_CONFIRMATION_FUNCTION_CALL_NAME) {
       continue;
     }
-    if (historyCall.call.name !== candidate.call.name) {
-      throw new Error(
-        `Function call name mismatch for ID '${id}': history has ` +
-          `'${historyCall.call.name}', confirmation has ` +
-          `'${candidate.call.name}'.`,
-      );
+    if (!functionResponse.id || !functionResponse.response) {
+      continue;
     }
-    if (!isEqual(historyCall.call.args ?? {}, candidate.call.args ?? {})) {
-      // Arguments can carry user data, so the message names only the id.
-      throw new Error(`Function call arguments mismatch for ID '${id}'.`);
-    }
-    // The payload is now proven equal to the historical call on id, name and
-    // args. Resuming the historical one keeps payload-only fields off the tool.
-    targets.set(id, {
-      call: historyCall.call,
-      confirmation: candidate.confirmation,
-    });
+    approvals.set(
+      functionResponse.id,
+      parseToolConfirmation(functionResponse.response),
+    );
   }
-  return targets;
+
+  // Plain-text fallback: an interactive user (e.g. `adk run`) can approve or
+  // deny a pending confirmation by simply typing a reply (yes/no) instead of
+  // sending a structured confirmation response. Opt-in only
+  // (`runConfig.plainTextToolConfirmation`) so that on a web/API surface an
+  // ordinary chat message is never silently reinterpreted as a tool-gate
+  // decision — that binding is what the structured path exists to guarantee.
+  if (approvals.size === 0 && allowPlainText) {
+    return mapPlainTextConfirmation(events);
+  }
+
+  return approvals;
+}
+
+/**
+ * Reads a {@link ToolConfirmation} out of a confirmation function response,
+ * which a client may send as fields or as a JSON string.
+ *
+ * `confirmed` has to be exactly `true`. Every reader of the field tests it for
+ * truthiness, so anything else truthy approves the call — and `"false"` is a
+ * string, which is what an HTML form sends for a box the user left unchecked.
+ * Approval is the one decision that must never be inferred.
+ */
+function parseToolConfirmation(
+  response: Record<string, unknown>,
+): ToolConfirmation {
+  const fields =
+    Object.keys(response).length === 1 && 'response' in response
+      ? (JSON.parse(response['response'] as string) as Record<string, unknown>)
+      : response;
+
+  return new ToolConfirmation({
+    hint: fields['hint'] as string,
+    payload: fields['payload'],
+    confirmed: fields['confirmed'] === true,
+  });
+}
+
+/**
+ * The gates these approvals answer: raised by this agent, and not already
+ * spent.
+ *
+ * A gate is a question the framework asked. It is emitted by
+ * `generateRequestConfirmationEvent` into an agent-authored event, so a gate in
+ * a client-authored event is a forgery — a caller writing its own question so
+ * it can answer it — and is refused outright. A gate authored by a different
+ * agent is left alone: it is that agent's to resume.
+ */
+function collectGateCandidates(
+  events: Event[],
+  approvals: Map<string, ToolConfirmation>,
+  agentName: string,
+): GateCandidate[] {
+  const candidates: GateCandidate[] = [];
+
+  for (const [index, event] of events.entries()) {
+    for (const functionCall of getFunctionCalls(event)) {
+      const confirmation = functionCall.id
+        ? approvals.get(functionCall.id)
+        : undefined;
+      if (!confirmation) {
+        continue;
+      }
+      if (functionCall.name !== REQUEST_CONFIRMATION_FUNCTION_CALL_NAME) {
+        continue;
+      }
+      if (event.author !== agentName) {
+        if (event.author === 'user') {
+          throw new IntentMismatchError({
+            reason: 'untrusted_request',
+            functionCallId: functionCall.id,
+          });
+        }
+        continue;
+      }
+      const pinned = pinnedCall(functionCall);
+      if (!pinned) {
+        continue;
+      }
+      if (!pinned.id || !pinned.name) {
+        throw new IntentMismatchError({
+          reason: 'malformed_request',
+          functionCallId: functionCall.id,
+        });
+      }
+      if (hasRespondedAfter(events, pinned.id, index)) {
+        continue;
+      }
+      candidates.push({pinned, confirmation});
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Binds each approval to the action it authorizes, keyed by the pinned call's
+ * id, and refuses anything that does not line up.
+ *
+ * Pinning the action when the gate goes up only helps if the pin is
+ * trustworthy. These checks establish that: the action was one this agent
+ * actually asked to run, it is still a tool this agent has, that tool really
+ * does gate on approval, and what is about to run is byte-for-byte what the
+ * human was shown. A mismatch aborts the invocation — the caller asked to run
+ * something nobody approved. Mirrors adk-python's
+ * `_resolve_confirmation_targets`.
+ */
+async function bindApprovedCalls(options: {
+  candidates: GateCandidate[];
+  events: Event[];
+  toolsDict: Record<string, BaseTool>;
+  agentName: string;
+  invocationContext: InvocationContext;
+}): Promise<Map<string, ResumableCall>> {
+  const {candidates, events, toolsDict, agentName, invocationContext} = options;
+  const history = agentAuthoredCalls(events, agentName);
+  const dynamicallyRequested = dynamicallyRequestedCallIds(events, agentName);
+  const resumable = new Map<string, ResumableCall>();
+
+  for (const {pinned, confirmation} of candidates) {
+    const pinnedId = pinned.id!;
+    const refuse = (reason: IntentMismatchReason): IntentMismatchError =>
+      new IntentMismatchError({reason, functionCallId: pinnedId});
+
+    const original = history.get(pinnedId);
+    if (!original) {
+      throw refuse('unknown_original_call');
+    }
+    const tool = toolsDict[pinned.name!];
+    if (!tool) {
+      throw refuse('unregistered_tool');
+    }
+    if (original.name !== pinned.name) {
+      throw refuse('tool_name_mismatch');
+    }
+    if (!isEqual(original.args ?? {}, pinned.args ?? {})) {
+      throw refuse('arguments_mismatch');
+    }
+
+    // Asked with the arguments from history, which the checks above have just
+    // established the pinned ones equal: a predicate never sees a payload that
+    // has not already been matched against what the agent asked to run.
+    const gates = await tool.checkRequireConfirmation(
+      original.args ?? {},
+      new Context({invocationContext, functionCallId: pinnedId}),
+    );
+    if (!gates && !dynamicallyRequested.has(pinnedId)) {
+      throw refuse('confirmation_not_required');
+    }
+
+    resumable.set(pinnedId, {call: pinned, confirmation});
+  }
+
+  return resumable;
+}
+
+/**
+ * The tool calls this agent issued, by id. Gates are excluded: a gate is the
+ * framework's question about a call, never the call itself.
+ */
+function agentAuthoredCalls(
+  events: Event[],
+  agentName: string,
+): Map<string, FunctionCall> {
+  const calls = new Map<string, FunctionCall>();
+  for (const event of events) {
+    if (event.author !== agentName) {
+      continue;
+    }
+    for (const functionCall of getFunctionCalls(event)) {
+      if (
+        functionCall.id &&
+        functionCall.name !== REQUEST_CONFIRMATION_FUNCTION_CALL_NAME
+      ) {
+        calls.set(functionCall.id, functionCall);
+      }
+    }
+  }
+  return calls;
+}
+
+/**
+ * Calls a tool asked to have confirmed at runtime, rather than by declaring
+ * `requireConfirmation` up front.
+ *
+ * Such a tool answers "no" to {@link BaseTool.checkRequireConfirmation} for the
+ * very call it paused, so without this the approval it asked for would be
+ * refused as unnecessary. The request is only honoured where the framework
+ * records it: an agent-authored event whose own response carries the id.
+ */
+function dynamicallyRequestedCallIds(
+  events: Event[],
+  agentName: string,
+): Set<string> {
+  const requested = new Set<string>();
+  for (const event of events) {
+    if (event.author !== agentName) {
+      continue;
+    }
+    const confirmations = event.actions.requestedToolConfirmations;
+    for (const functionResponse of getFunctionResponses(event)) {
+      if (functionResponse.id && functionResponse.id in confirmations) {
+        requested.add(functionResponse.id);
+      }
+    }
+  }
+  return requested;
+}
+
+/** The call an `adk_request_confirmation` request pinned for approval. */
+function pinnedCall(functionCall: FunctionCall): FunctionCall | undefined {
+  const args = functionCall.args;
+  if (!args || !('originalFunctionCall' in args)) {
+    return undefined;
+  }
+  const pinned = args['originalFunctionCall'];
+  if (typeof pinned !== 'object' || pinned === null || Array.isArray(pinned)) {
+    return undefined;
+  }
+  return pinned as FunctionCall;
+}
+
+/**
+ * Whether the pinned call already produced a result after its gate was raised —
+ * that is, whether this approval has already been spent.
+ *
+ * An approval authorizes one execution. The window opens at the gate rather
+ * than covering all of history because the paused call already has a response
+ * before the gate: the "requires confirmation" placeholder that raised it. It
+ * never closes, so a captured decision replayed later in the session finds its
+ * execution already on record and is refused — the hazard a window anchored on
+ * the approval turn misses.
+ */
+function hasRespondedAfter(
+  events: Event[],
+  pinnedCallId: string,
+  gateIndex: number,
+): boolean {
+  return events
+    .slice(gateIndex + 1)
+    .some((event) =>
+      getFunctionResponses(event).some(
+        (functionResponse) => functionResponse.id === pinnedCallId,
+      ),
+    );
+}
+
+/** The most recent user-authored event, if the session has one. */
+function findLatestUserEvent(events: Event[]): Event | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].author === 'user') {
+      return events[i];
+    }
+  }
+  return undefined;
 }
 
 /** Words interpreted as an approval when a user confirms by plain text. */
@@ -402,15 +522,11 @@ const NEGATIVE = new Set([
  * - Only recognized affirmative/negative words decide; any other text (a
  *   question, a typo, an answer to something else) is left as NO decision so the
  *   gate stays pending rather than being silently denied.
- *
- * Returns the synthesized confirmation keyed by the confirmation call id, and
- * the index of the plain-text user turn (or -1 when not applicable).
  */
-function mapPlainTextConfirmation(events: Event[]): {
-  responses: Record<string, ToolConfirmation>;
-  turnIndex: number;
-} {
-  const none = {responses: {}, turnIndex: -1};
+function mapPlainTextConfirmation(
+  events: Event[],
+): Map<string, ToolConfirmation> {
+  const none = new Map<string, ToolConfirmation>();
 
   // The reply is the most recent user turn, and only if it is plain text.
   let turnIndex = -1;
@@ -482,10 +598,7 @@ function mapPlainTextConfirmation(events: Event[]): {
     return none; // unrecognized -> no decision, leave the gate pending
   }
 
-  return {
-    responses: {[pendingId]: new ToolConfirmation({confirmed})},
-    turnIndex,
-  };
+  return new Map([[pendingId, new ToolConfirmation({confirmed})]]);
 }
 
 export const REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR =

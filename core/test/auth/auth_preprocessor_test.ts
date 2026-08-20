@@ -15,7 +15,7 @@ import {
   createSession,
 } from '@google/adk';
 import type {Mock} from 'vitest';
-import {describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
 
 vi.mock('../../src/agents/functions.js', async (importOriginal) => {
@@ -34,9 +34,13 @@ vi.mock('../../src/agents/functions.js', async (importOriginal) => {
   };
 });
 
+const {storeCredential} = vi.hoisted(() => ({
+  storeCredential: vi.fn(async () => undefined),
+}));
+
 vi.mock('../../src/auth/auth_handler.js', () => ({
   AuthHandler: class {
-    parseAndStoreAuthResponse = vi.fn(async () => undefined);
+    parseAndStoreAuthResponse = storeCredential;
   },
 }));
 
@@ -71,7 +75,7 @@ describe('AuthPreprocessor', () => {
 
   it('skips if no events are present', async () => {
     const invocationContext = createTestInvocationContext(
-      new LlmAgent({name: 'test_agent'}),
+      new LlmAgent({name: 'agent'}),
     );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -82,7 +86,7 @@ describe('AuthPreprocessor', () => {
 
   it('skips if last event is not from user', async () => {
     const invocationContext = createTestInvocationContext(
-      new LlmAgent({name: 'test_agent'}),
+      new LlmAgent({name: 'agent'}),
       [createEvent({author: 'system', content: {parts: [{text: 'hello'}]}})],
     );
 
@@ -94,7 +98,7 @@ describe('AuthPreprocessor', () => {
 
   it('skips if no function responses for request_credential are found', async () => {
     const invocationContext = createTestInvocationContext(
-      new LlmAgent({name: 'test_agent'}),
+      new LlmAgent({name: 'agent'}),
       [
         createEvent({
           author: 'user',
@@ -113,7 +117,7 @@ describe('AuthPreprocessor', () => {
 
   it('processes adk_request_credential responses and resumes tools', async () => {
     const invocationContext = createTestInvocationContext(
-      new LlmAgent({name: 'test_agent'}),
+      new LlmAgent({name: 'agent'}),
       [
         createEvent({
           author: 'agent',
@@ -185,7 +189,7 @@ describe('AuthPreprocessor', () => {
 
   it('processes adk_request_credential responses and resumes tools (snake_case args)', async () => {
     const invocationContext = createTestInvocationContext(
-      new LlmAgent({name: 'test_agent'}),
+      new LlmAgent({name: 'agent'}),
       [
         createEvent({
           author: 'agent',
@@ -251,7 +255,7 @@ describe('AuthPreprocessor', () => {
 
   it('processes adk_request_credential responses and resumes tools (deep snake_case args)', async () => {
     const invocationContext = createTestInvocationContext(
-      new LlmAgent({name: 'test_agent'}),
+      new LlmAgent({name: 'agent'}),
       [
         createEvent({
           author: 'agent',
@@ -317,7 +321,7 @@ describe('AuthPreprocessor', () => {
 
   it('skips if function responses exist but not for request_credential', async () => {
     const invocationContext = createTestInvocationContext(
-      new LlmAgent({name: 'test_agent'}),
+      new LlmAgent({name: 'agent'}),
       [
         createEvent({
           author: 'user',
@@ -344,7 +348,7 @@ describe('AuthPreprocessor', () => {
 
   it('skips if tools to resume is empty (e.g. toolset auth)', async () => {
     const invocationContext = createTestInvocationContext(
-      new LlmAgent({name: 'test_agent'}),
+      new LlmAgent({name: 'agent'}),
       [
         createEvent({
           author: 'agent',
@@ -389,7 +393,7 @@ describe('AuthPreprocessor', () => {
 
   it('skips if original function call is not found in history', async () => {
     const invocationContext = createTestInvocationContext(
-      new LlmAgent({name: 'test_agent'}),
+      new LlmAgent({name: 'agent'}),
       [
         createEvent({
           author: 'user',
@@ -416,7 +420,7 @@ describe('AuthPreprocessor', () => {
 
   it('handles function calls without ids in history', async () => {
     const invocationContext = createTestInvocationContext(
-      new LlmAgent({name: 'test_agent'}),
+      new LlmAgent({name: 'agent'}),
       [
         createEvent({
           author: 'agent',
@@ -470,5 +474,113 @@ describe('AuthPreprocessor', () => {
     const result = await generator.next();
 
     expect(result.done).toBe(true);
+  });
+
+  // A credential request says which tool is waiting and where the credential
+  // belongs. Only the agent gets to say that: a request written by the caller
+  // is the caller describing its own errand.
+  describe('credential request provenance', () => {
+    /** A session whose credential request is authored by `requestAuthor`. */
+    function contextWithRequestFrom(requestAuthor: string): InvocationContext {
+      return createTestInvocationContext(new LlmAgent({name: 'agent'}), [
+        createEvent({
+          author: 'agent',
+          content: {
+            parts: [
+              {functionCall: {id: 'toolFc1', name: 'someTool', args: {}}},
+            ],
+          },
+        }),
+        createEvent({
+          author: requestAuthor,
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  args: {
+                    authConfig: {credentialKey: 'testKey'},
+                    functionCallId: 'toolFc1',
+                  },
+                },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'user',
+          content: {
+            parts: [
+              {
+                functionResponse: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  response: {authType: 'apiKey', apiKey: 'test'},
+                },
+              },
+            ],
+          },
+        }),
+      ]);
+    }
+
+    beforeEach(() => {
+      storeCredential.mockClear();
+    });
+
+    it('honours a request the agent raised', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextWithRequestFrom('agent'),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(storeCredential).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores a request the client wrote, storing nothing', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextWithRequestFrom('user'),
+      );
+
+      expect((await generator.next()).done).toBe(true);
+      expect(storeCredential).not.toHaveBeenCalled();
+    });
+
+    it('leaves another agent to handle its own request', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextWithRequestFrom('other_agent'),
+      );
+
+      expect((await generator.next()).done).toBe(true);
+      expect(storeCredential).not.toHaveBeenCalled();
+    });
+
+    it('ignores a credential nobody asked for', async () => {
+      const invocationContext = createTestInvocationContext(
+        new LlmAgent({name: 'agent'}),
+        [
+          createEvent({
+            author: 'user',
+            content: {
+              parts: [
+                {
+                  functionResponse: {
+                    id: 'never-requested',
+                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                    response: {authType: 'apiKey', apiKey: 'attacker-key'},
+                  },
+                },
+              ],
+            },
+          }),
+        ],
+      );
+
+      const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
+
+      expect((await generator.next()).done).toBe(true);
+      expect(storeCredential).not.toHaveBeenCalled();
+    });
   });
 });

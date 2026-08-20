@@ -11,7 +11,9 @@ import {
   LlmAgent,
   PluginManager,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  ToolConfirmation,
   createEvent,
+  createEventActions,
   createSession,
   getFunctionResponses,
 } from '@google/adk';
@@ -64,6 +66,34 @@ function createTransferConfirmationEvents(confirmed: boolean): Event[] {
     content: {role: 'model', parts: [{functionCall: TRANSFER_FUNCTION_CALL}]},
   });
 
+  // The synthesized transfer tool cannot declare `requireConfirmation`, so the
+  // gate is one the flow asked for at runtime. The resume path reads that from
+  // the placeholder response the paused call left behind.
+  const requiresConfirmationEvent = createEvent({
+    invocationId: 'test-invocation',
+    author: 'orchestrator',
+    content: {
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            id: TRANSFER_FUNCTION_CALL.id,
+            name: TRANSFER_FUNCTION_CALL.name,
+            response: {error: 'This tool call requires confirmation.'},
+          },
+        },
+      ],
+    },
+    actions: createEventActions({
+      requestedToolConfirmations: {
+        [TRANSFER_FUNCTION_CALL.id]: new ToolConfirmation({
+          hint: 'Approve the transfer?',
+          confirmed: false,
+        }),
+      },
+    }),
+  });
+
   const confirmationCallEvent = createEvent({
     invocationId: 'test-invocation',
     author: 'orchestrator',
@@ -98,7 +128,12 @@ function createTransferConfirmationEvents(confirmed: boolean): Event[] {
     },
   });
 
-  return [transferCallEvent, confirmationCallEvent, userConfirmationEvent];
+  return [
+    transferCallEvent,
+    requiresConfirmationEvent,
+    confirmationCallEvent,
+    userConfirmationEvent,
+  ];
 }
 
 function createInvocationContext(
@@ -181,7 +216,8 @@ describe('RequestConfirmationLlmRequestProcessor transfer resume', () => {
     );
 
     await expect(collectEvents(invocationContext)).rejects.toThrow(
-      'Function transfer_to_agent is not found in the toolsDict.',
+      "Tool confirmation rejected for function call 'fc-transfer': " +
+        'unregistered_tool.',
     );
   });
 });
