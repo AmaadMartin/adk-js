@@ -510,6 +510,9 @@ export class VertexAiSessionService extends BaseSessionService {
       customMetadata[WORKFLOW_CUSTOM_METADATA_KEY] = workflowMetadata;
     }
 
+    // Strip the Part fields the Sessions API rejects (`partMetadata`) once,
+    // so both the wire content and the `rawEvent` blob below carry the
+    // stripped copy and the append is not rejected with 400 INVALID_ARGUMENT.
     const sanitizedEvent = event.content
       ? {...event, content: withoutPartMetadata(event.content)}
       : event;
@@ -559,6 +562,9 @@ export class VertexAiSessionService extends BaseSessionService {
     try {
       await this.sessions.events.append(params);
     } catch (error) {
+      // Only the API refusing `rawEvent` is safe to retry without it. Any
+      // other failure may already have persisted the event, so re-appending
+      // would duplicate it; let it propagate.
       if (!isRawEventRejection(error)) {
         throw error;
       }
@@ -745,7 +751,8 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   const eventMetadata = apiEventObj.eventMetadata || {};
 
   let customMetadata = eventMetadata.customMetadata as
-    Record<string, unknown> | undefined;
+    | Record<string, unknown>
+    | undefined;
   let compactionData: ParsedCompactionMetadata | undefined;
   let usageMetadataData = null;
   let workflowData: WorkflowEventMetadata | undefined;
@@ -783,7 +790,12 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
         'requestedToolConfirmations'
       ] as Record<string, ToolConfirmation>) || {},
     skipSummarization: actions['skipSummarization'] as boolean | undefined,
-    transferToAgent: actions['transferAgent'] as string | undefined,
+    // Earlier adk-js versions copied `event.actions` onto the request
+    // verbatim, so sessions they wrote store ADK's own `transferToAgent` key.
+    transferToAgent: (actions['transferAgent'] ??
+      (actions as Record<string, unknown>)['transferToAgent']) as
+      | string
+      | undefined,
     escalate: actions['escalate'] as boolean | undefined,
   };
 
@@ -804,9 +816,11 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     branch: eventMetadata['branch'] as string | undefined,
     customMetadata,
     longRunningToolIds: eventMetadata['longRunningToolIds'] as
-      string[] | undefined,
+      | string[]
+      | undefined,
     groundingMetadata: eventMetadata['groundingMetadata'] as
-      GroundingMetadata | undefined,
+      | GroundingMetadata
+      | undefined,
     usageMetadata:
       usageMetadataData as unknown as GenerateContentResponseUsageMetadata,
   };
