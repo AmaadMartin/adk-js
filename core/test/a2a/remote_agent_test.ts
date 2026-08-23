@@ -17,14 +17,19 @@ import {
   DefaultAgentCardResolver,
 } from '@a2a-js/sdk/client';
 import {
+  A2AClientError,
   Event as AdkEvent,
+  AgentCardResolutionError,
   createEvent,
   InvocationContext,
+  isA2AClientError,
+  isAgentCardResolutionError,
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
   Session,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {logger} from '../../src/utils/logger.js';
 
 type A2AStreamEventData =
   | Message
@@ -89,6 +94,36 @@ describe('A2ARemoteAgent', () => {
       } as unknown as Session,
       ...overrides,
     } as unknown as InvocationContext;
+  };
+
+  const streamingCard: AgentCard = {
+    name: 'Remote',
+    description: 'test',
+    protocolVersion: '1.0',
+    defaultInputModes: [],
+    defaultOutputModes: [],
+    capabilities: {streaming: true},
+    skills: [],
+    url: 'https://example.com',
+    version: '1.0',
+  };
+
+  /** An A2A stream that fails on the first read. */
+  const failingStream = async function* (
+    error: unknown,
+  ): AsyncGenerator<A2AStreamEventData, void, undefined> {
+    yield* [];
+    throw error;
+  };
+
+  const drain = async (
+    events: AsyncIterable<AdkEvent>,
+  ): Promise<AdkEvent[]> => {
+    const collected: AdkEvent[] = [];
+    for await (const event of events) {
+      collected.push(event);
+    }
+    return collected;
   };
 
   it('should throw if neither agentCard nor client are provided', () => {
@@ -365,5 +400,161 @@ describe('A2ARemoteAgent', () => {
         configuration: {acceptedOutputModes: ['custom']},
       }),
     );
+  });
+  it('throws AgentCardResolutionError when neither agentCard nor client are provided', () => {
+    let thrown: unknown;
+    try {
+      new RemoteA2AAgent({name: 'test'} as unknown as RemoteA2AAgentConfig);
+    } catch (e: unknown) {
+      thrown = e;
+    }
+
+    expect(isAgentCardResolutionError(thrown)).toBe(true);
+    expect((thrown as AgentCardResolutionError).message).toBe(
+      'Either AgentCard or Client must be provided',
+    );
+  });
+
+  it('rejects with A2AClientError when the client factory fails', async () => {
+    const inner = new Error('no transport matched the card');
+    vi.mocked(mockClientFactory.createFromAgentCard).mockRejectedValue(inner);
+
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: streamingCard,
+      clientFactory: mockClientFactory,
+    });
+
+    const err = await drain(agent.runAsync(createMockContext())).catch(
+      (e: unknown) => e,
+    );
+
+    expect(isA2AClientError(err)).toBe(true);
+    expect((err as A2AClientError).message).toBe(
+      'no transport matched the card',
+    );
+    expect((err as A2AClientError).cause).toBe(inner);
+  });
+
+  it('does not re-wrap a client factory failure that is already typed', async () => {
+    const typed = new A2AClientError('already typed');
+    vi.mocked(mockClientFactory.createFromAgentCard).mockRejectedValue(typed);
+
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: streamingCard,
+      clientFactory: mockClientFactory,
+    });
+
+    const err = await drain(agent.runAsync(createMockContext())).catch(
+      (e: unknown) => e,
+    );
+
+    expect(err).toBe(typed);
+  });
+
+  it('rejects with AgentCardResolutionError when card resolution fails', async () => {
+    vi.mocked(mockResolver.resolve).mockRejectedValue(new Error('bad card'));
+
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: 'https://example.com/card.json',
+      clientFactory: mockClientFactory,
+    });
+
+    const err = await drain(agent.runAsync(createMockContext())).catch(
+      (e: unknown) => e,
+    );
+
+    expect(isAgentCardResolutionError(err)).toBe(true);
+    expect(isA2AClientError(err)).toBe(false);
+    expect((err as AgentCardResolutionError).message).toBe('bad card');
+  });
+
+  it('emits an error event with the original message when the stream fails', async () => {
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: streamingCard,
+      clientFactory: mockClientFactory,
+    });
+    vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+      failingStream(new Error('stream broke')),
+    );
+
+    const events = await drain(agent.runAsync(createMockContext()));
+
+    expect(events.length).toBe(1);
+    expect(events[0].errorMessage).toBe('stream broke');
+    expect(events[0].turnComplete).toBe(true);
+  });
+
+  it('emits an error event with the original message when sendMessage fails', async () => {
+    const card: AgentCard = {
+      ...streamingCard,
+      capabilities: {streaming: false},
+    };
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: card,
+      clientFactory: mockClientFactory,
+    });
+    vi.mocked(mockClient.sendMessage).mockRejectedValue(
+      new Error('send broke'),
+    );
+
+    const events = await drain(agent.runAsync(createMockContext()));
+
+    expect(events.length).toBe(1);
+    expect(events[0].errorMessage).toBe('send broke');
+    expect(events[0].turnComplete).toBe(true);
+  });
+
+  it('does not label a per-chunk callback failure as a client error', async () => {
+    const callbackError = new Error('callback broke');
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: streamingCard,
+      clientFactory: mockClientFactory,
+      afterRequestCallbacks: [
+        () => {
+          throw callbackError;
+        },
+      ],
+    });
+    vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+      (async function* (): AsyncGenerator<A2AStreamEventData, void, void> {
+        yield {
+          kind: 'artifact-update',
+          artifact: {parts: [{kind: 'text', text: 'response'}]},
+        } as A2AStreamEventData;
+      })(),
+    );
+    const logged: unknown[] = [];
+    vi.spyOn(logger, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args[1]);
+    });
+
+    const events = await drain(agent.runAsync(createMockContext()));
+
+    expect(events.length).toBe(1);
+    expect(events[0].errorMessage).toBe('callback broke');
+    expect(logged).toEqual([callbackError]);
+    expect(isA2AClientError(logged[0])).toBe(false);
+  });
+
+  it('emits a readable error event when the client throws a non-Error value', async () => {
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: streamingCard,
+      clientFactory: mockClientFactory,
+    });
+    vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+      failingStream('plain string'),
+    );
+
+    const events = await drain(agent.runAsync(createMockContext()));
+
+    expect(events.length).toBe(1);
+    expect(events[0].errorMessage).toBe('plain string');
   });
 });
