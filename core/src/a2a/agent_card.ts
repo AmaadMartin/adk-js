@@ -19,12 +19,18 @@ import {ReadonlyContext} from '../agents/readonly_context.js';
 import {isSequentialAgent} from '../agents/sequential_agent.js';
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {isBaseToolset} from '../tools/base_toolset.js';
+import {errorMessage} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {isWorkflow} from '../workflow/workflow.js';
+import {AgentCardResolutionError} from './errors.js';
 
 /**
  * Resolves the AgentCard from the provided source.
+ *
+ * @throws {@link AgentCardResolutionError} when the card cannot be fetched,
+ *   read or parsed. The message is the one the underlying failure produced, and
+ *   that failure is attached as `cause`.
  */
 export async function resolveAgentCard(
   agentCard: AgentCard | string,
@@ -36,15 +42,20 @@ export async function resolveAgentCard(
   const source = agentCard as string;
   if (source.startsWith('http://') || source.startsWith('https://')) {
     const resolver = new DefaultAgentCardResolver();
-    return await resolver.resolve(source);
+    try {
+      return await resolver.resolve(source);
+    } catch (err: unknown) {
+      throw new AgentCardResolutionError(errorMessage(err), {cause: err});
+    }
   }
 
   try {
     const content = await fs.readFile(source, 'utf-8');
     return JSON.parse(content) as AgentCard;
   } catch (err: unknown) {
-    throw new Error(
-      `Failed to read agent card from file ${source}: ${(err as Error).message}`,
+    throw new AgentCardResolutionError(
+      `Failed to read agent card from file ${source}: ${errorMessage(err)}`,
+      {cause: err},
     );
   }
 }

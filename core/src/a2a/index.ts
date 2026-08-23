@@ -32,4 +32,10 @@ export {
 } from './agent_to_a2a.js';
 export type {A2aUserBuilder, ToA2aOptions} from './agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './auth.js';
+export {
+  A2AClientError,
+  AgentCardResolutionError,
+  isA2AClientError,
+  isAgentCardResolutionError,
+} from './errors.js';
 export type {ExecutorContext} from './executor_context.js';
