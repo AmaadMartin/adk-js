@@ -413,7 +413,7 @@ describe('A2ARemoteAgent', () => {
   it('throws AgentCardResolutionError when neither agentCard nor client are provided', () => {
     let thrown: unknown;
     try {
-      new RemoteA2AAgent({name: 'test'} as unknown as RemoteA2AAgentConfig);
+      new RemoteA2AAgent({name: 'test'});
     } catch (e: unknown) {
       thrown = e;
     }
