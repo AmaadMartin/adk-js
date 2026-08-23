@@ -9,6 +9,7 @@ import yaml from 'js-yaml';
 import {isUtf8} from 'node:buffer';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {logger} from '../utils/logger.js';
 import type {Frontmatter, Resources, Script, Skill} from './skill.js';
 import {FrontmatterSchema} from './skill.js';
@@ -251,6 +252,7 @@ export async function loadSkillFromDir(skillDir: string): Promise<Skill> {
   return {
     ...skill,
     resources,
+    uri: pathToFileURL(resolvedDir).href,
   };
 }
 

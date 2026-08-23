@@ -7,6 +7,7 @@
 import type {FunctionDeclaration} from '@google/genai';
 import {Type} from '@google/genai';
 import {requireAgent} from '../../agents/invocation_context.js';
+import {traceSkillLoad} from '../../telemetry/skill_tracing.js';
 import {experimental} from '../../utils/experimental.js';
 import type {RunAsyncToolRequest} from '../base_tool.js';
 import {BaseTool} from '../base_tool.js';
@@ -72,6 +73,9 @@ export class LoadSkillTool extends BaseTool {
         error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
         error_code: LoadSkillErrorCode.REGISTRY_ERROR,
       };
+    } finally {
+      // Runs on the error path too, where `skill` is undefined.
+      traceSkillLoad({skillName, skill});
     }
 
     if (!skill) {
