@@ -11,7 +11,6 @@ import {
   isAgentCardResolutionError,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {toA2AClientError} from '../../src/a2a/errors.js';
 
 describe('AgentCardResolutionError', () => {
   it('is an Error carrying the given name and message', () => {
@@ -110,30 +109,5 @@ describe('isA2AClientError', () => {
 
   it('rejects a non-error object that merely carries the name', () => {
     expect(isA2AClientError({name: 'A2AClientError'})).toBe(false);
-  });
-});
-
-describe('toA2AClientError', () => {
-  it('wraps a plain error, keeping the message and attaching the cause', () => {
-    const inner = new Error('transport down');
-
-    const err = toA2AClientError(inner);
-
-    expect(isA2AClientError(err)).toBe(true);
-    expect(err.message).toBe('transport down');
-    expect(err.cause).toBe(inner);
-  });
-
-  it('stringifies a thrown non-error value', () => {
-    const err = toA2AClientError('plain string');
-
-    expect(err.message).toBe('plain string');
-    expect(err.cause).toBe('plain string');
-  });
-
-  it('returns an already typed error unchanged', () => {
-    const typed = new A2AClientError('already typed');
-
-    expect(toA2AClientError(typed)).toBe(typed);
   });
 });

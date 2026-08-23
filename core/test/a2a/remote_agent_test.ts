@@ -486,19 +486,15 @@ describe('A2ARemoteAgent', () => {
       agentCard: streamingCard,
       clientFactory: mockClientFactory,
     });
-    const inner = new Error('stream broke');
     vi.mocked(mockClient.sendMessageStream).mockReturnValue(
-      failingStream(inner),
+      failingStream(new Error('stream broke')),
     );
-    const logged = captureLoggedErrors();
 
     const events = await drain(agent.runAsync(createMockContext()));
 
     expect(events.length).toBe(1);
     expect(events[0].errorMessage).toBe('stream broke');
     expect(events[0].turnComplete).toBe(true);
-    expect(isA2AClientError(logged[0])).toBe(true);
-    expect((logged[0] as A2AClientError).cause).toBe(inner);
   });
 
   it('emits an error event with the original message when sendMessage fails', async () => {
@@ -511,20 +507,18 @@ describe('A2ARemoteAgent', () => {
       agentCard: card,
       clientFactory: mockClientFactory,
     });
-    const inner = new Error('send broke');
-    vi.mocked(mockClient.sendMessage).mockRejectedValue(inner);
-    const logged = captureLoggedErrors();
+    vi.mocked(mockClient.sendMessage).mockRejectedValue(
+      new Error('send broke'),
+    );
 
     const events = await drain(agent.runAsync(createMockContext()));
 
     expect(events.length).toBe(1);
     expect(events[0].errorMessage).toBe('send broke');
     expect(events[0].turnComplete).toBe(true);
-    expect(isA2AClientError(logged[0])).toBe(true);
-    expect((logged[0] as A2AClientError).cause).toBe(inner);
   });
 
-  it('does not label a per-chunk callback failure as a client error', async () => {
+  it('reports a per-chunk callback failure through the error event', async () => {
     const callbackError = new Error('callback broke');
     const agent = new RemoteA2AAgent({
       name: 'test-agent',
@@ -551,7 +545,6 @@ describe('A2ARemoteAgent', () => {
     expect(events.length).toBe(1);
     expect(events[0].errorMessage).toBe('callback broke');
     expect(logged).toEqual([callbackError]);
-    expect(isA2AClientError(logged[0])).toBe(false);
   });
 
   it('emits a readable error event when a non-Error value is thrown', async () => {

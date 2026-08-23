@@ -12,8 +12,6 @@
  * from a failure of the A2A client itself.
  */
 
-import {errorMessage} from '../utils/error_utils.js';
-
 /**
  * Raised when the agent card cannot be resolved: no card source was configured,
  * the card file is missing or unreadable, its contents are not valid JSON, or
@@ -53,8 +51,8 @@ export function isAgentCardResolutionError(
 }
 
 /**
- * Raised when an A2A client operation fails: building a client from the
- * resolved card, or sending a message to the remote agent.
+ * Raised when an A2A client operation fails. `RemoteA2AAgent` raises it when it
+ * cannot build a client from the resolved agent card.
  *
  * Signals a transport or remote condition rather than a local misconfiguration.
  */
@@ -83,18 +81,4 @@ export class A2AClientError extends Error {
  */
 export function isA2AClientError(e: unknown): e is A2AClientError {
   return e instanceof Error && e.name === 'A2AClientError';
-}
-
-/**
- * Converts a failed A2A client call into an {@link A2AClientError}, keeping the
- * original message and attaching the original value as `cause`. An error that
- * is already an {@link A2AClientError} passes through unwrapped.
- *
- * @param e The value the client call threw.
- * @return The typed error to rethrow.
- */
-export function toA2AClientError(e: unknown): A2AClientError {
-  return isA2AClientError(e)
-    ? e
-    : new A2AClientError(errorMessage(e), {cause: e});
 }

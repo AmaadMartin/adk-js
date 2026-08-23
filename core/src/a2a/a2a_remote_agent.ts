@@ -29,7 +29,11 @@ import {
   toMissingRemoteSessionParts,
 } from './a2a_remote_agent_utils.js';
 import {resolveAgentCard} from './agent_card.js';
-import {AgentCardResolutionError, toA2AClientError} from './errors.js';
+import {
+  A2AClientError,
+  AgentCardResolutionError,
+  isA2AClientError,
+} from './errors.js';
 import {toAdkEvent} from './event_converter_utils.js';
 import {getA2ASessionMetadata} from './metadata_converter_utils.js';
 import {toA2AParts} from './part_converter_utils.js';
@@ -152,7 +156,10 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         try {
           this.client = await factory.createFromAgentCard(this.card);
         } catch (e: unknown) {
-          throw toA2AClientError(e);
+          // A caller-supplied factory may already raise the typed error.
+          throw isA2AClientError(e)
+            ? e
+            : new A2AClientError(errorMessage(e), {cause: e});
         }
       }
     }
@@ -227,7 +234,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         ? this.card.capabilities?.streaming !== false
         : true;
       if (useStreaming) {
-        for await (const chunk of streamMessage(this.client!, params)) {
+        for await (const chunk of this.client!.sendMessageStream(params)) {
           if (this.a2aConfig.afterRequestCallbacks) {
             for (const callback of this.a2aConfig.afterRequestCallbacks) {
               await callback(context, chunk);
@@ -256,7 +263,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           }
         }
       } else {
-        const result = await sendMessage(this.client!, params);
+        const result = await this.client!.sendMessage(params);
         if (this.a2aConfig.afterRequestCallbacks) {
           for (const callback of this.a2aConfig.afterRequestCallbacks) {
             await callback(context, result);
@@ -289,47 +296,5 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     _context: InvocationContext,
   ): AsyncGenerator<AdkEvent, void, void> {
     throw new Error('Live mode is not supported in A2ARemoteAgent yet.');
-  }
-}
-
-/**
- * Streams a message through `client`, rethrowing a client failure as
- * `A2AClientError`.
- *
- * Only the client call and the stream itself are wrapped. A consumer's
- * `for await` body runs in the consumer's frame, so an error raised while
- * processing a chunk is not mislabelled as a client failure.
- *
- * @param client The A2A client to stream through.
- * @param params The message send parameters.
- * @return The stream of A2A events.
- */
-async function* streamMessage(
-  client: Client,
-  params: MessageSendParams,
-): AsyncGenerator<A2AStreamEventData, void, undefined> {
-  try {
-    yield* client.sendMessageStream(params);
-  } catch (e: unknown) {
-    throw toA2AClientError(e);
-  }
-}
-
-/**
- * Sends a message through `client`, rethrowing a client failure as
- * `A2AClientError`.
- *
- * @param client The A2A client to send through.
- * @param params The message send parameters.
- * @return The remote agent's reply.
- */
-async function sendMessage(
-  client: Client,
-  params: MessageSendParams,
-): Promise<Message | Task> {
-  try {
-    return await client.sendMessage(params);
-  } catch (e: unknown) {
-    throw toA2AClientError(e);
   }
 }
