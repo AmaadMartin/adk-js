@@ -20,6 +20,7 @@ import {BaseAgent, BaseAgentConfig} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {errorMessage} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {MessageRole} from './a2a_event.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
@@ -28,6 +29,11 @@ import {
   toMissingRemoteSessionParts,
 } from './a2a_remote_agent_utils.js';
 import {resolveAgentCard} from './agent_card.js';
+import {
+  A2AClientError,
+  AgentCardResolutionError,
+  isA2AClientError,
+} from './errors.js';
 import {toAdkEvent} from './event_converter_utils.js';
 import {getA2ASessionMetadata} from './metadata_converter_utils.js';
 import {toA2AParts} from './part_converter_utils.js';
@@ -127,7 +133,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   constructor(private readonly a2aConfig: RemoteA2AAgentConfig) {
     super(a2aConfig);
     if (!a2aConfig.agentCard && !a2aConfig.client) {
-      throw new Error('Either AgentCard or Client must be provided');
+      throw new AgentCardResolutionError(
+        'Either AgentCard or Client must be provided',
+      );
     }
   }
 
@@ -145,7 +153,14 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
 
       if (!this.client) {
         const factory = this.a2aConfig.clientFactory || new ClientFactory();
-        this.client = await factory.createFromAgentCard(this.card);
+        try {
+          this.client = await factory.createFromAgentCard(this.card);
+        } catch (e: unknown) {
+          // A caller-supplied factory may already raise the typed error.
+          throw isA2AClientError(e)
+            ? e
+            : new A2AClientError(errorMessage(e), {cause: e});
+        }
       }
     }
 
@@ -266,13 +281,12 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         }
       }
     } catch (e: unknown) {
-      const error = e as Error;
-      logger.error(`A2ARemoteAgent ${this.name} failed:`, error);
+      logger.error(`A2ARemoteAgent ${this.name} failed:`, e);
 
       yield createEvent({
         author: this.name,
         invocationId: context.invocationId,
-        errorMessage: error.message,
+        errorMessage: errorMessage(e),
         turnComplete: true,
       });
     }

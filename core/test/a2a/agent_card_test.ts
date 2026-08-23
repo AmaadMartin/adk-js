@@ -4,17 +4,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it, vi} from 'vitest';
-import {buildAgentSkills} from '../../src/a2a/agent_card.js';
+import {AgentCard} from '@a2a-js/sdk';
+import {DefaultAgentCardResolver} from '@a2a-js/sdk/client';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import {buildAgentSkills, resolveAgentCard} from '../../src/a2a/agent_card.js';
 import {node} from '../../src/workflow/node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 
 import {
+  AgentCardResolutionError,
   BaseAgent,
   BaseTool,
   BaseToolset,
   FunctionTool,
   getA2AAgentCard,
+  isAgentCardResolutionError,
   LlmAgent,
   LoopAgent,
   ParallelAgent,
@@ -235,5 +242,91 @@ describe('Agent Card', () => {
       expect(workflowSkill?.description).toBe('Runs a graph');
       expect(skills.find((s) => s.name === 'custom')).toBeUndefined();
     });
+  });
+});
+
+describe('resolveAgentCard', () => {
+  const card: AgentCard = {
+    name: 'Remote',
+    description: 'test',
+    protocolVersion: '1.0',
+    defaultInputModes: [],
+    defaultOutputModes: [],
+    capabilities: {streaming: true},
+    skills: [],
+    url: 'https://example.com',
+    version: '1.0',
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns an object card unchanged', async () => {
+    expect(await resolveAgentCard(card)).toBe(card);
+  });
+
+  it('returns the card a URL source resolves to', async () => {
+    vi.spyOn(DefaultAgentCardResolver.prototype, 'resolve').mockResolvedValue(
+      card,
+    );
+
+    expect(await resolveAgentCard('https://example.com/card.json')).toBe(card);
+  });
+
+  it('throws AgentCardResolutionError with the resolver message when a URL source fails', async () => {
+    const inner = new Error('404 Not Found');
+    vi.spyOn(DefaultAgentCardResolver.prototype, 'resolve').mockRejectedValue(
+      inner,
+    );
+
+    const err = await resolveAgentCard('https://example.com/card.json').catch(
+      (e: unknown) => e,
+    );
+
+    expect(isAgentCardResolutionError(err)).toBe(true);
+    expect((err as AgentCardResolutionError).message).toBe('404 Not Found');
+    expect((err as AgentCardResolutionError).cause).toBe(inner);
+  });
+
+  it('throws AgentCardResolutionError when the card file is missing', async () => {
+    const missing = path.join(os.tmpdir(), 'adk-a2a-card-does-not-exist.json');
+
+    const err = await resolveAgentCard(missing).catch((e: unknown) => e);
+
+    expect(isAgentCardResolutionError(err)).toBe(true);
+    expect((err as AgentCardResolutionError).message).toMatch(
+      /^Failed to read agent card from file /,
+    );
+    expect((err as AgentCardResolutionError).cause).toBeDefined();
+  });
+
+  it('throws AgentCardResolutionError when the card file is not valid JSON', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-a2a-card-'));
+    try {
+      const file = path.join(dir, 'card.json');
+      await fs.writeFile(file, 'not json', 'utf-8');
+
+      const err = await resolveAgentCard(file).catch((e: unknown) => e);
+
+      expect(isAgentCardResolutionError(err)).toBe(true);
+      expect((err as AgentCardResolutionError).cause).toBeInstanceOf(
+        SyntaxError,
+      );
+    } finally {
+      await fs.rm(dir, {recursive: true, force: true});
+    }
+  });
+
+  it('returns the parsed card from a readable file', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-a2a-card-'));
+    try {
+      const file = path.join(dir, 'card.json');
+      await fs.writeFile(file, JSON.stringify(card), 'utf-8');
+
+      expect(await resolveAgentCard(file)).toEqual(card);
+    } finally {
+      await fs.rm(dir, {recursive: true, force: true});
+    }
   });
 });

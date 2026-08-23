@@ -55,8 +55,19 @@ function truncateBody(body: string): string {
     : body;
 }
 
-/** Returns the plain, non-recursive message for a single value. */
-function baseMessage(err: unknown): string {
+/**
+ * Returns the plain message a thrown value carries.
+ *
+ * Unlike {@link formatError} it does not unwrap the `cause` chain, flatten an
+ * `AggregateError` or append HTTP details, so the text an `Error` already
+ * carries survives verbatim. Use it where a message must be preserved rather
+ * than enriched, and in place of an unchecked `(err as Error).message` on a
+ * value that may not be an `Error`.
+ *
+ * @param err The thrown or rejected value.
+ * @return The value's own message.
+ */
+export function errorMessage(err: unknown): string {
   if (err instanceof Error) {
     return err.message;
   }
@@ -117,7 +128,7 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
   }
   if (typeof err === 'object') {
     if (seen.has(err)) {
-      return baseMessage(err);
+      return errorMessage(err);
     }
     seen.add(err);
   }
@@ -125,7 +136,7 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
     return err.errors.map((sub) => formatErrorRecursive(sub, seen)).join(' | ');
   }
   const http = extractHttpDetails(err);
-  const base = baseMessage(err);
+  const base = errorMessage(err);
   // Cycles (including a direct `err.cause === err`) are handled by `seen`.
   const cause = asRecord(err)?.['cause'];
   const causeMessage =
