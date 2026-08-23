@@ -4,13 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  ArtifactServiceFactory,
-  getServiceRegistry,
-  MemoryServiceFactory,
-  ServiceRegistrations,
-  SessionServiceFactory,
-} from '@google/adk';
+import {getServiceRegistry, ServiceRegistrations} from '@google/adk';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import {createRequire} from 'node:module';
@@ -39,14 +33,12 @@ const logger = new AdkLogger({
 /** The module basename that declares a directory's service factories. */
 const SERVICES_MODULE_NAME = 'services';
 
-type UnknownFunction = (...args: unknown[]) => unknown;
-
 /**
  * Only callability is checked. The user module is bundled separately and can
  * carry its own copy of `@google/adk`, so an `instanceof` check against the
  * service a factory returns would reject a legitimate backend.
  */
-function isServiceFactory(value: unknown): value is UnknownFunction {
+function isServiceFactory<T>(value: unknown): value is T {
   return typeof value === 'function';
 }
 
@@ -63,38 +55,76 @@ function isRegistrations(value: unknown): value is ServiceRegistrations {
   return isRecord(value) && SERVICE_KINDS.some((kind) => isRecord(value[kind]));
 }
 
-/**
- * The export candidates, in precedence order. A CommonJS bundle nests the
- * module's exports under `default`, so each candidate is looked up there too.
- */
-function registrationCandidates(jsModule: Record<string, unknown>): unknown[] {
+/** A CommonJS bundle nests the module's own exports under `default`. */
+function nestedExports(
+  jsModule: Record<string, unknown>,
+): Record<string, unknown> {
   const asDefault = jsModule['default'];
-  const nested = isRecord(asDefault) ? asDefault : {};
+
+  return isRecord(asDefault) ? asDefault : {};
+}
+
+/** The export candidates, in precedence order. */
+function registrationCandidates(jsModule: Record<string, unknown>): unknown[] {
+  const nested = nestedExports(jsModule);
 
   return [
     jsModule[SERVICES_MODULE_NAME],
     nested[SERVICES_MODULE_NAME],
-    asDefault,
+    jsModule['default'],
     nested['default'],
   ];
 }
 
 /**
- * Yields the callable entries of one service kind and reports the rest, so one
- * malformed entry does not discard its valid siblings.
+ * Registers the callable entries of one service kind and reports the rest, so
+ * one malformed entry does not discard its valid siblings.
  */
-function* serviceFactories(
-  kind: string,
+function registerFactories<T>(
+  register: (scheme: string, factory: T) => void,
+  kind: ServiceKind,
   entries: Record<string, unknown> | undefined,
-): Generator<[string, UnknownFunction]> {
+): void {
   for (const [scheme, value] of Object.entries(entries ?? {})) {
-    if (isServiceFactory(value)) {
-      yield [scheme, value];
+    if (isServiceFactory<T>(value)) {
+      register(scheme, value);
     } else {
       logger.warn(
         `Invalid ${kind} service registration for '${scheme}': expected a function.`,
       );
     }
+  }
+}
+
+/**
+ * The one place a service kind maps to a registration method. Both discovery
+ * forms register through here.
+ */
+function registerKind(
+  kind: ServiceKind,
+  entries: Record<string, unknown> | undefined,
+): void {
+  const registry = getServiceRegistry();
+
+  switch (kind) {
+    case 'session':
+      return registerFactories(
+        registry.registerSessionService.bind(registry),
+        kind,
+        entries,
+      );
+    case 'artifact':
+      return registerFactories(
+        registry.registerArtifactService.bind(registry),
+        kind,
+        entries,
+      );
+    case 'memory':
+      return registerFactories(
+        registry.registerMemoryService.bind(registry),
+        kind,
+        entries,
+      );
   }
 }
 
@@ -219,45 +249,21 @@ export function readExport(
   jsModule: Record<string, unknown>,
   name: string,
 ): unknown {
-  const asDefault = jsModule['default'];
-  const nested = isRecord(asDefault) ? asDefault : {};
-
-  return jsModule[name] ?? nested[name];
+  return jsModule[name] ?? nestedExports(jsModule)[name];
 }
-
-type ServiceConstructor<T> = new (uri: string) => T;
 
 /**
  * Only constructability is checked, for the reason {@link isServiceFactory}
  * gives: the module can carry its own copy of `@google/adk`, so an
  * `instanceof` check would reject a legitimate backend.
  */
-function isServiceConstructor<T>(
+function isServiceConstructor(
   value: unknown,
-): value is ServiceConstructor<T> {
+): value is new (uri: string) => unknown {
   return typeof value === 'function';
 }
 
-/** Registers `new Class(uri)` as the factory for one scheme. */
-function registerConstructor<T>(
-  register: (scheme: string, factory: (uri: string) => T) => void,
-  entry: ServiceEntry,
-  exported: unknown,
-  source: string,
-): void {
-  if (!isServiceConstructor<T>(exported)) {
-    logger.warn(
-      `Skipping '${entry.scheme}' in ${source}: ${entry.module} exports no ` +
-        `'${entry.class ?? 'default'}' class.`,
-    );
-
-    return;
-  }
-
-  register(entry.scheme, (uri) => new exported(uri));
-}
-
-/** Imports the module one entry names and registers its class. */
+/** Imports the module one entry names and registers `new Class(uri)`. */
 async function registerServiceEntry(
   entry: ServiceEntry,
   dir: string,
@@ -269,34 +275,19 @@ async function registerServiceEntry(
     ? await importModuleFile(filePath, fileOptions)
     : await importFile(filePath);
   const exported = readExport(jsModule, entry.class ?? 'default');
-  const registry = getServiceRegistry();
 
-  switch (entry.type) {
-    case 'session':
-      registerConstructor(
-        registry.registerSessionService.bind(registry),
-        entry,
-        exported,
-        source,
-      );
-      break;
-    case 'artifact':
-      registerConstructor(
-        registry.registerArtifactService.bind(registry),
-        entry,
-        exported,
-        source,
-      );
-      break;
-    case 'memory':
-      registerConstructor(
-        registry.registerMemoryService.bind(registry),
-        entry,
-        exported,
-        source,
-      );
-      break;
+  if (!isServiceConstructor(exported)) {
+    logger.warn(
+      `Skipping '${entry.scheme}' in ${source}: ${entry.module} exports no ` +
+        `'${entry.class ?? 'default'}' class.`,
+    );
+
+    return;
   }
+
+  registerKind(entry.type, {
+    [entry.scheme]: (uri: string) => new exported(uri),
+  });
 }
 
 /** Registers every entry of one config file, keeping the valid siblings. */
@@ -380,27 +371,8 @@ async function loadProgrammaticModule(
     return;
   }
 
-  const registry = getServiceRegistry();
-
-  for (const [scheme, factory] of serviceFactories(
-    'session',
-    registrations.session,
-  )) {
-    registry.registerSessionService(scheme, factory as SessionServiceFactory);
-  }
-
-  for (const [scheme, factory] of serviceFactories(
-    'artifact',
-    registrations.artifact,
-  )) {
-    registry.registerArtifactService(scheme, factory as ArtifactServiceFactory);
-  }
-
-  for (const [scheme, factory] of serviceFactories(
-    'memory',
-    registrations.memory,
-  )) {
-    registry.registerMemoryService(scheme, factory as MemoryServiceFactory);
+  for (const kind of SERVICE_KINDS) {
+    registerKind(kind, registrations[kind]);
   }
 }
 
