@@ -20,7 +20,7 @@ import {
   Runner,
 } from '@google/adk';
 import {Blob, Content, FunctionDeclaration, Modality} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -1111,5 +1111,58 @@ describe('Runner.runLive', () => {
     }).rejects.toThrow('Simulated outbound connection error on empty receive');
 
     expect(llm.connection!.closed).toBe(true);
+  });
+});
+
+describe('Runner.runLive default model resolution', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+
+  beforeEach(async () => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+  });
+
+  afterEach(() => {
+    LlmAgent.setDefaultModel(LlmAgent.DEFAULT_MODEL);
+    LlmAgent.setDefaultLiveModel(LlmAgent.DEFAULT_LIVE_MODEL);
+  });
+
+  // Instances keep the test offline: the built-in default names resolve to a
+  // real Gemini, which would open a Live API session.
+  it('connects a model-less agent with the default live model', async () => {
+    const turnLlm = new FakeLiveLlm([], 'fake-turn-llm');
+    const liveLlm = new FakeLiveLlm([{turnComplete: true}], 'fake-live-llm');
+    LlmAgent.setDefaultModel(turnLlm);
+    LlmAgent.setDefaultLiveModel(liveLlm);
+
+    const agent = new LlmAgent({name: 'agent'});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+    })) {
+      // drain
+    }
+
+    expect(liveLlm.connections).toHaveLength(1);
+    expect(turnLlm.connections).toHaveLength(0);
+    // Gemini.connect reads the name from the request, so the stamp decides the
+    // model the Live API session actually uses.
+    expect(liveLlm.llmRequestSeen?.model).toBe('fake-live-llm');
   });
 });

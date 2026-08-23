@@ -19,6 +19,7 @@ import {
   createSession,
   Event,
   FunctionTool,
+  Gemini,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -27,6 +28,7 @@ import {
   PluginManager,
   RunAsyncToolRequest,
   Runner,
+  SequentialAgent,
   Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
@@ -1222,5 +1224,164 @@ describe('LlmAgent usage metadata on content-less responses', () => {
     const events = await runAndCollect();
 
     expect(events.find((e) => e.usageMetadata)).toBeUndefined();
+  });
+});
+
+describe('LlmAgent model resolution', () => {
+  beforeEach(() => {
+    // Resolving a Gemini name constructs a Gemini, which requires a credential.
+    vi.stubEnv('GOOGLE_API_KEY', 'test-api-key');
+  });
+
+  afterEach(() => {
+    // The defaults are process-wide, so an unrestored setter leaks into every
+    // later suite in the same worker.
+    LlmAgent.setDefaultModel(LlmAgent.DEFAULT_MODEL);
+    LlmAgent.setDefaultLiveModel(LlmAgent.DEFAULT_LIVE_MODEL);
+    vi.unstubAllEnvs();
+  });
+
+  // Source of truth: adk-python `src/google/adk/agents/llm_agent.py`, ClassVars
+  // `DEFAULT_MODEL` and `DEFAULT_LIVE_MODEL`. A drift from adk-python must fail
+  // here, with a pointer to the file that decides the values.
+  it('pins the two built-in defaults to the adk-python values', () => {
+    expect(LlmAgent.DEFAULT_MODEL).toBe('gemini-3.5-flash');
+    expect(LlmAgent.DEFAULT_LIVE_MODEL).toBe(
+      'gemini-live-2.5-flash-native-audio',
+    );
+  });
+
+  it('resolves a model-less agent to the default model', () => {
+    const agent = new LlmAgent({name: 'agent'});
+
+    expect(agent.canonicalModel).toBeInstanceOf(Gemini);
+    expect(agent.canonicalModel.model).toBe(LlmAgent.DEFAULT_MODEL);
+  });
+
+  it('prefers its own model name over the default', () => {
+    const agent = new LlmAgent({name: 'agent', model: 'gemini-2.5-flash'});
+
+    expect(agent.canonicalModel.model).toBe('gemini-2.5-flash');
+  });
+
+  it('prefers its own BaseLlm instance over the default', () => {
+    const llm = new MockLlm(null);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+
+    expect(agent.canonicalModel).toBe(llm);
+  });
+
+  it('prefers an ancestor model over the default', () => {
+    const leaf = new LlmAgent({name: 'leaf'});
+    new LlmAgent({name: 'root', model: 'gemini-2.5-flash', subAgents: [leaf]});
+
+    expect(leaf.canonicalModel.model).toBe('gemini-2.5-flash');
+  });
+
+  it('walks past a non-LlmAgent ancestor', () => {
+    const leaf = new LlmAgent({name: 'leaf'});
+    const middle = new SequentialAgent({name: 'middle', subAgents: [leaf]});
+    new LlmAgent({
+      name: 'root',
+      model: 'gemini-2.5-flash',
+      subAgents: [middle],
+    });
+
+    expect(leaf.canonicalModel.model).toBe('gemini-2.5-flash');
+  });
+
+  it('uses the nearest ancestor that has a model', () => {
+    const leaf = new LlmAgent({name: 'leaf'});
+    const middle = new LlmAgent({
+      name: 'middle',
+      model: 'gemini-2.0-flash',
+      subAgents: [leaf],
+    });
+    new LlmAgent({
+      name: 'root',
+      model: 'gemini-2.5-flash',
+      subAgents: [middle],
+    });
+
+    expect(leaf.canonicalModel.model).toBe('gemini-2.0-flash');
+  });
+
+  it('resolves a model-less agent through setDefaultModel(name)', () => {
+    LlmAgent.setDefaultModel('gemini-2.0-flash');
+
+    expect(new LlmAgent({name: 'agent'}).canonicalModel.model).toBe(
+      'gemini-2.0-flash',
+    );
+  });
+
+  it('returns the exact instance passed to setDefaultModel', () => {
+    const llm = new MockLlm(null);
+    LlmAgent.setDefaultModel(llm);
+
+    expect(new LlmAgent({name: 'agent'}).canonicalModel).toBe(llm);
+  });
+
+  it('rejects an empty default model name', () => {
+    expect(() => LlmAgent.setDefaultModel('')).toThrow(/non-empty/);
+  });
+
+  it('rejects an empty default live model name', () => {
+    expect(() => LlmAgent.setDefaultLiveModel('')).toThrow(/non-empty/);
+  });
+
+  it('resolves live mode to the live default, not the turn-by-turn one', () => {
+    const agent = new LlmAgent({name: 'agent'});
+
+    expect(agent.canonicalLiveModel.model).toBe(LlmAgent.DEFAULT_LIVE_MODEL);
+    expect(agent.canonicalModel.model).toBe(LlmAgent.DEFAULT_MODEL);
+    expect(agent.canonicalLiveModel.model).not.toBe(agent.canonicalModel.model);
+  });
+
+  it('prefers its own model name in live mode', () => {
+    const agent = new LlmAgent({name: 'agent', model: 'gemini-2.5-flash'});
+
+    expect(agent.canonicalLiveModel.model).toBe('gemini-2.5-flash');
+  });
+
+  it('prefers its own BaseLlm instance in live mode', () => {
+    const llm = new MockLlm(null);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+
+    expect(agent.canonicalLiveModel).toBe(llm);
+  });
+
+  it('prefers an ancestor model in live mode', () => {
+    const leaf = new LlmAgent({name: 'leaf'});
+    new LlmAgent({name: 'root', model: 'gemini-2.5-flash', subAgents: [leaf]});
+
+    expect(leaf.canonicalLiveModel.model).toBe('gemini-2.5-flash');
+  });
+
+  it('ends at the live default after walking model-less ancestors', () => {
+    LlmAgent.setDefaultModel('gemini-2.5-flash');
+    LlmAgent.setDefaultLiveModel('gemini-2.0-flash-live-001');
+    const leaf = new LlmAgent({name: 'leaf'});
+    new LlmAgent({name: 'root', subAgents: [leaf]});
+
+    expect(leaf.canonicalLiveModel.model).toBe('gemini-2.0-flash-live-001');
+    expect(leaf.canonicalModel.model).toBe('gemini-2.5-flash');
+  });
+
+  it('resolves live mode through setDefaultLiveModel(name)', () => {
+    LlmAgent.setDefaultLiveModel('gemini-2.0-flash-live-001');
+
+    expect(new LlmAgent({name: 'agent'}).canonicalLiveModel.model).toBe(
+      'gemini-2.0-flash-live-001',
+    );
+  });
+
+  it('keeps the two defaults independent', () => {
+    const agent = new LlmAgent({name: 'agent'});
+
+    LlmAgent.setDefaultModel('gemini-2.0-flash');
+    expect(agent.canonicalLiveModel.model).toBe(LlmAgent.DEFAULT_LIVE_MODEL);
+
+    LlmAgent.setDefaultLiveModel('gemini-2.0-flash-live-001');
+    expect(agent.canonicalModel.model).toBe('gemini-2.0-flash');
   });
 });
