@@ -47,6 +47,7 @@ import {
   getA2ASessionMetadata,
 } from './metadata_converter_utils.js';
 import {toA2AParts, toGenAIContent} from './part_converter_utils.js';
+import {getA2aRequestMetadata} from './request_metadata.js';
 import {TaskResultAggregator} from './task_result_aggregator.js';
 
 /**
@@ -61,7 +62,10 @@ export type RunnerOrRunnerConfig =
 /**
  * Callback called before execution starts.
  */
-export type BeforeExecuteCallback = (reqCtx: RequestContext) => Promise<void>;
+export type BeforeExecuteCallback = (
+  reqCtx: RequestContext,
+  a2aMetadata?: Record<string, unknown>,
+) => Promise<void>;
 
 /**
  * Callback called after an ADK event is converted to an A2A event.
@@ -147,16 +151,18 @@ export class A2AAgentExecutor implements AgentExecutor {
       adkRunner.sessionService,
       adkRunner.appName,
     );
+    const a2aMetadata = getA2aRequestMetadata(ctx);
     const executorContext = createExecutorContext({
       session,
       userContent: genAIUserMessage,
       requestContext: ctx,
+      a2aMetadata,
     });
 
     this.contextIdsByTaskId.set(ctx.taskId, ctx.contextId);
     try {
       if (this.config.beforeExecuteCallback) {
-        await this.config.beforeExecuteCallback(ctx);
+        await this.config.beforeExecuteCallback(ctx, a2aMetadata);
       }
 
       if (ctx.task && isPausedTaskStatusUpdateEvent(ctx.task)) {
@@ -213,7 +219,11 @@ export class A2AAgentExecutor implements AgentExecutor {
         // Marked remote so the run knows this message came from a peer rather
         // than from the operator: a human-in-the-loop gate is not answerable
         // over A2A unless the deployment opts in.
-        runConfig: {...this.config.runConfig, remoteDelivered: true},
+        runConfig: {
+          ...this.config.runConfig,
+          remoteDelivered: true,
+          ...(a2aMetadata ? {a2aMetadata} : {}),
+        },
       })) {
         adkEvents.push(adkEvent);
 

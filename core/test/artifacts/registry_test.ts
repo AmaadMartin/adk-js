@@ -29,6 +29,15 @@ const {StorageMock, bucketMock} = vi.hoisted(() => {
 
 vi.mock('@google-cloud/storage', () => ({Storage: StorageMock}));
 
+/**
+ * Forces `service` to resolve its bucket. `@google-cloud/storage` is an
+ * optional peer loaded on first use, so nothing reaches `Storage` until an
+ * operation needs the bucket handle.
+ */
+async function resolveBucket(service: unknown): Promise<void> {
+  await (service as {getBucket(): Promise<unknown>}).getBucket();
+}
+
 describe('getArtifactServiceFromUri', () => {
   it('returns InMemoryArtifactService for memory uri', () => {
     const service = getArtifactServiceFromUri('memory://');
@@ -38,7 +47,10 @@ describe('getArtifactServiceFromUri', () => {
   it('returns GcsArtifactService for gs uri', () => {
     const service = getArtifactServiceFromUri('gs://my-bucket');
     expect(service).toBeInstanceOf(GcsArtifactService);
-    expect((service as unknown as {bucket: {name: string}}).bucket.name).toBe(
+    // The GCS client is an optional peer loaded on first use, so the bucket
+    // handle does not exist until then; the parsed name is what the registry
+    // is responsible for and it is all that can be asserted synchronously.
+    expect((service as unknown as {bucketName: string}).bucketName).toBe(
       'my-bucket',
     );
   });
@@ -55,14 +67,14 @@ describe('getArtifactServiceFromUri', () => {
       warnSpy.mockRestore();
     });
 
-    it('passes the bucket name through for a gs uri without a path', () => {
-      getArtifactServiceFromUri('gs://my-bucket');
+    it('passes the bucket name through for a gs uri without a path', async () => {
+      await resolveBucket(getArtifactServiceFromUri('gs://my-bucket'));
       expect(bucketMock).toHaveBeenCalledWith('my-bucket');
       expect(warnSpy).not.toHaveBeenCalled();
     });
 
-    it('ignores the path component of a gs uri', () => {
-      getArtifactServiceFromUri('gs://my-bucket/prefix');
+    it('ignores the path component of a gs uri', async () => {
+      await resolveBucket(getArtifactServiceFromUri('gs://my-bucket/prefix'));
       expect(bucketMock).toHaveBeenCalledWith('my-bucket');
       expect(bucketMock).not.toHaveBeenCalledWith('my-bucket/prefix');
     });
@@ -75,8 +87,8 @@ describe('getArtifactServiceFromUri', () => {
       expect(message).toContain('my-bucket');
     });
 
-    it('does not warn for a gs uri with only a trailing slash', () => {
-      getArtifactServiceFromUri('gs://my-bucket/');
+    it('does not warn for a gs uri with only a trailing slash', async () => {
+      await resolveBucket(getArtifactServiceFromUri('gs://my-bucket/'));
       expect(bucketMock).toHaveBeenCalledWith('my-bucket');
       expect(warnSpy).not.toHaveBeenCalled();
     });

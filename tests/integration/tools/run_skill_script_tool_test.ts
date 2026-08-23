@@ -23,7 +23,7 @@ import {
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   createSessionArtifactService,
   loadArtifactText,
@@ -72,6 +72,17 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     expect(path.dirname(dir)).toBe(os.tmpdir());
     scratchDirs.push(dir);
   }
+
+  // Script output file names are chosen by the executed script, so the tool
+  // materializes them into a dedicated directory instead of process.cwd().
+  // Every toolset that is not testing the default points at a scratch
+  // directory owned by the test: the default is a fresh mkdtemp per toolset,
+  // and nothing removes it.
+  let outputDir: string;
+
+  beforeEach(async () => {
+    outputDir = await makeOutputDir();
+  });
 
   afterEach(async () => {
     while (scratchDirs.length > 0) {
@@ -148,7 +159,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
 
   it('successfully executes a real JavaScript skill script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const toolset = new SkillToolset([testSkill], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillScriptTool(toolset);
 
     const result = (await tool.runAsync({
@@ -168,7 +182,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     'successfully executes a real Shell skill script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+      const toolset = new SkillToolset([testSkill], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -187,7 +204,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
 
   it('captures stderr from a failing JavaScript skill script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const toolset = new SkillToolset([testSkill], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillScriptTool(toolset);
 
     const result = (await tool.runAsync({
@@ -206,7 +226,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     'captures stderr and exit code from a failing Shell skill script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+      const toolset = new SkillToolset([testSkill], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -224,7 +247,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
 
   it('successfully executes a real Python skill script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const toolset = new SkillToolset([testSkill], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillScriptTool(toolset);
 
     const result = (await tool.runAsync({
@@ -242,7 +268,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
 
   it('captures stderr from a failing Python skill script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const toolset = new SkillToolset([testSkill], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillScriptTool(toolset);
 
     const result = (await tool.runAsync({
@@ -263,7 +292,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     'successfully executes a real PowerShell skill script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+      const toolset = new SkillToolset([testSkill], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -285,7 +317,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     'captures stderr from a failing PowerShell skill script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+      const toolset = new SkillToolset([testSkill], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -307,7 +342,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     'successfully executes a real CMD skill script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+      const toolset = new SkillToolset([testSkill], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -329,7 +367,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     'captures stderr from a failing CMD skill script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+      const toolset = new SkillToolset([testSkill], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -346,12 +387,11 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     TEST_EXECUTION_TIMEOUT,
   );
 
-  it('writes output files into the configured outputDir', async () => {
-    const outputDir = await makeOutputDir();
+  it('writes output files into the configured script output dir', async () => {
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([testSkill], {
       codeExecutor: executor,
-      outputDir,
+      scriptOutputDir: outputDir,
     });
     const tool = new RunSkillScriptTool(toolset);
 
@@ -406,11 +446,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   });
 
   it('handles file collisions by appending a numeric suffix', async () => {
-    const outputDir = await makeOutputDir();
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([testSkill], {
       codeExecutor: executor,
-      outputDir,
+      scriptOutputDir: outputDir,
     });
     const tool = new RunSkillScriptTool(toolset);
 
@@ -440,7 +479,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   });
   it('saves script output files to the artifact service', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const toolset = new SkillToolset([testSkill], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillScriptTool(toolset);
     const artifactService = createSessionArtifactService();
     const toolContext = createMockContext('test-agent', artifactService);
@@ -465,37 +507,46 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
 
   it('creates a new artifact version instead of a renamed file on repeat runs', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
-    const tool = new RunSkillScriptTool(toolset);
     const artifactService = createSessionArtifactService();
     const args = {
       skill_name: 'test-skill',
       script_path: 'scripts/create_file.js',
     };
 
-    const first = (await tool.runAsync({
-      args,
-      toolContext: createMockContext('test-agent', artifactService),
-    })) as SkillScriptResponse;
-    trackToolOutputDir(first.outputDir);
-    const result = (await tool.runAsync({
-      args,
-      toolContext: createMockContext('test-agent', artifactService),
-    })) as SkillScriptResponse;
-    trackToolOutputDir(result.outputDir);
+    /**
+     * One run, writing into an output directory of its own. A toolset reuses
+     * a single directory across its runs, so sharing one here would rename the
+     * second file rather than exercise the artifact versioning under test.
+     */
+    const run = async (): Promise<SkillScriptResponse> => {
+      const toolset = new SkillToolset([testSkill], {
+        codeExecutor: executor,
+        scriptOutputDir: await makeOutputDir(),
+      });
+      return (await new RunSkillScriptTool(toolset).runAsync({
+        args,
+        toolContext: createMockContext('test-agent', artifactService),
+      })) as SkillScriptResponse;
+    };
+
+    await run();
+    const result = await run();
 
     expect(result.outputFiles).toContainEqual(SCRIPT_OUTPUT);
     expect(
       await artifactService.listVersions('output_from_script.txt'),
     ).toEqual([0, 1]);
-    // Each run without a configured outputDir gets a directory of its own, so
-    // the second run collides with nothing and no file is renamed.
+    // Each run wrote into a directory of its own, so the second collided with
+    // nothing and no file was renamed.
     expect(await cwdContains('output_from_script_2.txt')).toBe(false);
   });
 
   it('reports output files with a warning when no artifact service is configured', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const toolset = new SkillToolset([testSkill], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillScriptTool(toolset);
 
     const result = (await tool.runAsync({

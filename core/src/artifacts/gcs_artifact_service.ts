@@ -5,11 +5,11 @@
  */
 
 import type {Bucket, File, StorageOptions} from '@google-cloud/storage';
-import {Storage} from '@google-cloud/storage';
 import type {Part} from '@google/genai';
 import {createPartFromBase64, createPartFromText} from '@google/genai';
 import {validatePathSegment} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
+import {loadOptionalPeer} from '../utils/optional_peer.js';
 
 import {hasArtifactContent} from './artifact_content_utils.js';
 import {
@@ -34,10 +34,27 @@ const GCS_IS_TEXT_METADATA_KEY = 'adkIsText';
 const USER_NAMESPACE_PREFIX = 'user:';
 
 export class GcsArtifactService implements BaseArtifactService {
-  private readonly bucket: Bucket;
+  private readonly bucketName: string;
+  private readonly storageOptions?: StorageOptions;
+  private bucketPromise?: Promise<Bucket>;
 
   constructor(bucket: string, options?: StorageOptions) {
-    this.bucket = new Storage(options).bucket(bucket);
+    this.bucketName = bucket;
+    this.storageOptions = options;
+  }
+
+  /**
+   * Resolves the GCS bucket handle, loading the `@google-cloud/storage`
+   * optional peer on first use.
+   */
+  private getBucket(): Promise<Bucket> {
+    this.bucketPromise ??= loadOptionalPeer(
+      {packageName: '@google-cloud/storage', feature: 'GcsArtifactService'},
+      () => import('@google-cloud/storage'),
+    ).then(({Storage}) =>
+      new Storage(this.storageOptions).bucket(this.bucketName),
+    );
+    return this.bucketPromise;
   }
 
   async saveArtifact(request: SaveArtifactRequest): Promise<number> {
@@ -47,7 +64,8 @@ export class GcsArtifactService implements BaseArtifactService {
 
     const versions = await this.listVersions(request);
     const version = versions.length > 0 ? Math.max(...versions) + 1 : 0;
-    const file = this.bucket.file(
+    const bucket = await this.getBucket();
+    const file = bucket.file(
       getFileName({
         ...request,
         version,
@@ -148,7 +166,7 @@ export class GcsArtifactService implements BaseArtifactService {
         version = Math.max(...versions);
       }
 
-      const file = this.bucket.file(
+      const file = (await this.getBucket()).file(
         getFileName({
           ...request,
           version,
@@ -157,7 +175,8 @@ export class GcsArtifactService implements BaseArtifactService {
       const [metadata] = await file.getMetadata();
       const customMeta = (metadata.metadata ?? {}) as Record<string, unknown>;
       const fileUri = customMeta[GCS_FILE_URI_METADATA_KEY] as
-        string | undefined;
+        | string
+        | undefined;
 
       if (fileUri) {
         const mimeType =
@@ -170,7 +189,8 @@ export class GcsArtifactService implements BaseArtifactService {
       const [rawDataBuffer] = await file.download();
 
       const displayName = customMeta[GCS_DISPLAY_NAME_METADATA_KEY] as
-        string | undefined;
+        | string
+        | undefined;
       if (displayName) {
         return {
           inlineData: {
@@ -208,9 +228,10 @@ export class GcsArtifactService implements BaseArtifactService {
 
     const sessionPrefix = `${request.appName}/${request.userId}/${request.sessionId}/`;
     const usernamePrefix = `${request.appName}/${request.userId}/user/`;
+    const bucket = await this.getBucket();
     const [[sessionFiles], [userSessionFiles]] = await Promise.all([
-      this.bucket.getFiles({prefix: sessionPrefix}),
-      this.bucket.getFiles({prefix: usernamePrefix}),
+      bucket.getFiles({prefix: sessionPrefix}),
+      bucket.getFiles({prefix: usernamePrefix}),
     ]);
 
     return [
@@ -221,10 +242,11 @@ export class GcsArtifactService implements BaseArtifactService {
 
   async deleteArtifact(request: DeleteArtifactRequest): Promise<void> {
     const versions = await this.listVersions(request);
+    const bucket = await this.getBucket();
 
     await Promise.all(
       versions.map((version) => {
-        const file = this.bucket.file(
+        const file = bucket.file(
           getFileName({
             ...request,
             version,
@@ -242,7 +264,8 @@ export class GcsArtifactService implements BaseArtifactService {
     const prefix = getFileName(request);
     // We need to add a trailing slash to prefix to ensure we only get children
     const searchPrefix = prefix + '/';
-    const [files] = await this.bucket.getFiles({prefix: searchPrefix});
+    const bucket = await this.getBucket();
+    const [files] = await bucket.getFiles({prefix: searchPrefix});
     const versions = [];
     for (const file of files) {
       // GCS is a flat namespace: 'doc/' also matches 'doc/nested/3', a version
@@ -289,7 +312,7 @@ export class GcsArtifactService implements BaseArtifactService {
         version = Math.max(...versions);
       }
 
-      const file = this.bucket.file(
+      const file = (await this.getBucket()).file(
         getFileName({
           ...request,
           version,

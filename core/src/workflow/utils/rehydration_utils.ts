@@ -415,7 +415,12 @@ function reconstructRuns(
     }
     for (const id of event.longRunningToolIds ?? []) {
       node.interruptIds.add(id);
-      interruptOwner.set(id, node);
+      // First announcement wins. A waiting parent re-announces the ids of the
+      // child it is blocked on when it records its own resume checkpoint, and
+      // the reply belongs to the node that asked for it, not to the parent.
+      if (!interruptOwner.has(id)) {
+        interruptOwner.set(id, node);
+      }
     }
     // Capture the node's original input, stashed on the interrupt event, so a
     // resumed waiting node re-runs with it (not the resume message). Guard the

@@ -14,40 +14,13 @@ import {installNodeLogger} from './utils/logger_node.js';
 // `getLogger()`.
 installNodeLogger();
 
-export {AGENT_CARD_PATH, RemoteA2AAgent} from './a2a/a2a_remote_agent.js';
-export type {
-  A2AStreamEventData,
-  AfterA2ARequestCallback,
-  BeforeA2ARequestCallback,
-  RemoteA2AAgentConfig,
-} from './a2a/a2a_remote_agent.js';
-export {getA2AAgentCard} from './a2a/agent_card.js';
-export {A2AAgentExecutor} from './a2a/agent_executor.js';
-export type {
-  AfterEventCallback,
-  AfterExecuteCallback,
-  AgentExecutorConfig,
-  BeforeExecuteCallback,
-  OnTaskPauseCallback,
-  OnTaskResumeCallback,
-  RunnerOrRunnerConfig,
-} from './a2a/agent_executor.js';
-export {toA2a} from './a2a/agent_to_a2a.js';
-export type {A2aUserBuilder, ToA2aOptions} from './a2a/agent_to_a2a.js';
-export {bearerTokenUserBuilder} from './a2a/auth.js';
-export type {ExecutorContext} from './a2a/executor_context.js';
-export {
-  detectContextMutation,
-  freezeIntent,
-  IntentMismatchReason,
-  verifyIntent,
-} from './a2a/intent_binding.js';
-export type {
-  ContextMutation,
-  IntentBinding,
-  IntentVerification,
-  PendingAction,
-} from './a2a/intent_binding.js';
+// Also available as `@google/adk/a2a`, which does not evaluate the rest of
+// this barrel.
+export * from './a2a/index.js';
+// `common.js` exports a different `IntentMismatchReason`, so two star exports
+// would make the name ambiguous. An explicit re-export takes precedence and
+// keeps the A2A one reachable from the root barrel.
+export {IntentMismatchReason} from './a2a/intent_binding.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
@@ -120,9 +93,6 @@ export * from './telemetry/agent_engine.js';
 export * from './telemetry/agent_engine_metrics.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
-export {toMcpServer} from './tools/mcp/agent_to_mcp.js';
-export type {ToMcpServerOptions} from './tools/mcp/agent_to_mcp.js';
-export * from './tools/mcp/load_mcp_resource_tool.js';
-export * from './tools/mcp/mcp_session_manager.js';
-export * from './tools/mcp/mcp_tool.js';
-export * from './tools/mcp/mcp_toolset.js';
+// Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
+// of this barrel.
+export * from './tools/mcp/index.js';

@@ -11,6 +11,9 @@ import type {
   Skill,
 } from '@google/adk';
 import {BaseTool, BaseToolset, Context, SkillToolset} from '@google/adk';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
 
 describe('skill_toolset', () => {
@@ -311,8 +314,10 @@ describe('skill_toolset', () => {
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
     });
 
-    it('exposes the configured outputDir', () => {
-      const toolset = new SkillToolset([], {outputDir: '/tmp/skill-output'});
+    it('exposes the configured script output directory', () => {
+      const toolset = new SkillToolset([], {
+        scriptOutputDir: '/tmp/skill-output',
+      });
 
       expect(toolset.outputDir).toBe('/tmp/skill-output');
     });
@@ -321,6 +326,60 @@ describe('skill_toolset', () => {
       const toolset = new SkillToolset([]);
 
       expect(toolset.outputDir).toBeUndefined();
+    });
+  });
+
+  describe('script output directory', () => {
+    it('creates one private temp directory and reuses it', async () => {
+      const toolset = new SkillToolset([mockSkill]);
+      const dir = await toolset.getScriptOutputDir();
+
+      try {
+        // Collision suffixing (`out_2.txt`) is only coherent if repeated calls
+        // land in the same directory.
+        expect(await toolset.getScriptOutputDir()).toBe(dir);
+        expect(path.dirname(dir)).toBe(os.tmpdir());
+        expect(dir).not.toBe(process.cwd());
+      } finally {
+        await fs.rm(dir, {recursive: true, force: true});
+      }
+    });
+
+    it('creates a configured directory that does not exist yet', async () => {
+      const parent = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'skill_toolset_test_'),
+      );
+      const configuredDir = path.join(parent, 'nested', 'output');
+
+      try {
+        const toolset = new SkillToolset([mockSkill], {
+          scriptOutputDir: configuredDir,
+        });
+
+        expect(await toolset.getScriptOutputDir()).toBe(configuredDir);
+        await fs.access(configuredDir);
+      } finally {
+        await fs.rm(parent, {recursive: true, force: true});
+      }
+    });
+
+    it('resolves a relative configured directory to an absolute path', async () => {
+      // materializeFiles resolves output names against this directory, so a
+      // relative value must be pinned to an absolute path rather than left to
+      // follow the process working directory.
+      const absoluteDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'skill_toolset_test_'),
+      );
+
+      try {
+        const toolset = new SkillToolset([mockSkill], {
+          scriptOutputDir: path.relative(process.cwd(), absoluteDir),
+        });
+
+        expect(await toolset.getScriptOutputDir()).toBe(absoluteDir);
+      } finally {
+        await fs.rm(absoluteDir, {recursive: true, force: true});
+      }
     });
   });
 });

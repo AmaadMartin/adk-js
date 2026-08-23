@@ -19,11 +19,10 @@ import {
 } from '../../test_case_utils.js';
 import modelResponses from './model_responses.json' with {type: 'json'};
 
+const PROJECT_DIR = path.dirname(fileURLToPath(import.meta.url));
+
 const skill = await loadSkillFromDir(
-  path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    '../skills/algorithmic-art',
-  ),
+  path.join(PROJECT_DIR, '../skills/algorithmic-art'),
 );
 
 export const rootAgent = new LlmAgent({
@@ -37,9 +36,13 @@ export const rootAgent = new LlmAgent({
       codeExecutor: new UnsafeLocalCodeExecutor(),
       // Inline-script execution is opt-in; enable it for this end-to-end test.
       allowInlineScripts: true,
-      // Script output goes only where the application declares. agent_test.ts
-      // creates a temporary directory and passes it in here.
-      outputDir: process.env['ADK_SKILL_OUTPUT_DIR'],
+      // Script output goes only where the application declares, so that
+      // script-chosen file names cannot land in the host app's working
+      // directory. agent_test.ts creates a temporary directory and passes it
+      // in here. Standalone, it falls back to a subdirectory of the project —
+      // never the project dir itself, which is the agent's working directory.
+      scriptOutputDir:
+        process.env['ADK_SKILL_OUTPUT_DIR'] ?? path.join(PROJECT_DIR, 'output'),
     }),
   ],
   // Executing model-provided inline scripts is gated behind a confirmation

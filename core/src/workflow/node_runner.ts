@@ -7,6 +7,7 @@
 import {context, type Span, SpanStatusCode, trace} from '@opentelemetry/api';
 import {InvocationContext} from '../agents/invocation_context.js';
 import type {Event} from '../events/event.js';
+import {createEvent} from '../events/event.js';
 import {traceNodeExecution, tracer} from '../telemetry/tracing.js';
 import {formatError} from '../utils/error_utils.js';
 import type {BaseNode} from './base_node.js';
@@ -16,9 +17,11 @@ import {
   isDynamicNodeFailError,
   isInvocationAbortedError,
   isNodeInterruptedError,
+  NodeReportedError,
   NodeTimeoutError,
 } from './errors.js';
 import {NodeContext} from './node_context.js';
+import {claimNodeErrorReport, isNodeErrorEvent} from './node_error_event.js';
 import type {NodeState} from './node_state.js';
 import {createNodeState} from './node_state.js';
 import {NodeStatus} from './node_status.js';
@@ -241,11 +244,12 @@ async function runChildNode({
     }
 
     let succeeded = false;
+    let inputRecorded = false;
     while (!succeeded) {
       resetState(child);
       child.attemptCount = nodeState.attemptCount;
       try {
-        await runAttempt({
+        inputRecorded = await runAttempt({
           node,
           child,
           input,
@@ -256,6 +260,7 @@ async function runChildNode({
           runId,
           attempt: nodeState.attemptCount,
         });
+        failIfNodeReportedError(child, nodeName);
         succeeded = true;
       } catch (err) {
         // A dynamic child stopped to ask the user. Its ids are already on
@@ -288,6 +293,10 @@ async function runChildNode({
         nodeState.attemptCount += 1;
         await delay(delaySeconds * 1000, effectiveAbortSignal);
       }
+    }
+
+    if (!inputRecorded && child.interruptIds.length > 0) {
+      recordInputForResume({child, nodeName, branch, isolationScope, input});
     }
 
     traceNodeExecution({
@@ -340,8 +349,11 @@ interface RunAttemptParams extends RunOnceParams {
 /**
  * Not `async`: a node without a retry config must reach `runOnce` and settle on
  * exactly the microtask it would have without tracing (see `executeChildNode`).
+ *
+ * Resolves to whether the attempt recorded the node's input for resume (see
+ * {@link runOnce}).
  */
-function runAttempt(params: RunAttemptParams): Promise<void> {
+function runAttempt(params: RunAttemptParams): Promise<boolean> {
   const {node, nodePath, runId, attempt} = params;
   if (!node.preparedRetryConfig) {
     return runOnce(params);
@@ -350,7 +362,7 @@ function runAttempt(params: RunAttemptParams): Promise<void> {
     `execute_node_attempt ${params.nodeName}`,
     async (span) => {
       try {
-        await runOnce(params);
+        const inputRecorded = await runOnce(params);
         traceNodeExecution({
           nodePath,
           runId,
@@ -359,6 +371,7 @@ function runAttempt(params: RunAttemptParams): Promise<void> {
             params.child.interruptIds.length > 0 ? 'waiting' : 'completed',
           interruptCount: params.child.interruptIds.length,
         });
+        return inputRecorded;
       } catch (err) {
         traceNodeExecution({
           nodePath,
@@ -380,6 +393,29 @@ function runAttempt(params: RunAttemptParams): Promise<void> {
 }
 
 /**
+ * Turns a failure the node *reported* into one it *threw*, so the engine's
+ * existing failure path handles it. Only when the node produced nothing: one
+ * that reported an error and still returned a value recovered.
+ *
+ * Claims the error so `Workflow.reportNodeError` does not emit a second event
+ * for a failure the node already reported.
+ */
+function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
+  const reported = child.reportedError;
+  if (
+    !reported ||
+    child.output !== undefined ||
+    child.route !== undefined ||
+    child.interruptIds.length > 0
+  ) {
+    return;
+  }
+  const error = new NodeReportedError({nodeName, ...reported});
+  claimNodeErrorReport(error, child.invocationId);
+  throw error;
+}
+
+/**
  * Reset per-attempt state so a retry starts clean. This covers everything a
  * failed attempt can leave behind on the child context: its output/route,
  * interrupt ids, AND its state writes. A node that calls `ctx.state.set(...)`
@@ -398,6 +434,7 @@ function resetState(childNodeContext: NodeContext): void {
   childNodeContext.output = undefined;
   childNodeContext.route = undefined;
   childNodeContext.interruptIds = [];
+  childNodeContext.reportedError = undefined;
   for (const key of Object.keys(childNodeContext.actions.stateDelta)) {
     delete childNodeContext.actions.stateDelta[key];
   }
@@ -429,6 +466,9 @@ interface RunOnceParams {
  *
  * When there is neither a deadline nor an abort signal, a plain `for await`
  * fast path is used.
+ *
+ * Resolves to whether an event the node emitted carried interrupt ids, and so
+ * got its input stamped on it for resume.
  */
 async function runOnce({
   node,
@@ -437,7 +477,8 @@ async function runOnce({
   nodeName,
   branch,
   isolationScope,
-}: RunOnceParams): Promise<void> {
+}: RunOnceParams): Promise<boolean> {
+  let inputRecorded = false;
   const consume = (event: Event): void => {
     enrichEvent({event, child, nodeName, branch, isolationScope});
     // An event can carry a state delta that never went through `ctx.state`,
@@ -460,6 +501,12 @@ async function runOnce({
     if (event.route !== undefined) {
       child.route = event.route;
     }
+    if (event.errorCode !== undefined && !isNodeErrorEvent(event)) {
+      child.reportedError = {
+        errorCode: event.errorCode,
+        errorMessage: event.errorMessage,
+      };
+    }
     // HITL: an interrupt event marks its ids as long-running tool ids.
     if (event.longRunningToolIds && event.longRunningToolIds.length > 0) {
       for (const id of event.longRunningToolIds) {
@@ -474,6 +521,7 @@ async function runOnce({
         ...(event.actions.agentState ?? {}),
         input,
       };
+      inputRecorded = true;
     }
     child.channel.push(event);
   };
@@ -486,7 +534,7 @@ async function runOnce({
     for await (const event of node.run(child, input)) {
       consume(event);
     }
-    return;
+    return inputRecorded;
   }
 
   // Cooperative cancellation (external abort, no deadline): expose the abort
@@ -504,7 +552,7 @@ async function runOnce({
     } finally {
       child.abortSignal = undefined;
     }
-    return;
+    return inputRecorded;
   }
 
   // Deadline path: drive the node step-by-step and race each step against the
@@ -565,6 +613,41 @@ async function runOnce({
     // queued behind any in-flight `next()`; its result is discarded.
     void Promise.resolve(iterator.return?.(undefined)).catch(() => {});
   }
+  return inputRecorded;
+}
+
+interface RecordInputForResumeParams {
+  child: NodeContext;
+  nodeName: string;
+  branch: string | undefined;
+  isolationScope: string | undefined;
+  input: unknown;
+}
+
+/**
+ * Writes the resume checkpoint for a waiting node that has no event of its own
+ * to carry its input — one waiting on a `ctx.runNode` child rather than on an
+ * interrupt it raised.
+ *
+ * Carries no content and no output, so it renders nowhere; it exists to be read
+ * back by {@link reconstructNodeRuns}.
+ */
+function recordInputForResume({
+  child,
+  nodeName,
+  branch,
+  isolationScope,
+  input,
+}: RecordInputForResumeParams): void {
+  const event = createEvent({
+    author: nodeName,
+    invocationId: child.invocationId,
+    branch,
+    longRunningToolIds: [...child.interruptIds],
+    actions: {agentState: {input}},
+  });
+  enrichEvent({event, child, nodeName, branch, isolationScope});
+  child.channel.push(event);
 }
 
 interface EnrichEventParams {

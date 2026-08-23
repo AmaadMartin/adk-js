@@ -159,9 +159,14 @@ export class RunSkillScriptTool extends BaseTool {
         },
       });
 
+      // Output file names are chosen by the executed script, so they are
+      // materialized into a dedicated output directory rather than being
+      // resolved against the host application's working directory.
+      const outputDir = await this.toolset.getScriptOutputDir();
+
       return saveScriptOutputs(
         toolContext,
-        await materializeScriptOutputs(result, this.toolset.outputDir),
+        await materializeScriptOutputs(result, outputDir),
       );
     } catch (e: unknown) {
       return {

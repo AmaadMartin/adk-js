@@ -21,17 +21,30 @@ import type {
   RequestHandlerExtra,
   RequestOptions,
 } from '@modelcontextprotocol/sdk/shared/protocol.js';
-import {
-  ElicitRequestSchema,
-  ErrorCode,
-  type ClientNotification,
-  type ClientRequest,
-  type ElicitRequest,
-  type ElicitResult,
+import type * as McpTypes from '@modelcontextprotocol/sdk/types.js';
+import type {
+  ClientNotification,
+  ClientRequest,
+  ElicitRequest,
+  ElicitResult,
 } from '@modelcontextprotocol/sdk/types.js';
 
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
+import type {OptionalPeer} from '../../utils/optional_peer.js';
+import {loadOptionalPeer} from '../../utils/optional_peer.js';
+
+/**
+ * The optional peer backing every MCP connection.
+ *
+ * `@modelcontextprotocol/sdk` is the single largest transitive dependency
+ * ADK ever pulled in, and it is only reachable through the MCP tools, so it
+ * is loaded lazily from {@link MCPSessionManager.createSession}.
+ */
+const MCP_SDK: OptionalPeer = {
+  packageName: '@modelcontextprotocol/sdk',
+  feature: 'MCPSessionManager (and the MCP tools built on it)',
+};
 
 /** Identifies ADK to every MCP server it connects to. */
 const CLIENT_INFO = {name: 'MCPClient', version: '1.0.0'};
@@ -47,16 +60,19 @@ interface McpSdkModules {
   StdioClientTransport: typeof StdioClientTransport;
   StreamableHTTPClientTransport: typeof StreamableHTTPClientTransport;
   SSEClientTransport: typeof SSEClientTransport;
+  ElicitRequestSchema: typeof McpTypes.ElicitRequestSchema;
+  ErrorCode: typeof McpTypes.ErrorCode;
 }
 
 let mcpSdkModules: Promise<McpSdkModules> | undefined;
 
 async function importMcpSdk(): Promise<McpSdkModules> {
-  const [client, stdio, streamableHttp, sse] = await Promise.all([
+  const [client, stdio, streamableHttp, sse, types] = await Promise.all([
     import('@modelcontextprotocol/sdk/client/index.js'),
     import('@modelcontextprotocol/sdk/client/stdio.js'),
     import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
     import('@modelcontextprotocol/sdk/client/sse.js'),
+    import('@modelcontextprotocol/sdk/types.js'),
   ]);
 
   return {
@@ -64,6 +80,8 @@ async function importMcpSdk(): Promise<McpSdkModules> {
     StdioClientTransport: stdio.StdioClientTransport,
     StreamableHTTPClientTransport: streamableHttp.StreamableHTTPClientTransport,
     SSEClientTransport: sse.SSEClientTransport,
+    ElicitRequestSchema: types.ElicitRequestSchema,
+    ErrorCode: types.ErrorCode,
   };
 }
 
@@ -72,25 +90,28 @@ async function importMcpSdk(): Promise<McpSdkModules> {
  *
  * Evaluating the client and its three transports costs roughly 0.3s, and a
  * process that imports `@google/adk` without ever opening an MCP session must
- * not pay it. The memo stores the promise, so concurrent callers share one
- * load.
+ * not pay it. The SDK is also an optional peer dependency, so a missing one is
+ * translated into an error naming the feature and the install command. The
+ * memo stores the promise, so concurrent callers share one load.
  */
 function loadMcpSdk(): Promise<McpSdkModules> {
-  return (mcpSdkModules ??= importMcpSdk());
+  return (mcpSdkModules ??= loadOptionalPeer(MCP_SDK, importMcpSdk));
 }
 
 /**
  * Reports whether `err` is the MCP SDK's own request-timeout rejection. The
  * JSON-RPC error code is matched instead of the error class, so the check
- * still holds when two copies of the SDK share one runtime.
+ * still holds when two copies of the SDK share one runtime. The code itself
+ * comes from the lazily loaded SDK, which anything that can time out has
+ * already pulled in.
  */
-function isRequestTimeout(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    err.code === ErrorCode.RequestTimeout
-  );
+async function isRequestTimeout(err: unknown): Promise<boolean> {
+  if (typeof err !== 'object' || err === null || !('code' in err)) {
+    return false;
+  }
+  const {ErrorCode} = await loadMcpSdk();
+
+  return err.code === ErrorCode.RequestTimeout;
 }
 
 /**
@@ -182,7 +203,9 @@ export interface SseConnectionParams {
  * A union of all supported MCP connection parameter types.
  */
 export type MCPConnectionParams =
-  StdioConnectionParams | StreamableHTTPConnectionParams | SseConnectionParams;
+  | StdioConnectionParams
+  | StreamableHTTPConnectionParams
+  | SseConnectionParams;
 
 /**
  * Handles a server-initiated `elicitation/create` request.
@@ -276,7 +299,7 @@ export class MCPSessionManager {
     try {
       return await call(this.requestOptions());
     } catch (err: unknown) {
-      if (timeout !== undefined && isRequestTimeout(err)) {
+      if (timeout !== undefined && (await isRequestTimeout(err))) {
         throw new Error(`MCP ${operation} timed out after ${timeout}ms`, {
           cause: err,
         });
@@ -291,6 +314,7 @@ export class MCPSessionManager {
       StdioClientTransport,
       StreamableHTTPClientTransport,
       SSEClientTransport,
+      ElicitRequestSchema,
     } = await loadMcpSdk();
     // The elicitation capability must be declared at construction: the SDK
     // rejects `setRequestHandler(ElicitRequestSchema, ...)` without it, and

@@ -249,6 +249,44 @@ describe('cli_run', () => {
     expect(runAsync).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the REPL alive when a turn fails', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let turn = 0;
+    (Runner as unknown as Mock).mockImplementation(() => ({
+      runAsync: async function* () {
+        turn++;
+        if (turn === 1) {
+          throw new Error('Context variable not found: `my_city`.');
+        }
+        yield {author: 'model', content: {parts: [{text: 'recovered'}]}};
+      },
+    }));
+    (mockRl.question as Mock)
+      .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+        cb('boom'),
+      )
+      .mockImplementationOnce((_p: string, cb: (a: string) => void) => cb('go'))
+      .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+        cb('exit'),
+      );
+
+    await runAgent({
+      agentPath: 'agent.ts',
+      sessionService: createMockSessionService(),
+    });
+
+    expect(
+      errors.mock.calls.map((call) => call.join(' ')).join('\n'),
+    ).toContain('Context variable not found');
+    expect(turn).toBe(2);
+    expect(
+      (console.log as Mock).mock.calls.map((call) => call.join(' ')).join('\n'),
+    ).toContain('recovered');
+    // Surviving the turn must not cost the cleanup: stdin is still released
+    // when the loop finally ends.
+    expect(mockRl.close as Mock).toHaveBeenCalledTimes(1);
+  });
+
   it('reuses one readline interface across prompts', async () => {
     (mockRl.question as Mock)
       .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
@@ -284,6 +322,26 @@ describe('cli_run', () => {
         agentPath: 'agent.ts',
         saveSession: true,
         sessionService,
+      }),
+    ).rejects.toThrow('save exploded');
+
+    expect(mockRl.close as Mock).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the readline interface when the file write throws', async () => {
+    (mockRl.question as Mock).mockImplementation(
+      (_p: string, cb: (a: string) => void) => cb('exit'),
+    );
+    // A failing turn no longer escapes — the REPL reports it and prompts again
+    // — so the throw that still has to release stdin comes from the save step.
+    (saveToFile as Mock).mockRejectedValue(new Error('save exploded'));
+
+    await expect(
+      runAgent({
+        agentPath: 'agent.ts',
+        saveSession: true,
+        sessionId: 'session-123',
+        sessionService: createMockSessionService(),
       }),
     ).rejects.toThrow('save exploded');
 
@@ -825,9 +883,6 @@ describe('cli_run', () => {
     });
 
     it('attributes a node whose response was empty', async () => {
-      // The node ran and handed the empty string to its successor, but with
-      // no text to print it vanished from the transcript, which then read as
-      // though it had been skipped.
       const output = await runOneTurn({
         author: 'city_generator_agent',
         content: {role: 'model', parts: [{text: ''}]},
@@ -844,6 +899,46 @@ describe('cli_run', () => {
       });
 
       expect(output).not.toContain('[bookkeeping]');
+    });
+
+    it("prints an output-only event, the run's actual answer", async () => {
+      const output = await runOneTurn({
+        author: 'final_answer',
+        output: '<<HELLO!>>',
+      });
+
+      expect(output).toContain('[final_answer]: <<HELLO!>>');
+    });
+
+    it('renders a structured output-only event as JSON', async () => {
+      const output = await runOneTurn({
+        author: 'lookup',
+        output: {timeInfo: '10:10 AM', city: 'Paris'},
+      });
+
+      expect(output).toContain(
+        '[lookup]: {"timeInfo":"10:10 AM","city":"Paris"}',
+      );
+    });
+
+    it('does not print a node result twice when it fills content and output', async () => {
+      const output = await runOneTurn({
+        author: 'echo',
+        content: {role: 'model', parts: [{text: 'HELLO'}]},
+        output: 'HELLO',
+      });
+
+      expect(output.match(/\[echo\]: HELLO/g)).toHaveLength(1);
+    });
+
+    it('stays quiet for a partial (streaming) event', async () => {
+      const output = await runOneTurn({
+        author: 'streamer',
+        output: 'partial value',
+        partial: true,
+      });
+
+      expect(output).not.toContain('[streamer]');
     });
   });
 

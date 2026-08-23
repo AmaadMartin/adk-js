@@ -13,6 +13,9 @@ import {assertWorkspaceAdkCliAvailable} from '../../workspace_cli.js';
 
 const dirname = process.cwd();
 const PROJECT_PATH = `${dirname}/tests/integration/skills/script_js`;
+// The agent writes script output into a dedicated subdirectory of the project
+// (see agent.ts), never into the project/working directory itself.
+const OUTPUT_PATH = `${PROJECT_PATH}/output`;
 const TEST_EXECUTION_TIMEOUT = 60000;
 
 /** Directory backing the CLI's file artifact service for this run. */
@@ -87,7 +90,7 @@ async function removeGeneratedOutputs(dir: string): Promise<void> {
  * 3. Asserts that the agent's response matches the expected output, confirming it claims to have created the art and files.
  * 4. Verifies that the expected files (`ephemeral_entanglement.md`, `index.html`, `sketch.js`) were generated in the output directory the agent was configured with, were saved to the artifact service, and were not written into the directory the agent process was started from.
  * 5. Compares the content of these generated files and saved artifacts with reference files in the `expected/` directory to ensure correctness.
- * 6. Cleans up the output directory and the artifact store after execution.
+ * 6. Cleans up the output directory, the artifact store and the installed dependencies after execution.
  *
  * The output directory is created here and handed to the agent through
  * `ADK_SKILL_OUTPUT_DIR` (see `agent.ts`), because skill script output is only
@@ -206,7 +209,14 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
   afterAll(async () => {
     await fs.rm(outputDir, {recursive: true, force: true}).catch(() => {});
     await fs.rm(artifactRoot, {recursive: true, force: true}).catch(() => {});
+    // The agent falls back to this when ADK_SKILL_OUTPUT_DIR is unset.
+    await fs.rm(OUTPUT_PATH, {recursive: true, force: true}).catch(() => {});
     // By name shape, not exact name: a variant in the fixture dir must go too.
     await removeGeneratedOutputs(PROJECT_PATH).catch(() => {});
+
+    await fs
+      .rm(`${PROJECT_PATH}/node_modules`, {recursive: true, force: true})
+      .catch(() => {});
+    await fs.unlink(`${PROJECT_PATH}/package-lock.json`).catch(() => {});
   });
 });

@@ -1,198 +1,217 @@
 # Changelog
 
-## [1.6.0](https://github.com/google/adk-js/compare/devtools-v1.5.0...devtools-v1.6.0) (2026-08-05)
+## [2.0.0](https://github.com/google/adk-js/compare/devtools-v1.6.0...devtools-v2.0.0) (2026-08-20)
 
+### ⚠ BREAKING CHANGES
+
+- **workflow:** `LLMAgentWrapper` and `LLMAgentWrapperConfig` are removed. An agent is a workflow node as itself — pass it to an edge or `node()` directly. A non-`LlmAgent` agent used as a node no longer has the node input appended to its conversation, nor its final model text promoted to the node output.
+- **workflow:** `InvocationContext.agent` is now optional. Code reading it outside an agent's own execution must handle `undefined`; inside one, prefer `requireAgent(ctx)`.
 
 ### Features
 
-* CLI-level A2A authenticator for the dev server and Cloud Run deploy (Part 2/2) ([#559](https://github.com/google/adk-js/issues/559)) ([0c0bba2](https://github.com/google/adk-js/commit/0c0bba2cc4639ff89e4fa517ace25e34babb64b0))
-
+- **core:** accept a bare Workflow as a root — runner, App and agent loader ([#680](https://github.com/google/adk-js/issues/680)) ([b3497e0](https://github.com/google/adk-js/commit/b3497e0ff2a931d954b4efa57337fc3a8b709056))
+- **dev:** render graph workflows in the dev UI agent graph ([#654](https://github.com/google/adk-js/issues/654)) ([434a43e](https://github.com/google/adk-js/commit/434a43e90fd67fb0e72e879ab992716c4a7efbe9))
+- **dev:** serve the agent structure graph the dev UI's graph tab asks for ([#694](https://github.com/google/adk-js/issues/694)) ([8915c2b](https://github.com/google/adk-js/commit/8915c2bae78553c1872bf0ea4fd90e1c83c3ad0b))
+- **tools:** FunctionTool require_confirmation — HITL approval (Part 7) ([#594](https://github.com/google/adk-js/issues/594)) ([d2ae57b](https://github.com/google/adk-js/commit/d2ae57b071ab4db7ea636b0d40e9b8ae93307222))
+- **workflow:** drive workflows as nodes and remove WorkflowAgent ([#688](https://github.com/google/adk-js/issues/688)) ([534546f](https://github.com/google/adk-js/commit/534546f5f847fc677bbb9e5abe11beabebf9e574))
 
 ### Bug Fixes
 
-* **cli:** check isCancel before coercing the project prompt in adk create ([#570](https://github.com/google/adk-js/issues/570)) ([c6f8b2f](https://github.com/google/adk-js/commit/c6f8b2f7482ab18a66d1b0c726e4b524802d2b8b))
-* **cli:** make the getting-started path actually work ([#624](https://github.com/google/adk-js/issues/624)) ([6ea645c](https://github.com/google/adk-js/commit/6ea645cab6c2b20fe91f054cbe2f08beffb3dfb9))
-* create dev-package temp directories atomically with mkdtemp (no predictable parent) ([#615](https://github.com/google/adk-js/issues/615)) ([81c1422](https://github.com/google/adk-js/commit/81c1422268f1295d7ae99e05a7d74cc51682362f))
-* **deploy:** reject unsafe appName/project/region in generated Dockerfile ([#604](https://github.com/google/adk-js/issues/604)) ([dadce1a](https://github.com/google/adk-js/commit/dadce1a1169a56b73e0d152b8c8d584b5b52b7c7))
-* make streaming and stateDelta optional on RunAgentRequest ([#585](https://github.com/google/adk-js/issues/585)) ([1df47e9](https://github.com/google/adk-js/commit/1df47e9733e0f2b0aac1bcbda24b7f1a8ae73d9b))
-* **security:** prevent prototype pollution via untrusted map keys ([#619](https://github.com/google/adk-js/issues/619)) ([2c07ad3](https://github.com/google/adk-js/commit/2c07ad3741cd84788d0b30a793587d5dd4b46106))
+- **agent-loader:** ignore node_modules and hidden folders in agent discovery and fix integration test timeouts ([#674](https://github.com/google/adk-js/issues/674)) ([d9ffd9d](https://github.com/google/adk-js/commit/d9ffd9d28f6218a11599f5cd8b920e8fab89d985))
+- **api-server:** return the events a failed invocation produced from /run ([#749](https://github.com/google/adk-js/issues/749)) ([4bc0e0d](https://github.com/google/adk-js/commit/4bc0e0db13f64d3becb08549ccc880bf4ec92488)), closes [#743](https://github.com/google/adk-js/issues/743)
+- **build:** retry the ADK Web download instead of failing the build ([#693](https://github.com/google/adk-js/issues/693)) ([e57f6cf](https://github.com/google/adk-js/commit/e57f6cf8da0e248f32aa5c4af0da49847447f181))
+- **cli:** keep one broken agent from killing the dev server; surface HITL prompts and errors in `adk run` ([#633](https://github.com/google/adk-js/issues/633)) ([a98d132](https://github.com/google/adk-js/commit/a98d132f7122f3cca1bce4121ce81610db5b1084))
+- **cli:** make --log_level debug actually set the debug level ([#658](https://github.com/google/adk-js/issues/658)) ([d56ea73](https://github.com/google/adk-js/commit/d56ea739fa2293c5ffb525b8964ee6752bacf771))
+- **dev:** keep the adk run REPL alive when a turn fails ([#780](https://github.com/google/adk-js/issues/780)) ([9c3121f](https://github.com/google/adk-js/commit/9c3121ffb042524011769de9797b3004394e3c72))
+- **dev:** print a node's output when it emitted no text ([#779](https://github.com/google/adk-js/issues/779)) ([2f534b7](https://github.com/google/adk-js/commit/2f534b7acd79b4bd5c7f34700b1eb25312544348))
+- **dev:** stop --verbose eating the agent path ([#764](https://github.com/google/adk-js/issues/764)) ([b633b57](https://github.com/google/adk-js/commit/b633b57f67a8fcee5f56d12edc720809c847c6df))
+- **dev:** stop an empty node response vanishing from the transcript ([#765](https://github.com/google/adk-js/issues/765)) ([af3a821](https://github.com/google/adk-js/commit/af3a82144261470eb59672ee535f2fa1ccf78e00)), closes [#728](https://github.com/google/adk-js/issues/728)
+- **dev:** stop dropping piped stdin lines, and keep the prompt on its own line ([#781](https://github.com/google/adk-js/issues/781)) ([e5c8532](https://github.com/google/adk-js/commit/e5c853278ef8ed35382db6be4322025a6bc14083))
+- **models:** consult GOOGLE_API_KEY on the Gemini API path ([#748](https://github.com/google/adk-js/issues/748)) ([60a3c67](https://github.com/google/adk-js/commit/60a3c6732b5100bcf67df9d806a64fdb2049bc72)), closes [#712](https://github.com/google/adk-js/issues/712)
+- **server:** serve /version, which the dev UI reads on load ([#685](https://github.com/google/adk-js/issues/685)) ([2817457](https://github.com/google/adk-js/commit/2817457bdcf1e9dc0ae3a87de4a17661b48955fb))
+- **skills:** materialize script output into a dedicated dir, not process.cwd() ([#620](https://github.com/google/adk-js/issues/620)) ([2ea08cf](https://github.com/google/adk-js/commit/2ea08cf8ba5fca65d678cdabecbf78713fee4106))
+- **telemetry:** make a workflow's spans retrievable so its traces render ([#750](https://github.com/google/adk-js/issues/750)) ([63a5f43](https://github.com/google/adk-js/commit/63a5f4395e6367d5129ccd679b76104eb7e6a8d3))
+- **tests:** stop cli_create tests reading the developer's gcloud env ([#666](https://github.com/google/adk-js/issues/666)) ([7312efc](https://github.com/google/adk-js/commit/7312efc8bb6ae0c86d79cce54e846bc77e09b9ce))
+- three defects found bug-bashing the graph-workflow docs samples ([#664](https://github.com/google/adk-js/issues/664)) ([e0dae58](https://github.com/google/adk-js/commit/e0dae584d43bab7ef068decb4743e6d6753d176f))
+- **workflow:** emit the interrupt schema under the key clients read ([#686](https://github.com/google/adk-js/issues/686)) ([e84eb3f](https://github.com/google/adk-js/commit/e84eb3fa9953a5e21164adb69475e7678f4b6fbf))
+- **workflow:** let two route keys share a destination node ([#763](https://github.com/google/adk-js/issues/763)) ([172ccb1](https://github.com/google/adk-js/commit/172ccb148c14990eec7435f7360f5349172369df)), closes [#740](https://github.com/google/adk-js/issues/740)
 
+### Code Refactoring
+
+- **workflow:** collapse LLMAgentWrapper into LlmAgent.runImpl ([#696](https://github.com/google/adk-js/issues/696)) ([49209ab](https://github.com/google/adk-js/commit/49209ab91bdcf4762f92d6a0b5fe9b5617a027bd))
 
 ### Dependencies
 
-* The following workspace dependencies were updated
-  * dependencies
-    * @google/adk bumped from ^1.5.0 to ^1.6.0
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^1.6.0 to ^2.0.0
+
+## [1.6.0](https://github.com/google/adk-js/compare/devtools-v1.5.0...devtools-v1.6.0) (2026-08-05)
+
+### Features
+
+- CLI-level A2A authenticator for the dev server and Cloud Run deploy (Part 2/2) ([#559](https://github.com/google/adk-js/issues/559)) ([0c0bba2](https://github.com/google/adk-js/commit/0c0bba2cc4639ff89e4fa517ace25e34babb64b0))
+
+### Bug Fixes
+
+- **cli:** check isCancel before coercing the project prompt in adk create ([#570](https://github.com/google/adk-js/issues/570)) ([c6f8b2f](https://github.com/google/adk-js/commit/c6f8b2f7482ab18a66d1b0c726e4b524802d2b8b))
+- **cli:** make the getting-started path actually work ([#624](https://github.com/google/adk-js/issues/624)) ([6ea645c](https://github.com/google/adk-js/commit/6ea645cab6c2b20fe91f054cbe2f08beffb3dfb9))
+- create dev-package temp directories atomically with mkdtemp (no predictable parent) ([#615](https://github.com/google/adk-js/issues/615)) ([81c1422](https://github.com/google/adk-js/commit/81c1422268f1295d7ae99e05a7d74cc51682362f))
+- **deploy:** reject unsafe appName/project/region in generated Dockerfile ([#604](https://github.com/google/adk-js/issues/604)) ([dadce1a](https://github.com/google/adk-js/commit/dadce1a1169a56b73e0d152b8c8d584b5b52b7c7))
+- make streaming and stateDelta optional on RunAgentRequest ([#585](https://github.com/google/adk-js/issues/585)) ([1df47e9](https://github.com/google/adk-js/commit/1df47e9733e0f2b0aac1bcbda24b7f1a8ae73d9b))
+- **security:** prevent prototype pollution via untrusted map keys ([#619](https://github.com/google/adk-js/issues/619)) ([2c07ad3](https://github.com/google/adk-js/commit/2c07ad3741cd84788d0b30a793587d5dd4b46106))
+
+### Dependencies
+
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^1.5.0 to ^1.6.0
 
 ## [1.5.0](https://github.com/google/adk-js/compare/devtools-v1.4.0...devtools-v1.5.0) (2026-07-29)
 
-
 ### Bug Fixes
 
-* **security:** require authentication when mounting A2A server ([#529](https://github.com/google/adk-js/issues/529)) ([7f39b6c](https://github.com/google/adk-js/commit/7f39b6c330bcadfedc35c29d67d103e7d0f6bb2b))
-
+- **security:** require authentication when mounting A2A server ([#529](https://github.com/google/adk-js/issues/529)) ([7f39b6c](https://github.com/google/adk-js/commit/7f39b6c330bcadfedc35c29d67d103e7d0f6bb2b))
 
 ### Dependencies
 
-* The following workspace dependencies were updated
-  * dependencies
-    * @google/adk bumped from ^1.4.0 to ^1.5.0
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^1.4.0 to ^1.5.0
 
 ## [1.4.0](https://github.com/google/adk-js/compare/devtools-v1.3.0...devtools-v1.4.0) (2026-07-20)
 
-
 ### Features
 
-* **cli:** support --agent_engine_id in deploy agent_engine ([#487](https://github.com/google/adk-js/issues/487)) ([ddbe34b](https://github.com/google/adk-js/commit/ddbe34b1205266506358793a1d16707fd3c3c96b))
-* Implement Gemini Interaction API in adk-js ([#364](https://github.com/google/adk-js/issues/364)) ([82ed4e1](https://github.com/google/adk-js/commit/82ed4e123ef8900f26e9a31e8d1880342c7b57fc))
-* Support apps  ([#489](https://github.com/google/adk-js/issues/489)) ([fd69b69](https://github.com/google/adk-js/commit/fd69b69d7df5a2a422ce269d0f3db249288771ad))
-
+- **cli:** support --agent_engine_id in deploy agent_engine ([#487](https://github.com/google/adk-js/issues/487)) ([ddbe34b](https://github.com/google/adk-js/commit/ddbe34b1205266506358793a1d16707fd3c3c96b))
+- Implement Gemini Interaction API in adk-js ([#364](https://github.com/google/adk-js/issues/364)) ([82ed4e1](https://github.com/google/adk-js/commit/82ed4e123ef8900f26e9a31e8d1880342c7b57fc))
+- Support apps ([#489](https://github.com/google/adk-js/issues/489)) ([fd69b69](https://github.com/google/adk-js/commit/fd69b69d7df5a2a422ce269d0f3db249288771ad))
 
 ### Bug Fixes
 
-* **streaming:** supress empty part arrays ([#450](https://github.com/google/adk-js/issues/450)) ([2ff0643](https://github.com/google/adk-js/commit/2ff0643133455ed748f3b4085ece32cb0027c12c))
-
+- **streaming:** supress empty part arrays ([#450](https://github.com/google/adk-js/issues/450)) ([2ff0643](https://github.com/google/adk-js/commit/2ff0643133455ed748f3b4085ece32cb0027c12c))
 
 ### Dependencies
 
-* The following workspace dependencies were updated
-  * dependencies
-    * @google/adk bumped from ^1.3.0 to ^1.4.0
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^1.3.0 to ^1.4.0
 
 ## [1.3.0](https://github.com/google/adk-js/compare/devtools-v1.2.0...devtools-v1.3.0) (2026-06-22)
 
-
 ### Features
 
-* add --reload_agents flag to watch agent files for changes ([#304](https://github.com/google/adk-js/issues/304)) ([b420284](https://github.com/google/adk-js/commit/b420284079a3fd3e37f7e12ea74188a2c7b2bab4))
-* **cli:** deploy agent engine to Artifact Registry instead of GCR (Agent Engine Deployment Artifact registry fix part 2) ([#441](https://github.com/google/adk-js/issues/441)) ([92ceb87](https://github.com/google/adk-js/commit/92ceb87777647fbae2145655fa487a527fa7d5ee))
-* **devtools:** add Reasoning Engine server compatibility routes and headers parser (Agent Engine Deployment Artifact registry fix part 1) ([#440](https://github.com/google/adk-js/issues/440)) ([fd94e49](https://github.com/google/adk-js/commit/fd94e49071ff41869b24bf2db92f4484ab84606d))
-* download ADK Web assets dynamically and serve from shared folder ([#427](https://github.com/google/adk-js/issues/427)) ([b8ee5d8](https://github.com/google/adk-js/commit/b8ee5d81d158f6acdb8b6a343203bdf27e27ff9d))
-
+- add --reload_agents flag to watch agent files for changes ([#304](https://github.com/google/adk-js/issues/304)) ([b420284](https://github.com/google/adk-js/commit/b420284079a3fd3e37f7e12ea74188a2c7b2bab4))
+- **cli:** deploy agent engine to Artifact Registry instead of GCR (Agent Engine Deployment Artifact registry fix part 2) ([#441](https://github.com/google/adk-js/issues/441)) ([92ceb87](https://github.com/google/adk-js/commit/92ceb87777647fbae2145655fa487a527fa7d5ee))
+- **devtools:** add Reasoning Engine server compatibility routes and headers parser (Agent Engine Deployment Artifact registry fix part 1) ([#440](https://github.com/google/adk-js/issues/440)) ([fd94e49](https://github.com/google/adk-js/commit/fd94e49071ff41869b24bf2db92f4484ab84606d))
+- download ADK Web assets dynamically and serve from shared folder ([#427](https://github.com/google/adk-js/issues/427)) ([b8ee5d8](https://github.com/google/adk-js/commit/b8ee5d81d158f6acdb8b6a343203bdf27e27ff9d))
 
 ### Bug Fixes
 
-* update default server port from 8000 to 8080 ([#439](https://github.com/google/adk-js/issues/439)) ([9f03632](https://github.com/google/adk-js/commit/9f03632e458d51a14e44ae17031a609c5a875cc8))
-
+- update default server port from 8000 to 8080 ([#439](https://github.com/google/adk-js/issues/439)) ([9f03632](https://github.com/google/adk-js/commit/9f03632e458d51a14e44ae17031a609c5a875cc8))
 
 ### Dependencies
 
-* The following workspace dependencies were updated
-  * dependencies
-    * @google/adk bumped from ^1.2.0 to ^1.3.0
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^1.2.0 to ^1.3.0
 
 ## [1.2.0](https://github.com/google/adk-js/compare/devtools-v1.1.0...devtools-v1.2.0) (2026-06-02)
 
-
 ### Features
 
-* abort agent execution on HTTP connection disconnected ([#382](https://github.com/google/adk-js/issues/382)) ([e7776cc](https://github.com/google/adk-js/commit/e7776ccbfbeb7657c0f0a3411173ae9bbf2ec0dd))
-* Add Agent Engine deployment support ([#335](https://github.com/google/adk-js/issues/335)) ([3e901a5](https://github.com/google/adk-js/commit/3e901a5b2d4c291628c9f88f223803a7e9269531))
-
+- abort agent execution on HTTP connection disconnected ([#382](https://github.com/google/adk-js/issues/382)) ([e7776cc](https://github.com/google/adk-js/commit/e7776ccbfbeb7657c0f0a3411173ae9bbf2ec0dd))
+- Add Agent Engine deployment support ([#335](https://github.com/google/adk-js/issues/335)) ([3e901a5](https://github.com/google/adk-js/commit/3e901a5b2d4c291628c9f88f223803a7e9269531))
 
 ### Bug Fixes
 
-* mark lightningcss and jiti as external in agent_loader esbuild to fix adk web on missing optional deps ([#319](https://github.com/google/adk-js/issues/319)) ([ab625c9](https://github.com/google/adk-js/commit/ab625c9e29a4385f474df6bc5fd2426f96aea41e))
-* remove hardcoded Access-Control-Allow-Origin wildcard from run_sse ([#360](https://github.com/google/adk-js/issues/360)) ([d2db989](https://github.com/google/adk-js/commit/d2db989334f85b5fd00039364bd0754ae1691bab))
-* replace unix cp with node.js fs.cp in dev/build.js for windows compatibility ([#318](https://github.com/google/adk-js/issues/318)) ([53ee7eb](https://github.com/google/adk-js/commit/53ee7eb0f301b8bf617afb4cf7b0e9b1d7f8c9a9))
-* Resolve CORS vulnerability by disabling express.urlencoded parser ([#378](https://github.com/google/adk-js/issues/378)) ([1fe631f](https://github.com/google/adk-js/commit/1fe631f55a730aee2e4141f3dd7b6e8e9f756b86))
-* **server:** restrict AdkApiServer to listen on configured host ([#383](https://github.com/google/adk-js/issues/383)) ([7be8c81](https://github.com/google/adk-js/commit/7be8c8145a6ff37f5f3863b254f374b2c7072c18))
-
+- mark lightningcss and jiti as external in agent_loader esbuild to fix adk web on missing optional deps ([#319](https://github.com/google/adk-js/issues/319)) ([ab625c9](https://github.com/google/adk-js/commit/ab625c9e29a4385f474df6bc5fd2426f96aea41e))
+- remove hardcoded Access-Control-Allow-Origin wildcard from run_sse ([#360](https://github.com/google/adk-js/issues/360)) ([d2db989](https://github.com/google/adk-js/commit/d2db989334f85b5fd00039364bd0754ae1691bab))
+- replace unix cp with node.js fs.cp in dev/build.js for windows compatibility ([#318](https://github.com/google/adk-js/issues/318)) ([53ee7eb](https://github.com/google/adk-js/commit/53ee7eb0f301b8bf617afb4cf7b0e9b1d7f8c9a9))
+- Resolve CORS vulnerability by disabling express.urlencoded parser ([#378](https://github.com/google/adk-js/issues/378)) ([1fe631f](https://github.com/google/adk-js/commit/1fe631f55a730aee2e4141f3dd7b6e8e9f756b86))
+- **server:** restrict AdkApiServer to listen on configured host ([#383](https://github.com/google/adk-js/issues/383)) ([7be8c81](https://github.com/google/adk-js/commit/7be8c8145a6ff37f5f3863b254f374b2c7072c18))
 
 ### Dependencies
 
-* The following workspace dependencies were updated
-  * dependencies
-    * @google/adk bumped from ^1.1.0 to ^1.2.0
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^1.1.0 to ^1.2.0
 
 ## [1.1.0](https://github.com/google/adk-js/compare/devtools-v1.0.0...devtools-v1.1.0) (2026-04-28)
 
-
 ### Bug Fixes
 
-* fix adk web ui source code serving path ([#309](https://github.com/google/adk-js/issues/309)) ([b92c238](https://github.com/google/adk-js/commit/b92c2387622cedec880227ed6a6af4b5559d43e3))
-
+- fix adk web ui source code serving path ([#309](https://github.com/google/adk-js/issues/309)) ([b92c238](https://github.com/google/adk-js/commit/b92c2387622cedec880227ed6a6af4b5559d43e3))
 
 ### Dependencies
 
-* The following workspace dependencies were updated
-  * dependencies
-    * @google/adk bumped from ^1.0.0 to ^1.1.0
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^1.0.0 to ^1.1.0
 
 ## [1.0.0](https://github.com/google/adk-js/compare/devtools-v0.6.1...devtools-v1.0.0) (2026-04-21)
 
-
 ### Features
 
-* export AdkApiServer from @google/adk-devtools package ([#245](https://github.com/google/adk-js/issues/245)) ([0887e40](https://github.com/google/adk-js/commit/0887e4082974fb500a67411ded196f31e9d790bf))
-* keep original __dirname, __filename and import.meta.url value for compiled agent files. ([#254](https://github.com/google/adk-js/issues/254)) ([db89a42](https://github.com/google/adk-js/commit/db89a4212000a450b6b197438cb798b4bf294831))
-
+- export AdkApiServer from @google/adk-devtools package ([#245](https://github.com/google/adk-js/issues/245)) ([0887e40](https://github.com/google/adk-js/commit/0887e4082974fb500a67411ded196f31e9d790bf))
+- keep original **dirname, **filename and import.meta.url value for compiled agent files. ([#254](https://github.com/google/adk-js/issues/254)) ([db89a42](https://github.com/google/adk-js/commit/db89a4212000a450b6b197438cb798b4bf294831))
 
 ### Bug Fixes
 
-* add client url to support custom url options for DB connection. ([#284](https://github.com/google/adk-js/issues/284)) ([bf8fade](https://github.com/google/adk-js/commit/bf8fadefb764e2ea22f9bc022b6e437ce8020873))
-
+- add client url to support custom url options for DB connection. ([#284](https://github.com/google/adk-js/issues/284)) ([bf8fade](https://github.com/google/adk-js/commit/bf8fadefb764e2ea22f9bc022b6e437ce8020873))
 
 ### Miscellaneous Chores
 
-* release 1.0.0 ([84f886e](https://github.com/google/adk-js/commit/84f886e1ac8b3e9a7807a184257444fd0b15e1af))
-
+- release 1.0.0 ([84f886e](https://github.com/google/adk-js/commit/84f886e1ac8b3e9a7807a184257444fd0b15e1af))
 
 ### Dependencies
 
-* The following workspace dependencies were updated
-  * dependencies
-    * @google/adk bumped from ^0.6.1 to ^1.0.0
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^0.6.1 to ^1.0.0
 
 ## [0.6.1](https://github.com/google/adk-js/compare/devtools-v0.6.0...devtools-v0.6.1) (2026-03-30)
 
-
 ### Bug Fixes
 
-* support native addon agent deps ([#219](https://github.com/google/adk-js/issues/219)) ([a13ee82](https://github.com/google/adk-js/commit/a13ee8244fb9d843a4123732ab5c28bbc49aeb7a))
-
+- support native addon agent deps ([#219](https://github.com/google/adk-js/issues/219)) ([a13ee82](https://github.com/google/adk-js/commit/a13ee8244fb9d843a4123732ab5c28bbc49aeb7a))
 
 ### Dependencies
 
-* The following workspace dependencies were updated
-  * dependencies
-    * @google/adk bumped from ^0.6.0 to ^0.6.1
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^0.6.0 to ^0.6.1
 
 ## [0.6.0](https://github.com/google/adk-js/compare/devtools-v0.5.0...devtools-v0.6.0) (2026-03-23)
 
-
 ### Features
 
-* A2A integration: A2A Remote agent ([#190](https://github.com/google/adk-js/issues/190)) ([c6b75a2](https://github.com/google/adk-js/commit/c6b75a29683b0bbac98e1e17d811aa958025a11a))
-* A2A integration: Add CLI option and serve ADK agents via A2A ([#188](https://github.com/google/adk-js/issues/188)) ([3897ee9](https://github.com/google/adk-js/commit/3897ee99df7122b57e4ff2c29b3f6806d6cb1ff4))
-* A2A integration: add toA2a util function ([#205](https://github.com/google/adk-js/issues/205)) ([b7043ab](https://github.com/google/adk-js/commit/b7043abd2cc5193deb95bdad5cc347d04d56d87d))
-
+- A2A integration: A2A Remote agent ([#190](https://github.com/google/adk-js/issues/190)) ([c6b75a2](https://github.com/google/adk-js/commit/c6b75a29683b0bbac98e1e17d811aa958025a11a))
+- A2A integration: Add CLI option and serve ADK agents via A2A ([#188](https://github.com/google/adk-js/issues/188)) ([3897ee9](https://github.com/google/adk-js/commit/3897ee99df7122b57e4ff2c29b3f6806d6cb1ff4))
+- A2A integration: add toA2a util function ([#205](https://github.com/google/adk-js/issues/205)) ([b7043ab](https://github.com/google/adk-js/commit/b7043abd2cc5193deb95bdad5cc347d04d56d87d))
 
 ### Bug Fixes
 
-* Add option to start ADK API server on free random port. ([#197](https://github.com/google/adk-js/issues/197)) ([b8b92bf](https://github.com/google/adk-js/commit/b8b92bfb4344c8fd5d66556663c5b35c36511585))
-* Print error message when port for ADK API server already in use ([#207](https://github.com/google/adk-js/issues/207)) ([8164857](https://github.com/google/adk-js/commit/816485786940daefded405731fe776170df80efb))
-
+- Add option to start ADK API server on free random port. ([#197](https://github.com/google/adk-js/issues/197)) ([b8b92bf](https://github.com/google/adk-js/commit/b8b92bfb4344c8fd5d66556663c5b35c36511585))
+- Print error message when port for ADK API server already in use ([#207](https://github.com/google/adk-js/issues/207)) ([8164857](https://github.com/google/adk-js/commit/816485786940daefded405731fe776170df80efb))
 
 ### Dependencies
 
-* The following workspace dependencies were updated
-  * dependencies
-    * @google/adk bumped from ^0.5.0 to ^0.6.0
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^0.5.0 to ^0.6.0
 
 ## [0.5.0](https://github.com/google/adk-js/compare/devtools-v0.4.0...devtools-v0.5.0) (2026-03-09)
 
-
 ### Features
 
-* integrate with ADK conformance tests ([#168](https://github.com/google/adk-js/issues/168)) ([3a7c012](https://github.com/google/adk-js/commit/3a7c012e035f665dbf200640c10caa6e6dd82aa3))
-
+- integrate with ADK conformance tests ([#168](https://github.com/google/adk-js/issues/168)) ([3a7c012](https://github.com/google/adk-js/commit/3a7c012e035f665dbf200640c10caa6e6dd82aa3))
 
 ### Dependencies
 
-* The following workspace dependencies were updated
-  * dependencies
-    * @google/adk bumped from ^0.4.0 to ^0.5.0
+- The following workspace dependencies were updated
+  - dependencies
+    - @google/adk bumped from ^0.4.0 to ^0.5.0
 
 ## [0.4.0](https://github.com/google/adk-js/compare/devtools-v0.3.0...devtools-v0.4.0) (2026-02-25)
 

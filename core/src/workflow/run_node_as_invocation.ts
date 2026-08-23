@@ -175,15 +175,24 @@ function plainTextResume(ic: InvocationContext): PlainTextResume | undefined {
   const text = parts.map((p) => p.text).join('');
 
   const pending = new Set<string>();
+  const answered = new Set<string>();
   // Scoped to the run still in progress: a pause belonging to a run that
   // already finished is not resumable, and must not swallow the new message.
   const events = eventsForCurrentRun(ic.session?.events ?? [], ic.invocationId);
   for (const nodeState of reconstructNodeStates(events).values()) {
     for (const id of nodeState.interruptIds) {
-      if (!nodeState.resolvedResponses.has(id)) {
+      if (nodeState.resolvedResponses.has(id)) {
+        answered.add(id);
+      } else {
         pending.add(id);
       }
     }
+  }
+  // A waiting parent re-announces the ids of the child it is blocked on when it
+  // records its resume checkpoint, so one id can read as resolved on the child
+  // and unresolved on the parent. An answered interrupt is answered.
+  for (const id of answered) {
+    pending.delete(id);
   }
 
   // Only the unambiguous single-pause case is resumable by plain text.

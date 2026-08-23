@@ -93,6 +93,42 @@ Reusable skills for AI coding assistants working on this repository live in
 [`.agents/skills/`](.agents/skills/README.md), which indexes them and explains
 how to add one. [`AGENTS.md`](AGENTS.md) points agents at them.
 
+### Commit notation
+
+Pull requests are squash merged, so the PR title becomes the commit subject on
+`main`. `release-please` reads those subjects to pick the next version and
+write the changelog, so the PR title must follow
+[Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<optional scope>): <description>
+```
+
+- **Types**: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`,
+  `revert`, `style`, `test`. `feat` cuts a minor release, `fix` and `perf` a
+  patch, and the rest appear in the changelog only.
+- **Breaking changes**: add `!` before the colon, as in `feat(core)!: ...`, or
+  add a `BREAKING CHANGE: <what broke>` footer to the commit body.
+- **Scope** is optional and free-form, but lowercase — `dev`, `workflow`,
+  `sessions`. It groups the changelog, so `fix(Dev)` and `fix(dev)` would split
+  into two sections.
+- Keep the subject to 100 characters, and leave off the trailing period.
+
+Examples:
+
+```
+fix(dev): stop dropping piped stdin lines
+feat(core): implement Runner.runLive
+refactor(workflow)!: collapse LLMAgentWrapper into LlmAgent
+```
+
+The `commit-convention` CI check enforces this on every pull request. To check
+a subject before you open one:
+
+```bash
+node scripts/check_commit_message.mjs "fix(dev): stop dropping piped stdin lines"
+```
+
 ### Sign our Contributor License Agreement
 
 Contributions to this project must be accompanied by a

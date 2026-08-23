@@ -69,6 +69,10 @@ export interface InvocationContextParams {
    * transparently reconnect a dropped live connection.
    */
   liveSessionResumptionHandle?: string;
+  /**
+   * Request-level metadata passed from an incoming A2A request or caller.
+   */
+  a2aMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -276,6 +280,11 @@ export class InvocationContext {
   liveSessionResumptionHandle?: string;
 
   /**
+   * Request-level metadata passed from an incoming A2A request or caller.
+   */
+  readonly a2aMetadata?: Record<string, unknown>;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -299,6 +308,7 @@ export class InvocationContext {
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.liveRequestQueue = params.liveRequestQueue;
     this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
+    this.a2aMetadata = params.a2aMetadata;
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop

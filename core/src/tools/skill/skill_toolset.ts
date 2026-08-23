@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type {Context} from '../../agents/context.js';
 import type {ReadonlyContext} from '../../agents/readonly_context.js';
 import type {BaseCodeExecutor} from '../../code_executors/base_code_executor.js';
@@ -48,7 +51,9 @@ export class SkillToolset extends BaseToolset {
   public registry?: SkillRegistry;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
+  /** The `scriptOutputDir` this toolset was configured with, if any. */
   public readonly outputDir?: string;
+  private tempOutputDir?: Promise<string>;
 
   constructor(
     skills: Record<string, Skill> | Skill[],
@@ -66,21 +71,20 @@ export class SkillToolset extends BaseToolset {
        */
       allowInlineScripts?: boolean;
       /**
-       * Directory that output files produced by `run_skill_script` and
-       * `run_skill_inline_script` are written into. A relative path is
-       * resolved against the host process's working directory.
+       * Directory that files produced by `run_skill_script` /
+       * `run_skill_inline_script` are written into. Output file names come from
+       * the executed script, so this must be a directory dedicated to
+       * throwaway script output — never the application's working directory or
+       * a source tree. A relative path is resolved against the host process's
+       * working directory.
        *
-       * When unset, each execution that produces output files gets a fresh
-       * directory under the OS temp directory and the tool response reports
-       * its absolute path. Set this to keep script output in a location the
-       * application manages.
-       *
-       * The directory is never deleted, unlike the code executor's own scratch
-       * directory: it holds the artifacts the script was asked to produce.
-       * Unconfigured runs therefore rely on OS temp-directory cleanup, so an
-       * application that needs a managed lifetime should set this.
+       * Defaults to a private, randomly named directory created under the OS
+       * temp dir on first use. Nothing removes that directory: `close()` runs
+       * once per invocation on a toolset instance that concurrent invocations
+       * share (see `Runner`), so it cannot tell whose output is still in use.
+       * Set this to own the location and the lifetime of the output.
        */
-      outputDir?: string;
+      scriptOutputDir?: string;
     } = {},
   ) {
     super([], 'adk_skill_toolset');
@@ -90,7 +94,7 @@ export class SkillToolset extends BaseToolset {
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
-    this.outputDir = options.outputDir;
+    this.outputDir = options.scriptOutputDir;
 
     this.tools = [
       new ListSkillsTool(this),
@@ -121,6 +125,31 @@ export class SkillToolset extends BaseToolset {
 
   getSkill(name: string): Skill | undefined {
     return this.skills[name];
+  }
+
+  /**
+   * Resolves the directory that script output files are materialized into.
+   *
+   * Script output file names are attacker-influenced (a prompt-injected skill
+   * controls what its script writes), so they must never be resolved against
+   * the host application's working directory. When no `scriptOutputDir` was
+   * configured this hands back a private temp directory instead, created once
+   * and reused for the lifetime of the toolset.
+   */
+  getScriptOutputDir(): Promise<string> {
+    if (this.outputDir) {
+      // mkdir is idempotent, so it can just run per call; only the temp
+      // directory needs to be remembered, since its name is generated.
+      const dir = path.resolve(this.outputDir);
+      return fs.mkdir(dir, {recursive: true}).then(() => dir);
+    }
+
+    // mkdtemp names the directory itself and creates it exclusively at 0o700,
+    // so another local user can neither predict the path nor pre-create it as
+    // a symlink to somewhere else.
+    return (this.tempOutputDir ??= fs.mkdtemp(
+      path.join(os.tmpdir(), 'adk_skill_script_output_'),
+    ));
   }
 
   async getOrFetchSkill(

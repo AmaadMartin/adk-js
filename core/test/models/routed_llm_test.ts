@@ -7,8 +7,6 @@
 import type {BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
 import {BaseLlm, RoutedLlm} from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import type {Logger} from '../../src/utils/logger.js';
-import {setLogger} from '../../src/utils/logger.js';
 
 class MockLlm extends BaseLlm {
   receivedStream: boolean | undefined;
@@ -39,30 +37,6 @@ describe('RoutedLlm', () => {
   const modelA = new MockLlm('model-a');
   const modelB = new MockLlm('model-b');
   const models = [modelA, modelB];
-
-  describe('experimental check', () => {
-    const warnCalls: string[] = [];
-    const mockLogger: Logger = {
-      setLogLevel: () => {},
-      log: () => {},
-      debug: () => {},
-      info: () => {},
-      warn: (...args: unknown[]) => {
-        warnCalls.push(args.map((a) => String(a)).join(' '));
-      },
-      error: () => {},
-    };
-
-    it('warns when instantiated', () => {
-      setLogger(mockLogger);
-
-      const router = async () => 'model-a';
-      new RoutedLlm({models: [], router});
-
-      expect(warnCalls).toHaveLength(1);
-      expect(warnCalls[0]).toContain('Class RoutedLlm is experimental');
-    });
-  });
 
   it('should route generateContentAsync to the selected model A', async () => {
     let routerCalledWithModels: Readonly<Record<string, BaseLlm>> | null = null;

@@ -27,7 +27,9 @@ import {
   SkillToolset,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
-import {describe, expect, it, vi} from 'vitest';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {materializeScriptOutputs} from '../../../src/tools/skill/script_output_utils.js';
 
 // Only the materialize step is spied on, so the tests below can assert both
@@ -73,6 +75,19 @@ interface ToolErrorResponse {
 }
 
 describe('RunSkillScriptTool', () => {
+  // Running a script resolves an output directory and creates it on disk.
+  // Point the tests that configure one at a temp directory of their own and
+  // remove it in afterEach, so a failing assertion cannot leave files behind.
+  let outputDir: string;
+
+  beforeEach(async () => {
+    outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'skill_script_test_'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(outputDir, {recursive: true, force: true});
+  });
+
   function createMockContext(
     agentName = 'test-agent',
     agentExecutor?: BaseCodeExecutor,
@@ -401,39 +416,47 @@ describe('RunSkillScriptTool', () => {
     });
   }
 
-  it('materializes output files with no directory when none is configured', async () => {
+  it('materializes output files into the toolset script output dir', async () => {
     const mockExecutor = executorReturning([testFile]);
-    // Stubbed so the assertion is about the call, not about a directory this
-    // test would then have to clean up.
-    vi.mocked(materializeScriptOutputs).mockResolvedValueOnce(
-      mockExecutor.mockResult,
-    );
-
-    await runTool(new SkillToolset([mockSkill], {codeExecutor: mockExecutor}));
-
-    expect(materializeScriptOutputs).toHaveBeenCalledWith(
-      mockExecutor.mockResult,
-      undefined,
-    );
-  });
-
-  it('passes the toolset outputDir through', async () => {
-    const mockExecutor = executorReturning([testFile]);
-    vi.mocked(materializeScriptOutputs).mockResolvedValueOnce(
-      mockExecutor.mockResult,
-    );
 
     await runTool(
       new SkillToolset([mockSkill], {
         codeExecutor: mockExecutor,
-        outputDir: '/configured/dir',
+        scriptOutputDir: outputDir,
       }),
     );
 
     expect(materializeScriptOutputs).toHaveBeenCalledWith(
       mockExecutor.mockResult,
-      '/configured/dir',
+      outputDir,
     );
+    expect(await fs.readFile(path.join(outputDir, 'output.txt'), 'utf-8')).toBe(
+      'hello',
+    );
+  });
+
+  it('defaults to a private temp dir, never the process working directory', async () => {
+    // Output file names are chosen by the executed script, i.e. by whatever a
+    // prompt injection persuaded the model/skill to emit. Resolving them
+    // against process.cwd() would let that content drop files into the host
+    // application's working directory.
+    const mockExecutor = executorReturning([testFile]);
+    const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
+    const before = (await fs.readdir(process.cwd())).sort();
+
+    const result = (await runTool(toolset)) as SkillScriptResponse;
+
+    // The toolset picks the generated name, so this test owns the cleanup.
+    const dir = await toolset.getScriptOutputDir();
+    try {
+      expect(result.outputDir).toBe(dir);
+      expect(dir).not.toBe(process.cwd());
+      expect(path.resolve(dir)).toBe(dir);
+      expect(path.dirname(dir)).toBe(os.tmpdir());
+      expect((await fs.readdir(process.cwd())).sort()).toEqual(before);
+    } finally {
+      await fs.rm(dir, {recursive: true, force: true});
+    }
   });
 
   it('returns the outputDir reported by the helper', async () => {
@@ -444,7 +467,10 @@ describe('RunSkillScriptTool', () => {
     });
 
     const result = (await runTool(
-      new SkillToolset([mockSkill], {codeExecutor: mockExecutor}),
+      new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+        scriptOutputDir: outputDir,
+      }),
     )) as SkillScriptResult;
 
     expect(result.outputDir).toBe('/somewhere');

@@ -24,7 +24,7 @@ import {
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   createSessionArtifactService,
   loadArtifactText,
@@ -52,6 +52,16 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     scratchDirs.push(dir);
     return dir;
   }
+
+  // Inline-script output file names are chosen by the executed script, so the
+  // tool materializes them into a dedicated directory instead of process.cwd().
+  // Every toolset here points at a scratch directory owned by the test: the
+  // default is a fresh mkdtemp per toolset, and nothing removes it.
+  let outputDir: string;
+
+  beforeEach(async () => {
+    outputDir = await makeOutputDir();
+  });
 
   afterEach(async () => {
     while (scratchDirs.length > 0) {
@@ -107,7 +117,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
   it('successfully executes a real JavaScript inline script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const toolset = new SkillToolset([], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillInlineScriptTool(toolset);
 
     const result = (await tool.runAsync({
@@ -129,7 +142,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     'successfully executes a real Shell inline script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillInlineScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -149,7 +165,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
   it('captures stderr from a real JavaScript inline script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const toolset = new SkillToolset([], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillInlineScriptTool(toolset);
 
     const result = (await tool.runAsync({
@@ -168,7 +187,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     'captures stderr and exit code from a real Shell inline script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillInlineScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -189,7 +211,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     'successfully executes a real PowerShell inline script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillInlineScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -211,7 +236,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     'captures stderr from a failing PowerShell inline script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillInlineScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -235,7 +263,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     'successfully executes a real CMD inline script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillInlineScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -257,7 +288,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     'captures stderr from a failing CMD inline script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillInlineScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -278,7 +312,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     'successfully executes a real Python inline script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillInlineScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -300,7 +337,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     'captures stderr from a real Python inline script',
     async () => {
       const executor = new UnsafeLocalCodeExecutor();
-      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        scriptOutputDir: outputDir,
+      });
       const tool = new RunSkillInlineScriptTool(toolset);
 
       const result = (await tool.runAsync({
@@ -318,10 +358,12 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     TEST_EXECUTION_TIMEOUT,
   );
 
-  it('writes output files into the configured outputDir', async () => {
-    const outputDir = await makeOutputDir();
+  it('writes output files into the configured script output dir', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor, outputDir});
+    const toolset = new SkillToolset([], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillInlineScriptTool(toolset);
 
     const testFileName = `test_output_${Date.now()}.txt`;
@@ -351,7 +393,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
   it('successfully passes array arguments to a JavaScript inline script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const toolset = new SkillToolset([], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillInlineScriptTool(toolset);
 
     const result = (await tool.runAsync({
@@ -369,7 +414,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
   it('successfully passes object arguments to a JavaScript inline script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const toolset = new SkillToolset([], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillInlineScriptTool(toolset);
 
     const result = (await tool.runAsync({
@@ -386,9 +434,11 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
   });
 
   it('handles file collisions by appending a numeric suffix', async () => {
-    const outputDir = await makeOutputDir();
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor, outputDir});
+    const toolset = new SkillToolset([], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillInlineScriptTool(toolset);
 
     const testFileName = `test_inline_output_${Date.now()}.txt`;
@@ -416,7 +466,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
   });
   it('saves script output files to the artifact service', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const toolset = new SkillToolset([], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillInlineScriptTool(toolset);
     const artifactService = createSessionArtifactService();
     const toolContext = createMockContext('test-agent', artifactService);
@@ -444,7 +497,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
   it('reports output files with a warning when no artifact service is configured', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const toolset = new SkillToolset([], {
+      codeExecutor: executor,
+      scriptOutputDir: outputDir,
+    });
     const tool = new RunSkillInlineScriptTool(toolset);
     const testFileName = `test_unsaved_output_${Date.now()}.txt`;
 
@@ -466,8 +522,6 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
   it('creates a new artifact version instead of a renamed file on repeat runs', async () => {
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
-    const tool = new RunSkillInlineScriptTool(toolset);
     const artifactService = createSessionArtifactService();
     const testFileName = `test_inline_artifact_${Date.now()}.txt`;
     const args = {
@@ -475,23 +529,31 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
       language: CodeExecutionLanguage.JAVASCRIPT,
     };
 
-    const first = (await tool.runAsync({
-      args,
-      toolContext: createMockContext('test-agent', artifactService),
-    })) as SkillScriptResponse;
-    trackToolOutputDir(first.outputDir);
-    const result = (await tool.runAsync({
-      args,
-      toolContext: createMockContext('test-agent', artifactService),
-    })) as SkillScriptResponse;
-    trackToolOutputDir(result.outputDir);
+    /**
+     * One run, writing into an output directory of its own. A toolset reuses
+     * a single directory across its runs, so sharing one here would rename the
+     * second file rather than exercise the artifact versioning under test.
+     */
+    const run = async (): Promise<SkillScriptResponse> => {
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        scriptOutputDir: await makeOutputDir(),
+      });
+      return (await new RunSkillInlineScriptTool(toolset).runAsync({
+        args,
+        toolContext: createMockContext('test-agent', artifactService),
+      })) as SkillScriptResponse;
+    };
+
+    await run();
+    const result = await run();
 
     expect(result.outputFiles).toEqual([
       {name: testFileName, mimeType: 'text/plain'},
     ]);
     expect(await artifactService.listVersions(testFileName)).toEqual([0, 1]);
-    // Each run without a configured outputDir gets a directory of its own, so
-    // the second run collides with nothing and no file is renamed.
+    // Each run wrote into a directory of its own, so the second collided with
+    // nothing and no file was renamed.
     const collisionName = `${path.basename(testFileName, '.txt')}_2.txt`;
     expect(await cwdContains(collisionName)).toBe(false);
   });

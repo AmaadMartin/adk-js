@@ -64,14 +64,15 @@ describe('createAgent', () => {
     (listFiles as Mock).mockResolvedValue(['file1', 'file2']);
     // `createAgent` prefers these over `gcloud config`, so a machine with
     // either one exported takes a different path through the code than the one
-    // under test. Clear them: what this suite asserts has to come from its own
+    // under test. getGcpProject()/getGcpRegion() read them before falling back
+    // to `gcloud config get-value`, so the mocked execSync would never be
+    // consulted. Clear them: what this suite asserts has to come from its own
     // mocks, not from the environment that happens to be running it.
     vi.stubEnv('GOOGLE_CLOUD_PROJECT', undefined);
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', undefined);
   });
 
   afterEach(() => {
-    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
