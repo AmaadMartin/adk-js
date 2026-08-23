@@ -6,10 +6,13 @@
 
 import {
   Context,
+  createSession,
   Frontmatter,
   InvocationContext,
+  LlmAgent,
   LoadSkillResourceTool,
   LoadSkillTool,
+  PluginManager,
   Skill,
   SkillRegistry,
   SkillToolset,
@@ -69,10 +72,12 @@ class FailingSkillRegistry implements SkillRegistry {
 
 function createContext(): Context {
   return new Context({
-    invocationContext: {
-      session: {state: {}},
-      agent: {name: 'test-agent'},
-    } as unknown as InvocationContext,
+    invocationContext: new InvocationContext({
+      invocationId: 'inv-1',
+      session: createSession({id: 'session-1', appName: 'app'}),
+      agent: new LlmAgent({name: 'test_agent'}),
+      pluginManager: new PluginManager(),
+    }),
   });
 }
 

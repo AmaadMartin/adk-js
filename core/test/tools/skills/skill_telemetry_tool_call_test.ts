@@ -25,12 +25,12 @@ import {
   expect,
   it,
 } from 'vitest';
-import type {BaseAgent} from '../../../src/agents/base_agent.js';
 import {handleFunctionCallsAsync} from '../../../src/agents/functions.js';
 import {InvocationContext} from '../../../src/agents/invocation_context.js';
+import {LlmAgent} from '../../../src/agents/llm_agent.js';
 import {createEvent} from '../../../src/events/event.js';
 import {PluginManager} from '../../../src/plugins/plugin_manager.js';
-import type {Session} from '../../../src/sessions/session.js';
+import {createSession} from '../../../src/sessions/session.js';
 import {loadAllSkillsInDir} from '../../../src/skills/loader.js';
 import {SkillToolset} from '../../../src/tools/skill/skill_toolset.js';
 
@@ -96,15 +96,8 @@ describe('skill telemetry through a real tool call', () => {
     const toolset = new SkillToolset(await loadAllSkillsInDir(skillsDir));
     const invocationContext = new InvocationContext({
       invocationId: 'inv-1',
-      session: {
-        id: 'session-1',
-        appName: 'app',
-        userId: 'user',
-        state: {},
-        events: [],
-        lastUpdateTime: Date.now(),
-      } as Session,
-      agent: {name: 'skill-agent'} as BaseAgent,
+      session: createSession({id: 'session-1', appName: 'app'}),
+      agent: new LlmAgent({name: 'skill_agent'}),
       pluginManager: new PluginManager(),
     });
     const tool = (await toolset.getTools()).find((t) => t.name === name);
