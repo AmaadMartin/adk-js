@@ -6,6 +6,7 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 import {requireAgent} from '../../agents/invocation_context.js';
+import {traceSkillLoad} from '../../telemetry/skill_tracing.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
@@ -59,6 +60,11 @@ export class LoadSkillTool extends BaseTool {
         error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
         error_code: 'REGISTRY_ERROR',
       };
+    } finally {
+      // A failed load is still a load attempt worth reporting, so this runs on
+      // the error path too. `skill` is undefined there, which records the
+      // requested name alone.
+      traceSkillLoad({skillName, skill});
     }
 
     if (!skill) {

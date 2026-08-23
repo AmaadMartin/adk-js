@@ -93,4 +93,9 @@ export interface Skill {
   frontmatter: Frontmatter;
   instructions: string;
   resources?: Resources;
+  /**
+   * Location the skill was loaded from, used for telemetry. Should be
+   * compliant with RFC 3986. Undefined when the load path cannot name one.
+   */
+  uri?: string;
 }

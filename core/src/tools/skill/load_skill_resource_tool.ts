@@ -6,6 +6,7 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 import path from 'node:path';
+import {traceSkillResourceLoad} from '../../telemetry/skill_tracing.js';
 import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
 import {
@@ -83,6 +84,11 @@ export class LoadSkillResourceTool extends BaseTool {
         error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
         error_code: 'REGISTRY_ERROR',
       };
+    } finally {
+      // A failed load is still a load attempt worth reporting, so this runs on
+      // the error path too. `skill` is undefined there, which records the
+      // requested name and resource path alone.
+      traceSkillResourceLoad({skillName, resourcePath, skill});
     }
 
     if (!skill) {
