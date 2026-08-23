@@ -116,15 +116,6 @@ describe('A2ARemoteAgent', () => {
     throw error;
   };
 
-  /** Captures the error value the agent logs when a run fails. */
-  const captureLoggedErrors = (): unknown[] => {
-    const logged: unknown[] = [];
-    vi.spyOn(logger, 'error').mockImplementation((...args: unknown[]) => {
-      logged.push(args[1]);
-    });
-    return logged;
-  };
-
   const drain = async (
     events: AsyncIterable<AdkEvent>,
   ): Promise<AdkEvent[]> => {
@@ -538,7 +529,10 @@ describe('A2ARemoteAgent', () => {
         } as A2AStreamEventData;
       })(),
     );
-    const logged = captureLoggedErrors();
+    const logged: unknown[] = [];
+    vi.spyOn(logger, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args[1]);
+    });
 
     const events = await drain(agent.runAsync(createMockContext()));
 
