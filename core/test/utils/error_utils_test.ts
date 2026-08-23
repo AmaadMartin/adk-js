@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {errorMessage, formatError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,22 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('errorMessage', () => {
+  it("returns an error's own message without unwrapping its cause", () => {
+    const err = new Error('outer', {cause: new Error('root cause')});
+
+    expect(errorMessage(err)).toBe('outer');
+  });
+
+  it('returns a thrown string unchanged', () => {
+    expect(errorMessage('plain string')).toBe('plain string');
+  });
+
+  it('stringifies a thrown value that is neither an error nor a string', () => {
+    expect(errorMessage(undefined)).toBe('undefined');
+    expect(errorMessage(42)).toBe('42');
   });
 });
