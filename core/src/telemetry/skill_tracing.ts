@@ -26,23 +26,13 @@ const ADK_EXPERIMENTAL_SKILL_RESOURCE_PATH =
 
 const ADDITIONAL_TOOLS_METADATA_KEY = 'adk_additional_tools';
 
-/**
- * Reads the additional tools a skill declares, or undefined when the skill
- * declares none or declares them in a shape OpenTelemetry cannot carry.
- *
- * `Frontmatter.metadata` is `Record<string, unknown>`, and a `Skill` can be
- * built as an object literal without passing through `FrontmatterSchema`, so
- * the shape is checked here rather than assumed.
- */
+/** Narrows the untyped metadata value, which skips `FrontmatterSchema` when a `Skill` is built as an object literal. */
 function additionalToolsOf(skill: Skill): string[] | undefined {
   const declared = skill.frontmatter.metadata?.[ADDITIONAL_TOOLS_METADATA_KEY];
-  if (
-    Array.isArray(declared) &&
+  return Array.isArray(declared) &&
     declared.every((tool) => typeof tool === 'string')
-  ) {
-    return declared;
-  }
-  return undefined;
+    ? declared
+    : undefined;
 }
 
 export interface TraceSkillLoadParams {

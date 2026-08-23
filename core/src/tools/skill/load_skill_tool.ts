@@ -61,9 +61,7 @@ export class LoadSkillTool extends BaseTool {
         error_code: 'REGISTRY_ERROR',
       };
     } finally {
-      // A failed load is still a load attempt worth reporting, so this runs on
-      // the error path too. `skill` is undefined there, which records the
-      // requested name alone.
+      // Runs on the error path too, where `skill` is undefined.
       traceSkillLoad({skillName, skill});
     }
 
