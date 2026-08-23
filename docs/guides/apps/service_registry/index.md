@@ -52,7 +52,7 @@ Declare it in `my_agents/services.yaml`:
 services:
   - scheme: mysession
     type: session
-    module: ./my_session_service.js
+    module: ./my_session_service.ts
     class: MySessionService
 ```
 
@@ -79,6 +79,13 @@ every session in that server.
 `module` is resolved from the agent directory, so `./backends/mine.js` points
 inside it and `my-backend-package` comes from its `node_modules`. A TypeScript
 source is compiled first, the same way ADK compiles an agent file.
+
+`module` names the file on disk. Give a TypeScript source its real extension,
+`./backends/mine.ts`, and not the `./backends/mine.js` a TypeScript `import`
+would write for it. ADK resolves this key through Node, which has no rule that
+maps `.js` back to `.ts`. An entry ADK cannot resolve is reported and skipped,
+so the symptom is a start-up warning and then `Unsupported session service URI`
+when the scheme is used.
 
 ADK reads `services.yaml` and then `services.yml`, so both take effect when both
 exist. A malformed entry is reported and skipped, and its valid siblings still

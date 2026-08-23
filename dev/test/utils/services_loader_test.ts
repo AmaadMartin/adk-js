@@ -844,14 +844,14 @@ describe('the documented services.yaml example', () => {
        }
      }`;
 
-  it('serves sessions from the class the config names', async () => {
-    await writeServices('my_session_service.js', backend);
+  it('serves sessions from the TypeScript class the config names', async () => {
+    await writeServices('my_session_service.ts', backend);
     await writeServices(
       'services.yaml',
       `services:
          - scheme: mysession
            type: session
-           module: ./my_session_service.js
+           module: ./my_session_service.ts
            class: MySessionService
       `,
     );
@@ -872,7 +872,30 @@ describe('the documented services.yaml example', () => {
         sessionId: session.id,
       }),
     ).toMatchObject({id: session.id});
-  });
+    // The CLI's default options bundle the SDK into the module, which is slow.
+  }, 60000);
+
+  it('skips a TypeScript source the entry names with a .js extension', async () => {
+    await writeServices('my_rewritten_service.ts', backend);
+    await writeServices(
+      'services.yaml',
+      `services:
+         - scheme: myrewritten
+           type: session
+           module: ./my_rewritten_service.js
+           class: MySessionService
+      `,
+    );
+
+    await loadServicesModule(dir);
+
+    expect(registry.createSessionService('myrewritten://x')).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Skipping 'myrewritten'"),
+    );
+    // Long enough that a resolver which did compile the source would fail on
+    // the assertion rather than on the clock.
+  }, 60000);
 
   it('serves sessions from the factory the services module exports', async () => {
     await writeServices('my_module_session_service.js', backend);
