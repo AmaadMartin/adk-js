@@ -76,9 +76,11 @@ The argument names are `snake_case` because the model reads them and they must
 match adk-python. The list tools return bare ids, not full resource names.
 
 `spanner_create_instance` and `spanner_create_database` create billable Google
-Cloud resources. Both are long-running operations, and the tool waits for the
-operation to finish before it answers, so the model never reports success on a
-creation that later fails.
+Cloud resources, and both descriptions say so to the model. Each is a
+long-running operation, and the tool waits for it to finish before answering,
+so the model never reports success on a creation that later fails. The wait is
+bounded at 300 seconds, matching adk-python; a slower operation returns an
+error while the operation itself keeps running in Cloud Spanner.
 
 ## Results and errors
 
@@ -90,10 +92,15 @@ type SpannerToolResult =
   | {status: 'ERROR'; error_details: string};
 ```
 
-A rejected Admin API call, a failed long-running operation, missing credentials
-and a missing `@google-cloud/spanner-api` package all arrive as
+A rejected Admin API call, a failed or too-slow long-running operation, missing
+credentials and a missing `@google-cloud/spanner-api` package all arrive as
 `{status: 'ERROR', error_details}`. The model reads the message and can retry or
 tell the user.
+
+`spanner_create_database` also rejects a `database_id` containing a backtick.
+The id is quoted with backticks inside `CREATE DATABASE`, so a backtick in it
+would let the model append arbitrary DDL. adk-python has the same hole; this
+port closes it.
 
 ## Credentials
 

@@ -121,6 +121,21 @@ describe('SpannerAdminToolset', () => {
     }
   });
 
+  it.each(['spanner_create_instance', 'spanner_create_database'])(
+    '%s tells the model that it costs money',
+    async (name) => {
+      const tools = await new SpannerAdminToolset().getTools();
+      const tool = tools.find((candidate) => candidate.name === name);
+      if (!tool) {
+        expect.fail(`toolset does not expose ${name}`);
+      }
+
+      expect(tool._getDeclaration()?.description).toContain(
+        'billable Google Cloud resource',
+      );
+    },
+  );
+
   describe('close', () => {
     it('releases both admin clients once a tool has run', async () => {
       fakeInstanceAdmin.listInstances.mockResolvedValue([[]]);
