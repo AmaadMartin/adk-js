@@ -61,31 +61,6 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 
-/** Artifact version path segment that selects the newest version. */
-const LATEST_VERSION_ID = 'latest';
-
-/** Decimal integer, matching the inputs Python's `int()` accepts. */
-const INTEGER_VERSION_ID = /^[+-]?\d+$/;
-
-/** The outcome of resolving an artifact version path segment. */
-type ParsedVersionId = {valid: true; version?: number} | {valid: false};
-
-/**
- * Resolves an artifact version path segment. `latest` resolves to an absent
- * version, which the artifact service reads as "newest".
- */
-function parseArtifactVersionId(versionId: string): ParsedVersionId {
-  if (versionId === LATEST_VERSION_ID) {
-    return {valid: true};
-  }
-
-  if (!INTEGER_VERSION_ID.test(versionId)) {
-    return {valid: false};
-  }
-
-  return {valid: true, version: Number(versionId)};
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -828,9 +803,9 @@ export class AdkApiServer {
           const artifactName = req.params['artifactName'];
           const versionId = req.params['versionId'];
 
-          const parsed = parseArtifactVersionId(versionId);
-
-          if (!parsed.valid) {
+          // A decimal integer, matching what Python's `int()` accepts.
+          // `Number` would take '0x10' and '1e3', which must be a 422.
+          if (versionId !== 'latest' && !/^[+-]?\d+$/.test(versionId)) {
             res.status(422).json({error: `Invalid version ID: ${versionId}`});
             return;
           }
@@ -841,7 +816,8 @@ export class AdkApiServer {
               userId,
               sessionId,
               filename: artifactName,
-              version: parsed.version,
+              // An absent version reads as "newest".
+              version: versionId === 'latest' ? undefined : Number(versionId),
             },
           );
 

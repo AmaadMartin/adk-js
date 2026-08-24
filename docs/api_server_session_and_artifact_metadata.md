@@ -27,8 +27,7 @@ server's HTTP contract now works against the TypeScript one.
 
 ## Get started
 
-`AdkApiClient` wraps the three routes. The example patches a session, then reads
-the metadata of the newest version of an artifact.
+`AdkApiClient` wraps the three routes.
 
 ```ts
 import {AdkApiClient} from '@google/adk-devtools';
@@ -59,15 +58,6 @@ const all = await client.listArtifactVersionsMetadata({
   artifactName: 'a.txt',
 });
 console.log(all.map((v) => v.version)); // [0, 1]
-```
-
-The same calls over `curl`:
-
-```bash
-curl -X PATCH localhost:8000/apps/demo/users/u1/sessions/s1 \
-  -H 'Content-Type: application/json' -d '{"stateDelta":{"mode":"beta"}}'
-curl localhost:8000/apps/demo/users/u1/sessions/s1/artifacts/a.txt/versions/latest/metadata
-curl localhost:8000/apps/demo/users/u1/sessions/s1/artifacts/a.txt/versions/metadata
 ```
 
 ## The patch body
@@ -103,15 +93,7 @@ only `temp:` keys answers `200` and leaves the stored state unchanged.
 `{version_id}` is a decimal integer or the literal `latest`. `latest` resolves
 to the newest version, so a client can inspect it without knowing its number.
 Anything else is a `422`, which separates a malformed request from a version
-that does not exist.
-
-## Responses
-
-| Request                          | Success                          | Failure                                                  |
-| -------------------------------- | -------------------------------- | -------------------------------------------------------- |
-| `PATCH .../sessions/{session}`   | `200` and the updated `Session`  | `404` unknown session, `422` missing or non-object delta |
-| `GET .../versions/{id}/metadata` | `200` and one `ArtifactVersion`  | `422` unparseable id, `404` no such version              |
-| `GET .../versions/metadata`      | `200` and an `ArtifactVersion[]` | none; an unknown artifact returns `[]`                   |
+that does not exist. A version that does not exist is a `404`.
 
 Every error body is `{"error": "<message>"}`, which is the envelope the whole JS
 API server uses. `adk-python` sends `{"detail": ...}`. The status codes match
