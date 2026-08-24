@@ -163,7 +163,12 @@ function applyLiveRunConfig(
     // handle onto this object, and the Gemini API backend deletes
     // `transparent` from it, so a shared reference would leave both marks on a
     // RunConfig the caller reuses for a later run.
-    liveConfig.sessionResumption = {...runConfig.sessionResumption};
+    //
+    // `handle` is left out on purpose. It belongs to the invocation context,
+    // which withholds it from a transferred sub-agent; copying it here would
+    // put the caller's handle back onto the sub-agent's fresh request.
+    const {handle, ...resumptionMode} = runConfig.sessionResumption;
+    liveConfig.sessionResumption = resumptionMode;
   }
 }
 
@@ -1000,15 +1005,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // =========================================================================
     applyLiveRunConfig(invocationContext.runConfig, llmRequest);
 
-    const configuredHandle =
-      llmRequest.liveConnectConfig?.sessionResumption?.handle;
-    if (!invocationContext.liveSessionResumptionHandle && configuredHandle) {
-      // A caller-supplied handle is a mid-session handle: the server already
-      // holds the state, so history must not be replayed, and a drop before
-      // the first server-issued update still has a handle to retry with.
-      invocationContext.liveSessionResumptionHandle = configuredHandle;
-    }
-
     const llm = this.canonicalModel;
     let reconnectAttempts = 0;
 
@@ -1022,14 +1018,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
       // Apply the latest resumption handle before each connect attempt,
       // merging it into whatever the caller configured rather than replacing
-      // it, so a caller-supplied `transparent: false` survives a reconnect.
+      // it, so a caller-supplied `transparent` choice survives a reconnect.
+      // Transparent resumption is the default only when the caller configured
+      // no mode of their own.
       const handle = invocationContext.liveSessionResumptionHandle;
       if (handle) {
         llmRequest.liveConnectConfig ??= {};
-        const resumption = (llmRequest.liveConnectConfig.sessionResumption ??=
-          {});
+        const resumption = (llmRequest.liveConnectConfig.sessionResumption ??= {
+          transparent: true,
+        });
         resumption.handle = handle;
-        resumption.transparent ??= true;
       }
 
       let connection: BaseLlmConnection;

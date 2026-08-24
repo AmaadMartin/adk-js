@@ -715,7 +715,13 @@ export class Runner {
             pluginManager: this.pluginManager,
             liveRequestQueue: params.liveRequestQueue,
             abortSignal: params.abortSignal,
-            liveSessionResumptionHandle: params.liveSessionResumptionHandle,
+            // A handle names one server-held session, so the invocation owns
+            // it. Seeding it here rather than in each agent's flow is what
+            // lets the transfer path withhold it from a sub-agent, which
+            // needs its own session. The explicit parameter wins.
+            liveSessionResumptionHandle:
+              params.liveSessionResumptionHandle ??
+              runConfig.sessionResumption?.handle,
           });
 
           invocationContext.agent = this.determineAgentForResumption(
@@ -770,6 +776,7 @@ export class Runner {
             let eventToPersist = eventToProcess;
             if (
               runConfig.saveLiveBlob &&
+              !eventToProcess.partial &&
               eventToProcess.content &&
               isLiveModelMediaEventWithInlineData(eventToProcess)
             ) {

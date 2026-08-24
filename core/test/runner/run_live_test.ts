@@ -1286,6 +1286,65 @@ describe('Runner.runLive', () => {
       ).toBe('h-0');
     });
 
+    it('withholds a configured resumption handle from a transferred sub-agent', async () => {
+      await seedUserTurn();
+      const childLlm = new FakeLiveLlm([
+        {content: {role: 'model', parts: [{text: 'child speaking'}]}},
+        {turnComplete: true},
+      ]);
+      const parentLlm = new FakeLiveLlm([
+        {
+          content: {
+            role: 'model',
+            parts: [
+              {
+                functionCall: {
+                  name: 'transfer_to_agent',
+                  args: {agentName: 'child'},
+                },
+              },
+            ],
+          },
+        },
+        {turnComplete: true},
+      ]);
+      const parent = new LlmAgent({
+        name: 'parent',
+        model: parentLlm,
+        subAgents: [new LlmAgent({name: 'child', model: childLlm})],
+      });
+      const runner = new Runner({
+        appName: TEST_APP_ID,
+        agent: parent,
+        sessionService,
+        artifactService,
+      });
+
+      await drainLive(runner, {sessionResumption: {handle: 'h-0'}});
+
+      expect(
+        parentLlm.llmRequestSeen?.liveConnectConfig?.sessionResumption?.handle,
+      ).toBe('h-0');
+      expect(childLlm.connections.length).toBe(1);
+      expect(
+        childLlm.llmRequestSeen?.liveConnectConfig?.sessionResumption?.handle,
+      ).toBeUndefined();
+      expect(childLlm.connections[0].historyCalls.length).toBe(1);
+    });
+
+    it('does not add transparent to a caller handle that omitted it', async () => {
+      const llm = new FakeLiveLlm([{turnComplete: true}]);
+
+      await drainLive(makeRunner(llm, artifactService), {
+        sessionResumption: {handle: 'h-0'},
+      });
+
+      const resumption =
+        llm.llmRequestSeen?.liveConnectConfig?.sessionResumption;
+      expect(resumption?.handle).toBe('h-0');
+      expect(resumption?.transparent).toBeUndefined();
+    });
+
     it('replays history for the same session without a resumption handle', async () => {
       await seedUserTurn();
       const llm = new FakeLiveLlm([{turnComplete: true}]);
@@ -1327,6 +1386,26 @@ describe('Runner.runLive', () => {
         event.content?.parts?.some((part) => part.inlineData),
       );
       expect(yieldedAudio?.content?.parts?.[0]?.inlineData?.data).toBe('AAA=');
+    });
+
+    it('writes no artifact for a partial event the session never stores', async () => {
+      const llm = new FakeLiveLlm([
+        {
+          content: {
+            role: 'model',
+            parts: [
+              {text: 'partial text'},
+              {inlineData: {data: 'AAA=', mimeType: 'audio/pcm'}},
+            ],
+          },
+          partial: true,
+        },
+        {turnComplete: true},
+      ]);
+
+      await drainLive(makeRunner(llm, artifactService), {saveLiveBlob: true});
+
+      expect(await artifactService.listArtifactKeys(SESSION_KEY)).toEqual([]);
     });
 
     it('saves nothing when saveLiveBlob is off', async () => {
