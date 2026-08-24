@@ -8,6 +8,7 @@ import {
   createEvent,
   Event,
   InMemorySessionService,
+  LiveRequest,
   LiveRequestQueue,
   LlmAgent,
   Logger,
@@ -459,6 +460,19 @@ describe('runLiveSession', () => {
     expect(logger.errors).toEqual([
       'Live socket error: connection reset by peer',
     ]);
+  });
+
+  it('closes its request queue when the run ends', async () => {
+    let parked: Promise<LiveRequest> | undefined;
+
+    await drive(async function* (params) {
+      // A reader that outlives the run. Closing the queue releases it with a
+      // close request; leaving it open strands it for the process lifetime.
+      parked = params.liveRequestQueue.get();
+      yield echoEvent({role: 'model', parts: [{text: 'done'}]});
+    });
+
+    expect(await parked).toEqual({close: true});
   });
 
   it('drops an unparseable frame without closing the socket', async () => {
