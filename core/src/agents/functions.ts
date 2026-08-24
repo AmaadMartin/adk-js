@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
+import {
+  Content,
+  createUserContent,
+  FunctionCall,
+  FunctionResponse,
+  FunctionResponseScheduling,
+  Part,
+} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -196,27 +203,83 @@ async function callToolAsync(
   });
 }
 
+const FUNCTION_RESPONSE_KEYS: ReadonlySet<string> = new Set([
+  'willContinue',
+  'scheduling',
+  'parts',
+  'id',
+  'name',
+  'response',
+]);
+
+const FUNCTION_RESPONSE_SCHEDULINGS: ReadonlySet<string> = new Set(
+  Object.values(FunctionResponseScheduling),
+);
+
+/**
+ * Reports whether a tool result is a `FunctionResponse` asking for its own
+ * scheduling.
+ *
+ * Every field of `FunctionResponse` is optional, so a valid `scheduling` plus
+ * no foreign key is what separates such a result from an ordinary payload that
+ * happens to carry a `response` key.
+ */
+function isToolFunctionResponse(result: unknown): result is FunctionResponse {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) {
+    return false;
+  }
+  const scheduling = (result as {scheduling?: unknown}).scheduling;
+  if (
+    typeof scheduling !== 'string' ||
+    !FUNCTION_RESPONSE_SCHEDULINGS.has(scheduling)
+  ) {
+    return false;
+  }
+  return Object.keys(result).every((key) => FUNCTION_RESPONSE_KEYS.has(key));
+}
+
+/**
+ * Builds the `FunctionResponse` that carries a tool result back to the model.
+ *
+ * A tool that wants a different Live scheduling mode for one particular call
+ * returns a `FunctionResponse` holding that call's payload and mode. Only
+ * those two fields are read: `id` and `name` have to address the function call
+ * being answered, which a tool cannot know, so ADK keeps owning them. A
+ * scheduling asked for on the one result wins over the tool-wide default.
+ */
+function buildToolFunctionResponse(
+  tool: BaseTool,
+  functionResult: unknown,
+  functionCallId: string | undefined,
+): FunctionResponse {
+  let schedulingOverride: FunctionResponseScheduling | undefined;
+  let payload = functionResult;
+  if (isToolFunctionResponse(functionResult)) {
+    schedulingOverride = functionResult.scheduling;
+    payload = functionResult.response;
+  }
+
+  const scheduling = schedulingOverride ?? tool.responseScheduling;
+  return {
+    id: functionCallId,
+    name: tool.name,
+    response: normalizeCallbackResponse(payload) ?? {result: payload},
+    ...(scheduling !== undefined && {scheduling}),
+  };
+}
+
 function buildResponseEvent(
   tool: BaseTool,
   functionResult: unknown,
   toolContext: Context,
   invocationContext: InvocationContext,
 ): Event {
-  let responseResult: Record<string, unknown>;
-  if (typeof functionResult !== 'object' || functionResult == null) {
-    responseResult = {result: functionResult};
-  } else if (Array.isArray(functionResult)) {
-    responseResult = {results: functionResult};
-  } else {
-    responseResult = functionResult as Record<string, unknown>;
-  }
-
   const partFunctionResponse: Part = {
-    functionResponse: {
-      name: tool.name,
-      response: responseResult,
-      id: toolContext.functionCallId,
-    },
+    functionResponse: buildToolFunctionResponse(
+      tool,
+      functionResult,
+      toolContext.functionCallId,
+    ),
   };
 
   const content: Content = {
@@ -455,14 +518,11 @@ export async function handleFunctionCallList({
       invocationId: invocationContext.invocationId,
       author: invocationContext.agent.name,
       content: createUserContent({
-        functionResponse: {
-          id: toolContext.functionCallId,
-          name: tool.name,
-          response: functionResponse,
-          ...(tool.responseScheduling !== undefined && {
-            scheduling: tool.responseScheduling,
-          }),
-        },
+        functionResponse: buildToolFunctionResponse(
+          tool,
+          functionResponse,
+          toolContext.functionCallId,
+        ),
       }),
       actions: toolContext.actions,
       branch: invocationContext.branch,
