@@ -97,17 +97,16 @@ const agents = await getAgentsInfo(support);
 }
 ```
 
-## What the map guarantees
+## Which agents you get back
 
-- **Children come first.** An agent's key is written after every one of its
-  `LlmAgent` children, so `Object.keys` is a post-order listing.
-- **One key per agent.** An agent reachable by two paths is recorded once, and
-  is still named in both parents' `subAgents`.
-- **`LlmAgent` edges only.** A sub-agent of any other type is skipped: it gets
-  no key, it is not named in its parent's `subAgents`, and its own descendants
-  stay invisible. This matches the Python reference.
-- **`subAgents` names direct children only**, in declaration order. Every name
-  in it is also a key of the map.
+Only `LlmAgent` edges are followed. A sub-agent of any other type is skipped: it
+gets no key, it is not named in its parent's `subAgents`, and its own
+descendants stay invisible. This surprises people who nest an `LlmAgent` under a
+`RoutedAgent` and expect to find it. The Python reference behaves the same way,
+and matching it is deliberate.
+
+The per-call contract — post-order keys, one key per agent, declaration order in
+`subAgents` — is on the TSDoc for `getAgentsInfo`.
 
 ## Resolving tools on their own
 
@@ -120,20 +119,11 @@ import {getToolsInfo} from '@google/adk';
 const tools = await getToolsInfo(orders.tools);
 ```
 
-Each returned `Tool` carries exactly one `FunctionDeclaration`. The declarations
-keep the input order, with a toolset expanded in the position it occupied. A
-tool that declares nothing is omitted, which is how a built-in such as Google
+A tool that declares nothing is omitted, which is how a built-in such as Google
 Search stays out of the list.
 
-## Cost and failure modes
+## Cost
 
 Resolving a `BaseToolset` calls its `getTools()`. For a remote toolset (MCP,
 OpenAPI) that performs I/O, so `getAgentsInfo` is not a free structure read.
 Call it once and cache the result if a host serves it per request.
-
-Nothing is caught. An error from `getTools()` or from a tool's declaration
-propagates to your caller, and you get no partial map.
-
-An agent whose `instruction` is an `InstructionProvider` reports `instruction:
-''`. Resolving a provider needs a live `ReadonlyContext`, which a structure
-query does not have.
