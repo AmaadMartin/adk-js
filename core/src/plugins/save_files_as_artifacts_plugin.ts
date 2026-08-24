@@ -11,6 +11,7 @@ import {Context} from '../agents/context.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
 import {State} from '../sessions/state.js';
+import {base64ByteLength} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {BasePlugin} from './base_plugin.js';
@@ -21,6 +22,14 @@ import {BasePlugin} from './base_plugin.js';
  * provider capabilities are surfaced.
  */
 const MODEL_ACCESSIBLE_URI_SCHEMES = new Set(['gs', 'https', 'http']);
+
+const BYTES_PER_MB = 1024 * 1024;
+
+/**
+ * The largest blob the Gemini API accepts as inline data:
+ * https://ai.google.dev/gemini-api/docs/files
+ */
+const MAX_INLINE_DATA_SIZE_BYTES = 20 * BYTES_PER_MB;
 
 /**
  * The session-state key holding the pending `filename -> version` map handed
@@ -124,6 +133,19 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
             `No displayName found, using generated filename: ${fileName}`,
           );
         }
+        const fileSize = base64ByteLength(inlineData.data ?? '');
+        if (fileSize > MAX_INLINE_DATA_SIZE_BYTES) {
+          const errorMessage =
+            `File ${fileName} (${(fileSize / BYTES_PER_MB).toFixed(2)} MB) ` +
+            `exceeds the maximum supported size of ` +
+            `${MAX_INLINE_DATA_SIZE_BYTES / BYTES_PER_MB}MB. ` +
+            `Please upload a smaller file.`;
+          logger.warn(errorMessage);
+          newParts.push({text: `[Upload Error: ${errorMessage}]`});
+          modified = true;
+          continue;
+        }
+
         // Shallow copy (mirrors adk-python's `copy.copy`): the artifact service
         // may retain this reference, so detach the part's own fields from the
         // caller's object. The `inlineData` payload itself is still shared.

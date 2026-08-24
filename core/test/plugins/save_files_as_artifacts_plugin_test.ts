@@ -5,61 +5,95 @@
  */
 
 import {
-  BaseAgent,
   BasePlugin,
   Context,
   createEvent,
+  createSession,
   getLogger,
   InMemorySessionService,
   InvocationContext,
+  LlmAgent,
   Logger,
   PluginManager,
   SaveFilesAsArtifactsPlugin,
   SessionArtifactService,
   setLogger,
-  State,
 } from '@google/adk';
 import {Blob, Content, Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
+const APP_NAME = 'test_app';
+const USER_ID = 'test_user';
+const INVOCATION_ID = 'test_invocation_123';
+
+/** The inline-data ceiling the plugin enforces, mirrored from the source. */
+const MAX_INLINE_DATA_SIZE_BYTES = 20 * 1024 * 1024;
+
 /**
- * Builds a fresh mock artifact service and invocation context for each test,
- * mirroring the adk-python test harness. The mocked `getArtifactVersion`
- * returns a model-accessible `gs://` URI by default.
+ * Builds a base64 payload that decodes to exactly `bytes` bytes. The padding is
+ * derived from the byte count, so the string is valid base64 rather than a
+ * string of the right length.
  */
-interface MockArtifactVersion {
-  version: number;
-  canonicalUri?: string;
-  mimeType?: string;
+function base64OfSize(bytes: number): string {
+  const padding = (3 - (bytes % 3)) % 3;
+  const encodedLength = ((bytes + padding) / 3) * 4;
+  return 'A'.repeat(encodedLength - padding) + '='.repeat(padding);
 }
 
-function createHarness() {
-  const saveArtifact = vi.fn().mockResolvedValue(0);
+/**
+ * Builds a fake artifact service whose calls are observable. Every method is a
+ * spy so the fake satisfies {@link SessionArtifactService} without a cast, and
+ * `getArtifactVersion` resolves to a model-accessible `gs://` URI by default.
+ */
+function createFakeArtifactService() {
+  const saveArtifact = vi.fn<SessionArtifactService['saveArtifact']>(
+    async () => 0,
+  );
   const getArtifactVersion = vi.fn<
-    (req: {
-      filename: string;
-      version: number;
-    }) => Promise<MockArtifactVersion | undefined>
+    SessionArtifactService['getArtifactVersion']
   >(async ({filename, version}) => ({
-    version,
+    version: version ?? 0,
     canonicalUri: `gs://mock-bucket/${filename}/versions/${version}`,
     mimeType: 'application/pdf',
   }));
-  const artifactService = {
+  const artifactService: SessionArtifactService = {
     saveArtifact,
     getArtifactVersion,
-  } as unknown as SessionArtifactService;
+    loadArtifact: vi.fn(async () => undefined),
+    listArtifactKeys: vi.fn(async () => []),
+    deleteArtifact: vi.fn(async () => {}),
+    listVersions: vi.fn(async () => []),
+    listArtifactVersions: vi.fn(async () => []),
+  };
 
-  const invocationContext = {
+  return {saveArtifact, getArtifactVersion, artifactService};
+}
+
+/**
+ * Builds a fresh fake artifact service and a real invocation context for each
+ * test, mirroring the adk-python test harness.
+ */
+function createHarness(
+  session = createSession({
+    id: 'test_session',
+    appName: APP_NAME,
+    userId: USER_ID,
+  }),
+) {
+  const {saveArtifact, getArtifactVersion, artifactService} =
+    createFakeArtifactService();
+
+  const invocationContext = new InvocationContext({
+    invocationId: INVOCATION_ID,
+    session,
     artifactService,
-    invocationId: 'test_invocation_123',
-    session: {id: 'test_session', state: {} as Record<string, unknown>},
-  } as unknown as InvocationContext;
+    pluginManager: new PluginManager(),
+  });
 
   return {saveArtifact, getArtifactVersion, artifactService, invocationContext};
 }
 
-const mockAgent = {name: 'test_agent'} as BaseAgent;
+const testAgent = new LlmAgent({name: 'test_agent'});
 
 /**
  * The plugin's cross-callback bookkeeping key. The `temp:` prefix is part of
@@ -609,6 +643,160 @@ describe('SaveFilesAsArtifactsPlugin', () => {
     });
   });
 
+  describe('file size limit', () => {
+    it('saves a file whose decoded size is exactly the limit', async () => {
+      const {invocationContext, saveArtifact} = createHarness();
+      const plugin = new SaveFilesAsArtifactsPlugin();
+
+      const inlineData: Blob = {
+        displayName: 'exactly_20mb.pdf',
+        data: base64OfSize(MAX_INLINE_DATA_SIZE_BYTES),
+        mimeType: 'application/pdf',
+      };
+
+      const result = await plugin.onUserMessageCallback({
+        invocationContext,
+        userMessage: {role: 'user', parts: [{inlineData}]},
+      });
+
+      expect(saveArtifact).toHaveBeenCalledTimes(1);
+      expect(result!.parts![0].text).toBe(
+        '[Uploaded Artifact: "exactly_20mb.pdf"]',
+      );
+    });
+
+    it('saves a blob that carries no data', async () => {
+      const {invocationContext, saveArtifact} = createHarness();
+      const plugin = new SaveFilesAsArtifactsPlugin();
+
+      const inlineData: Blob = {
+        displayName: 'empty.pdf',
+        mimeType: 'application/pdf',
+      };
+
+      const result = await plugin.onUserMessageCallback({
+        invocationContext,
+        userMessage: {role: 'user', parts: [{inlineData}]},
+      });
+
+      expect(saveArtifact).toHaveBeenCalledTimes(1);
+      expect(result!.parts![0].text).toBe('[Uploaded Artifact: "empty.pdf"]');
+    });
+
+    it('rejects a file one byte over the limit', async () => {
+      const {invocationContext, saveArtifact} = createHarness();
+      const plugin = new SaveFilesAsArtifactsPlugin();
+
+      const inlineData: Blob = {
+        displayName: 'over_limit.pdf',
+        data: base64OfSize(MAX_INLINE_DATA_SIZE_BYTES + 1),
+        mimeType: 'application/pdf',
+      };
+
+      const result = await plugin.onUserMessageCallback({
+        invocationContext,
+        userMessage: {role: 'user', parts: [{inlineData}]},
+      });
+
+      expect(saveArtifact).not.toHaveBeenCalled();
+      expect(result!.parts).toHaveLength(1);
+      expect(result!.parts![0].text).toBe(
+        '[Upload Error: File over_limit.pdf (20.00 MB) exceeds the maximum' +
+          ' supported size of 20MB. Please upload a smaller file.]',
+      );
+      expect(
+        warnMessages.some((m) => m.includes('exceeds the maximum supported')),
+      ).toBe(true);
+    });
+
+    it('reports the size in megabytes for a 21MB file', async () => {
+      const {invocationContext, saveArtifact} = createHarness();
+      const plugin = new SaveFilesAsArtifactsPlugin();
+
+      const inlineData: Blob = {
+        displayName: 'big.pdf',
+        data: base64OfSize(21 * 1024 * 1024),
+        mimeType: 'application/pdf',
+      };
+
+      const result = await plugin.onUserMessageCallback({
+        invocationContext,
+        userMessage: {role: 'user', parts: [{inlineData}]},
+      });
+
+      expect(saveArtifact).not.toHaveBeenCalled();
+      expect(result!.parts![0].text).toBe(
+        '[Upload Error: File big.pdf (21.00 MB) exceeds the maximum supported' +
+          ' size of 20MB. Please upload a smaller file.]',
+      );
+    });
+
+    it('names an oversized file without a displayName by its generated name', async () => {
+      const {invocationContext} = createHarness();
+      const plugin = new SaveFilesAsArtifactsPlugin();
+
+      const inlineData: Blob = {
+        data: base64OfSize(MAX_INLINE_DATA_SIZE_BYTES + 1),
+        mimeType: 'application/pdf',
+      };
+
+      const result = await plugin.onUserMessageCallback({
+        invocationContext,
+        userMessage: {role: 'user', parts: [{inlineData}]},
+      });
+
+      expect(result!.parts![0].text).toContain(
+        '[Upload Error: File artifact_test_invocation_123_0 (20.00 MB)',
+      );
+    });
+
+    it('saves the small file and rejects the large one in the same message', async () => {
+      const {invocationContext, saveArtifact} = createHarness();
+      const plugin = new SaveFilesAsArtifactsPlugin();
+
+      const userMessage: Content = {
+        role: 'user',
+        parts: [
+          {
+            inlineData: {
+              displayName: 'small.pdf',
+              data: base64OfSize(5 * 1024 * 1024),
+              mimeType: 'application/pdf',
+            },
+          },
+          {
+            inlineData: {
+              displayName: 'large.pdf',
+              data: base64OfSize(25 * 1024 * 1024),
+              mimeType: 'application/pdf',
+            },
+          },
+        ],
+      };
+
+      const result = await plugin.onUserMessageCallback({
+        invocationContext,
+        userMessage,
+      });
+
+      expect(saveArtifact).toHaveBeenCalledTimes(1);
+      expect(saveArtifact.mock.calls[0][0].filename).toBe('small.pdf');
+
+      expect(result!.parts).toHaveLength(3);
+      expect(result!.parts![0].text).toBe('[Uploaded Artifact: "small.pdf"]');
+      expect(result!.parts![1].fileData!.fileUri).toBe(
+        'gs://mock-bucket/small.pdf/versions/0',
+      );
+      expect(result!.parts![2].text).toBe(
+        '[Upload Error: File large.pdf (25.00 MB) exceeds the maximum' +
+          ' supported size of 20MB. Please upload a smaller file.]',
+      );
+      expect(invocationContext.session.state[PENDING_DELTA_KEY]).toEqual({
+        'small.pdf': 0,
+      });
+    });
+  });
+
   describe('artifact delta reporting', () => {
     it('records the pending delta into session state', async () => {
       const {invocationContext} = createHarness();
@@ -675,12 +863,9 @@ describe('SaveFilesAsArtifactsPlugin', () => {
       });
 
       // Turn 1: before-agent callback flushes the delta and clears the state.
-      const callbackContext1 = {
-        state: new State(invocationContext.session.state),
-        actions: {artifactDelta: {} as Record<string, number>},
-      } as unknown as Context;
+      const callbackContext1 = new Context({invocationContext});
       await plugin.beforeAgentCallback({
-        agent: mockAgent,
+        agent: testAgent,
         callbackContext: callbackContext1,
       });
       expect(callbackContext1.actions.artifactDelta).toEqual({'blob.pdf': 0});
@@ -707,12 +892,9 @@ describe('SaveFilesAsArtifactsPlugin', () => {
       });
 
       // Turn 2: before-agent callback flushes the second delta.
-      const callbackContext2 = {
-        state: new State(invocationContext.session.state),
-        actions: {artifactDelta: {} as Record<string, number>},
-      } as unknown as Context;
+      const callbackContext2 = new Context({invocationContext});
       await plugin.beforeAgentCallback({
-        agent: mockAgent,
+        agent: testAgent,
         callbackContext: callbackContext2,
       });
       expect(callbackContext2.actions.artifactDelta).toEqual({'blob_2.pdf': 0});
@@ -723,13 +905,10 @@ describe('SaveFilesAsArtifactsPlugin', () => {
       const {invocationContext} = createHarness();
       const plugin = new SaveFilesAsArtifactsPlugin();
 
-      const callbackContext = {
-        state: new State(invocationContext.session.state),
-        actions: {artifactDelta: {} as Record<string, number>},
-      } as unknown as Context;
+      const callbackContext = new Context({invocationContext});
 
       const result = await plugin.beforeAgentCallback({
-        agent: mockAgent,
+        agent: testAgent,
         callbackContext,
       });
 
@@ -742,13 +921,10 @@ describe('SaveFilesAsArtifactsPlugin', () => {
       invocationContext.session.state[PENDING_DELTA_KEY] = {};
       const plugin = new SaveFilesAsArtifactsPlugin();
 
-      const callbackContext = {
-        state: new State(invocationContext.session.state),
-        actions: {artifactDelta: {} as Record<string, number>},
-      } as unknown as Context;
+      const callbackContext = new Context({invocationContext});
 
       await plugin.beforeAgentCallback({
-        agent: mockAgent,
+        agent: testAgent,
         callbackContext,
       });
 
@@ -758,15 +934,10 @@ describe('SaveFilesAsArtifactsPlugin', () => {
     it('keeps the bookkeeping key out of durable session state', async () => {
       const sessionService = new InMemorySessionService();
       const session = await sessionService.createSession({
-        appName: 'test_app',
-        userId: 'test_user',
+        appName: APP_NAME,
+        userId: USER_ID,
       });
-      const {artifactService} = createHarness();
-      const invocationContext = {
-        artifactService,
-        invocationId: 'test_invocation_123',
-        session,
-      } as unknown as InvocationContext;
+      const {invocationContext} = createHarness(session);
       const plugin = new SaveFilesAsArtifactsPlugin();
 
       await plugin.onUserMessageCallback({
@@ -789,7 +960,7 @@ describe('SaveFilesAsArtifactsPlugin', () => {
       // is what a session service would persist.
       const callbackContext = new Context({invocationContext});
       await plugin.beforeAgentCallback({
-        agent: mockAgent,
+        agent: testAgent,
         callbackContext,
       });
       expect(callbackContext.actions.artifactDelta).toEqual({'blob.pdf': 0});
