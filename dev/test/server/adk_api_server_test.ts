@@ -638,6 +638,59 @@ describe('AdkWebServer', () => {
         }),
       ).toBeUndefined();
     });
+
+    describe('version id', () => {
+      beforeEach(async () => {
+        await sessionService.createSession({
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+        });
+
+        for (const text of ['content', 'content2']) {
+          await artifactService.saveArtifact({
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+            filename: 'artifact.txt',
+            artifact: {text},
+          });
+        }
+      });
+
+      it('resolves latest to the newest version', async () => {
+        const response = await client.get(
+          '/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt/versions/latest',
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.data).toEqual({text: 'content2'});
+      });
+
+      it.each(['abc', '1abc', '1.5', 'LATEST'])(
+        'returns 422 for the version id %s',
+        async (versionId) => {
+          await expect(
+            client.get(
+              `/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt/versions/${versionId}`,
+            ),
+          ).rejects.toMatchObject({
+            response: {
+              status: 422,
+              data: {error: `Invalid version ID: ${versionId}`},
+            },
+          });
+        },
+      );
+
+      it('returns 404 for a well-formed version that does not exist', async () => {
+        await expect(
+          client.get(
+            '/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt/versions/5',
+          ),
+        ).rejects.toMatchObject({response: {status: 404}});
+      });
+    });
   });
 
   describe('Artifact version metadata', () => {

@@ -848,12 +848,19 @@ export class AdkApiServer {
           const artifactName = req.params['artifactName'];
           const versionId = req.params['versionId'];
 
+          const parsed = parseArtifactVersionId(versionId);
+
+          if (!parsed.valid) {
+            res.status(422).json({error: `Invalid version ID: ${versionId}`});
+            return;
+          }
+
           const artifact = await this.artifactService.loadArtifact({
             appName,
             userId,
             sessionId,
             filename: artifactName,
-            version: parseInt(versionId, 10),
+            version: parsed.version,
           });
 
           if (!artifact) {
