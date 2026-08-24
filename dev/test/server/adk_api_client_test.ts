@@ -160,7 +160,7 @@ describe('AdkApiClient', () => {
         userId: 'user1',
         state: {key: 'value'},
       });
-      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      fetchMock.mockResolvedValue({
         ok: true,
         json: async () => mockSession,
       });
@@ -172,7 +172,7 @@ describe('AdkApiClient', () => {
         stateDelta: {key: 'value'},
       });
 
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(fetchMock).toHaveBeenCalledWith(
         `${mockBackendUrl}/apps/app1/users/user1/sessions/session1`,
         {
           method: 'PATCH',
@@ -184,7 +184,7 @@ describe('AdkApiClient', () => {
     });
 
     it('should throw the error the server reported', async () => {
-      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      fetchMock.mockResolvedValue({
         ok: false,
         status: 404,
         json: async () => ({error: 'Session not found: session1'}),
@@ -579,7 +579,7 @@ describe('AdkApiClient', () => {
   describe('getArtifactVersionMetadata', () => {
     it('should read a numbered version successfully', async () => {
       const mockVersion = {version: 2, mimeType: 'text/plain'};
-      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      fetchMock.mockResolvedValue({
         ok: true,
         json: async () => mockVersion,
       });
@@ -592,7 +592,7 @@ describe('AdkApiClient', () => {
         version: 2,
       });
 
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(fetchMock).toHaveBeenCalledWith(
         `${mockBackendUrl}/apps/app1/users/user1/sessions/session1/artifacts/report/versions/2/metadata`,
         {
           method: 'GET',
@@ -603,7 +603,7 @@ describe('AdkApiClient', () => {
     });
 
     it('should request the latest version', async () => {
-      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      fetchMock.mockResolvedValue({
         ok: true,
         json: async () => ({version: 4}),
       });
@@ -616,7 +616,7 @@ describe('AdkApiClient', () => {
         version: 'latest',
       });
 
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(fetchMock).toHaveBeenCalledWith(
         `${mockBackendUrl}/apps/app1/users/user1/sessions/session1/artifacts/report/versions/latest/metadata`,
         {
           method: 'GET',
@@ -626,7 +626,7 @@ describe('AdkApiClient', () => {
     });
 
     it('should throw the error the server reported', async () => {
-      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      fetchMock.mockResolvedValue({
         ok: false,
         status: 422,
         json: async () => ({error: 'Invalid version ID: abc'}),
@@ -647,7 +647,7 @@ describe('AdkApiClient', () => {
   describe('listArtifactVersionsMetadata', () => {
     it('should list the version metadata successfully', async () => {
       const mockVersions = [{version: 0}, {version: 1}];
-      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      fetchMock.mockResolvedValue({
         ok: true,
         json: async () => mockVersions,
       });
@@ -659,7 +659,7 @@ describe('AdkApiClient', () => {
         artifactName: 'report',
       });
 
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(fetchMock).toHaveBeenCalledWith(
         `${mockBackendUrl}/apps/app1/users/user1/sessions/session1/artifacts/report/versions/metadata`,
         {
           method: 'GET',
