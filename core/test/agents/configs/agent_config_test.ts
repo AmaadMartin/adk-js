@@ -48,9 +48,9 @@ describe('agentClassDiscriminator', () => {
     },
   );
 
-  it('reads an already-camelCased document', () => {
+  it('ignores a camelCase agentClass key', () => {
     expect(agentClassDiscriminator({name: 'a', agentClass: 'LoopAgent'})).toBe(
-      'LoopAgent',
+      'LlmAgent',
     );
   });
 
@@ -84,11 +84,11 @@ describe('parseAgentYamlConfig', () => {
     expect(
       parseAgentYamlConfig({name: 'writer', instruction: 'Write code.'}),
     ).toEqual({
-      agentClass: 'LlmAgent',
+      agent_class: 'LlmAgent',
       name: 'writer',
       description: '',
       instruction: 'Write code.',
-      includeContents: 'default',
+      include_contents: 'default',
     });
   });
 
@@ -100,10 +100,10 @@ describe('parseAgentYamlConfig', () => {
         other_field: 'other value',
       }),
     ).toEqual({
-      agentClass: 'mylib.agents.MyCustomAgent',
+      agent_class: 'mylib.agents.MyCustomAgent',
       name: 'custom',
       description: '',
-      otherField: 'other value',
+      other_field: 'other value',
     });
   });
 
@@ -141,15 +141,37 @@ describe('parseAgentYamlConfig', () => {
         instruction: 'Do it.',
         model_code: {name: 'mylib.models.my_model'},
       }),
-    ).toMatchObject({modelCode: {name: 'mylib.models.my_model'}});
+    ).toMatchObject({model_code: {name: 'mylib.models.my_model'}});
   });
 
-  it('rejects a tool entry carrying args', () => {
+  it('accepts a tool entry with free-form args', () => {
+    expect(
+      parseAgentYamlConfig({
+        name: 'a',
+        instruction: 'Do it.',
+        tools: [{name: 'mylib.tools.make_tool', args: {threshold: 1}}],
+      }),
+    ).toMatchObject({
+      tools: [{name: 'mylib.tools.make_tool', args: {threshold: 1}}],
+    });
+  });
+
+  it('accepts a tool entry naming nothing but a tool', () => {
+    expect(
+      parseAgentYamlConfig({
+        name: 'a',
+        instruction: 'Do it.',
+        tools: [{name: 'google_search'}],
+      }),
+    ).toMatchObject({tools: [{name: 'google_search'}]});
+  });
+
+  it('rejects a tool entry carrying a key beyond name and args', () => {
     expect(() =>
       parseAgentYamlConfig({
         name: 'a',
         instruction: 'Do it.',
-        tools: [{name: 'mylib.tools.make_tool', args: [{name: 'p', value: 1}]}],
+        tools: [{name: 'google_search', config: {}}],
       }),
     ).toThrowError(INVALID_CONFIG);
   });
@@ -180,41 +202,52 @@ describe('parseAgentYamlConfig', () => {
     ).toThrowError(INVALID_CONFIG);
   });
 
-  it('parses a snake_case and a camelCase document identically', () => {
-    const snakeCase = parseAgentYamlConfig({
+  it('keeps every wire key as written', () => {
+    expect(
+      parseAgentYamlConfig({
+        agent_class: 'LoopAgent',
+        name: 'looper',
+        max_iterations: 3,
+        sub_agents: [{config_path: 'sub/child.yaml'}],
+        before_agent_callbacks: [{name: 'mylib.callbacks.before'}],
+      }),
+    ).toEqual({
       agent_class: 'LoopAgent',
       name: 'looper',
+      description: '',
       max_iterations: 3,
       sub_agents: [{config_path: 'sub/child.yaml'}],
       before_agent_callbacks: [{name: 'mylib.callbacks.before'}],
     });
-    const camelCase = parseAgentYamlConfig({
-      agentClass: 'LoopAgent',
-      name: 'looper',
-      maxIterations: 3,
-      subAgents: [{configPath: 'sub/child.yaml'}],
-      beforeAgentCallbacks: [{name: 'mylib.callbacks.before'}],
-    });
-
-    expect(snakeCase).toEqual(camelCase);
-    expect(snakeCase).toEqual({
-      agentClass: 'LoopAgent',
-      name: 'looper',
-      description: '',
-      maxIterations: 3,
-      subAgents: [{configPath: 'sub/child.yaml'}],
-      beforeAgentCallbacks: [{name: 'mylib.callbacks.before'}],
-    });
   });
 
-  it('camelCases include_contents and its value stays on the wire spelling', () => {
+  it('rejects a camelCase spelling of a strict schema field', () => {
+    expect(() =>
+      parseAgentYamlConfig({
+        agent_class: 'LoopAgent',
+        name: 'looper',
+        maxIterations: 3,
+      }),
+    ).toThrowError(INVALID_CONFIG);
+  });
+
+  it('names the offending key when a field is misspelled', () => {
+    expect(() =>
+      parseAgentYamlConfig({
+        name: 'a',
+        instructions: 'Do it.',
+      }),
+    ).toThrowError(/instructions/);
+  });
+
+  it('keeps include_contents on the wire spelling', () => {
     expect(
       parseAgentYamlConfig({
         name: 'a',
         instruction: 'Do it.',
         include_contents: 'none',
       }),
-    ).toMatchObject({includeContents: 'none'});
+    ).toMatchObject({include_contents: 'none'});
   });
 
   it('rejects an include_contents value outside the wire vocabulary', () => {
@@ -227,14 +260,14 @@ describe('parseAgentYamlConfig', () => {
     ).toThrowError(INVALID_CONFIG);
   });
 
-  it('accepts a generate_content_config object and camelCases its keys', () => {
+  it('accepts a generate_content_config object without touching its keys', () => {
     expect(
       parseAgentYamlConfig({
         name: 'a',
         instruction: 'Do it.',
         generate_content_config: {temperature: 0.5, top_k: 4},
       }),
-    ).toMatchObject({generateContentConfig: {temperature: 0.5, topK: 4}});
+    ).toMatchObject({generate_content_config: {temperature: 0.5, top_k: 4}});
   });
 
   it('rejects a non-object generate_content_config', () => {
@@ -257,9 +290,7 @@ describe('parseAgentYamlConfig', () => {
 describe('agentRefYamlConfigSchema', () => {
   it('accepts a config_path on its own', () => {
     expect(agentRefYamlConfigSchema.parse({config_path: 'child.yaml'})).toEqual(
-      {
-        configPath: 'child.yaml',
-      },
+      {config_path: 'child.yaml'},
     );
   });
 

@@ -153,7 +153,7 @@ export type LlmAgentYamlConfig = z.infer<typeof llmAgentYamlConfigSchema>;
 export const loopAgentYamlConfigSchema = commonAgentYamlObject
   .extend({
     agent_class: z.string().default('LoopAgent'),
-    max_iterations: z.number().int().positive().optional(),
+    max_iterations: z.number().int().optional(),
   })
   .strict()
   .meta({id: 'LoopAgentConfig'});

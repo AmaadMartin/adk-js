@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {GenerateContentConfig} from '@google/genai';
 import * as yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -219,6 +220,18 @@ function resolveCallbacks<T extends AnyCallback>(
   });
 }
 
+/**
+ * `@google/genai` names the fields of a `GenerateContentConfig` in camelCase,
+ * while adk-python's `types.GenerateContentConfig` takes the snake_case
+ * spellings a config document otherwise uses. Converting the subtree keeps a
+ * document written for either language loadable.
+ */
+function toGenerateContentConfig(
+  value: GenerateContentConfig | undefined,
+): GenerateContentConfig | undefined {
+  return value && (camelCaseKeys(value) as GenerateContentConfig);
+}
+
 function asTool(name: string, resolved: unknown): ToolUnion {
   if (!isBaseTool(resolved) && !isBaseToolset(resolved)) {
     throw new AgentConfigError(
@@ -423,7 +436,9 @@ async function createLlmAgent(
     disallowTransferToPeers: parsed.disallow_transfer_to_peers,
     includeContents: parsed.include_contents,
     outputKey: parsed.output_key,
-    generateContentConfig: parsed.generate_content_config,
+    generateContentConfig: toGenerateContentConfig(
+      parsed.generate_content_config,
+    ),
     beforeModelCallback: resolveCallbacks<SingleBeforeModelCallback>(
       parsed.before_model_callbacks,
       options,
