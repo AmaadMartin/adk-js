@@ -44,11 +44,25 @@ export interface SpannerAdminToolsetOptions {
  *   - `spanner_list_databases`
  *   - `spanner_create_database`
  *
+ * Every tool answers with a {@link SpannerToolResult} and never throws.
+ *
  * `spanner_create_instance` and `spanner_create_database` create billable
- * Google Cloud resources.
+ * Google Cloud resources. Both wait for the long-running operation, bounded at
+ * {@link CREATE_OPERATION_TIMEOUT_MS}.
  *
  * Requires the optional peer dependency `@google-cloud/spanner-api`, which is
- * loaded on the first tool call.
+ * loaded on the first tool call. Install it with
+ * `npm install @google-cloud/spanner-api`.
+ *
+ * Credentials default to Application Default Credentials scoped to the Spanner
+ * admin scope. `clientOptions` reaches both Admin API clients, so anything they
+ * accept works:
+ *
+ * ```ts
+ * const toolset = new SpannerAdminToolset({
+ *   clientOptions: {keyFilename: process.env.SPANNER_KEY_FILE},
+ * });
+ * ```
  *
  * A `toolFilter` given as a string array matches the prefixed name, as it does
  * for `MCPToolset` and `OpenAPIToolset`. adk-python filters on the bare name,

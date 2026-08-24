@@ -43,7 +43,10 @@ const CREATE_OPERATION_CALL_OPTIONS = {
 };
 
 /**
- * What a Spanner admin tool returns to the model.
+ * What a Spanner admin tool returns to the model. A tool never throws: a
+ * rejected Admin API call, a create operation that fails or exceeds
+ * {@link CREATE_OPERATION_TIMEOUT_MS}, missing credentials and a missing
+ * `@google-cloud/spanner-api` package all arrive as `ERROR`.
  *
  * The keys are `snake_case` because they cross the model boundary and must
  * match what adk-python emits.
@@ -113,9 +116,13 @@ const createDatabaseParams = z.object({
     .describe('The Spanner database id. It cannot contain a backtick.'),
 });
 
-/** Reduces a full resource name (`projects/p/instances/i`) to its id (`i`). */
-function resourceId(name: string): string {
-  return name.slice(name.lastIndexOf('/') + 1);
+/**
+ * Reduces a resource to the last segment of its name, so
+ * `projects/p/instances/i` reads as `i`. The generated protos type every field
+ * as optional, so a nameless resource yields the empty string.
+ */
+function resourceId({name}: {name?: string | null}): string {
+  return name ? name.slice(name.lastIndexOf('/') + 1) : '';
 }
 
 /** Reports a replica type as its enum name, whatever form the client used. */
@@ -172,7 +179,7 @@ const listInstancesTool: SpannerAdminToolDefinition<
     });
     return {
       status: 'SUCCESS',
-      results: instances.map((instance) => resourceId(instance.name!)),
+      results: instances.map(resourceId),
     };
   },
 };
@@ -211,7 +218,7 @@ const listInstanceConfigsTool: SpannerAdminToolDefinition<
     });
     return {
       status: 'SUCCESS',
-      results: configs.map((config) => resourceId(config.name!)),
+      results: configs.map(resourceId),
     };
   },
 };
@@ -285,7 +292,7 @@ const listDatabasesTool: SpannerAdminToolDefinition<
     });
     return {
       status: 'SUCCESS',
-      results: databases.map((database) => resourceId(database.name!)),
+      results: databases.map(resourceId),
     };
   },
 };
@@ -312,24 +319,11 @@ const createDatabaseTool: SpannerAdminToolDefinition<
 };
 
 /**
- * Resolves the admin clients and runs one tool, turning any failure into the
- * `ERROR` result. adk-python wraps every admin function body in
- * `try/except Exception`; here the single wrapper also covers the client
- * construction, so a missing peer dependency or missing credentials reach the
- * model as an error rather than as a thrown exception.
+ * Wraps one operation as a prefixed tool. adk-python wraps every admin
+ * function body in `try/except Exception`; the single `catch` here also covers
+ * resolving the clients, so a missing peer dependency or missing credentials
+ * reach the model as an error rather than as a thrown exception.
  */
-async function runAdminTool<TParams extends z.ZodObject>(
-  provider: SpannerAdminClientProvider,
-  definition: SpannerAdminToolDefinition<TParams>,
-  args: ToolExecuteArgument<TParams>,
-): Promise<SpannerToolResult> {
-  try {
-    return await definition.run(await provider.getClients(), args);
-  } catch (err: unknown) {
-    return {status: 'ERROR', error_details: formatError(err)};
-  }
-}
-
 function createSpannerTool<TParams extends z.ZodObject>(
   provider: SpannerAdminClientProvider,
   definition: SpannerAdminToolDefinition<TParams>,
@@ -338,7 +332,13 @@ function createSpannerTool<TParams extends z.ZodObject>(
     name: `${SPANNER_TOOL_NAME_PREFIX}_${definition.name}`,
     description: definition.description,
     parameters: definition.parameters,
-    execute: (args) => runAdminTool(provider, definition, args),
+    async execute(args) {
+      try {
+        return await definition.run(await provider.getClients(), args);
+      } catch (err: unknown) {
+        return {status: 'ERROR', error_details: formatError(err)};
+      }
+    },
   });
 }
 

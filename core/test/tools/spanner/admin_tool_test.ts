@@ -75,6 +75,16 @@ describe('Spanner admin tools', () => {
       ).toEqual({status: 'SUCCESS', results: []});
     });
 
+    it('reports an instance the API left unnamed as an empty id', async () => {
+      // Every field of a generated proto is optional, so `name` can be absent
+      // even though the API always sets it.
+      fakeInstanceAdmin.listInstances.mockResolvedValue([[{}]]);
+
+      expect(
+        await runTool('spanner_list_instances', {project_id: PROJECT}),
+      ).toEqual({status: 'SUCCESS', results: ['']});
+    });
+
     it('reports a rejected call as an error result', async () => {
       fakeInstanceAdmin.listInstances.mockRejectedValue(
         new Error('permission denied'),
