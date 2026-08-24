@@ -167,7 +167,7 @@ function applyLiveRunConfig(
     // `handle` is left out on purpose. It belongs to the invocation context,
     // which withholds it from a transferred sub-agent; copying it here would
     // put the caller's handle back onto the sub-agent's fresh request.
-    const {handle, ...resumptionMode} = runConfig.sessionResumption;
+    const {handle: _handle, ...resumptionMode} = runConfig.sessionResumption;
     liveConfig.sessionResumption = resumptionMode;
   }
 }
