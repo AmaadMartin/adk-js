@@ -51,7 +51,6 @@ import {
   AgentConfigErrorCode,
   AgentRefYamlConfig,
   agentRefYamlConfigSchema,
-  AgentYamlConfig,
   BaseAgentYamlConfig,
   baseAgentYamlConfigSchema,
   CodeYamlConfig,
@@ -63,7 +62,6 @@ import {
   LoopAgentYamlConfig,
   loopAgentYamlConfigSchema,
   parallelAgentYamlConfigSchema,
-  parseAgentYamlConfig,
   parseWithSchema,
   sequentialAgentYamlConfigSchema,
   ToolYamlConfig,
@@ -372,7 +370,15 @@ async function resolveSubAgentPath(
   return resolved;
 }
 
-async function readConfigDocument(configAbsPath: string): Promise<unknown> {
+/**
+ * Reads a config file and returns its document.
+ *
+ * An empty file, a list and a bare scalar are all rejected here, so the rest
+ * of the loader can treat a document as a mapping.
+ */
+async function readConfigDocument(
+  configAbsPath: string,
+): Promise<Record<string, unknown>> {
   let contents: string;
   try {
     contents = await fs.readFile(configAbsPath, 'utf-8');
@@ -386,14 +392,27 @@ async function readConfigDocument(configAbsPath: string): Promise<unknown> {
     throw e;
   }
 
+  let document: unknown;
   try {
-    return yaml.load(contents);
+    document = yaml.load(contents);
   } catch (e: unknown) {
     throw new AgentConfigError(
       AgentConfigErrorCode.INVALID_CONFIG,
       `Invalid agent config in ${configAbsPath}: ${String(e)}`,
     );
   }
+
+  if (
+    typeof document !== 'object' ||
+    document === null ||
+    Array.isArray(document)
+  ) {
+    throw new AgentConfigError(
+      AgentConfigErrorCode.INVALID_CONFIG,
+      `Invalid agent config in ${configAbsPath}: expected an object, got ${JSON.stringify(document) ?? typeof document}.`,
+    );
+  }
+  return document as Record<string, unknown>;
 }
 
 async function createBaseAgentConfig(
@@ -547,17 +566,26 @@ function createCustomAgent(
   return agent;
 }
 
+/**
+ * Builds the agent a document describes.
+ *
+ * The document is validated once, against the schema its `agent_class`
+ * selects. A missing or empty `agent_class` means `LlmAgent`, matching
+ * adk-python's `agent_class or "LlmAgent"`, and an unrecognised one falls back
+ * to the permissive base config rather than raising.
+ */
 async function buildAgent(
-  config: AgentYamlConfig,
+  config: Record<string, unknown>,
   configAbsPath: string,
   options: LoadAgentOptions | undefined,
   inFlight: InFlightPaths,
 ): Promise<BaseAgent> {
-  // An empty agent_class means LlmAgent, matching adk-python's
-  // `agent_class or "LlmAgent"`.
-  switch (
-    BUILT_IN_AGENT_CLASSES.get(config.agent_class || DEFAULT_AGENT_CLASS)
-  ) {
+  const agentClass =
+    typeof config.agent_class === 'string' && config.agent_class
+      ? config.agent_class
+      : DEFAULT_AGENT_CLASS;
+
+  switch (BUILT_IN_AGENT_CLASSES.get(agentClass)) {
     case 'LlmAgent': {
       const parsed = parseWithSchema(llmAgentYamlConfigSchema, config);
       return createLlmAgent(
@@ -613,12 +641,7 @@ async function loadAgent(
   const document = await readConfigDocument(configAbsPath);
   inFlight.add(configAbsPath);
   try {
-    return await buildAgent(
-      parseAgentYamlConfig(document),
-      configAbsPath,
-      options,
-      inFlight,
-    );
+    return await buildAgent(document, configAbsPath, options, inFlight);
   } finally {
     inFlight.delete(configAbsPath);
   }

@@ -217,41 +217,6 @@ export const AGENT_YAML_CONFIG_SCHEMAS = {
   BaseAgent: baseAgentYamlConfigSchema,
 } as const satisfies Record<AgentYamlConfigTag, z.ZodType>;
 
-function isAdkAgentClass(value: unknown): value is AdkAgentClass {
-  return ADK_AGENT_CLASSES.some((agentClass) => agentClass === value);
-}
-
-/**
- * Selects the config shape a document is validated against.
- *
- * Reproduces adk-python's two documented edge cases: a missing `agent_class`
- * defaults to `LlmAgent`, and an unrecognised `agent_class` falls back to the
- * permissive base config instead of raising. Only bare class names are
- * recognised here — a fully qualified name such as
- * `google.adk.agents.LlmAgent` is tagged `BaseAgent` and re-typed at load time.
- *
- * @param document The raw config document.
- * @returns The tag naming the config shape to validate against.
- * @throws {AgentConfigError} With code `INVALID_CONFIG` if the document is not
- *     an object.
- */
-export function agentClassDiscriminator(document: unknown): AgentYamlConfigTag {
-  if (
-    typeof document !== 'object' ||
-    document === null ||
-    Array.isArray(document)
-  ) {
-    throw new AgentConfigError(
-      AgentConfigErrorCode.INVALID_CONFIG,
-      `Invalid agent config: expected an object, got ${JSON.stringify(document) ?? typeof document}.`,
-    );
-  }
-
-  const agentClass =
-    'agent_class' in document ? document.agent_class : DEFAULT_AGENT_CLASS;
-  return isAdkAgentClass(agentClass) ? agentClass : 'BaseAgent';
-}
-
 /**
  * Validates `data` against `schema`, reporting failures as an
  * {@link AgentConfigError} that keeps the underlying validation detail.
@@ -268,22 +233,4 @@ export function parseWithSchema<T extends z.ZodType>(
     );
   }
   return result.data;
-}
-
-/**
- * Validates a declarative agent config document.
- *
- * Keys are the `snake_case` names adk-python writes; the loader maps them to
- * the camelCase agent constructor options.
- *
- * @param data The raw config document.
- * @returns The validated config.
- * @throws {AgentConfigError} With code `INVALID_CONFIG` if the document does
- *     not satisfy the schema selected by {@link agentClassDiscriminator}.
- */
-export function parseAgentYamlConfig(data: unknown): AgentYamlConfig {
-  return parseWithSchema(
-    AGENT_YAML_CONFIG_SCHEMAS[agentClassDiscriminator(data)],
-    data,
-  );
 }

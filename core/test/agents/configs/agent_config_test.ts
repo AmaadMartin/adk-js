@@ -8,67 +8,25 @@ import {describe, expect, it} from 'vitest';
 import {
   ADK_AGENT_CLASSES,
   AgentConfigErrorCode,
-  agentClassDiscriminator,
   agentRefYamlConfigSchema,
-  parseAgentYamlConfig,
+  baseAgentYamlConfigSchema,
+  llmAgentYamlConfigSchema,
+  loopAgentYamlConfigSchema,
+  parallelAgentYamlConfigSchema,
+  parseWithSchema,
+  sequentialAgentYamlConfigSchema,
 } from '../../../src/agents/configs/agent_config.js';
 
 const INVALID_CONFIG = expect.objectContaining({
   code: AgentConfigErrorCode.INVALID_CONFIG,
 });
 
-describe('agentClassDiscriminator', () => {
-  it('defaults a document with no agent_class to LlmAgent', () => {
-    expect(agentClassDiscriminator({name: 'writer'})).toBe('LlmAgent');
-  });
-
-  it.each([
-    ['LlmAgent', 'LlmAgent', 'llm_agent'],
-    ['LoopAgent', 'LoopAgent', 'loop_agent'],
-    ['ParallelAgent', 'ParallelAgent', 'parallel_agent'],
-    ['SequentialAgent', 'SequentialAgent', 'sequential_agent'],
-  ])(
-    'tags the bare name %s but not its qualified spellings',
-    (agentClass, bareName, moduleName) => {
-      expect(agentClassDiscriminator({name: 'a', agent_class: bareName})).toBe(
-        agentClass,
-      );
-      expect(
-        agentClassDiscriminator({
-          name: 'a',
-          agent_class: `google.adk.agents.${bareName}`,
-        }),
-      ).toBe('BaseAgent');
-      expect(
-        agentClassDiscriminator({
-          name: 'a',
-          agent_class: `google.adk.agents.${moduleName}.${bareName}`,
-        }),
-      ).toBe('BaseAgent');
-    },
-  );
-
-  it('ignores a camelCase agentClass key', () => {
-    expect(agentClassDiscriminator({name: 'a', agentClass: 'LoopAgent'})).toBe(
-      'LlmAgent',
-    );
-  });
-
-  it('tags an unknown agent_class as BaseAgent', () => {
-    expect(
-      agentClassDiscriminator({name: 'a', agent_class: 'mylib.MyCustomAgent'}),
-    ).toBe('BaseAgent');
-  });
-
-  it.each([[null], [undefined], [42], ['x'], [['a']]])(
-    'rejects the non-object document %s',
-    (document) => {
-      expect(() => agentClassDiscriminator(document)).toThrowError(
-        INVALID_CONFIG,
-      );
-    },
-  );
-
+/**
+ * Which schema a document is validated against is the loader's decision, so
+ * the cases covering that live in `config_agent_utils_test.ts` and drive
+ * `loadAgentFromConfigFile`. The cases here pin the schemas themselves.
+ */
+describe('ADK_AGENT_CLASSES', () => {
   it('exposes the four built-in agent classes', () => {
     expect(ADK_AGENT_CLASSES).toEqual([
       'LlmAgent',
@@ -79,10 +37,13 @@ describe('agentClassDiscriminator', () => {
   });
 });
 
-describe('parseAgentYamlConfig', () => {
-  it('applies the LlmAgent defaults to a document with no agent_class', () => {
+describe('llmAgentYamlConfigSchema', () => {
+  it('applies the documented defaults to a minimal document', () => {
     expect(
-      parseAgentYamlConfig({name: 'writer', instruction: 'Write code.'}),
+      parseWithSchema(llmAgentYamlConfigSchema, {
+        name: 'writer',
+        instruction: 'Write code.',
+      }),
     ).toEqual({
       agent_class: 'LlmAgent',
       name: 'writer',
@@ -92,40 +53,9 @@ describe('parseAgentYamlConfig', () => {
     });
   });
 
-  it('keeps an unknown agent_class and its extra fields', () => {
-    expect(
-      parseAgentYamlConfig({
-        agent_class: 'mylib.agents.MyCustomAgent',
-        name: 'custom',
-        other_field: 'other value',
-      }),
-    ).toEqual({
-      agent_class: 'mylib.agents.MyCustomAgent',
-      name: 'custom',
-      description: '',
-      other_field: 'other value',
-    });
-  });
-
-  it.each([
-    ['LlmAgent', {instruction: 'Do it.'}],
-    ['LoopAgent', {}],
-    ['ParallelAgent', {}],
-    ['SequentialAgent', {}],
-  ])('rejects an unknown key on a %s document', (agentClass, extraFields) => {
-    expect(() =>
-      parseAgentYamlConfig({
-        agent_class: agentClass,
-        name: 'a',
-        ...extraFields,
-        not_a_field: true,
-      }),
-    ).toThrowError(INVALID_CONFIG);
-  });
-
   it('rejects a document that sets both model and model_code', () => {
     expect(() =>
-      parseAgentYamlConfig({
+      parseWithSchema(llmAgentYamlConfigSchema, {
         name: 'a',
         instruction: 'Do it.',
         model: 'gemini-2.5-flash',
@@ -136,7 +66,7 @@ describe('parseAgentYamlConfig', () => {
 
   it('accepts a document that sets only model_code', () => {
     expect(
-      parseAgentYamlConfig({
+      parseWithSchema(llmAgentYamlConfigSchema, {
         name: 'a',
         instruction: 'Do it.',
         model_code: {name: 'mylib.models.my_model'},
@@ -146,7 +76,7 @@ describe('parseAgentYamlConfig', () => {
 
   it('accepts a tool entry with free-form args', () => {
     expect(
-      parseAgentYamlConfig({
+      parseWithSchema(llmAgentYamlConfigSchema, {
         name: 'a',
         instruction: 'Do it.',
         tools: [{name: 'mylib.tools.make_tool', args: {threshold: 1}}],
@@ -158,7 +88,7 @@ describe('parseAgentYamlConfig', () => {
 
   it('accepts a tool entry naming nothing but a tool', () => {
     expect(
-      parseAgentYamlConfig({
+      parseWithSchema(llmAgentYamlConfigSchema, {
         name: 'a',
         instruction: 'Do it.',
         tools: [{name: 'google_search'}],
@@ -168,7 +98,7 @@ describe('parseAgentYamlConfig', () => {
 
   it('rejects a tool entry carrying a key beyond name and args', () => {
     expect(() =>
-      parseAgentYamlConfig({
+      parseWithSchema(llmAgentYamlConfigSchema, {
         name: 'a',
         instruction: 'Do it.',
         tools: [{name: 'google_search', config: {}}],
@@ -176,15 +106,15 @@ describe('parseAgentYamlConfig', () => {
     ).toThrowError(INVALID_CONFIG);
   });
 
-  it('requires an instruction on an LlmAgent document', () => {
-    expect(() => parseAgentYamlConfig({name: 'a'})).toThrowError(
-      INVALID_CONFIG,
-    );
+  it('requires an instruction', () => {
+    expect(() =>
+      parseWithSchema(llmAgentYamlConfigSchema, {name: 'a'}),
+    ).toThrowError(INVALID_CONFIG);
   });
 
   it('rejects static_instruction, which adk-js LlmAgent does not support', () => {
     expect(() =>
-      parseAgentYamlConfig({
+      parseWithSchema(llmAgentYamlConfigSchema, {
         name: 'a',
         instruction: 'Do it.',
         static_instruction: 'Static.',
@@ -192,9 +122,76 @@ describe('parseAgentYamlConfig', () => {
     ).toThrowError(INVALID_CONFIG);
   });
 
+  it('rejects a camelCase spelling of a field', () => {
+    expect(() =>
+      parseWithSchema(llmAgentYamlConfigSchema, {
+        name: 'a',
+        instruction: 'Do it.',
+        outputKey: 'draft',
+      }),
+    ).toThrowError(INVALID_CONFIG);
+  });
+
+  it('names the offending key when a field is misspelled', () => {
+    expect(() =>
+      parseWithSchema(llmAgentYamlConfigSchema, {
+        name: 'a',
+        instructions: 'Do it.',
+      }),
+    ).toThrowError(/instructions/);
+  });
+
+  it('keeps include_contents on the wire spelling', () => {
+    expect(
+      parseWithSchema(llmAgentYamlConfigSchema, {
+        name: 'a',
+        instruction: 'Do it.',
+        include_contents: 'none',
+      }),
+    ).toMatchObject({include_contents: 'none'});
+  });
+
+  it('rejects an include_contents value outside the wire vocabulary', () => {
+    expect(() =>
+      parseWithSchema(llmAgentYamlConfigSchema, {
+        name: 'a',
+        instruction: 'Do it.',
+        include_contents: 'all',
+      }),
+    ).toThrowError(INVALID_CONFIG);
+  });
+
+  it('accepts a generate_content_config object without touching its keys', () => {
+    expect(
+      parseWithSchema(llmAgentYamlConfigSchema, {
+        name: 'a',
+        instruction: 'Do it.',
+        generate_content_config: {temperature: 0.5, top_k: 4},
+      }),
+    ).toMatchObject({generate_content_config: {temperature: 0.5, top_k: 4}});
+  });
+
+  it('rejects a non-object generate_content_config', () => {
+    expect(() =>
+      parseWithSchema(llmAgentYamlConfigSchema, {
+        name: 'a',
+        instruction: 'Do it.',
+        generate_content_config: 'hot',
+      }),
+    ).toThrowError(INVALID_CONFIG);
+  });
+
+  it('reports the underlying validation detail', () => {
+    expect(() =>
+      parseWithSchema(llmAgentYamlConfigSchema, {instruction: 'Do it.'}),
+    ).toThrowError(/Invalid agent config:[\s\S]*name/);
+  });
+});
+
+describe('loopAgentYamlConfigSchema', () => {
   it("rejects a non-integer max_iterations, matching Python's int", () => {
     expect(() =>
-      parseAgentYamlConfig({
+      parseWithSchema(loopAgentYamlConfigSchema, {
         agent_class: 'LoopAgent',
         name: 'looper',
         max_iterations: 2.7,
@@ -204,7 +201,7 @@ describe('parseAgentYamlConfig', () => {
 
   it('keeps every wire key as written', () => {
     expect(
-      parseAgentYamlConfig({
+      parseWithSchema(loopAgentYamlConfigSchema, {
         agent_class: 'LoopAgent',
         name: 'looper',
         max_iterations: 3,
@@ -221,70 +218,52 @@ describe('parseAgentYamlConfig', () => {
     });
   });
 
-  it('rejects a camelCase spelling of a strict schema field', () => {
+  it('rejects a camelCase spelling of a field', () => {
     expect(() =>
-      parseAgentYamlConfig({
+      parseWithSchema(loopAgentYamlConfigSchema, {
         agent_class: 'LoopAgent',
         name: 'looper',
         maxIterations: 3,
       }),
     ).toThrowError(INVALID_CONFIG);
   });
+});
 
-  it('names the offending key when a field is misspelled', () => {
-    expect(() =>
-      parseAgentYamlConfig({
-        name: 'a',
-        instructions: 'Do it.',
-      }),
-    ).toThrowError(/instructions/);
-  });
-
-  it('keeps include_contents on the wire spelling', () => {
+describe('baseAgentYamlConfigSchema', () => {
+  it('keeps an unknown agent_class and its extra fields', () => {
     expect(
-      parseAgentYamlConfig({
-        name: 'a',
-        instruction: 'Do it.',
-        include_contents: 'none',
+      parseWithSchema(baseAgentYamlConfigSchema, {
+        agent_class: 'mylib.agents.MyCustomAgent',
+        name: 'custom',
+        other_field: 'other value',
       }),
-    ).toMatchObject({include_contents: 'none'});
+    ).toEqual({
+      agent_class: 'mylib.agents.MyCustomAgent',
+      name: 'custom',
+      description: '',
+      other_field: 'other value',
+    });
   });
+});
 
-  it('rejects an include_contents value outside the wire vocabulary', () => {
-    expect(() =>
-      parseAgentYamlConfig({
-        name: 'a',
-        instruction: 'Do it.',
-        include_contents: 'all',
-      }),
-    ).toThrowError(INVALID_CONFIG);
-  });
-
-  it('accepts a generate_content_config object without touching its keys', () => {
-    expect(
-      parseAgentYamlConfig({
-        name: 'a',
-        instruction: 'Do it.',
-        generate_content_config: {temperature: 0.5, top_k: 4},
-      }),
-    ).toMatchObject({generate_content_config: {temperature: 0.5, top_k: 4}});
-  });
-
-  it('rejects a non-object generate_content_config', () => {
-    expect(() =>
-      parseAgentYamlConfig({
-        name: 'a',
-        instruction: 'Do it.',
-        generate_content_config: 'hot',
-      }),
-    ).toThrowError(INVALID_CONFIG);
-  });
-
-  it('reports the underlying validation detail', () => {
-    expect(() => parseAgentYamlConfig({instruction: 'Do it.'})).toThrowError(
-      /Invalid agent config:[\s\S]*name/,
-    );
-  });
+describe('the strict agent config schemas', () => {
+  it.each([
+    ['LlmAgent', llmAgentYamlConfigSchema, {instruction: 'Do it.'}],
+    ['LoopAgent', loopAgentYamlConfigSchema, {}],
+    ['ParallelAgent', parallelAgentYamlConfigSchema, {}],
+    ['SequentialAgent', sequentialAgentYamlConfigSchema, {}],
+  ])(
+    'rejects an unknown key on a %s document',
+    (_name, schema, extraFields) => {
+      expect(() =>
+        parseWithSchema(schema, {
+          name: 'a',
+          ...extraFields,
+          not_a_field: true,
+        }),
+      ).toThrowError(INVALID_CONFIG);
+    },
+  );
 });
 
 describe('agentRefYamlConfigSchema', () => {

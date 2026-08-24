@@ -418,6 +418,67 @@ name: writer
     ).rejects.toThrowError(/bad indentation/);
   });
 
+  it.each([
+    ['an empty file', ''],
+    ['a comment-only file', '# nothing here\n'],
+    ['a list', '- writer\n- reviewer\n'],
+    ['a bare scalar', 'writer\n'],
+    ['an explicit null', '~\n'],
+  ])('rejects %s as a config document', async (_label, contents) => {
+    const dir = await writeConfigs({'root.yaml': contents});
+
+    await expect(
+      loadAgentFromConfigFile(path.join(dir, 'root.yaml')),
+    ).rejects.toThrowError(errorWithCode(AgentConfigErrorCode.INVALID_CONFIG));
+  });
+
+  it('ignores a camelCase agentClass key', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+agentClass: LoopAgent
+name: writer
+instruction: Write code.
+`,
+    });
+
+    // The document is validated as an LlmAgent, whose schema is strict, so the
+    // stray camelCase key is reported rather than selecting a LoopAgent.
+    await expect(
+      loadAgentFromConfigFile(path.join(dir, 'root.yaml')),
+    ).rejects.toThrowError(errorWithCode(AgentConfigErrorCode.INVALID_CONFIG));
+  });
+
+  it('validates an unknown agent_class against the loose base config', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+agent_class: mylib.agents.GreetingAgent
+name: greeter
+greeting: hello
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(
+      path.join(dir, 'root.yaml'),
+      resolvingTo({'mylib.agents.GreetingAgent': GreetingAgent}),
+    );
+
+    expect(agent.name).toBe('greeter');
+  });
+
+  it('rejects a non-string agent_class', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+agent_class: 42
+name: writer
+instruction: Write code.
+`,
+    });
+
+    await expect(
+      loadAgentFromConfigFile(path.join(dir, 'root.yaml')),
+    ).rejects.toThrowError(errorWithCode(AgentConfigErrorCode.INVALID_CONFIG));
+  });
+
   it('loads a JSON config document', async () => {
     const dir = await writeConfigs({
       'root.json': JSON.stringify({
