@@ -6,12 +6,19 @@
 
 import type {v1} from '@google-cloud/spanner-api';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
+import {version} from '../../version.js';
 
 /** OAuth scope required by the Spanner Admin API. */
 const SPANNER_ADMIN_SCOPE = 'https://www.googleapis.com/auth/spanner.admin';
 
 /** The feature named in the error raised when the peer is not installed. */
 const FEATURE_NAME = 'SpannerAdminToolset';
+
+/**
+ * Attribution sent to the Spanner Admin API, matching adk-python's
+ * `USER_AGENT = f"adk-spanner-tool google-adk/{version.__version__}"`.
+ */
+const CLIENT_LIB_NAME = 'adk-spanner-tool google-adk';
 
 /**
  * Options the Spanner Admin API clients accept: `credentials`, `keyFilename`,
@@ -76,7 +83,12 @@ export class SpannerAdminClientProvider {
       {packageName: '@google-cloud/spanner-api', feature: FEATURE_NAME},
       () => import('@google-cloud/spanner-api'),
     );
-    const options = {scopes: [SPANNER_ADMIN_SCOPE], ...this.options};
+    const options = {
+      scopes: [SPANNER_ADMIN_SCOPE],
+      libName: CLIENT_LIB_NAME,
+      libVersion: version,
+      ...this.options,
+    };
     return {
       instanceAdmin: new spannerV1.InstanceAdminClient(options),
       databaseAdmin: new spannerV1.DatabaseAdminClient(options),

@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseTool, Context, SpannerAdminToolset} from '@google/adk';
+import {
+  BaseTool,
+  Context,
+  CREATE_OPERATION_TIMEOUT_MS,
+  SpannerAdminToolset,
+} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   completedOperation,
@@ -260,6 +265,27 @@ describe('Spanner admin tools', () => {
       });
     });
 
+    it('reports a replica type the enum does not know as an error', async () => {
+      fakeInstanceAdmin.getInstanceConfig.mockResolvedValue([
+        {
+          name: 'nam3',
+          displayName: 'nam3',
+          replicas: [{location: 'us-east4', type: 99}],
+          labels: {},
+        },
+      ]);
+
+      expect(
+        await runTool('spanner_get_instance_config', {
+          project_id: PROJECT,
+          config_id: 'nam3',
+        }),
+      ).toEqual({
+        status: 'ERROR',
+        error_details: 'Unknown Spanner replica type: 99.',
+      });
+    });
+
     it('reports a config without replicas as an empty list', async () => {
       fakeInstanceAdmin.getInstanceConfig.mockResolvedValue([
         {name: 'nam3', displayName: 'nam3', labels: {}},
@@ -300,15 +326,22 @@ describe('Spanner admin tools', () => {
         nodes: 3,
       });
 
-      expect(fakeInstanceAdmin.createInstance).toHaveBeenCalledWith({
-        parent: `projects/${PROJECT}`,
-        instanceId: 'new-instance',
-        instance: {
-          displayName: 'New Instance',
-          config: `projects/${PROJECT}/instanceConfigs/regional-us-central1`,
-          nodeCount: 3,
+      expect(fakeInstanceAdmin.createInstance).toHaveBeenCalledWith(
+        {
+          parent: `projects/${PROJECT}`,
+          instanceId: 'new-instance',
+          instance: {
+            displayName: 'New Instance',
+            config: `projects/${PROJECT}/instanceConfigs/regional-us-central1`,
+            nodeCount: 3,
+          },
         },
-      });
+        expect.objectContaining({
+          longrunning: expect.objectContaining({
+            totalTimeoutMillis: CREATE_OPERATION_TIMEOUT_MS,
+          }),
+        }),
+      );
       expect(operation.promise).toHaveBeenCalled();
       expect(result).toEqual({
         status: 'SUCCESS',
@@ -332,6 +365,7 @@ describe('Spanner admin tools', () => {
         expect.objectContaining({
           instance: expect.objectContaining({nodeCount: 1}),
         }),
+        expect.anything(),
       );
     });
 
@@ -409,13 +443,36 @@ describe('Spanner admin tools', () => {
         database_id: 'my-database',
       });
 
-      expect(fakeDatabaseAdmin.createDatabase).toHaveBeenCalledWith({
-        parent: `projects/${PROJECT}/instances/my-instance`,
-        createStatement: 'CREATE DATABASE `my-database`',
-      });
+      expect(fakeDatabaseAdmin.createDatabase).toHaveBeenCalledWith(
+        {
+          parent: `projects/${PROJECT}/instances/my-instance`,
+          createStatement: 'CREATE DATABASE `my-database`',
+        },
+        expect.objectContaining({
+          longrunning: expect.objectContaining({
+            totalTimeoutMillis: CREATE_OPERATION_TIMEOUT_MS,
+          }),
+        }),
+      );
       expect(operation.promise).toHaveBeenCalled();
       // adk-python returns the status alone here, with no `results` key.
       expect(result).toEqual({status: 'SUCCESS'});
+    });
+
+    it('rejects a database id that would break out of the backticks', async () => {
+      const result = await runTool('spanner_create_database', {
+        project_id: PROJECT,
+        instance_id: 'my-instance',
+        database_id: 'ok` OPTIONS (version_retention_period = `1h',
+      });
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details:
+          'Invalid database id "ok` OPTIONS (version_retention_period = `1h": ' +
+          'it cannot contain a backtick.',
+      });
+      expect(fakeDatabaseAdmin.createDatabase).not.toHaveBeenCalled();
     });
 
     it('reports a failed operation as an error result', async () => {

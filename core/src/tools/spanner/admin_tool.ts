@@ -21,6 +21,28 @@ export const SPANNER_TOOL_NAME_PREFIX = 'spanner';
 const DEFAULT_INSTANCE_NODES = 1;
 
 /**
+ * How long a create operation may run before it is reported as an error,
+ * matching adk-python's `operation.result(timeout=300)`.
+ */
+export const CREATE_OPERATION_TIMEOUT_MS = 300_000;
+
+/**
+ * Polling settings for a create operation. google-gax replaces its default
+ * backoff outright when `longrunning` is supplied rather than merging into it,
+ * so the delays below repeat `createDefaultBackoffSettings()`; only the total
+ * bound is ours. Without it gax polls with a deadline of `Infinity`, so a
+ * create that never completes would hang the tool call forever.
+ */
+const CREATE_OPERATION_CALL_OPTIONS = {
+  longrunning: {
+    initialRetryDelayMillis: 100,
+    retryDelayMultiplier: 1.3,
+    maxRetryDelayMillis: 60_000,
+    totalTimeoutMillis: CREATE_OPERATION_TIMEOUT_MS,
+  },
+};
+
+/**
  * What a Spanner admin tool returns to the model.
  *
  * The keys are `snake_case` because they cross the model boundary and must
@@ -86,7 +108,9 @@ const listDatabasesParams = z.object({
 const createDatabaseParams = z.object({
   project_id: projectIdField,
   instance_id: instanceIdField,
-  database_id: z.string().describe('The Spanner database id.'),
+  database_id: z
+    .string()
+    .describe('The Spanner database id. It cannot contain a backtick.'),
 });
 
 /** Reduces a full resource name (`projects/p/instances/i`) to its id (`i`). */
@@ -98,10 +122,30 @@ function resourceId(name: string): string {
 function replicaTypeName(
   type: ReplicaType | ReplicaTypeName | null | undefined,
 ): ReplicaTypeName {
-  if (typeof type === 'number') {
-    return REPLICA_TYPE_NAMES[type];
+  if (typeof type !== 'number') {
+    return type ?? 'TYPE_UNSPECIFIED';
   }
-  return type ?? 'TYPE_UNSPECIFIED';
+  const name = REPLICA_TYPE_NAMES[type];
+  if (name === undefined) {
+    // adk-python raises here too: `ReplicaInfo.ReplicaType(r.type)` rejects a
+    // value the generated enum does not know.
+    throw new Error(`Unknown Spanner replica type: ${type}.`);
+  }
+  return name;
+}
+
+/**
+ * Rejects a database id that would break out of the backticks quoting it in
+ * the `CREATE DATABASE` statement. The id comes from the model, so without
+ * this it could append arbitrary DDL. adk-python has the same hole; this port
+ * closes it.
+ */
+function assertQuotableDatabaseId(databaseId: string): void {
+  if (databaseId.includes('`')) {
+    throw new Error(
+      `Invalid database id "${databaseId}": it cannot contain a backtick.`,
+    );
+  }
 }
 
 /** One admin tool: its model-facing schema and the Admin API call it makes. */
@@ -202,21 +246,25 @@ const createInstanceTool: SpannerAdminToolDefinition<
   typeof createInstanceParams
 > = {
   name: 'create_instance',
-  description: 'Create a Spanner instance.',
+  description:
+    'Create a Spanner instance. This creates a billable Google Cloud resource.',
   parameters: createInstanceParams,
   async run(
     {instanceAdmin},
     {project_id, instance_id, config_id, display_name, nodes},
   ) {
-    const [operation] = await instanceAdmin.createInstance({
-      parent: instanceAdmin.projectPath(project_id),
-      instanceId: instance_id,
-      instance: {
-        displayName: display_name,
-        config: instanceAdmin.instanceConfigPath(project_id, config_id),
-        nodeCount: nodes,
+    const [operation] = await instanceAdmin.createInstance(
+      {
+        parent: instanceAdmin.projectPath(project_id),
+        instanceId: instance_id,
+        instance: {
+          displayName: display_name,
+          config: instanceAdmin.instanceConfigPath(project_id, config_id),
+          nodeCount: nodes,
+        },
       },
-    });
+      CREATE_OPERATION_CALL_OPTIONS,
+    );
     await operation.promise();
     return {
       status: 'SUCCESS',
@@ -246,13 +294,18 @@ const createDatabaseTool: SpannerAdminToolDefinition<
   typeof createDatabaseParams
 > = {
   name: 'create_database',
-  description: 'Create a Spanner database.',
+  description:
+    'Create a Spanner database. This creates a billable Google Cloud resource.',
   parameters: createDatabaseParams,
   async run({databaseAdmin}, {project_id, instance_id, database_id}) {
-    const [operation] = await databaseAdmin.createDatabase({
-      parent: databaseAdmin.instancePath(project_id, instance_id),
-      createStatement: `CREATE DATABASE \`${database_id}\``,
-    });
+    assertQuotableDatabaseId(database_id);
+    const [operation] = await databaseAdmin.createDatabase(
+      {
+        parent: databaseAdmin.instancePath(project_id, instance_id),
+        createStatement: `CREATE DATABASE \`${database_id}\``,
+      },
+      CREATE_OPERATION_CALL_OPTIONS,
+    );
     await operation.promise();
     return {status: 'SUCCESS'};
   },

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {SpannerAdminClientProvider} from '@google/adk';
+import {SpannerAdminClientProvider, version} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   DatabaseAdminClientMock,
@@ -20,6 +20,7 @@ vi.mock('@google-cloud/spanner-api', async () => {
 });
 
 const ADMIN_SCOPE = 'https://www.googleapis.com/auth/spanner.admin';
+const LIB_NAME = 'adk-spanner-tool google-adk';
 
 describe('SpannerAdminClientProvider', () => {
   beforeEach(() => {
@@ -29,12 +30,13 @@ describe('SpannerAdminClientProvider', () => {
   it('scopes both clients to the Spanner admin scope', async () => {
     const clients = await new SpannerAdminClientProvider().getClients();
 
-    expect(InstanceAdminClientMock).toHaveBeenCalledWith({
+    const expected = {
       scopes: [ADMIN_SCOPE],
-    });
-    expect(DatabaseAdminClientMock).toHaveBeenCalledWith({
-      scopes: [ADMIN_SCOPE],
-    });
+      libName: LIB_NAME,
+      libVersion: version,
+    };
+    expect(InstanceAdminClientMock).toHaveBeenCalledWith(expected);
+    expect(DatabaseAdminClientMock).toHaveBeenCalledWith(expected);
     expect(clients.instanceAdmin).toBe(fakeInstanceAdmin);
     expect(clients.databaseAdmin).toBe(fakeDatabaseAdmin);
   });
@@ -45,10 +47,12 @@ describe('SpannerAdminClientProvider', () => {
       scopes: ['https://www.googleapis.com/auth/cloud-platform'],
     }).getClients();
 
-    expect(InstanceAdminClientMock).toHaveBeenCalledWith({
-      projectId: 'my-project',
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    });
+    expect(InstanceAdminClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'my-project',
+        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+      }),
+    );
   });
 
   it('builds the clients once and reuses them', async () => {
