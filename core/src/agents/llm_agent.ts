@@ -1035,11 +1035,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
       try {
         if (resuming) {
-          llmRequest.liveConnectConfig.sessionResumption = {
-            ...(llmRequest.liveConnectConfig.sessionResumption ?? {}),
-            handle: invocationContext.liveSessionResumptionHandle,
-            transparent: true,
-          };
+          // Merge, not replace, so the caller's mode survives a reconnect;
+          // transparent is the default only when they configured none.
+          const resumption = (llmRequest.liveConnectConfig.sessionResumption ??=
+            {transparent: true});
+          resumption.handle = invocationContext.liveSessionResumptionHandle;
           logger.info(
             `Reconnecting live connection for agent ${this.name} (attempt ${reconnectAttempts}).`,
           );

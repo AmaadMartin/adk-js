@@ -797,7 +797,11 @@ export class Runner {
           pluginManager: this.pluginManager,
           liveRequestQueue: params.liveRequestQueue,
           abortSignal: params.abortSignal,
-          liveSessionResumptionHandle: params.liveSessionResumptionHandle,
+          // Seeded per invocation, not per agent flow, so the transfer path
+          // can withhold the handle from a sub-agent's own session.
+          liveSessionResumptionHandle:
+            params.liveSessionResumptionHandle ??
+            runConfig.sessionResumption?.handle,
         });
 
         invocationContext.agent = this.determineAgentForResumption(
@@ -845,13 +849,31 @@ export class Runner {
 
           const eventToProcess = modifiedEvent ?? event;
 
+          // Persist the artifact reference, but yield the untouched event:
+          // a live front-end still has to play those bytes.
+          let eventToPersist = eventToProcess;
           if (
+            runConfig.saveLiveBlob &&
             !eventToProcess.partial &&
-            !isLiveModelMediaEventWithInlineData(eventToProcess)
+            eventToProcess.content &&
+            isLiveModelMediaEventWithInlineData(eventToProcess)
+          ) {
+            eventToPersist = {
+              ...eventToProcess,
+              content: await this.saveArtifacts(
+                invocationContext,
+                eventToProcess.content,
+              ),
+            };
+          }
+
+          if (
+            !eventToPersist.partial &&
+            !isLiveModelMediaEventWithInlineData(eventToPersist)
           ) {
             await this.sessionService.appendEvent({
               session,
-              event: eventToProcess,
+              event: eventToPersist,
             });
           }
 

@@ -93,4 +93,31 @@ describe('createRunConfig', () => {
     const config = createRunConfig({getSessionConfig: {numRecentEvents: 10}});
     expect(config.getSessionConfig).toEqual({numRecentEvents: 10});
   });
+
+  it('defaults saveLiveBlob to false and leaves the other live fields absent', () => {
+    const config = createRunConfig();
+    expect(config.saveLiveBlob).toBe(false);
+    expect(config.sessionResumption).toBeUndefined();
+    expect(config.explicitVadSignal).toBeUndefined();
+  });
+
+  it('keeps the supplied live streaming fields', () => {
+    const config = createRunConfig({
+      sessionResumption: {transparent: true},
+      saveLiveBlob: true,
+      explicitVadSignal: true,
+    });
+    expect(config.sessionResumption).toEqual({transparent: true});
+    expect(config.saveLiveBlob).toBe(true);
+    expect(config.explicitVadSignal).toBe(true);
+  });
+
+  it('keeps an explicit false for saveLiveBlob and explicitVadSignal', () => {
+    const config = createRunConfig({
+      saveLiveBlob: false,
+      explicitVadSignal: false,
+    });
+    expect(config.saveLiveBlob).toBe(false);
+    expect(config.explicitVadSignal).toBe(false);
+  });
 });

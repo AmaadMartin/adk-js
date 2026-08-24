@@ -69,6 +69,16 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
         invocationContext.runConfig.realtimeInputConfig;
       llmRequest.liveConnectConfig.contextWindowCompression =
         invocationContext.runConfig.contextWindowCompression;
+      llmRequest.liveConnectConfig.explicitVadSignal =
+        invocationContext.runConfig.explicitVadSignal;
+      if (invocationContext.runConfig.sessionResumption) {
+        // Copy: the reconnect loop and google_llm both mutate this, and
+        // `handle` is owned by the invocation context (withheld from
+        // sub-agents).
+        const {handle: _handle, ...resumptionMode} =
+          invocationContext.runConfig.sessionResumption;
+        llmRequest.liveConnectConfig.sessionResumption = resumptionMode;
+      }
       // Gemini 3.x Live models reject these two fields.
       if (!isGemini3xFlashLive(llmRequest.model)) {
         llmRequest.liveConnectConfig.enableAffectiveDialog =
