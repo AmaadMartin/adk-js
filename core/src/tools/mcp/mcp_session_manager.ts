@@ -4,15 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {
-  StdioClientTransport,
-  StdioServerParameters,
-} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {
-  StreamableHTTPClientTransport,
-  StreamableHTTPClientTransportOptions,
-} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
+import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+import {formatError} from '../../utils/error_utils.js';
+import {logger} from '../../utils/logger.js';
+import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
+
+/**
+ * The optional peer backing every MCP connection.
+ *
+ * `@modelcontextprotocol/sdk` is the single largest transitive dependency
+ * ADK ever pulled in, and it is only reachable through the MCP tools, so it
+ * is loaded lazily from {@link MCPSessionManager.createSession}.
+ */
+const MCP_SDK: OptionalPeer = {
+  packageName: '@modelcontextprotocol/sdk',
+  feature: 'MCPSessionManager (and the MCP tools built on it)',
+};
+
+/** Surfaces a background transport error that would otherwise be dropped. */
+function logTransportError(err: unknown): void {
+  logger.error('MCP transport error: ' + formatError(err));
+}
 
 /**
  * Defines the parameters for establishing a connection to an MCP server using
@@ -79,39 +94,60 @@ export class MCPSessionManager {
   }
 
   async createSession(): Promise<Client> {
+    const {Client} = await loadOptionalPeer(
+      MCP_SDK,
+      () => import('@modelcontextprotocol/sdk/client/index.js'),
+    );
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
 
-    switch (this.connectionParams.type) {
-      case 'StdioConnectionParams':
-        await client.connect(
-          new StdioClientTransport(this.connectionParams.serverParams),
-        );
-        break;
-      case 'StreamableHTTPConnectionParams': {
-        const options = this.connectionParams.transportOptions ?? {};
-
-        if (
-          !options.requestInit &&
-          this.connectionParams.header !== undefined
-        ) {
-          options.requestInit = {
-            headers: this.connectionParams.header as Record<string, string>,
-          };
+    try {
+      switch (this.connectionParams.type) {
+        case 'StdioConnectionParams': {
+          const {StdioClientTransport} = await loadOptionalPeer(
+            MCP_SDK,
+            () => import('@modelcontextprotocol/sdk/client/stdio.js'),
+          );
+          const transport = new StdioClientTransport(
+            this.connectionParams.serverParams,
+          );
+          transport.onerror = logTransportError;
+          await client.connect(transport);
+          break;
         }
+        case 'StreamableHTTPConnectionParams': {
+          const options = this.connectionParams.transportOptions ?? {};
 
-        await client.connect(
-          new StreamableHTTPClientTransport(
+          if (
+            !options.requestInit &&
+            this.connectionParams.header !== undefined
+          ) {
+            options.requestInit = {
+              headers: this.connectionParams.header as Record<string, string>,
+            };
+          }
+
+          const {StreamableHTTPClientTransport} = await loadOptionalPeer(
+            MCP_SDK,
+            () => import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+          );
+          const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
             options,
-          ),
-        );
-        break;
+          );
+          transport.onerror = logTransportError;
+          await client.connect(transport);
+          break;
+        }
+        default: {
+          // Triggers compile error if a case is missing.
+          const _exhaustiveCheck: never = this.connectionParams;
+          break;
+        }
       }
-      default: {
-        // Triggers compile error if a case is missing.
-        const _exhaustiveCheck: never = this.connectionParams;
-        break;
-      }
+    } catch (err) {
+      throw new Error('Failed to create MCP session: ' + formatError(err), {
+        cause: err,
+      });
     }
 
     this.activeSessions.add(client);

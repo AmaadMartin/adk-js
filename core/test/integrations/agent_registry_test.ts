@@ -6,6 +6,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistry,
@@ -49,6 +50,7 @@ vi.mock('google-auth-library', () => {
 
 const mockMcpClient = {
   connect: vi.fn().mockResolvedValue(undefined),
+  close: vi.fn().mockResolvedValue(undefined),
   listTools: vi.fn().mockResolvedValue({
     tools: [
       {name: 'tool1', description: 'desc1', inputSchema: {}},
@@ -558,6 +560,9 @@ describe('AgentRegistry', () => {
             preferredTransport: 'JSONRPC',
             protocolVersion: '0.3.0',
             skills: [],
+            capabilities: {},
+            defaultInputModes: [],
+            defaultOutputModes: [],
           },
         },
       };
@@ -693,16 +698,20 @@ describe('AgentRegistry', () => {
           content: {
             name: 'CustomAgentWithOptions',
             description: 'Desc',
+            version: '1.0.0',
             url: 'https://agent.com',
             preferredTransport: 'JSONRPC',
             protocolVersion: '0.3.0',
             skills: [],
+            capabilities: {},
+            defaultInputModes: [],
+            defaultOutputModes: [],
           },
         },
       };
 
-      const dummyClient = {};
-      const dummyClientFactory = () => {};
+      const dummyClient = {} as unknown as Client;
+      const dummyClientFactory = (() => {}) as unknown as ClientFactory;
 
       vi.spyOn(registry, 'getAgentInfo').mockResolvedValue(agentInfo);
       const agent = await registry.getRemoteA2AAgent('agents/agent-1', {

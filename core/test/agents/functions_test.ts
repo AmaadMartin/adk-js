@@ -28,7 +28,6 @@ import {
   generateClientFunctionCallId,
   getLongRunningFunctionCalls,
   mergeParallelFunctionResponseEvents,
-  populateClientFunctionCallId,
 } from '../../src/agents/functions.js';
 
 // Get the test target function
@@ -93,6 +92,26 @@ class TestPlugin extends BasePlugin {
 
 function randomIdForTestingOnly(): string {
   return (Math.random() * 100).toString();
+}
+
+const silentLongRunningTool = new FunctionTool({
+  name: 'silentLongRunningTool',
+  description: 'long running tool returning nullish',
+  parameters: z.object({}),
+  execute: async () => null,
+  isLongRunning: true,
+});
+
+const falsyLongRunningTool = new FunctionTool({
+  name: 'falsyLongRunningTool',
+  description: 'long running tool returning an empty string',
+  parameters: z.object({}),
+  execute: async () => '',
+  isLongRunning: true,
+});
+
+function callFor(tool: BaseTool): FunctionCall {
+  return {id: randomIdForTestingOnly(), name: tool.name, args: {}};
 }
 
 describe('handleFunctionCallList', () => {
@@ -364,6 +383,60 @@ describe('handleFunctionCallList', () => {
       }),
     );
   });
+
+  it('should still emit an event when a regular tool returns nothing', async () => {
+    const nullTool = new FunctionTool({
+      name: 'nullTool',
+      description: 'tool returning nullish',
+      parameters: z.object({}),
+      execute: async () => null,
+    });
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(nullTool)],
+      toolsDict: {'nullTool': nullTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(event).not.toBeNull();
+    expect(event?.content?.parts?.[0].functionResponse?.response).toStrictEqual(
+      {
+        result: null,
+      },
+    );
+  });
+
+  it('should cleanly return null and emit no event when long-running tool returns null or undefined', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(silentLongRunningTool)],
+      toolsDict: {silentLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(event).toBeNull();
+  });
+
+  it('should emit a response part only for the long-running tool that returned something', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        callFor(silentLongRunningTool),
+        callFor(falsyLongRunningTool),
+      ],
+      toolsDict: {silentLongRunningTool, falsyLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(event?.content?.parts).toEqual([
+      expect.objectContaining({
+        functionResponse: expect.objectContaining({
+          name: 'falsyLongRunningTool',
+          response: {result: ''},
+        }),
+      }),
+    ]);
+  });
 });
 
 describe('generateAuthEvent', () => {
@@ -403,7 +476,9 @@ describe('generateAuthEvent', () => {
     const functionResponseEvent = createEvent({
       actions: createEventActions({
         requestedAuthConfigs: {
+          // @ts-expect-error - testing string assignments
           'call_1': 'auth_config_1',
+          // @ts-expect-error - testing string assignments
           'call_2': 'auth_config_2',
         },
       }),
@@ -614,44 +689,6 @@ describe('generateClientFunctionCallId', () => {
   });
 });
 
-describe('populateClientFunctionCallId', () => {
-  it('should populate ID if missing', () => {
-    const event = createEvent({
-      content: {
-        role: 'model',
-        parts: [{functionCall: {name: 'testTool', args: {}}}],
-      },
-    });
-    populateClientFunctionCallId(event);
-    expect(event.content!.parts![0].functionCall!.id).toBeDefined();
-    expect(event.content!.parts![0].functionCall!.id).toMatch(/^adk-/);
-  });
-
-  it('should not overwrite existing ID', () => {
-    const event = createEvent({
-      content: {
-        role: 'model',
-        parts: [
-          {functionCall: {name: 'testTool', args: {}, id: 'existing-id'}},
-        ],
-      },
-    });
-    populateClientFunctionCallId(event);
-    expect(event.content!.parts![0].functionCall!.id).toBe('existing-id');
-  });
-
-  it('should handle event with no function calls', () => {
-    const event = createEvent({
-      content: {
-        role: 'model',
-        parts: [{text: 'hello'}],
-      },
-    });
-    populateClientFunctionCallId(event);
-    expect(event.content!.parts![0].text).toBe('hello');
-  });
-});
-
 describe('getLongRunningFunctionCalls', () => {
   it('should return IDs of long running function calls', () => {
     const functionCalls = [
@@ -672,7 +709,6 @@ describe('getLongRunningFunctionCalls', () => {
         isLongRunning: false,
       }),
     };
-    // @ts-expect-error ts will argue about toolsDict because getLongRunningFunctionCalls is improted from the source and BaseTool is imported from '@google/adk'.
     const result = getLongRunningFunctionCalls(functionCalls, toolsDict);
     expect(result.has('call-1')).toBe(true);
     expect(result.has('call-2')).toBe(false);

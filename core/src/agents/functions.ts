@@ -11,30 +11,55 @@ import {InvocationContext} from '../agents/invocation_context.js';
 import {
   createEvent,
   Event,
+  generateClientFunctionCallId,
   getFunctionCalls,
   getFunctionResponses,
 } from '../events/event.js';
 import {mergeEventActions} from '../events/event_actions.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
+import {
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+} from './framework_function_calls.js';
 
 import {
   traceMergedToolCalls,
   tracer,
   traceToolCall,
 } from '../telemetry/tracing.js';
+
 import {
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
 } from './llm_agent.js';
 
-export const AF_FUNCTION_CALL_ID_PREFIX = 'adk-';
-export const REQUEST_EUC_FUNCTION_CALL_NAME = 'adk_request_credential';
-export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
-  'adk_request_confirmation';
+/**
+ * Author for an event this module creates.
+ *
+ * Normally the agent whose turn produced the tool call. A `ToolNode` in a
+ * workflow has no agent above it when the workflow is the runner's root, and
+ * the node runner stamps the node's own name onto any event that leaves without
+ * an author — so returning an empty string here defers to that rather than
+ * asserting an agent that legitimately is not there.
+ */
+function toolEventAuthor(invocationContext: InvocationContext): string {
+  return invocationContext.agent?.name ?? '';
+}
+
+export {
+  AF_FUNCTION_CALL_ID_PREFIX,
+  generateClientFunctionCallId,
+  populateClientFunctionCallId,
+} from '../events/event.js';
+export {
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+  REQUEST_INPUT_FUNCTION_CALL_NAME,
+  reservedFunctionCallName,
+} from './framework_function_calls.js';
 
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {
@@ -42,30 +67,6 @@ export const functionsExportedForTestingOnly = {
   generateAuthEvent,
   generateRequestConfirmationEvent,
 };
-
-export function generateClientFunctionCallId(): string {
-  return `${AF_FUNCTION_CALL_ID_PREFIX}${randomUUID()}`;
-}
-
-/**
- * Populates client-side function call IDs.
- *
- * It iterates through all function calls in the event and assigns a
- * unique client-side ID to each one that doesn't already have an ID.
- */
-// TODO - b/425992518: consider move into event.ts
-export function populateClientFunctionCallId(modelResponseEvent: Event): void {
-  const functionCalls = getFunctionCalls(modelResponseEvent);
-  if (!functionCalls) {
-    return;
-  }
-  for (const functionCall of functionCalls) {
-    if (!functionCall.id) {
-      functionCall.id = generateClientFunctionCallId();
-    }
-  }
-}
-
 // TODO - b/425992518: consider internalize as part of llm_agent's runtime.
 /**
  * Returns a set of function call ids of the long running tools.
@@ -111,21 +112,21 @@ export function generateAuthEvent(
   for (const [functionCallId, authConfig] of Object.entries(
     functionResponseEvent.actions.requestedAuthConfigs,
   )) {
-    const requestEucFunctionCall: FunctionCall = {
-      name: REQUEST_EUC_FUNCTION_CALL_NAME,
+    const requestCredentialFunctionCall: FunctionCall = {
+      name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
       args: {
         'function_call_id': functionCallId,
         'auth_config': authConfig,
       },
       id: generateClientFunctionCallId(),
     };
-    longRunningToolIds.add(requestEucFunctionCall.id!);
-    parts.push({functionCall: requestEucFunctionCall});
+    longRunningToolIds.add(requestCredentialFunctionCall.id!);
+    parts.push({functionCall: requestCredentialFunctionCall});
   }
 
   return createEvent({
     invocationId: invocationContext.invocationId,
-    author: invocationContext.agent.name,
+    author: toolEventAuthor(invocationContext),
     branch: invocationContext.branch,
     content: {
       parts: parts,
@@ -178,7 +179,7 @@ export function generateRequestConfirmationEvent({
   }
   return createEvent({
     invocationId: invocationContext.invocationId,
-    author: invocationContext.agent.name,
+    author: toolEventAuthor(invocationContext),
     branch: invocationContext.branch,
     content: {
       parts: parts,
@@ -246,7 +247,7 @@ function buildResponseEvent(
 
   return createEvent({
     invocationId: invocationContext.invocationId,
-    author: invocationContext.agent.name,
+    author: toolEventAuthor(invocationContext),
     content: content,
     actions: toolContext.actions,
     branch: invocationContext.branch,
@@ -291,6 +292,24 @@ export async function handleFunctionCallsAsync({
     filters: filters,
     toolConfirmationDict: toolConfirmationDict,
   });
+}
+
+/**
+ * Normalizes callback and tool responses into a Record<string, unknown> or undefined.
+ */
+function normalizeCallbackResponse(
+  response: unknown,
+): Record<string, unknown> | undefined {
+  if (response == null) {
+    return undefined;
+  }
+  if (typeof response !== 'object') {
+    return {result: response};
+  }
+  if (Array.isArray(response)) {
+    return {results: response};
+  }
+  return response as Record<string, unknown>;
 }
 
 /**
@@ -342,7 +361,7 @@ export async function handleFunctionCallList({
     // Step 1: Check if plugin before_tool_callback overrides the function
     // response.
     let functionResponse = null;
-    let functionResponseError: string | unknown | undefined;
+    let functionResponseError: unknown;
     functionResponse =
       await invocationContext.pluginManager.runBeforeToolCallback({
         tool: tool,
@@ -352,7 +371,6 @@ export async function handleFunctionCallList({
 
     // Step 2: If no overrides are provided from the plugins, further run the
     // canonical callback.
-    // TODO - b/425992518: validate the callback response type matches.
     if (functionResponse == null) {
       // Cover both null and undefined
       for (const callback of beforeToolCallbacks) {
@@ -366,6 +384,10 @@ export async function handleFunctionCallList({
         }
       }
     }
+
+    // An override from step 1 or 2 bypasses the tool call and is handed to the
+    // after-tool callbacks as-is, so normalize it before they see it.
+    functionResponse = normalizeCallbackResponse(functionResponse);
 
     // Step 3: Otherwise, proceed calling the tool normally.
     if (functionResponse == null) {
@@ -384,8 +406,8 @@ export async function handleFunctionCallList({
 
           // Set function response to the result of the error callback and
           // continue execution, do not shortcut
-          if (onToolErrorResponse) {
-            functionResponse = onToolErrorResponse;
+          if (onToolErrorResponse != null) {
+            functionResponse = normalizeCallbackResponse(onToolErrorResponse);
           } else {
             // If the error callback returns undefined, use the error message
             // as the function response error.
@@ -429,30 +451,29 @@ export async function handleFunctionCallList({
     // Step 6: If alternative response exists from after_tool_callback, use it
     // instead of the original function response.
     if (alteredFunctionResponse != null) {
-      functionResponse = alteredFunctionResponse;
+      functionResponse = normalizeCallbackResponse(alteredFunctionResponse);
     }
 
-    // TODO - b/425992518: state event polluting runtime, consider fix.
     // Allow long running function to return None as response.
-    if (tool.isLongRunning && !functionResponse) {
+    // Only a nullish response defers the event. A falsy-but-present response
+    // ('', 0, false) is a real result and still emits one, so long-running
+    // tools that return such a value now produce a response event where they
+    // previously produced none.
+    if (tool.isLongRunning && functionResponse == null) {
       continue;
     }
 
     if (functionResponseError) {
       functionResponse = {error: functionResponseError};
-    } else if (
-      typeof functionResponse !== 'object' ||
-      functionResponse == null
-    ) {
+    } else if (functionResponse == null) {
       functionResponse = {result: functionResponse};
-    } else if (Array.isArray(functionResponse)) {
-      functionResponse = {results: functionResponse};
+    } else {
+      functionResponse = normalizeCallbackResponse(functionResponse);
     }
 
-    // Builds the function response event.
     const functionResponseEvent = createEvent({
       invocationId: invocationContext.invocationId,
-      author: invocationContext.agent.name,
+      author: toolEventAuthor(invocationContext),
       content: createUserContent({
         functionResponse: {
           id: toolContext.functionCallId,

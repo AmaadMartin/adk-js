@@ -6,6 +6,7 @@
 
 import AdmZip from 'adm-zip';
 import yaml from 'js-yaml';
+import {isUtf8} from 'node:buffer';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {logger} from '../utils/logger.js';
@@ -22,6 +23,9 @@ const ALLOWED_FRONTMATTER_KEYS = new Set([
   'description',
   'license',
   'allowed-tools',
+  // Camel-case alias: FrontmatterSchema's preprocessor derives `allowedTools`
+  // from `allowed-tools`, and `.loose()` passes either spelling through.
+  'allowedTools',
   'metadata',
   'compatibility',
 ]);
@@ -49,6 +53,17 @@ const IGNORED_EXTENSIONS = new Set([
   '.tsbuildinfo',
   '.DS_Store',
 ]);
+
+/**
+ * Decodes skill resource bytes as UTF-8 text when valid, otherwise keeps the
+ * raw Buffer.
+ *
+ * `Buffer.prototype.toString('utf-8')` never throws on invalid sequences — it
+ * substitutes U+FFFD — so callers must check validity before decoding.
+ */
+function decodeSkillFileContent(data: Buffer): string | Buffer {
+  return isUtf8(data) ? data.toString('utf-8') : data;
+}
 
 /**
  * Recursively loads files from a directory into a dictionary.
@@ -79,12 +94,7 @@ async function loadDir(
         }
 
         const fileData = await fs.readFile(fullPath);
-
-        try {
-          files[relativePath] = fileData.toString('utf-8');
-        } catch (_e: unknown) {
-          files[relativePath] = fileData;
-        }
+        files[relativePath] = decodeSkillFileContent(fileData);
       }
     }
   }
@@ -104,14 +114,14 @@ async function loadDir(
 }
 
 /**
- * Parses SKILL.md from a raw content string, extracting the YAML frontmatter and the body.
+ * Splits SKILL.md into its raw, unvalidated YAML frontmatter mapping and its body.
  *
  * @param content - The raw content of the SKILL.md file.
- * @returns An object containing the parsed frontmatter and the remaining markdown body.
+ * @returns An object containing the raw frontmatter mapping and the remaining markdown body.
  * @throws {Error} If the content is not properly formatted with YAML frontmatter.
  */
-export function parseSkillMdContent(content: string): {
-  frontmatter: Frontmatter;
+function parseFrontmatterYaml(content: string): {
+  raw: Record<string, unknown>;
   body: string;
 } {
   if (!content.startsWith('---')) {
@@ -132,15 +142,70 @@ export function parseSkillMdContent(content: string): {
 
   try {
     const parsed = yaml.load(frontmatterStr);
-    if (typeof parsed !== 'object' || parsed === null) {
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       throw new Error('SKILL.md frontmatter must be a YAML mapping');
     }
-    const frontmatter = FrontmatterSchema.parse(parsed);
-
-    return {frontmatter, body};
+    return {raw: parsed as Record<string, unknown>, body};
   } catch (e: unknown) {
     throw new Error(`Invalid YAML in frontmatter: ${(e as Error).message}`);
   }
+}
+
+/**
+ * Validates a raw frontmatter mapping against {@link FrontmatterSchema}.
+ *
+ * @param raw - The raw frontmatter mapping produced by {@link parseFrontmatterYaml}.
+ * @returns The validated and normalized frontmatter.
+ * @throws {Error} If the mapping does not satisfy the schema.
+ */
+function validateFrontmatter(raw: Record<string, unknown>): Frontmatter {
+  try {
+    return FrontmatterSchema.parse(raw);
+  } catch (e: unknown) {
+    throw new Error(`Invalid YAML in frontmatter: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Parses SKILL.md from a raw content string, extracting the YAML frontmatter and the body.
+ *
+ * @param content - The raw content of the SKILL.md file.
+ * @returns An object containing the parsed frontmatter and the remaining markdown body.
+ * @throws {Error} If the content is not properly formatted with YAML frontmatter.
+ */
+export function parseSkillMdContent(content: string): {
+  frontmatter: Frontmatter;
+  body: string;
+} {
+  const {raw, body} = parseFrontmatterYaml(content);
+  return {frontmatter: validateFrontmatter(raw), body};
+}
+
+/**
+ * Checks whether a zip member name attempts to escape the extraction root (zip
+ * slip), mirroring adk-python's `_load_skill_from_zip_bytes`. This is a
+ * name-shape check on archive metadata, not a sandbox: it says nothing about
+ * symlinks.
+ */
+function isDangerousZipEntryName(entryName: string): boolean {
+  if (path.posix.isAbsolute(entryName) || path.win32.isAbsolute(entryName)) {
+    return true;
+  }
+  return entryName.split(/[/\\]/).some((segment) => segment === '..');
+}
+
+/**
+ * Checks that a skill name is a single bare path segment, mirroring
+ * adk-python's `pathlib.Path(name).name != name`. '.' and '..' are rejected
+ * explicitly because `path.basename('..') === '..'` whereas
+ * `pathlib.Path('..').name === ''`.
+ */
+function isBareSkillName(name: string): boolean {
+  return name !== '.' && name !== '..' && path.basename(name) === name;
 }
 
 /**
@@ -332,12 +397,23 @@ export async function loadAllSkillsInDir(
 /**
  * Loads a complete skill directly from in-memory zip file buffer.
  *
+ * The whole archive is rejected if any member name escapes the extraction
+ * root, and the skill name must be a bare path segment.
+ *
  * @param zipBuffer - The raw Buffer of the zip file containing the skill.
  * @returns A Skill object with all components loaded.
+ * @throws {Error} If a member name is a traversal path, if SKILL.md is missing,
+ * or if the skill name is missing or is not a bare path segment.
  */
 export function loadSkillFromZipBuffer(zipBuffer: Buffer): Skill {
   const zip = new AdmZip(zipBuffer);
   const entries = zip.getEntries();
+
+  for (const entry of entries) {
+    if (isDangerousZipEntryName(entry.entryName)) {
+      throw new Error(`Dangerous zip entry ignored: ${entry.entryName}`);
+    }
+  }
 
   let skillMdContent = '';
   for (const entry of entries) {
@@ -352,8 +428,15 @@ export function loadSkillFromZipBuffer(zipBuffer: Buffer): Skill {
     throw new Error('SKILL.md not found in zipped filesystem.');
   }
 
-  const {frontmatter: parsed, body} = parseSkillMdContent(skillMdContent);
-  const frontmatter = FrontmatterSchema.parse(parsed);
+  const {raw, body} = parseFrontmatterYaml(skillMdContent);
+  const skillName = raw['name'];
+  if (!skillName) {
+    throw new Error("SKILL.md frontmatter must contain 'name'");
+  }
+  if (typeof skillName !== 'string' || !isBareSkillName(skillName)) {
+    throw new Error(`Invalid skill name in SKILL.md: ${String(skillName)}`);
+  }
+  const frontmatter = validateFrontmatter(raw);
 
   const references: Record<string, string | Buffer> = {};
   const assets: Record<string, string | Buffer> = {};
@@ -369,11 +452,7 @@ export function loadSkillFromZipBuffer(zipBuffer: Buffer): Skill {
         const relativePath = entry.entryName.substring(normPrefix.length);
         if (!relativePath) continue;
         const data = entry.getData();
-        try {
-          res[relativePath] = data.toString('utf-8');
-        } catch (_e: unknown) {
-          res[relativePath] = data;
-        }
+        res[relativePath] = decodeSkillFileContent(data);
       }
     }
     return res;

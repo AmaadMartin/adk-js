@@ -21,6 +21,7 @@ import {
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {logger} from '../../src/utils/logger.js';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -503,6 +504,184 @@ describe('Runner.determineAgentForResumption', () => {
     );
     expect(result.name).toBe('sub_agent1');
   });
+
+  describe('graph-workflow node events', () => {
+    /** A session holding the given events. */
+    async function sessionWith(sessionId: string, events: Event[]) {
+      const session = await sessionService.createSession({
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId,
+      });
+      for (const event of events) {
+        await sessionService.appendEvent({session, event});
+      }
+      return session;
+    }
+
+    /**
+     * An event from a node that is not an agent: authored by the node's own
+     * name, stamped with a node path. It is not in the agent tree, and never
+     * can be.
+     */
+    function nodeEvent(author: string, text: string) {
+      return createEvent({
+        invocationId: 'inv1',
+        author,
+        nodeInfo: {path: `root_agent.${author}`},
+        content: {role: 'model', parts: [{text}]},
+      });
+    }
+
+    it('does not warn about a node that is not in the agent tree', async () => {
+      // Every HITL resume replays node events, so this fired on the happy
+      // path of any workflow that pauses for input.
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      determineAgentForResumption(
+        await sessionWith('session_workflow_node', [
+          nodeEvent('step1', 'Enter a number:'),
+        ]),
+        rootAgent,
+        createResumabilityConfig({isResumable: true}),
+      );
+
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it('does not warn when a resumed function call came from a node', async () => {
+      // A HITL interrupt event carries no author, so the workflow engine
+      // stamps the node name on it. Replying to it with a structured resume
+      // sends Case 1 looking for an agent named after the node.
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const interrupt = createEvent({
+        invocationId: 'inv1',
+        author: 'gate',
+        nodeInfo: {path: 'root_agent.gate'},
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                id: 'interrupt_1',
+                name: 'adk_request_input',
+                args: {},
+              },
+            },
+          ],
+        },
+      });
+      const reply = createEvent({
+        invocationId: 'inv2',
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'interrupt_1',
+                name: 'adk_request_input',
+                response: {value: 21},
+              },
+            },
+          ],
+        },
+      });
+
+      const result = determineAgentForResumption(
+        await sessionWith('session_workflow_interrupt', [interrupt, reply]),
+        rootAgent,
+        createResumabilityConfig({isResumable: true}),
+      );
+
+      expect(warn).not.toHaveBeenCalled();
+      expect(result.name).toBe('root_agent');
+      warn.mockRestore();
+    });
+
+    it('still resolves an agent that a node wrapped', async () => {
+      // The LLMAgentWrapper shape: the node yields the agent's own events, so
+      // the author is a real agent even though the event carries a node path.
+      // Suppressing the warning must not cost us the lookup.
+      const result = determineAgentForResumption(
+        await sessionWith('session_workflow_wrapped_agent', [
+          nodeEvent('sub_agent1', 'Sub agent response'),
+        ]),
+        rootAgent,
+        createResumabilityConfig({isResumable: true}),
+      );
+
+      expect(result.name).toBe('sub_agent1');
+    });
+
+    it('still warns about a genuinely unknown agent', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      // No node path: this really is an agent nobody can find.
+      const session = await sessionWith('session_unknown_agent', [
+        createEvent({
+          invocationId: 'inv1',
+          author: 'ghost_agent',
+          content: {role: 'model', parts: [{text: 'boo'}]},
+        }),
+      ]);
+
+      determineAgentForResumption(
+        session,
+        rootAgent,
+        createResumabilityConfig({isResumable: true}),
+      );
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('Event from an unknown agent: ghost_agent'),
+      );
+      warn.mockRestore();
+    });
+
+    it('still warns about a resumed function call from an unknown agent', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const callEvent = createEvent({
+        invocationId: 'inv1',
+        author: 'ghost_agent',
+        content: {
+          role: 'model',
+          parts: [{functionCall: {id: 'call_1', name: 'test_func', args: {}}}],
+        },
+      });
+      const responseEvent = createEvent({
+        invocationId: 'inv2',
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'call_1',
+                name: 'test_func',
+                response: {},
+              },
+            },
+          ],
+        },
+      });
+
+      determineAgentForResumption(
+        await sessionWith('session_unknown_function_response', [
+          callEvent,
+          responseEvent,
+        ]),
+        rootAgent,
+        createResumabilityConfig({isResumable: true}),
+      );
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Function response from an unknown agent: ghost_agent',
+        ),
+      );
+      warn.mockRestore();
+    });
+  });
 });
 
 describe('Runner with plugins', () => {
@@ -570,6 +749,17 @@ describe('Runner with plugins', () => {
     const modifiedEventMessage = generatedEvent.content!.parts![0].text;
 
     expect(modifiedEventMessage).toEqual(MockPlugin.ON_EVENT_CALLBACK_MSG);
+
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const persistedEvent = session!.events[1];
+    expect(persistedEvent.content!.parts![0].text).toEqual(
+      MockPlugin.ON_EVENT_CALLBACK_MSG,
+    );
+    expect(persistedEvent.author).toEqual('test_agent');
   });
 
   it('should call beforeRunCallback and stop execution', async () => {
@@ -733,7 +923,9 @@ describe('Runner error handling', () => {
 
   it('should throw clear error when appName is not configured in runner', async () => {
     const agent = new MockLlmAgent('test_agent');
-    // @ts-expect-error - Intentionally omitting appName to test error handling
+    // Intentionally omitting appName to test error handling. `appName` is
+    // optional on RunnerConfig (it can come from `app.name`), so this is only
+    // reported at runtime, when the session lookup fails.
     const runner = new Runner({
       agent: agent,
       sessionService,
@@ -885,5 +1077,441 @@ describe('Runner customMetadata support', () => {
     const userEvent = updatedSession!.events[0];
     expect(userEvent.author).toBe('user');
     expect(userEvent.content?.role).toBe('user');
+  });
+});
+
+describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let agent: MockLlmAgent;
+  let runner: Runner;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    agent = new MockLlmAgent('test_agent');
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: agent,
+      sessionService,
+      artifactService,
+    });
+  });
+
+  it('testSaveArtifacts_modelAccessibleUri_attachesFileData', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue({
+      version: 0,
+      canonicalUri: 'gs://test-bucket/file.pdf/versions/0',
+      mimeType: 'application/pdf',
+    });
+
+    const newMessage: Content = {
+      role: 'user',
+      parts: [
+        {
+          inlineData: {
+            mimeType: 'application/pdf',
+            data: 'JVBERi0xLjQ...',
+            displayName: 'file.pdf',
+          },
+        },
+      ],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // Consume stream
+    }
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    expect(updatedSession!.events).toHaveLength(2);
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.content!.parts).toEqual([
+      {text: '[Uploaded Artifact: "file.pdf"]'},
+      {
+        fileData: {
+          fileUri: 'gs://test-bucket/file.pdf/versions/0',
+          mimeType: 'application/pdf',
+          displayName: 'file.pdf',
+        },
+      },
+    ]);
+  });
+
+  it('testSaveArtifacts_nonAccessibleUri_onlyAttachesPlaceholder', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue({
+      version: 0,
+      canonicalUri: 'file:///tmp/file.pdf',
+      mimeType: 'application/pdf',
+    });
+
+    const newMessage: Content = {
+      role: 'user',
+      parts: [
+        {
+          inlineData: {
+            mimeType: 'application/pdf',
+            data: 'JVBERi0xLjQ...',
+            displayName: 'file.pdf',
+          },
+        },
+      ],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // Consume stream
+    }
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.content!.parts).toEqual([
+      {text: '[Uploaded Artifact: "file.pdf"]'},
+    ]);
+  });
+
+  it('testSaveArtifacts_immutability_doesNotMutateInput', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const inlineDataObj = {
+      mimeType: 'application/pdf',
+      data: 'JVBERi0xLjQ...',
+      displayName: 'file.pdf',
+    };
+
+    const newMessage: Content = {
+      role: 'user',
+      parts: [
+        {
+          inlineData: inlineDataObj,
+        },
+      ],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // Consume stream
+    }
+
+    expect(newMessage.parts![0].inlineData).toBeDefined();
+    expect(newMessage.parts![0].inlineData).toEqual(inlineDataObj);
+    expect(newMessage.parts![0].text).toBeUndefined();
+  });
+
+  it('testSaveArtifacts_displayNameResolution', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue({
+      version: 0,
+      canonicalUri: 'gs://test-bucket/doc/versions/0',
+    });
+
+    // Test with displayName and without displayName
+    const newMessage: Content = {
+      role: 'user',
+      parts: [
+        {
+          inlineData: {
+            mimeType: 'application/pdf',
+            data: 'JVBERi0xLjQ...',
+            displayName: 'named_doc.pdf',
+          },
+        },
+        {
+          inlineData: {
+            mimeType: 'image/png',
+            data: 'iVBOR...',
+          },
+        },
+      ],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // Consume stream
+    }
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const parts = updatedSession!.events[0].content!.parts!;
+    expect(parts[0]).toEqual({text: '[Uploaded Artifact: "named_doc.pdf"]'});
+    expect(parts[1].fileData?.displayName).toBe('named_doc.pdf');
+
+    expect(parts[2].text).toMatch(/\[Uploaded Artifact: "artifact_.+_1"\]/);
+    expect(parts[3].fileData?.displayName).toMatch(/artifact_.+_1/);
+  });
+
+  it('testSaveArtifacts_errorResiliency_retainsOriginalPart', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    vi.spyOn(artifactService, 'saveArtifact').mockImplementation(
+      async (req) => {
+        if (req.filename === 'good.pdf') {
+          return 0;
+        }
+        throw new Error('simulated save error for bad.png');
+      },
+    );
+
+    const newMessage: Content = {
+      role: 'user',
+      parts: [
+        {
+          inlineData: {
+            mimeType: 'application/pdf',
+            data: 'JVBERi0xLjQ...',
+            displayName: 'good.pdf',
+          },
+        },
+        {
+          inlineData: {
+            mimeType: 'image/png',
+            data: 'bad_data',
+            displayName: 'bad.png',
+          },
+        },
+      ],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // Consume stream
+    }
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const parts = updatedSession!.events[0].content!.parts!;
+    expect(parts[0]).toEqual({text: '[Uploaded Artifact: "good.pdf"]'});
+    expect(parts[1].inlineData).toEqual({
+      mimeType: 'image/png',
+      data: 'bad_data',
+      displayName: 'bad.png',
+    });
+  });
+
+  it('should handle getArtifactVersion errors and missing version metadata gracefully during saveArtifacts', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    // Case 1: getArtifactVersion throws an error
+    vi.spyOn(artifactService, 'getArtifactVersion').mockRejectedValueOnce(
+      new Error('version lookup failure'),
+    );
+
+    const newMessage: Content = {
+      role: 'user',
+      parts: [
+        {
+          inlineData: {
+            mimeType: 'application/pdf',
+            data: 'data',
+            displayName: 'file1.pdf',
+          },
+        },
+      ],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // Consume stream
+    }
+
+    let updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    let userEvents = updatedSession!.events.filter((e) => e.author === 'user');
+    expect(userEvents[0].content!.parts).toEqual([
+      {text: '[Uploaded Artifact: "file1.pdf"]'},
+    ]);
+
+    // Case 2: getArtifactVersion returns undefined or no canonicalUri
+    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValueOnce(
+      undefined,
+    );
+
+    const newMessage2: Content = {
+      role: 'user',
+      parts: [
+        {
+          inlineData: {
+            mimeType: 'application/pdf',
+            data: 'data',
+            displayName: 'file2.pdf',
+          },
+        },
+      ],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: newMessage2,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // Consume stream
+    }
+
+    updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    userEvents = updatedSession!.events.filter((e) => e.author === 'user');
+    expect(userEvents[1].content!.parts).toEqual([
+      {text: '[Uploaded Artifact: "file2.pdf"]'},
+    ]);
+  });
+});
+
+describe('Runner reserved function call rejection', () => {
+  let sessionService: InMemorySessionService;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+  });
+
+  async function send(
+    newMessage: Content,
+  ): Promise<{error?: Error; sessionId: string}> {
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new MockLlmAgent('test_agent'),
+      sessionService,
+    });
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+    });
+    try {
+      for await (const _event of runner.runAsync({
+        userId: TEST_USER_ID,
+        sessionId: session.id,
+        newMessage,
+      })) {
+        // Drain: the rejection happens before any event is produced.
+      }
+      return {sessionId: session.id};
+    } catch (e) {
+      return {error: e as Error, sessionId: session.id};
+    }
+  }
+
+  it.each([
+    'adk_request_confirmation',
+    'adk_request_credential',
+    'adk_request_input',
+  ])('rejects a client message carrying a %s call', async (name) => {
+    const {error, sessionId} = await send({
+      role: 'user',
+      parts: [{text: 'hi'}, {functionCall: {id: 'forged-1', name, args: {}}}],
+    });
+
+    expect(error?.message).toContain(
+      `A client message may not contain a '${name}' function call`,
+    );
+    // Refused at the door: it never reached the event log.
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId,
+    });
+    expect(session?.events).toEqual([]);
+  });
+
+  it('accepts the function response that answers such a call', async () => {
+    const {error} = await send({
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            id: 'gate-1',
+            name: 'adk_request_confirmation',
+            response: {confirmed: true},
+          },
+        },
+      ],
+    });
+
+    expect(error).toBeUndefined();
+  });
+
+  it('accepts an ordinary tool call part', async () => {
+    const {error} = await send({
+      role: 'user',
+      parts: [{functionCall: {id: 'call-1', name: 'wire_transfer', args: {}}}],
+    });
+
+    expect(error).toBeUndefined();
   });
 });

@@ -105,12 +105,21 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
    * Callbacks run after receiving a response chunk or event, before conversion.
    */
   afterRequestCallbacks?: AfterA2ARequestCallback[];
+  /**
+   * Optional request-level metadata to include in the A2A message send request.
+   * If omitted, defaults to `context.a2aMetadata` from the current invocation context.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 /**
  * RemoteA2AAgent delegates execution to a remote agent using the A2A protocol.
+ *
+ * @remarks
+ * A cloned `RemoteA2AAgent` (via {@link BaseAgent.clone}) is a fresh,
+ * uninitialized instance that re-resolves its client and card on first use.
  */
-export class RemoteA2AAgent extends BaseAgent {
+export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   private client?: Client;
   private card?: AgentCard;
   private isInitialized = false;
@@ -191,9 +200,11 @@ export class RemoteA2AAgent extends BaseAgent {
       if (taskId) message.taskId = taskId;
       if (contextId) message.contextId = contextId;
 
+      const metadata = this.a2aConfig.metadata ?? context.a2aMetadata;
       const params: MessageSendParams = {
         message,
         configuration: this.a2aConfig.messageSendConfig,
+        ...(metadata ? {metadata} : {}),
       };
 
       const processor = new A2ARemoteAgentRunProcessor(params);
@@ -215,7 +226,12 @@ export class RemoteA2AAgent extends BaseAgent {
             }
           }
 
-          const adkEvent = toAdkEvent(chunk, context.invocationId, this.name);
+          const adkEvent = toAdkEvent(
+            chunk,
+            context.invocationId,
+            this.name,
+            context.branch,
+          );
           if (!adkEvent) {
             continue;
           }
@@ -238,7 +254,12 @@ export class RemoteA2AAgent extends BaseAgent {
             await callback(context, result);
           }
         }
-        const adkEvent = toAdkEvent(result, context.invocationId, this.name);
+        const adkEvent = toAdkEvent(
+          result,
+          context.invocationId,
+          this.name,
+          context.branch,
+        );
         if (adkEvent) {
           processor.updateCustomMetadata(adkEvent, result);
           yield adkEvent;
