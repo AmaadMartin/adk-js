@@ -116,7 +116,9 @@ placeholder always names the latest one.
 ## Limits and failures
 
 A blob larger than 20MB is not saved. The Gemini API rejects inline data above
-that size, so the plugin replaces the blob with an error the user can read:
+that size, and saving the file does not avoid the limit: `LOAD_ARTIFACTS`
+pushes the artifact back into a later request as an inline part. The plugin
+replaces the blob with an error the user can read:
 
 ```
 [Upload Error: File report.pdf (24.30 MB) exceeds the maximum supported size of 20MB. Please upload a smaller file.]
@@ -128,5 +130,5 @@ Two failures leave the message usable rather than ending the invocation:
 
 - The save fails. The plugin logs the error and keeps the original blob part,
   so the model still receives the file.
-- The runner has no artifact service. The plugin logs a warning and returns the
-  message unchanged.
+- The runner has no artifact service. The plugin logs a warning and leaves the
+  message alone.
