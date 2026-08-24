@@ -5,42 +5,13 @@ artifact in the artifact service the dev API server runs with. Reach for it when
 a client outside the server process must seed an artifact, for example a test
 harness or a script that prepares a session before an agent runs.
 
-## Introduction
-
-`adk api_server` and `adk web` expose the artifact service over HTTP. The other
-routes only read: they list the filenames in a session, load a version, and
-delete an artifact. Without a save route, the only way to create an artifact is
-from inside the server process, through the `Context` an agent tool receives.
-
-That leaves a gap for anything that drives the server from outside. This route
-closes it. The server saves the `Part` you post, reads back the metadata for the
-version the save produced, and answers with that metadata. Storage stays
-append-only, so a second save of the same filename creates version 1 and leaves
-version 0 in place.
+The sibling artifact routes only read: they list the filenames in a session,
+load a version, and delete an artifact. Without this route, the only way to
+create an artifact is from inside the server process, through the `Context` an
+agent tool receives. Storage stays append-only, so a second save of the same
+filename creates version 1 and leaves version 0 in place.
 
 ## Get started
-
-Start the server, create a session, then post the artifact.
-
-```bash
-npx @google/adk-devtools api_server ./samples/workflows/graphs --port 8399
-
-curl -X POST localhost:8399/apps/get_started/users/u/sessions/s \
-  -H 'Content-Type: application/json' -d '{}'
-
-curl -X POST localhost:8399/apps/get_started/users/u/sessions/s/artifacts \
-  -H 'Content-Type: application/json' \
-  -d '{"filename":"greeting.txt","artifact":{"text":"hello world"}}'
-# {"version":0}
-
-curl localhost:8399/apps/get_started/users/u/sessions/s/artifacts
-# ["greeting.txt"]
-
-curl localhost:8399/apps/get_started/users/u/sessions/s/artifacts/greeting.txt
-# {"text":"hello world"}
-```
-
-The same call from TypeScript:
 
 ```ts
 import {Part} from '@google/genai';
@@ -63,6 +34,9 @@ async function saveArtifact(
 }
 ```
 
+The session must exist first. Create it with
+`POST /apps/{appName}/users/{userId}/sessions/{sessionId}`.
+
 ## Request body
 
 | Field            | Type     | Required | Notes                                                                                                      |
@@ -70,9 +44,6 @@ async function saveArtifact(
 | `filename`       | `string` | yes      | Non-empty. The artifact key inside the session.                                                            |
 | `artifact`       | `Part`   | yes      | A `@google/genai` `Part`, for example `{"text": "..."}`, `{"inlineData": {...}}` or `{"fileData": {...}}`. |
 | `customMetadata` | `object` | no       | Stored with the version and returned unchanged.                                                            |
-
-The server parses the body with a 50 MB limit, so an inline payload up to that
-size is accepted.
 
 ## Response
 
