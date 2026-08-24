@@ -28,6 +28,9 @@ wait for `LiveRequestQueue.sendActivityStart()` and `sendActivityEnd()`.
 
 ## Get started
 
+Substitute a Gemini Live model you have access to. The id below is the one
+`tests/e2e/live_model_test.ts` runs against.
+
 ```ts
 import {
   InMemoryArtifactService,
@@ -86,8 +89,10 @@ runConfig: {sessionResumption: {handle: priorHandle, transparent: true}},
 ```
 
 The runner reads each `liveSessionResumptionUpdate` the server sends and merges
-the new handle into the connect config. Your `transparent` choice survives that
-merge. Read the handle off the event stream to persist it for a later run:
+the new handle into the connect config. A `transparent` choice you made survives
+that merge. If you configured no resumption at all, the runner uses
+`transparent: true` for the reconnect. Read the handle off the event stream to
+persist it for a later run:
 
 ```ts
 for await (const event of runner.runLive({
@@ -103,6 +108,10 @@ for await (const event of runner.runLive({
 The runner copies the config rather than sharing it, so the observed handle
 never appears on the `RunConfig` object you passed in. One `RunConfig` is safe
 to reuse across runs.
+
+The handle belongs to one invocation. When a live run transfers to a sub-agent,
+the sub-agent opens its own session and does not receive the handle, so it
+replays the conversation instead of resuming yours.
 
 The Gemini API backend rejects `transparent` and the model provider strips it.
 Vertex AI accepts it.
