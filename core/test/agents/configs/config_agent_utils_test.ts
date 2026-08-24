@@ -12,14 +12,14 @@ import {
   BaseLlmConnection,
   BaseTool,
   BaseToolset,
-  Event,
-  FunctionTool,
-  InvocationContext,
   ENTERPRISE_WEB_SEARCH,
+  Event,
   EXIT_LOOP,
+  FunctionTool,
   getUserChoiceTool,
   GOOGLE_MAPS_GROUNDING,
   GOOGLE_SEARCH,
+  InvocationContext,
   isAgentTool,
   isLlmAgent,
   isLoopAgent,
@@ -520,6 +520,30 @@ generate_content_config:
     expect(agent.generateContentConfig).toEqual({temperature: 0.25});
   });
 
+  it('camelCases the generate_content_config keys for @google/genai', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+generate_content_config:
+  temperature: 0.25
+  top_k: 4
+  max_output_tokens: 128
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(path.join(dir, 'root.yaml'));
+
+    if (!isLlmAgent(agent)) {
+      expect.fail('Expected an LlmAgent.');
+    }
+    expect(agent.generateContentConfig).toEqual({
+      temperature: 0.25,
+      topK: 4,
+      maxOutputTokens: 128,
+    });
+  });
+
   it('keeps the LlmAgent defaults when the optional fields are omitted', async () => {
     const dir = await writeConfigs({'root.yaml': LLM_DOC});
 
@@ -970,6 +994,56 @@ after_agent_callbacks:
 
     expect(agent.beforeAgentCallback).toEqual([before]);
     expect(agent.afterAgentCallback).toEqual([after]);
+  });
+
+  it('keeps every callback list in document order', async () => {
+    const first = () => undefined;
+    const second = () => undefined;
+    const third = () => undefined;
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+before_agent_callbacks:
+  - name: mylib.callbacks.first
+  - name: mylib.callbacks.second
+  - name: mylib.callbacks.third
+after_agent_callbacks:
+  - name: mylib.callbacks.third
+  - name: mylib.callbacks.first
+before_model_callbacks:
+  - name: mylib.callbacks.second
+  - name: mylib.callbacks.third
+after_model_callbacks:
+  - name: mylib.callbacks.third
+  - name: mylib.callbacks.second
+before_tool_callbacks:
+  - name: mylib.callbacks.first
+  - name: mylib.callbacks.third
+after_tool_callbacks:
+  - name: mylib.callbacks.second
+  - name: mylib.callbacks.first
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(
+      path.join(dir, 'root.yaml'),
+      resolvingTo({
+        'mylib.callbacks.first': first,
+        'mylib.callbacks.second': second,
+        'mylib.callbacks.third': third,
+      }),
+    );
+
+    if (!isLlmAgent(agent)) {
+      expect.fail('Expected an LlmAgent.');
+    }
+    expect(agent.beforeAgentCallback).toEqual([first, second, third]);
+    expect(agent.afterAgentCallback).toEqual([third, first]);
+    expect(agent.beforeModelCallback).toEqual([second, third]);
+    expect(agent.afterModelCallback).toEqual([third, second]);
+    expect(agent.beforeToolCallback).toEqual([first, third]);
+    expect(agent.afterToolCallback).toEqual([second, first]);
   });
 
   it('treats empty reference lists as absent', async () => {
