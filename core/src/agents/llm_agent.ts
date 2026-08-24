@@ -159,14 +159,8 @@ function applyLiveRunConfig(
     }
   }
   if (runConfig.sessionResumption) {
-    // Copied, not aliased. The reconnect loop below stamps the server-issued
-    // handle onto this object, and the Gemini API backend deletes
-    // `transparent` from it, so a shared reference would leave both marks on a
-    // RunConfig the caller reuses for a later run.
-    //
-    // `handle` is left out on purpose. It belongs to the invocation context,
-    // which withholds it from a transferred sub-agent; copying it here would
-    // put the caller's handle back onto the sub-agent's fresh request.
+    // Copy: the reconnect loop and google_llm both mutate this, and `handle`
+    // is owned by the invocation context (withheld from sub-agents).
     const {handle: _handle, ...resumptionMode} = runConfig.sessionResumption;
     liveConfig.sessionResumption = resumptionMode;
   }
@@ -1016,11 +1010,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         return;
       }
 
-      // Apply the latest resumption handle before each connect attempt,
-      // merging it into whatever the caller configured rather than replacing
-      // it, so a caller-supplied `transparent` choice survives a reconnect.
-      // Transparent resumption is the default only when the caller configured
-      // no mode of their own.
+      // Merge, not replace, so the caller's mode survives a reconnect;
+      // transparent is the default only when they configured none.
       const handle = invocationContext.liveSessionResumptionHandle;
       if (handle) {
         llmRequest.liveConnectConfig ??= {};

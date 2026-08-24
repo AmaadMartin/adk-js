@@ -100,9 +100,10 @@ export interface RunConfig {
   contextWindowCompression?: ContextWindowCompressionConfig;
 
   /**
-   * Configures the session resumption mechanism. Only transparent session
-   * resumption is supported. When set, the Live server restores the state it
-   * holds for the handle instead of relying on client-side history replay.
+   * Configures the session resumption mechanism. Both transparent and
+   * non-transparent modes are forwarded as configured. When set, the Live
+   * server restores the state it holds for the handle instead of relying on
+   * client-side history replay.
    */
   sessionResumption?: SessionResumptionConfig;
 

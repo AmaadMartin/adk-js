@@ -715,10 +715,8 @@ export class Runner {
             pluginManager: this.pluginManager,
             liveRequestQueue: params.liveRequestQueue,
             abortSignal: params.abortSignal,
-            // A handle names one server-held session, so the invocation owns
-            // it. Seeding it here rather than in each agent's flow is what
-            // lets the transfer path withhold it from a sub-agent, which
-            // needs its own session. The explicit parameter wins.
+            // Seeded per invocation, not per agent flow, so the transfer path
+            // can withhold the handle from a sub-agent's own session.
             liveSessionResumptionHandle:
               params.liveSessionResumptionHandle ??
               runConfig.sessionResumption?.handle,
@@ -769,10 +767,8 @@ export class Runner {
 
             const eventToProcess = modifiedEvent ?? event;
 
-            // `saveArtifacts` rewrites the inline blob into an artifact
-            // reference, which the guard below then lets through to the
-            // session. The caller still receives the untouched event, because
-            // a live front-end has to play those bytes.
+            // Persist the artifact reference, but yield the untouched event:
+            // a live front-end still has to play those bytes.
             let eventToPersist = eventToProcess;
             if (
               runConfig.saveLiveBlob &&
