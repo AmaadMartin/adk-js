@@ -1288,6 +1288,49 @@ describe('AdkWebServer', () => {
       }
     });
 
+    it('keeps the agent file alive until the live session ends', async () => {
+      await createLiveSession();
+      // `AgentFile.dispose` unlinks the bundle a .ts agent compiles into, so a
+      // run outliving it would execute against a deleted file.
+      const disposals: string[] = [];
+      const load = agentLoader.getAgentFile.bind(agentLoader);
+      vi.spyOn(agentLoader, 'getAgentFile').mockImplementation(
+        async (appName) => {
+          const file = await load(appName);
+          const dispose = file[Symbol.asyncDispose].bind(file);
+          file[Symbol.asyncDispose] = async () => {
+            disposals.push(appName);
+            await dispose();
+          };
+          return file;
+        },
+      );
+      let signalStarted = () => {};
+      const started = new Promise<void>((resolve) => {
+        signalStarted = resolve;
+      });
+      vi.spyOn(Runner.prototype, 'runLive').mockImplementation(
+        async function* (params) {
+          signalStarted();
+          const request = await params.liveRequestQueue.get(params.abortSignal);
+          yield createEvent({
+            invocationId: 'i',
+            author: 'testAgent',
+            content: request.content,
+          });
+        },
+      );
+
+      const live = connect(server.url, LIVE_QUERY);
+      await started;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(disposals).toEqual([]);
+
+      live.close();
+      await vi.waitFor(() => expect(disposals).toEqual(['testApp']));
+    });
+
     it('does not start a run for a client that left while the app loaded', async () => {
       await createLiveSession();
       // Loading an app compiles it, which is slow enough on a first request

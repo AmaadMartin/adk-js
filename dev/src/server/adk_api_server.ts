@@ -1261,7 +1261,9 @@ export class AdkApiServer {
       return;
     }
 
-    return runLiveSession({socket, runner, query, logger: this.logger});
+    // Awaited, not returned: `await using` disposes at the `return`, which
+    // would unlink the compiled bundle while the conversation still runs on it.
+    await runLiveSession({socket, runner, query, logger: this.logger});
   }
 
   /**
