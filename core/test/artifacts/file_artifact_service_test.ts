@@ -108,7 +108,7 @@ describe('FileArtifactService', () => {
         });
 
         const written = JSON.parse(
-          await fs.readFile(await metadataPath(rootDir), 'utf-8'),
+          await fs.readFile(metadataPath(rootDir), 'utf-8'),
         ) as Record<string, unknown>;
 
         expect(written.customMetadata).toEqual({});
@@ -130,7 +130,7 @@ describe('FileArtifactService', () => {
           artifact: {text: 'body'},
         });
 
-        const legacyPath = await metadataPath(rootDir);
+        const legacyPath = metadataPath(rootDir);
         const legacy = JSON.parse(
           await fs.readFile(legacyPath, 'utf-8'),
         ) as Record<string, unknown>;
