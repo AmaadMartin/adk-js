@@ -61,6 +61,26 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 
+/**
+ * Resolves an artifact version path segment for the two routes that accept
+ * one. `latest` resolves to an absent version, which the artifact service
+ * reads as "newest". Anything but a decimal integer is invalid: `Number`
+ * would take '0x10' and '1e3', which Python's `int()` rejects.
+ */
+function parseArtifactVersionId(
+  versionId: string,
+): {valid: true; version?: number} | {valid: false} {
+  if (versionId === 'latest') {
+    return {valid: true};
+  }
+
+  if (!/^[+-]?\d+$/.test(versionId)) {
+    return {valid: false};
+  }
+
+  return {valid: true, version: Number(versionId)};
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -803,9 +823,9 @@ export class AdkApiServer {
           const artifactName = req.params['artifactName'];
           const versionId = req.params['versionId'];
 
-          // A decimal integer, matching what Python's `int()` accepts.
-          // `Number` would take '0x10' and '1e3', which must be a 422.
-          if (versionId !== 'latest' && !/^[+-]?\d+$/.test(versionId)) {
+          const parsed = parseArtifactVersionId(versionId);
+
+          if (!parsed.valid) {
             res.status(422).json({error: `Invalid version ID: ${versionId}`});
             return;
           }
@@ -816,8 +836,7 @@ export class AdkApiServer {
               userId,
               sessionId,
               filename: artifactName,
-              // An absent version reads as "newest".
-              version: versionId === 'latest' ? undefined : Number(versionId),
+              version: parsed.version,
             },
           );
 
