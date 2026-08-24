@@ -19,7 +19,12 @@ import {
   SingleBeforeToolCallback,
   ToolConfirmation,
 } from '@google/adk';
-import {FunctionCall} from '@google/genai';
+import {
+  createPartFromBase64,
+  createPartFromUri,
+  FunctionCall,
+  FunctionResponse,
+} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {
@@ -113,6 +118,21 @@ const falsyLongRunningTool = new FunctionTool({
 function callFor(tool: BaseTool): FunctionCall {
   return {id: randomIdForTestingOnly(), name: tool.name, args: {}};
 }
+
+const CHART_DATA = 'Y2hhcnQtYnl0ZXM=';
+const PHOTO_DATA = 'cGhvdG8tYnl0ZXM=';
+const CHART_URI = 'gs://bucket/chart.png';
+
+const chartPart = createPartFromBase64(CHART_DATA, 'image/png');
+const photoPart = createPartFromBase64(PHOTO_DATA, 'image/jpeg');
+const fileChartPart = createPartFromUri(CHART_URI, 'image/png');
+
+const chartResponsePart = {
+  inlineData: {data: CHART_DATA, mimeType: 'image/png'},
+};
+const photoResponsePart = {
+  inlineData: {data: PHOTO_DATA, mimeType: 'image/jpeg'},
+};
 
 describe('handleFunctionCallList', () => {
   let invocationContext: InvocationContext;
@@ -436,6 +456,172 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     ]);
+  });
+
+  async function responseFor(
+    tool: BaseTool,
+    afterToolCallbacks: SingleAfterToolCallback[] = [],
+  ): Promise<FunctionResponse> {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(tool)],
+      toolsDict: {[tool.name]: tool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks,
+    });
+    const functionResponse = event?.content?.parts?.[0].functionResponse;
+    if (!functionResponse) {
+      expect.fail('the tool call emitted no function response');
+    }
+    return functionResponse;
+  }
+
+  function mediaTool(name: string, execute: () => unknown) {
+    return new FunctionTool({
+      name,
+      description: 'returns media',
+      parameters: z.object({}),
+      execute: async () => execute(),
+    });
+  }
+
+  it('should carry a bare media part on the function response', async () => {
+    const tool = mediaTool('chartTool', () => chartPart);
+
+    const response = await responseFor(tool);
+
+    expect(response.parts).toEqual([chartResponsePart]);
+    expect(response.response).toEqual({});
+  });
+
+  it('should carry media returned alongside data', async () => {
+    const tool = mediaTool('chartTool', () => ({
+      chart: chartPart,
+      summary: 'up 3%',
+    }));
+
+    const response = await responseFor(tool);
+
+    expect(response.parts).toEqual([chartResponsePart]);
+    expect(response.response).toEqual({summary: 'up 3%'});
+  });
+
+  it('should carry several media parts in the order the tool returned them', async () => {
+    const tool = mediaTool('chartTool', () => [
+      chartPart,
+      photoPart,
+      'two charts',
+    ]);
+
+    const response = await responseFor(tool);
+
+    expect(response.parts).toEqual([chartResponsePart, photoResponsePart]);
+    expect(response.response).toEqual({results: ['two charts']});
+  });
+
+  it('should carry a file reference as a media part', async () => {
+    const tool = mediaTool('chartTool', () => fileChartPart);
+
+    const response = await responseFor(tool);
+
+    expect(response.parts).toEqual([
+      {fileData: {fileUri: CHART_URI, mimeType: 'image/png'}},
+    ]);
+    expect(response.response).toEqual({});
+  });
+
+  it('should leave a file reference without a mime type in the response body', async () => {
+    const value = {fileData: {fileUri: CHART_URI}};
+    const tool = mediaTool('chartTool', () => value);
+
+    const response = await responseFor(tool);
+
+    expect(response.parts).toBeUndefined();
+    expect(response.response).toEqual(value);
+  });
+
+  it('should carry media nested one container deep and drop the emptied key', async () => {
+    const tool = mediaTool('chartTool', () => ({
+      images: [chartPart, photoPart],
+      summary: 'two charts',
+    }));
+
+    const response = await responseFor(tool);
+
+    expect(response.parts).toEqual([chartResponsePart, photoResponsePart]);
+    expect(response.response).toEqual({summary: 'two charts'});
+  });
+
+  it('should leave media buried deeper than one container in the response body', async () => {
+    const value = {report: {charts: {first: chartPart}}};
+    const tool = mediaTool('chartTool', () => value);
+
+    const response = await responseFor(tool);
+
+    expect(response.parts).toBeUndefined();
+    expect(response.response).toEqual(value);
+  });
+
+  it('should leave a plain data result unchanged', async () => {
+    const tool = mediaTool('chartTool', () => ({summary: 'up 3%'}));
+
+    const response = await responseFor(tool);
+
+    expect(response.parts).toBeUndefined();
+    expect(response.response).toEqual({summary: 'up 3%'});
+  });
+
+  it('should emit no parts key at all for a media-free result', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const functionResponse = event?.content?.parts?.[0].functionResponse;
+    expect(functionResponse).toStrictEqual({
+      id: functionCall.id,
+      name: 'testTool',
+      response: {result: 'tool executed'},
+    });
+    expect('parts' in functionResponse!).toBe(false);
+  });
+
+  it('should keep the media parts of one call when parallel calls are merged', async () => {
+    const chartTool = mediaTool('chartTool', () => chartPart);
+    const chartCall = callFor(chartTool);
+    const plainCall = callFor(testTool);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [chartCall, plainCall],
+      toolsDict: {chartTool, testTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse).toStrictEqual({
+      id: chartCall.id,
+      name: 'chartTool',
+      response: {},
+      parts: [chartResponsePart],
+    });
+    expect(event?.content?.parts?.[1].functionResponse).toStrictEqual({
+      id: plainCall.id,
+      name: 'testTool',
+      response: {result: 'tool executed'},
+    });
+  });
+
+  it('should carry media returned by an afterToolCallback', async () => {
+    const response = await responseFor(testTool, [
+      () => ({chart: chartPart, summary: 'up 3%'}),
+    ]);
+
+    expect(response.parts).toEqual([chartResponsePart]);
+    expect(response.response).toEqual({summary: 'up 3%'});
   });
 });
 

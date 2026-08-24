@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
+import {
+  Content,
+  createUserContent,
+  FunctionCall,
+  FunctionResponsePart,
+  Part,
+} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -19,6 +25,7 @@ import {mergeEventActions} from '../events/event_actions.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
+import {extractMediaParts} from '../utils/media_part_utils.js';
 import {Context} from './context.js';
 import {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -223,20 +230,17 @@ function buildResponseEvent(
   toolContext: Context,
   invocationContext: InvocationContext,
 ): Event {
-  let responseResult: Record<string, unknown>;
-  if (typeof functionResult !== 'object' || functionResult == null) {
-    responseResult = {result: functionResult};
-  } else if (Array.isArray(functionResult)) {
-    responseResult = {results: functionResult};
-  } else {
-    responseResult = functionResult as Record<string, unknown>;
-  }
+  const {remainder, parts} = extractMediaParts(functionResult);
+  const responseResult = normalizeCallbackResponse(remainder) ?? {
+    result: remainder,
+  };
 
   const partFunctionResponse: Part = {
     functionResponse: {
       name: tool.name,
       response: responseResult,
       id: toolContext.functionCallId,
+      ...(parts && {parts}),
     },
   };
 
@@ -463,12 +467,15 @@ export async function handleFunctionCallList({
       continue;
     }
 
+    let responseParts: FunctionResponsePart[] | undefined;
     if (functionResponseError) {
       functionResponse = {error: functionResponseError};
     } else if (functionResponse == null) {
       functionResponse = {result: functionResponse};
     } else {
-      functionResponse = normalizeCallbackResponse(functionResponse);
+      const {remainder, parts} = extractMediaParts(functionResponse);
+      responseParts = parts;
+      functionResponse = normalizeCallbackResponse(remainder);
     }
 
     const functionResponseEvent = createEvent({
@@ -479,6 +486,7 @@ export async function handleFunctionCallList({
           id: toolContext.functionCallId,
           name: tool.name,
           response: functionResponse,
+          ...(responseParts && {parts: responseParts}),
         },
       }),
       actions: toolContext.actions,
