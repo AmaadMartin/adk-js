@@ -146,6 +146,10 @@ export {TruncatingContextCompactor} from './context/truncating_context_compactor
 export type {TruncatingContextCompactorOptions} from './context/truncating_context_compactor.js';
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
+export {
+  AlreadyExistsError,
+  isAlreadyExistsError,
+} from './errors/already_exists_error.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
