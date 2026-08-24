@@ -1,0 +1,325 @@
+{
+  "title": "AgentConfig",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/LlmAgentConfig"
+    },
+    {
+      "$ref": "#/$defs/LoopAgentConfig"
+    },
+    {
+      "$ref": "#/$defs/ParallelAgentConfig"
+    },
+    {
+      "$ref": "#/$defs/SequentialAgentConfig"
+    },
+    {
+      "$ref": "#/$defs/BaseAgentConfig"
+    }
+  ],
+  "$defs": {
+    "LlmAgentConfig": {
+      "type": "object",
+      "properties": {
+        "agent_class": {
+          "default": "LlmAgent",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "sub_agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentRefConfig"
+          }
+        },
+        "before_agent_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "after_agent_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "model": {
+          "type": "string"
+        },
+        "model_code": {
+          "$ref": "#/$defs/CodeConfig"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "disallow_transfer_to_parent": {
+          "type": "boolean"
+        },
+        "disallow_transfer_to_peers": {
+          "type": "boolean"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/CodeConfig"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/CodeConfig"
+        },
+        "output_key": {
+          "type": "string"
+        },
+        "include_contents": {
+          "default": "default",
+          "type": "string",
+          "enum": [
+            "default",
+            "none"
+          ]
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolConfig"
+          }
+        },
+        "before_model_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "after_model_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "before_tool_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "after_tool_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "generate_content_config": {}
+      },
+      "required": [
+        "name",
+        "instruction"
+      ],
+      "additionalProperties": false
+    },
+    "AgentRefConfig": {
+      "type": "object",
+      "properties": {
+        "config_path": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CodeConfig": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "ToolConfig": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "LoopAgentConfig": {
+      "type": "object",
+      "properties": {
+        "agent_class": {
+          "default": "LoopAgent",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "sub_agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentRefConfig"
+          }
+        },
+        "before_agent_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "after_agent_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "ParallelAgentConfig": {
+      "type": "object",
+      "properties": {
+        "agent_class": {
+          "default": "ParallelAgent",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "sub_agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentRefConfig"
+          }
+        },
+        "before_agent_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "after_agent_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "SequentialAgentConfig": {
+      "type": "object",
+      "properties": {
+        "agent_class": {
+          "default": "SequentialAgent",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "sub_agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentRefConfig"
+          }
+        },
+        "before_agent_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "after_agent_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "BaseAgentConfig": {
+      "type": "object",
+      "properties": {
+        "agent_class": {
+          "default": "BaseAgent",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "sub_agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentRefConfig"
+          }
+        },
+        "before_agent_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        },
+        "after_agent_callbacks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodeConfig"
+          }
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": {}
+    }
+  }
+}

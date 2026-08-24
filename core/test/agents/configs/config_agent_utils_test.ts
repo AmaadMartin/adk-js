@@ -12,17 +12,28 @@ import {
   BaseLlmConnection,
   BaseTool,
   BaseToolset,
+  ENTERPRISE_WEB_SEARCH,
   Event,
+  EXIT_LOOP,
   FunctionTool,
+  getUserChoiceTool,
+  GOOGLE_MAPS_GROUNDING,
+  GOOGLE_SEARCH,
   InvocationContext,
+  isAgentTool,
   isLlmAgent,
   isLoopAgent,
   isParallelAgent,
   isSequentialAgent,
   LlmRequest,
   LlmResponse,
+  LOAD_ARTIFACTS,
+  LOAD_MEMORY,
   loadAgentFromConfigFile,
   LoadAgentOptions,
+  PRELOAD_MEMORY,
+  requestInputTool,
+  URL_CONTEXT,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -407,6 +418,67 @@ name: writer
     ).rejects.toThrowError(/bad indentation/);
   });
 
+  it.each([
+    ['an empty file', ''],
+    ['a comment-only file', '# nothing here\n'],
+    ['a list', '- writer\n- reviewer\n'],
+    ['a bare scalar', 'writer\n'],
+    ['an explicit null', '~\n'],
+  ])('rejects %s as a config document', async (_label, contents) => {
+    const dir = await writeConfigs({'root.yaml': contents});
+
+    await expect(
+      loadAgentFromConfigFile(path.join(dir, 'root.yaml')),
+    ).rejects.toThrowError(errorWithCode(AgentConfigErrorCode.INVALID_CONFIG));
+  });
+
+  it('ignores a camelCase agentClass key', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+agentClass: LoopAgent
+name: writer
+instruction: Write code.
+`,
+    });
+
+    // The document is validated as an LlmAgent, whose schema is strict, so the
+    // stray camelCase key is reported rather than selecting a LoopAgent.
+    await expect(
+      loadAgentFromConfigFile(path.join(dir, 'root.yaml')),
+    ).rejects.toThrowError(errorWithCode(AgentConfigErrorCode.INVALID_CONFIG));
+  });
+
+  it('validates an unknown agent_class against the loose base config', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+agent_class: mylib.agents.GreetingAgent
+name: greeter
+greeting: hello
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(
+      path.join(dir, 'root.yaml'),
+      resolvingTo({'mylib.agents.GreetingAgent': GreetingAgent}),
+    );
+
+    expect(agent.name).toBe('greeter');
+  });
+
+  it('rejects a non-string agent_class', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+agent_class: 42
+name: writer
+instruction: Write code.
+`,
+    });
+
+    await expect(
+      loadAgentFromConfigFile(path.join(dir, 'root.yaml')),
+    ).rejects.toThrowError(errorWithCode(AgentConfigErrorCode.INVALID_CONFIG));
+  });
+
   it('loads a JSON config document', async () => {
     const dir = await writeConfigs({
       'root.json': JSON.stringify({
@@ -509,6 +581,30 @@ generate_content_config:
     expect(agent.generateContentConfig).toEqual({temperature: 0.25});
   });
 
+  it('camelCases the generate_content_config keys for @google/genai', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+generate_content_config:
+  temperature: 0.25
+  top_k: 4
+  max_output_tokens: 128
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(path.join(dir, 'root.yaml'));
+
+    if (!isLlmAgent(agent)) {
+      expect.fail('Expected an LlmAgent.');
+    }
+    expect(agent.generateContentConfig).toEqual({
+      temperature: 0.25,
+      topK: 4,
+      maxOutputTokens: 128,
+    });
+  });
+
   it('keeps the LlmAgent defaults when the optional fields are omitted', async () => {
     const dir = await writeConfigs({'root.yaml': LLM_DOC});
 
@@ -595,6 +691,232 @@ tools:
       expect.fail('Expected an LlmAgent.');
     }
     expect(agent.tools).toEqual([testTool, toolset]);
+  });
+
+  it.each([
+    ['enterprise_web_search', ENTERPRISE_WEB_SEARCH],
+    ['exit_loop', EXIT_LOOP],
+    ['get_user_choice', getUserChoiceTool],
+    ['google_maps_grounding', GOOGLE_MAPS_GROUNDING],
+    ['google_search', GOOGLE_SEARCH],
+    ['load_artifacts', LOAD_ARTIFACTS],
+    ['load_memory', LOAD_MEMORY],
+    ['preload_memory', PRELOAD_MEMORY],
+    ['request_input', requestInputTool],
+    ['url_context', URL_CONTEXT],
+  ])('resolves the built-in tool %s with no resolver', async (name, tool) => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+tools:
+  - name: ${name}
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(path.join(dir, 'root.yaml'));
+
+    if (!isLlmAgent(agent)) {
+      expect.fail('Expected an LlmAgent.');
+    }
+    expect(agent.tools).toEqual([tool]);
+  });
+
+  it('prefers a built-in tool over the resolver', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+tools:
+  - name: google_search
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(
+      path.join(dir, 'root.yaml'),
+      resolvingTo({google_search: testTool}),
+    );
+
+    if (!isLlmAgent(agent)) {
+      expect.fail('Expected an LlmAgent.');
+    }
+    expect(agent.tools).toEqual([GOOGLE_SEARCH]);
+  });
+
+  it('builds an AgentTool around the agent its args name', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+tools:
+  - name: AgentTool
+    args:
+      agent:
+        config_path: sub_agents/helper.yaml
+      skip_summarization: true
+`,
+      'sub_agents/helper.yaml': `
+name: helper
+description: Helps.
+instruction: Help.
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(path.join(dir, 'root.yaml'));
+
+    if (!isLlmAgent(agent)) {
+      expect.fail('Expected an LlmAgent.');
+    }
+    const [tool] = agent.tools ?? [];
+    if (!isAgentTool(tool)) {
+      expect.fail('Expected an AgentTool.');
+    }
+    // An AgentTool takes its name and description from the agent it wraps.
+    expect(tool.name).toBe('helper');
+    expect(tool.description).toBe('Helps.');
+  });
+
+  it('rejects a non-boolean skip_summarization', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+tools:
+  - name: AgentTool
+    args:
+      agent:
+        config_path: sub_agents/helper.yaml
+      skip_summarization: yes please
+`,
+      'sub_agents/helper.yaml': `
+name: helper
+instruction: Help.
+`,
+    });
+
+    await expect(
+      loadAgentFromConfigFile(path.join(dir, 'root.yaml')),
+    ).rejects.toThrowError(errorWithCode(AgentConfigErrorCode.INVALID_CONFIG));
+  });
+
+  it('builds an AgentTool around the agent a code reference names', async () => {
+    const child = new GreetingAgent({name: 'child'});
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+tools:
+  - name: AgentTool
+    args:
+      agent:
+        code: mylib.agents.child
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(
+      path.join(dir, 'root.yaml'),
+      resolvingTo({'mylib.agents.child': child}),
+    );
+
+    if (!isLlmAgent(agent)) {
+      expect.fail('Expected an LlmAgent.');
+    }
+    const [tool] = agent.tools ?? [];
+    if (!isAgentTool(tool)) {
+      expect.fail('Expected an AgentTool.');
+    }
+    expect(tool.name).toBe('child');
+  });
+
+  it('rejects AgentTool args that name no agent', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+tools:
+  - name: AgentTool
+    args:
+      skip_summarization: true
+`,
+    });
+
+    await expect(
+      loadAgentFromConfigFile(path.join(dir, 'root.yaml')),
+    ).rejects.toThrowError(errorWithCode(AgentConfigErrorCode.INVALID_CONFIG));
+  });
+
+  it('calls a tool-building function with the args written against it', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+tools:
+  - name: mylib.tools.make_tool
+    args:
+      threshold: 4
+`,
+    });
+    const seen: Array<Record<string, unknown>> = [];
+
+    const agent = await loadAgentFromConfigFile(
+      path.join(dir, 'root.yaml'),
+      resolvingTo({
+        'mylib.tools.make_tool': (args: Record<string, unknown>) => {
+          seen.push(args);
+          return testTool;
+        },
+      }),
+    );
+
+    if (!isLlmAgent(agent)) {
+      expect.fail('Expected an LlmAgent.');
+    }
+    expect(seen).toEqual([{threshold: 4}]);
+    expect(agent.tools).toEqual([testTool]);
+  });
+
+  it('rejects a tool-building function that returns a non-tool', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+tools:
+  - name: mylib.tools.make_tool
+    args:
+      threshold: 4
+`,
+    });
+
+    await expect(
+      loadAgentFromConfigFile(
+        path.join(dir, 'root.yaml'),
+        resolvingTo({'mylib.tools.make_tool': () => 42}),
+      ),
+    ).rejects.toThrowError(
+      errorWithCode(AgentConfigErrorCode.UNRESOLVED_REFERENCE),
+    );
+  });
+
+  it('rejects args written against a tool that cannot take them', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+tools:
+  - name: mylib.tools.my_tool
+    args:
+      threshold: 4
+`,
+    });
+
+    await expect(
+      loadAgentFromConfigFile(
+        path.join(dir, 'root.yaml'),
+        resolvingTo({'mylib.tools.my_tool': testTool}),
+      ),
+    ).rejects.toThrowError(
+      errorWithCode(AgentConfigErrorCode.UNSUPPORTED_TOOL_ARGS),
+    );
   });
 
   it('rejects a tool reference that names something else', async () => {
@@ -733,6 +1055,56 @@ after_agent_callbacks:
 
     expect(agent.beforeAgentCallback).toEqual([before]);
     expect(agent.afterAgentCallback).toEqual([after]);
+  });
+
+  it('keeps every callback list in document order', async () => {
+    const first = () => undefined;
+    const second = () => undefined;
+    const third = () => undefined;
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instruction: Write code.
+before_agent_callbacks:
+  - name: mylib.callbacks.first
+  - name: mylib.callbacks.second
+  - name: mylib.callbacks.third
+after_agent_callbacks:
+  - name: mylib.callbacks.third
+  - name: mylib.callbacks.first
+before_model_callbacks:
+  - name: mylib.callbacks.second
+  - name: mylib.callbacks.third
+after_model_callbacks:
+  - name: mylib.callbacks.third
+  - name: mylib.callbacks.second
+before_tool_callbacks:
+  - name: mylib.callbacks.first
+  - name: mylib.callbacks.third
+after_tool_callbacks:
+  - name: mylib.callbacks.second
+  - name: mylib.callbacks.first
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(
+      path.join(dir, 'root.yaml'),
+      resolvingTo({
+        'mylib.callbacks.first': first,
+        'mylib.callbacks.second': second,
+        'mylib.callbacks.third': third,
+      }),
+    );
+
+    if (!isLlmAgent(agent)) {
+      expect.fail('Expected an LlmAgent.');
+    }
+    expect(agent.beforeAgentCallback).toEqual([first, second, third]);
+    expect(agent.afterAgentCallback).toEqual([third, first]);
+    expect(agent.beforeModelCallback).toEqual([second, third]);
+    expect(agent.afterModelCallback).toEqual([third, second]);
+    expect(agent.beforeToolCallback).toEqual([first, third]);
+    expect(agent.afterToolCallback).toEqual([second, first]);
   });
 
   it('treats empty reference lists as absent', async () => {
@@ -1072,5 +1444,62 @@ sub_agents:
     ).rejects.toThrowError(
       errorWithCode(AgentConfigErrorCode.CIRCULAR_SUB_AGENT_REFERENCE),
     );
+  });
+});
+
+describe('loadAgentFromConfigFile on a three-file agent tree', () => {
+  it('builds the whole tree from the files alone', async () => {
+    const dir = await writeConfigs({
+      'root_agent.yaml': `
+name: code_pipeline_agent
+description: Writes, reviews and refactors code.
+agent_class: SequentialAgent
+sub_agents:
+  - config_path: sub_agents/code_writer_agent.yaml
+  - config_path: sub_agents/code_reviewer_agent.yaml
+`,
+      'sub_agents/code_writer_agent.yaml': `
+name: code_writer_agent
+model: gemini-2.5-flash
+description: Writes initial code based on a specification.
+instruction: |
+  You are a Code Writer AI.
+output_key: generated_code
+tools:
+  - name: google_search
+`,
+      'sub_agents/code_reviewer_agent.yaml': `
+name: code_reviewer_agent
+model: gemini-2.5-flash
+description: Reviews the code the writer produced.
+instruction: |
+  You are a Code Reviewer AI.
+output_key: review_comments
+`,
+    });
+
+    const agent = await loadAgentFromConfigFile(
+      path.join(dir, 'root_agent.yaml'),
+    );
+
+    expect(isSequentialAgent(agent)).toBe(true);
+    expect(agent.name).toBe('code_pipeline_agent');
+    expect(agent.subAgents.map((subAgent) => subAgent.name)).toEqual([
+      'code_writer_agent',
+      'code_reviewer_agent',
+    ]);
+    for (const subAgent of agent.subAgents) {
+      expect(subAgent.parentAgent).toBe(agent);
+    }
+
+    const [writer, reviewer] = agent.subAgents;
+    if (!isLlmAgent(writer) || !isLlmAgent(reviewer)) {
+      expect.fail('Expected both children to be LlmAgents.');
+    }
+    expect(writer.model).toBe('gemini-2.5-flash');
+    expect(writer.outputKey).toBe('generated_code');
+    expect(writer.tools).toEqual([GOOGLE_SEARCH]);
+    expect(reviewer.outputKey).toBe('review_comments');
+    expect(reviewer.tools).toEqual([]);
   });
 });

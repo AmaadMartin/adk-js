@@ -24,6 +24,8 @@ export {toA2a} from './a2a/agent_to_a2a.js';
 export type {A2aUserBuilder, ToA2aOptions} from './a2a/agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './a2a/auth.js';
 export type {ExecutorContext} from './a2a/executor_context.js';
+export {loadAgentFromConfigFile} from './agents/configs/config_agent_utils.js';
+export type {LoadAgentOptions} from './agents/configs/config_agent_utils.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
 export {GcsArtifactService} from './artifacts/gcs_artifact_service.js';

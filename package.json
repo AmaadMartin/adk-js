@@ -14,6 +14,7 @@
     "clean": "npm run clean --workspaces",
     "clean:all": "rm package-lock.json && rm -rf ./node_modules && npm run clean:all --workspaces",
     "rebuild": "npm run clean:all && npm install && npm run build",
+    "generate:agent-config-schema": "node scripts/generate_agent_config_schema.mjs",
     "ts:check": "tsc --noEmit",
     "lint": "eslint \"**/*.ts\"",
     "lint:fix": "eslint --fix \"**/*.ts\"",
