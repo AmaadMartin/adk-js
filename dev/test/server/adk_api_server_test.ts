@@ -1225,6 +1225,102 @@ describe('AdkWebServer', () => {
       await expect(lingering.stop()).resolves.toBeUndefined();
     });
 
+    it('closes with 1011 when the session service fails', async () => {
+      vi.spyOn(sessionService, 'getSession').mockRejectedValue(
+        new Error('database is down'),
+      );
+
+      const live = connect(server.url, LIVE_QUERY);
+      const {code, reason} = await live.closed;
+
+      expect(code).toBe(1011);
+      expect(reason).toBe('database is down');
+    });
+
+    it('terminates the socket when reporting the failure also fails', async () => {
+      vi.spyOn(sessionService, 'getSession').mockRejectedValue(
+        new Error('database is down'),
+      );
+      const brokenLogger = new RecordingLogger();
+      brokenLogger.error = () => {
+        throw new Error('the logger is broken too');
+      };
+      const failing = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        logger: brokenLogger,
+      });
+      await failing.start();
+      try {
+        const live = connect(failing.url, LIVE_QUERY);
+
+        // 1006 is the abnormal closure a terminated socket produces.
+        expect((await live.closed).code).toBe(1006);
+      } finally {
+        await failing.stop();
+      }
+    });
+
+    it('serves a host that is a bare IPv6 address', async () => {
+      const ipv6 = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        host: '::1',
+      });
+      await ipv6.start();
+      try {
+        await createLiveSession();
+
+        // `AdkApiServer.url` leaves an IPv6 host unbracketed, so the port is
+        // read off the end rather than parsed out of the URL.
+        const port = ipv6.url.slice(ipv6.url.lastIndexOf(':') + 1);
+        const live = new LiveClient(`http://[::1]:${port}`, LIVE_QUERY);
+        clients.push(live);
+        const event = await live.nextEvent();
+
+        expect(event.content?.parts?.[0].text).toBe('test live content');
+      } finally {
+        await ipv6.stop();
+      }
+    });
+
+    it('does not start a run for a client that left while the app loaded', async () => {
+      const slowLoader = {
+        listAgents: () => Promise.resolve(['testApp']),
+        getAgentFile: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          return {
+            load: () => Promise.resolve(TEST_AGENT),
+            async [Symbol.asyncDispose](): Promise<void> {},
+          };
+        },
+      } as unknown as AgentLoader;
+      const slow = new AdkApiServer({
+        agentLoader: slowLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+      await slow.start();
+      try {
+        await createLiveSession();
+        const runLive = vi.spyOn(Runner.prototype, 'runLive');
+
+        const live = connect(slow.url, LIVE_QUERY);
+        await live.opened;
+        live.terminate();
+        await new Promise((resolve) => setTimeout(resolve, 600));
+
+        expect(runLive).not.toHaveBeenCalled();
+      } finally {
+        await slow.stop();
+      }
+    });
+
     it('destroys an upgrade request on any other path', async () => {
       const stray = new WebSocket(`${toWsUrl(server.url)}/not_run_live`);
       stray.on('error', () => {});

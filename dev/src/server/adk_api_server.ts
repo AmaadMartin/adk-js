@@ -59,6 +59,7 @@ import {
   LiveCloseCode,
   parseRunLiveQuery,
   RUN_LIVE_PATH,
+  RunLiveQuery,
   runLiveSession,
   truncateCloseReason,
 } from './run_live.js';
@@ -1176,16 +1177,24 @@ export class AdkApiServer {
     socket: Duplex,
     head: Buffer,
   ): void {
-    // Node always sets `url` on a server request; it is optional only on the
-    // client-response side of the same type.
-    const url = new URL(request.url!, `http://${this.host}`);
+    // Only the path and the query are read, so the authority is a placeholder.
+    // `this.host` cannot serve as one: an IPv6 host such as `::1` is not a
+    // valid URL authority unless it is bracketed, and `new URL` would throw
+    // here for every upgrade request. Node always sets `url` on a server
+    // request; it is optional only on the client-response side of the type.
+    const url = new URL(request.url!, 'http://localhost');
     if (url.pathname !== RUN_LIVE_PATH) {
       socket.destroy();
       return;
     }
 
     wss.handleUpgrade(request, socket, head, (client) => {
-      void this.serveRunLive(client, url.searchParams, request.headers.origin);
+      // `serveRunLive` reports its own failures. This last-resort handler
+      // exists because nobody awaits it, and an unhandled rejection would
+      // take the whole server process down.
+      this.serveRunLive(client, url.searchParams, request.headers.origin).catch(
+        () => client.terminate(),
+      );
     });
   }
 
@@ -1201,34 +1210,47 @@ export class AdkApiServer {
     params: URLSearchParams,
     origin?: string,
   ): Promise<void> {
-    if (!isOriginAllowed(origin, this.allowOrigins)) {
-      socket.close(LiveCloseCode.POLICY_VIOLATION, 'Origin not allowed');
-      return;
-    }
+    try {
+      if (!isOriginAllowed(origin, this.allowOrigins)) {
+        socket.close(LiveCloseCode.POLICY_VIOLATION, 'Origin not allowed');
+        return;
+      }
 
-    const parsed = parseRunLiveQuery(params);
-    if (!parsed.ok) {
-      socket.close(
-        LiveCloseCode.POLICY_VIOLATION,
-        truncateCloseReason(parsed.reason),
-      );
-      return;
-    }
-    const query = parsed.value;
+      const parsed = parseRunLiveQuery(params);
+      if (!parsed.ok) {
+        socket.close(
+          LiveCloseCode.POLICY_VIOLATION,
+          truncateCloseReason(parsed.reason),
+        );
+        return;
+      }
+      const query = parsed.value;
 
-    // `Runner.runLive` creates a session it cannot find, so an unknown
-    // `session_id` is rejected here instead of silently starting a new
-    // conversation.
-    const session = await this.sessionService.getSession({
-      appName: query.appName,
-      userId: query.userId,
-      sessionId: query.sessionId,
-    });
-    if (!session) {
-      socket.close(LiveCloseCode.PROTOCOL_ERROR, 'Session not found');
-      return;
-    }
+      // `Runner.runLive` creates a session it cannot find, so an unknown
+      // `session_id` is rejected here instead of silently starting a new
+      // conversation. A session service backed by a database rejects when the
+      // backend is down, which the catch below turns into a close frame.
+      const session = await this.sessionService.getSession({
+        appName: query.appName,
+        userId: query.userId,
+        sessionId: query.sessionId,
+      });
+      if (!session) {
+        socket.close(LiveCloseCode.PROTOCOL_ERROR, 'Session not found');
+        return;
+      }
 
+      await this.startLiveRun(socket, query);
+    } catch (e: unknown) {
+      closeWithError(socket, e, this.logger);
+    }
+  }
+
+  /** Loads the app and runs the live session it asked for. */
+  private async startLiveRun(
+    socket: WebSocket,
+    query: RunLiveQuery,
+  ): Promise<void> {
     const liveRequestQueue = new LiveRequestQueue();
     try {
       await using agentFile = await this.agentLoader.getAgentFile(
@@ -1237,6 +1259,14 @@ export class AdkApiServer {
       const loaded = await agentFile.load();
       const runner = await this.getRunner(loaded, query.appName);
 
+      // Loading an app compiles it on the first request, which takes long
+      // enough for a client to give up. `runLiveSession` only learns about a
+      // disconnect from the socket's `close` event, and that one has already
+      // fired, so starting the run now would park it on the queue forever.
+      if (socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
       await runLiveSession({
         socket,
         runner,
@@ -1244,8 +1274,6 @@ export class AdkApiServer {
         liveRequestQueue,
         logger: this.logger,
       });
-    } catch (e: unknown) {
-      closeWithError(socket, e, this.logger);
     } finally {
       liveRequestQueue.close();
     }
