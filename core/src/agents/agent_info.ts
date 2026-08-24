@@ -36,8 +36,8 @@ export interface LlmAgentInfo {
 /**
  * Resolves an agent's `tools` to the declarations a model would be given.
  *
- * Each returned {@link Tool} holds exactly one `FunctionDeclaration`, in input
- * order, with every toolset expanded in place. A tool that declares nothing is
+ * Each returned `Tool` holds exactly one `FunctionDeclaration`, in input order,
+ * with every toolset expanded in place. A tool that declares nothing is
  * omitted.
  *
  * Resolving a `BaseToolset` calls its `getTools()`, so a remote toolset (MCP,
