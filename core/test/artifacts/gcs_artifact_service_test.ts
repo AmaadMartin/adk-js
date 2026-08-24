@@ -363,4 +363,179 @@ describe('GcsArtifactService', () => {
       expect(loaded?.inlineData?.displayName).toBe('photo.png');
     });
   });
+
+  // adk-python keeps the "user:" prefix inside the object name, so a bucket
+  // written by one SDK must be readable by the other at the same path.
+  describe('user-namespaced object layout', () => {
+    const scope = {
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'test-session',
+    };
+
+    function newService(): GcsArtifactService {
+      storageMock.buckets.clear();
+      return new GcsArtifactService(bucketName);
+    }
+
+    function bucketFiles() {
+      return storageMock.bucket(bucketName).files;
+    }
+
+    it('saves a user-scoped artifact under the prefixed object name', async () => {
+      const service = newService();
+
+      await service.saveArtifact({
+        ...scope,
+        filename: 'user:document.pdf',
+        artifact: {text: 'hello'},
+      });
+
+      expect(
+        bucketFiles().get('test-app/test-user/user/user:document.pdf/0'),
+      ).toBeDefined();
+      expect(bucketFiles().has('test-app/test-user/user/document.pdf/0')).toBe(
+        false,
+      );
+    });
+
+    it('leaves the session-scoped object name unchanged', async () => {
+      const service = newService();
+
+      await service.saveArtifact({
+        ...scope,
+        filename: 'document.pdf',
+        artifact: {text: 'hello'},
+      });
+
+      expect([...bucketFiles().keys()]).toEqual([
+        'test-app/test-user/test-session/document.pdf/0',
+      ]);
+    });
+
+    it('numbers versions on the prefixed object name and loads the latest', async () => {
+      const service = newService();
+
+      await service.saveArtifact({
+        ...scope,
+        filename: 'user:document.pdf',
+        artifact: {text: 'first'},
+      });
+      await service.saveArtifact({
+        ...scope,
+        filename: 'user:document.pdf',
+        artifact: {text: 'second'},
+      });
+
+      const versions = await service.listVersions({
+        ...scope,
+        filename: 'user:document.pdf',
+      });
+      expect(versions).toEqual([0, 1]);
+      expect(
+        bucketFiles().has('test-app/test-user/user/user:document.pdf/0'),
+      ).toBe(true);
+      expect(
+        bucketFiles().has('test-app/test-user/user/user:document.pdf/1'),
+      ).toBe(true);
+
+      const loaded = await service.loadArtifact({
+        ...scope,
+        filename: 'user:document.pdf',
+      });
+      expect(loaded?.text).toBe('second');
+    });
+
+    it('reports a user-scoped key exactly once', async () => {
+      const service = newService();
+
+      await service.saveArtifact({
+        ...scope,
+        filename: 'session.txt',
+        artifact: {text: 'session'},
+      });
+      await service.saveArtifact({
+        ...scope,
+        filename: 'user:document.pdf',
+        artifact: {text: 'user'},
+      });
+
+      const keys = await service.listArtifactKeys(scope);
+
+      expect(keys).toEqual(['session.txt', 'user:document.pdf']);
+    });
+
+    it('keeps a nested user-scoped filename intact', async () => {
+      const service = newService();
+
+      await service.saveArtifact({
+        ...scope,
+        filename: 'user:nested/dir/note.txt',
+        artifact: {text: 'nested'},
+      });
+
+      expect(
+        bucketFiles().has('test-app/test-user/user/user:nested/dir/note.txt/0'),
+      ).toBe(true);
+
+      const keys = await service.listArtifactKeys(scope);
+      expect(keys).toEqual(['user:nested/dir/note.txt']);
+    });
+
+    it('deletes the object at the prefixed name', async () => {
+      const service = newService();
+
+      await service.saveArtifact({
+        ...scope,
+        filename: 'user:document.pdf',
+        artifact: {text: 'hello'},
+      });
+      expect(
+        bucketFiles().has('test-app/test-user/user/user:document.pdf/0'),
+      ).toBe(true);
+
+      await service.deleteArtifact({...scope, filename: 'user:document.pdf'});
+
+      expect(bucketFiles().size).toBe(0);
+      expect(
+        await service.listVersions({...scope, filename: 'user:document.pdf'}),
+      ).toEqual([]);
+    });
+
+    it('reports the prefixed path in the version canonical URI', async () => {
+      const service = newService();
+
+      await service.saveArtifact({
+        ...scope,
+        filename: 'user:document.pdf',
+        artifact: {text: 'hello'},
+      });
+
+      const artifactVersion = await service.getArtifactVersion({
+        ...scope,
+        filename: 'user:document.pdf',
+      });
+
+      expect(artifactVersion?.canonicalUri).toContain(
+        '/test-app/test-user/user/user:document.pdf/0',
+      );
+    });
+
+    it('loads an object written by adk-python at the prefixed path', async () => {
+      const service = newService();
+
+      bucketFiles().set('test-app/test-user/user/user:seeded.txt/0', {
+        data: Buffer.from('written by adk-python'),
+        metadata: {adkIsText: 'true'},
+        contentType: 'text/plain',
+      });
+
+      const loaded = await service.loadArtifact({
+        ...scope,
+        filename: 'user:seeded.txt',
+      });
+
+      expect(loaded?.text).toBe('written by adk-python');
+    });
+  });
 });
