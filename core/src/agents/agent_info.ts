@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Tool} from '@google/genai';
+import {Tool} from '@google/genai';
 
 import {BaseTool} from '../tools/base_tool.js';
 import {
@@ -52,15 +52,10 @@ export async function getToolsInfo(tools: ToolUnion[]): Promise<Tool[]> {
     resolved.push(...(await convertToolUnionToTools(tool)));
   }
 
-  return resolved
-    .map((tool) => tool._getDeclaration())
-    .filter(
-      (declaration): declaration is FunctionDeclaration =>
-        declaration !== undefined,
-    )
-    .map((functionDeclaration) => ({
-      functionDeclarations: [functionDeclaration],
-    }));
+  return resolved.flatMap((tool) => {
+    const declaration = tool._getDeclaration();
+    return declaration ? [{functionDeclarations: [declaration]}] : [];
+  });
 }
 
 /**
