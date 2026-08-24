@@ -9,6 +9,7 @@ import {
   createEventActions,
   DatabaseSessionService,
   Event,
+  isAlreadyExistsError,
   State,
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
@@ -323,6 +324,22 @@ describe('DatabaseSessionService', () => {
       userId: 'u1',
     });
     expect(listAll.sessions.length).toBe(1);
+  });
+
+  it('rejects a duplicate session id with AlreadyExistsError', async () => {
+    await service.createSession({
+      appName: 'app1',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+
+    await expect(
+      service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+      }),
+    ).rejects.toSatisfy(isAlreadyExistsError);
   });
 
   it('should handle errors', async () => {
