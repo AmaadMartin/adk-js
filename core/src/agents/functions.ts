@@ -230,18 +230,10 @@ function buildResponseEvent(
   toolContext: Context,
   invocationContext: InvocationContext,
 ): Event {
-  // Media has to come out before the result is coerced to a record, so that a
-  // part returned on its own or inside a container is still reachable.
   const {remainder, parts} = extractMediaParts(functionResult);
-
-  let responseResult: Record<string, unknown>;
-  if (typeof remainder !== 'object' || remainder == null) {
-    responseResult = {result: remainder};
-  } else if (Array.isArray(remainder)) {
-    responseResult = {results: remainder};
-  } else {
-    responseResult = remainder as Record<string, unknown>;
-  }
+  const responseResult = normalizeCallbackResponse(remainder) ?? {
+    result: remainder,
+  };
 
   const partFunctionResponse: Part = {
     functionResponse: {
@@ -481,9 +473,6 @@ export async function handleFunctionCallList({
     } else if (functionResponse == null) {
       functionResponse = {result: functionResponse};
     } else {
-      // Media has to come out before the result is coerced to a record, so
-      // that a part returned on its own or inside a container is still
-      // reachable.
       const {remainder, parts} = extractMediaParts(functionResponse);
       responseParts = parts;
       functionResponse = normalizeCallbackResponse(remainder);

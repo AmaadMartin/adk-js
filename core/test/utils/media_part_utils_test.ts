@@ -107,6 +107,16 @@ describe('extractMediaParts', () => {
     expect(result.remainder).toEqual({summary: 'two charts'});
   });
 
+  it('keeps what survives in a nested container the media came out of', () => {
+    const result = extractMediaParts({
+      payload: [pngPart, 'a note'],
+      summary: 'up 3%',
+    });
+
+    expect(result.parts).toEqual([pngResponsePart]);
+    expect(result.remainder).toEqual({payload: ['a note'], summary: 'up 3%'});
+  });
+
   it('leaves media buried deeper than one container in the response body', () => {
     const value = {report: {charts: {first: pngPart}}};
 
