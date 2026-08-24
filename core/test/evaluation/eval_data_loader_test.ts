@@ -147,6 +147,55 @@ describe('loadEvalSetFromFile', () => {
     });
   });
 
+  it('reads an eval set that spells unset optional fields as null', () => {
+    // adk-python serializes every unset optional field as null.
+    const file = writeJson(makeTempDir(), 'a.test.json', {
+      eval_set_id: 'dice_set',
+      name: 'dice_set',
+      description: null,
+      creation_timestamp: 1,
+      eval_cases: [
+        {
+          eval_id: 'roll_a_die',
+          session_input: null,
+          rubrics: null,
+          conversation: [
+            {
+              invocation_id: 'inv-1',
+              user_content: {
+                parts: [{function_call: null, text: 'Roll a 17 sided dice'}],
+                role: 'user',
+              },
+              final_response: {parts: [{text: 'I rolled 13.'}], role: 'model'},
+              intermediate_data: {
+                tool_uses: [
+                  {id: null, name: 'roll_die', args: {sides_count: null}},
+                ],
+                intermediate_responses: [],
+              },
+              creation_timestamp: 1,
+            },
+          ],
+          creation_timestamp: 1,
+        },
+      ],
+    });
+
+    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG, {});
+
+    expect(evalSet.evalCases[0].sessionInput).toBeUndefined();
+    expect(evalSet.evalCases[0].conversation?.[0].userContent).toEqual({
+      parts: [{text: 'Roll a 17 sided dice'}],
+      role: 'user',
+    });
+    // A null inside a user-defined map is data, not an omission.
+    expect(
+      evalSet.evalCases[0].conversation?.[0].intermediateData,
+    ).toMatchObject({
+      toolUses: [{name: 'roll_die', args: {sides_count: null}}],
+    });
+  });
+
   it('rejects an eval set file combined with an initial session', () => {
     const file = writeJson(makeTempDir(), 'a.test.json', SNAKE_CASE_EVAL_SET);
 

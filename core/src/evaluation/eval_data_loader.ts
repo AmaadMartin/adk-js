@@ -9,7 +9,11 @@ import {z} from 'zod';
 
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
-import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
+import {
+  stripNullValues,
+  toCamelCase,
+  toSnakeCase,
+} from '../utils/object_notation_utils.js';
 
 import {EvalConfig} from './eval_config.js';
 import {PrebuiltMetrics} from './eval_metrics.js';
@@ -364,8 +368,13 @@ export function loadEvalSetFromFile(
   initialSession: Record<string, unknown>,
 ): EvalSet {
   const parsed: unknown = readJsonFile(evalSetFile);
+  // adk-python writes every unset optional field as `null`, which the schemas
+  // read as a value rather than as an omission.
   const asEvalSet = EvalSetSchema.safeParse(
-    toCamelCase(parsed, PRESERVE_KEYS_ON_READ),
+    toCamelCase(
+      stripNullValues(parsed, PRESERVE_KEYS_ON_READ),
+      PRESERVE_KEYS_ON_READ,
+    ),
   );
 
   if (asEvalSet.success) {

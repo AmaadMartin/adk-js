@@ -6,6 +6,7 @@
 
 import {describe, expect, it} from 'vitest';
 import {
+  stripNullValues,
   toCamelCase,
   toSnakeCase,
 } from '../../src/utils/object_notation_utils.js';
@@ -149,5 +150,34 @@ describe('toSnakeCase', () => {
     expect(toSnakeCase(123)).toBe(123);
     expect(toSnakeCase(null)).toBe(null);
     expect(toSnakeCase(undefined)).toBe(undefined);
+  });
+});
+
+describe('stripNullValues', () => {
+  it('drops properties whose value is null', () => {
+    expect(stripNullValues({name: 'a', description: null, count: 0})).toEqual({
+      name: 'a',
+      count: 0,
+    });
+  });
+
+  it('drops nested and in-array null properties', () => {
+    expect(
+      stripNullValues({
+        cases: [{id: 'a', sessionInput: null, data: {inner: null, kept: 1}}],
+      }),
+    ).toEqual({cases: [{id: 'a', data: {kept: 1}}]});
+  });
+
+  it('keeps a null held under a preserved path', () => {
+    expect(
+      stripNullValues({tool: {args: {opt_out: null}, id: null}}, ['tool.args']),
+    ).toEqual({tool: {args: {opt_out: null}}});
+  });
+
+  it('passes primitives and a bare null through', () => {
+    expect(stripNullValues('string')).toBe('string');
+    expect(stripNullValues(null)).toBe(null);
+    expect(stripNullValues(undefined)).toBe(undefined);
   });
 });

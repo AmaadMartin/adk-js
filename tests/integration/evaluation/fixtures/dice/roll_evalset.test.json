@@ -1,0 +1,49 @@
+{
+  "eval_set_id": "roll_evalset",
+  "name": "roll_evalset",
+  "description": null,
+  "creation_timestamp": 0,
+  "eval_cases": [
+    {
+      "eval_id": "roll_a_17_sided_die",
+      "conversation": [
+        {
+          "invocation_id": "roll-1",
+          "user_content": {
+            "parts": [
+              {
+                "function_call": null,
+                "function_response": null,
+                "text": "Roll a 17 sided dice"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "I rolled a 17 sided die and got 13.\n"
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "id": null,
+                "name": "roll_die",
+                "args": {
+                  "sides": 17
+                }
+              }
+            ],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0
+        }
+      ],
+      "session_input": null,
+      "creation_timestamp": 0
+    }
+  ]
+}
