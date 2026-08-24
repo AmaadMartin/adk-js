@@ -4,16 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/** The message used when a caller does not supply one. */
-const DEFAULT_MESSAGE = 'The resource already exists.';
-
 /**
  * Raised when an entity a caller asked to create is already present.
  *
  * Ported from `google/adk-python` `errors/already_exists_error.py`.
  */
 export class AlreadyExistsError extends Error {
-  constructor(message: string = DEFAULT_MESSAGE) {
+  constructor(message = 'The resource already exists.') {
     super(message);
     this.name = 'AlreadyExistsError';
     // Restore prototype chain for `instanceof` across transpilation targets.

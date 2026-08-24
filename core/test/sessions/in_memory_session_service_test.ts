@@ -5,7 +5,6 @@
  */
 
 import {
-  CreateSessionRequest,
   InMemorySessionService,
   Session,
   State,
@@ -15,17 +14,6 @@ import {
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
-
-/** Resolves to the rejection reason, or undefined when the create succeeds. */
-function createSessionError(
-  service: InMemorySessionService,
-  request: CreateSessionRequest,
-): Promise<unknown> {
-  return service.createSession(request).then(
-    () => undefined,
-    (e: unknown) => e,
-  );
-}
 
 describe('isInMemoryConnectionString', () => {
   it('returns true for memory://', () => {
@@ -123,16 +111,29 @@ describe('InMemorySessionService', () => {
         sessionId: 'existing_session',
       });
 
-      const error = await createSessionError(service, {
+      await expect(
+        service.createSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: 'existing_session',
+        }),
+      ).rejects.toSatisfy(isAlreadyExistsError);
+    });
+
+    it('names the duplicated id in the message', async () => {
+      await service.createSession({
         appName: 'app',
         userId: 'user',
         sessionId: 'existing_session',
       });
 
-      expect(isAlreadyExistsError(error)).toBe(true);
-      expect((error as Error).message).toBe(
-        'Session with id existing_session already exists.',
-      );
+      await expect(
+        service.createSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: 'existing_session',
+        }),
+      ).rejects.toThrow('Session with id existing_session already exists.');
     });
 
     it('keeps the events and the state of the existing session', async () => {
@@ -147,12 +148,14 @@ describe('InMemorySessionService', () => {
         event: createEvent({timestamp: Date.now(), author: 'user'}),
       });
 
-      const error = await createSessionError(service, {
-        appName: 'app',
-        userId: 'user',
-        sessionId: 's1',
-        state: {keep: 'overwritten'},
-      });
+      await expect(
+        service.createSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: 's1',
+          state: {keep: 'overwritten'},
+        }),
+      ).rejects.toSatisfy(isAlreadyExistsError);
 
       const stored = await service.getSession({
         appName: 'app',
@@ -161,7 +164,6 @@ describe('InMemorySessionService', () => {
       });
       expect(stored?.events).toHaveLength(1);
       expect(stored?.state).toEqual({keep: 'me'});
-      expect(isAlreadyExistsError(error)).toBe(true);
     });
 
     it('generates a distinct id when no sessionId is provided', async () => {
