@@ -9,6 +9,7 @@ import {z} from 'zod';
 
 import {CodeConfigSchema} from '../agents/common_configs.js';
 import {logger} from '../utils/logger.js';
+import {toCamelCase} from '../utils/object_notation_utils.js';
 import {DEFAULT_LIVE_TIMEOUT_SECONDS} from './constants.js';
 import {
   BaseCriterion,
@@ -95,6 +96,45 @@ const DEFAULT_EVAL_CONFIG: EvalConfig = EvalConfigSchema.parse({
   },
 });
 
+/** Config fields whose keys are metric names chosen by the user. */
+const METRIC_KEYED_FIELDS = ['criteria', 'customMetrics'] as const;
+
+/** The paths those fields are reached by, in either spelling. */
+const METRIC_KEYED_PATHS = ['criteria', 'custom_metrics', 'customMetrics'];
+
+/**
+ * Rewrites an eval config's own field names to camelCase, so a config file
+ * written by adk-python loads here. A criterion spells its match type
+ * `match_type` there and `matchType` here, and the whole criterion is dropped
+ * silently without this step.
+ *
+ * The keys of `criteria` and `customMetrics` are metric names, so they are
+ * left exactly as written; only the values under them are rewritten.
+ */
+function toCamelCaseEvalConfig(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return raw;
+  }
+
+  const config = toCamelCase(raw, METRIC_KEYED_PATHS) as Record<
+    string,
+    unknown
+  >;
+  for (const field of METRIC_KEYED_FIELDS) {
+    const metricMap = config[field];
+    if (typeof metricMap !== 'object' || metricMap === null) {
+      continue;
+    }
+    config[field] = Object.fromEntries(
+      Object.entries(metricMap).map(([metricName, value]) => [
+        metricName,
+        toCamelCase(value),
+      ]),
+    );
+  }
+  return config;
+}
+
 /**
  * Returns the `EvalConfig` read from the config file, if present. Otherwise a
  * default one is returned.
@@ -110,7 +150,9 @@ export function getEvaluationCriteriaOrDefault(
 ): EvalConfig {
   if (evalConfigFilePath && fs.existsSync(evalConfigFilePath)) {
     const content = fs.readFileSync(evalConfigFilePath, 'utf-8');
-    return EvalConfigSchema.parse(JSON.parse(content));
+    return EvalConfigSchema.parse(
+      toCamelCaseEvalConfig(JSON.parse(content) as unknown),
+    );
   }
 
   logger.info(

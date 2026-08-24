@@ -70,6 +70,51 @@ describe('evaluation/eval_config', () => {
       expect(getEvaluationCriteriaOrDefault(filePath)).toEqual(evalConfig);
     });
 
+    it('reads a criterion field written in snake_case', () => {
+      // adk-python spells MatchType.IN_ORDER as `"match_type": 1`.
+      const filePath = writeTempConfig(
+        JSON.stringify({
+          criteria: {
+            tool_trajectory_avg_score: {threshold: 1.0, match_type: 1},
+          },
+        }),
+      );
+
+      const criterion =
+        getEvaluationCriteriaOrDefault(filePath).criteria[
+          'tool_trajectory_avg_score'
+        ];
+
+      expect(criterion).toMatchObject({threshold: 1.0, matchType: 1});
+    });
+
+    it('reads custom_metrics as well as customMetrics', () => {
+      const filePath = writeTempConfig(
+        JSON.stringify({
+          criteria: {my_metric: 0.5},
+          custom_metrics: {
+            my_metric: {code_config: {name: 'scorers.my_metric'}},
+          },
+        }),
+      );
+
+      const config = getEvaluationCriteriaOrDefault(filePath);
+
+      expect(config.customMetrics?.['my_metric'].codeConfig.name).toBe(
+        'scorers.my_metric',
+      );
+    });
+
+    it('never renames a metric name inside criteria', () => {
+      const filePath = writeTempConfig(
+        JSON.stringify({criteria: {tool_trajectory_avg_score: 1.0}}),
+      );
+
+      expect(
+        Object.keys(getEvaluationCriteriaOrDefault(filePath).criteria),
+      ).toEqual(['tool_trajectory_avg_score']);
+    });
+
     it('returns the default config when the file does not exist', () => {
       const missing = path.join(
         os.tmpdir(),
