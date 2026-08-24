@@ -75,27 +75,26 @@ socket.send(
 
 ## Query parameters
 
-| Parameter                   | Type                          | Required | Default |
-| --------------------------- | ----------------------------- | -------- | ------- |
-| `app_name`                  | string                        | yes      | —       |
-| `user_id`                   | string                        | yes      | —       |
-| `session_id`                | string                        | yes      | —       |
-| `modalities`                | `TEXT` or `AUDIO`, repeatable | no       | `AUDIO` |
-| `proactive_audio`           | boolean                       | no       | unset   |
-| `enable_affective_dialog`   | boolean                       | no       | unset   |
-| `enable_session_resumption` | boolean                       | no       | unset   |
-| `save_live_blob`            | boolean                       | no       | unset   |
-| `explicit_vad_signal`       | boolean                       | no       | unset   |
+| Parameter                 | Type                          | Required | Default |
+| ------------------------- | ----------------------------- | -------- | ------- |
+| `app_name`                | string                        | yes      | —       |
+| `user_id`                 | string                        | yes      | —       |
+| `session_id`              | string                        | yes      | —       |
+| `modalities`              | `TEXT` or `AUDIO`, repeatable | no       | `AUDIO` |
+| `proactive_audio`         | boolean                       | no       | unset   |
+| `enable_affective_dialog` | boolean                       | no       | unset   |
 
 Repeat `modalities` to ask for more than one:
 `&modalities=TEXT&modalities=AUDIO`. A boolean accepts `true`, `false`, `1` and
 `0`, in any case.
 
-`modalities`, `proactive_audio` and `enable_affective_dialog` reach the run
-config as `responseModalities`, `proactivity.proactiveAudio` and
-`enableAffectiveDialog`. The last three parameters are validated and then
-ignored: `RunConfig` has no field for them yet. The development UI sends them,
-so refusing them would break it.
+These reach the run config as `responseModalities`,
+`proactivity.proactiveAudio` and `enableAffectiveDialog`.
+
+adk-python reads three more: `enable_session_resumption`, `save_live_blob` and
+`explicit_vad_signal`. `RunConfig` has no field for any of them, so this
+endpoint ignores them, as it ignores any other unknown parameter. A client
+written for the Python server therefore still connects.
 
 ## Inbound frames
 

@@ -40,17 +40,6 @@ const LIVE_MODALITIES = new Map<string, Modality>([
   ['AUDIO', Modality.AUDIO],
 ]);
 
-/** Query parameters read as booleans. */
-const BOOLEAN_PARAMS = [
-  'proactive_audio',
-  'enable_affective_dialog',
-  'enable_session_resumption',
-  'save_live_blob',
-  'explicit_vad_signal',
-] as const;
-
-type BooleanParam = (typeof BOOLEAN_PARAMS)[number];
-
 /** Tokens accepted for a boolean query parameter, lowercased. */
 const BOOLEAN_TOKENS = new Map<string, boolean>([
   ['true', true],
@@ -79,10 +68,10 @@ export type ParseResult<T> = {ok: true; value: T} | {ok: false; reason: string};
 /**
  * The `/run_live` query, after validation.
  *
- * `enable_session_resumption`, `save_live_blob` and `explicit_vad_signal` are
- * accepted and validated on the wire, because the shared ADK dev UI sends
- * them, but they are absent here: `RunConfig` has no counterpart field yet, so
- * a field for them would have no reader.
+ * adk-python also reads `enable_session_resumption`, `save_live_blob` and
+ * `explicit_vad_signal`. `RunConfig` has no counterpart field for any of them,
+ * so this endpoint ignores them as it ignores any other unknown parameter,
+ * rather than carrying three values nothing reads.
  */
 export interface RunLiveQuery {
   appName: string;
@@ -98,7 +87,6 @@ export interface RunLiveSessionOptions {
   socket: WebSocket;
   runner: Runner;
   query: RunLiveQuery;
-  liveRequestQueue: LiveRequestQueue;
   logger: Logger;
 }
 
@@ -167,24 +155,20 @@ function parseModalities(params: URLSearchParams): ParseResult<Modality[]> {
   return {ok: true, value: modalities};
 }
 
-/** Reads every boolean parameter that is present, rejecting an unknown token. */
-function parseBooleanParams(
+/** Reads an optional boolean parameter, rejecting a token that is not one. */
+function parseBoolean(
   params: URLSearchParams,
-): ParseResult<Map<BooleanParam, boolean>> {
-  const values = new Map<BooleanParam, boolean>();
-  for (const name of BOOLEAN_PARAMS) {
-    const raw = params.get(name);
-    if (raw === null) {
-      continue;
-    }
-    const value = BOOLEAN_TOKENS.get(raw.toLowerCase());
-    if (value === undefined) {
-      return {ok: false, reason: `Invalid boolean for ${name}: ${raw}`};
-    }
-    values.set(name, value);
+  name: string,
+): ParseResult<boolean | undefined> {
+  const raw = params.get(name);
+  if (raw === null) {
+    return {ok: true, value: undefined};
   }
 
-  return {ok: true, value: values};
+  const value = BOOLEAN_TOKENS.get(raw.toLowerCase());
+  return value === undefined
+    ? {ok: false, reason: `Invalid boolean for ${name}: ${raw}`}
+    : {ok: true, value};
 }
 
 /**
@@ -212,9 +196,13 @@ export function parseRunLiveQuery(
   if (!modalities.ok) {
     return modalities;
   }
-  const booleans = parseBooleanParams(params);
-  if (!booleans.ok) {
-    return booleans;
+  const proactiveAudio = parseBoolean(params, 'proactive_audio');
+  if (!proactiveAudio.ok) {
+    return proactiveAudio;
+  }
+  const enableAffectiveDialog = parseBoolean(params, 'enable_affective_dialog');
+  if (!enableAffectiveDialog.ok) {
+    return enableAffectiveDialog;
   }
 
   return {
@@ -224,8 +212,8 @@ export function parseRunLiveQuery(
       userId: userId.value,
       sessionId: sessionId.value,
       modalities: modalities.value,
-      proactiveAudio: booleans.value.get('proactive_audio'),
-      enableAffectiveDialog: booleans.value.get('enable_affective_dialog'),
+      proactiveAudio: proactiveAudio.value,
+      enableAffectiveDialog: enableAffectiveDialog.value,
     },
   };
 }
@@ -326,6 +314,9 @@ function parseLiveRequest(frame: string): LiveRequest | undefined {
  * Drives one live connection: the runner's events go out as JSON frames, and
  * inbound frames go onto `liveRequestQueue`.
  *
+ * The queue lives and dies with the connection, so this owns it: it is created
+ * here and closed on every exit path.
+ *
  * A frame that is not a valid {@link LiveRequest} is logged and dropped, and
  * the socket stays open. A client disconnect ends the run quietly; any other
  * error propagates to the caller, which owns the close frame.
@@ -333,7 +324,8 @@ function parseLiveRequest(frame: string): LiveRequest | undefined {
 export async function runLiveSession(
   options: RunLiveSessionOptions,
 ): Promise<void> {
-  const {socket, runner, query, liveRequestQueue, logger} = options;
+  const {socket, runner, query, logger} = options;
+  const liveRequestQueue = new LiveRequestQueue();
   const abortController = new AbortController();
   let disconnected = false;
 

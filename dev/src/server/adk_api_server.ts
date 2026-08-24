@@ -17,7 +17,6 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
-  LiveRequestQueue,
   Logger,
   LogLevel,
   RunConfig,
@@ -1180,9 +1179,8 @@ export class AdkApiServer {
     // Only the path and the query are read, so the authority is a placeholder.
     // `this.host` cannot serve as one: an IPv6 host such as `::1` is not a
     // valid URL authority unless it is bracketed, and `new URL` would throw
-    // here for every upgrade request. Node always sets `url` on a server
-    // request; it is optional only on the client-response side of the type.
-    const url = new URL(request.url!, 'http://localhost');
+    // here for every upgrade request.
+    const url = new URL(request.url ?? '/', 'http://localhost');
     if (url.pathname !== RUN_LIVE_PATH) {
       socket.destroy();
       return;
@@ -1251,32 +1249,19 @@ export class AdkApiServer {
     socket: WebSocket,
     query: RunLiveQuery,
   ): Promise<void> {
-    const liveRequestQueue = new LiveRequestQueue();
-    try {
-      await using agentFile = await this.agentLoader.getAgentFile(
-        query.appName,
-      );
-      const loaded = await agentFile.load();
-      const runner = await this.getRunner(loaded, query.appName);
+    await using agentFile = await this.agentLoader.getAgentFile(query.appName);
+    const loaded = await agentFile.load();
+    const runner = await this.getRunner(loaded, query.appName);
 
-      // Loading an app compiles it on the first request, which takes long
-      // enough for a client to give up. `runLiveSession` only learns about a
-      // disconnect from the socket's `close` event, and that one has already
-      // fired, so starting the run now would park it on the queue forever.
-      if (socket.readyState !== WebSocket.OPEN) {
-        return;
-      }
-
-      await runLiveSession({
-        socket,
-        runner,
-        query,
-        liveRequestQueue,
-        logger: this.logger,
-      });
-    } finally {
-      liveRequestQueue.close();
+    // Loading an app compiles it on the first request, which takes long enough
+    // for a client to give up. `runLiveSession` only learns about a disconnect
+    // from the socket's `close` event, and that one has already fired, so
+    // starting the run now would park it on the queue forever.
+    if (socket.readyState !== WebSocket.OPEN) {
+      return;
     }
+
+    return runLiveSession({socket, runner, query, logger: this.logger});
   }
 
   /**

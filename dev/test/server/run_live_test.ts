@@ -96,9 +96,10 @@ describe('parseRunLiveQuery', () => {
     'enable_session_resumption',
     'save_live_blob',
     'explicit_vad_signal',
-  ])('accepts %s, which has no RunConfig counterpart yet', (name) => {
+  ])('ignores %s, which adk-python reads but RunConfig cannot', (name) => {
+    // Accepted whatever the value, so an adk-python client keeps working.
     expect(parseOrFail(`${REQUIRED}&${name}=true`).appName).toBe('a');
-    expect(parseOrFail(`${REQUIRED}&${name}=false`).appName).toBe('a');
+    expect(parseOrFail(`${REQUIRED}&${name}=nonsense`).appName).toBe('a');
   });
 
   it.each(['app_name', 'user_id', 'session_id'])(
@@ -134,21 +135,18 @@ describe('parseRunLiveQuery', () => {
     );
   });
 
-  it.each([
-    'proactive_audio',
-    'enable_affective_dialog',
-    'enable_session_resumption',
-    'save_live_blob',
-    'explicit_vad_signal',
-  ])('rejects an unparseable %s', (name) => {
-    expect(rejectionReason(`${REQUIRED}&${name}=maybe`)).toBe(
-      `Invalid boolean for ${name}: maybe`,
-    );
-  });
+  it.each(['proactive_audio', 'enable_affective_dialog'])(
+    'rejects an unparseable %s',
+    (name) => {
+      expect(rejectionReason(`${REQUIRED}&${name}=maybe`)).toBe(
+        `Invalid boolean for ${name}: maybe`,
+      );
+    },
+  );
 
   it('rejects a boolean token that names an Object.prototype member', () => {
-    expect(rejectionReason(`${REQUIRED}&save_live_blob=constructor`)).toBe(
-      'Invalid boolean for save_live_blob: constructor',
+    expect(rejectionReason(`${REQUIRED}&proactive_audio=constructor`)).toBe(
+      'Invalid boolean for proactive_audio: constructor',
     );
   });
 });
@@ -363,11 +361,9 @@ describe('runLiveSession', () => {
   let clientSocket: WebSocket;
   let logger: RecordingLogger;
   let runner: Runner;
-  let liveRequestQueue: LiveRequestQueue;
 
   beforeEach(async () => {
     logger = new RecordingLogger();
-    liveRequestQueue = new LiveRequestQueue();
     runner = new Runner({
       appName: 'testApp',
       agent: new LlmAgent({name: 'liveAgent', description: 'live agent'}),
@@ -400,7 +396,6 @@ describe('runLiveSession', () => {
         sessionId: 'liveSession',
         modalities: [Modality.TEXT],
       },
-      liveRequestQueue,
       logger,
     });
   }
@@ -458,7 +453,7 @@ describe('runLiveSession', () => {
     });
 
     serverSocket.emit('error', new Error('connection reset by peer'));
-    liveRequestQueue.close();
+    clientSocket.close();
     await session;
 
     expect(logger.errors).toEqual([
