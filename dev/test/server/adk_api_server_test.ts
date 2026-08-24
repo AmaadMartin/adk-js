@@ -1289,36 +1289,24 @@ describe('AdkWebServer', () => {
     });
 
     it('does not start a run for a client that left while the app loaded', async () => {
-      const slowLoader = {
-        listAgents: () => Promise.resolve(['testApp']),
-        getAgentFile: async () => {
+      await createLiveSession();
+      // Loading an app compiles it, which is slow enough on a first request
+      // for a client to give up before the run starts.
+      const load = agentLoader.getAgentFile.bind(agentLoader);
+      vi.spyOn(agentLoader, 'getAgentFile').mockImplementation(
+        async (appName) => {
           await new Promise((resolve) => setTimeout(resolve, 300));
-          return {
-            load: () => Promise.resolve(TEST_AGENT),
-            async [Symbol.asyncDispose](): Promise<void> {},
-          };
+          return load(appName);
         },
-      } as unknown as AgentLoader;
-      const slow = new AdkApiServer({
-        agentLoader: slowLoader,
-        sessionService,
-        memoryService,
-        artifactService,
-      });
-      await slow.start();
-      try {
-        await createLiveSession();
-        const runLive = vi.spyOn(Runner.prototype, 'runLive');
+      );
+      const runLive = vi.spyOn(Runner.prototype, 'runLive');
 
-        const live = connect(slow.url, LIVE_QUERY);
-        await live.opened;
-        live.terminate();
-        await new Promise((resolve) => setTimeout(resolve, 600));
+      const live = connect(server.url, LIVE_QUERY);
+      await live.opened;
+      live.terminate();
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
-        expect(runLive).not.toHaveBeenCalled();
-      } finally {
-        await slow.stop();
-      }
+      expect(runLive).not.toHaveBeenCalled();
     });
 
     it('destroys an upgrade request on any other path', async () => {
