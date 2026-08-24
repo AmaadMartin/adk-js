@@ -188,6 +188,14 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
     return {role: userMessage.role, parts: newParts};
   }
 
+  /**
+   * Reports the versions saved by {@link onUserMessageCallback} through
+   * `EventActions.artifactDelta`.
+   *
+   * `BaseAgent` does not dispatch plugin agent callbacks yet, so nothing calls
+   * this today and the artifact delta stays empty. The saved versions wait in
+   * session state until it runs.
+   */
   override async beforeAgentCallback({
     callbackContext,
   }: {

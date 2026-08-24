@@ -19,8 +19,7 @@ rest of the session. Add the `LOAD_ARTIFACTS` tool to the agent, or load the
 artifact in your own tool, to read the file back.
 
 `RunConfig.saveInputBlobsAsArtifacts` runs a similar save inside the runner.
-The plugin adds the size limit, the `attachFileReference` switch, and the
-artifact-delta reporting described below.
+The plugin adds the 20MB size limit and the `attachFileReference` switch.
 
 ## Get started
 
@@ -112,8 +111,7 @@ store the file in the user namespace instead, where later sessions of the same
 user can load it.
 
 Saving a file under a name that already exists appends a new version. The
-placeholder always names the latest one. The plugin reports each saved version
-through `EventActions.artifactDelta` when the agent starts.
+placeholder always names the latest one.
 
 ## Limits and failures
 

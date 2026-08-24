@@ -110,7 +110,8 @@ export function base64Decode(data: string): string {
  * Returns the number of bytes a base64-encoded string decodes to.
  *
  * The size is computed arithmetically instead of by decoding, so measuring a
- * large attachment does not materialize it.
+ * large attachment does not materialize it. The count is lexical: it assumes
+ * unwrapped base64, so line breaks in a MIME-wrapped payload inflate it.
  *
  * @param data The base64-encoded string.
  * @return The decoded size in bytes.
