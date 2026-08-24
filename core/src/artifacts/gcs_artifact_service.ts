@@ -314,9 +314,7 @@ function extractArtifactKeys(files: File[], fileNamePrefix: string): string[] {
       continue;
     }
 
-    const relative = file.name.substring(fileNamePrefix.length);
-
-    keys.add(getFileNameFromPath(relative));
+    keys.add(getFileNameFromPath(file.name.substring(fileNamePrefix.length)));
   }
 
   return [...keys];
