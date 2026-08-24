@@ -10,8 +10,8 @@ import {z} from 'zod';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {
-  stripNullValues,
   toCamelCase,
+  toCamelCaseKey,
   toSnakeCase,
 } from '../utils/object_notation_utils.js';
 
@@ -56,16 +56,7 @@ const PRESERVE_KEYS_SNAKE_CASE = [
  * The camelCase counterparts of {@link PRESERVE_KEYS_SNAKE_CASE}, used when
  * writing an eval set back to disk.
  */
-const PRESERVE_KEYS_CAMEL_CASE = [
-  'evalCases.sessionInput.state',
-  'evalCases.finalSessionState',
-  'evalCases.conversation.userContent.parts.functionCall.args',
-  'evalCases.conversation.userContent.parts.functionResponse.response',
-  'evalCases.conversation.finalResponse.parts.functionCall.args',
-  'evalCases.conversation.finalResponse.parts.functionResponse.response',
-  'evalCases.conversation.intermediateData.toolUses.args',
-  'evalCases.conversation.intermediateData.toolResponses.response',
-];
+const PRESERVE_KEYS_CAMEL_CASE = PRESERVE_KEYS_SNAKE_CASE.map(toCamelCaseKey);
 
 /**
  * Preserve paths for reading. An eval set file may spell its own field names in
@@ -306,45 +297,6 @@ export function readInitialSessionFile(
   return parsed;
 }
 
-function convertParsedLegacyFile(
-  evalSetFile: string,
-  parsed: unknown,
-  evalConfig: EvalConfig,
-  initialSession: Record<string, unknown>,
-): EvalSet {
-  validateLegacyInput(parsed, evalConfig.criteria);
-  return convertLegacyEvalSet(randomUUID(), [
-    {
-      name: evalSetFile,
-      data: LegacyFileSchema.parse(parsed),
-      initial_session:
-        Object.keys(initialSession).length > 0
-          ? LegacyInitialSessionSchema.parse(initialSession)
-          : undefined,
-    },
-  ]);
-}
-
-/**
- * Reads an {@link EvalSet} from a file in the legacy array format.
- *
- * @param evalSetFile Path to the legacy eval file.
- * @param evalConfig The eval config that applies to this file.
- * @param initialSession Session values shared by every case in the file.
- */
-export function loadLegacyEvalSetFile(
-  evalSetFile: string,
-  evalConfig: EvalConfig,
-  initialSession: Record<string, unknown>,
-): EvalSet {
-  return convertParsedLegacyFile(
-    evalSetFile,
-    readJsonFile(evalSetFile),
-    evalConfig,
-    initialSession,
-  );
-}
-
 /**
  * Reads an {@link EvalSet} from a `*.test.json` file written by either SDK.
  *
@@ -368,13 +320,8 @@ export function loadEvalSetFromFile(
   initialSession: Record<string, unknown>,
 ): EvalSet {
   const parsed: unknown = readJsonFile(evalSetFile);
-  // adk-python writes every unset optional field as `null`, which the schemas
-  // read as a value rather than as an omission.
   const asEvalSet = EvalSetSchema.safeParse(
-    toCamelCase(
-      stripNullValues(parsed, PRESERVE_KEYS_ON_READ),
-      PRESERVE_KEYS_ON_READ,
-    ),
+    toCamelCase(parsed, PRESERVE_KEYS_ON_READ, /* dropNulls= */ true),
   );
 
   if (asEvalSet.success) {
@@ -395,12 +342,17 @@ export function loadEvalSetFromFile(
       ' migrating your old test files.',
   );
 
-  return convertParsedLegacyFile(
-    evalSetFile,
-    parsed,
-    evalConfig,
-    initialSession,
-  );
+  validateLegacyInput(parsed, evalConfig.criteria);
+  return convertLegacyEvalSet(randomUUID(), [
+    {
+      name: evalSetFile,
+      data: LegacyFileSchema.parse(parsed),
+      initial_session:
+        Object.keys(initialSession).length > 0
+          ? LegacyInitialSessionSchema.parse(initialSession)
+          : undefined,
+    },
+  ]);
 }
 
 /**

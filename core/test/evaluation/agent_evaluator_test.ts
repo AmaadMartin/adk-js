@@ -149,8 +149,8 @@ function matchingAgent(name = 'dice_agent'): ScriptedAgent {
 }
 
 afterEach(() => {
-  while (tempDirs.length > 0) {
-    fs.rmSync(tempDirs.pop()!, {recursive: true, force: true});
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, {recursive: true, force: true});
   }
 });
 

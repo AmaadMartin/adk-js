@@ -371,6 +371,7 @@ export {
   getEvaluationCriteriaOrDefault,
 } from './evaluation/eval_config.js';
 export type {
+  CriterionBackedEvalMetric,
   CustomMetricConfig,
   EvalConfig,
   LiveModelConfig,

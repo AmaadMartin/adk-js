@@ -9,7 +9,7 @@ import {z} from 'zod';
 
 import {CodeConfigSchema} from '../agents/common_configs.js';
 import {logger} from '../utils/logger.js';
-import {toCamelCase} from '../utils/object_notation_utils.js';
+import {toCamelCase, toSnakeCaseKey} from '../utils/object_notation_utils.js';
 import {DEFAULT_LIVE_TIMEOUT_SECONDS} from './constants.js';
 import {
   BaseCriterion,
@@ -100,7 +100,10 @@ const DEFAULT_EVAL_CONFIG: EvalConfig = EvalConfigSchema.parse({
 const METRIC_KEYED_FIELDS = ['criteria', 'customMetrics'] as const;
 
 /** The paths those fields are reached by, in either spelling. */
-const METRIC_KEYED_PATHS = ['criteria', 'custom_metrics', 'customMetrics'];
+const METRIC_KEYED_PATHS = METRIC_KEYED_FIELDS.flatMap((field) => [
+  field,
+  toSnakeCaseKey(field),
+]);
 
 /**
  * Rewrites an eval config's own field names to camelCase, so a config file
@@ -162,14 +165,22 @@ export function getEvaluationCriteriaOrDefault(
 }
 
 /**
+ * An {@link EvalMetric} whose criterion, and therefore whose threshold, is
+ * known to be present. Every metric derived from an `EvalConfig` is one.
+ */
+export type CriterionBackedEvalMetric = EvalMetric & {criterion: BaseCriterion};
+
+/**
  * Flattens an `EvalConfig`'s criteria into the list of `EvalMetric`s that an
  * eval run consumes, preserving criteria insertion order.
  *
  * @throws {Error} If a criterion is neither a numeric threshold nor a
  *     criterion object.
  */
-export function getEvalMetricsFromConfig(evalConfig: EvalConfig): EvalMetric[] {
-  const evalMetricList: EvalMetric[] = [];
+export function getEvalMetricsFromConfig(
+  evalConfig: EvalConfig,
+): CriterionBackedEvalMetric[] {
+  const evalMetricList: CriterionBackedEvalMetric[] = [];
   for (const [metricName, criterion] of Object.entries(evalConfig.criteria)) {
     const customFunctionPath =
       evalConfig.customMetrics?.[metricName]?.codeConfig.name;

@@ -13,17 +13,17 @@ import {logger} from '../utils/logger.js';
 import {EvalFailureError} from './errors.js';
 import {EvalCase} from './eval_case.js';
 import {
+  CriterionBackedEvalMetric,
   EvalConfig,
   getEvalMetricsFromConfig,
   getEvaluationCriteriaOrDefault,
 } from './eval_config.js';
 import {
   loadEvalSetFromFile,
-  loadLegacyEvalSetFile,
   readInitialSessionFile,
   toEvalSetJson,
 } from './eval_data_loader.js';
-import {EvalMetric, EvalStatus} from './eval_metrics.js';
+import {EvalStatus} from './eval_metrics.js';
 import {formatMetricDetails} from './eval_report.js';
 import {EvalSet} from './eval_set.js';
 import {EvaluationGenerator} from './evaluation_generator.js';
@@ -40,36 +40,32 @@ const TEST_CONFIG_FILE_NAME = 'test_config.json';
 /** Default number of times every eval case is run before scoring. */
 export const NUM_RUNS = 2;
 
-/** Options for {@link AgentEvaluator.evaluate}. */
-export interface EvaluateOptions {
+/** Options shared by every entry point of {@link AgentEvaluator}. */
+export interface EvaluateBaseOptions {
   /** The agent under test. */
   agent: BaseAgent;
-  /** A `*.test.json` file, or a directory searched recursively for them. */
-  evalDatasetFilePathOrDir: string;
   /** Times to run every eval case. Defaults to {@link NUM_RUNS}. */
   numRuns?: number;
   /** Evaluate a named sub-agent instead of the root. */
   agentName?: string;
-  /** JSON file holding session values shared by every case in the dataset. */
-  initialSessionFile?: string;
   /** Include the per-invocation detail in the failure report. Defaults to true. */
   printDetailedResults?: boolean;
 }
 
+/** Options for {@link AgentEvaluator.evaluate}. */
+export interface EvaluateOptions extends EvaluateBaseOptions {
+  /** A `*.test.json` file, or a directory searched recursively for them. */
+  evalDatasetFilePathOrDir: string;
+  /** JSON file holding session values shared by every case in the dataset. */
+  initialSessionFile?: string;
+}
+
 /** Options for {@link AgentEvaluator.evaluateEvalSet}. */
-export interface EvaluateEvalSetOptions {
-  /** The agent under test. */
-  agent: BaseAgent;
+export interface EvaluateEvalSetOptions extends EvaluateBaseOptions {
   /** The eval set to run. */
   evalSet: EvalSet;
   /** The criteria every eval case in the set is scored against. */
   evalConfig: EvalConfig;
-  /** Times to run every eval case. Defaults to {@link NUM_RUNS}. */
-  numRuns?: number;
-  /** Evaluate a named sub-agent instead of the root. */
-  agentName?: string;
-  /** Include the per-invocation detail in the failure report. Defaults to true. */
-  printDetailedResults?: boolean;
 }
 
 /** Returns every `*.test.json` file at or below `pathOrDir`. */
@@ -107,7 +103,7 @@ function resolveAgent(agent: BaseAgent, agentName?: string): BaseAgent {
 
 /** Every per-invocation result recorded for one metric. */
 interface MetricResults {
-  evalMetric: EvalMetric;
+  evalMetric: CriterionBackedEvalMetric;
   results: PerInvocationResult[];
 }
 
@@ -118,7 +114,7 @@ interface MetricResults {
 async function scoreEvalCase(
   agent: BaseAgent,
   evalCase: EvalCase,
-  evalMetrics: EvalMetric[],
+  evalMetrics: CriterionBackedEvalMetric[],
   numRuns: number,
 ): Promise<MetricResults[]> {
   const expectedInvocations = evalCase.conversation;
@@ -170,9 +166,7 @@ function collectFailures(
     if (results.length === 0) {
       continue;
     }
-    // getEvalMetricsFromConfig always resolves a criterion, and every criterion
-    // carries a threshold.
-    const threshold = evalMetric.criterion!.threshold;
+    const threshold = evalMetric.criterion.threshold;
 
     const scores = results
       .map((result) => result.score)
@@ -310,7 +304,7 @@ export class AgentEvaluator {
       throw new Error('One of oldEvalDataFile or newEvalDataFile is empty.');
     }
 
-    const evalSet = loadLegacyEvalSetFile(
+    const evalSet = loadEvalSetFromFile(
       oldEvalDataFile,
       AgentEvaluator.findConfigForTestFile(oldEvalDataFile),
       readInitialSessionFile(initialSessionFile),

@@ -39,27 +39,14 @@ export {
 export * from './common.js';
 export {AgentEvaluator, NUM_RUNS} from './evaluation/agent_evaluator.js';
 export type {
+  EvaluateBaseOptions,
   EvaluateEvalSetOptions,
   EvaluateOptions,
 } from './evaluation/agent_evaluator.js';
 export {EvalFailureError} from './evaluation/errors.js';
 export {
-  ALLOWED_CRITERIA,
-  LegacyInitialSessionSchema,
-  LegacyIntermediateResponseSchema,
-  LegacyInvocationSchema,
-  LegacyToolUseSchema,
-  convertLegacyEvalSet,
   loadEvalSetFromFile,
   toEvalSetJson,
-  validateLegacyInput,
-} from './evaluation/eval_data_loader.js';
-export type {
-  LegacyEvalCase,
-  LegacyInitialSession,
-  LegacyIntermediateResponse,
-  LegacyInvocation,
-  LegacyToolUse,
 } from './evaluation/eval_data_loader.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';

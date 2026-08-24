@@ -17,6 +17,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
+import {ZodError} from 'zod';
 
 // The `userSimulatorConfig` discriminator tests from adk-python
 // (`test_user_simulator_config_*`) are intentionally NOT ported here: the
@@ -35,8 +36,7 @@ describe('evaluation/eval_config', () => {
   const createdDirs: string[] = [];
 
   afterEach(() => {
-    while (createdDirs.length > 0) {
-      const dir = createdDirs.pop()!;
+    for (const dir of createdDirs.splice(0)) {
       fs.rmSync(dir, {recursive: true, force: true});
     }
   });
@@ -113,6 +113,12 @@ describe('evaluation/eval_config', () => {
       expect(
         Object.keys(getEvaluationCriteriaOrDefault(filePath).criteria),
       ).toEqual(['tool_trajectory_avg_score']);
+    });
+
+    it('rejects a config file that does not hold an object', () => {
+      const filePath = writeTempConfig('null');
+
+      expect(() => getEvaluationCriteriaOrDefault(filePath)).toThrow(ZodError);
     });
 
     it('returns the default config when the file does not exist', () => {

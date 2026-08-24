@@ -5,19 +5,24 @@
  */
 
 import {
-  convertLegacyEvalSet,
   EvalConfig,
   EvalConfigSchema,
   EvalSetSchema,
-  LegacyInvocationSchema,
   loadEvalSetFromFile,
   toEvalSetJson,
-  validateLegacyInput,
 } from '@google/adk';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
+
+// Package-internal: these are not on the public barrel, so they are imported
+// by module path, as the sibling evaluation tests do.
+import {
+  convertLegacyEvalSet,
+  LegacyInvocationSchema,
+  validateLegacyInput,
+} from '../../src/evaluation/eval_data_loader.js';
 
 const DEFAULT_CONFIG: EvalConfig = EvalConfigSchema.parse({
   criteria: {tool_trajectory_avg_score: 1.0, response_match_score: 0.8},
@@ -104,8 +109,8 @@ function writeJson(dir: string, name: string, value: unknown): string {
 }
 
 afterEach(() => {
-  while (tempDirs.length > 0) {
-    fs.rmSync(tempDirs.pop()!, {recursive: true, force: true});
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, {recursive: true, force: true});
   }
 });
 
