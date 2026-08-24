@@ -7,10 +7,23 @@
 import * as yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import {z} from 'zod';
 
 import {isBaseLlm} from '../../models/base_llm.js';
+import {AgentTool} from '../../tools/agent_tool.js';
 import {isBaseTool} from '../../tools/base_tool.js';
 import {isBaseToolset} from '../../tools/base_toolset.js';
+import {ENTERPRISE_WEB_SEARCH} from '../../tools/enterprise_web_search_tool.js';
+import {EXIT_LOOP} from '../../tools/exit_loop_tool.js';
+import {getUserChoiceTool} from '../../tools/get_user_choice_tool.js';
+import {GOOGLE_MAPS_GROUNDING} from '../../tools/google_maps_grounding_tool.js';
+import {GOOGLE_SEARCH} from '../../tools/google_search_tool.js';
+import {LOAD_ARTIFACTS} from '../../tools/load_artifacts_tool.js';
+import {LOAD_MEMORY} from '../../tools/load_memory_tool.js';
+import {PRELOAD_MEMORY} from '../../tools/preload_memory_tool.js';
+import {requestInputTool} from '../../tools/request_input_tool.js';
+import {URL_CONTEXT} from '../../tools/url_context_tool.js';
+import {camelCaseKeys} from '../../utils/case_utils.js';
 import {isPathContained} from '../../utils/path_utils.js';
 import {
   BaseAgent,
@@ -36,6 +49,7 @@ import {
   AgentConfigError,
   AgentConfigErrorCode,
   AgentRefYamlConfig,
+  agentRefYamlConfigSchema,
   AgentYamlConfig,
   BaseAgentYamlConfig,
   baseAgentYamlConfigSchema,
@@ -51,6 +65,7 @@ import {
   parseAgentYamlConfig,
   parseWithSchema,
   sequentialAgentYamlConfigSchema,
+  ToolYamlConfig,
 } from './agent_config.js';
 
 /** Options controlling how a declarative agent config is loaded. */
@@ -78,8 +93,46 @@ type AgentConstructor = new (
   config: BaseAgentConfig & Record<string, unknown>,
 ) => unknown;
 
+/** A function that builds a tool from the `args` written in a config. */
+type ToolFactory = (args: Record<string, unknown>) => unknown;
+
 /** Absolute config paths currently being loaded, used to detect cycles. */
 type InFlightPaths = Set<string>;
+
+/** The tool name whose `args` name an agent to wrap. */
+const AGENT_TOOL_NAME = 'AgentTool';
+
+/** The `args` an `AgentTool` entry accepts. */
+const agentToolArgsSchema = z
+  .object({
+    agent: agentRefYamlConfigSchema,
+    skip_summarization: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * The tools a config may name without supplying a resolver, keyed by the bare
+ * export names of `google.adk.tools` so a config authored for either language
+ * resolves to the same tool.
+ *
+ * `transfer_to_agent` is absent deliberately: adk-js performs agent transfer in
+ * the agent-transfer request processor rather than through a standalone tool.
+ */
+const BUILT_IN_TOOLS: ReadonlyMap<string, ToolUnion> = new Map<
+  string,
+  ToolUnion
+>([
+  ['enterprise_web_search', ENTERPRISE_WEB_SEARCH],
+  ['exit_loop', EXIT_LOOP],
+  ['get_user_choice', getUserChoiceTool],
+  ['google_maps_grounding', GOOGLE_MAPS_GROUNDING],
+  ['google_search', GOOGLE_SEARCH],
+  ['load_artifacts', LOAD_ARTIFACTS],
+  ['load_memory', LOAD_MEMORY],
+  ['preload_memory', PRELOAD_MEMORY],
+  ['request_input', requestInputTool],
+  ['url_context', URL_CONTEXT],
+]);
 
 /**
  * Every `agent_class` spelling that selects a built-in agent, keyed to the
@@ -166,20 +219,89 @@ function resolveCallbacks<T extends AnyCallback>(
   });
 }
 
-function resolveTools(
-  configs: readonly CodeYamlConfig[],
+function asTool(name: string, resolved: unknown): ToolUnion {
+  if (!isBaseTool(resolved) && !isBaseToolset(resolved)) {
+    throw new AgentConfigError(
+      AgentConfigErrorCode.UNRESOLVED_REFERENCE,
+      `Reference '${name}' did not resolve to a tool or toolset.`,
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Builds the `AgentTool` an entry names, loading the agent it wraps exactly as
+ * a sub-agent reference is loaded.
+ */
+async function createAgentTool(
+  args: Record<string, unknown>,
+  configAbsPath: string,
   options: LoadAgentOptions | undefined,
-): ToolUnion[] {
-  return configs.map((config) => {
-    const resolved = resolveReference(config.name, options);
-    if (!isBaseTool(resolved) && !isBaseToolset(resolved)) {
-      throw new AgentConfigError(
-        AgentConfigErrorCode.UNRESOLVED_REFERENCE,
-        `Reference '${config.name}' did not resolve to a tool or toolset.`,
-      );
-    }
-    return resolved;
+  inFlight: InFlightPaths,
+): Promise<AgentTool> {
+  const parsed = parseWithSchema(agentToolArgsSchema, args);
+  return new AgentTool({
+    agent: await resolveRef(parsed.agent, configAbsPath, options, inFlight),
+    skipSummarization: parsed.skip_summarization,
   });
+}
+
+/**
+ * Builds a tool from the `args` written against it.
+ *
+ * adk-js has no `BaseTool.fromConfig` protocol, so the two shapes adk-python
+ * documents are supported and anything else is rejected: an `AgentTool`, and a
+ * reference naming a function that returns a tool.
+ */
+async function createToolFromArgs(
+  config: ToolYamlConfig,
+  args: Record<string, unknown>,
+  configAbsPath: string,
+  options: LoadAgentOptions | undefined,
+  inFlight: InFlightPaths,
+): Promise<ToolUnion> {
+  if (config.name === AGENT_TOOL_NAME) {
+    return createAgentTool(args, configAbsPath, options, inFlight);
+  }
+
+  const resolved = resolveReference(config.name, options);
+  if (typeof resolved !== 'function') {
+    throw new AgentConfigError(
+      AgentConfigErrorCode.UNSUPPORTED_TOOL_ARGS,
+      `Tool '${config.name}' does not accept args: only '${AGENT_TOOL_NAME}' and a reference naming a tool-building function do.`,
+    );
+  }
+  // JavaScript cannot introspect a function's parameters, so "is a function"
+  // is the whole of what is checkable before the call; the result is checked.
+  return asTool(config.name, (resolved as ToolFactory)(args));
+}
+
+async function resolveTools(
+  configs: readonly ToolYamlConfig[],
+  configAbsPath: string,
+  options: LoadAgentOptions | undefined,
+  inFlight: InFlightPaths,
+): Promise<ToolUnion[]> {
+  const tools: ToolUnion[] = [];
+  for (const config of configs) {
+    if (config.args) {
+      tools.push(
+        await createToolFromArgs(
+          config,
+          config.args,
+          configAbsPath,
+          options,
+          inFlight,
+        ),
+      );
+      continue;
+    }
+    const builtIn = BUILT_IN_TOOLS.get(config.name);
+    tools.push(
+      builtIn ?? asTool(config.name, resolveReference(config.name, options)),
+    );
+  }
+  return tools;
 }
 
 function resolveAgentSchema(
@@ -268,7 +390,7 @@ async function createBaseAgentConfig(
   inFlight: InFlightPaths,
 ): Promise<BaseAgentConfig> {
   const subAgents: BaseAgent[] = [];
-  for (const ref of config.subAgents ?? []) {
+  for (const ref of config.sub_agents ?? []) {
     subAgents.push(await resolveRef(ref, configAbsPath, options, inFlight));
   }
 
@@ -277,69 +399,76 @@ async function createBaseAgentConfig(
     description: config.description,
     subAgents,
     beforeAgentCallback: resolveCallbacks<SingleAgentCallback>(
-      config.beforeAgentCallbacks,
+      config.before_agent_callbacks,
       options,
     ),
     afterAgentCallback: resolveCallbacks<SingleAgentCallback>(
-      config.afterAgentCallbacks,
+      config.after_agent_callbacks,
       options,
     ),
   };
 }
 
-function createLlmAgent(
+async function createLlmAgent(
   parsed: LlmAgentYamlConfig,
   baseConfig: BaseAgentConfig,
+  configAbsPath: string,
   options: LoadAgentOptions | undefined,
-): LlmAgent {
+  inFlight: InFlightPaths,
+): Promise<LlmAgent> {
   const llmConfig: LlmAgentConfig = {
     ...baseConfig,
     instruction: parsed.instruction,
-    disallowTransferToParent: parsed.disallowTransferToParent,
-    disallowTransferToPeers: parsed.disallowTransferToPeers,
-    includeContents: parsed.includeContents,
-    outputKey: parsed.outputKey,
-    generateContentConfig: parsed.generateContentConfig,
+    disallowTransferToParent: parsed.disallow_transfer_to_parent,
+    disallowTransferToPeers: parsed.disallow_transfer_to_peers,
+    includeContents: parsed.include_contents,
+    outputKey: parsed.output_key,
+    generateContentConfig: parsed.generate_content_config,
     beforeModelCallback: resolveCallbacks<SingleBeforeModelCallback>(
-      parsed.beforeModelCallbacks,
+      parsed.before_model_callbacks,
       options,
     ),
     afterModelCallback: resolveCallbacks<SingleAfterModelCallback>(
-      parsed.afterModelCallbacks,
+      parsed.after_model_callbacks,
       options,
     ),
     beforeToolCallback: resolveCallbacks<SingleBeforeToolCallback>(
-      parsed.beforeToolCallbacks,
+      parsed.before_tool_callbacks,
       options,
     ),
     afterToolCallback: resolveCallbacks<SingleAfterToolCallback>(
-      parsed.afterToolCallbacks,
+      parsed.after_tool_callbacks,
       options,
     ),
   };
 
   // The remaining fields gate a resolver call that throws on a missing
   // reference, so they stay conditional.
-  if (parsed.modelCode) {
-    const model = resolveReference(parsed.modelCode.name, options);
+  if (parsed.model_code) {
+    const model = resolveReference(parsed.model_code.name, options);
     if (!isBaseLlm(model)) {
       throw new AgentConfigError(
         AgentConfigErrorCode.UNRESOLVED_REFERENCE,
-        `Reference '${parsed.modelCode.name}' did not resolve to a model.`,
+        `Reference '${parsed.model_code.name}' did not resolve to a model.`,
       );
     }
     llmConfig.model = model;
   } else if (parsed.model) {
     llmConfig.model = parsed.model;
   }
-  if (parsed.inputSchema) {
-    llmConfig.inputSchema = resolveAgentSchema(parsed.inputSchema, options);
+  if (parsed.input_schema) {
+    llmConfig.inputSchema = resolveAgentSchema(parsed.input_schema, options);
   }
-  if (parsed.outputSchema) {
-    llmConfig.outputSchema = resolveAgentSchema(parsed.outputSchema, options);
+  if (parsed.output_schema) {
+    llmConfig.outputSchema = resolveAgentSchema(parsed.output_schema, options);
   }
   if (parsed.tools?.length) {
-    llmConfig.tools = resolveTools(parsed.tools, options);
+    llmConfig.tools = await resolveTools(
+      parsed.tools,
+      configAbsPath,
+      options,
+      inFlight,
+    );
   }
 
   return new LlmAgent(llmConfig);
@@ -350,8 +479,8 @@ function createLoopAgent(
   baseConfig: BaseAgentConfig,
 ): LoopAgent {
   const loopConfig: LoopAgentConfig = {...baseConfig};
-  if (parsed.maxIterations) {
-    loopConfig.maxIterations = parsed.maxIterations;
+  if (parsed.max_iterations) {
+    loopConfig.maxIterations = parsed.max_iterations;
   }
   return new LoopAgent(loopConfig);
 }
@@ -371,12 +500,16 @@ function createCustomAgent(
   baseConfig: BaseAgentConfig,
   options: LoadAgentOptions | undefined,
 ): BaseAgent {
-  const agentClass = parsed.agentClass;
-  const extras = Object.fromEntries(
-    Object.entries(parsed).filter(
-      ([key]) => !COMMON_AGENT_YAML_KEYS.includes(key),
+  const agentClass = parsed.agent_class;
+  // The document is snake_case and a TypeScript constructor takes camelCase,
+  // so the extras are the one part of a config that needs converting.
+  const extras = camelCaseKeys(
+    Object.fromEntries(
+      Object.entries(parsed).filter(
+        ([key]) => !COMMON_AGENT_YAML_KEYS.includes(key),
+      ),
     ),
-  );
+  ) as Record<string, unknown>;
 
   const resolved = options?.resolveReference?.(agentClass);
   if (typeof resolved !== 'function') {
@@ -408,14 +541,16 @@ async function buildAgent(
   // An empty agent_class means LlmAgent, matching adk-python's
   // `agent_class or "LlmAgent"`.
   switch (
-    BUILT_IN_AGENT_CLASSES.get(config.agentClass || DEFAULT_AGENT_CLASS)
+    BUILT_IN_AGENT_CLASSES.get(config.agent_class || DEFAULT_AGENT_CLASS)
   ) {
     case 'LlmAgent': {
       const parsed = parseWithSchema(llmAgentYamlConfigSchema, config);
       return createLlmAgent(
         parsed,
         await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
+        configAbsPath,
         options,
+        inFlight,
       );
     }
     case 'LoopAgent': {
@@ -482,9 +617,9 @@ async function resolveRef(
 ): Promise<BaseAgent> {
   // Empty strings fall through to the `code` branch, matching adk-python's
   // truthiness check on `config_path`.
-  if (ref.configPath) {
+  if (ref.config_path) {
     return loadAgent(
-      await resolveSubAgentPath(ref.configPath, referencingConfigAbsPath),
+      await resolveSubAgentPath(ref.config_path, referencingConfigAbsPath),
       options,
       inFlight,
     );
