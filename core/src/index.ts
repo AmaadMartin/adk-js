@@ -48,3 +48,6 @@ export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
 // of this barrel.
 export * from './tools/mcp/index.js';
+// Also available as `@google/adk/tools/spanner`, which does not evaluate the
+// rest of this barrel.
+export * from './tools/spanner/index.js';
