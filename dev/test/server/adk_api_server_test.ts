@@ -17,7 +17,9 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   InvocationContext,
+  LiveRequestQueue,
   LlmAgent,
+  Logger,
   node,
   Runner,
   Session,
@@ -25,6 +27,7 @@ import {
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {WebSocket} from 'ws';
 import {z} from 'zod';
 
 import {
@@ -132,6 +135,113 @@ class HttpClient {
       data,
       text,
     };
+  }
+}
+
+/** Query that names the session `createLiveSession` creates. */
+const LIVE_QUERY = 'app_name=testApp&user_id=testUser&session_id=liveSession';
+
+/** Rewrites a server's HTTP base URL as a WebSocket URL. */
+function toWsUrl(baseUrl: string): string {
+  return baseUrl.replace(/^http:/, 'ws:');
+}
+
+/**
+ * Stands in for `Runner.runLive`, echoing whatever arrives on the queue back
+ * as an event, so a test can observe that an inbound frame reached the queue.
+ */
+async function* echoLiveQueue(params: {
+  liveRequestQueue: LiveRequestQueue;
+  abortSignal?: AbortSignal;
+}): AsyncGenerator<Event, void, undefined> {
+  while (true) {
+    const request = await params.liveRequestQueue.get(params.abortSignal);
+    if (request.close) {
+      return;
+    }
+    yield createEvent({
+      invocationId: 'liveInvocation',
+      author: 'testAgent',
+      content: request.content,
+    });
+  }
+}
+
+/** Logger that records what the server reported, so a test can assert on it. */
+class RecordingLogger implements Logger {
+  readonly errors: string[] = [];
+
+  log(): void {}
+  debug(): void {}
+  info(): void {}
+  warn(): void {}
+  setLogLevel(): void {}
+
+  error(...args: unknown[]): void {
+    this.errors.push(args.join(' '));
+  }
+}
+
+/** Drives a real `/run_live` WebSocket and records the frames it receives. */
+class LiveClient {
+  readonly socket: WebSocket;
+  readonly opened: Promise<void>;
+  readonly closed: Promise<{code: number; reason: string}>;
+  private readonly frames: string[] = [];
+  private readonly waiters: Array<(frame: string) => void> = [];
+
+  constructor(baseUrl: string, query: string, origin?: string) {
+    this.socket = new WebSocket(
+      `${toWsUrl(baseUrl)}/run_live?${query}`,
+      origin ? {origin} : {},
+    );
+    this.socket.on('message', (data) => {
+      const frame = data.toString();
+      const waiter = this.waiters.shift();
+      if (waiter) {
+        waiter(frame);
+      } else {
+        this.frames.push(frame);
+      }
+    });
+    // A refused handshake also raises an error; the close code carries why.
+    this.socket.on('error', () => {});
+    this.opened = new Promise((resolve) => {
+      this.socket.on('open', () => resolve());
+    });
+    this.closed = new Promise((resolve) => {
+      this.socket.on('close', (code, reason) => {
+        resolve({code, reason: reason.toString()});
+      });
+    });
+  }
+
+  async send(frame: string): Promise<void> {
+    await this.opened;
+    this.socket.send(frame);
+  }
+
+  close(): void {
+    this.socket.close();
+  }
+
+  terminate(): void {
+    this.socket.terminate();
+  }
+
+  async nextEvent(): Promise<Event> {
+    const buffered = this.frames.shift();
+    const frame = buffered ?? (await this.awaitFrame());
+    return JSON.parse(frame) as Event;
+  }
+
+  private awaitFrame(): Promise<string> {
+    return Promise.race([
+      new Promise<string>((resolve) => this.waiters.push(resolve)),
+      this.closed.then(({code, reason}): string =>
+        expect.fail(`closed with ${code} (${reason}) before sending a frame`),
+      ),
+    ]);
   }
 }
 
@@ -864,6 +974,250 @@ describe('AdkWebServer', () => {
       expect(runAsyncParams.abortSignal).toBeInstanceOf(AbortSignal);
 
       spy.mockRestore();
+    });
+  });
+
+  describe('run_live', () => {
+    const clients: LiveClient[] = [];
+
+    /** Opens a `/run_live` socket that `afterEach` always tears down. */
+    function connect(
+      baseUrl: string,
+      query: string,
+      origin?: string,
+    ): LiveClient {
+      const liveClient = new LiveClient(baseUrl, query, origin);
+      clients.push(liveClient);
+      return liveClient;
+    }
+
+    async function createLiveSession(): Promise<void> {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'liveSession',
+      });
+    }
+
+    afterEach(() => {
+      for (const liveClient of clients.splice(0)) {
+        liveClient.terminate();
+      }
+      vi.restoreAllMocks();
+    });
+
+    it('streams the live events of an existing session', async () => {
+      await createLiveSession();
+
+      const live = connect(server.url, LIVE_QUERY);
+      const event = await live.nextEvent();
+
+      expect(event.content?.parts?.[0].text).toBe('test live content');
+    });
+
+    it('closes with 1002 for a session that does not exist', async () => {
+      const live = connect(server.url, LIVE_QUERY);
+
+      const {code, reason} = await live.closed;
+
+      expect(code).toBe(1002);
+      expect(reason).toBe('Session not found');
+    });
+
+    it('does not create the session it refused with 1002', async () => {
+      const live = connect(server.url, LIVE_QUERY);
+      await live.closed;
+
+      const session = await sessionService.getSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'liveSession',
+      });
+
+      expect(session).toBeFalsy();
+    });
+
+    it('closes with 1008 when app_name is missing', async () => {
+      const live = connect(
+        server.url,
+        'user_id=testUser&session_id=liveSession',
+      );
+
+      const {code, reason} = await live.closed;
+
+      expect(code).toBe(1008);
+      expect(reason).toBe('Missing required query parameter: app_name');
+    });
+
+    it('closes with 1008 for an unsupported modality', async () => {
+      const live = connect(server.url, `${LIVE_QUERY}&modalities=BRAILLE`);
+
+      const {code, reason} = await live.closed;
+
+      expect(code).toBe(1008);
+      expect(reason).toBe('Unsupported modality: BRAILLE');
+    });
+
+    it('closes with 1008 for a non-loopback origin when allowOrigins is unset', async () => {
+      await createLiveSession();
+
+      const live = connect(server.url, LIVE_QUERY, 'https://evil.com');
+      const {code, reason} = await live.closed;
+
+      expect(code).toBe(1008);
+      expect(reason).toBe('Origin not allowed');
+    });
+
+    it('accepts a loopback origin when allowOrigins is unset', async () => {
+      await createLiveSession();
+
+      const live = connect(server.url, LIVE_QUERY, 'http://localhost:4200');
+      const event = await live.nextEvent();
+
+      expect(event.content?.parts?.[0].text).toBe('test live content');
+    });
+
+    it('honours a configured allowOrigins', async () => {
+      const guarded = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        allowOrigins: 'http://localhost:4200',
+      });
+      await guarded.start();
+      try {
+        await createLiveSession();
+
+        const refused = connect(guarded.url, LIVE_QUERY, 'https://evil.com');
+        expect((await refused.closed).code).toBe(1008);
+
+        const allowed = connect(
+          guarded.url,
+          LIVE_QUERY,
+          'http://localhost:4200',
+        );
+        const event = await allowed.nextEvent();
+        expect(event.content?.parts?.[0].text).toBe('test live content');
+      } finally {
+        await guarded.stop();
+      }
+    });
+
+    it('plumbs the query options into the run config', async () => {
+      await createLiveSession();
+      const spy = vi.spyOn(Runner.prototype, 'runLive');
+
+      const live = connect(
+        server.url,
+        `${LIVE_QUERY}&modalities=TEXT&modalities=AUDIO` +
+          '&proactive_audio=true&enable_affective_dialog=true',
+      );
+      await live.nextEvent();
+
+      const runConfig = spy.mock.calls[0][0].runConfig;
+      expect(runConfig?.responseModalities).toEqual(['TEXT', 'AUDIO']);
+      expect(runConfig?.proactivity).toEqual({proactiveAudio: true});
+      expect(runConfig?.enableAffectiveDialog).toBe(true);
+    });
+
+    it('pushes an inbound frame onto the live request queue', async () => {
+      await createLiveSession();
+      vi.spyOn(Runner.prototype, 'runLive').mockImplementation(echoLiveQueue);
+
+      const live = connect(server.url, LIVE_QUERY);
+      live.send(
+        JSON.stringify({content: {role: 'user', parts: [{text: 'hi'}]}}),
+      );
+      const event = await live.nextEvent();
+
+      expect(event.content?.parts?.[0].text).toBe('hi');
+    });
+
+    it('drops an unparseable frame and keeps reading', async () => {
+      await createLiveSession();
+      vi.spyOn(Runner.prototype, 'runLive').mockImplementation(echoLiveQueue);
+
+      const live = connect(server.url, LIVE_QUERY);
+      live.send('not json');
+      live.send(
+        JSON.stringify({content: {role: 'user', parts: [{text: 'hi'}]}}),
+      );
+      const event = await live.nextEvent();
+
+      expect(event.content?.parts?.[0].text).toBe('hi');
+      expect(live.socket.readyState).toBe(WebSocket.OPEN);
+    });
+
+    it('closes with 1011 and a reason of at most 123 bytes when the run fails', async () => {
+      await createLiveSession();
+      const message = `live run failed: ${'x'.repeat(200)}`;
+      vi.spyOn(Runner.prototype, 'runLive').mockImplementation(
+        async function* () {
+          yield createEvent({invocationId: 'i', author: 'testAgent'});
+          throw new Error(message);
+        },
+      );
+
+      const live = connect(server.url, LIVE_QUERY);
+      const {code, reason} = await live.closed;
+
+      expect(code).toBe(1011);
+      expect(Buffer.byteLength(reason, 'utf8')).toBe(123);
+      expect(message.startsWith(reason)).toBe(true);
+    });
+
+    it('reports a thrown non-Error in the close reason', async () => {
+      await createLiveSession();
+      vi.spyOn(Runner.prototype, 'runLive').mockImplementation(
+        async function* () {
+          yield createEvent({invocationId: 'i', author: 'testAgent'});
+          throw 'the model refused';
+        },
+      );
+
+      const live = connect(server.url, LIVE_QUERY);
+      const {code, reason} = await live.closed;
+
+      expect(code).toBe(1011);
+      expect(reason).toBe('the model refused');
+    });
+
+    it('treats a client disconnect as an ordinary end of the session', async () => {
+      const logger = new RecordingLogger();
+      const quiet = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        logger,
+      });
+      await quiet.start();
+      try {
+        await createLiveSession();
+        vi.spyOn(Runner.prototype, 'runLive').mockImplementation(echoLiveQueue);
+
+        const live = connect(quiet.url, LIVE_QUERY);
+        await live.opened;
+        live.close();
+        await live.closed;
+      } finally {
+        await expect(quiet.stop()).resolves.toBeUndefined();
+      }
+
+      expect(logger.errors).toEqual([]);
+    });
+
+    it('destroys an upgrade request on any other path', async () => {
+      const stray = new WebSocket(`${toWsUrl(server.url)}/not_run_live`);
+      stray.on('error', () => {});
+
+      const code = await new Promise<number>((resolve) => {
+        stray.on('close', resolve);
+      });
+
+      // 1006 is the abnormal closure a destroyed socket produces.
+      expect(code).toBe(1006);
     });
   });
 
