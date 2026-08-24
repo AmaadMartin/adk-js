@@ -339,6 +339,39 @@ export function runArtifactServiceTests(
       expect(versionMetadata).toBeDefined();
       expect(versionMetadata?.customMetadata).toMatchObject(customMetadata);
     });
+
+    it('defaults customMetadata to an empty object when none was supplied', async () => {
+      const filename = 'no-meta.png';
+      // A binary artifact with no display name is the only shape that carries
+      // no adk* marker keys in the GCS blob metadata map.
+      const data =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNiAAAABgDNjd8qAAAAAElFTkSuQmCC';
+      const version = await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {inlineData: {data, mimeType: 'image/png'}},
+      });
+
+      const single = await service.getArtifactVersion({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version,
+      });
+      expect(single?.customMetadata).toEqual({});
+
+      const listed = await service.listArtifactVersions({
+        appName,
+        userId,
+        sessionId,
+        filename,
+      });
+      expect(listed).toHaveLength(1);
+      expect(listed[0].customMetadata).toEqual({});
+    });
   });
 
   describe('listArtifactVersions', () => {

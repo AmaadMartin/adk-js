@@ -103,4 +103,28 @@ describe('InMemoryArtifactService', () => {
 
     expect(keys).toEqual([]);
   });
+
+  it('returns a caller-supplied empty customMetadata unchanged', async () => {
+    const service = new InMemoryArtifactService();
+    const customMetadata: Record<string, unknown> = {};
+
+    const version = await service.saveArtifact({
+      appName: 'app',
+      userId: 'user',
+      sessionId: 'session',
+      filename: 'empty-meta.txt',
+      artifact: {text: 'body'},
+      customMetadata,
+    });
+
+    const stored = await service.getArtifactVersion({
+      appName: 'app',
+      userId: 'user',
+      sessionId: 'session',
+      filename: 'empty-meta.txt',
+      version,
+    });
+
+    expect(stored?.customMetadata).toBe(customMetadata);
+  });
 });

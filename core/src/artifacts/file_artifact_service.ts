@@ -130,7 +130,7 @@ export class FileArtifactService implements BaseArtifactService {
       fileUri,
       version: nextVersion,
       canonicalUri,
-      customMetadata,
+      customMetadata: customMetadata ?? {},
     };
 
     await writeMetadata(path.join(versionDir, 'metadata.json'), metadata);
@@ -590,6 +590,9 @@ async function writeMetadata(
 /**
  * Reads the metadata from the metadata file.
  *
+ * Metadata files written before `customMetadata` gained a default have no such
+ * key, so the value is normalized here for every read path.
+ *
  * @param metadataPath The path to the metadata file.
  * @returns A promise that resolves to the metadata.
  */
@@ -597,7 +600,8 @@ async function readMetadata(
   metadataPath: string,
 ): Promise<FileArtifactVersion> {
   const content = await fs.readFile(metadataPath, 'utf-8');
-  return JSON.parse(content) as FileArtifactVersion;
+  const parsed = JSON.parse(content) as FileArtifactVersion;
+  return {...parsed, customMetadata: parsed.customMetadata ?? {}};
 }
 
 /**
