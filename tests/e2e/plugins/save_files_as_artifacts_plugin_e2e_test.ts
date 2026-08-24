@@ -128,6 +128,46 @@ describe('E2E SaveFilesAsArtifactsPlugin', () => {
     expect(saved?.inlineData?.data).toBe(pdfBytes);
   });
 
+  it('leaves an error in place of a blob over the 20MB limit', async () => {
+    const {agent, runner, session} = await createRunner();
+
+    const oversized = Buffer.alloc(20 * 1024 * 1024 + 1).toString('base64');
+    const newMessage: Content = {
+      role: 'user',
+      parts: [
+        {
+          inlineData: {
+            displayName: 'huge.pdf',
+            data: oversized,
+            mimeType: 'application/pdf',
+          },
+        },
+      ],
+    };
+
+    for await (const _event of runner.runAsync({
+      userId: USER_ID,
+      sessionId: session.id,
+      newMessage,
+    })) {
+      // Drain the generator so the run completes.
+    }
+
+    const seenParts = agent.lastUserContent?.parts ?? [];
+    expect(seenParts[0].text).toBe(
+      '[Upload Error: File huge.pdf (20.00 MB) exceeds the maximum supported' +
+        ' size of 20MB. Please upload a smaller file.]',
+    );
+    expect(seenParts.some((p) => p.inlineData)).toBe(false);
+
+    const keys = await runner.artifactService!.listArtifactKeys({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: session.id,
+    });
+    expect(keys).toHaveLength(0);
+  });
+
   // Complements the unit test for this branch by proving the fallback name is
   // built from a real runner-generated invocation id, not a fixture string.
   it('generates a filename when the uploaded blob has no displayName', async () => {
