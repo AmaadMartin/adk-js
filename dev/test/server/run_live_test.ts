@@ -426,21 +426,29 @@ describe('runLiveSession', () => {
     expect(event.content?.parts?.[0].text).toBe('split');
   });
 
-  it('stops sending once the socket is no longer open', async () => {
+  it('stops pulling events once the socket is no longer open', async () => {
     const frames: string[] = [];
+    const yielded: string[] = [];
     clientSocket.on('message', (data) => frames.push(data.toString()));
 
     await drive(async function* () {
+      yielded.push('first');
       yield echoEvent({role: 'model', parts: [{text: 'first'}]});
       serverSocket.close();
       await once(serverSocket, 'close');
+      yielded.push('second');
       yield echoEvent({role: 'model', parts: [{text: 'second'}]});
+      yielded.push('third');
+      yield echoEvent({role: 'model', parts: [{text: 'third'}]});
     });
 
     expect(frames).toHaveLength(1);
     expect((JSON.parse(frames[0]) as Event).content?.parts?.[0].text).toBe(
       'first',
     );
+    // The run ends at the first event the closed socket cannot take, rather
+    // than draining the rest of the model stream into it.
+    expect(yielded).toEqual(['first', 'second']);
   });
 
   it('reports a socket error through the logger', async () => {

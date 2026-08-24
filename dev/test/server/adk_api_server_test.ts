@@ -1208,6 +1208,23 @@ describe('AdkWebServer', () => {
       expect(logger.errors).toEqual([]);
     });
 
+    it('stops while a live socket is still open', async () => {
+      const lingering = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+      await lingering.start();
+      await createLiveSession();
+      vi.spyOn(Runner.prototype, 'runLive').mockImplementation(echoLiveQueue);
+
+      const live = connect(lingering.url, LIVE_QUERY);
+      await live.opened;
+
+      await expect(lingering.stop()).resolves.toBeUndefined();
+    });
+
     it('destroys an upgrade request on any other path', async () => {
       const stray = new WebSocket(`${toWsUrl(server.url)}/not_run_live`);
       stray.on('error', () => {});
