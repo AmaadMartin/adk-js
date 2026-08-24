@@ -59,13 +59,7 @@ new MultimodalToolResultsPlugin({retention: 'session'});
 
 Use `'session'` when a follow-up turn should still be able to refer to the file: "now compare it with last quarter". Use the default when the tool result is only relevant to the answer it feeds.
 
-`'session'` replaces rather than accumulates across turns. A turn that returns new parts drops the parts of the previous turn. Within one turn, several tool calls accumulate, and that buffer has no cap.
-
-## What survives a turn boundary
-
-Only `fileData` and `text` parts are retained across turns. An `inlineData` part is always one-shot: it is attached to the requests of its own turn and then dropped. `inlineData` carries the raw bytes inline, so retaining it would write the payload into persisted session state on every turn.
-
-The retained parts live under the state key `multimodal_tool_results_plugin:PARTS_RETURNED_BY_TOOLS_ID`, exported as `SESSION_PARTS_RETURNED_BY_TOOLS_ID`. The key is deliberately not `temp:`-prefixed, because the session layer strips `temp:` keys from an event before it persists the event. The one-shot buffer of the default mode uses `PARTS_RETURNED_BY_TOOLS_ID`, which is `temp:`-prefixed.
+`'session'` replaces rather than accumulates across turns: a turn that returns new parts drops the previous turn's parts. An `inlineData` part is the exception in either mode. It is always one-shot, because it carries the raw bytes inline and retaining it would write the payload into persisted session state on every turn.
 
 ## Behaviour to know about
 
@@ -73,6 +67,6 @@ The retained parts live under the state key `multimodal_tool_results_plugin:PART
 
 **Only the first element of an array is checked.** An array whose first element is a `Part` is taken whole. This matches adk-python.
 
-**A non-part result skips the agent-level callbacks.** The plugin returns the original result unchanged when the tool did not return parts, and a plugin that returns a value stops ADK from running the agent's own `afterToolCallback`s for that call. This matches adk-python. Do not combine this plugin with an agent-level `afterToolCallback` you rely on for tools that return ordinary values.
+**The session buffer has no cap within a turn.** Each tool call that returns parts adds to it, and it is cleared only when a later turn returns parts of its own.
 
 **An empty request is a no-op.** If `llmRequest.contents` is empty the plugin attaches nothing and keeps the buffered parts for the next call.

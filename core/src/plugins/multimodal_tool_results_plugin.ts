@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Part} from '@google/genai';
+import {Part} from '@google/genai';
 import {cloneDeep, isEqual} from 'lodash-es';
 
 import {Context} from '../agents/context.js';
@@ -44,11 +44,6 @@ export const SESSION_UPDATED_KEY =
 
 const DEFAULT_PLUGIN_NAME = 'multimodal_tool_results_plugin';
 
-const RETENTION_MODES: readonly MultimodalToolResultsRetention[] = [
-  'next_model_call',
-  'session',
-];
-
 /** Own-property names a `@google/genai` `Part` can carry. */
 const PART_KEYS: ReadonlySet<string> = new Set([
   'mediaResolution',
@@ -67,10 +62,6 @@ const PART_KEYS: ReadonlySet<string> = new Set([
   'partMetadata',
 ]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * Structural type guard for a `@google/genai` `Part`.
  *
@@ -81,14 +72,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * therefore treated as one.
  */
 export function isPart(value: unknown): value is Part {
-  if (!isRecord(value)) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
   const keys = Object.keys(value);
   return (
     keys.length > 0 &&
     keys.every((key) => PART_KEYS.has(key)) &&
-    keys.some((key) => value[key] !== undefined)
+    Object.values(value).some((field) => field !== undefined)
   );
 }
 
@@ -109,19 +100,6 @@ function extractParts(result: unknown): Part[] | undefined {
     return [result];
   }
   return isPartArray(result) ? [...result] : undefined;
-}
-
-/** Returns the retention mode, or throws when it is not a known mode. */
-export function validateRetention(
-  retention: string,
-): MultimodalToolResultsRetention {
-  const mode = RETENTION_MODES.find((candidate) => candidate === retention);
-  if (mode === undefined) {
-    throw new Error(
-      `retention must be 'next_model_call' or 'session', got ${retention}`,
-    );
-  }
-  return mode;
 }
 
 /** Appends `parts` to the array held under `key`. */
@@ -179,11 +157,6 @@ function takeSessionParts(state: State): Part[] {
   return [...unseen, ...currentParts];
 }
 
-function appendToLastContent(contents: Content[], parts: Part[]): void {
-  const last = contents[contents.length - 1];
-  last.parts = [...(last.parts ?? []), ...parts];
-}
-
 /**
  * Lets a function tool return multimodal content directly.
  *
@@ -232,12 +205,22 @@ export class MultimodalToolResultsPlugin extends BasePlugin {
     } = {},
   ) {
     super(options.name ?? DEFAULT_PLUGIN_NAME);
-    this.retention = validateRetention(options.retention ?? 'next_model_call');
+    const retention = options.retention ?? 'next_model_call';
+    if (retention !== 'next_model_call' && retention !== 'session') {
+      throw new Error(
+        `retention must be 'next_model_call' or 'session', got ${retention}`,
+      );
+    }
+    this.retention = retention;
   }
 
   /**
-   * Buffers the parts the tool returned. A result that is not a `Part` or a
-   * non-empty array of `Part`s is returned unchanged.
+   * Buffers the parts the tool returned, leaving the tool result unchanged.
+   *
+   * Always returns `undefined`, including for a result that carries no parts.
+   * A plugin that returns a value stops `PluginManager` from running the
+   * plugins after it and stops ADK from running the agent's own
+   * `afterToolCallback`s, and this plugin never replaces a result.
    */
   override async afterToolCallback({
     toolContext,
@@ -250,7 +233,7 @@ export class MultimodalToolResultsPlugin extends BasePlugin {
   }): Promise<Record<string, unknown> | undefined> {
     const parts = extractParts(result);
     if (!parts) {
-      return result;
+      return undefined;
     }
     if (this.retention === 'session') {
       saveSessionParts(toolContext.state, parts);
@@ -280,7 +263,8 @@ export class MultimodalToolResultsPlugin extends BasePlugin {
         ? takeSessionParts(state)
         : takeNextModelCallParts(state);
     if (parts.length > 0) {
-      appendToLastContent(llmRequest.contents, parts);
+      const last = llmRequest.contents[llmRequest.contents.length - 1];
+      last.parts = [...(last.parts ?? []), ...parts];
     }
     return undefined;
   }

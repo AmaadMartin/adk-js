@@ -7,6 +7,8 @@
 import {
   BaseLlm,
   BaseLlmConnection,
+  BasePlugin,
+  BaseTool,
   Context,
   createSession,
   FunctionTool,
@@ -33,8 +35,8 @@ import {describe, expect, it} from 'vitest';
 import {
   CURRENT_TURN_PARTS_ID,
   isPart,
+  MultimodalToolResultsRetention,
   SESSION_UPDATED_KEY,
-  validateRetention,
 } from '../../src/plugins/multimodal_tool_results_plugin.js';
 
 const TEMP_KEYS = [
@@ -105,6 +107,27 @@ function lastParts(request: LlmRequest): Part[] {
   return request.contents[request.contents.length - 1].parts ?? [];
 }
 
+/** A plugin that records the tool calls its afterToolCallback is shown. */
+class RecordingPlugin extends BasePlugin {
+  readonly seen: string[] = [];
+
+  constructor() {
+    super('recording_plugin');
+  }
+
+  override async afterToolCallback({
+    tool,
+  }: {
+    tool: BaseTool;
+    toolArgs: Record<string, unknown>;
+    toolContext: Context;
+    result: Record<string, unknown>;
+  }): Promise<Record<string, unknown> | undefined> {
+    this.seen.push(tool.name);
+    return undefined;
+  }
+}
+
 /** A model that replays a queued script and records every request it saw. */
 class ScriptedLlm extends BaseLlm {
   readonly requests: LlmRequest[] = [];
@@ -143,13 +166,21 @@ describe('MultimodalToolResultsPlugin', () => {
     });
   });
 
-  describe('validateRetention', () => {
-    it.each(['next_model_call', 'session'])('accepts %s', (mode) => {
-      expect(validateRetention(mode)).toBe(mode);
-    });
+  describe('retention validation', () => {
+    it.each(['next_model_call', 'session'] as const)(
+      'accepts %s',
+      (retention) => {
+        expect(
+          () => new MultimodalToolResultsPlugin({retention}),
+        ).not.toThrow();
+      },
+    );
 
     it('rejects an unknown mode', () => {
-      expect(() => validateRetention('invalid')).toThrowError(
+      // The cast supplies the value a JavaScript caller or a JSON config can
+      // still pass, which is what the runtime guard exists for.
+      const retention = 'invalid' as MultimodalToolResultsRetention;
+      expect(() => new MultimodalToolResultsPlugin({retention})).toThrowError(
         "retention must be 'next_model_call' or 'session', got invalid",
       );
     });
@@ -179,6 +210,70 @@ describe('MultimodalToolResultsPlugin', () => {
       {name: 'a number', value: 42},
     ])('rejects $name', ({value}) => {
       expect(isPart(value)).toBe(false);
+    });
+  });
+
+  describe('the rest of the callback chain', () => {
+    it.each([
+      {name: 'an ordinary result', result: {some: 'data'}},
+      {name: 'a part result', result: filePart},
+    ])('still runs the plugins after this one for $name', async ({result}) => {
+      const recorder = new RecordingPlugin();
+      const manager = new PluginManager([
+        new MultimodalToolResultsPlugin(),
+        recorder,
+      ]);
+
+      const response = await manager.runAfterToolCallback({
+        tool: mockTool,
+        toolArgs: {},
+        toolContext: newContext(newSession()),
+        result: result as Record<string, unknown>,
+      });
+
+      expect(response).toBeUndefined();
+      expect(recorder.seen).toEqual(['test_tool']);
+    });
+
+    it("still runs the agent's own afterToolCallback", async () => {
+      const seen: string[] = [];
+      const model = new ScriptedLlm([
+        {role: 'model', parts: [{functionCall: {name: 'get_status'}}]},
+        {role: 'model', parts: [{text: 'done'}]},
+      ]);
+      const agent = new LlmAgent({
+        name: 'root_agent',
+        model,
+        tools: [
+          new FunctionTool({
+            name: 'get_status',
+            description: 'Returns an ordinary record.',
+            execute: () => ({status: 'ok'}),
+          }),
+        ],
+        afterToolCallback: ({tool}) => {
+          seen.push(tool.name);
+          return undefined;
+        },
+      });
+      const runner = new InMemoryRunner({
+        agent,
+        plugins: [new MultimodalToolResultsPlugin()],
+      });
+      const session = await runner.sessionService.createSession({
+        appName: runner.appName,
+        userId: 'test_user',
+      });
+
+      for await (const _event of runner.runAsync({
+        userId: 'test_user',
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: [{text: 'status?'}]},
+      })) {
+        // Drain the stream so the turn runs to completion.
+      }
+
+      expect(seen).toEqual(['get_status']);
     });
   });
 
@@ -213,14 +308,14 @@ describe('MultimodalToolResultsPlugin', () => {
       expect(context.state.get(PARTS_RETURNED_BY_TOOLS_ID)).toEqual([filePart]);
     });
 
-    it('leaves a non-part result and the request untouched', async () => {
+    it('buffers nothing for a non-part result and leaves the request alone', async () => {
       const plugin = new MultimodalToolResultsPlugin();
       const context = newContext(newSession());
       const original = {some: 'data'};
 
       const result = await callAfterTool(plugin, context, original);
 
-      expect(result).toBe(original);
+      expect(result).toBeUndefined();
       expect(context.state.has(PARTS_RETURNED_BY_TOOLS_ID)).toBe(false);
 
       const request = newRequest([{role: 'user', parts: [{text: 'original'}]}]);
@@ -237,11 +332,11 @@ describe('MultimodalToolResultsPlugin', () => {
       {name: 'an array of non-part objects', value: [{some: 'data'}]},
       {name: 'an array whose first element is a primitive', value: ['x']},
       {name: 'an array whose first element is null', value: [null]},
-    ])('leaves $name untouched', async ({value}) => {
+    ])('buffers nothing for $name', async ({value}) => {
       const plugin = new MultimodalToolResultsPlugin();
       const context = newContext(newSession());
 
-      expect(await callAfterTool(plugin, context, value)).toBe(value);
+      expect(await callAfterTool(plugin, context, value)).toBeUndefined();
       expect(context.state.has(PARTS_RETURNED_BY_TOOLS_ID)).toBe(false);
     });
 
