@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
+import {
+  Content,
+  createUserContent,
+  FunctionCall,
+  FunctionResponse,
+  Part,
+} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -196,27 +202,41 @@ async function callToolAsync(
   });
 }
 
+/**
+ * Builds the `FunctionResponse` that carries a tool result back to the model.
+ *
+ * A scheduling the tool asked for on this one call wins over its tool-wide
+ * default. `id` and `name` address the function call being answered, so ADK
+ * owns both whatever the tool returned.
+ */
+function buildToolFunctionResponse(
+  tool: BaseTool,
+  functionResult: unknown,
+  toolContext: Context,
+): FunctionResponse {
+  const scheduling = toolContext.responseScheduling ?? tool.responseScheduling;
+  return {
+    id: toolContext.functionCallId,
+    name: tool.name,
+    response: normalizeCallbackResponse(functionResult) ?? {
+      result: functionResult,
+    },
+    ...(scheduling !== undefined && {scheduling}),
+  };
+}
+
 function buildResponseEvent(
   tool: BaseTool,
   functionResult: unknown,
   toolContext: Context,
   invocationContext: InvocationContext,
 ): Event {
-  let responseResult: Record<string, unknown>;
-  if (typeof functionResult !== 'object' || functionResult == null) {
-    responseResult = {result: functionResult};
-  } else if (Array.isArray(functionResult)) {
-    responseResult = {results: functionResult};
-  } else {
-    responseResult = functionResult as Record<string, unknown>;
-  }
-
   const partFunctionResponse: Part = {
-    functionResponse: {
-      name: tool.name,
-      response: responseResult,
-      id: toolContext.functionCallId,
-    },
+    functionResponse: buildToolFunctionResponse(
+      tool,
+      functionResult,
+      toolContext,
+    ),
   };
 
   const content: Content = {
@@ -455,14 +475,11 @@ export async function handleFunctionCallList({
       invocationId: invocationContext.invocationId,
       author: invocationContext.agent.name,
       content: createUserContent({
-        functionResponse: {
-          id: toolContext.functionCallId,
-          name: tool.name,
-          response: functionResponse,
-          ...(tool.responseScheduling !== undefined && {
-            scheduling: tool.responseScheduling,
-          }),
-        },
+        functionResponse: buildToolFunctionResponse(
+          tool,
+          functionResponse,
+          toolContext,
+        ),
       }),
       actions: toolContext.actions,
       branch: invocationContext.branch,
