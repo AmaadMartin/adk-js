@@ -215,7 +215,9 @@ export {LoggingPlugin} from './plugins/logging_plugin.js';
 export {
   MultimodalToolResultsPlugin,
   PARTS_RETURNED_BY_TOOLS_ID,
+  SESSION_PARTS_RETURNED_BY_TOOLS_ID,
 } from './plugins/multimodal_tool_results_plugin.js';
+export type {MultimodalToolResultsRetention} from './plugins/multimodal_tool_results_plugin.js';
 export {PluginManager} from './plugins/plugin_manager.js';
 export {
   InMemoryPolicyEngine,
