@@ -6,13 +6,9 @@
 
 import {
   BasePlugin,
-  Context,
-  createEvent,
   createSession,
   getLogger,
-  InMemorySessionService,
   InvocationContext,
-  LlmAgent,
   Logger,
   PluginManager,
   SaveFilesAsArtifactsPlugin,
@@ -92,15 +88,6 @@ function createHarness(
 
   return {saveArtifact, getArtifactVersion, artifactService, invocationContext};
 }
-
-const testAgent = new LlmAgent({name: 'test_agent'});
-
-/**
- * The plugin's cross-callback bookkeeping key. The `temp:` prefix is part of
- * the contract: session services skip persisting `temp:`-prefixed keys, so this
- * never lands in durable session state.
- */
-const PENDING_DELTA_KEY = 'temp:save_files_as_artifacts_plugin:pending_delta';
 
 describe('SaveFilesAsArtifactsPlugin', () => {
   let originalLogger: Logger;
@@ -791,206 +778,6 @@ describe('SaveFilesAsArtifactsPlugin', () => {
         '[Upload Error: File large.pdf (25.00 MB) exceeds the maximum' +
           ' supported size of 20MB. Please upload a smaller file.]',
       );
-      expect(invocationContext.session.state[PENDING_DELTA_KEY]).toEqual({
-        'small.pdf': 0,
-      });
-    });
-  });
-
-  describe('artifact delta reporting', () => {
-    it('records the pending delta into session state', async () => {
-      const {invocationContext} = createHarness();
-      const plugin = new SaveFilesAsArtifactsPlugin();
-
-      const blob: Blob = {
-        displayName: 'blob.pdf',
-        data: 'ZGF0YQ==',
-        mimeType: 'application/pdf',
-      };
-      await plugin.onUserMessageCallback({
-        invocationContext,
-        userMessage: {role: 'user', parts: [{inlineData: blob}]},
-      });
-
-      expect(invocationContext.session.state[PENDING_DELTA_KEY]).toEqual({
-        'blob.pdf': 0,
-      });
-    });
-
-    it('merges a new delta into an existing pending delta', async () => {
-      const {invocationContext} = createHarness();
-      invocationContext.session.state[PENDING_DELTA_KEY] = {'existing.pdf': 3};
-      const plugin = new SaveFilesAsArtifactsPlugin();
-
-      const blob: Blob = {
-        displayName: 'blob.pdf',
-        data: 'ZGF0YQ==',
-        mimeType: 'application/pdf',
-      };
-      await plugin.onUserMessageCallback({
-        invocationContext,
-        userMessage: {role: 'user', parts: [{inlineData: blob}]},
-      });
-
-      expect(invocationContext.session.state[PENDING_DELTA_KEY]).toEqual({
-        'existing.pdf': 3,
-        'blob.pdf': 0,
-      });
-    });
-
-    it('flushes the pending delta into actions.artifactDelta and resets state across turns', async () => {
-      const {invocationContext} = createHarness();
-      const plugin = new SaveFilesAsArtifactsPlugin();
-
-      // Turn 1: user message callback records the delta in state.
-      await plugin.onUserMessageCallback({
-        invocationContext,
-        userMessage: {
-          role: 'user',
-          parts: [
-            {
-              inlineData: {
-                displayName: 'blob.pdf',
-                data: 'ZGF0YQ==',
-                mimeType: 'application/pdf',
-              },
-            },
-          ],
-        },
-      });
-      expect(invocationContext.session.state[PENDING_DELTA_KEY]).toEqual({
-        'blob.pdf': 0,
-      });
-
-      // Turn 1: before-agent callback flushes the delta and clears the state.
-      const callbackContext1 = new Context({invocationContext});
-      await plugin.beforeAgentCallback({
-        agent: testAgent,
-        callbackContext: callbackContext1,
-      });
-      expect(callbackContext1.actions.artifactDelta).toEqual({'blob.pdf': 0});
-      expect(invocationContext.session.state[PENDING_DELTA_KEY]).toEqual({});
-
-      // Turn 2: a new upload records only the new delta (no accumulation).
-      await plugin.onUserMessageCallback({
-        invocationContext,
-        userMessage: {
-          role: 'user',
-          parts: [
-            {
-              inlineData: {
-                displayName: 'blob_2.pdf',
-                data: 'ZGF0YTI=',
-                mimeType: 'application/pdf',
-              },
-            },
-          ],
-        },
-      });
-      expect(invocationContext.session.state[PENDING_DELTA_KEY]).toEqual({
-        'blob_2.pdf': 0,
-      });
-
-      // Turn 2: before-agent callback flushes the second delta.
-      const callbackContext2 = new Context({invocationContext});
-      await plugin.beforeAgentCallback({
-        agent: testAgent,
-        callbackContext: callbackContext2,
-      });
-      expect(callbackContext2.actions.artifactDelta).toEqual({'blob_2.pdf': 0});
-      expect(invocationContext.session.state[PENDING_DELTA_KEY]).toEqual({});
-    });
-
-    it('is a no-op when there is no pending delta', async () => {
-      const {invocationContext} = createHarness();
-      const plugin = new SaveFilesAsArtifactsPlugin();
-
-      const callbackContext = new Context({invocationContext});
-
-      const result = await plugin.beforeAgentCallback({
-        agent: testAgent,
-        callbackContext,
-      });
-
-      expect(result).toBeUndefined();
-      expect(callbackContext.actions.artifactDelta).toEqual({});
-    });
-
-    it('is a no-op when the pending delta is empty', async () => {
-      const {invocationContext} = createHarness();
-      invocationContext.session.state[PENDING_DELTA_KEY] = {};
-      const plugin = new SaveFilesAsArtifactsPlugin();
-
-      const callbackContext = new Context({invocationContext});
-
-      await plugin.beforeAgentCallback({
-        agent: testAgent,
-        callbackContext,
-      });
-
-      expect(callbackContext.actions.artifactDelta).toEqual({});
-    });
-
-    it('keeps the bookkeeping key out of durable session state', async () => {
-      const sessionService = new InMemorySessionService();
-      const session = await sessionService.createSession({
-        appName: APP_NAME,
-        userId: USER_ID,
-      });
-      const {invocationContext} = createHarness(session);
-      const plugin = new SaveFilesAsArtifactsPlugin();
-
-      await plugin.onUserMessageCallback({
-        invocationContext,
-        userMessage: {
-          role: 'user',
-          parts: [
-            {
-              inlineData: {
-                displayName: 'blob.pdf',
-                data: 'ZGF0YQ==',
-                mimeType: 'application/pdf',
-              },
-            },
-          ],
-        },
-      });
-
-      // A real Context routes state writes into eventActions.stateDelta, which
-      // is what a session service would persist.
-      const callbackContext = new Context({invocationContext});
-      await plugin.beforeAgentCallback({
-        agent: testAgent,
-        callbackContext,
-      });
-      expect(callbackContext.actions.artifactDelta).toEqual({'blob.pdf': 0});
-
-      const appended = await sessionService.appendEvent({
-        session,
-        event: createEvent({
-          invocationId: invocationContext.invocationId,
-          author: 'test_agent',
-          actions: callbackContext.eventActions,
-        }),
-      });
-
-      // Nothing resembling the bookkeeping key survives into the persisted
-      // delta, so it never lands in durable session state.
-      expect(
-        Object.keys(appended.actions.stateDelta).some((k) =>
-          k.includes('pending_delta'),
-        ),
-      ).toBe(false);
-      const reloaded = await sessionService.getSession({
-        appName: 'test_app',
-        userId: 'test_user',
-        sessionId: session.id,
-      });
-      expect(
-        Object.keys(reloaded!.state).some(
-          (k) => k.includes('pending_delta') && !k.startsWith('temp:'),
-        ),
-      ).toBe(false);
     });
   });
 });

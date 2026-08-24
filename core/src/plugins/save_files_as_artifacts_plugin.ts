@@ -6,42 +6,30 @@
 
 import {Content, Part} from '@google/genai';
 
-import {BaseAgent} from '../agents/base_agent.js';
-import {Context} from '../agents/context.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
-import {State} from '../sessions/state.js';
 import {base64ByteLength} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {BasePlugin} from './base_plugin.js';
 
 /**
- * URI schemes that the model connectors can access directly. Vertex exposes
- * `gs://` while hosted endpoints use HTTP(S). Expand this set when more
- * provider capabilities are surfaced.
+ * URI schemes the model connectors can fetch directly. Vertex exposes `gs://`
+ * while hosted endpoints use HTTP(S).
  */
-const MODEL_ACCESSIBLE_URI_SCHEMES = new Set(['gs', 'https', 'http']);
+const MODEL_ACCESSIBLE_URI_SCHEME = /^(gs|https?):/i;
 
 const BYTES_PER_MB = 1024 * 1024;
 
 /**
  * The largest blob the Gemini API accepts as inline data:
  * https://ai.google.dev/gemini-api/docs/files
+ *
+ * A saved artifact is not out of reach of that limit: `LoadArtifactsTool`
+ * pushes the artifact back into the request as an inline part, so an oversized
+ * artifact would build a request the API rejects.
  */
 const MAX_INLINE_DATA_SIZE_BYTES = 20 * BYTES_PER_MB;
-
-/**
- * The session-state key holding the pending `filename -> version` map handed
- * off from `onUserMessageCallback` to the next `beforeAgentCallback`.
- *
- * The `temp:` prefix keeps this bookkeeping out of durable session state: it is
- * only needed within a single invocation, and session services skip persisting
- * `temp:`-prefixed keys.
- */
-function pendingDeltaKey(pluginName: string): string {
-  return `${State.TEMP_PREFIX}${pluginName}:pending_delta`;
-}
 
 /**
  * Options for {@link SaveFilesAsArtifactsPlugin}.
@@ -114,7 +102,6 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
     }
 
     const newParts: Part[] = [];
-    const pendingDelta: Record<string, number> = {};
     let modified = false;
 
     for (let i = 0; i < userMessage.parts.length; i++) {
@@ -167,7 +154,6 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
           }
         }
 
-        pendingDelta[fileName] = version;
         modified = true;
         logger.debug(`Successfully saved artifact: ${fileName}`);
       } catch (e) {
@@ -180,35 +166,7 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
       return undefined;
     }
 
-    const key = pendingDeltaKey(this.name);
-    const existing =
-      (invocationContext.session.state[key] as Record<string, number>) ?? {};
-    invocationContext.session.state[key] = {...existing, ...pendingDelta};
-
     return {role: userMessage.role, parts: newParts};
-  }
-
-  /**
-   * Reports the versions saved by {@link onUserMessageCallback} through
-   * `EventActions.artifactDelta`.
-   *
-   * `BaseAgent` does not dispatch plugin agent callbacks yet, so nothing calls
-   * this today and the artifact delta stays empty. The saved versions wait in
-   * session state until it runs.
-   */
-  override async beforeAgentCallback({
-    callbackContext,
-  }: {
-    agent: BaseAgent;
-    callbackContext: Context;
-  }): Promise<Content | undefined> {
-    const key = pendingDeltaKey(this.name);
-    const pendingDelta = callbackContext.state.get<Record<string, number>>(key);
-    if (pendingDelta && Object.keys(pendingDelta).length > 0) {
-      Object.assign(callbackContext.actions.artifactDelta, pendingDelta);
-      callbackContext.state.set(key, {});
-    }
-    return undefined;
   }
 }
 
@@ -238,7 +196,7 @@ async function buildFileReferencePart(
 
   if (
     !artifactVersion?.canonicalUri ||
-    !isModelAccessibleUri(artifactVersion.canonicalUri)
+    !MODEL_ACCESSIBLE_URI_SCHEME.test(artifactVersion.canonicalUri)
   ) {
     return undefined;
   }
@@ -250,16 +208,4 @@ async function buildFileReferencePart(
       displayName: filename,
     },
   };
-}
-
-/**
- * Returns whether the given URI uses a scheme the model can access directly.
- * Scheme-less strings return `false`.
- */
-function isModelAccessibleUri(uri: string): boolean {
-  const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(uri);
-  if (!match) {
-    return false;
-  }
-  return MODEL_ACCESSIBLE_URI_SCHEMES.has(match[1].toLowerCase());
 }
