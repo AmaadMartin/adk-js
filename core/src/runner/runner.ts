@@ -763,13 +763,34 @@ export class Runner {
 
             const eventToProcess = modifiedEvent ?? event;
 
+            // `saveArtifacts` rewrites the inline blob into an artifact
+            // reference, which the guard below then lets through to the
+            // session. The caller still receives the untouched event, because
+            // a live front-end has to play those bytes.
+            let eventToPersist = eventToProcess;
             if (
-              !eventToProcess.partial &&
-              !isLiveModelMediaEventWithInlineData(eventToProcess)
+              runConfig.saveLiveBlob &&
+              eventToProcess.content &&
+              isLiveModelMediaEventWithInlineData(eventToProcess)
+            ) {
+              eventToPersist = {
+                ...eventToProcess,
+                content: await this.saveArtifacts(
+                  invocationContext.invocationId,
+                  params.userId,
+                  params.sessionId,
+                  eventToProcess.content,
+                ),
+              };
+            }
+
+            if (
+              !eventToPersist.partial &&
+              !isLiveModelMediaEventWithInlineData(eventToPersist)
             ) {
               await this.sessionService.appendEvent({
                 session,
-                event: eventToProcess,
+                event: eventToPersist,
               });
             }
 
