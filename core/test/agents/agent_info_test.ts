@@ -248,8 +248,9 @@ describe('getAgentsInfo', () => {
     expect(Object.keys(agents)).toEqual(['grandchild', 'child', 'root']);
   });
 
-  it('records an agent reachable by two paths exactly once', async () => {
-    const shared = new LlmAgent({name: 'shared'});
+  it('resolves an agent reachable by two paths exactly once', async () => {
+    const sharedTool = new CountingTool('shared_tool');
+    const shared = new LlmAgent({name: 'shared', tools: [sharedTool]});
     const a = new LlmAgent({name: 'a'});
     const b = new LlmAgent({name: 'b'});
     const root = new LlmAgent({name: 'root', subAgents: [a, b]});
@@ -260,6 +261,9 @@ describe('getAgentsInfo', () => {
 
     const agents = await getAgentsInfo(root);
 
+    // The visited guard stops the second path from re-resolving the subtree,
+    // which for a remote toolset would be a second round of I/O.
+    expect(sharedTool.declarationCalls).toBe(1);
     expect(Object.keys(agents).filter((name) => name === 'shared')).toEqual([
       'shared',
     ]);
