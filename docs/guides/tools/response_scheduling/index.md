@@ -17,8 +17,8 @@ exposes it in two layers:
 
 - A tool-wide default, `responseScheduling` on the tool. Every result from that
   tool carries it.
-- A per-call override. A tool that returns a `FunctionResponse` names the mode
-  for that one call, and it wins over the tool-wide default.
+- A per-call override. A tool sets `context.responseScheduling` while it runs to
+  name the mode for that one call, and it wins over the tool-wide default.
 
 A tool that sets neither leaves the field unset, and the server default applies.
 
@@ -51,10 +51,12 @@ The emitted part is
 
 ## Override the mode for one call
 
-Return a `FunctionResponse` instead of a plain payload. Its `response` becomes
-the payload and its `scheduling` applies to that call only.
+Assign `context.responseScheduling` inside the tool. It applies to that call
+only, and the tool returns its payload unchanged.
 
 ```ts
+import {Context, FunctionTool} from '@google/adk';
+
 async function readSensor(): Promise<{value: number; critical: boolean}> {
   return {value: 9, critical: true};
 }
@@ -63,14 +65,12 @@ const watch = new FunctionTool({
   name: 'watch',
   description: 'Watches a sensor.',
   parameters: z.object({}),
-  execute: async () => {
+  execute: async (_args, context?: Context) => {
     const reading = await readSensor();
-    return reading.critical
-      ? {
-          response: {reading: reading.value},
-          scheduling: FunctionResponseScheduling.INTERRUPT,
-        }
-      : {reading: reading.value};
+    if (reading.critical && context) {
+      context.responseScheduling = FunctionResponseScheduling.INTERRUPT;
+    }
+    return {reading: reading.value};
   },
   responseScheduling: FunctionResponseScheduling.SILENT,
 });
@@ -80,8 +80,12 @@ A critical reading emits
 `{functionResponse: {id, name: 'watch', response: {reading: 9}, scheduling: 'INTERRUPT'}}`.
 Every other reading keeps the tool-wide `SILENT`.
 
-A response an `afterToolCallback` or a plugin substitutes goes through the same
-path, so a callback can return a `FunctionResponse` too.
+`Context` is the same object an `afterToolCallback` and a plugin receive, so a
+callback can set the mode for a call too.
+
+The tool result is never inspected for a `scheduling` key. A tool whose payload
+happens to contain one — `{scheduling: 'SILENT', temperature: 20}` — sends that
+payload through untouched.
 
 ## The modes
 
@@ -95,22 +99,5 @@ path, so a callback can return a `FunctionResponse` too.
 ## What ADK owns
 
 `id` and `name` on the emitted `FunctionResponse` always address the function
-call being answered. A tool cannot know the call id, so ADK overwrites both,
-whatever the returned object puts there.
-
-## When a returned object counts as an override
-
-Every field of `FunctionResponse` is optional, so an object shape alone cannot
-tell an override from an ordinary payload. ADK treats a returned object as an
-override only when both hold:
-
-- `scheduling` names a member of `FunctionResponseScheduling`.
-- The object carries no key outside `willContinue`, `scheduling`, `parts`,
-  `id`, `name` and `response`.
-
-Anything else is an ordinary payload and lands nested under `response`. So
-`{scheduling: 'SILENT', temperature: 20}` is a weather reading, not an
-override, and a tool that already returns `{response: ...}` keeps working
-unchanged.
-
-`willContinue` and `parts` on a returned `FunctionResponse` are ignored.
+call being answered. A tool cannot know the call id, so ADK sets both, whatever
+keys the returned payload carries.

@@ -6,6 +6,7 @@
 import {
   BasePlugin,
   BaseTool,
+  Context,
   createEvent,
   createEventActions,
   Event,
@@ -112,6 +113,22 @@ const falsyLongRunningTool = new FunctionTool({
 
 function callFor(tool: BaseTool): FunctionCall {
   return {id: randomIdForTestingOnly(), name: tool.name, args: {}};
+}
+
+/**
+ * Sets the per-call scheduling from inside a tool.
+ *
+ * `ToolExecuteFunction` declares its context parameter optional so a tool can
+ * omit it, so a tool that uses it has to narrow first.
+ */
+function scheduleResponse(
+  context: Context | undefined,
+  scheduling: FunctionResponseScheduling,
+): void {
+  if (!context) {
+    expect.fail('the tool was invoked without a Context');
+  }
+  context.responseScheduling = scheduling;
 }
 
 describe('handleFunctionCallList', () => {
@@ -499,15 +516,15 @@ describe('handleFunctionCallList', () => {
     });
   });
 
-  it('should unwrap a returned FunctionResponse and apply its scheduling', async () => {
+  it('should apply a scheduling the tool set on the context for one call', async () => {
     const sensorTool = new FunctionTool({
       name: 'sensorTool',
-      description: 'returns a reading that asks to interrupt',
+      description: 'interrupts on a critical reading',
       parameters: z.object({}),
-      execute: async () => ({
-        response: {reading: 9},
-        scheduling: FunctionResponseScheduling.INTERRUPT,
-      }),
+      execute: async (_args, context) => {
+        scheduleResponse(context, FunctionResponseScheduling.INTERRUPT);
+        return {reading: 9};
+      },
     });
 
     const event = await handleFunctionCallList({
@@ -525,15 +542,15 @@ describe('handleFunctionCallList', () => {
     );
   });
 
-  it('should let a returned scheduling win over the tool-wide default', async () => {
+  it('should let a scheduling set on the context win over the tool-wide default', async () => {
     const overridingTool = new FunctionTool({
       name: 'overridingTool',
       description: 'defaults to idle but asks for silence on this call',
       parameters: z.object({}),
-      execute: async () => ({
-        response: {reading: 3},
-        scheduling: FunctionResponseScheduling.SILENT,
-      }),
+      execute: async (_args, context) => {
+        scheduleResponse(context, FunctionResponseScheduling.SILENT);
+        return {reading: 3};
+      },
       responseScheduling: FunctionResponseScheduling.WHEN_IDLE,
     });
 
@@ -550,17 +567,48 @@ describe('handleFunctionCallList', () => {
     );
   });
 
-  it('should replace the id and name a returned FunctionResponse invents', async () => {
+  it('should keep the tool-wide default for a call that sets no context scheduling', async () => {
+    const selectiveTool = new FunctionTool({
+      name: 'selectiveTool',
+      description: 'only interrupts on a critical reading',
+      parameters: z.object({critical: z.boolean()}),
+      execute: async ({critical}, context) => {
+        if (critical) {
+          scheduleResponse(context, FunctionResponseScheduling.INTERRUPT);
+        }
+        return {reading: 1};
+      },
+      responseScheduling: FunctionResponseScheduling.SILENT,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {
+          id: randomIdForTestingOnly(),
+          name: 'selectiveTool',
+          args: {critical: false},
+        },
+      ],
+      toolsDict: {selectiveTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.scheduling).toBe(
+      FunctionResponseScheduling.SILENT,
+    );
+  });
+
+  it('should own the id and name whatever keys the tool result carries', async () => {
     const identityTool = new FunctionTool({
       name: 'identityTool',
-      description: 'returns a FunctionResponse naming the wrong call',
+      description: 'returns a payload naming a different call',
       parameters: z.object({}),
-      execute: async () => ({
-        id: 'tool_invented_id',
-        name: 'tool_invented_name',
-        response: {value: 1},
-        scheduling: FunctionResponseScheduling.SILENT,
-      }),
+      execute: async (_args, context) => {
+        scheduleResponse(context, FunctionResponseScheduling.SILENT);
+        return {id: 'tool_invented_id', name: 'tool_invented_name'};
+      },
     });
     const call = callFor(identityTool);
 
@@ -575,18 +623,21 @@ describe('handleFunctionCallList', () => {
     const functionResponse = event?.content?.parts?.[0].functionResponse;
     expect(functionResponse?.id).toBe(call.id);
     expect(functionResponse?.name).toBe('identityTool');
-    expect(functionResponse?.response).toEqual({value: 1});
-    expect(functionResponse?.scheduling).toBe(
-      FunctionResponseScheduling.SILENT,
-    );
+    expect(functionResponse?.response).toEqual({
+      id: 'tool_invented_id',
+      name: 'tool_invented_name',
+    });
   });
 
-  it('should fall back to an empty result when a returned FunctionResponse carries no response', async () => {
+  it('should apply a context scheduling to a tool that returns nothing', async () => {
     const emptyTool = new FunctionTool({
       name: 'emptyTool',
       description: 'asks for silence and returns no payload',
       parameters: z.object({}),
-      execute: async () => ({scheduling: FunctionResponseScheduling.SILENT}),
+      execute: async (_args, context) => {
+        scheduleResponse(context, FunctionResponseScheduling.SILENT);
+        return null;
+      },
     });
 
     const event = await handleFunctionCallList({
@@ -598,13 +649,13 @@ describe('handleFunctionCallList', () => {
     });
 
     const functionResponse = event?.content?.parts?.[0].functionResponse;
-    expect(functionResponse?.response).toStrictEqual({result: undefined});
+    expect(functionResponse?.response).toStrictEqual({result: null});
     expect(functionResponse?.scheduling).toBe(
       FunctionResponseScheduling.SILENT,
     );
   });
 
-  it('should keep a payload carrying a foreign key nested under response', async () => {
+  it('should never read scheduling out of the tool payload itself', async () => {
     const weatherTool = new FunctionTool({
       name: 'weatherTool',
       description: 'returns a payload that mentions scheduling',
@@ -631,32 +682,32 @@ describe('handleFunctionCallList', () => {
     expect(functionResponse?.scheduling).toBeUndefined();
   });
 
-  it('should keep a payload naming an unknown scheduling nested under response', async () => {
-    const unknownSchedulingTool = new FunctionTool({
-      name: 'unknownSchedulingTool',
-      description: 'returns a payload naming a scheduling that does not exist',
+  it('should nest a payload shaped like a FunctionResponse under response', async () => {
+    const wrapperTool = new FunctionTool({
+      name: 'wrapperTool',
+      description: 'returns a payload whose only key is response',
       parameters: z.object({}),
-      execute: async () => ({scheduling: 'LATER'}),
+      execute: async () => ({response: {a: 1}}),
     });
 
     const event = await handleFunctionCallList({
       invocationContext,
-      functionCalls: [callFor(unknownSchedulingTool)],
-      toolsDict: {unknownSchedulingTool},
+      functionCalls: [callFor(wrapperTool)],
+      toolsDict: {wrapperTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
     });
 
     const functionResponse = event?.content?.parts?.[0].functionResponse;
-    expect(functionResponse?.response).toEqual({scheduling: 'LATER'});
+    expect(functionResponse?.response).toEqual({response: {a: 1}});
     expect(functionResponse?.scheduling).toBeUndefined();
   });
 
-  it('should unwrap a FunctionResponse returned by an afterToolCallback', async () => {
-    const afterToolCallback: SingleAfterToolCallback = async () => ({
-      response: {b: 2},
-      scheduling: FunctionResponseScheduling.SILENT,
-    });
+  it('should apply a scheduling an afterToolCallback set on the context', async () => {
+    const afterToolCallback: SingleAfterToolCallback = async ({context}) => {
+      context.responseScheduling = FunctionResponseScheduling.SILENT;
+      return {b: 2};
+    };
 
     const event = await handleFunctionCallList({
       invocationContext,
@@ -685,8 +736,10 @@ describe('handleFunctionCallList', () => {
       name: 'quietTool',
       description: 'never triggers a turn',
       parameters: z.object({}),
-      execute: async () => ({done: 2}),
-      responseScheduling: FunctionResponseScheduling.SILENT,
+      execute: async (_args, context) => {
+        scheduleResponse(context, FunctionResponseScheduling.SILENT);
+        return {done: 2};
+      },
     });
 
     const event = await handleFunctionCallList({
