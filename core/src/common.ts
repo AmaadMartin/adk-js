@@ -18,7 +18,15 @@ export {
   AgentConfigError,
   AgentConfigErrorCode,
   agentClassDiscriminator,
+  agentRefYamlConfigSchema,
+  baseAgentYamlConfigSchema,
+  codeYamlConfigSchema,
+  llmAgentYamlConfigSchema,
+  loopAgentYamlConfigSchema,
+  parallelAgentYamlConfigSchema,
   parseAgentYamlConfig,
+  sequentialAgentYamlConfigSchema,
+  toolYamlConfigSchema,
 } from './agents/configs/agent_config.js';
 export type {
   AdkAgentClass,
