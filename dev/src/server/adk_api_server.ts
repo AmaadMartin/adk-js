@@ -58,6 +58,10 @@ import {
   serializeAgent,
   serializeAppInfo,
 } from './app_info.js';
+import {
+  getAllowedRequestHosts,
+  isDnsRebindingRequest,
+} from './dns_rebinding_guard.js';
 import {metricsFlushingMiddleware} from './metrics_middleware.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
@@ -98,6 +102,15 @@ interface ServerOptions {
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
+  /**
+   * Additional Host header values the DNS-rebinding guard accepts besides
+   * loopback and any host derivable from `allowOrigins`. Independent of
+   * CORS: this widens what the guard accepts without opening
+   * `allowOrigins` to `'*'`, which is the only way to do so otherwise. Set
+   * this to the host an operator's reverse proxy presents to this server
+   * when the server itself binds to loopback behind that proxy.
+   */
+  allowedHosts?: string[];
   otelToCloud?: boolean;
   logger?: Logger;
   logLevel?: LogLevel;
@@ -297,6 +310,7 @@ export class AdkApiServer {
   private readonly artifactService: BaseArtifactService;
   private readonly serveDebugUI: boolean;
   private readonly allowOrigins?: string;
+  private readonly allowedHosts?: string[];
   private readonly otelToCloud: boolean;
   private readonly registerProcessors?: (
     tracerProvider: TracerProvider,
@@ -328,6 +342,7 @@ export class AdkApiServer {
       );
     this.serveDebugUI = options.serveDebugUI ?? false;
     this.allowOrigins = options.allowOrigins;
+    this.allowedHosts = options.allowedHosts;
     this.otelToCloud = options.otelToCloud ?? false;
     this.registerProcessors = options.registerProcessors;
     this.memoryExporter = new InMemoryExporter(this.sessionTraceDict);
@@ -416,6 +431,35 @@ export class AdkApiServer {
     if (metricsState) {
       app.use(metricsFlushingMiddleware(metricsState.reader));
     }
+
+    // Registered before any route (including /health, /, /version) so the
+    // DNS-rebinding guard applies to every endpoint, not just the ones
+    // registered after this point. Origin cannot be relied on here: a
+    // DNS-rebound page's requests look same-origin to the browser, which
+    // omits Origin for them, so safe methods (GET/HEAD/OPTIONS) get the
+    // same check as everything else.
+    const allowedRequestHosts = getAllowedRequestHosts(
+      this.allowOrigins,
+      this.allowedHosts,
+    );
+    app.use((req: Request, res: Response, next: express.NextFunction) => {
+      if (
+        isDnsRebindingRequest(req.headers.host, this.host, allowedRequestHosts)
+      ) {
+        this.logger.warn(
+          `Rejected request with Host ${JSON.stringify(String(req.headers.host).slice(0, 128))}: the server is bound to ` +
+            `${this.host} and only loopback hosts are accepted. Set the ` +
+            `allowedHosts server option (or --allowed_hosts on the CLI) to ` +
+            `the host you are reaching this server through.`,
+        );
+        res
+          .status(403)
+          .type('text/plain')
+          .send('Forbidden: possible DNS-rebinding request');
+        return;
+      }
+      next();
+    });
 
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
