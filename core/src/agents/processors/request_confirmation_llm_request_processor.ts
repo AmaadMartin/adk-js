@@ -92,6 +92,7 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
     const approvals = collectApprovals(
       events,
       runConfig?.plainTextToolConfirmation ?? false,
+      agent.name,
     );
     if (approvals.size === 0) {
       return;
@@ -205,6 +206,7 @@ function eventsInScope(invocationContext: InvocationContext): Event[] {
 function collectApprovals(
   events: Event[],
   allowPlainText: boolean,
+  agentName: string,
 ): Map<string, ToolConfirmation> {
   const approvals = new Map<string, ToolConfirmation>();
 
@@ -233,7 +235,7 @@ function collectApprovals(
   // ordinary chat message is never silently reinterpreted as a tool-gate
   // decision — that binding is what the structured path exists to guarantee.
   if (approvals.size === 0 && allowPlainText) {
-    return mapPlainTextConfirmation(events);
+    return mapPlainTextConfirmation(events, agentName);
   }
 
   return approvals;
@@ -298,6 +300,10 @@ function collectGateCandidates(
             functionCallId: functionCall.id,
           });
         }
+        logger.debug(
+          `Skipping tool confirmation from event ${event.id}: authored by ` +
+            `${event.author}, not by ${agentName}.`,
+        );
         continue;
       }
       const pinned = pinnedCall(functionCall);
@@ -310,7 +316,7 @@ function collectGateCandidates(
           functionCallId: functionCall.id,
         });
       }
-      if (hasRespondedAfter(events, pinned.id, index)) {
+      if (hasRespondedAfter(events, pinned.id, index, agentName)) {
         continue;
       }
       candidates.push({pinned, confirmation});
@@ -457,18 +463,27 @@ function pinnedCall(functionCall: FunctionCall): FunctionCall | undefined {
  * never closes, so a captured decision replayed later in the session finds its
  * execution already on record and is refused — the hazard a window anchored on
  * the approval turn misses.
+ *
+ * Only a response this agent produced counts. An event landing in this window
+ * that reuses the pinned call's id — for example an A2A peer's response
+ * converted into a model-role event, or any other event this agent did not
+ * author — would otherwise convince this scan the tool had already run,
+ * silently dropping a real approval before the caller even gets a result.
  */
 function hasRespondedAfter(
   events: Event[],
   pinnedCallId: string,
   gateIndex: number,
+  agentName: string,
 ): boolean {
   return events
     .slice(gateIndex + 1)
-    .some((event) =>
-      getFunctionResponses(event).some(
-        (functionResponse) => functionResponse.id === pinnedCallId,
-      ),
+    .some(
+      (event) =>
+        event.author === agentName &&
+        getFunctionResponses(event).some(
+          (functionResponse) => functionResponse.id === pinnedCallId,
+        ),
     );
 }
 
@@ -525,6 +540,7 @@ const NEGATIVE = new Set([
  */
 function mapPlainTextConfirmation(
   events: Event[],
+  agentName: string,
 ): Map<string, ToolConfirmation> {
   const none = new Map<string, ToolConfirmation>();
 
@@ -569,6 +585,14 @@ function mapPlainTextConfirmation(
     const event = events[i];
     if (event.author === 'user') {
       break; // another user turn between request and reply -> not immediate
+    }
+    if (event.author !== agentName) {
+      // Same threat model as collectGateCandidates: a foreign-authored
+      // event -- e.g. an A2A peer's response converted into a model-role
+      // event -- must not be treated as the pending confirmation this
+      // reply resolves. Skip it, but don't break: it doesn't count as an
+      // intervening user turn either.
+      continue;
     }
     for (const fc of getFunctionCalls(event)) {
       if (
