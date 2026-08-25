@@ -18,6 +18,7 @@ import {
   functionsExportedForTestingOnly,
   FunctionTool,
   InvocationContext,
+  isToolNotFound,
   LlmAgent,
   LongRunningFunctionTool,
   PluginManager,
@@ -25,7 +26,8 @@ import {
 } from '@google/adk';
 import type {FunctionCall, FunctionResponse} from '@google/genai';
 import {createPartFromBase64, createPartFromUri} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import type {MockInstance} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {
   findEventByFunctionCallId,
@@ -219,8 +221,16 @@ describe('handleFunctionCallList', () => {
   let pluginManager: PluginManager;
   let functionCall: FunctionCall;
   let toolsDict: Record<string, BaseTool>;
+  let warnSpy: MockInstance<typeof logger.warn>;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   beforeEach(() => {
+    // These tests deliberately provoke resolution failures; keep the expected
+    // diagnostics out of the suite output.
+    warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     pluginManager = new PluginManager();
     const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
     invocationContext = new InvocationContext({
@@ -489,6 +499,218 @@ describe('handleFunctionCallList', () => {
       expect.any(Number),
       expect.any(Error),
     );
+  });
+
+  it('should route an unregistered tool name through plugin onToolErrorCallback', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    plugin.onToolErrorCallbackResponse = {
+      error: 'no such tool, try testTool',
+    };
+    pluginManager.registerPlugin(plugin);
+    const onToolErrorCallback = vi.spyOn(plugin, 'onToolErrorCallback');
+    const hallucinatedCall: FunctionCall = {
+      id: randomIdForTestingOnly(),
+      name: 'google_search',
+      args: {query: 'anything'},
+    };
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [hallucinatedCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(onToolErrorCallback).toHaveBeenCalledTimes(1);
+    const {tool, toolArgs} = onToolErrorCallback.mock.calls[0][0];
+    expect(tool.name).toBe('google_search');
+    expect(toolArgs).toEqual({query: 'anything'});
+
+    const functionResponse = event!.content!.parts![0].functionResponse!;
+    expect(functionResponse.id).toBe(hallucinatedCall.id);
+    expect(functionResponse.name).toBe('google_search');
+    expect(functionResponse.response).toEqual({
+      error: 'no such tool, try testTool',
+    });
+  });
+
+  it('should answer an unregistered tool name with the resolution error when no plugin handles it', async () => {
+    const unresolvableCall: FunctionCall = {
+      id: randomIdForTestingOnly(),
+      name: 'google_search',
+      args: {},
+    };
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [unresolvableCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    // The call has to be answered, not left dangling: the request is otherwise
+    // identical next iteration, and Gemini rejects an unpaired functionCall.
+    const functionResponse = event!.content!.parts![0].functionResponse!;
+    expect(functionResponse.id).toBe(unresolvableCall.id);
+    expect(functionResponse.name).toBe('google_search');
+    const {error} = functionResponse.response as {error: string};
+    expect(error).toContain(
+      'Function google_search is not found in the toolsDict.',
+    );
+    // The inventory and the causes are for an operator, not the model: the
+    // model already has its declarations and would otherwise pay for the whole
+    // toolset on every occurrence.
+    expect(error).not.toContain('Callable tools');
+    expect(error).not.toContain('Possible causes');
+  });
+
+  it('should warn the operator with the inventory and the possible causes', async () => {
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: 'call-1', name: 'google_search', args: {}}],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    // Without this the only trace of a misconfigured agent is a string the
+    // model sees and the operator never does.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const warning = warnSpy.mock.calls[0][0] as string;
+    expect(warning).toContain("Could not resolve tool 'google_search'");
+    expect(warning).toContain('call-1');
+    expect(warning).toContain('Callable tools: testTool.');
+    expect(warning).toContain('Possible causes:');
+    // The cause this change tripped over in SleepyTool has to be listed.
+    expect(warning).toContain('_getDeclaration()');
+  });
+
+  it('should not warn when a plugin handles the unresolvable call', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    plugin.onToolErrorCallbackResponse = {result: 'handled'};
+    pluginManager.registerPlugin(plugin);
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: 'call-1', name: 'google_search', args: {}}],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    // A plugin that answers these has made them an expected condition; the
+    // sibling path for a registered tool that throws is silent too.
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('should skip the before and after tool callbacks for an unresolvable call', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    pluginManager.registerPlugin(plugin);
+    const beforeToolCallback = vi.spyOn(plugin, 'beforeToolCallback');
+    const afterToolCallback = vi.spyOn(plugin, 'afterToolCallback');
+    const canonicalAfter = vi.fn().mockResolvedValue(undefined);
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: 'call-1', name: 'google_search', args: {}}],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [canonicalAfter],
+    });
+
+    // Documented asymmetry with the registered-tool error path, which does run
+    // them. Pin it so the doc comment and the code cannot drift apart.
+    expect(beforeToolCallback).not.toHaveBeenCalled();
+    expect(afterToolCallback).not.toHaveBeenCalled();
+    expect(canonicalAfter).not.toHaveBeenCalled();
+  });
+
+  it('should hand plugins a placeholder that identifies itself and rethrows', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    plugin.onToolErrorCallbackResponse = {result: 'handled'};
+    pluginManager.registerPlugin(plugin);
+    const onToolErrorCallback = vi.spyOn(plugin, 'onToolErrorCallback');
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: 'call-1', name: 'google_search', args: {}}],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const {tool} = onToolErrorCallback.mock.calls[0][0];
+    // A plugin can tell an unresolvable name from a registered tool that threw
+    // without matching on the error message.
+    expect(isToolNotFound(tool)).toBe(true);
+    expect(isToolNotFound(testTool)).toBe(false);
+    // Nothing in the framework runs it, but a plugin holding it can, and it
+    // must not invent a second, different message.
+    await expect(
+      tool.runAsync({args: {}, toolContext: {} as Context}),
+    ).rejects.toThrow('Function google_search is not found in the toolsDict.');
+  });
+
+  // `functionCall.name` is model-supplied and `toolsDict` is a plain object, so
+  // an unguarded lookup reaches `Object.prototype`. These names would resolve
+  // to a JS builtin, be treated as found, and skip the whole recovery path —
+  // `constructor` even answers under the name `Object`, breaking the pairing.
+  it.each([
+    'constructor',
+    'toString',
+    'valueOf',
+    'hasOwnProperty',
+    'isPrototypeOf',
+    'propertyIsEnumerable',
+    'toLocaleString',
+    '__proto__',
+  ])('should treat the inherited name %s as unresolvable', async (name) => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: 'call-1', name, args: {}}],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const functionResponse = event!.content!.parts![0].functionResponse!;
+    // The response has to name the call, or the pair dangles.
+    expect(functionResponse.name).toBe(name);
+    expect(functionResponse.id).toBe('call-1');
+    expect((functionResponse.response as {error: string}).error).toBe(
+      `Function ${name} is not found in the toolsDict.`,
+    );
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should answer every call in a batch when one name is unresolvable', async () => {
+    const unresolvableId = randomIdForTestingOnly();
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        callFor(testTool),
+        {id: unresolvableId, name: 'google_search', args: {}},
+        callFor(testTool),
+      ],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const responses = event!.content!.parts!.map((p) => p.functionResponse!);
+    expect(responses.map((r) => r.name)).toEqual([
+      'testTool',
+      'google_search',
+      'testTool',
+    ]);
+    expect(responses[0].response).toEqual({result: 'tool executed'});
+    expect(responses[2].response).toEqual({result: 'tool executed'});
+    // The id is what keeps the pairing balanced, so pin it on the
+    // unresolvable slot too — that is the one built off the placeholder.
+    expect(responses[1].id).toBe(unresolvableId);
+    expect(responses[1].response).toHaveProperty('error');
   });
 
   it('should pass abortSignal to tool execution', async () => {
@@ -845,18 +1067,29 @@ describe('handleFunctionCallList', () => {
     expect(response.response).toEqual({summary: 'up 3%'});
   });
 
-  it('should reject for an unknown tool when no plugin handles the error', async () => {
-    await expect(
-      handleFunctionCallList({
-        invocationContext,
-        functionCalls: [
-          {id: randomIdForTestingOnly(), name: 'unknownTool', args: {}},
-        ],
-        toolsDict,
-        beforeToolCallbacks: [],
-        afterToolCallbacks: [],
-      }),
-    ).rejects.toThrow('Function unknownTool is not found in the toolsDict.');
+  it('should answer an unknown tool with the lookup error when no plugin handles it', async () => {
+    const unknownCall = {
+      id: randomIdForTestingOnly(),
+      name: 'unknownTool',
+      args: {},
+    };
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [unknownCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    // The call is answered rather than thrown: an unanswered call makes the
+    // next request identical to this one and the model re-issues it.
+    const functionResponse = event!.content!.parts![0].functionResponse!;
+    expect(functionResponse.id).toBe(unknownCall.id);
+    expect(functionResponse.name).toBe('unknownTool');
+    expect(functionResponse.response).toEqual({
+      error: 'Function unknownTool is not found in the toolsDict.',
+    });
   });
 
   it('should answer an unknown tool with the onToolErrorCallback response', async () => {
