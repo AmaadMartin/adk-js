@@ -5,6 +5,7 @@
  */
 
 import {logger} from '../../utils/logger.js';
+import {redactUriPassword} from '../../utils/redact_uri.js';
 import type {OAuth2Auth} from '../auth_credential.js';
 
 import type {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
@@ -119,8 +120,8 @@ export function parseAuthorizationCode(uri: string): string | undefined {
   try {
     const url = new URL(uri);
     return url.searchParams.get('code') || undefined;
-  } catch (e) {
-    logger.warn(`Failed to parse authorization URI ${uri}: ${e}`);
+  } catch {
+    logger.warn(`Failed to parse authorization URI ${redactUriPassword(uri)}`);
     return undefined;
   }
 }
@@ -160,7 +161,9 @@ export interface RefreshTokenParams {
  * Parameters for creating an OAuth2 token request body.
  */
 export type OAuth2TokenRequestParams =
-  ClientCredentialsParams | AuthorizationCodeParams | RefreshTokenParams;
+  | ClientCredentialsParams
+  | AuthorizationCodeParams
+  | RefreshTokenParams;
 
 /**
  * Creates URLSearchParams for an OAuth2 token request.

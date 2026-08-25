@@ -1,90 +1,58 @@
 /**
  * @license
- * Copyright 2025 Google LLC
+ * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Part, Schema} from '@google/genai';
-import {FinishReason, Type} from '@google/genai';
-
+import type {Content, Part} from '@google/genai';
+import {FinishReason} from '@google/genai';
+import {v4 as uuidv4} from 'uuid';
 import type {Context} from '../agents/context.js';
-import {isLlmAgent} from '../agents/llm_agent.js';
 import type {LlmRequest} from '../models/llm_request.js';
 import type {LlmResponse} from '../models/llm_response.js';
 import {FunctionTool} from '../tools/function_tool.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
-
-import {BasePlugin} from './base_plugin.js';
 import {
   REFLECT_AND_RETRY_RESPONSE_TYPE,
   resolveScopeKey,
   ScopedFailureTracker,
   TrackingScope,
-} from './reflect_retry_utils.js';
+} from './_reflect_retry_utils.js';
+import {BasePlugin} from './base_plugin.js';
 
-/**
- * Error type used when the model directly calls the reserved reflection tool.
- */
 export const RESERVED_TOOL_CALL_ERROR_TYPE = 'RESERVED_TOOL_CALL';
+export const ADK_HANDLE_MODEL_ERROR_TOOL_NAME = 'adk_handle_model_error';
 
 /**
- * Name of the reserved tool injected into every request so the framework can
- * feed reflection guidance back to the model.
- */
-const ADK_HANDLE_MODEL_ERROR = 'adk_handle_model_error';
-
-/**
- * Configuration options for {@link ReflectAndRetryModelPlugin}.
+ * Options for configuring {@link ReflectAndRetryModelPlugin}.
  */
 export interface ReflectAndRetryModelPluginOptions {
-  /** Plugin instance identifier. Defaults to `'reflect_retry_model_plugin'`. */
+  /** Plugin instance identifier. Defaults to 'reflect_retry_model_plugin'. */
   name?: string;
-  /**
-   * Maximum consecutive failures before giving up (0 = no retries). Must be a
-   * non-negative integer. Defaults to `3`.
-   */
+  /** Maximum consecutive model failures before giving up (0 = no retries). Defaults to 3. */
   maxRetries?: number;
-  /**
-   * If `true`, throws when the retry limit is exceeded; otherwise returns the
-   * failing response. Defaults to `true`.
-   */
+  /** If true, raises the exception when retry limit is reached. If false, returns response. Defaults to true. */
   throwExceptionIfRetryExceeded?: boolean;
-  /**
-   * Determines the lifecycle of the failure-tracking state. Defaults to
-   * {@link TrackingScope.INVOCATION}.
-   */
+  /** Determines the lifecycle of the error tracking state. Defaults to TrackingScope.INVOCATION. */
   trackingScope?: TrackingScope;
-  /**
-   * Finish reasons treated as retryable model errors. Defaults to
-   * `[FinishReason.MALFORMED_FUNCTION_CALL]`.
-   */
+  /** A list of FinishReasons that should be treated as model errors. Defaults to [FinishReason.MALFORMED_FUNCTION_CALL]. */
   onModelErrors?: FinishReason[];
 }
 
 /**
- * Provides self-healing error recovery for model failures.
+ * Provides self-healing, concurrent-safe error recovery for model failures.
  *
- * This plugin injects a reserved reflection tool into every request, detects
- * model errors surfaced in the {@link LlmResponse} (by `finishReason`), and
- * feeds structured reflection guidance back to the model to drive a retry, up
- * to a configurable limit. Failure counts are tracked per-model-name within a
- * configurable scope; a successful response resets that model's counter.
+ * This plugin intercepts model failures (such as `MALFORMED_FUNCTION_CALL`),
+ * provides structured guidance to the LLM for reflection and correction, and
+ * retries the turn up to a configurable limit.
  *
  * @example
  * ```typescript
  * import {ReflectAndRetryModelPlugin, TrackingScope} from '@google/adk';
  *
- * // Most common: retry malformed function calls up to 3x within an invocation.
- * const plugin = new ReflectAndRetryModelPlugin();
- *
- * // Track failures globally across invocations, allow 5 retries.
- * const globalPlugin = new ReflectAndRetryModelPlugin({
- *   maxRetries: 5,
- *   trackingScope: TrackingScope.GLOBAL,
+ * const modelRetryPlugin = new ReflectAndRetryModelPlugin({
+ *   maxRetries: 3,
+ *   trackingScope: TrackingScope.INVOCATION,
  * });
- *
- * // Registered on the runner like any other plugin:
- * // new Runner({ ..., plugins: [plugin] });
  * ```
  */
 export class ReflectAndRetryModelPlugin extends BasePlugin {
@@ -94,25 +62,80 @@ export class ReflectAndRetryModelPlugin extends BasePlugin {
   readonly onModelErrors: FinishReason[];
   private readonly tracker: ScopedFailureTracker;
 
+  /**
+   * Initializes the {@link ReflectAndRetryModelPlugin}.
+   *
+   * @param options - Configuration options for the plugin.
+   */
   constructor(options: ReflectAndRetryModelPluginOptions = {}) {
     super(options.name ?? 'reflect_retry_model_plugin');
-    const maxRetries = options.maxRetries ?? 3;
-    if (maxRetries < 0) {
-      throw new Error('max_retries must be a non-negative integer.');
+
+    const retries = options.maxRetries ?? 3;
+    if (retries < 0) {
+      throw new Error('maxRetries must be a non-negative integer.');
     }
-    this.maxRetries = maxRetries;
+
+    this.maxRetries = retries;
     this.throwExceptionIfRetryExceeded =
       options.throwExceptionIfRetryExceeded ?? true;
     this.scope = options.trackingScope ?? TrackingScope.INVOCATION;
-    this.onModelErrors = this.validateModelErrors(
-      options.onModelErrors ?? [FinishReason.MALFORMED_FUNCTION_CALL],
-    );
+    this.onModelErrors = options.onModelErrors ?? [
+      FinishReason.MALFORMED_FUNCTION_CALL,
+    ];
     this.tracker = new ScopedFailureTracker();
   }
 
   /**
-   * Injects the reserved reflection tool into the request so the model always
-   * has a tool it can be driven to call for corrective guidance.
+   * Internal framework reflection tool handler.
+   */
+  adkHandleModelError({
+    retryCount,
+  }: {
+    responseType?: string;
+    errorType?: string;
+    errorDetails?: string;
+    finishReason?: string;
+    retryCount?: number;
+  }): {reflection_guidance: string} {
+    const attempt = retryCount ?? 1;
+    return {
+      reflection_guidance: `
+The call to the model failed.
+
+**Reflection Guidance:**
+- This is retry attempt **${attempt}** of **${this.maxRetries}**
+- Analyze the error and the arguments you provided. Do not repeat the exact same call.
+
+Formulate a new plan based on your analysis and try a corrected or different approach.
+`.trim(),
+    };
+  }
+
+  /**
+   * Checks if the model response contains an error matching `onModelErrors`.
+   */
+  protected checkForModelError(llmResponse: LlmResponse): boolean {
+    if (!llmResponse.errorCode && !llmResponse.finishReason) {
+      return false;
+    }
+    if (
+      llmResponse.finishReason &&
+      this.onModelErrors.includes(llmResponse.finishReason)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Retrieves the model name from context.
+   */
+  protected getModelNameFromContext(callbackContext: Context): string {
+    return callbackContext.agentName || 'default_model';
+  }
+
+  /**
+   * Prepares the LLM request by attaching the reflection tool.
    */
   override async beforeModelCallback({
     llmRequest,
@@ -125,9 +148,7 @@ export class ReflectAndRetryModelPlugin extends BasePlugin {
   }
 
   /**
-   * Detects a reserved tool (mis)call or a retryable model error and drives the
-   * reflect-and-retry flow. On a successful response, resets the model's
-   * failure counter.
+   * Inspects LLM responses, intercepts model errors or reserved tool calls, and handles retries.
    */
   override async afterModelCallback({
     callbackContext,
@@ -137,118 +158,53 @@ export class ReflectAndRetryModelPlugin extends BasePlugin {
     llmResponse: LlmResponse;
   }): Promise<LlmResponse | undefined> {
     if (this.hasReservedToolCall(llmResponse)) {
-      return this.handleReservedToolCall({callbackContext});
+      return await this.handleReservedToolCall(callbackContext, llmResponse);
     }
 
     if (this.checkForModelError(llmResponse)) {
-      return this.handleModelError({callbackContext, llmResponse});
+      return await this.handleModelError(callbackContext, llmResponse);
     }
 
     const scopeKey = this.getModelScopeKey(callbackContext);
     const modelName = this.getModelNameFromContext(callbackContext);
-    await this.tracker.reset(scopeKey, modelName);
+    await this.resetModelFailureCount(scopeKey, modelName);
     return undefined;
   }
 
   /**
-   * The reserved reflection tool's implementation. Returns structured guidance
-   * instructing the model to reflect on the failure and try a different
-   * approach.
+   * Provides the adk_handle_model_error tool for reflection and retries.
    */
-  private adkHandleModelError(args: {retry_count?: number}): {
-    reflection_guidance: string;
-  } {
-    const reflectionGuidance = `The call to the model failed.
-
-**Reflection Guidance:**
-- This is retry attempt **${args.retry_count}** of **${this.maxRetries}**
-- Analyze the error and the arguments you provided. Do not repeat the exact same call.
-
-Formulate a new plan based on your analysis and try a corrected or different approach.`;
-    return {reflection_guidance: reflectionGuidance};
-  }
-
-  /**
-   * Returns `true` when the response is a retryable model error: it carries an
-   * `errorCode` and its `finishReason` is in the configured allow-list.
-   */
-  private checkForModelError(llmResponse: LlmResponse): boolean {
-    if (!llmResponse.errorCode) {
-      return false;
+  protected provideReflectionTool(llmRequest: LlmRequest): void {
+    if (!llmRequest.toolsDict) {
+      llmRequest.toolsDict = {};
     }
-    return (
-      llmResponse.finishReason !== undefined &&
-      this.onModelErrors.includes(llmResponse.finishReason)
-    );
-  }
-
-  /**
-   * Validates that every entry in `modelErrors` is a {@link FinishReason}.
-   */
-  private validateModelErrors(modelErrors: FinishReason[]): FinishReason[] {
-    const validReasons = Object.values(FinishReason);
-    for (const modelError of modelErrors) {
-      if (!validReasons.includes(modelError)) {
-        throw new Error(
-          `model_error must be a FinishReason, got ${modelError}`,
-        );
-      }
-    }
-    return modelErrors;
-  }
-
-  /**
-   * Resolves the current model name from the callback context.
-   */
-  private getModelNameFromContext(callbackContext: Context): string {
-    const agent = callbackContext.invocationContext.agent;
-    if (isLlmAgent(agent)) {
-      // `canonicalModel` is a getter that throws when no model is resolvable;
-      // guard it so callers observe the intended error below.
-      try {
-        const model = agent.canonicalModel?.model;
-        if (model) {
-          return model;
-        }
-      } catch {
-        // Fall through to the thrown error below.
-      }
-    }
-    throw new Error('Agent model not found.');
-  }
-
-  /**
-   * Adds the reserved reflection tool to the request's tools dictionary.
-   */
-  private provideReflectionTool(llmRequest: LlmRequest): void {
-    const parameters: Schema = {
-      type: Type.OBJECT,
-      properties: {
-        response_type: {type: Type.STRING},
-        error_type: {type: Type.STRING},
-        error_details: {type: Type.STRING},
-        finish_reason: {type: Type.STRING},
-        retry_count: {type: Type.INTEGER},
-      },
-    };
-    llmRequest.toolsDict[ADK_HANDLE_MODEL_ERROR] = new FunctionTool({
-      name: ADK_HANDLE_MODEL_ERROR,
+    llmRequest.toolsDict[ADK_HANDLE_MODEL_ERROR_TOOL_NAME] = new FunctionTool({
+      name: ADK_HANDLE_MODEL_ERROR_TOOL_NAME,
       description:
-        'A tool that triggers reflection. Reserved for internal framework ' +
-        'use only. Do not call directly.',
-      parameters,
+        'A tool that triggers reflection. Reserved for internal framework use only. Do not call directly.',
       execute: (args) =>
-        this.adkHandleModelError(args as {retry_count?: number}),
+        this.adkHandleModelError(
+          args as {
+            responseType?: string;
+            errorType?: string;
+            errorDetails?: string;
+            finishReason?: string;
+            retryCount?: number;
+          },
+        ),
     });
   }
 
   /**
-   * Returns `true` when the response contains a function call to the reserved
-   * reflection tool.
+   * Checks if the model response calls the reserved reflection tool.
    */
-  private hasReservedToolCall(llmResponse: LlmResponse): boolean {
-    for (const part of llmResponse.content?.parts ?? []) {
-      if (part.functionCall?.name === ADK_HANDLE_MODEL_ERROR) {
+  protected hasReservedToolCall(llmResponse: LlmResponse): boolean {
+    if (!llmResponse.content?.parts) return false;
+    for (const part of llmResponse.content.parts) {
+      if (
+        part.functionCall &&
+        part.functionCall.name === ADK_HANDLE_MODEL_ERROR_TOOL_NAME
+      ) {
         return true;
       }
     }
@@ -256,25 +212,23 @@ Formulate a new plan based on your analysis and try a corrected or different app
   }
 
   /**
-   * Handles the model directly (mis)calling the reserved reflection tool.
+   * Handles direct calls to the reserved reflection tool.
    */
-  private async handleReservedToolCall({
-    callbackContext,
-  }: {
-    callbackContext: Context;
-  }): Promise<LlmResponse> {
-    const response = await this.handleModelRetry({
+  protected async handleReservedToolCall(
+    callbackContext: Context,
+    _llmResponse: LlmResponse,
+  ): Promise<LlmResponse | undefined> {
+    const retryResponse = await this.handleModelRetry(
       callbackContext,
-      errorType: RESERVED_TOOL_CALL_ERROR_TYPE,
-      errorDetails:
-        `Model attempted to call reserved tool ${ADK_HANDLE_MODEL_ERROR} ` +
-        'directly. This tool is reserved for framework use only. Do not ' +
-        'call it.',
-      finishReason: FinishReason.OTHER,
-    });
-    if (response) {
-      return response;
+      RESERVED_TOOL_CALL_ERROR_TYPE,
+      `Model attempted to call reserved tool ${ADK_HANDLE_MODEL_ERROR_TOOL_NAME} directly. This tool is reserved for framework use only. Do not call it.`,
+      FinishReason.OTHER,
+    );
+
+    if (retryResponse !== undefined) {
+      return retryResponse;
     }
+
     return {
       errorCode: RESERVED_TOOL_CALL_ERROR_TYPE,
       errorMessage:
@@ -283,90 +237,80 @@ Formulate a new plan based on your analysis and try a corrected or different app
   }
 
   /**
-   * Handles a retryable model error surfaced in the response.
+   * Handles detected model errors by initiating retry logic.
    */
-  private async handleModelError({
-    callbackContext,
-    llmResponse,
-  }: {
-    callbackContext: Context;
-    llmResponse: LlmResponse;
-  }): Promise<LlmResponse> {
-    const response = await this.handleModelRetry({
+  protected async handleModelError(
+    callbackContext: Context,
+    llmResponse: LlmResponse,
+  ): Promise<LlmResponse | undefined> {
+    const retryResponse = await this.handleModelRetry(
       callbackContext,
-      // Non-null: this path is only reached after checkForModelError confirmed
-      // errorCode is set.
-      errorType: llmResponse.errorCode!,
-      errorDetails: llmResponse.errorMessage,
-      finishReason: llmResponse.finishReason,
-    });
-    return response ?? llmResponse;
+      llmResponse.errorCode ?? 'MODEL_ERROR',
+      llmResponse.errorMessage ?? 'Model error encountered.',
+      llmResponse.finishReason ?? FinishReason.OTHER,
+    );
+
+    if (retryResponse !== undefined) {
+      return retryResponse;
+    }
+
+    return llmResponse;
   }
 
   /**
-   * Central retry logic: increments the failure counter and either returns a
-   * synthesized retry response, throws, or returns `undefined` when the limit
-   * is exceeded (depending on `throwExceptionIfRetryExceeded`).
+   * Tracks retry count, generates retry response, and checks against limits.
    */
-  private async handleModelRetry({
-    callbackContext,
-    errorType,
-    errorDetails,
-    finishReason,
-  }: {
-    callbackContext: Context;
-    errorType: string;
-    errorDetails: string | undefined;
-    finishReason: FinishReason | undefined;
-  }): Promise<LlmResponse | undefined> {
+  protected async handleModelRetry(
+    callbackContext: Context,
+    errorType?: string,
+    errorDetails?: string,
+    finishReason?: FinishReason,
+  ): Promise<LlmResponse | undefined> {
     const scopeKey = this.getModelScopeKey(callbackContext);
     const modelName = this.getModelNameFromContext(callbackContext);
-    const currentRetries = await this.tracker.increment(scopeKey, modelName);
+    const currentRetries = await this.incrementModelFailureCount(
+      scopeKey,
+      modelName,
+    );
 
     if (currentRetries <= this.maxRetries) {
       return {
         content: {
           role: 'model',
           parts: [
-            this.generateModelRetryPart({
-              retryCount: currentRetries,
+            this.generateModelRetryPart(
+              currentRetries,
               errorType,
               errorDetails,
               finishReason,
-            }),
+            ),
           ],
-        },
+        } as Content,
       };
     }
 
     if (this.throwExceptionIfRetryExceeded) {
       throw new Error(
-        `The model has failed consecutively ${this.maxRetries} times and ` +
-          'the retry limit has been exceeded.',
+        `The model has failed consecutively ${this.maxRetries} times and the retry limit has been exceeded.`,
       );
     }
+
     return undefined;
   }
 
   /**
-   * Builds the synthesized `functionCall` part that carries reflection metadata
-   * back to the model.
+   * Generates a function call part for the model retry tool.
    */
-  private generateModelRetryPart({
-    retryCount,
-    errorType,
-    errorDetails,
-    finishReason,
-  }: {
-    retryCount: number;
-    errorType: string;
-    errorDetails: string | undefined;
-    finishReason: FinishReason | undefined;
-  }): Part {
+  protected generateModelRetryPart(
+    retryCount: number,
+    errorType?: string,
+    errorDetails?: string,
+    finishReason?: FinishReason,
+  ): Part {
     return {
       functionCall: {
         id: this.getModelRetryUuid(),
-        name: ADK_HANDLE_MODEL_ERROR,
+        name: ADK_HANDLE_MODEL_ERROR_TOOL_NAME,
         args: {
           response_type: REFLECT_AND_RETRY_RESPONSE_TYPE,
           error_type: errorType,
@@ -375,17 +319,40 @@ Formulate a new plan based on your analysis and try a corrected or different app
           retry_count: retryCount,
         },
       },
-    };
+    } as Part;
   }
 
-  private getModelRetryUuid(): string {
-    return `${ADK_HANDLE_MODEL_ERROR}_${randomUUID()}`;
+  /**
+   * Generates a unique ID for the model retry tool call.
+   */
+  protected getModelRetryUuid(): string {
+    return `${ADK_HANDLE_MODEL_ERROR_TOOL_NAME}_${uuidv4()}`;
   }
 
-  private getModelScopeKey(callbackContext: Context): string {
-    return resolveScopeKey(
-      this.scope,
-      callbackContext.invocationContext.invocationId,
-    );
+  /**
+   * Returns the scope key for model failure tracking.
+   */
+  protected getModelScopeKey(callbackContext: Context): string {
+    return resolveScopeKey(this.scope, callbackContext.invocationId);
+  }
+
+  /**
+   * Increment the failure count for a model within a scope.
+   */
+  protected async incrementModelFailureCount(
+    scopeKey: string,
+    itemName: string,
+  ): Promise<number> {
+    return await this.tracker.increment(scopeKey, itemName);
+  }
+
+  /**
+   * Reset the failure count for a model within a scope.
+   */
+  protected async resetModelFailureCount(
+    scopeKey: string,
+    itemName: string,
+  ): Promise<void> {
+    await this.tracker.reset(scopeKey, itemName);
   }
 }

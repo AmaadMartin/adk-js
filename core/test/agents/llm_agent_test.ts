@@ -34,6 +34,7 @@ import {
   InvocationContext,
   LlmAgent,
   llmAgentFunctionsExportedForTestingOnly,
+  LongRunningFunctionTool,
   PluginManager,
   Runner,
 } from '@google/adk';
@@ -112,6 +113,28 @@ class StreamingMockLlm extends BaseLlm {
       yield chunk;
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
+/**
+ * Yields the chunks of `turns[n]` on the n-th call and counts how many turns
+ * the agent asked for.
+ */
+class CountingMockLlm extends BaseLlm {
+  callCount = 0;
+
+  constructor(private readonly turns: LlmResponse[][]) {
+    super({model: 'counting-mock-llm'});
+  }
+
+  async *generateContentAsync(
+    _request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    yield* this.turns[this.callCount++] ?? [];
   }
 
   async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
@@ -1017,6 +1040,79 @@ describe('LlmAgent postprocess empty parts filtering', () => {
   });
 });
 
+describe('LlmAgent long running tool termination', () => {
+  const startJobCall: LlmResponse = {
+    content: {
+      role: 'model',
+      parts: [{functionCall: {name: 'startJob', args: {}, id: 'call_1'}}],
+    },
+  };
+  const secondTurnText: LlmResponse = {
+    content: {role: 'model', parts: [{text: 'second turn'}]},
+  };
+
+  function runAgent(model: BaseLlm, startJob: LongRunningFunctionTool) {
+    const agent = new LlmAgent({name: 'test_agent', model, tools: [startJob]});
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: createSession({id: 'sess_123', appName: 'test_app'}),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+    return agent.runAsync(invocationContext);
+  }
+
+  function createStartJobTool(mutate?: (toolContext: Context) => void) {
+    return new LongRunningFunctionTool({
+      name: 'startJob',
+      description: 'starts a background job',
+      execute: async (_args, toolContext) => {
+        mutate?.(toolContext!);
+        return undefined;
+      },
+    });
+  }
+
+  it('should stop the step loop after an actions-only event', async () => {
+    const model = new CountingMockLlm([[startJobCall], [secondTurnText]]);
+    const startJob = createStartJobTool((toolContext) => {
+      toolContext.actions.skipSummarization = true;
+    });
+
+    const events: Event[] = [];
+    for await (const event of runAgent(model, startJob)) {
+      events.push(event);
+    }
+
+    expect(model.callCount).toBe(1);
+    expect(
+      events.some((event) =>
+        event.content?.parts?.some((part) => part.text === 'second turn'),
+      ),
+    ).toBe(false);
+    const lastEvent = events[events.length - 1];
+    expect(lastEvent.content).toBeUndefined();
+    expect(lastEvent.actions.skipSummarization).toBe(true);
+  });
+
+  it('should keep running the step loop after a trailing empty chunk with default actions', async () => {
+    const model = new CountingMockLlm([
+      [startJobCall, {content: {role: 'model'}}],
+      [secondTurnText],
+    ]);
+
+    const events: Event[] = [];
+    for await (const event of runAgent(model, createStartJobTool())) {
+      events.push(event);
+    }
+
+    expect(model.callCount).toBe(2);
+    expect(events[events.length - 1].content?.parts?.[0].text).toBe(
+      'second turn',
+    );
+  });
+});
+
 describe('LlmAgent Default Request Processors', () => {
   it('includes AUTH_PREPROCESSOR in default requestProcessors before CONTENT_REQUEST_PROCESSOR', () => {
     const agent = new LlmAgent({
@@ -1516,6 +1612,27 @@ describe('generateAuthEvent', () => {
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
     expect(call2!.functionCall!.args!['auth_config']).toBe(authConfig2);
+  });
+
+  it('should default the role to user for a content-less event', () => {
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedAuthConfigs: {
+          'call_1': {
+            authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+            credentialKey: 'test-credential-key',
+          },
+        },
+      }),
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+
+    expect(event!.content!.role).toBe('user');
+    expect(event!.content!.parts!.length).toBe(1);
+    expect(event!.content!.parts![0].functionCall!.name).toBe(
+      'adk_request_credential',
+    );
   });
 });
 

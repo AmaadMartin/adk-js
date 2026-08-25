@@ -5,6 +5,7 @@
  */
 
 import type {Content} from '@google/genai';
+import {isEmpty} from 'lodash-es';
 
 import type {AuthConfig} from '../auth/auth_tool.js';
 import {carryDeltaStamps} from '../sessions/state_write_order.js';
@@ -132,6 +133,30 @@ export function createEventActions(
     requestedToolConfirmations: {},
     ...state,
   };
+}
+
+/**
+ * Returns whether the given {@link EventActions} still holds only its default
+ * values, i.e. the event carries no state, artifact, auth, confirmation,
+ * transfer, escalation or summarization signal.
+ *
+ * An actions object is considered non-default when any dictionary field has at
+ * least one entry, or when any scalar field has been explicitly set (including
+ * being set to `false`).
+ *
+ * @param actions - The actions to inspect.
+ * @returns `true` when every field is at its default value.
+ */
+export function isDefaultEventActions(actions: EventActions): boolean {
+  return (
+    isEmpty(actions.stateDelta) &&
+    isEmpty(actions.artifactDelta) &&
+    isEmpty(actions.requestedAuthConfigs) &&
+    isEmpty(actions.requestedToolConfirmations) &&
+    actions.skipSummarization === undefined &&
+    actions.transferToAgent === undefined &&
+    actions.escalate === undefined
+  );
 }
 
 /**

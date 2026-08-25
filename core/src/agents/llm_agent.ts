@@ -34,7 +34,10 @@ import {
   populateClientFunctionCallId,
 } from '../events/event.js';
 import type {EventActions} from '../events/event_actions.js';
-import {createEventActions} from '../events/event_actions.js';
+import {
+  createEventActions,
+  isDefaultEventActions,
+} from '../events/event_actions.js';
 
 import type {BaseExampleProvider} from '../examples/base_example_provider.js';
 import type {Example} from '../examples/example.js';
@@ -935,7 +938,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       const isEmptyMetadataEvent =
         lastEvent.author === this.name &&
         !lastEvent.partial &&
-        (!lastEvent.content?.parts || lastEvent.content.parts.length === 0);
+        (!lastEvent.content?.parts || lastEvent.content.parts.length === 0) &&
+        isDefaultEventActions(lastEvent.actions);
 
       if (
         isFinalResponse(lastEvent) &&
@@ -2050,7 +2054,7 @@ export function generateAuthEvent(
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content!.role,
+      role: functionResponseEvent.content?.role ?? 'user',
     },
     longRunningToolIds: Array.from(longRunningToolIds),
   });
