@@ -32,6 +32,8 @@ import cors from 'cors';
 import express, {Request, Response} from 'express';
 import * as http from 'node:http';
 import * as path from 'node:path';
+import {Duplex} from 'node:stream';
+import {WebSocket, WebSocketServer} from 'ws';
 import {version} from '../version.js';
 
 import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
@@ -50,6 +52,16 @@ import {
   serializeAgent,
   serializeAppInfo,
 } from './app_info.js';
+import {
+  closeWithError,
+  isOriginAllowed,
+  LiveCloseCode,
+  parseRunLiveQuery,
+  RUN_LIVE_PATH,
+  RunLiveQuery,
+  runLiveSession,
+  truncateCloseReason,
+} from './run_live.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
 /**
@@ -119,6 +131,7 @@ export class AdkApiServer {
     tracerProvider: TracerProvider,
   ) => void;
   private server?: http.Server;
+  private wss?: WebSocketServer;
   private readonly traceDict: Record<string, Record<string, unknown>> =
     Object.create(null);
   private readonly sessionTraceDict: Record<string, string[]> =
@@ -1100,6 +1113,12 @@ export class AdkApiServer {
         }
       });
 
+      const wss = new WebSocketServer({noServer: true});
+      this.wss = wss;
+      this.server.on('upgrade', (request, socket, head) => {
+        this.handleUpgrade(wss, request, socket, head);
+      });
+
       this.server.on('error', (err: unknown) => {
         if ((err as {code: string}).code === 'EADDRINUSE') {
           const error = new Error();
@@ -1118,6 +1137,17 @@ export class AdkApiServer {
       return Promise.resolve();
     }
 
+    // An open WebSocket is an open connection, and `http.Server.close()` waits
+    // for those, so the sockets go first or the close never settles.
+    const wss = this.wss;
+    this.wss = undefined;
+    if (wss) {
+      for (const client of wss.clients) {
+        client.terminate();
+      }
+      wss.close();
+    }
+
     return new Promise((resolve, reject) => {
       this.server!.close((err) => {
         if (err) {
@@ -1132,6 +1162,108 @@ export class AdkApiServer {
         resolve();
       });
     });
+  }
+
+  /**
+   * Answers an HTTP upgrade request.
+   *
+   * Node closes nothing for an upgrade nobody handles, so a request on any
+   * other path has its socket destroyed rather than left open.
+   */
+  private handleUpgrade(
+    wss: WebSocketServer,
+    request: http.IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+  ): void {
+    // Only the path and the query are read, so the authority is a placeholder.
+    // `this.host` cannot serve as one: an IPv6 host such as `::1` is not a
+    // valid URL authority unless it is bracketed, and `new URL` would throw
+    // here for every upgrade request.
+    const url = new URL(request.url ?? '/', 'http://localhost');
+    if (url.pathname !== RUN_LIVE_PATH) {
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (client) => {
+      // `serveRunLive` reports its own failures. This last-resort handler
+      // exists because nobody awaits it, and an unhandled rejection would
+      // take the whole server process down.
+      this.serveRunLive(client, url.searchParams, request.headers.origin).catch(
+        () => client.terminate(),
+      );
+    });
+  }
+
+  /**
+   * Serves one `/run_live` connection.
+   *
+   * The handshake completes before the pre-flight checks so that a client sees
+   * the close code. Closing first turns into an HTTP error, which a browser
+   * reports as 1006 and no client can tell apart from a network fault.
+   */
+  private async serveRunLive(
+    socket: WebSocket,
+    params: URLSearchParams,
+    origin?: string,
+  ): Promise<void> {
+    try {
+      if (!isOriginAllowed(origin, this.allowOrigins)) {
+        socket.close(LiveCloseCode.POLICY_VIOLATION, 'Origin not allowed');
+        return;
+      }
+
+      const parsed = parseRunLiveQuery(params);
+      if (!parsed.ok) {
+        socket.close(
+          LiveCloseCode.POLICY_VIOLATION,
+          truncateCloseReason(parsed.reason),
+        );
+        return;
+      }
+      const query = parsed.value;
+
+      // `Runner.runLive` creates a session it cannot find, so an unknown
+      // `session_id` is rejected here instead of silently starting a new
+      // conversation. A session service backed by a database rejects when the
+      // backend is down, which the catch below turns into a close frame.
+      const session = await this.sessionService.getSession({
+        appName: query.appName,
+        userId: query.userId,
+        sessionId: query.sessionId,
+      });
+      if (!session) {
+        socket.close(LiveCloseCode.PROTOCOL_ERROR, 'Session not found');
+        return;
+      }
+
+      await this.startLiveRun(socket, query);
+    } catch (e: unknown) {
+      closeWithError(socket, e, this.logger);
+    }
+  }
+
+  /** Loads the app and runs the live session it asked for. */
+  private async startLiveRun(
+    socket: WebSocket,
+    query: RunLiveQuery,
+  ): Promise<void> {
+    await using agentFile = await this.agentLoader.getAgentFile(query.appName);
+    const loaded = await agentFile.load();
+    const runner = await this.getRunner(loaded, query.appName);
+
+    // Loading an app compiles it on the first request, which takes long enough
+    // for a client to give up. `runLiveSession` only learns about a disconnect
+    // from the socket's `close` event, and that one has already fired, so
+    // starting the run now would park it on the queue forever.
+    if (socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    // Awaited, not returned: `await using` disposes at the `return`, which
+    // would unlink the compiled bundle while the conversation still runs on it.
+    await runLiveSession({socket, runner, query, logger: this.logger});
   }
 
   /**
