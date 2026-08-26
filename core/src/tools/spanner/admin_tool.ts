@@ -161,6 +161,12 @@ interface SpannerAdminToolDefinition<TParams extends z.ZodObject> {
   name: string;
   description: string;
   parameters: TParams;
+  /**
+   * Set on an operation that provisions a billable resource, so the user must
+   * approve the call before it runs. There is no option to turn this off: a
+   * caller who does not want the tool at all can drop it with `toolFilter`.
+   */
+  requireConfirmation?: boolean;
   run(
     clients: SpannerAdminClients,
     args: ToolExecuteArgument<TParams>,
@@ -256,6 +262,7 @@ const createInstanceTool: SpannerAdminToolDefinition<
   description:
     'Create a Spanner instance. This creates a billable Google Cloud resource.',
   parameters: createInstanceParams,
+  requireConfirmation: true,
   async run(
     {instanceAdmin},
     {project_id, instance_id, config_id, display_name, nodes},
@@ -304,6 +311,7 @@ const createDatabaseTool: SpannerAdminToolDefinition<
   description:
     'Create a Spanner database. This creates a billable Google Cloud resource.',
   parameters: createDatabaseParams,
+  requireConfirmation: true,
   async run({databaseAdmin}, {project_id, instance_id, database_id}) {
     assertQuotableDatabaseId(database_id);
     const [operation] = await databaseAdmin.createDatabase(
@@ -332,6 +340,7 @@ function createSpannerTool<TParams extends z.ZodObject>(
     name: `${SPANNER_TOOL_NAME_PREFIX}_${definition.name}`,
     description: definition.description,
     parameters: definition.parameters,
+    requireConfirmation: definition.requireConfirmation,
     async execute(args) {
       try {
         return await definition.run(await provider.getClients(), args);

@@ -13,10 +13,14 @@ import {
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  answered,
+  completedOperation,
   DatabaseAdminClientMock,
   fakeDatabaseAdmin,
   fakeInstanceAdmin,
+  FUNCTION_CALL_ID,
   InstanceAdminClientMock,
+  makeToolContext,
   resetSpannerFakes,
 } from './spanner_test_utils.js';
 
@@ -54,8 +58,23 @@ const EXPECTED_PARAMETERS: Record<string, string[]> = {
   spanner_create_database: ['project_id', 'instance_id', 'database_id'],
 };
 
+/** The two tools that provision a billable resource. */
+const CREATE_TOOL_NAMES = [
+  'spanner_create_instance',
+  'spanner_create_database',
+];
+
 function toolNames(tools: BaseTool[]): string[] {
   return tools.map((tool) => tool.name);
+}
+
+async function getTool(name: string): Promise<BaseTool> {
+  const tools = await new SpannerAdminToolset().getTools();
+  const tool = tools.find((candidate) => candidate.name === name);
+  if (!tool) {
+    expect.fail(`toolset does not expose ${name}`);
+  }
+  return tool;
 }
 
 describe('SpannerAdminToolset', () => {
@@ -135,6 +154,85 @@ describe('SpannerAdminToolset', () => {
       );
     },
   );
+
+  describe('confirmation gate', () => {
+    it.each(CREATE_TOOL_NAMES)('%s asks the user to confirm', async (name) => {
+      const tool = await getTool(name);
+
+      expect(await tool.checkRequireConfirmation({}, makeToolContext())).toBe(
+        true,
+      );
+    });
+
+    it.each(ALL_TOOL_NAMES.filter((name) => !CREATE_TOOL_NAMES.includes(name)))(
+      '%s runs without confirmation',
+      async (name) => {
+        const tool = await getTool(name);
+
+        expect(await tool.checkRequireConfirmation({}, makeToolContext())).toBe(
+          false,
+        );
+      },
+    );
+
+    it('does not reach the client until the user confirms', async () => {
+      const tool = await getTool('spanner_create_database');
+      const context = makeToolContext();
+
+      const result = await tool.runAsync({
+        args: {
+          project_id: 'my-project',
+          instance_id: 'my-instance',
+          database_id: 'my-db',
+        },
+        toolContext: context,
+      });
+
+      expect(result).toEqual({
+        error:
+          'This tool call requires confirmation, please approve or reject.',
+      });
+      expect(fakeDatabaseAdmin.createDatabase).not.toHaveBeenCalled();
+      expect(
+        context.actions.requestedToolConfirmations[FUNCTION_CALL_ID],
+      ).toBeDefined();
+    });
+
+    it('creates the database once the user confirms', async () => {
+      fakeDatabaseAdmin.createDatabase.mockResolvedValue([
+        completedOperation(),
+      ]);
+      const tool = await getTool('spanner_create_database');
+
+      const result = await tool.runAsync({
+        args: {
+          project_id: 'my-project',
+          instance_id: 'my-instance',
+          database_id: 'my-db',
+        },
+        toolContext: makeToolContext(answered(true)),
+      });
+
+      expect(result).toEqual({status: 'SUCCESS'});
+      expect(fakeDatabaseAdmin.createDatabase).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not create the database when the user rejects', async () => {
+      const tool = await getTool('spanner_create_database');
+
+      const result = await tool.runAsync({
+        args: {
+          project_id: 'my-project',
+          instance_id: 'my-instance',
+          database_id: 'my-db',
+        },
+        toolContext: makeToolContext(answered(false)),
+      });
+
+      expect(result).toEqual({error: 'This tool call is rejected.'});
+      expect(fakeDatabaseAdmin.createDatabase).not.toHaveBeenCalled();
+    });
+  });
 
   describe('close', () => {
     it('releases both admin clients once a tool has run', async () => {

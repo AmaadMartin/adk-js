@@ -16,7 +16,41 @@
  * ```
  */
 
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
+  ToolConfirmation,
+} from '@google/adk';
 import {vi} from 'vitest';
+
+/** Id of the function call every tool context below answers for. */
+export const FUNCTION_CALL_ID = 'fc-1';
+
+/**
+ * A tool context. Pass `toolConfirmation` to answer the confirmation gate that
+ * the two create tools raise; omit it to leave the gate unanswered.
+ */
+export function makeToolContext(toolConfirmation?: ToolConfirmation): Context {
+  const invocationContext = new InvocationContext({
+    invocationId: 'inv-1',
+    agent: new LlmAgent({name: 'a', model: 'gemini-2.5-flash'}),
+    session: createSession({id: 's1', appName: 'app', userId: 'u1'}),
+    pluginManager: new PluginManager([]),
+  });
+  return new Context({
+    invocationContext,
+    functionCallId: FUNCTION_CALL_ID,
+    toolConfirmation,
+  });
+}
+
+/** A confirmation the user has already approved or rejected. */
+export function answered(confirmed: boolean): ToolConfirmation {
+  return {hint: 'approve or reject', confirmed};
+}
 
 /** A long-running operation double. */
 export interface FakeOperation {

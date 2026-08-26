@@ -6,15 +6,16 @@
 
 import {
   BaseTool,
-  Context,
   CREATE_OPERATION_TIMEOUT_MS,
   SpannerAdminToolset,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  answered,
   completedOperation,
   fakeDatabaseAdmin,
   fakeInstanceAdmin,
+  makeToolContext,
   resetSpannerFakes,
 } from './spanner_test_utils.js';
 
@@ -24,7 +25,13 @@ vi.mock('@google-cloud/spanner-api', async () => {
 });
 
 const PROJECT = 'my-project';
-const emptyContext = {} as Context;
+
+/**
+ * These cases exercise what each tool asks the Admin API, so the two create
+ * tools run with the confirmation already approved. The gate itself is covered
+ * in `admin_toolset_test.ts`.
+ */
+const approvedContext = makeToolContext(answered(true));
 
 /** Runs one tool of a freshly built toolset and returns its result. */
 async function runTool(
@@ -38,7 +45,7 @@ async function runTool(
   if (!tool) {
     expect.fail(`toolset does not expose ${name}`);
   }
-  return tool.runAsync({args, toolContext: emptyContext});
+  return tool.runAsync({args, toolContext: approvedContext});
 }
 
 describe('Spanner admin tools', () => {

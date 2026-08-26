@@ -48,7 +48,13 @@ export interface SpannerAdminToolsetOptions {
  *
  * `spanner_create_instance` and `spanner_create_database` create billable
  * Google Cloud resources. Both wait for the long-running operation, bounded at
- * {@link CREATE_OPERATION_TIMEOUT_MS}.
+ * {@link CREATE_OPERATION_TIMEOUT_MS}. Both also require the user to confirm
+ * the call: through an `LlmAgent` turn they raise an `adk_request_confirmation`
+ * interrupt and run only once the user approves. There is no option to turn
+ * that off. A caller who does not want them at all can drop them with
+ * `toolFilter`. A workflow `ToolNode` does not route through the confirmation
+ * path, so such a node reports the "requires confirmation" error as its output
+ * instead of pausing.
  *
  * Requires the optional peer dependency `@google-cloud/spanner-api`, which is
  * loaded on the first tool call. Install it with
