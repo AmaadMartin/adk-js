@@ -712,6 +712,7 @@ async function resolveRef(
  * @returns The created agent.
  * @throws {AgentConfigError} If the file is missing, the document is invalid,
  *     the agent class is unsupported, or a reference cannot be resolved.
+ * @experimental  (Experimental, subject to change)
  */
 export async function loadAgentFromConfigFile(
   configPath: string,
