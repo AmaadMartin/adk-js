@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {SpannerAdminClientProvider, version} from '@google/adk';
+import {version} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {SpannerAdminClientProvider} from '../../../src/tools/spanner/client.js';
 import {
   DatabaseAdminClientMock,
   fakeDatabaseAdmin,

@@ -4,12 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseTool,
-  CREATE_OPERATION_TIMEOUT_MS,
-  SpannerAdminToolset,
-} from '@google/adk';
+import {BaseTool, SpannerAdminToolset} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {CREATE_OPERATION_TIMEOUT_MS} from '../../../src/tools/spanner/admin_tool.js';
 import {
   answered,
   completedOperation,

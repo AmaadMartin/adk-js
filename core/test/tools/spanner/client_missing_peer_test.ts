@@ -14,8 +14,8 @@
  * it stays separate from the other Spanner tests.
  */
 
-import {SpannerAdminClientProvider} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {SpannerAdminClientProvider} from '../../../src/tools/spanner/client.js';
 
 vi.mock('../../../src/utils/optional_peer.js', async (importOriginal) => {
   const actual =

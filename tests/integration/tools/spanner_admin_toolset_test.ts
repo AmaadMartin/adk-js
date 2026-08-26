@@ -59,7 +59,7 @@ async function captureRequest(toolset: SpannerAdminToolset) {
 
 describe('SpannerAdminToolset in an LlmAgent', () => {
   it('offers the seven prefixed admin tools to the model', async () => {
-    // No credentials and no `@google-cloud/spanner` client are needed to
+    // No credentials and no `@google-cloud/spanner-api` client are needed to
     // advertise the tools: both are resolved on the first tool call.
     const request = await captureRequest(new SpannerAdminToolset());
 

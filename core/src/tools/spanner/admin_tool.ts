@@ -17,9 +17,6 @@ import type {
 /** Prefix prepended to every tool name in the Spanner admin toolset. */
 export const SPANNER_TOOL_NAME_PREFIX = 'spanner';
 
-/** Node count used when the model does not ask for a specific size. */
-const DEFAULT_INSTANCE_NODES = 1;
-
 /**
  * How long a create operation may run before it is reported as an error,
  * matching adk-python's `operation.result(timeout=300)`.
@@ -44,8 +41,8 @@ const CREATE_OPERATION_CALL_OPTIONS = {
 
 /**
  * What a Spanner admin tool returns to the model. A tool never throws: a
- * rejected Admin API call, a create operation that fails or exceeds
- * {@link CREATE_OPERATION_TIMEOUT_MS}, missing credentials and a missing
+ * rejected Admin API call, a create operation that fails or exceeds its
+ * 300-second bound, missing credentials and a missing
  * `@google-cloud/spanner-api` package all arrive as `ERROR`.
  *
  * The keys are `snake_case` because they cross the model boundary and must
@@ -76,14 +73,14 @@ const REPLICA_TYPE_NAMES: Record<ReplicaType, ReplicaTypeName> = {
 const projectIdField = z.string().describe('The Google Cloud project id.');
 const instanceIdField = z.string().describe('The Spanner instance id.');
 
-const listInstancesParams = z.object({project_id: projectIdField});
+/** What a tool scoped to a project takes. */
+const projectParams = z.object({project_id: projectIdField});
 
-const getInstanceParams = z.object({
+/** What a tool scoped to one instance takes. */
+const instanceParams = z.object({
   project_id: projectIdField,
   instance_id: instanceIdField,
 });
-
-const listInstanceConfigsParams = z.object({project_id: projectIdField});
 
 const getInstanceConfigParams = z.object({
   project_id: projectIdField,
@@ -99,13 +96,8 @@ const createInstanceParams = z.object({
   display_name: z.string().describe('The display name for the instance.'),
   nodes: z
     .number()
-    .default(DEFAULT_INSTANCE_NODES)
+    .default(1)
     .describe('Number of nodes for the instance. Defaults to 1.'),
-});
-
-const listDatabasesParams = z.object({
-  project_id: projectIdField,
-  instance_id: instanceIdField,
 });
 
 const createDatabaseParams = z.object({
@@ -173,12 +165,10 @@ interface SpannerAdminToolDefinition<TParams extends z.ZodObject> {
   ): Promise<SpannerToolResult>;
 }
 
-const listInstancesTool: SpannerAdminToolDefinition<
-  typeof listInstancesParams
-> = {
+const listInstancesTool: SpannerAdminToolDefinition<typeof projectParams> = {
   name: 'list_instances',
   description: 'List Spanner instances within a project.',
-  parameters: listInstancesParams,
+  parameters: projectParams,
   async run({instanceAdmin}, {project_id}) {
     const [instances] = await instanceAdmin.listInstances({
       parent: instanceAdmin.projectPath(project_id),
@@ -190,10 +180,10 @@ const listInstancesTool: SpannerAdminToolDefinition<
   },
 };
 
-const getInstanceTool: SpannerAdminToolDefinition<typeof getInstanceParams> = {
+const getInstanceTool: SpannerAdminToolDefinition<typeof instanceParams> = {
   name: 'get_instance',
   description: 'Get details of a Spanner instance.',
-  parameters: getInstanceParams,
+  parameters: instanceParams,
   async run({instanceAdmin}, {project_id, instance_id}) {
     const [instance] = await instanceAdmin.getInstance({
       name: instanceAdmin.instancePath(project_id, instance_id),
@@ -213,11 +203,11 @@ const getInstanceTool: SpannerAdminToolDefinition<typeof getInstanceParams> = {
 };
 
 const listInstanceConfigsTool: SpannerAdminToolDefinition<
-  typeof listInstanceConfigsParams
+  typeof projectParams
 > = {
   name: 'list_instance_configs',
   description: 'List Spanner instance configs available for a project.',
-  parameters: listInstanceConfigsParams,
+  parameters: projectParams,
   async run({instanceAdmin}, {project_id}) {
     const [configs] = await instanceAdmin.listInstanceConfigs({
       parent: instanceAdmin.projectPath(project_id),
@@ -287,12 +277,10 @@ const createInstanceTool: SpannerAdminToolDefinition<
   },
 };
 
-const listDatabasesTool: SpannerAdminToolDefinition<
-  typeof listDatabasesParams
-> = {
+const listDatabasesTool: SpannerAdminToolDefinition<typeof instanceParams> = {
   name: 'list_databases',
   description: 'List Spanner databases within an instance.',
-  parameters: listDatabasesParams,
+  parameters: instanceParams,
   async run({databaseAdmin}, {project_id, instance_id}) {
     const [databases] = await databaseAdmin.listDatabases({
       parent: databaseAdmin.instancePath(project_id, instance_id),

@@ -4,13 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseTool,
-  Context,
-  isFunctionTool,
-  ReadonlyContext,
-  SpannerAdminToolset,
-} from '@google/adk';
+import {BaseTool, isFunctionTool, SpannerAdminToolset} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   answered,
@@ -28,8 +22,6 @@ vi.mock('@google-cloud/spanner-api', async () => {
   const {fakeSpannerModule} = await import('./spanner_test_utils.js');
   return fakeSpannerModule;
 });
-
-const emptyReadonlyContext = {} as ReadonlyContext;
 
 const ALL_TOOL_NAMES = [
   'spanner_list_instances',
@@ -104,13 +96,13 @@ describe('SpannerAdminToolset', () => {
       toolFilter: (tool) => tool.name.startsWith('spanner_list_'),
     });
 
-    expect(
-      toolNames(await toolset.getTools(emptyReadonlyContext)).sort(),
-    ).toEqual([
-      'spanner_list_databases',
-      'spanner_list_instance_configs',
-      'spanner_list_instances',
-    ]);
+    expect(toolNames(await toolset.getTools(makeToolContext())).sort()).toEqual(
+      [
+        'spanner_list_databases',
+        'spanner_list_instance_configs',
+        'spanner_list_instances',
+      ],
+    );
   });
 
   it('cannot apply a predicate filter without a context', async () => {
@@ -124,7 +116,7 @@ describe('SpannerAdminToolset', () => {
   it('treats an empty filter as no filter', async () => {
     const toolset = new SpannerAdminToolset({toolFilter: []});
 
-    expect(await toolset.getTools(emptyReadonlyContext)).toHaveLength(
+    expect(await toolset.getTools(makeToolContext())).toHaveLength(
       ALL_TOOL_NAMES.length,
     );
   });
@@ -241,7 +233,7 @@ describe('SpannerAdminToolset', () => {
       const [listInstances] = await toolset.getTools();
       await listInstances.runAsync({
         args: {project_id: 'my-project'},
-        toolContext: {} as Context,
+        toolContext: makeToolContext(),
       });
 
       await toolset.close();
