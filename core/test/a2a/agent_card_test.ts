@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {buildAgentSkills} from '../../src/a2a/agent_card.js';
+import {logger} from '../../src/utils/logger.js';
 import {node} from '../../src/workflow/node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 
@@ -46,6 +47,18 @@ class MockToolset extends BaseToolset {
   }
   async getTools() {
     return this.tools;
+  }
+  async close() {}
+}
+
+// Stands in for a toolset that enumerates its tools over the network and
+// cannot reach the far end.
+class RejectingToolset extends BaseToolset {
+  constructor(private readonly error: unknown) {
+    super([]);
+  }
+  async getTools(): Promise<BaseTool[]> {
+    throw this.error;
   }
   async close() {}
 }
@@ -234,6 +247,145 @@ describe('Agent Card', () => {
       const workflowSkill = skills.find((s) => s.name === 'workflow');
       expect(workflowSkill?.description).toBe('Runs a graph');
       expect(skills.find((s) => s.name === 'custom')).toBeUndefined();
+    });
+  });
+
+  describe('sub-agent skill build failures', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function rootWithFailingSubAgent(error: unknown): LlmAgent {
+      return new LlmAgent({
+        name: 'root',
+        description: 'Root agent',
+        tools: [
+          new FunctionTool({
+            name: 'root_tool',
+            description: 'Root tool',
+            execute: async () => 'ok',
+          }),
+        ],
+        subAgents: [
+          new LlmAgent({
+            name: 'bad',
+            description: 'Bad agent',
+            tools: [new RejectingToolset(error)],
+          }),
+          new LlmAgent({name: 'good', description: 'Good agent'}),
+        ],
+      });
+    }
+
+    it('serves the card without the skills of a failing sub-agent', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const root = rootWithFailingSubAgent(new Error('toolset unreachable'));
+
+      const card = await getA2AAgentCard(root, [dummyTransport]);
+
+      expect(card.skills.map((s) => s.id)).toEqual([
+        'root',
+        'root-root_tool',
+        'good_good',
+      ]);
+      expect(card.skills.some((s) => s.tags?.includes('sub_agent:bad'))).toBe(
+        false,
+      );
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it('reports the failure once, naming the sub-agent', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const error = new Error('toolset unreachable');
+      const root = rootWithFailingSubAgent(error);
+
+      await getA2AAgentCard(root, [dummyTransport]);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Failed to build skills for sub-agent bad',
+        error,
+      );
+    });
+
+    it('skips a sub-agent that rejects with a non-Error value', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const root = rootWithFailingSubAgent('toolset unreachable');
+
+      const card = await getA2AAgentCard(root, [dummyTransport]);
+
+      expect(card.skills.map((s) => s.id)).toEqual([
+        'root',
+        'root-root_tool',
+        'good_good',
+      ]);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Failed to build skills for sub-agent bad',
+        'toolset unreachable',
+      );
+    });
+
+    it('leaves the skills of healthy sub-agents unchanged', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const root = new LlmAgent({
+        name: 'root',
+        description: 'Root agent',
+        tools: [
+          new FunctionTool({
+            name: 'root_tool',
+            description: 'Root tool',
+            execute: async () => 'ok',
+          }),
+        ],
+        subAgents: [
+          new LlmAgent({name: 'alpha', description: 'Alpha agent'}),
+          new LlmAgent({name: 'beta', description: 'Beta agent'}),
+        ],
+      });
+
+      const skills = await buildAgentSkills(root);
+
+      expect(skills).toEqual([
+        {
+          id: 'root',
+          name: 'model',
+          description: 'Root agent',
+          tags: ['llm'],
+        },
+        {
+          id: 'root-root_tool',
+          name: 'root_tool',
+          description: 'Root tool',
+          tags: ['llm', 'tools'],
+        },
+        {
+          id: 'alpha_alpha',
+          name: 'alpha: model',
+          description: 'Alpha agent',
+          tags: ['sub_agent:alpha', 'llm'],
+        },
+        {
+          id: 'beta_beta',
+          name: 'beta: model',
+          description: 'Beta agent',
+          tags: ['sub_agent:beta', 'llm'],
+        },
+      ]);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('still rejects when the root agent itself cannot be described', async () => {
+      const root = new LlmAgent({
+        name: 'root',
+        description: 'Root agent',
+        tools: [new RejectingToolset(new Error('root toolset unreachable'))],
+        subAgents: [new LlmAgent({name: 'good', description: 'Good agent'})],
+      });
+
+      await expect(getA2AAgentCard(root, [dummyTransport])).rejects.toThrow(
+        'root toolset unreachable',
+      );
     });
   });
 });
