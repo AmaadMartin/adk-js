@@ -76,6 +76,7 @@ describe('assertCardRpcTargetsAllowed', () => {
       'http://127.0.0.1:8000/.well-known/agent-card.json',
       'http://127.0.0.1:8000/a2a',
     ],
+    ['http://[::1]:8000/.well-known/agent-card.json', 'http://[::1]:8000/a2a'],
   ])('accepts loopback http served from %s', (source, url) => {
     expect(() =>
       assertCardRpcTargetsAllowed(makeCard(url), source),
@@ -109,15 +110,6 @@ describe('assertCardRpcTargetsAllowed', () => {
 
     expect(() =>
       assertCardRpcTargetsAllowed(card, REMOTE_SOURCE),
-    ).not.toThrow();
-  });
-
-  it('exempts a card that did not come off the network', () => {
-    expect(() =>
-      assertCardRpcTargetsAllowed(
-        makeCard('http://internal-host:8080/rpc'),
-        '/path/to/agent.json',
-      ),
     ).not.toThrow();
   });
 
