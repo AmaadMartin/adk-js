@@ -6,17 +6,6 @@ a conversation is worth remembering.
 
 ## Introduction
 
-A memory service stores finished conversations so a later session can search
-them. The API server that `adk web` and `adk api_server` start already holds
-one, and gives it to every `Runner` it builds. Until this route existed, only
-code running inside an agent could write to it: a callback or a tool called
-`addSessionToMemory`, and an operator with a session id had no way in.
-
-That is the wrong place for the decision in two common setups. A support tool
-promotes a conversation to memory after a human marks it resolved. A batch job
-walks yesterday's sessions and ingests the ones that reached an answer. Both
-know the session id and neither wants to run a model turn to trigger ingestion.
-
 The route takes the session id in the body and the scope from the path. The
 server loads the session through its own session service, so a caller cannot
 promote a session belonging to another user or another app. It writes nothing

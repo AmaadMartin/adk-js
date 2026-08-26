@@ -116,7 +116,7 @@ export class AdkApiClient {
     userId: string;
     sessionId: string;
   }): Promise<void> {
-    return this.fetch<void>(
+    await this.fetchResponse(
       `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/sessions/${params.sessionId}`,
       {
         method: 'DELETE',
@@ -310,7 +310,7 @@ export class AdkApiClient {
     artifactName: string;
   }): Promise<void> {
     const url = `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/sessions/${params.sessionId}/artifacts/${params.artifactName}`;
-    return this.fetch<void>(url, {
+    await this.fetchResponse(url, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
@@ -327,7 +327,7 @@ export class AdkApiClient {
     userId: string;
     sessionId: string;
   }): Promise<void> {
-    return this.fetch<void>(
+    await this.fetchResponse(
       `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/memory`,
       {
         method: 'PATCH',
@@ -339,11 +339,16 @@ export class AdkApiClient {
     );
   }
 
-  private async fetch<T = unknown>(
+  /**
+   * Issues the request and throws the error the server reported. Callers that
+   * expect no response body use this directly, because a 204 carries nothing
+   * for `fetch` to parse.
+   */
+  private async fetchResponse(
     url: string,
     // eslint-disable-next-line no-undef
     options?: RequestInit,
-  ): Promise<T> {
+  ): Promise<Response> {
     const response = await fetch(url, options);
 
     if (!response.ok) {
@@ -358,11 +363,14 @@ export class AdkApiClient {
       );
     }
 
-    // A 204 carries no body, so `response.json()` would reject.
-    if (response.status === 204) {
-      return undefined as T;
-    }
+    return response;
+  }
 
-    return response.json();
+  private async fetch<T = unknown>(
+    url: string,
+    // eslint-disable-next-line no-undef
+    options?: RequestInit,
+  ): Promise<T> {
+    return (await this.fetchResponse(url, options)).json();
   }
 }
