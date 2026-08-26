@@ -22,6 +22,9 @@ const card: AgentCard = {
   version: '1.0',
 };
 
+/** Where an A2A server mounted on `/a2a/agent/` serves its card. */
+const MOUNTED_CARD_PATH = '/a2a/agent/.well-known/agent-card.json';
+
 describe('resolveAgentCard against a real server', () => {
   const requested: string[] = [];
   let server: http.Server;
@@ -30,7 +33,7 @@ describe('resolveAgentCard against a real server', () => {
   beforeAll(async () => {
     server = http.createServer((req, res) => {
       requested.push(req.url ?? '');
-      if (req.url === '/my-card.json') {
+      if (req.url === '/my-card.json' || req.url === MOUNTED_CARD_PATH) {
         res.writeHead(200, {'content-type': 'application/json'});
         res.end(JSON.stringify(card));
         return;
@@ -60,5 +63,14 @@ describe('resolveAgentCard against a real server', () => {
     await expect(resolveAgentCard(origin)).rejects.toThrow();
 
     expect(requested).toEqual(['/.well-known/agent-card.json']);
+  });
+
+  it('joins the well-known path onto a mount path', async () => {
+    requested.length = 0;
+
+    const resolved = await resolveAgentCard(`${origin}/a2a/agent/`);
+
+    expect(resolved.name).toBe('live');
+    expect(requested).toEqual([MOUNTED_CARD_PATH]);
   });
 });

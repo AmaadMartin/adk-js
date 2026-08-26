@@ -320,6 +320,14 @@ describe('Agent Card', () => {
       expect(resolveMock).toHaveBeenCalledWith(source, undefined);
     });
 
+    it('falls back for a mount path with a trailing slash', async () => {
+      const source = 'https://example.com/a2a/weather_agent/';
+
+      await resolveAgentCard(source);
+
+      expect(resolveMock).toHaveBeenCalledWith(source, undefined);
+    });
+
     it('throws on a malformed card URL', async () => {
       await expect(resolveAgentCard('http://')).rejects.toThrow(TypeError);
 

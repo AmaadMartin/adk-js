@@ -27,7 +27,8 @@ import {isWorkflow} from '../workflow/workflow.js';
  * Resolves the AgentCard from the provided source.
  *
  * A path in the card URL is where the card lives, so it is fetched verbatim.
- * Only a bare origin falls back to the resolver's well-known card path.
+ * A path ending in a slash names the base an A2A server mounts an agent on, so
+ * the resolver joins its well-known card path onto it.
  */
 export async function resolveAgentCard(
   agentCard: AgentCard | string,
@@ -40,7 +41,9 @@ export async function resolveAgentCard(
   if (source.startsWith('http://') || source.startsWith('https://')) {
     const resolver = new DefaultAgentCardResolver();
     const {pathname, search} = new URL(source);
-    const cardPath = pathname === '/' ? undefined : `${pathname}${search}`;
+    const cardPath = pathname.endsWith('/')
+      ? undefined
+      : `${pathname}${search}`;
     return await resolver.resolve(source, cardPath);
   }
 
