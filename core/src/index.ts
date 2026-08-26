@@ -37,6 +37,17 @@ export {
   validateSkillDir,
 } from './skills/loader.js';
 export {
+  BaseGoogleCredentialsConfig,
+  GoogleCredentialsManager,
+} from './tools/google_credentials.js';
+export type {BaseGoogleCredentialsConfigOptions} from './tools/google_credentials.js';
+export {GoogleTool} from './tools/google_tool.js';
+export type {
+  GoogleToolAuth,
+  GoogleToolExecuteFunction,
+  GoogleToolOptions,
+} from './tools/google_tool.js';
+export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
