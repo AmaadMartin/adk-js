@@ -10,6 +10,7 @@ import {
   State,
   createEvent,
   createEventActions,
+  isAlreadyExistsError,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
@@ -99,6 +100,135 @@ describe('InMemorySessionService', () => {
 
       expect(session.state).toHaveProperty('normalKey', 'value');
       expect(session.state).not.toHaveProperty(`${State.TEMP_PREFIX}tempKey`);
+    });
+  });
+
+  describe('createSession with a duplicate id', () => {
+    it('rejects with AlreadyExistsError', async () => {
+      await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 'existing_session',
+      });
+
+      await expect(
+        service.createSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: 'existing_session',
+        }),
+      ).rejects.toSatisfy(isAlreadyExistsError);
+    });
+
+    it('names the duplicated id in the message', async () => {
+      await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 'existing_session',
+      });
+
+      await expect(
+        service.createSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: 'existing_session',
+        }),
+      ).rejects.toThrow('Session with id existing_session already exists.');
+    });
+
+    it('keeps the events and the state of the existing session', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 's1',
+        state: {keep: 'me'},
+      });
+      await service.appendEvent({
+        session,
+        event: createEvent({timestamp: Date.now(), author: 'user'}),
+      });
+
+      await expect(
+        service.createSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: 's1',
+          state: {keep: 'overwritten'},
+        }),
+      ).rejects.toSatisfy(isAlreadyExistsError);
+
+      const stored = await service.getSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 's1',
+      });
+      expect(stored?.events).toHaveLength(1);
+      expect(stored?.state).toEqual({keep: 'me'});
+    });
+
+    it('generates a distinct id when no sessionId is provided', async () => {
+      const first = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+      const second = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+
+      expect(second.id).not.toBe(first.id);
+    });
+
+    it('accepts the same id for a different userId', async () => {
+      await service.createSession({
+        appName: 'app',
+        userId: 'user1',
+        sessionId: 'shared',
+      });
+
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user2',
+        sessionId: 'shared',
+      });
+
+      expect(session.id).toBe('shared');
+    });
+
+    it('accepts the same id for a different appName', async () => {
+      await service.createSession({
+        appName: 'app1',
+        userId: 'user',
+        sessionId: 'shared',
+      });
+
+      const session = await service.createSession({
+        appName: 'app2',
+        userId: 'user',
+        sessionId: 'shared',
+      });
+
+      expect(session.id).toBe('shared');
+    });
+
+    it('rejects under an appName of __proto__ and leaves Object.prototype clean', async () => {
+      const proto = Object.prototype as Record<string, unknown>;
+      delete proto['duplicate_sid'];
+
+      await service.createSession({
+        appName: '__proto__',
+        userId: 'user',
+        sessionId: 'duplicate_sid',
+      });
+
+      await expect(
+        service.createSession({
+          appName: '__proto__',
+          userId: 'user',
+          sessionId: 'duplicate_sid',
+        }),
+      ).rejects.toSatisfy(isAlreadyExistsError);
+      expect(proto['duplicate_sid']).toBeUndefined();
     });
   });
 

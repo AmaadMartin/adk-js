@@ -5,6 +5,7 @@
  */
 import {cloneDeep} from 'lodash-es';
 
+import {AlreadyExistsError} from '../errors/already_exists_error.js';
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
@@ -68,6 +69,12 @@ export class InMemorySessionService extends BaseSessionService {
     state,
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
+    if (sessionId && this.sessions[appName]?.[userId]?.[sessionId]) {
+      throw new AlreadyExistsError(
+        `Session with id ${sessionId} already exists.`,
+      );
+    }
+
     const filteredState = state ? trimTempState(state) : undefined;
     const session = createSession({
       id: sessionId || randomUUID(),
