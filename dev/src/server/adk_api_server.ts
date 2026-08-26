@@ -949,6 +949,45 @@ export class AdkApiServer {
       },
     );
 
+    // ------------------------ Memory related endpoints -----------------------
+    app.patch(
+      '/apps/:appName/users/:userId/memory',
+      async (req: Request, res: Response) => {
+        try {
+          const appName = req.params['appName'];
+          const userId = req.params['userId'];
+          const sessionId: unknown = req.body['sessionId'];
+
+          if (typeof sessionId !== 'string' || !sessionId) {
+            res.status(400).json({
+              error: 'Update memory request is invalid: sessionId is required',
+            });
+            return;
+          }
+
+          const session = await this.sessionService.getSession({
+            appName,
+            userId,
+            sessionId,
+          });
+
+          if (!session) {
+            res.status(404).json({error: `Session not found: ${sessionId}`});
+            return;
+          }
+
+          await this.memoryService.addSessionToMemory(session);
+
+          res.status(204).json({});
+        } catch (e: unknown) {
+          const error = `Failed to update memory: ${e}`;
+
+          res.status(500).json({error});
+          this.logger.error(error);
+        }
+      },
+    );
+
     // --------------------- Eval Sets related endpoints -----------------------
     // TODO: Implement eval set related endpoints.
     app.post(

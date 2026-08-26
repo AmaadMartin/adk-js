@@ -693,4 +693,49 @@ describe('AdkApiClient', () => {
       );
     });
   });
+
+  describe('addSessionToMemory', () => {
+    it('should resolve on the empty 204 the server returns', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 204,
+        json: async () => {
+          throw new SyntaxError('Unexpected end of JSON input');
+        },
+      });
+
+      await expect(
+        client.addSessionToMemory({
+          appName: 'app1',
+          userId: 'user1',
+          sessionId: 'session1',
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${mockBackendUrl}/apps/app1/users/user1/memory`,
+        {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({sessionId: 'session1'}),
+        },
+      );
+    });
+
+    it('should throw the error the server reports', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({error: 'Session not found: session1'}),
+      });
+
+      await expect(
+        client.addSessionToMemory({
+          appName: 'app1',
+          userId: 'user1',
+          sessionId: 'session1',
+        }),
+      ).rejects.toThrow('Session not found: session1');
+    });
+  });
 });

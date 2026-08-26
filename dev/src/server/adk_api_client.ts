@@ -318,6 +318,27 @@ export class AdkApiClient {
     });
   }
 
+  /**
+   * Adds every event of a finished session to the server's memory service, so
+   * a later session can recall it.
+   */
+  async addSessionToMemory(params: {
+    appName: string;
+    userId: string;
+    sessionId: string;
+  }): Promise<void> {
+    return this.fetch<void>(
+      `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/memory`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({sessionId: params.sessionId}),
+      },
+    );
+  }
+
   private async fetch<T = unknown>(
     url: string,
     // eslint-disable-next-line no-undef
@@ -335,6 +356,11 @@ export class AdkApiClient {
       throw new Error(
         error?.error ?? `Request failed with status ${response.status}`,
       );
+    }
+
+    // A 204 carries no body, so `response.json()` would reject.
+    if (response.status === 204) {
+      return undefined as T;
     }
 
     return response.json();
