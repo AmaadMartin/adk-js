@@ -137,6 +137,23 @@ describe('Agent Card', () => {
       expect(orchestrationSkill).toBeDefined();
       expect(orchestrationSkill?.description).toContain('fetch data');
     });
+
+    it('publishes the named sub-agents on the agent card', async () => {
+      const seqAgent = new SequentialAgent({
+        name: 'seq_agent',
+        subAgents: [
+          new CustomAgent('sub1', 'fetch data'),
+          new CustomAgent('sub2', 'process data'),
+        ],
+      });
+
+      const card = await getA2AAgentCard(seqAgent, [dummyTransport]);
+
+      const skill = card.skills.find((s) => s.name === 'sub-agents');
+      expect(skill?.description).toBe(
+        'Orchestrates: sub1: fetch data; sub2: process data',
+      );
+    });
   });
 
   describe('buildAgentSkills', () => {
@@ -220,6 +237,100 @@ describe('Agent Card', () => {
       expect(workflowSkill?.description).toBe(
         'This agent will do A and do B in a loop (max 5 iterations).',
       );
+    });
+
+    it('names each sub-agent in the orchestration description', async () => {
+      const seqAgent = new SequentialAgent({
+        name: 'seq_agent',
+        subAgents: [
+          new CustomAgent('sub1', 'fetch data'),
+          new CustomAgent('sub2', 'process data'),
+        ],
+      });
+
+      const skills = await buildAgentSkills(seqAgent);
+
+      const skill = skills.find((s) => s.name === 'sub-agents');
+      expect(skill?.description).toBe(
+        'Orchestrates: sub1: fetch data; sub2: process data',
+      );
+      expect(skill?.id).toBe('seq_agent-sub-agents');
+      expect(skill?.tags).toEqual(['sequential_workflow', 'orchestration']);
+    });
+
+    it('falls back to "No description" per named sub-agent', async () => {
+      const seqAgent = new SequentialAgent({
+        name: 'seq_agent',
+        subAgents: [new CustomAgent('sub1'), new CustomAgent('sub2', '')],
+      });
+
+      const skills = await buildAgentSkills(seqAgent);
+
+      const skill = skills.find((s) => s.name === 'sub-agents');
+      expect(skill?.description).toBe(
+        'Orchestrates: sub1: No description; sub2: No description',
+      );
+    });
+
+    it('names sub-agents for a parallel agent', async () => {
+      const parAgent = new ParallelAgent({
+        name: 'par_agent',
+        subAgents: [
+          new CustomAgent('sub1', 'do A'),
+          new CustomAgent('sub2', 'do B'),
+        ],
+      });
+
+      const skills = await buildAgentSkills(parAgent);
+
+      const skill = skills.find((s) => s.name === 'sub-agents');
+      expect(skill?.description).toBe('Orchestrates: sub1: do A; sub2: do B');
+      expect(skill?.tags).toEqual(['parallel_workflow', 'orchestration']);
+    });
+
+    it('names sub-agents for a loop agent', async () => {
+      const loopAgent = new LoopAgent({
+        name: 'loop_agent',
+        subAgents: [
+          new CustomAgent('sub1', 'do A'),
+          new CustomAgent('sub2', 'do B'),
+        ],
+        maxIterations: 5,
+      });
+
+      const skills = await buildAgentSkills(loopAgent);
+
+      const skill = skills.find((s) => s.name === 'sub-agents');
+      expect(skill?.description).toBe('Orchestrates: sub1: do A; sub2: do B');
+      expect(skill?.tags).toEqual(['loop_workflow', 'orchestration']);
+    });
+
+    it('names sub-agents for a custom agent', async () => {
+      const customParent = new CustomAgent('custom_parent', 'a parent', [
+        new CustomAgent('sub1', 'do A'),
+      ]);
+
+      const skills = await buildAgentSkills(customParent);
+
+      const skill = skills.find((s) => s.name === 'sub-agents');
+      expect(skill?.description).toBe('Orchestrates: sub1: do A');
+      expect(skill?.tags).toEqual(['custom_agent', 'orchestration']);
+    });
+
+    it('names sub-agents in a nested orchestration skill', async () => {
+      const middle = new SequentialAgent({
+        name: 'middle',
+        subAgents: [new CustomAgent('leaf', 'do A')],
+      });
+      const root = new SequentialAgent({
+        name: 'root',
+        subAgents: [middle],
+      });
+
+      const skills = await buildAgentSkills(root);
+
+      const nested = skills.find((s) => s.name === 'middle: sub-agents');
+      expect(nested?.description).toBe('Orchestrates: leaf: do A');
     });
 
     it('classifies a graph Workflow as a workflow, not a custom agent', async () => {

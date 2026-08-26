@@ -190,7 +190,7 @@ function buildNonLLMAgentSkills(agent: BaseAgent): AgentSkill[] {
   const subAgents = agent.subAgents;
   if (subAgents.length > 0) {
     const descriptions = subAgents.map(
-      (sub) => sub.description || 'No description',
+      (sub) => `${sub.name}: ${sub.description || 'No description'}`,
     );
     skills.push({
       id: `${agent.name}-sub-agents`,
