@@ -13,25 +13,41 @@ filename creates version 1 and leaves version 0 in place.
 
 ## Get started
 
+From TypeScript, use `AdkApiClient.saveArtifact`. It returns the
+`ArtifactVersion` the server reports, and throws the server's `error` message
+when the request fails.
+
 ```ts
-import {Part} from '@google/genai';
+import {AdkApiClient} from '@google/adk-devtools';
 
-async function saveArtifact(
-  baseUrl: string,
-  filename: string,
-  artifact: Part,
-): Promise<{version: number}> {
-  const response = await fetch(
-    `${baseUrl}/apps/get_started/users/u/sessions/s/artifacts`,
-    {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({filename, artifact}),
-    },
-  );
+const client = new AdkApiClient({backendUrl: 'http://localhost:8000'});
 
-  return (await response.json()) as {version: number};
-}
+const saved = await client.saveArtifact({
+  appName: 'get_started',
+  userId: 'u',
+  sessionId: 's',
+  filename: 'greeting.txt',
+  artifact: {text: 'hello world'},
+  customMetadata: {rev: 'one'},
+});
+// saved.version === 0
+
+await client.loadArtifact({
+  appName: 'get_started',
+  userId: 'u',
+  sessionId: 's',
+  artifactName: 'greeting.txt',
+});
+// {text: 'hello world'}
+```
+
+From any other language, post the same body yourself:
+
+```bash
+curl -X POST \
+  http://localhost:8000/apps/get_started/users/u/sessions/s/artifacts \
+  -H 'Content-Type: application/json' \
+  -d '{"filename":"greeting.txt","artifact":{"text":"hello world"}}'
 ```
 
 The session must exist first. Create it with
