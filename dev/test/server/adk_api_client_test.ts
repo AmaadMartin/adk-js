@@ -555,7 +555,7 @@ describe('AdkApiClient', () => {
     const artifactsUrl = `${mockBackendUrl}/apps/app1/users/user1/sessions/session1/artifacts`;
 
     it('should post the artifact and return its version metadata', async () => {
-      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      fetchMock.mockResolvedValue({
         ok: true,
         json: async () => ({version: 0}),
       });
@@ -580,7 +580,7 @@ describe('AdkApiClient', () => {
     });
 
     it('should send customMetadata when it is provided', async () => {
-      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      fetchMock.mockResolvedValue({
         ok: true,
         json: async () => ({version: 0, customMetadata: {rev: 'one'}}),
       });
@@ -607,7 +607,7 @@ describe('AdkApiClient', () => {
     });
 
     it('should reject with the error the server reported', async () => {
-      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      fetchMock.mockResolvedValue({
         ok: false,
         status: 500,
         json: async () => ({error: 'Failed to save artifact: boom'}),
