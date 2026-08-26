@@ -20,16 +20,27 @@ import {PrebuiltMetrics} from './eval_metrics.js';
 import {EvalSet, EvalSetSchema} from './eval_set.js';
 
 /**
+ * Metric names the registry resolves but adk-js cannot score.
+ *
+ * Their evaluators call the Vertex Gen AI Eval service, which adk-js does not
+ * ship, so each one throws when it runs. adk-python allows them because it can
+ * reach that service.
+ */
+export const UNSUPPORTED_METRICS: readonly string[] = [
+  PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
+  PrebuiltMetrics.SAFETY_V1,
+];
+
+/**
  * Metric names an eval config may use with a legacy-format test file.
  *
- * Mirrors adk-python's `ALLOWED_CRITERIA`. Richer metrics exist in the registry
- * but need data the legacy format cannot express.
+ * Mirrors adk-python's `ALLOWED_CRITERIA`, less {@link UNSUPPORTED_METRICS}.
+ * Richer metrics exist in the registry but need data the legacy format cannot
+ * express.
  */
 export const ALLOWED_CRITERIA: readonly string[] = [
   PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
-  PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
   PrebuiltMetrics.RESPONSE_MATCH_SCORE,
-  PrebuiltMetrics.SAFETY_V1,
 ];
 
 const QUERY_COLUMN = 'query';
@@ -196,7 +207,6 @@ export function validateLegacyInput(
       PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
       [QUERY_COLUMN, EXPECTED_TOOL_USE_COLUMN],
     ],
-    [PrebuiltMetrics.RESPONSE_EVALUATION_SCORE, [QUERY_COLUMN]],
     [PrebuiltMetrics.RESPONSE_MATCH_SCORE, [QUERY_COLUMN, REFERENCE_COLUMN]],
   ];
 

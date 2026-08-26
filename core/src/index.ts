@@ -43,7 +43,7 @@ export type {
   EvaluateEvalSetOptions,
   EvaluateOptions,
 } from './evaluation/agent_evaluator.js';
-export {EvalFailureError} from './evaluation/errors.js';
+export {EvalFailureError, UnsupportedMetricError} from './evaluation/errors.js';
 export {
   loadEvalSetFromFile,
   toEvalSetJson,

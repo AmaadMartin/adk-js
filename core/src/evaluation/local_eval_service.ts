@@ -12,6 +12,7 @@ import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
 import {runWithClientLabel} from '../utils/client_labels.js';
+import {mapWithConcurrency} from '../utils/concurrency_utils.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
@@ -158,54 +159,6 @@ interface EvalSetResultGroup {
  */
 function resultGroupKey(appName: string, evalSetId: string): string {
   return `${appName}\u0000${evalSetId}`;
-}
-
-/**
- * Runs `fn` over `items` with at most `limit` concurrent executions, yielding
- * each result as soon as it settles (completion order, not input order).
- *
- * The first rejection is propagated to the consumer; in-flight siblings are
- * abandoned but never surface as unhandled rejections.
- */
-async function* mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): AsyncGenerator<R> {
-  // A comparison against NaN is always false, so `Math.max` would leave the
-  // limit NaN and silently starve the pool; treat any non-positive or
-  // non-numeric limit as 1.
-  const effectiveLimit = limit >= 1 ? Math.floor(limit) : 1;
-  type Settled =
-    | {index: number; ok: true; result: R}
-    | {index: number; ok: false; error: unknown};
-  const executing = new Map<number, Promise<Settled>>();
-  let nextIndex = 0;
-
-  const startNext = (): void => {
-    const index = nextIndex++;
-    const promise = fn(items[index]).then(
-      (result): Settled => ({index, ok: true, result}),
-      (error): Settled => ({index, ok: false, error}),
-    );
-    executing.set(index, promise);
-  };
-
-  while (nextIndex < items.length && executing.size < effectiveLimit) {
-    startNext();
-  }
-
-  while (executing.size > 0) {
-    const settled = await Promise.race(executing.values());
-    executing.delete(settled.index);
-    if (!settled.ok) {
-      throw settled.error;
-    }
-    if (nextIndex < items.length) {
-      startNext();
-    }
-    yield settled.result;
-  }
 }
 
 /** Options for constructing a {@link LocalEvalService}. */

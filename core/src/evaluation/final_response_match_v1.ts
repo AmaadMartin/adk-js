@@ -248,13 +248,12 @@ export class RougeEvaluator extends Evaluator {
   evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-    conversationScenario?: ConversationScenario,
+    _conversationScenario?: ConversationScenario,
   ): EvaluationResult {
     if (expectedInvocations === undefined) {
       throw new Error('expected_invocations is required for this metric.');
     }
     validateInvocationLengths(actualInvocations, expectedInvocations);
-    void conversationScenario; // not used by this metric.
 
     let totalScore = 0.0;
     const perInvocationResults: PerInvocationResult[] = [];

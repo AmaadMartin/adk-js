@@ -21,6 +21,7 @@ import {afterEach, describe, expect, it} from 'vitest';
 import {
   convertLegacyEvalSet,
   LegacyInvocationSchema,
+  UNSUPPORTED_METRICS,
   validateLegacyInput,
 } from '../../src/evaluation/eval_data_loader.js';
 
@@ -315,12 +316,12 @@ describe('validateLegacyInput', () => {
     ).toThrow(/tool_trajectory_avg_score must include query and/);
   });
 
-  it('requires query for the response evaluation metric', () => {
-    expect(() =>
-      validateLegacyInput([{reference: 'hi'}], {
-        response_evaluation_score: 1,
-      }),
-    ).toThrow(/response_evaluation_score must include query keys/);
+  it('rejects a metric that adk-js cannot score', () => {
+    for (const metricName of UNSUPPORTED_METRICS) {
+      expect(() =>
+        validateLegacyInput([{query: 'hi'}], {[metricName]: 1}),
+      ).toThrow(`Invalid criteria key: ${metricName}`);
+    }
   });
 
   it('requires query and reference for the response match metric', () => {

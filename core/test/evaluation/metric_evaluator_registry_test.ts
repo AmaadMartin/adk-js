@@ -11,7 +11,6 @@ import {
   EvalStatus,
   type EvaluationResult,
   Evaluator,
-  type EvaluatorConstructor,
   FinalResponseMatchV2EvaluatorMetricInfoProvider,
   getDefaultMetricEvaluatorRegistry,
   HallucinationsV1EvaluatorMetricInfoProvider,
@@ -282,7 +281,7 @@ describe('evaluation/metric_evaluator_registry', () => {
       const registry = new MetricEvaluatorRegistry();
       registry.registerEvaluator(
         intervalMetricInfo('subclassed_custom', '', 0.0, 1.0),
-        SubclassedCustomMetricEvaluator as unknown as EvaluatorConstructor,
+        SubclassedCustomMetricEvaluator,
       );
       const evaluator = registry.getEvaluator({
         metricName: 'subclassed_custom',

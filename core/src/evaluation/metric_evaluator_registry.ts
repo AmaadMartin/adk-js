@@ -10,7 +10,7 @@ import {logger} from '../utils/logger.js';
 import {CustomMetricEvaluator} from './custom_metric_evaluator.js';
 import {EvalConfig} from './eval_config.js';
 import {EvalMetric, MetricInfo, PrebuiltMetrics} from './eval_metrics.js';
-import {Evaluator} from './evaluator.js';
+import {Evaluator, EvaluatorConstructor} from './evaluator.js';
 import {
   ResponseEvaluatorMetricInfoProvider,
   SafetyEvaluatorV1MetricInfoProvider,
@@ -19,36 +19,6 @@ import {
 import {ResponseEvaluator} from './response_evaluator.js';
 import {SafetyEvaluatorV1} from './safety_evaluator.js';
 import {TrajectoryEvaluator} from './trajectory_evaluator.js';
-
-// Providers are re-exported here for parity with adk-python, whose registry
-// module re-exports them (the registry tests import them from here).
-export * from './metric_info_providers.js';
-
-/**
- * The options an evaluator constructor may receive from the registry. The
- * registry always supplies `evalMetric`, plus `customFunctionPath` for custom
- * metrics; each concrete evaluator reads the subset of fields it needs.
- */
-export interface EvaluatorConstructorOptions {
-  evalMetric: EvalMetric;
-  customFunctionPath?: string;
-}
-
-/**
- * A constructor for an {@link Evaluator} that can be registered in the registry.
- */
-export type EvaluatorConstructor = new (
-  options: EvaluatorConstructorOptions,
-) => Evaluator;
-
-function isCustomMetricEvaluatorConstructor(
-  evaluator: EvaluatorConstructor,
-): boolean {
-  return (
-    evaluator === (CustomMetricEvaluator as unknown as EvaluatorConstructor) ||
-    evaluator.prototype instanceof CustomMetricEvaluator
-  );
-}
 
 /**
  * A registry for metric {@link Evaluator}s.
@@ -79,13 +49,10 @@ export class MetricEvaluatorRegistry {
     }
 
     const [evaluatorType] = entry;
-    if (isCustomMetricEvaluatorConstructor(evaluatorType)) {
-      return new evaluatorType({
-        evalMetric,
-        customFunctionPath: evalMetric.customFunctionPath,
-      });
-    }
-    return new evaluatorType({evalMetric});
+    return new evaluatorType({
+      evalMetric,
+      customFunctionPath: evalMetric.customFunctionPath,
+    });
   }
 
   /**
@@ -201,7 +168,7 @@ export function registerCustomMetricsFromConfig(
       : getDefaultMetricInfo(metricName, config.description);
     metricEvaluatorRegistry.registerEvaluator(
       metricInfo,
-      CustomMetricEvaluator as unknown as EvaluatorConstructor,
+      CustomMetricEvaluator,
     );
   }
 

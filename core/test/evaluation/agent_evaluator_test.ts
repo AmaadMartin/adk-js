@@ -8,6 +8,7 @@ import {
   AgentEvaluator,
   BaseAgent,
   createEvent,
+  EvalConfigSchema,
   EvalFailureError,
   EvalSetSchema,
   EvalStatus,
@@ -18,6 +19,7 @@ import {
   Invocation,
   InvocationContext,
   NUM_RUNS,
+  UnsupportedMetricError,
 } from '@google/adk';
 import {FunctionCall} from '@google/genai';
 import * as fs from 'node:fs';
@@ -492,6 +494,45 @@ describe('AgentEvaluator.evaluateEvalSet', () => {
         ),
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('refuses a metric adk-js cannot score, before running the agent', async () => {
+    const agent = matchingAgent();
+    const evalSet = EvalSetSchema.parse({
+      evalSetId: 'set',
+      evalCases: [
+        {
+          evalId: 'case',
+          conversation: [
+            {
+              userContent: {parts: [{text: 'Roll a die'}], role: 'user'},
+              finalResponse: {parts: [{text: REFERENCE_TEXT}], role: 'model'},
+            },
+          ],
+        },
+      ],
+    });
+
+    await expect(
+      AgentEvaluator.evaluateEvalSet({
+        agent,
+        evalSet,
+        evalConfig: EvalConfigSchema.parse({criteria: {safety_v1: 0.8}}),
+      }),
+    ).rejects.toThrow(UnsupportedMetricError);
+    expect(agent.runCount).toBe(0);
+  });
+
+  it('names the unsupported metric in the error', async () => {
+    await expect(
+      AgentEvaluator.evaluateEvalSet({
+        agent: matchingAgent(),
+        evalSet: EvalSetSchema.parse({evalSetId: 'empty', evalCases: []}),
+        evalConfig: EvalConfigSchema.parse({
+          criteria: {response_evaluation_score: 0.8},
+        }),
+      }),
+    ).rejects.toThrow(/response_evaluation_score/);
   });
 });
 

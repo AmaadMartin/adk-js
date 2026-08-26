@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import {BaseAgent} from '../agents/base_agent.js';
 import {logger} from '../utils/logger.js';
 
-import {EvalFailureError} from './errors.js';
+import {EvalFailureError, UnsupportedMetricError} from './errors.js';
 import {EvalCase} from './eval_case.js';
 import {
   CriterionBackedEvalMetric,
@@ -22,6 +22,7 @@ import {
   loadEvalSetFromFile,
   readInitialSessionFile,
   toEvalSetJson,
+  UNSUPPORTED_METRICS,
 } from './eval_data_loader.js';
 import {EvalStatus} from './eval_metrics.js';
 import {formatMetricDetails} from './eval_report.js';
@@ -153,6 +154,21 @@ async function scoreEvalCase(
 }
 
 /**
+ * Rejects an eval config that asks for a metric adk-js cannot score.
+ *
+ * @throws {UnsupportedMetricError} On the first such metric.
+ */
+function assertMetricsSupported(
+  evalMetrics: CriterionBackedEvalMetric[],
+): void {
+  for (const evalMetric of evalMetrics) {
+    if (UNSUPPORTED_METRICS.includes(evalMetric.metricName)) {
+      throw new UnsupportedMetricError(evalMetric.metricName);
+    }
+  }
+}
+
+/**
  * Averages each metric's scores across every run and returns one failure line
  * per metric that did not pass, preceded by its detail when requested.
  */
@@ -258,6 +274,7 @@ export class AgentEvaluator {
   }: EvaluateEvalSetOptions): Promise<void> {
     const agentForEval = resolveAgent(agent, agentName);
     const evalMetrics = getEvalMetricsFromConfig(evalConfig);
+    assertMetricsSupported(evalMetrics);
 
     const failures: string[] = [];
     for (const evalCase of evalSet.evalCases) {

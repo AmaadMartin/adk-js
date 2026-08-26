@@ -8,7 +8,6 @@ import {
   EvalConfigSchema,
   getEvalMetricsFromConfig,
   getEvaluationCriteriaOrDefault,
-  type EvalConfig,
   type LlmAsAJudgeCriterion,
   type Rubric,
   type RubricsBasedCriterion,
@@ -223,14 +222,10 @@ describe('evaluation/eval_config', () => {
       expect(getEvalMetricsFromConfig(evalConfig)).toEqual([]);
     });
 
-    it('throws for an unexpected criterion type', () => {
-      const evalConfig = {
-        criteria: {bad_metric: 'not-a-valid-criterion'},
-      } as unknown as EvalConfig;
-
-      expect(() => getEvalMetricsFromConfig(evalConfig)).toThrow(
-        /Unexpected criterion type/,
-      );
+    it('rejects a criterion that is neither a number nor an object', () => {
+      expect(() =>
+        EvalConfigSchema.parse({criteria: {bad_metric: 'not-a-criterion'}}),
+      ).toThrow(ZodError);
     });
   });
 

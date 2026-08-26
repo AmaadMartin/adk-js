@@ -168,13 +168,12 @@ export class TrajectoryEvaluator extends Evaluator {
   evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-    conversationScenario?: ConversationScenario,
+    _conversationScenario?: ConversationScenario,
   ): EvaluationResult {
     if (expectedInvocations === undefined) {
       throw new Error('expected_invocations is needed by this metric.');
     }
     validateInvocationLengths(actualInvocations, expectedInvocations);
-    void conversationScenario; // not supported for per-invocation evaluation.
 
     let totalToolUseAccuracy = 0.0;
     const perInvocationResults: PerInvocationResult[] = [];

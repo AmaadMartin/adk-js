@@ -8,7 +8,7 @@ import {z} from 'zod';
 
 import {ConversationScenario} from './conversation_scenarios.js';
 import {Invocation, InvocationSchema} from './eval_case.js';
-import {EvalStatus} from './eval_metrics.js';
+import {EvalMetric, EvalStatus} from './eval_metrics.js';
 import {RubricScoreSchema} from './eval_rubrics.js';
 
 // Re-exported for parity with adk-python, whose evaluator module re-exports
@@ -108,3 +108,21 @@ export abstract class Evaluator {
     conversationScenario?: ConversationScenario,
   ): EvaluationResult | Promise<EvaluationResult>;
 }
+
+/**
+ * The options every {@link Evaluator} constructor receives from the registry.
+ *
+ * `customFunctionPath` is set only for custom metrics. Each concrete evaluator
+ * reads the fields it needs and ignores the rest.
+ */
+export interface EvaluatorConstructorOptions {
+  evalMetric: EvalMetric;
+  customFunctionPath?: string;
+}
+
+/**
+ * A constructor for an {@link Evaluator} that can be registered in the registry.
+ */
+export type EvaluatorConstructor = new (
+  options: EvaluatorConstructorOptions,
+) => Evaluator;

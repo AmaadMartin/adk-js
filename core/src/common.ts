@@ -317,10 +317,7 @@ export type {
   InferenceRequest,
   InferenceResult,
 } from './evaluation/base_eval_service.js';
-export {
-  DEFAULT_LIVE_TIMEOUT_SECONDS,
-  MISSING_EVAL_DEPENDENCIES_MESSAGE,
-} from './evaluation/constants.js';
+export {DEFAULT_LIVE_TIMEOUT_SECONDS} from './evaluation/constants.js';
 export {
   ConversationGenerationConfigSchema,
   ConversationScenarioSchema,
@@ -335,10 +332,7 @@ export {
   CustomMetricEvaluator,
   getMetricFunction,
 } from './evaluation/custom_metric_evaluator.js';
-export type {
-  CustomMetricEvaluatorOptions,
-  CustomMetricFunction,
-} from './evaluation/custom_metric_evaluator.js';
+export type {CustomMetricFunction} from './evaluation/custom_metric_evaluator.js';
 export {
   EvalCaseSchema,
   IntermediateDataSchema,
@@ -447,6 +441,8 @@ export {
 } from './evaluation/evaluator.js';
 export type {
   EvaluationResult,
+  EvaluatorConstructor,
+  EvaluatorConstructorOptions,
   PerInvocationResult,
 } from './evaluation/evaluator.js';
 export {
@@ -472,10 +468,6 @@ export {
   MetricEvaluatorRegistry,
   getDefaultMetricEvaluatorRegistry,
   registerCustomMetricsFromConfig,
-} from './evaluation/metric_evaluator_registry.js';
-export type {
-  EvaluatorConstructor,
-  EvaluatorConstructorOptions,
 } from './evaluation/metric_evaluator_registry.js';
 export {
   FinalResponseMatchV2EvaluatorMetricInfoProvider,

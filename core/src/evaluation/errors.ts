@@ -14,3 +14,21 @@ export class EvalFailureError extends Error {
     this.name = 'EvalFailureError';
   }
 }
+
+/**
+ * Thrown when an eval config selects a metric that adk-js cannot score.
+ *
+ * The registry resolves an evaluator for every prebuilt metric name, but some
+ * of those evaluators call the Vertex Gen AI Eval service, which adk-js does
+ * not ship. Refusing the metric by name says so plainly, rather than failing
+ * later inside the evaluator.
+ */
+export class UnsupportedMetricError extends Error {
+  constructor(metricName: string) {
+    super(
+      `Metric ${metricName} needs the Vertex Gen AI Eval service, which` +
+        ' adk-js does not ship. Remove it from the eval config criteria.',
+    );
+    this.name = 'UnsupportedMetricError';
+  }
+}

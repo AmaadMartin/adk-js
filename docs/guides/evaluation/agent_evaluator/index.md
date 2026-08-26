@@ -116,14 +116,14 @@ It applies to legacy-format files only. An eval set file carries its own `sessio
 
 ## Metrics
 
-The metric names in `criteria` are the names the registry knows. `AgentEvaluator` supports the four adk-python allows in a legacy-format file:
+The metric names in `criteria` are the names the registry knows. `AgentEvaluator` scores two of them:
 
-| Metric                      | What it scores                                        |
-| --------------------------- | ----------------------------------------------------- |
-| `tool_trajectory_avg_score` | The tool calls, against the recorded ones.            |
-| `response_match_score`      | The final answer, by ROUGE-1 overlap.                 |
-| `response_evaluation_score` | Answer coherence, through the Vertex AI eval service. |
-| `safety_v1`                 | Answer safety, through the Vertex AI eval service.    |
+| Metric                      | What it scores                             |
+| --------------------------- | ------------------------------------------ |
+| `tool_trajectory_avg_score` | The tool calls, against the recorded ones. |
+| `response_match_score`      | The final answer, by ROUGE-1 overlap.      |
+
+adk-python also allows `response_evaluation_score` and `safety_v1`. Both need the Vertex Gen AI Eval service, which adk-js does not ship, so `evaluate` rejects them with an `UnsupportedMetricError` naming the metric.
 
 A criterion is either a bare threshold or an object. Use the object form to pick how the tool trajectory is matched:
 

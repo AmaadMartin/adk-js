@@ -7,7 +7,11 @@
 import {ConversationScenario} from './conversation_scenarios.js';
 import {Invocation} from './eval_case.js';
 import {EvalMetric} from './eval_metrics.js';
-import {EvaluationResult, Evaluator} from './evaluator.js';
+import {
+  EvaluationResult,
+  Evaluator,
+  EvaluatorConstructorOptions,
+} from './evaluator.js';
 
 /**
  * A user-supplied custom metric function.
@@ -57,16 +61,6 @@ export async function getMetricFunction(
 }
 
 /**
- * Options for constructing a {@link CustomMetricEvaluator}.
- */
-export interface CustomMetricEvaluatorOptions {
-  /** The metric being evaluated. */
-  evalMetric: EvalMetric;
-  /** The `<module>.<export>` path to the custom metric function. */
-  customFunctionPath: string;
-}
-
-/**
  * Evaluator that dispatches to a user-supplied custom metric function loaded
  * dynamically by path.
  *
@@ -77,8 +71,17 @@ export class CustomMetricEvaluator extends Evaluator {
   private readonly evalMetric: EvalMetric;
   private readonly customFunctionPath: string;
 
-  constructor({evalMetric, customFunctionPath}: CustomMetricEvaluatorOptions) {
+  /**
+   * @throws {Error} If `customFunctionPath` is missing. A custom metric has
+   *     nothing to dispatch to without it.
+   */
+  constructor({evalMetric, customFunctionPath}: EvaluatorConstructorOptions) {
     super();
+    if (customFunctionPath === undefined) {
+      throw new Error(
+        `Custom metric ${evalMetric.metricName} needs a customFunctionPath.`,
+      );
+    }
     this.evalMetric = evalMetric;
     this.customFunctionPath = customFunctionPath;
   }

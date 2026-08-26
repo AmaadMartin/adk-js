@@ -173,9 +173,6 @@ export type CriterionBackedEvalMetric = EvalMetric & {criterion: BaseCriterion};
 /**
  * Flattens an `EvalConfig`'s criteria into the list of `EvalMetric`s that an
  * eval run consumes, preserving criteria insertion order.
- *
- * @throws {Error} If a criterion is neither a numeric threshold nor a
- *     criterion object.
  */
 export function getEvalMetricsFromConfig(
   evalConfig: EvalConfig,
@@ -185,16 +182,10 @@ export function getEvalMetricsFromConfig(
     const customFunctionPath =
       evalConfig.customMetrics?.[metricName]?.codeConfig.name;
 
-    let resolvedCriterion: BaseCriterion;
-    if (typeof criterion === 'number') {
-      resolvedCriterion = BaseCriterionSchema.parse({threshold: criterion});
-    } else if (typeof criterion === 'object' && criterion !== null) {
-      resolvedCriterion = criterion;
-    } else {
-      throw new Error(
-        `Unexpected criterion type. ${typeof criterion} not supported.`,
-      );
-    }
+    const resolvedCriterion: BaseCriterion =
+      typeof criterion === 'number'
+        ? BaseCriterionSchema.parse({threshold: criterion})
+        : criterion;
 
     evalMetricList.push({
       metricName,
