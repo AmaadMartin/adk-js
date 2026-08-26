@@ -25,55 +25,17 @@ const FALLBACK_FILENAME_EXTENSION = 'bin';
 /** Which side of the conversation a chunk of live audio came from. */
 export type AudioCacheType = 'input' | 'output';
 
-/** Options for {@link AudioCacheManager}. */
-export interface AudioCacheManagerOptions {
-  /**
-   * Cap on the decoded audio bytes retained per direction. When a new chunk
-   * would exceed it, the manager drops the oldest chunks until it fits, so a
-   * long turn keeps a rolling window of the most recent audio instead of
-   * growing without bound.
-   */
-  maxCacheBytes?: number;
-}
-
 /** Options for {@link AudioCacheManager.flushCaches}. */
 export interface FlushCachesOptions {
-  /** Whether to flush the user's audio. Defaults to true. */
+  /** Whether to flush the user's audio too. Defaults to true. */
   flushUserAudio?: boolean;
-  /** Whether to flush the model's audio. Defaults to true. */
-  flushModelAudio?: boolean;
-}
-
-/**
- * The decoded byte length of a base64 string, computed without decoding it.
- *
- * Four base64 characters carry three bytes, less one byte per `=` of padding.
- */
-function base64ByteLength(data: string): number {
-  let padding = 0;
-  if (data.endsWith('==')) {
-    padding = 2;
-  } else if (data.endsWith('=')) {
-    padding = 1;
-  }
-  return Math.floor((data.length * 3) / 4) - padding;
-}
-
-/**
- * The base64 payload of a cached chunk.
- *
- * {@link AudioCacheManager.cacheAudio} refuses a chunk without one, but the
- * caches are plain fields on the invocation context, so a chunk put there by
- * other means is treated as empty rather than trusted.
- */
-function entryData(entry: RealtimeCacheEntry): string {
-  return entry.data.data ?? '';
 }
 
 /** The decoded byte length of a cache, in bytes. */
 function cacheByteLength(cache: readonly RealtimeCacheEntry[]): number {
   return cache.reduce(
-    (total, entry) => total + base64ByteLength(entryData(entry)),
+    (total, entry) =>
+      total + Buffer.byteLength(entry.data.data ?? '', 'base64'),
     0,
   );
 }
@@ -86,7 +48,9 @@ function cacheByteLength(cache: readonly RealtimeCacheEntry[]): number {
  * in the middle of the combined payload.
  */
 function combineAudioChunks(cache: readonly RealtimeCacheEntry[]): string {
-  const chunks = cache.map((entry) => Buffer.from(entryData(entry), 'base64'));
+  const chunks = cache.map((entry) =>
+    Buffer.from(entry.data.data ?? '', 'base64'),
+  );
   return Buffer.concat(chunks).toString('base64');
 }
 
@@ -118,12 +82,9 @@ function audioFilenameExtension(mimeType: string): string {
  * Used by `LlmAgent`'s live flow when `RunConfig.saveLiveBlob` is on.
  */
 export class AudioCacheManager {
-  private readonly maxCacheBytes: number;
-
-  constructor(options: AudioCacheManagerOptions = {}) {
-    this.maxCacheBytes =
-      options.maxCacheBytes ?? DEFAULT_MAX_LIVE_AUDIO_CACHE_BYTES;
-  }
+  constructor(
+    private readonly maxCacheBytes = DEFAULT_MAX_LIVE_AUDIO_CACHE_BYTES,
+  ) {}
 
   /**
    * Appends an audio chunk to the cache for `cacheType`, evicting the oldest
@@ -144,7 +105,7 @@ export class AudioCacheManager {
       ? (invocationContext.inputRealtimeCache ??= [])
       : (invocationContext.outputRealtimeCache ??= []);
 
-    this.evictToFit(cache, base64ByteLength(audioBlob.data));
+    this.evictToFit(cache, Buffer.byteLength(audioBlob.data, 'base64'));
     cache.push({
       role: isInput ? 'user' : 'model',
       data: audioBlob,
@@ -153,8 +114,9 @@ export class AudioCacheManager {
   }
 
   /**
-   * Writes each requested cache to the artifact service as one audio artifact
-   * and returns an {@link Event} per cache written.
+   * Writes the model's audio, and optionally the user's, to the artifact
+   * service as one audio artifact each, and returns an {@link Event} per cache
+   * written.
    *
    * A cache that was written is cleared. A cache whose write failed is kept, so
    * its audio joins the next flush rather than being lost.
@@ -163,7 +125,7 @@ export class AudioCacheManager {
     invocationContext: InvocationContext,
     options: FlushCachesOptions = {},
   ): Promise<Event[]> {
-    const {flushUserAudio = true, flushModelAudio = true} = options;
+    const {flushUserAudio = true} = options;
     const flushedEvents: Event[] = [];
 
     const inputCache = invocationContext.inputRealtimeCache;
@@ -181,7 +143,7 @@ export class AudioCacheManager {
     }
 
     const outputCache = invocationContext.outputRealtimeCache;
-    if (flushModelAudio && outputCache?.length) {
+    if (outputCache?.length) {
       const event = await this.flushCache(
         invocationContext,
         outputCache,
@@ -204,24 +166,21 @@ export class AudioCacheManager {
     invocationContext: InvocationContext,
     llmResponse: LlmResponse,
   ): Promise<Event[]> {
-    if (llmResponse.interrupted) {
-      return this.flushCaches(invocationContext, {flushUserAudio: false});
+    if (!llmResponse.interrupted && !llmResponse.turnComplete) {
+      return [];
     }
-    if (llmResponse.turnComplete) {
-      return this.flushCaches(invocationContext);
-    }
-    return [];
+    return this.flushCaches(invocationContext, {
+      flushUserAudio: !llmResponse.interrupted,
+    });
   }
 
   /** Drops the oldest chunks until `incomingBytes` more would fit. */
   private evictToFit(cache: RealtimeCacheEntry[], incomingBytes: number): void {
-    let cachedBytes = cacheByteLength(cache);
     let evicted = 0;
     while (
       cache.length > 0 &&
-      cachedBytes + incomingBytes > this.maxCacheBytes
+      cacheByteLength(cache) + incomingBytes > this.maxCacheBytes
     ) {
-      cachedBytes -= base64ByteLength(entryData(cache[0]));
       cache.shift();
       evicted += 1;
     }

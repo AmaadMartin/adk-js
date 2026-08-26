@@ -110,7 +110,7 @@ describe('AudioCacheManager.cacheAudio', () => {
     // Three bytes per chunk, so only two chunks fit under a 7-byte cap.
     const chunk = (byte: number) =>
       audioBlob(Buffer.from([byte, byte, byte]).toString('base64'));
-    const capped = new AudioCacheManager({maxCacheBytes: 7});
+    const capped = new AudioCacheManager(7);
 
     capped.cacheAudio(ctx, chunk(1), 'input');
     capped.cacheAudio(ctx, chunk(2), 'input');
@@ -123,7 +123,7 @@ describe('AudioCacheManager.cacheAudio', () => {
   });
 
   it('counts a chunk seeded without data as empty when measuring the cache', () => {
-    const capped = new AudioCacheManager({maxCacheBytes: 2});
+    const capped = new AudioCacheManager(2);
     ctx.inputRealtimeCache = [
       {role: 'user', data: {mimeType: 'audio/pcm'}, timestamp: 1},
     ];
@@ -135,7 +135,7 @@ describe('AudioCacheManager.cacheAudio', () => {
   });
 
   it('keeps a single chunk that is larger than the cap on its own', () => {
-    const capped = new AudioCacheManager({maxCacheBytes: 1});
+    const capped = new AudioCacheManager(1);
 
     capped.cacheAudio(ctx, audioBlob(TWO_BYTES), 'input');
 
@@ -236,7 +236,7 @@ describe('AudioCacheManager.flushCaches', () => {
       {role: 'user', data: audioBlob(TWO_BYTES), timestamp: 2},
     ];
 
-    await manager.flushCaches(ctx, {flushModelAudio: false});
+    await manager.flushCaches(ctx);
 
     const artifact = await artifactService.loadArtifact({
       appName: APP_NAME,
@@ -245,6 +245,26 @@ describe('AudioCacheManager.flushCaches', () => {
       filename: 'adk_live_audio_storage_input_audio_1.pcm',
     });
     expect(artifact?.inlineData?.mimeType).toBe('audio/pcm');
+    expect(
+      Array.from(Buffer.from(artifact?.inlineData?.data ?? '', 'base64')),
+    ).toEqual([1, 2, 3]);
+  });
+
+  it('skips a chunk seeded without data when combining the audio', async () => {
+    ctx.inputRealtimeCache = [
+      {role: 'user', data: audioBlob(ONE_BYTE), timestamp: 1},
+      {role: 'user', data: {mimeType: 'audio/pcm'}, timestamp: 2},
+      {role: 'user', data: audioBlob(TWO_BYTES), timestamp: 3},
+    ];
+
+    await manager.flushCaches(ctx);
+
+    const artifact = await artifactService.loadArtifact({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      filename: 'adk_live_audio_storage_input_audio_1.pcm',
+    });
     expect(
       Array.from(Buffer.from(artifact?.inlineData?.data ?? '', 'base64')),
     ).toEqual([1, 2, 3]);
