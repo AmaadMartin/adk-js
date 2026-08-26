@@ -764,4 +764,76 @@ describe('A2ARemoteAgent', () => {
     const dumped = JSON.stringify(capturedParts);
     expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
   });
+
+  describe('agent card RPC target validation', () => {
+    const cardWithUrl = (url: string): AgentCard => ({
+      name: 'Remote',
+      description: 'test',
+      protocolVersion: '0.3.0',
+      defaultInputModes: [],
+      defaultOutputModes: [],
+      capabilities: {streaming: true},
+      skills: [],
+      url,
+      version: '1.0',
+    });
+
+    const drain = async (agent: RemoteA2AAgent) => {
+      for await (const _ of agent.runAsync(createMockContext())) {
+        // empty
+      }
+    };
+
+    const streamOnce = () =>
+      (async function* () {
+        yield {
+          kind: 'artifact-update',
+          artifact: {parts: [{kind: 'text', text: 'response'}]},
+        } as A2AStreamEventData;
+      })();
+
+    it('rejects an off-origin fetched card on every run', async () => {
+      vi.mocked(mockResolver.resolve).mockResolvedValue(
+        cardWithUrl('https://attacker.example.net/rpc'),
+      );
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: 'https://example.com/card.json',
+        clientFactory: mockClientFactory,
+      });
+
+      await expect(drain(agent)).rejects.toThrow(/same origin/);
+      await expect(drain(agent)).rejects.toThrow(/same origin/);
+      expect(mockClientFactory.createFromAgentCard).not.toHaveBeenCalled();
+    });
+
+    it('accepts a same-origin loopback http fetched card', async () => {
+      const card = cardWithUrl('http://localhost:8000/a2a');
+      vi.mocked(mockResolver.resolve).mockResolvedValue(card);
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(streamOnce());
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: 'http://localhost:8000/.well-known/agent-card.json',
+        clientFactory: mockClientFactory,
+      });
+
+      await drain(agent);
+
+      expect(mockClientFactory.createFromAgentCard).toHaveBeenCalledWith(card);
+    });
+
+    it('exempts a card passed as an object', async () => {
+      const card = cardWithUrl('http://internal-host:8080/rpc');
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(streamOnce());
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: card,
+        clientFactory: mockClientFactory,
+      });
+
+      await drain(agent);
+
+      expect(mockClientFactory.createFromAgentCard).toHaveBeenCalledWith(card);
+    });
+  });
 });
