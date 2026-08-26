@@ -7,7 +7,6 @@
 import {
   BaseAgent,
   ConversationScenario,
-  DEFAULT_METRIC_EVALUATOR_REGISTRY,
   EvalCase,
   EvalCaseResult,
   EvalMetricResult,
@@ -34,6 +33,7 @@ import {
   copyEvalCaseRubricsToActualInvocations,
   copyInvocationRubricsToActualInvocations,
   generateFinalEvalStatus,
+  getDefaultMetricEvaluatorRegistry,
   getSessionId,
 } from '@google/adk';
 import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
@@ -213,15 +213,15 @@ function makeInferenceResult(
 }
 
 beforeAll(() => {
-  DEFAULT_METRIC_EVALUATOR_REGISTRY.registerEvaluator(
+  getDefaultMetricEvaluatorRegistry().registerEvaluator(
     FAKE_METRIC_INFO,
     FakeEvaluator,
   );
-  DEFAULT_METRIC_EVALUATOR_REGISTRY.registerEvaluator(
+  getDefaultMetricEvaluatorRegistry().registerEvaluator(
     FAKE_SINGLE_SIDED_METRIC_INFO,
     FakeSingleSidedEvaluator,
   );
-  DEFAULT_METRIC_EVALUATOR_REGISTRY.registerEvaluator(
+  getDefaultMetricEvaluatorRegistry().registerEvaluator(
     FAKE_MISMATCH_METRIC_INFO,
     FakeMismatchEvaluator,
   );

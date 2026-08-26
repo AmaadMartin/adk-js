@@ -8,13 +8,13 @@ import {
   AgentEvaluator,
   BaseAgent,
   createEvent,
-  DEFAULT_METRIC_EVALUATOR_REGISTRY,
   EvalFailureError,
   EvalSetSchema,
   EvalStatus,
   EvaluationResult,
   Evaluator,
   Event,
+  getDefaultMetricEvaluatorRegistry,
   Invocation,
   InvocationContext,
   NUM_RUNS,
@@ -411,7 +411,7 @@ describe('AgentEvaluator.evaluate', () => {
 
   it('reports a metric that produced results but no score', async () => {
     const metricName = 'unscored_test_metric';
-    DEFAULT_METRIC_EVALUATOR_REGISTRY.registerEvaluator(
+    getDefaultMetricEvaluatorRegistry().registerEvaluator(
       {
         metricName,
         description: 'test-only metric that reports no score',

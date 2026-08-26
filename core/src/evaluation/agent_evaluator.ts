@@ -28,7 +28,7 @@ import {formatMetricDetails} from './eval_report.js';
 import {EvalSet} from './eval_set.js';
 import {EvaluationGenerator} from './evaluation_generator.js';
 import {PerInvocationResult} from './evaluator.js';
-import {DEFAULT_METRIC_EVALUATOR_REGISTRY} from './metric_evaluator_registry.js';
+import {getDefaultMetricEvaluatorRegistry} from './metric_evaluator_registry.js';
 import {StaticUserSimulator} from './simulation/static_user_simulator.js';
 
 /** Suffix that marks a file as an eval dataset. */
@@ -139,7 +139,7 @@ async function scoreEvalCase(
       });
 
     for (const metricResult of metricResults) {
-      const evaluator = DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator(
+      const evaluator = getDefaultMetricEvaluatorRegistry().getEvaluator(
         metricResult.evalMetric,
       );
       const evaluationResult = await evaluator.evaluateInvocations(

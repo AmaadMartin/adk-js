@@ -42,7 +42,7 @@ import {
 } from './evaluation_generator.js';
 import {EvaluationResult, PerInvocationResult} from './evaluator.js';
 import {
-  DEFAULT_METRIC_EVALUATOR_REGISTRY,
+  getDefaultMetricEvaluatorRegistry,
   MetricEvaluatorRegistry,
 } from './metric_evaluator_registry.js';
 import {UserSimulatorProvider} from './simulation/user_simulator_provider.js';
@@ -255,7 +255,7 @@ export class LocalEvalService extends BaseEvalService {
     this.rootAgent = options.rootAgent;
     this.evalSetsManager = options.evalSetsManager;
     this.metricEvaluatorRegistry =
-      options.metricEvaluatorRegistry ?? DEFAULT_METRIC_EVALUATOR_REGISTRY;
+      options.metricEvaluatorRegistry ?? getDefaultMetricEvaluatorRegistry();
     this.sessionService =
       options.sessionService ?? new InMemorySessionService();
     this.artifactService =

@@ -469,8 +469,8 @@ export {
 } from './evaluation/local_eval_service.js';
 export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
 export {
-  DEFAULT_METRIC_EVALUATOR_REGISTRY,
   MetricEvaluatorRegistry,
+  getDefaultMetricEvaluatorRegistry,
   registerCustomMetricsFromConfig,
 } from './evaluation/metric_evaluator_registry.js';
 export type {
