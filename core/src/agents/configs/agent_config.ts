@@ -220,16 +220,23 @@ export const AGENT_YAML_CONFIG_SCHEMAS = {
 /**
  * Validates `data` against `schema`, reporting failures as an
  * {@link AgentConfigError} that keeps the underlying validation detail.
+ *
+ * @param schema The schema to validate against.
+ * @param data The document to validate.
+ * @param sourcePath The file the document was read from, named in the error so
+ *     a caller loading a directory of configs can tell which file is broken.
  */
 export function parseWithSchema<T extends z.ZodType>(
   schema: T,
   data: unknown,
+  sourcePath?: string,
 ): z.infer<T> {
   const result = schema.safeParse(data);
   if (!result.success) {
+    const source = sourcePath ? ` in ${sourcePath}` : '';
     throw new AgentConfigError(
       AgentConfigErrorCode.INVALID_CONFIG,
-      `Invalid agent config: ${z.prettifyError(result.error)}`,
+      `Invalid agent config${source}: ${z.prettifyError(result.error)}`,
     );
   }
   return result.data;

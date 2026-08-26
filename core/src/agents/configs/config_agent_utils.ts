@@ -250,7 +250,7 @@ async function createAgentTool(
   options: LoadAgentOptions | undefined,
   inFlight: InFlightPaths,
 ): Promise<AgentTool> {
-  const parsed = parseWithSchema(agentToolArgsSchema, args);
+  const parsed = parseWithSchema(agentToolArgsSchema, args, configAbsPath);
   return new AgentTool({
     agent: await resolveRef(parsed.agent, configAbsPath, options, inFlight),
     skipSummarization: parsed.skip_summarization,
@@ -587,7 +587,11 @@ async function buildAgent(
 
   switch (BUILT_IN_AGENT_CLASSES.get(agentClass)) {
     case 'LlmAgent': {
-      const parsed = parseWithSchema(llmAgentYamlConfigSchema, config);
+      const parsed = parseWithSchema(
+        llmAgentYamlConfigSchema,
+        config,
+        configAbsPath,
+      );
       return createLlmAgent(
         parsed,
         await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
@@ -597,26 +601,42 @@ async function buildAgent(
       );
     }
     case 'LoopAgent': {
-      const parsed = parseWithSchema(loopAgentYamlConfigSchema, config);
+      const parsed = parseWithSchema(
+        loopAgentYamlConfigSchema,
+        config,
+        configAbsPath,
+      );
       return createLoopAgent(
         parsed,
         await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
       );
     }
     case 'ParallelAgent': {
-      const parsed = parseWithSchema(parallelAgentYamlConfigSchema, config);
+      const parsed = parseWithSchema(
+        parallelAgentYamlConfigSchema,
+        config,
+        configAbsPath,
+      );
       return new ParallelAgent(
         await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
       );
     }
     case 'SequentialAgent': {
-      const parsed = parseWithSchema(sequentialAgentYamlConfigSchema, config);
+      const parsed = parseWithSchema(
+        sequentialAgentYamlConfigSchema,
+        config,
+        configAbsPath,
+      );
       return new SequentialAgent(
         await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
       );
     }
     default: {
-      const parsed = parseWithSchema(baseAgentYamlConfigSchema, config);
+      const parsed = parseWithSchema(
+        baseAgentYamlConfigSchema,
+        config,
+        configAbsPath,
+      );
       return createCustomAgent(
         parsed,
         await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
