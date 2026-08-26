@@ -756,6 +756,129 @@ describe('AdkWebServer', () => {
     });
   });
 
+  describe('Memory', () => {
+    async function createSessionWithEvent(text: string): Promise<void> {
+      const session = await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'user',
+          content: {role: 'user', parts: [{text}]},
+        }),
+      });
+    }
+
+    it("adds the session's events to the memory service", async () => {
+      await createSessionWithEvent('hello world');
+
+      const response = await client.patch(
+        '/apps/testApp/users/testUser/memory',
+        {sessionId: 'sessionId'},
+      );
+
+      expect(response.status).toBe(204);
+
+      const {memories} = await memoryService.searchMemory({
+        appName: 'testApp',
+        userId: 'testUser',
+        query: 'hello',
+      });
+      expect(memories).toHaveLength(1);
+      expect(memories[0].content.parts?.[0]?.text).toBe('hello world');
+    });
+
+    it('returns 400 when sessionId is missing', async () => {
+      await createSessionWithEvent('hello world');
+
+      await expect(
+        client.patch('/apps/testApp/users/testUser/memory', {}),
+      ).rejects.toMatchObject({
+        response: {status: 400},
+        message: 'Update memory request is invalid: sessionId is required',
+      });
+
+      await expect(
+        memoryService.searchMemory({
+          appName: 'testApp',
+          userId: 'testUser',
+          query: 'hello',
+        }),
+      ).resolves.toEqual({memories: []});
+    });
+
+    it('returns 400 when sessionId is not a string', async () => {
+      await createSessionWithEvent('hello world');
+
+      await expect(
+        client.patch('/apps/testApp/users/testUser/memory', {sessionId: 42}),
+      ).rejects.toMatchObject({
+        response: {status: 400},
+        message: 'Update memory request is invalid: sessionId is required',
+      });
+
+      await expect(
+        memoryService.searchMemory({
+          appName: 'testApp',
+          userId: 'testUser',
+          query: 'hello',
+        }),
+      ).resolves.toEqual({memories: []});
+    });
+
+    it('returns 404 for an unknown session', async () => {
+      await expect(
+        client.patch('/apps/testApp/users/testUser/memory', {
+          sessionId: 'nope',
+        }),
+      ).rejects.toMatchObject({
+        response: {status: 404},
+        message: 'Session not found: nope',
+      });
+
+      await expect(
+        memoryService.searchMemory({
+          appName: 'testApp',
+          userId: 'testUser',
+          query: 'hello',
+        }),
+      ).resolves.toEqual({memories: []});
+    });
+
+    it('returns 500 when the memory service throws', async () => {
+      const failingMemoryService: BaseMemoryService = {
+        addSessionToMemory: () =>
+          Promise.reject(new Error('memory unavailable')),
+        searchMemory: () => Promise.resolve({memories: []}),
+      };
+      const failingServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        artifactService,
+        memoryService: failingMemoryService,
+      });
+      await failingServer.start();
+      await createSessionWithEvent('hello world');
+
+      try {
+        await expect(
+          new HttpClient(failingServer.url).patch(
+            '/apps/testApp/users/testUser/memory',
+            {sessionId: 'sessionId'},
+          ),
+        ).rejects.toMatchObject({
+          response: {status: 500},
+          message: 'Failed to update memory: Error: memory unavailable',
+        });
+      } finally {
+        await failingServer.stop();
+      }
+    });
+  });
+
   describe('run', () => {
     it('should return a list of events', async () => {
       await sessionService.createSession({

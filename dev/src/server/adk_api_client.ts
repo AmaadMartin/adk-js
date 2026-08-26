@@ -15,6 +15,9 @@ export interface AdkApiClientConfig {
   backendUrl: string;
 }
 
+// eslint-disable-next-line no-undef
+type FetchOptions = RequestInit;
+
 /**
  * Run agent request interface.
  *
@@ -116,7 +119,7 @@ export class AdkApiClient {
     userId: string;
     sessionId: string;
   }): Promise<void> {
-    return this.fetch<void>(
+    await this.fetchResponse(
       `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/sessions/${params.sessionId}`,
       {
         method: 'DELETE',
@@ -310,7 +313,7 @@ export class AdkApiClient {
     artifactName: string;
   }): Promise<void> {
     const url = `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/sessions/${params.sessionId}/artifacts/${params.artifactName}`;
-    return this.fetch<void>(url, {
+    await this.fetchResponse(url, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
@@ -318,11 +321,36 @@ export class AdkApiClient {
     });
   }
 
-  private async fetch<T = unknown>(
+  /**
+   * Adds every event of a finished session to the server's memory service, so
+   * a later session can recall it.
+   */
+  async addSessionToMemory(params: {
+    appName: string;
+    userId: string;
+    sessionId: string;
+  }): Promise<void> {
+    await this.fetchResponse(
+      `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/memory`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({sessionId: params.sessionId}),
+      },
+    );
+  }
+
+  /**
+   * Issues the request and throws the error the server reported. Callers that
+   * expect no response body use this directly, because a 204 carries nothing
+   * for `fetch` to parse.
+   */
+  private async fetchResponse(
     url: string,
-    // eslint-disable-next-line no-undef
-    options?: RequestInit,
-  ): Promise<T> {
+    options?: FetchOptions,
+  ): Promise<Response> {
     const response = await fetch(url, options);
 
     if (!response.ok) {
@@ -337,6 +365,13 @@ export class AdkApiClient {
       );
     }
 
-    return response.json();
+    return response;
+  }
+
+  private async fetch<T = unknown>(
+    url: string,
+    options?: FetchOptions,
+  ): Promise<T> {
+    return (await this.fetchResponse(url, options)).json();
   }
 }
