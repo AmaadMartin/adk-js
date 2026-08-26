@@ -15,6 +15,9 @@ export interface AdkApiClientConfig {
   backendUrl: string;
 }
 
+// eslint-disable-next-line no-undef
+type FetchOptions = RequestInit;
+
 /**
  * Run agent request interface.
  *
@@ -346,8 +349,7 @@ export class AdkApiClient {
    */
   private async fetchResponse(
     url: string,
-    // eslint-disable-next-line no-undef
-    options?: RequestInit,
+    options?: FetchOptions,
   ): Promise<Response> {
     const response = await fetch(url, options);
 
@@ -368,8 +370,7 @@ export class AdkApiClient {
 
   private async fetch<T = unknown>(
     url: string,
-    // eslint-disable-next-line no-undef
-    options?: RequestInit,
+    options?: FetchOptions,
   ): Promise<T> {
     return (await this.fetchResponse(url, options)).json();
   }
