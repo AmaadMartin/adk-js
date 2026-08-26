@@ -1112,4 +1112,193 @@ describe('Runner.runLive', () => {
 
     expect(llm.connection!.closed).toBe(true);
   });
+
+  describe('saveLiveBlob', () => {
+    const SESSION_KEY = {
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    };
+    /** Base64 for the single byte 0x01. */
+    const USER_AUDIO = 'AQ==';
+    /** Base64 for the single byte 0x02. */
+    const MODEL_AUDIO = 'Ag==';
+    const MODEL_AUDIO_CONTENT: Content = {
+      role: 'model',
+      parts: [{inlineData: {data: MODEL_AUDIO, mimeType: 'audio/pcm'}}],
+    };
+
+    function makeRunner(
+      llm: FakeLiveLlm,
+      artifacts?: InMemoryArtifactService,
+    ): Runner {
+      return new Runner({
+        appName: TEST_APP_ID,
+        agent: new LlmAgent({name: 'agent', model: llm}),
+        sessionService,
+        artifactService: artifacts,
+      });
+    }
+
+    /** Runs a live turn that sends one user audio blob, and collects the events. */
+    async function runTurn(
+      runner: Runner,
+      saveLiveBlob?: boolean,
+    ): Promise<Event[]> {
+      const queue = new LiveRequestQueue();
+      queue.sendRealtime({data: USER_AUDIO, mimeType: 'audio/pcm'});
+      queue.close();
+      const events: Event[] = [];
+      for await (const event of runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue: queue,
+        runConfig: saveLiveBlob === undefined ? undefined : {saveLiveBlob},
+      })) {
+        events.push(event);
+      }
+      return events;
+    }
+
+    function fileUris(events: Event[]): string[] {
+      return events.flatMap(
+        (event) =>
+          event.content?.parts
+            ?.map((part) => part.fileData?.fileUri)
+            .filter((uri): uri is string => uri !== undefined) ?? [],
+      );
+    }
+
+    async function persistedEvents(): Promise<Event[]> {
+      const session = await sessionService.getSession(SESSION_KEY);
+      return session!.events;
+    }
+
+    it('writes one artifact per direction and references it from the session', async () => {
+      const llm = new FakeLiveLlm([
+        {content: MODEL_AUDIO_CONTENT},
+        {content: MODEL_AUDIO_CONTENT},
+        {turnComplete: true},
+      ]);
+
+      const events = await runTurn(makeRunner(llm, artifactService), true);
+
+      const keys = await artifactService.listArtifactKeys(SESSION_KEY);
+      expect(keys).toHaveLength(2);
+      expect(
+        keys.some((key) =>
+          key.startsWith('adk_live_audio_storage_input_audio_'),
+        ),
+      ).toBe(true);
+      expect(
+        keys.some((key) =>
+          key.startsWith('adk_live_audio_storage_output_audio_'),
+        ),
+      ).toBe(true);
+
+      const uris = fileUris(events);
+      expect(uris).toHaveLength(2);
+      for (const uri of uris) {
+        expect(uri).toMatch(
+          new RegExp(
+            `^artifact://${TEST_APP_ID}/${TEST_USER_ID}/${TEST_SESSION_ID}/_adk_live/adk_live_audio_storage_(input|output)_audio_\\d+\\.pcm#0$`,
+          ),
+        );
+      }
+
+      // The model sent two chunks; the flushed artifact holds both.
+      const outputKey = keys.find((key) => key.includes('output_audio'))!;
+      const combined = await artifactService.loadArtifact({
+        ...SESSION_KEY,
+        filename: outputKey,
+      });
+      expect(
+        Array.from(Buffer.from(combined?.inlineData?.data ?? '', 'base64')),
+      ).toEqual([2, 2]);
+
+      const persisted = await persistedEvents();
+      expect(fileUris(persisted)).toEqual(uris);
+      expect(
+        persisted.some((event) =>
+          event.content?.parts?.some((part) => part.inlineData),
+        ),
+      ).toBe(false);
+      expect(events.some((event) => event.turnComplete)).toBe(true);
+    });
+
+    it('writes nothing when saveLiveBlob is off', async () => {
+      const llm = new FakeLiveLlm([
+        {content: MODEL_AUDIO_CONTENT},
+        {turnComplete: true},
+      ]);
+
+      const events = await runTurn(makeRunner(llm, artifactService));
+
+      expect(await artifactService.listArtifactKeys(SESSION_KEY)).toEqual([]);
+      expect(fileUris(events)).toEqual([]);
+      expect(fileUris(await persistedEvents())).toEqual([]);
+      expect(events.some((event) => event.turnComplete)).toBe(true);
+    });
+
+    it('flushes the model audio only on an interruption', async () => {
+      const llm = new FakeLiveLlm([
+        {content: MODEL_AUDIO_CONTENT},
+        {content: MODEL_AUDIO_CONTENT},
+        {interrupted: true},
+      ]);
+
+      const events = await runTurn(makeRunner(llm, artifactService), true);
+
+      const keys = await artifactService.listArtifactKeys(SESSION_KEY);
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).toContain('adk_live_audio_storage_output_audio_');
+      expect(fileUris(events)).toHaveLength(1);
+      expect(events.some((event) => event.interrupted)).toBe(true);
+    });
+
+    it('still sends a malformed audio blob it cannot cache', async () => {
+      const llm = new FakeLiveLlm([
+        {content: MODEL_AUDIO_CONTENT},
+        {turnComplete: true},
+      ]);
+      const malformed: Blob = {data: '', mimeType: 'audio/pcm'};
+      const queue = new LiveRequestQueue();
+      queue.sendRealtime(malformed);
+      queue.close();
+
+      const events: Event[] = [];
+      for await (const event of makeRunner(llm, artifactService).runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue: queue,
+        runConfig: {saveLiveBlob: true},
+      })) {
+        events.push(event);
+      }
+
+      expect(llm.connection!.realtimeCalls).toEqual([malformed]);
+      const keys = await artifactService.listArtifactKeys(SESSION_KEY);
+      expect(keys).toEqual([
+        expect.stringContaining('adk_live_audio_storage_output_audio_'),
+      ]);
+      expect(events.some((event) => event.turnComplete)).toBe(true);
+    });
+
+    it('runs normally when saveLiveBlob is on without an artifact service', async () => {
+      const llm = new FakeLiveLlm([
+        {content: MODEL_AUDIO_CONTENT},
+        {turnComplete: true},
+      ]);
+
+      const events = await runTurn(makeRunner(llm), true);
+
+      expect(fileUris(events)).toEqual([]);
+      expect(events.some((event) => event.turnComplete)).toBe(true);
+      expect(
+        events.some((event) =>
+          event.content?.parts?.some((part) => part.inlineData),
+        ),
+      ).toBe(true);
+    });
+  });
 });

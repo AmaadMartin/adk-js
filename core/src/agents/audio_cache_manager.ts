@@ -59,10 +59,21 @@ function base64ByteLength(data: string): number {
   return Math.floor((data.length * 3) / 4) - padding;
 }
 
+/**
+ * The base64 payload of a cached chunk.
+ *
+ * {@link AudioCacheManager.cacheAudio} refuses a chunk without one, but the
+ * caches are plain fields on the invocation context, so a chunk put there by
+ * other means is treated as empty rather than trusted.
+ */
+function entryData(entry: RealtimeCacheEntry): string {
+  return entry.data.data ?? '';
+}
+
 /** The decoded byte length of a cache, in bytes. */
 function cacheByteLength(cache: readonly RealtimeCacheEntry[]): number {
   return cache.reduce(
-    (total, entry) => total + base64ByteLength(entry.data.data ?? ''),
+    (total, entry) => total + base64ByteLength(entryData(entry)),
     0,
   );
 }
@@ -75,9 +86,7 @@ function cacheByteLength(cache: readonly RealtimeCacheEntry[]): number {
  * in the middle of the combined payload.
  */
 function combineAudioChunks(cache: readonly RealtimeCacheEntry[]): string {
-  const chunks = cache.map((entry) =>
-    Buffer.from(entry.data.data ?? '', 'base64'),
-  );
+  const chunks = cache.map((entry) => Buffer.from(entryData(entry), 'base64'));
   return Buffer.concat(chunks).toString('base64');
 }
 
@@ -89,7 +98,7 @@ function combineAudioChunks(cache: readonly RealtimeCacheEntry[]): string {
  * `pcm`) and any remaining character outside `[a-z0-9]` is replaced.
  */
 function audioFilenameExtension(mimeType: string): string {
-  const subtype = mimeType.split('/').pop() ?? '';
+  const subtype = mimeType.slice(mimeType.lastIndexOf('/') + 1);
   const sanitized = subtype
     .split(';')[0]
     .toLowerCase()
@@ -212,7 +221,7 @@ export class AudioCacheManager {
       cache.length > 0 &&
       cachedBytes + incomingBytes > this.maxCacheBytes
     ) {
-      cachedBytes -= base64ByteLength(cache[0].data.data ?? '');
+      cachedBytes -= base64ByteLength(entryData(cache[0]));
       cache.shift();
       evicted += 1;
     }
