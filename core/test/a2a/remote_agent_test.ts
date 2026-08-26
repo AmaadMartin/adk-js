@@ -135,6 +135,7 @@ describe('A2ARemoteAgent', () => {
 
     expect(mockResolver.resolve).toHaveBeenCalledWith(
       'https://example.com/card.json',
+      '/card.json',
     );
     expect(mockClientFactory.createFromAgentCard).toHaveBeenCalledWith(card);
     expect(mockClient.sendMessageStream).toHaveBeenCalled();
