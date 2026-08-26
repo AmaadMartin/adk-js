@@ -28,6 +28,15 @@ import {
 
 const {resolveMock} = vi.hoisted(() => ({resolveMock: vi.fn()}));
 
+/** The resolver's own fallback, `AGENT_CARD_PATH` in `@a2a-js/sdk`. */
+const WELL_KNOWN_CARD_PATH = '.well-known/agent-card.json';
+
+/** The URL the resolver fetches, given the arguments it was called with. */
+function fetchedCardUrl(): string {
+  const [baseUrl, cardUrl] = resolveMock.mock.calls[0] as [string, string?];
+  return new URL(cardUrl ?? WELL_KNOWN_CARD_PATH, baseUrl).href;
+}
+
 vi.mock('@a2a-js/sdk/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@a2a-js/sdk/client')>();
   return {
@@ -285,7 +294,7 @@ describe('Agent Card', () => {
 
       await expect(resolveAgentCard(source)).resolves.toBe(remoteCard);
 
-      expect(resolveMock).toHaveBeenCalledWith(source, '/my-card.json');
+      expect(fetchedCardUrl()).toBe('https://example.com/my-card.json');
     });
 
     it('honours a nested card path', async () => {
@@ -293,7 +302,7 @@ describe('Agent Card', () => {
 
       await resolveAgentCard(source);
 
-      expect(resolveMock).toHaveBeenCalledWith(source, '/a2a/agent');
+      expect(fetchedCardUrl()).toBe('https://example.com/a2a/agent');
     });
 
     it('keeps the query string on the card path', async () => {
@@ -301,7 +310,32 @@ describe('Agent Card', () => {
 
       await resolveAgentCard(source);
 
-      expect(resolveMock).toHaveBeenCalledWith(source, '/agent.json?v=1');
+      expect(fetchedCardUrl()).toBe('http://localhost:8000/agent.json?v=1');
+    });
+
+    it('keeps a doubled slash on the configured origin', async () => {
+      const source = 'https://example.com//evil.com/card.json';
+
+      await resolveAgentCard(source);
+
+      expect(new URL(fetchedCardUrl()).host).toBe('example.com');
+      expect(fetchedCardUrl()).toBe('https://example.com//evil.com/card.json');
+    });
+
+    it('keeps the userinfo in the card URL', async () => {
+      const source = 'https://user:pw@example.com/card.json';
+
+      await resolveAgentCard(source);
+
+      expect(fetchedCardUrl()).toBe('https://user:pw@example.com/card.json');
+    });
+
+    it('drops the fragment from the card URL', async () => {
+      const source = 'https://example.com/card.json#skills';
+
+      await resolveAgentCard(source);
+
+      expect(fetchedCardUrl()).toBe('https://example.com/card.json');
     });
 
     it('falls back to the well-known path for a bare origin', async () => {
@@ -310,6 +344,9 @@ describe('Agent Card', () => {
       await resolveAgentCard(source);
 
       expect(resolveMock).toHaveBeenCalledWith(source, undefined);
+      expect(fetchedCardUrl()).toBe(
+        'https://example.com/.well-known/agent-card.json',
+      );
     });
 
     it('falls back for an origin with a trailing slash', async () => {
@@ -318,6 +355,9 @@ describe('Agent Card', () => {
       await resolveAgentCard(source);
 
       expect(resolveMock).toHaveBeenCalledWith(source, undefined);
+      expect(fetchedCardUrl()).toBe(
+        'https://example.com/.well-known/agent-card.json',
+      );
     });
 
     it('falls back for a mount path with a trailing slash', async () => {
@@ -326,6 +366,9 @@ describe('Agent Card', () => {
       await resolveAgentCard(source);
 
       expect(resolveMock).toHaveBeenCalledWith(source, undefined);
+      expect(fetchedCardUrl()).toBe(
+        'https://example.com/a2a/weather_agent/.well-known/agent-card.json',
+      );
     });
 
     it('throws on a malformed card URL', async () => {

@@ -25,6 +25,9 @@ const card: AgentCard = {
 /** Where an A2A server mounted on `/a2a/agent/` serves its card. */
 const MOUNTED_CARD_PATH = '/a2a/agent/.well-known/agent-card.json';
 
+/** A path whose doubled slash reads as a host in a relative URL reference. */
+const DOUBLED_SLASH_CARD_PATH = '//example.com/card.json';
+
 describe('resolveAgentCard against a real server', () => {
   const requested: string[] = [];
   let server: http.Server;
@@ -33,7 +36,11 @@ describe('resolveAgentCard against a real server', () => {
   beforeAll(async () => {
     server = http.createServer((req, res) => {
       requested.push(req.url ?? '');
-      if (req.url === '/my-card.json' || req.url === MOUNTED_CARD_PATH) {
+      if (
+        req.url === '/my-card.json' ||
+        req.url === MOUNTED_CARD_PATH ||
+        req.url === DOUBLED_SLASH_CARD_PATH
+      ) {
         res.writeHead(200, {'content-type': 'application/json'});
         res.end(JSON.stringify(card));
         return;
@@ -60,7 +67,9 @@ describe('resolveAgentCard against a real server', () => {
   it('requests the well-known path for a bare origin', async () => {
     requested.length = 0;
 
-    await expect(resolveAgentCard(origin)).rejects.toThrow();
+    await expect(resolveAgentCard(origin)).rejects.toThrow(
+      `Failed to fetch Agent Card from ${origin}/.well-known/agent-card.json: 404`,
+    );
 
     expect(requested).toEqual(['/.well-known/agent-card.json']);
   });
@@ -72,5 +81,16 @@ describe('resolveAgentCard against a real server', () => {
 
     expect(resolved.name).toBe('live');
     expect(requested).toEqual([MOUNTED_CARD_PATH]);
+  });
+
+  it('stays on the configured origin when the path has a doubled slash', async () => {
+    requested.length = 0;
+
+    const resolved = await resolveAgentCard(
+      `${origin}${DOUBLED_SLASH_CARD_PATH}`,
+    );
+
+    expect(resolved.name).toBe('live');
+    expect(requested).toEqual([DOUBLED_SLASH_CARD_PATH]);
   });
 });
