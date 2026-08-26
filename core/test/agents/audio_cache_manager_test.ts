@@ -4,18 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  InMemoryArtifactService,
-  InvocationContext,
-  LlmAgent,
-  PluginManager,
-  Session,
-} from '@google/adk';
 import {Blob} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {AudioCacheManager} from '../../src/agents/audio_cache_manager.js';
+import {InvocationContext} from '../../src/agents/invocation_context.js';
+import {LlmAgent} from '../../src/agents/llm_agent.js';
+import {InMemoryArtifactService} from '../../src/artifacts/in_memory_artifact_service.js';
 import {ScopedArtifactService} from '../../src/artifacts/scoped_artifact_service.js';
+import {PluginManager} from '../../src/plugins/plugin_manager.js';
+import {Session} from '../../src/sessions/session.js';
 
 const APP_NAME = 'test-app';
 const USER_ID = 'test-user';
@@ -179,6 +177,17 @@ describe('AudioCacheManager.flushCaches', () => {
       sessionId: SESSION_ID,
     });
     expect(keys).toHaveLength(2);
+  });
+
+  it('empties the caches a cloned context shares with the original', async () => {
+    manager.cacheAudio(ctx, audioBlob(ONE_BYTE), 'input');
+    manager.cacheAudio(ctx, audioBlob(ONE_BYTE), 'output');
+    const subAgentCtx = ctx.clone();
+
+    await manager.flushCaches(subAgentCtx);
+
+    expect(ctx.inputRealtimeCache).toHaveLength(0);
+    expect(ctx.outputRealtimeCache).toHaveLength(0);
   });
 
   it('flushes only the direction the caller asked for', async () => {

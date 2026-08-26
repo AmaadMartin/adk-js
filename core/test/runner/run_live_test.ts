@@ -12,12 +12,16 @@ import {
   Event,
   InMemoryArtifactService,
   InMemorySessionService,
+  InvocationContext,
   LiveRequestQueue,
   LlmAgent,
   LlmRequest,
   LlmResponse,
+  PluginManager,
+  RealtimeCacheEntry,
   RunAsyncToolRequest,
   Runner,
+  Session,
 } from '@google/adk';
 import {Blob, Content, FunctionDeclaration, Modality} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
@@ -1300,5 +1304,100 @@ describe('Runner.runLive', () => {
         ),
       ).toBe(true);
     });
+  });
+});
+
+describe('LlmAgent live audio caching', () => {
+  const MODEL_AUDIO_CONTENT: Content = {
+    role: 'model',
+    parts: [{inlineData: {data: 'Ag==', mimeType: 'audio/pcm'}}],
+  };
+
+  /**
+   * A live context whose caches already exist, so the agent's own child context
+   * shares the same arrays and the test can read what was cached. Nothing is
+   * flushed: there is no artifact service, which is what keeps the audio in the
+   * caches for the assertions.
+   */
+  function liveContext(
+    agent: LlmAgent,
+    queue: LiveRequestQueue,
+    saveLiveBlob?: boolean,
+  ): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'inv-live',
+      agent,
+      session: {
+        id: TEST_SESSION_ID,
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        state: {},
+        events: [],
+        lastUpdateTime: Date.now(),
+      } as unknown as Session,
+      pluginManager: new PluginManager(),
+      liveRequestQueue: queue,
+      runConfig: {saveLiveBlob},
+      inputRealtimeCache: [],
+      outputRealtimeCache: [],
+    });
+  }
+
+  async function runAgentTurn(options: {
+    saveLiveBlob?: boolean;
+    userBlob?: Blob;
+    modelContent?: Content;
+  }): Promise<{input: RealtimeCacheEntry[]; output: RealtimeCacheEntry[]}> {
+    const llm = new FakeLiveLlm([
+      {content: options.modelContent ?? MODEL_AUDIO_CONTENT},
+      {turnComplete: true},
+    ]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const queue = new LiveRequestQueue();
+    queue.sendRealtime(
+      options.userBlob ?? {data: 'AQ==', mimeType: 'audio/pcm'},
+    );
+    queue.close();
+    const ctx = liveContext(agent, queue, options.saveLiveBlob);
+
+    for await (const _ of agent.runLive(ctx)) {
+      // drain
+    }
+
+    return {
+      input: ctx.inputRealtimeCache ?? [],
+      output: ctx.outputRealtimeCache ?? [],
+    };
+  }
+
+  it('caches both directions when saveLiveBlob is on', async () => {
+    const {input, output} = await runAgentTurn({saveLiveBlob: true});
+
+    expect(input.map((entry) => entry.role)).toEqual(['user']);
+    expect(output.map((entry) => entry.role)).toEqual(['model']);
+  });
+
+  it('caches nothing when saveLiveBlob is off', async () => {
+    const {input, output} = await runAgentTurn({});
+
+    expect(input).toEqual([]);
+    expect(output).toEqual([]);
+  });
+
+  it('caches the audio parts of a turn and skips the other media', async () => {
+    const {input, output} = await runAgentTurn({
+      saveLiveBlob: true,
+      userBlob: {data: 'AQ==', mimeType: 'video/mp4'},
+      modelContent: {
+        role: 'model',
+        parts: [
+          {inlineData: {data: 'Aw==', mimeType: 'image/png'}},
+          {inlineData: {data: 'Ag==', mimeType: 'audio/pcm'}},
+        ],
+      },
+    });
+
+    expect(input).toEqual([]);
+    expect(output.map((entry) => entry.data.mimeType)).toEqual(['audio/pcm']);
   });
 });
