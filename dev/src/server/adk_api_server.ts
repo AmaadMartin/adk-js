@@ -97,12 +97,7 @@ interface ServerOptions {
   registerProcessors?: (tracerProvider: TracerProvider) => void;
 }
 
-/**
- * Body accepted by `POST /apps/../users/../sessions/../artifacts`.
- *
- * Every field is optional because the body is untrusted input. The route
- * checks `filename` and `artifact` before it calls the artifact service.
- */
+/** Untrusted body of `POST /apps/../users/../sessions/../artifacts`. */
 interface SaveArtifactRequestBody {
   filename?: string;
   artifact?: Part;
