@@ -7,7 +7,6 @@
 import * as fs from 'node:fs';
 import {z} from 'zod';
 
-import {CodeConfigSchema} from '../agents/common_configs.js';
 import {logger} from '../utils/logger.js';
 import {toCamelCase, toSnakeCaseKey} from '../utils/object_notation_utils.js';
 import {DEFAULT_LIVE_TIMEOUT_SECONDS} from './constants.js';
@@ -17,6 +16,27 @@ import {
   EvalMetric,
   MetricInfoSchema,
 } from './eval_metrics.js';
+
+/**
+ * Code reference config for a variable, a function, or a class.
+ *
+ * Only references an object by name. Declarative configs cannot pass
+ * constructor arguments, so build the object elsewhere and reference its fully
+ * qualified name here.
+ *
+ * Rejects unknown keys (parity with adk-python's `extra="forbid"`).
+ */
+export const CodeConfigSchema = z
+  .object({
+    /** The fully qualified name of the variable, function, or class. */
+    name: z.string(),
+  })
+  .strict();
+
+/**
+ * Code reference config for a variable, a function, or a class.
+ */
+export type CodeConfig = z.infer<typeof CodeConfigSchema>;
 
 /**
  * Configuration for a custom metric.

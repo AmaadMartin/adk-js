@@ -6,14 +6,18 @@
 
 import {describe, expect, it} from 'vitest';
 
+import {BaseAgent} from '../../src/agents/base_agent.js';
 import {Context} from '../../src/agents/context.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {
   LLM_REQUEST_ID_KEY,
   RequestIntercepterPlugin,
 } from '../../src/evaluation/request_intercepter_plugin.js';
+import {Event} from '../../src/events/event.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
 import {LlmResponse} from '../../src/models/llm_response.js';
+import {PluginManager} from '../../src/plugins/plugin_manager.js';
+import {createSession} from '../../src/sessions/session.js';
 
 function makeLlmRequest(): LlmRequest {
   return {
@@ -24,11 +28,19 @@ function makeLlmRequest(): LlmRequest {
   };
 }
 
+/** An agent that yields nothing; these tests never run it. */
+class SilentAgent extends BaseAgent {
+  protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {}
+  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {}
+}
+
 function makeCallbackContext(): Context {
-  const invocationContext = {
-    session: {state: {}},
-    abortSignal: undefined,
-  } as unknown as InvocationContext;
+  const invocationContext = new InvocationContext({
+    invocationId: 'inv1',
+    agent: new SilentAgent({name: 'test_agent'}),
+    session: createSession({id: 'session1', appName: 'test_app'}),
+    pluginManager: new PluginManager([]),
+  });
   return new Context({invocationContext});
 }
 

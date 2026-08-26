@@ -11,30 +11,39 @@ import {
   EvalCaseResult,
   EvalMetricResult,
   EvalSet,
+  EvalSetResult,
   EvalSetResultsManager,
   EvalSetsManager,
   EvalStatus,
-  EvaluateConfig,
+  EvaluateDeps,
   EvaluationGenerator,
   EvaluationResult,
   Evaluator,
   EvaluatorConstructorOptions,
+  Event,
+  InMemoryArtifactService,
+  InMemorySessionService,
+  InferenceDeps,
   InferenceResult,
   InferenceStatus,
   Invocation,
   LocalEvalService,
   LocalEvalServiceOptions,
   MetricInfo,
+  NextUserMessage,
   NotFoundError,
   Rubric,
+  Status as SimulatorStatus,
   UserSimulator,
   UserSimulatorProvider,
   addRubricsToInvocation,
   copyEvalCaseRubricsToActualInvocations,
   copyInvocationRubricsToActualInvocations,
+  evaluateSingleInferenceResult,
   generateFinalEvalStatus,
   getDefaultMetricEvaluatorRegistry,
   getSessionId,
+  performInferenceSingleEvalItem,
 } from '@google/adk';
 import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 
@@ -144,45 +153,124 @@ class FakeMismatchEvaluator extends Evaluator {
 
 // --- Test helpers. ---
 
-interface LocalEvalServicePrivates {
-  evaluateSingleInferenceResult(
-    inferenceResult: InferenceResult,
-    evaluateConfig: EvaluateConfig,
-  ): Promise<[InferenceResult, EvalCaseResult]>;
-  performInferenceSingleEvalItem(params: {
-    appName: string;
-    evalSetId: string;
-    evalCase: EvalCase;
-  }): Promise<InferenceResult>;
+/** An agent that yields nothing, for tests that never run inference. */
+class SilentAgent extends BaseAgent {
+  protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {}
+  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {}
+}
+
+/** A simulator that always reports it has nothing more to say. */
+class SilentUserSimulator extends UserSimulator {
+  async getNextUserMessage(): Promise<NextUserMessage> {
+    return {status: SimulatorStatus.NO_MESSAGE};
+  }
+}
+
+/** A provider that hands back one simulator, whatever the eval case. */
+class FixedUserSimulatorProvider extends UserSimulatorProvider {
+  constructor(private readonly simulator: UserSimulator) {
+    super();
+  }
+
+  override provide(): UserSimulator {
+    return this.simulator;
+  }
+}
+
+const SCENARIO: ConversationScenario = {
+  startingPrompt: 'start',
+  conversationPlan: 'plan',
+};
+
+/**
+ * An {@link EvalSetsManager} whose two read methods are vitest mocks. The
+ * write methods reject, so a test that reaches one fails loudly instead of
+ * silently doing nothing.
+ */
+class FakeEvalSetsManager implements EvalSetsManager {
+  getEvalSet = vi.fn<EvalSetsManager['getEvalSet']>();
+  getEvalCase = vi.fn<EvalSetsManager['getEvalCase']>();
+
+  createEvalSet(): Promise<EvalSet> {
+    return Promise.reject(new Error('createEvalSet is not used by this test.'));
+  }
+  listEvalSets(): Promise<string[]> {
+    return Promise.reject(new Error('listEvalSets is not used by this test.'));
+  }
+  addEvalCase(): Promise<void> {
+    return Promise.reject(new Error('addEvalCase is not used by this test.'));
+  }
+  updateEvalCase(): Promise<void> {
+    return Promise.reject(
+      new Error('updateEvalCase is not used by this test.'),
+    );
+  }
+  deleteEvalCase(): Promise<void> {
+    return Promise.reject(
+      new Error('deleteEvalCase is not used by this test.'),
+    );
+  }
+}
+
+/** An {@link EvalSetResultsManager} that records what was saved. */
+class FakeEvalSetResultsManager implements EvalSetResultsManager {
+  saveEvalSetResult = vi.fn<EvalSetResultsManager['saveEvalSetResult']>(
+    async () => {},
+  );
+
+  getEvalSetResult(): Promise<EvalSetResult> {
+    return Promise.reject(
+      new Error('getEvalSetResult is not used by this test.'),
+    );
+  }
+  listEvalSetResults(): Promise<string[]> {
+    return Promise.reject(
+      new Error('listEvalSetResults is not used by this test.'),
+    );
+  }
 }
 
 function makeService(options: Partial<LocalEvalServiceOptions> = {}): {
   service: LocalEvalService;
-  privates: LocalEvalServicePrivates;
-  evalSetsManager: EvalSetsManager;
-  evalSetResultsManager: EvalSetResultsManager;
+  evalSetsManager: FakeEvalSetsManager;
+  evalSetResultsManager: FakeEvalSetResultsManager;
   rootAgent: BaseAgent;
+  evaluateDeps: EvaluateDeps;
+  inferenceDeps: InferenceDeps;
 } {
-  const evalSetsManager = {
-    getEvalSet: vi.fn(),
-    getEvalCase: vi.fn(),
-  } as unknown as EvalSetsManager;
-  const evalSetResultsManager = {
-    saveEvalSetResult: vi.fn(),
-  } as unknown as EvalSetResultsManager;
-  const rootAgent = {name: 'test_agent'} as unknown as BaseAgent;
-  const service = new LocalEvalService({
+  const evalSetsManager = new FakeEvalSetsManager();
+  const evalSetResultsManager = new FakeEvalSetResultsManager();
+  const rootAgent = new SilentAgent({name: 'test_agent'});
+  const resolved = {
     rootAgent,
     evalSetsManager,
     evalSetResultsManager,
     ...options,
-  });
+  };
+  const service = new LocalEvalService(resolved);
+  const sessionService =
+    resolved.sessionService ?? new InMemorySessionService();
   return {
     service,
-    privates: service as unknown as LocalEvalServicePrivates,
     evalSetsManager,
     evalSetResultsManager,
-    rootAgent,
+    rootAgent: resolved.rootAgent,
+    evaluateDeps: {
+      evalSetsManager: resolved.evalSetsManager,
+      sessionService,
+      metricEvaluatorRegistry:
+        resolved.metricEvaluatorRegistry ?? getDefaultMetricEvaluatorRegistry(),
+    },
+    inferenceDeps: {
+      rootAgent: resolved.rootAgent,
+      userSimulatorProvider:
+        resolved.userSimulatorProvider ?? new UserSimulatorProvider(),
+      sessionIdSupplier: resolved.sessionIdSupplier ?? getSessionId,
+      sessionService,
+      artifactService:
+        resolved.artifactService ?? new InMemoryArtifactService(),
+      memoryService: resolved.memoryService,
+    },
   };
 }
 
@@ -196,8 +284,20 @@ function makeInvocation(userText: string, finalText?: string): Invocation {
   };
 }
 
+function makeEvalSet(
+  evalCases: EvalCase[],
+  evalSetId = 'test_eval_set',
+): EvalSet {
+  return {evalSetId, name: evalSetId, evalCases, creationTimestamp: 0};
+}
+
 function makeEvalCase(fields: Partial<EvalCase>): EvalCase {
-  return {evalId: 'case1', ...fields} as unknown as EvalCase;
+  return {
+    evalId: 'case1',
+    creationTimestamp: 0,
+    finalSessionState: {},
+    ...fields,
+  };
 }
 
 function makeInferenceResult(
@@ -233,20 +333,16 @@ afterEach(() => {
 
 describe('LocalEvalService.performInference', () => {
   it('streams one result per eval case', async () => {
-    const {service, privates, evalSetsManager} = makeService();
-    const evalSet = {
-      evalSetId: 'test_eval_set',
-      evalCases: [
-        makeEvalCase({evalId: 'case1', conversation: []}),
-        makeEvalCase({evalId: 'case2', conversation: []}),
-      ],
-    } as unknown as EvalSet;
+    const {service, evalSetsManager} = makeService();
+    const evalSet = makeEvalSet([
+      makeEvalCase({evalId: 'case1', conversation: []}),
+      makeEvalCase({evalId: 'case2', conversation: []}),
+    ]);
     vi.mocked(evalSetsManager.getEvalSet).mockResolvedValue(evalSet);
 
-    const mockResult = makeInferenceResult({evalCaseId: 'case1'});
     const spy = vi
-      .spyOn(privates, 'performInferenceSingleEvalItem')
-      .mockResolvedValue(mockResult);
+      .spyOn(EvaluationGenerator, 'generateInferencesFromRootAgent')
+      .mockResolvedValue([]);
 
     const results: InferenceResult[] = [];
     for await (const result of service.performInference({
@@ -261,8 +357,10 @@ describe('LocalEvalService.performInference', () => {
       results.push(result);
     }
 
-    expect(results).toHaveLength(2);
-    expect(results[0]).toBe(mockResult);
+    expect(results.map((result) => result.evalCaseId).sort()).toEqual([
+      'case1',
+      'case2',
+    ]);
     expect(evalSetsManager.getEvalSet).toHaveBeenCalledWith(
       'test_app',
       'test_eval_set',
@@ -271,19 +369,17 @@ describe('LocalEvalService.performInference', () => {
   });
 
   it('filters eval cases by evalCaseIds', async () => {
-    const {service, privates, evalSetsManager} = makeService();
-    const evalSet = {
-      evalSetId: 'test_eval_set',
-      evalCases: [
-        makeEvalCase({evalId: 'case1', conversation: []}),
-        makeEvalCase({evalId: 'case2', conversation: []}),
-        makeEvalCase({evalId: 'case3', conversation: []}),
-      ],
-    } as unknown as EvalSet;
+    const {service, evalSetsManager} = makeService();
+    const evalSet = makeEvalSet([
+      makeEvalCase({evalId: 'case1', conversation: []}),
+      makeEvalCase({evalId: 'case2', conversation: []}),
+      makeEvalCase({evalId: 'case3', conversation: []}),
+    ]);
     vi.mocked(evalSetsManager.getEvalSet).mockResolvedValue(evalSet);
-    const spy = vi
-      .spyOn(privates, 'performInferenceSingleEvalItem')
-      .mockResolvedValue(makeInferenceResult({evalCaseId: 'case1'}));
+    vi.spyOn(
+      EvaluationGenerator,
+      'generateInferencesFromRootAgent',
+    ).mockResolvedValue([]);
 
     const results: InferenceResult[] = [];
     for await (const result of service.performInference({
@@ -299,25 +395,17 @@ describe('LocalEvalService.performInference', () => {
       results.push(result);
     }
 
-    expect(results).toHaveLength(2);
-    expect(spy).toHaveBeenCalledWith({
-      appName: 'test_app',
-      evalSetId: 'test_eval_set',
-      evalCase: evalSet.evalCases[0],
-    });
-    expect(spy).toHaveBeenCalledWith({
-      appName: 'test_app',
-      evalSetId: 'test_eval_set',
-      evalCase: evalSet.evalCases[2],
-    });
+    expect(results.map((result) => result.evalCaseId)).toEqual([
+      'case1',
+      'case3',
+    ]);
   });
 
   it('throws when live inference is requested', async () => {
     const {service, evalSetsManager} = makeService();
-    vi.mocked(evalSetsManager.getEvalSet).mockResolvedValue({
-      evalSetId: 'test_eval_set',
-      evalCases: [makeEvalCase({evalId: 'case1', conversation: []})],
-    } as unknown as EvalSet);
+    vi.mocked(evalSetsManager.getEvalSet).mockResolvedValue(
+      makeEvalSet([makeEvalCase({evalId: 'case1', conversation: []})]),
+    );
 
     await expect(
       (async () => {
@@ -594,7 +682,7 @@ describe('LocalEvalService.evaluate', () => {
 
 describe('LocalEvalService.evaluateSingleInferenceResult', () => {
   it('scores each invocation for a two-sided metric', async () => {
-    const {privates, evalSetsManager} = makeService();
+    const {evaluateDeps, evalSetsManager} = makeService();
     const inferences = [
       makeInvocation('user', 'final'),
       makeInvocation('user', 'final'),
@@ -609,7 +697,8 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
       makeEvalCase({conversation}),
     );
 
-    const [, result] = await privates.evaluateSingleInferenceResult(
+    const [, result] = await evaluateSingleInferenceResult(
+      evaluateDeps,
       makeInferenceResult({
         evalCaseId: 'case1',
         inferences,
@@ -646,7 +735,7 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
   });
 
   it('uses the user id from the eval case session input', async () => {
-    const {privates, evalSetsManager} = makeService();
+    const {evaluateDeps, evalSetsManager} = makeService();
     vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
       makeEvalCase({
         conversation: [makeInvocation('user', 'final')],
@@ -654,7 +743,8 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
       }),
     );
 
-    const [, result] = await privates.evaluateSingleInferenceResult(
+    const [, result] = await evaluateSingleInferenceResult(
+      evaluateDeps,
       makeInferenceResult({
         evalCaseId: 'case1',
         inferences: [makeInvocation('user', 'final')],
@@ -669,12 +759,13 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
   });
 
   it('returns a FAILED result when there are no inferences', async () => {
-    const {privates, evalSetsManager} = makeService();
+    const {evaluateDeps, evalSetsManager} = makeService();
     vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
       makeEvalCase({conversation: []}),
     );
 
-    const [, result] = await privates.evaluateSingleInferenceResult(
+    const [, result] = await evaluateSingleInferenceResult(
+      evaluateDeps,
       makeInferenceResult({
         evalCaseId: 'case1',
         inferences: undefined,
@@ -696,12 +787,13 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
   });
 
   it('returns a FAILED result with an empty session id when none is set', async () => {
-    const {privates, evalSetsManager} = makeService();
+    const {evaluateDeps, evalSetsManager} = makeService();
     vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
       makeEvalCase({conversation: []}),
     );
 
-    const [, result] = await privates.evaluateSingleInferenceResult(
+    const [, result] = await evaluateSingleInferenceResult(
+      evaluateDeps,
       makeInferenceResult({
         evalCaseId: 'case1',
         inferences: undefined,
@@ -720,13 +812,14 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
   });
 
   it('throws when there is no conversation to match inferences against', async () => {
-    const {privates, evalSetsManager} = makeService();
+    const {evaluateDeps, evalSetsManager} = makeService();
     vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
       makeEvalCase({conversation: undefined, conversationScenario: undefined}),
     );
 
     await expect(
-      privates.evaluateSingleInferenceResult(
+      evaluateSingleInferenceResult(
+        evaluateDeps,
         makeInferenceResult({
           evalCaseId: 'case1',
           inferences: [makeInvocation('user', 'final')],
@@ -740,7 +833,7 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
   });
 
   it('scores a single-sided metric for a conversation scenario', async () => {
-    const {privates, evalSetsManager} = makeService();
+    const {evaluateDeps, evalSetsManager} = makeService();
     const inferences = [
       makeInvocation('user', 'final'),
       makeInvocation('user', 'final'),
@@ -749,11 +842,12 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
     vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
       makeEvalCase({
         conversation: undefined,
-        conversationScenario: {} as unknown as ConversationScenario,
+        conversationScenario: SCENARIO,
       }),
     );
 
-    const [, result] = await privates.evaluateSingleInferenceResult(
+    const [, result] = await evaluateSingleInferenceResult(
+      evaluateDeps,
       makeInferenceResult({
         evalCaseId: 'case1',
         inferences,
@@ -783,7 +877,7 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
   });
 
   it('downgrades to NOT_EVALUATED when a metric throws', async () => {
-    const {privates, evalSetsManager} = makeService();
+    const {evaluateDeps, evalSetsManager} = makeService();
     const inferences = [
       makeInvocation('user', 'final'),
       makeInvocation('user', 'final'),
@@ -792,11 +886,12 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
     vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
       makeEvalCase({
         conversation: undefined,
-        conversationScenario: {} as unknown as ConversationScenario,
+        conversationScenario: SCENARIO,
       }),
     );
 
-    const [, result] = await privates.evaluateSingleInferenceResult(
+    const [, result] = await evaluateSingleInferenceResult(
+      evaluateDeps,
       makeInferenceResult({
         evalCaseId: 'case1',
         inferences,
@@ -815,13 +910,14 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
   });
 
   it('throws when inference count does not match the conversation', async () => {
-    const {privates, evalSetsManager} = makeService();
+    const {evaluateDeps, evalSetsManager} = makeService();
     vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
       makeEvalCase({conversation: [makeInvocation('user', 'final')]}),
     );
 
     await expect(
-      privates.evaluateSingleInferenceResult(
+      evaluateSingleInferenceResult(
+        evaluateDeps,
         makeInferenceResult({
           evalCaseId: 'case1',
           inferences: [
@@ -841,12 +937,13 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
   });
 
   it('handles a null session id', async () => {
-    const {privates, evalSetsManager} = makeService();
+    const {evaluateDeps, evalSetsManager} = makeService();
     vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
       makeEvalCase({conversation: [makeInvocation('user', 'final')]}),
     );
 
-    const [, result] = await privates.evaluateSingleInferenceResult(
+    const [, result] = await evaluateSingleInferenceResult(
+      evaluateDeps,
       makeInferenceResult({
         evalCaseId: 'case1',
         inferences: [makeInvocation('user', 'final')],
@@ -863,13 +960,14 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
   });
 
   it('throws when a metric returns a mismatched result count', async () => {
-    const {privates, evalSetsManager} = makeService();
+    const {evaluateDeps, evalSetsManager} = makeService();
     vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
       makeEvalCase({conversation: [makeInvocation('user', 'final')]}),
     );
 
     await expect(
-      privates.evaluateSingleInferenceResult(
+      evaluateSingleInferenceResult(
+        evaluateDeps,
         makeInferenceResult({
           evalCaseId: 'case1',
           inferences: [makeInvocation('user', 'final')],
@@ -885,11 +983,9 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
 
 describe('LocalEvalService.performInferenceSingleEvalItem', () => {
   it('runs non-live inference and reports success', async () => {
-    const mockUserSim = {} as unknown as UserSimulator;
-    const userSimulatorProvider = {
-      provide: vi.fn().mockReturnValue(mockUserSim),
-    } as unknown as UserSimulatorProvider;
-    const {privates, rootAgent} = makeService({
+    const mockUserSim = new SilentUserSimulator();
+    const userSimulatorProvider = new FixedUserSimulatorProvider(mockUserSim);
+    const {inferenceDeps, rootAgent} = makeService({
       sessionIdSupplier: () => 'test_session_id',
       userSimulatorProvider,
     });
@@ -898,7 +994,7 @@ describe('LocalEvalService.performInferenceSingleEvalItem', () => {
       .mockResolvedValue([]);
     const evalCase = makeEvalCase({conversation: []});
 
-    const result = await privates.performInferenceSingleEvalItem({
+    const result = await performInferenceSingleEvalItem(inferenceDeps, {
       appName: 'test_app',
       evalSetId: 'test_eval_set',
       evalCase,
@@ -918,17 +1014,17 @@ describe('LocalEvalService.performInferenceSingleEvalItem', () => {
   });
 
   it('reports failure when inference throws', async () => {
-    const {privates} = makeService({
-      userSimulatorProvider: {
-        provide: () => ({}) as unknown as UserSimulator,
-      } as unknown as UserSimulatorProvider,
+    const {inferenceDeps} = makeService({
+      userSimulatorProvider: new FixedUserSimulatorProvider(
+        new SilentUserSimulator(),
+      ),
     });
     vi.spyOn(
       EvaluationGenerator,
       'generateInferencesFromRootAgent',
     ).mockRejectedValue(new Error('boom'));
 
-    const result = await privates.performInferenceSingleEvalItem({
+    const result = await performInferenceSingleEvalItem(inferenceDeps, {
       appName: 'test_app',
       evalSetId: 'test_eval_set',
       evalCase: makeEvalCase({conversation: []}),

@@ -10,7 +10,6 @@ import {
   getAllToolCallsWithResponses,
   getAllToolResponses,
   IntermediateDataSchema,
-  type IntermediateDataType,
   InvocationEventSchema,
   InvocationEventsSchema,
   SessionInputSchema,
@@ -107,17 +106,15 @@ describe('evaluation/eval_case', () => {
     });
 
     it('throws for an unsupported type (string)', () => {
-      expect(() =>
-        getAllToolCalls(
-          'this is not a valid type' as unknown as IntermediateDataType,
-        ),
-      ).toThrow('Unsupported type for intermediate_data');
+      expect(() => getAllToolCalls('this is not a valid type')).toThrow(
+        'Unsupported type for intermediate_data',
+      );
     });
 
     it('throws for an unsupported object shape', () => {
-      expect(() =>
-        getAllToolCalls({foo: 'bar'} as unknown as IntermediateDataType),
-      ).toThrow('Unsupported type for intermediate_data');
+      expect(() => getAllToolCalls({foo: 'bar'})).toThrow(
+        'Unsupported type for intermediate_data',
+      );
     });
   });
 
@@ -174,15 +171,15 @@ describe('evaluation/eval_case', () => {
     });
 
     it('throws for an unsupported type (string)', () => {
-      expect(() =>
-        getAllToolResponses('nope' as unknown as IntermediateDataType),
-      ).toThrow('Unsupported type for intermediate_data');
+      expect(() => getAllToolResponses('nope')).toThrow(
+        'Unsupported type for intermediate_data',
+      );
     });
 
     it('throws for an unsupported object shape', () => {
-      expect(() =>
-        getAllToolResponses({foo: 1} as unknown as IntermediateDataType),
-      ).toThrow('Unsupported type for intermediate_data');
+      expect(() => getAllToolResponses({foo: 1})).toThrow(
+        'Unsupported type for intermediate_data',
+      );
     });
   });
 

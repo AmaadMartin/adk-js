@@ -7,7 +7,7 @@
 import {CodeConfigSchema} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
-describe('agents/common_configs', () => {
+describe('evaluation/eval_config CodeConfigSchema', () => {
   describe('CodeConfigSchema', () => {
     it('parses a valid code config', () => {
       const config = CodeConfigSchema.parse({name: 'my.module.my_function'});

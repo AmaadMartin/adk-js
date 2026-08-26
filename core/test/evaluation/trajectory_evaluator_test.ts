@@ -114,7 +114,7 @@ describe('evaluation/trajectory_evaluator', () => {
       const evalMetric: EvalMetric = {
         metricName: PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
         threshold: 0.5,
-        criterion: {threshold: 0.5, matchType: 'ANY_ORDER'} as never,
+        criterion: {threshold: 0.5, matchType: 'ANY_ORDER'},
       };
       const evaluator = new TrajectoryEvaluator({evalMetric});
       const toolCall1: FunctionCall = {name: 'test_func1', args: {}};
@@ -142,7 +142,7 @@ describe('evaluation/trajectory_evaluator', () => {
       const evalMetric: EvalMetric = {
         metricName: PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
         threshold: 0.5,
-        criterion: {threshold: 0.5, matchType: 'random string'} as never,
+        criterion: {threshold: 0.5, matchType: 'random string'},
       };
       expect(() => new TrajectoryEvaluator({evalMetric})).toThrow(
         '`tool_trajectory_avg_score` metric expects a criterion of type' +

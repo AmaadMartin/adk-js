@@ -13,8 +13,6 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
-export {CodeConfigSchema} from './agents/common_configs.js';
-export type {CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
   findEventByFunctionCallId,
@@ -358,6 +356,7 @@ export type {
   ToolCallAndResponse,
 } from './evaluation/eval_case.js';
 export {
+  CodeConfigSchema,
   CustomMetricConfigSchema,
   EvalConfigSchema,
   LiveModelConfigSchema,
@@ -365,6 +364,7 @@ export {
   getEvaluationCriteriaOrDefault,
 } from './evaluation/eval_config.js';
 export type {
+  CodeConfig,
   CriterionBackedEvalMetric,
   CustomMetricConfig,
   EvalConfig,
@@ -460,10 +460,16 @@ export {
   addRubricsToInvocation,
   copyEvalCaseRubricsToActualInvocations,
   copyInvocationRubricsToActualInvocations,
+  evaluateSingleInferenceResult,
   generateFinalEvalStatus,
   getSessionId,
+  performInferenceSingleEvalItem,
 } from './evaluation/local_eval_service.js';
-export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
+export type {
+  EvaluateDeps,
+  InferenceDeps,
+  LocalEvalServiceOptions,
+} from './evaluation/local_eval_service.js';
 export {
   MetricEvaluatorRegistry,
   getDefaultMetricEvaluatorRegistry,
