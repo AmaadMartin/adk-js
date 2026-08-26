@@ -6,7 +6,6 @@
 
 import {AgentCard} from '@a2a-js/sdk';
 import * as http from 'node:http';
-import {AddressInfo} from 'node:net';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {resolveAgentCard} from '../../src/a2a/agent_card.js';
 
@@ -47,10 +46,15 @@ describe('resolveAgentCard against a real server', () => {
       }
       res.writeHead(404).end();
     });
-    await new Promise<void>((resolve) =>
-      server.listen(0, '127.0.0.1', resolve),
-    );
-    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        if (address && typeof address !== 'string') {
+          origin = `http://127.0.0.1:${address.port}`;
+        }
+        resolve();
+      });
+    });
   });
 
   afterAll(async () => {
@@ -59,6 +63,15 @@ describe('resolveAgentCard against a real server', () => {
 
   it('fetches the card at the configured path', async () => {
     const resolved = await resolveAgentCard(`${origin}/my-card.json`);
+
+    expect(resolved.name).toBe('live');
+    expect(requested).toEqual(['/my-card.json']);
+  });
+
+  it('never sends the fragment to the server', async () => {
+    requested.length = 0;
+
+    const resolved = await resolveAgentCard(`${origin}/my-card.json#skills`);
 
     expect(resolved.name).toBe('live');
     expect(requested).toEqual(['/my-card.json']);

@@ -40,13 +40,14 @@ export async function resolveAgentCard(
   const source = agentCard as string;
   if (source.startsWith('http://') || source.startsWith('https://')) {
     const resolver = new DefaultAgentCardResolver();
-    const url = new URL(source);
-    url.hash = '';
+    const {pathname} = new URL(source);
     // The resolver resolves this against the base, and a bare pathname starting
     // with `//` would be a protocol-relative reference that replaces the host.
     // An absolute URL resolves to itself, so the fetch stays on this origin.
-    const cardUrl = url.pathname.endsWith('/') ? undefined : url.href;
-    return await resolver.resolve(source, cardUrl);
+    return await resolver.resolve(
+      source,
+      pathname.endsWith('/') ? undefined : source,
+    );
   }
 
   try {

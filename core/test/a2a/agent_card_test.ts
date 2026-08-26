@@ -5,7 +5,10 @@
  */
 
 import {AgentCard} from '@a2a-js/sdk';
-import {DefaultAgentCardResolver} from '@a2a-js/sdk/client';
+import {
+  type AgentCardResolver,
+  DefaultAgentCardResolver,
+} from '@a2a-js/sdk/client';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -26,14 +29,16 @@ import {
   SequentialAgent,
 } from '@google/adk';
 
-const {resolveMock} = vi.hoisted(() => ({resolveMock: vi.fn()}));
+const {resolveMock} = vi.hoisted(() => ({
+  resolveMock: vi.fn<AgentCardResolver['resolve']>(),
+}));
 
 /** The resolver's own fallback, `AGENT_CARD_PATH` in `@a2a-js/sdk`. */
 const WELL_KNOWN_CARD_PATH = '.well-known/agent-card.json';
 
 /** The URL the resolver fetches, given the arguments it was called with. */
 function fetchedCardUrl(): string {
-  const [baseUrl, cardUrl] = resolveMock.mock.calls[0] as [string, string?];
+  const [baseUrl, cardUrl] = resolveMock.mock.calls[0];
   return new URL(cardUrl ?? WELL_KNOWN_CARD_PATH, baseUrl).href;
 }
 
@@ -328,14 +333,6 @@ describe('Agent Card', () => {
       await resolveAgentCard(source);
 
       expect(fetchedCardUrl()).toBe('https://user:pw@example.com/card.json');
-    });
-
-    it('drops the fragment from the card URL', async () => {
-      const source = 'https://example.com/card.json#skills';
-
-      await resolveAgentCard(source);
-
-      expect(fetchedCardUrl()).toBe('https://example.com/card.json');
     });
 
     it('falls back to the well-known path for a bare origin', async () => {
