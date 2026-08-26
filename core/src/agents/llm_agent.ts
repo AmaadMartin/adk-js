@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {Blob, GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
@@ -67,6 +67,7 @@ import {
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
+import {AudioCacheManager, AudioCacheType} from './audio_cache_manager.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
@@ -493,6 +494,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   /** The output schema as supplied — see {@link inputSchemaSource}. */
   readonly outputSchemaSource?: SchemaLike;
   outputKey?: string;
+  /**
+   * Accumulates this agent's live audio for `RunConfig.saveLiveBlob`. It holds
+   * configuration only — the caches live on each {@link InvocationContext} — so
+   * concurrent invocations of the same agent can share it.
+   */
+  private readonly audioCacheManager = new AudioCacheManager();
   private _finishTaskTool?: FinishTaskTool;
   beforeModelCallback?: BeforeModelCallback;
   afterModelCallback?: AfterModelCallback;
@@ -1057,6 +1064,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         ? AbortSignal.any([invocationContext.abortSignal, sendAbort.signal])
         : sendAbort.signal;
       const sendTask = this.runSendLoop(
+        invocationContext,
         connection,
         invocationContext.liveRequestQueue,
         combinedAbort,
@@ -1157,6 +1165,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   private async runSendLoop(
+    invocationContext: InvocationContext,
     connection: BaseLlmConnection,
     liveRequestQueue: LiveRequestQueue,
     sendAbortSignal?: AbortSignal,
@@ -1179,7 +1188,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         throw error;
       }
       try {
-        await this.dispatchLiveRequest(connection, liveRequest);
+        await this.dispatchLiveRequest(
+          invocationContext,
+          connection,
+          liveRequest,
+        );
       } catch (error) {
         if (sendAbortSignal?.aborted || invocationAbortSignal?.aborted) {
           logger.debug('Send failed after teardown:', error);
@@ -1198,6 +1211,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   private async dispatchLiveRequest(
+    invocationContext: InvocationContext,
     connection: BaseLlmConnection,
     liveRequest: LiveRequest,
   ): Promise<void> {
@@ -1214,11 +1228,49 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       return;
     }
     if (liveRequest.blob) {
+      if (
+        invocationContext.runConfig?.saveLiveBlob &&
+        liveRequest.blob.mimeType?.startsWith('audio/')
+      ) {
+        this.cacheLiveAudio(invocationContext, liveRequest.blob, 'input');
+      }
       await connection.sendRealtime(liveRequest.blob);
       return;
     }
     if (liveRequest.content) {
       await connection.sendContent(liveRequest.content);
+    }
+  }
+
+  /**
+   * Caches one live audio chunk. A malformed chunk is logged and dropped: it is
+   * not worth tearing down a live session over one unusable blob.
+   */
+  private cacheLiveAudio(
+    invocationContext: InvocationContext,
+    audioBlob: Blob,
+    cacheType: AudioCacheType,
+  ): void {
+    try {
+      this.audioCacheManager.cacheAudio(
+        invocationContext,
+        audioBlob,
+        cacheType,
+      );
+    } catch (error) {
+      logger.warn(`Skipped caching a live ${cacheType} audio chunk:`, error);
+    }
+  }
+
+  /** Caches every audio part the model sent on this event. */
+  private cacheLiveModelAudio(
+    invocationContext: InvocationContext,
+    event: Event,
+  ): void {
+    for (const part of event.content?.parts ?? []) {
+      if (part.inlineData?.mimeType?.startsWith('audio/')) {
+        this.cacheLiveAudio(invocationContext, part.inlineData, 'output');
+      }
     }
   }
 
@@ -1290,6 +1342,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         llmResponse,
         modelResponseEvent,
       )) {
+        if (invocationContext.runConfig?.saveLiveBlob) {
+          this.cacheLiveModelAudio(invocationContext, event);
+        }
+
         yield event;
 
         // Send function responses directly through the connection rather
@@ -1407,6 +1463,20 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         partial: llmResponse.partial,
       });
       return;
+    }
+
+    // A completed or interrupted turn is where the accumulated audio is
+    // written out. Unlike adk-python the control event is still yielded
+    // afterwards, because callers rely on `turnComplete` to end a turn.
+    if (invocationContext.runConfig?.saveLiveBlob) {
+      const flushedEvents =
+        await this.audioCacheManager.handleControlEventFlush(
+          invocationContext,
+          llmResponse,
+        );
+      for (const flushedEvent of flushedEvents) {
+        yield flushedEvent;
+      }
     }
 
     const mergedEvent = createEvent({
