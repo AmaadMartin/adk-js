@@ -4,8 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it, vi} from 'vitest';
-import {buildAgentSkills} from '../../src/a2a/agent_card.js';
+import {AgentCard} from '@a2a-js/sdk';
+import {DefaultAgentCardResolver} from '@a2a-js/sdk/client';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {buildAgentSkills, resolveAgentCard} from '../../src/a2a/agent_card.js';
 import {node} from '../../src/workflow/node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 
@@ -20,6 +25,18 @@ import {
   ParallelAgent,
   SequentialAgent,
 } from '@google/adk';
+
+const {resolveMock} = vi.hoisted(() => ({resolveMock: vi.fn()}));
+
+vi.mock('@a2a-js/sdk/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@a2a-js/sdk/client')>();
+  return {
+    ...actual,
+    DefaultAgentCardResolver: vi
+      .fn()
+      .mockImplementation(() => ({resolve: resolveMock})),
+  };
+});
 
 // Minimal CustomAgent for testing BaseAgent path
 class CustomAgent extends BaseAgent {
@@ -234,6 +251,105 @@ describe('Agent Card', () => {
       const workflowSkill = skills.find((s) => s.name === 'workflow');
       expect(workflowSkill?.description).toBe('Runs a graph');
       expect(skills.find((s) => s.name === 'custom')).toBeUndefined();
+    });
+  });
+
+  describe('resolveAgentCard', () => {
+    const remoteCard: AgentCard = {
+      name: 'remote',
+      description: 'a remote agent',
+      protocolVersion: '1.0',
+      defaultInputModes: [],
+      defaultOutputModes: [],
+      capabilities: {},
+      skills: [],
+      url: 'https://example.com',
+      version: '1.0',
+    };
+    let tempDir: string | undefined;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      resolveMock.mockResolvedValue(remoteCard);
+    });
+
+    afterEach(async () => {
+      if (tempDir) {
+        await fs.rm(tempDir, {recursive: true, force: true});
+        tempDir = undefined;
+      }
+    });
+
+    it('fetches the exact path when the card URL has one', async () => {
+      const source = 'https://example.com/my-card.json';
+
+      await expect(resolveAgentCard(source)).resolves.toBe(remoteCard);
+
+      expect(resolveMock).toHaveBeenCalledWith(source, '/my-card.json');
+    });
+
+    it('honours a nested card path', async () => {
+      const source = 'https://example.com/a2a/agent';
+
+      await resolveAgentCard(source);
+
+      expect(resolveMock).toHaveBeenCalledWith(source, '/a2a/agent');
+    });
+
+    it('keeps the query string on the card path', async () => {
+      const source = 'http://localhost:8000/agent.json?v=1';
+
+      await resolveAgentCard(source);
+
+      expect(resolveMock).toHaveBeenCalledWith(source, '/agent.json?v=1');
+    });
+
+    it('falls back to the well-known path for a bare origin', async () => {
+      const source = 'https://example.com';
+
+      await resolveAgentCard(source);
+
+      expect(resolveMock).toHaveBeenCalledWith(source, undefined);
+    });
+
+    it('falls back for an origin with a trailing slash', async () => {
+      const source = 'https://example.com/';
+
+      await resolveAgentCard(source);
+
+      expect(resolveMock).toHaveBeenCalledWith(source, undefined);
+    });
+
+    it('throws on a malformed card URL', async () => {
+      await expect(resolveAgentCard('http://')).rejects.toThrow(TypeError);
+
+      expect(resolveMock).not.toHaveBeenCalled();
+    });
+
+    it('reads a file source without contacting the resolver', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-agent-card-'));
+      const file = path.join(tempDir, 'card.json');
+      await fs.writeFile(file, JSON.stringify(remoteCard), 'utf-8');
+
+      await expect(resolveAgentCard(file)).resolves.toEqual(remoteCard);
+
+      expect(DefaultAgentCardResolver).not.toHaveBeenCalled();
+      expect(resolveMock).not.toHaveBeenCalled();
+    });
+
+    it('reports the file that could not be read', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-agent-card-'));
+      const missing = path.join(tempDir, 'absent.json');
+
+      await expect(resolveAgentCard(missing)).rejects.toThrow(
+        `Failed to read agent card from file ${missing}: `,
+      );
+    });
+
+    it('returns an AgentCard object unchanged', async () => {
+      await expect(resolveAgentCard(remoteCard)).resolves.toBe(remoteCard);
+
+      expect(DefaultAgentCardResolver).not.toHaveBeenCalled();
     });
   });
 });
