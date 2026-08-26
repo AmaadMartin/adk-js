@@ -29,7 +29,7 @@ export interface AgentOptimizer<
    *     the agent.
    * @return The final result of the optimization process, containing the
    *     optimized agent instances along with their corresponding scores on the
-   *     validation examples and any optimization metadata.
+   *     validation examples.
    */
   optimize(
     initialAgent: LlmAgent,

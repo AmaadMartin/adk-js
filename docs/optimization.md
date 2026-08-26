@@ -27,38 +27,22 @@ lands the contract that optimizers and evaluation services implement.
 
 ## Get started
 
-This example sweeps two instructions and scores each candidate with a local
-heuristic. Replace `scoreAgent` with a call into your own evaluation service.
+Implement `Sampler` over your own examples and scoring:
 
 ```ts
 import {
-  LlmAgent,
-  type AgentOptimizer,
-  type AgentWithScores,
-  type OptimizerResult,
+  type LlmAgent,
   type SampleAndScoreParams,
   type Sampler,
   type SamplingResult,
 } from '@google/adk';
 
-const EXAMPLES: Record<string, string> = {
-  ex_1: 'refund a duplicate charge',
-  ex_2: 'cancel a subscription',
-  ex_3: 'update a billing address',
-};
-
-/** Stand-in for your evaluation service. Higher is better. */
-async function scoreAgent(
+declare function scoreWithYourHarness(
   candidate: LlmAgent,
-  exampleId: string,
-): Promise<number> {
-  const instruction =
-    typeof candidate.instruction === 'string' ? candidate.instruction : '';
-  const words = EXAMPLES[exampleId].split(' ');
-  return words.filter((word) => instruction.includes(word)).length;
-}
+  batch: string[],
+): Promise<Record<string, number>>;
 
-class BillingEvalSampler implements Sampler {
+export class MyEvalSampler implements Sampler {
   getTrainExampleIds(): string[] {
     return ['ex_1', 'ex_2'];
   }
@@ -74,65 +58,14 @@ class BillingEvalSampler implements Sampler {
       (exampleSet === 'train'
         ? this.getTrainExampleIds()
         : this.getValidationExampleIds());
-
-    const scores: Record<string, number> = {};
-    for (const exampleId of batch) {
-      scores[exampleId] = await scoreAgent(params.candidate, exampleId);
-    }
-    return {scores};
+    return {scores: await scoreWithYourHarness(params.candidate, batch)};
   }
 }
-
-class InstructionSweepOptimizer implements AgentOptimizer {
-  constructor(private readonly instructions: string[]) {}
-
-  async optimize(
-    initialAgent: LlmAgent,
-    sampler: Sampler,
-  ): Promise<OptimizerResult> {
-    const validationIds = sampler.getValidationExampleIds();
-    const optimizedAgents: AgentWithScores[] = [];
-
-    for (const instruction of this.instructions) {
-      const candidate = new LlmAgent({
-        name: initialAgent.name,
-        model: initialAgent.model,
-        instruction,
-      });
-      const {scores} = await sampler.sampleAndScore({
-        candidate,
-        exampleSet: 'validation',
-        batch: validationIds,
-      });
-      const values = Object.values(scores);
-      optimizedAgents.push({
-        optimizedAgent: candidate,
-        overallScore:
-          values.reduce((sum, value) => sum + value, 0) / values.length,
-      });
-    }
-    return {optimizedAgents};
-  }
-}
-
-const initialAgent = new LlmAgent({
-  name: 'billing_agent',
-  instruction: 'Help the user.',
-});
-
-const result = await new InstructionSweepOptimizer([
-  'Help the user with billing.',
-  'Help the user update a billing address or refund a charge.',
-]).optimize(initialAgent, new BillingEvalSampler());
-
-const best = result.optimizedAgents.reduce((left, right) =>
-  (right.overallScore ?? 0) > (left.overallScore ?? 0) ? right : left,
-);
 ```
 
-`result.optimizedAgents` holds one entry per instruction, with scores `1` and
-`4`. `best` is the second candidate, which matches four words of the validation
-example.
+Hand it to an optimizer with `optimizer.optimize(initialAgent, sampler)`. For a
+complete train-then-validate loop, including an optimizer that returns several
+candidates, read `core/test/optimization/agent_optimizer_test.ts`.
 
 ## The example sets
 
