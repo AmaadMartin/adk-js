@@ -550,4 +550,78 @@ describe('AdkApiClient', () => {
       );
     });
   });
+
+  describe('saveArtifact', () => {
+    const artifactsUrl = `${mockBackendUrl}/apps/app1/users/user1/sessions/session1/artifacts`;
+
+    it('should post the artifact and return its version metadata', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({version: 0}),
+      });
+
+      const result = await client.saveArtifact({
+        appName: 'app1',
+        userId: 'user1',
+        sessionId: 'session1',
+        filename: 'file1.txt',
+        artifact: {text: 'hello world'},
+      });
+
+      expect(global.fetch).toHaveBeenCalledWith(artifactsUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          filename: 'file1.txt',
+          artifact: {text: 'hello world'},
+        }),
+      });
+      expect(result).toEqual({version: 0});
+    });
+
+    it('should send customMetadata when it is provided', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({version: 0, customMetadata: {rev: 'one'}}),
+      });
+
+      const result = await client.saveArtifact({
+        appName: 'app1',
+        userId: 'user1',
+        sessionId: 'session1',
+        filename: 'file1.txt',
+        artifact: {text: 'hello world'},
+        customMetadata: {rev: 'one'},
+      });
+
+      expect(global.fetch).toHaveBeenCalledWith(artifactsUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          filename: 'file1.txt',
+          artifact: {text: 'hello world'},
+          customMetadata: {rev: 'one'},
+        }),
+      });
+      expect(result).toEqual({version: 0, customMetadata: {rev: 'one'}});
+    });
+
+    it('should reject with the error the server reported', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({error: 'Failed to save artifact: boom'}),
+      });
+
+      await expect(
+        client.saveArtifact({
+          appName: 'app1',
+          userId: 'user1',
+          sessionId: 'session1',
+          filename: 'file1.txt',
+          artifact: {text: 'hello world'},
+        }),
+      ).rejects.toThrow('Failed to save artifact: boom');
+    });
+  });
 });

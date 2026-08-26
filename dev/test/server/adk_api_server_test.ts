@@ -29,6 +29,7 @@ import * as http from 'node:http';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
+import {AdkApiClient} from '../../src/server/adk_api_client.js';
 import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
@@ -768,6 +769,43 @@ describe('AdkWebServer', () => {
             },
           },
         });
+      });
+
+      it('should round-trip an artifact through AdkApiClient', async () => {
+        const apiClient = new AdkApiClient({backendUrl: server.url});
+
+        const saved = await apiClient.saveArtifact({
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          filename: 'greeting.txt',
+          artifact: {text: 'hello world'},
+          customMetadata: {rev: 'one'},
+        });
+
+        expect(saved).toMatchObject({version: 0, customMetadata: {rev: 'one'}});
+        expect(
+          await apiClient.loadArtifact({
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+            artifactName: 'greeting.txt',
+          }),
+        ).toEqual({text: 'hello world'});
+      });
+
+      it('should surface the server error through AdkApiClient', async () => {
+        const apiClient = new AdkApiClient({backendUrl: server.url});
+
+        await expect(
+          apiClient.saveArtifact({
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+            filename: '',
+            artifact: {text: 'hello world'},
+          }),
+        ).rejects.toThrow('filename and artifact are required');
       });
     });
   });

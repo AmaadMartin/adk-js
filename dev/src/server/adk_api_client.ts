@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Event} from '@google/adk';
+import type {ArtifactVersion, Event} from '@google/adk';
 import {Session} from '@google/adk';
-import {Content, createUserContent} from '@google/genai';
+import {Content, createUserContent, Part} from '@google/genai';
 
 /**
  * ADK web client config interface.
@@ -192,6 +192,33 @@ export class AdkApiClient {
         }
       }
     }
+  }
+
+  /**
+   * Saves one artifact into the session and returns the version it was
+   * written as. Versions start at 0 and increment on every later save of the
+   * same filename.
+   */
+  async saveArtifact(params: {
+    appName: string;
+    userId: string;
+    sessionId: string;
+    filename: string;
+    artifact: Part;
+    customMetadata?: Record<string, unknown>;
+  }): Promise<ArtifactVersion> {
+    const url = `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/sessions/${params.sessionId}/artifacts`;
+    return this.fetch<ArtifactVersion>(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filename: params.filename,
+        artifact: params.artifact,
+        customMetadata: params.customMetadata,
+      }),
+    });
   }
 
   async listArtifacts(params: {
