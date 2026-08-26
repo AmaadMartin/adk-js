@@ -65,6 +65,20 @@ function makeClient(credentials: {
   return client;
 }
 
+/** Makes any client's refresh succeed with the given token and expiry. */
+function stubRefresh(accessToken: string, expiryDate: number): void {
+  vi.spyOn(oauth2ClientPrototype, 'getAccessToken').mockImplementation(
+    async function (this: AuthClient) {
+      this.setCredentials({
+        ...this.credentials,
+        access_token: accessToken,
+        expiry_date: expiryDate,
+      });
+      return {token: accessToken};
+    },
+  );
+}
+
 /** The serialized token cache the manager stored, parsed back. */
 function readCache(context: Context): Record<string, unknown> {
   const raw = context.state.get<string>(CACHE_KEY);
@@ -216,6 +230,21 @@ describe('GoogleCredentialsManager app-supplied credentials', () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it('returns a credential that states no lifetime as it stands', async () => {
+    // A service-account or metadata client the application already refreshed
+    // reports no expiry. adk-python treats such a credential as valid too.
+    const client = makeClient({accessToken: 'token'});
+    const refresh = vi.spyOn(client, 'getAccessToken');
+    const config = new BaseGoogleCredentialsConfig({credentials: client});
+
+    const resolved = await new GoogleCredentialsManager(
+      config,
+    ).getValidCredentials(makeContext());
+
+    expect(resolved).toBe(client);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it('refreshes an expired credential that has no refresh token', async () => {
     const client = makeClient({
       accessToken: 'stale',
@@ -275,17 +304,7 @@ describe('GoogleCredentialsManager token cache', () => {
 
   it('refreshes an expired cached token and stores the new one', async () => {
     const newExpiry = Date.now() + HOUR_MS;
-    vi.spyOn(oauth2ClientPrototype, 'getAccessToken').mockImplementation(
-      async function (this: AuthClient) {
-        this.setCredentials({
-          access_token: 'refreshed-token',
-          refresh_token: 'refresh',
-          expiry_date: newExpiry,
-          scope: SCOPES.join(' '),
-        });
-        return {token: 'refreshed-token'};
-      },
-    );
+    stubRefresh('refreshed-token', newExpiry);
     const context = makeContext({
       [CACHE_KEY]: JSON.stringify({
         token: 'stale-token',
@@ -333,7 +352,7 @@ describe('GoogleCredentialsManager token cache', () => {
     expect(client?.credentials.scope).toBe('scope-a scope-b');
   });
 
-  it('ignores cache fields that hold the wrong type', async () => {
+  it('ignores a cache scopes field that is not an array', async () => {
     const config = new BaseGoogleCredentialsConfig({
       clientId: 'client-id',
       clientSecret: 'client-secret',
@@ -344,7 +363,7 @@ describe('GoogleCredentialsManager token cache', () => {
         token: 'cached-token',
         refresh_token: 'refresh',
         scopes: 'scope-a scope-b',
-        expiry: 'the day after tomorrow',
+        expiry: new Date(Date.now() + HOUR_MS).toISOString(),
       }),
     });
 
@@ -353,8 +372,46 @@ describe('GoogleCredentialsManager token cache', () => {
     ).getValidCredentials(context);
 
     expect(client?.credentials.scope).toBeUndefined();
-    expect(client?.credentials.expiry_date).toBeUndefined();
     expect(client?.credentials.access_token).toBe('cached-token');
+  });
+
+  it('refreshes a cached token that recorded no expiry', async () => {
+    const newExpiry = Date.now() + HOUR_MS;
+    stubRefresh('refreshed-token', newExpiry);
+    const context = makeContext({
+      [CACHE_KEY]: JSON.stringify({
+        token: 'undated-token',
+        refresh_token: 'refresh',
+      }),
+    });
+
+    const client = await new GoogleCredentialsManager(
+      oauthConfig(),
+    ).getValidCredentials(context);
+
+    expect(client?.credentials.access_token).toBe('refreshed-token');
+    expect(readCache(context)).toMatchObject({
+      token: 'refreshed-token',
+      expiry: new Date(newExpiry).toISOString(),
+    });
+  });
+
+  it('refreshes a cached token whose expiry cannot be parsed', async () => {
+    const newExpiry = Date.now() + HOUR_MS;
+    stubRefresh('refreshed-token', newExpiry);
+    const context = makeContext({
+      [CACHE_KEY]: JSON.stringify({
+        token: 'cached-token',
+        refresh_token: 'refresh',
+        expiry: 'the day after tomorrow',
+      }),
+    });
+
+    const client = await new GoogleCredentialsManager(
+      oauthConfig(),
+    ).getValidCredentials(context);
+
+    expect(client?.credentials.access_token).toBe('refreshed-token');
   });
 
   it('never writes state when no cache key is configured', async () => {
@@ -567,6 +624,55 @@ describe('GoogleCredentialsManager OAuth flow', () => {
       scopes: SCOPES,
     });
     expect(context.eventActions.requestedAuthConfigs).toEqual({});
+  });
+
+  it('keeps the lifetime the authorization granted', async () => {
+    const expiresAt = Date.now() + HOUR_MS;
+    const context = makeContext({
+      [`temp:${CACHE_KEY}`]: {
+        authType: 'oauth2',
+        oauth2: {
+          accessToken: 'granted-token',
+          refreshToken: 'granted-refresh',
+          expiresAt,
+        },
+      },
+    });
+
+    const client = await new GoogleCredentialsManager(
+      oauthConfig(),
+    ).getValidCredentials(context);
+
+    expect(client?.credentials.expiry_date).toBe(expiresAt);
+    expect(readCache(context)).toMatchObject({
+      expiry: new Date(expiresAt).toISOString(),
+    });
+  });
+
+  it('refreshes the granted credential once its lifetime runs out', async () => {
+    const newExpiry = Date.now() + HOUR_MS;
+    const context = makeContext({
+      [`temp:${CACHE_KEY}`]: {
+        authType: 'oauth2',
+        oauth2: {
+          accessToken: 'granted-token',
+          refreshToken: 'granted-refresh',
+          expiresAt: Date.now() - HOUR_MS,
+        },
+      },
+    });
+    await new GoogleCredentialsManager(oauthConfig()).getValidCredentials(
+      context,
+    );
+
+    stubRefresh('refreshed-token', newExpiry);
+    const later = makeContext(context.state.toRecord());
+    const client = await new GoogleCredentialsManager(
+      oauthConfig(),
+    ).getValidCredentials(later);
+
+    expect(client?.credentials.access_token).toBe('refreshed-token');
+    expect(later.eventActions.requestedAuthConfigs).toEqual({});
   });
 
   it('lets a second manager resolve the cached credential without a new flow', async () => {

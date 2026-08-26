@@ -46,7 +46,7 @@ Run `gcloud auth application-default login` first.
 ```ts
 import {BaseGoogleCredentialsConfig, GoogleTool} from '@google/adk';
 import {GoogleAuth} from 'google-auth-library';
-import {z} from 'zod';
+import {z} from 'zod/v4';
 
 const auth = new GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/cloud-platform'],

@@ -176,7 +176,11 @@ export class GoogleCredentialsManager {
       clientSecret: readString(payload, 'client_secret'),
       scopes:
         this.credentialsConfig.scopes ?? readStringArray(payload, 'scopes'),
-      expiryDate: parseExpiry(readString(payload, 'expiry')),
+      // An entry that recorded no expiry counts as already expired, so the
+      // token is refreshed instead of served forever. adk-python's
+      // `from_authorized_user_info` does the same ("auto-expire if not
+      // saved"), which also keeps a cache written by that SDK readable here.
+      expiryDate: parseExpiry(readString(payload, 'expiry')) ?? Date.now(),
     });
   }
 
@@ -212,6 +216,10 @@ export class GoogleCredentialsManager {
       clientId: this.credentialsConfig.clientId,
       clientSecret: this.credentialsConfig.clientSecret,
       scopes: this.credentialsConfig.scopes,
+      // `AuthCredential.oauth2.expiresAt` is epoch milliseconds, as
+      // `auth/oauth2/oauth2_utils.ts` writes it. Without it the token is
+      // cached with no lifetime and never refreshed.
+      expiryDate: authResponse.oauth2.expiresAt,
     });
     this.writeTokenCache(toolContext, client);
     return client;
