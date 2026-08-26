@@ -21,7 +21,7 @@ import {
   RealtimeCacheEntry,
   RunAsyncToolRequest,
   Runner,
-  Session,
+  createSession,
 } from '@google/adk';
 import {Blob, Content, FunctionDeclaration, Modality} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
@@ -1327,14 +1327,11 @@ describe('LlmAgent live audio caching', () => {
     return new InvocationContext({
       invocationId: 'inv-live',
       agent,
-      session: {
+      session: createSession({
         id: TEST_SESSION_ID,
         appName: TEST_APP_ID,
         userId: TEST_USER_ID,
-        state: {},
-        events: [],
-        lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
       liveRequestQueue: queue,
       runConfig: {saveLiveBlob},

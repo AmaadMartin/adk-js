@@ -13,7 +13,7 @@ import {LlmAgent} from '../../src/agents/llm_agent.js';
 import {InMemoryArtifactService} from '../../src/artifacts/in_memory_artifact_service.js';
 import {ScopedArtifactService} from '../../src/artifacts/scoped_artifact_service.js';
 import {PluginManager} from '../../src/plugins/plugin_manager.js';
-import {Session} from '../../src/sessions/session.js';
+import {createSession} from '../../src/sessions/session.js';
 
 const APP_NAME = 'test-app';
 const USER_ID = 'test-user';
@@ -25,24 +25,17 @@ const ONE_BYTE = Buffer.from([1]).toString('base64');
 /** Base64 for the two bytes 0x02 0x03. */
 const TWO_BYTES = Buffer.from([2, 3]).toString('base64');
 
-function makeSession(): Session {
-  return {
-    id: SESSION_ID,
-    appName: APP_NAME,
-    userId: USER_ID,
-    state: {},
-    events: [],
-    lastUpdateTime: Date.now(),
-  } as unknown as Session;
-}
-
 function makeContext(
   artifactService?: InMemoryArtifactService,
 ): InvocationContext {
   return new InvocationContext({
     invocationId: 'inv-1',
     agent: new LlmAgent({name: AGENT_NAME}),
-    session: makeSession(),
+    session: createSession({
+      id: SESSION_ID,
+      appName: APP_NAME,
+      userId: USER_ID,
+    }),
     pluginManager: new PluginManager(),
     artifactService: artifactService
       ? new ScopedArtifactService(
