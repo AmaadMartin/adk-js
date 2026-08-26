@@ -160,6 +160,15 @@ async function buildLLMAgentSkills(agent: LlmAgent): Promise<AgentSkill[]> {
     }
   }
 
+  if (agent.codeExecutor) {
+    skills.push({
+      id: `${agent.name}-code-executor`,
+      name: 'code-execution',
+      description: 'Can execute code',
+      tags: ['llm', 'code_execution'],
+    });
+  }
+
   return skills;
 }
 
