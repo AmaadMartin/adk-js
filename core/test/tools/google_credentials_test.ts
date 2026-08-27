@@ -13,7 +13,7 @@ import {
   PluginManager,
   createSession,
 } from '@google/adk';
-import {AuthClient, OAuth2Client} from 'google-auth-library';
+import {AuthClient, OAuth2Client, PassThroughClient} from 'google-auth-library';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -165,6 +165,19 @@ describe('BaseGoogleCredentialsConfig validation', () => {
         .externalAccessTokenKey,
     ).toBe('k');
     expect(oauthConfig().scopes).toEqual(SCOPES);
+  });
+
+  it('adopts no identity from a client that carries no OAuth fields', () => {
+    // PassThroughClient extends AuthClient directly, so it declares no
+    // `_clientId` at all — the shape an `instanceof OAuth2Client` check would
+    // conflate with a service account.
+    const config = new BaseGoogleCredentialsConfig({
+      credentials: new PassThroughClient(),
+    });
+
+    expect(config.clientId).toBeUndefined();
+    expect(config.clientSecret).toBeUndefined();
+    expect(config.scopes).toBeUndefined();
   });
 
   it('adopts the OAuth identity of an authorized-user client', () => {

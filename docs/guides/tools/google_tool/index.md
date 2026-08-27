@@ -60,7 +60,10 @@ const listDatasets = new GoogleTool({
     credentials: await auth.getClient(),
   }),
   execute: async ({projectId}, {credentials}) => {
-    const response = await credentials!.request({
+    if (!credentials) {
+      throw new Error('list_datasets needs a Google credential.');
+    }
+    const response = await credentials.request({
       url: `https://bigquery.googleapis.com/bigquery/v2/projects/${projectId}/datasets`,
     });
     return response.data;
@@ -69,8 +72,9 @@ const listDatasets = new GoogleTool({
 ```
 
 `credentials` is typed optional because a `GoogleTool` may be built without a
-credentials config. When one is configured, the function only runs after a
-credential resolves, so the non-null assertion is safe there.
+credentials config. With one configured the function only runs after a
+credential resolves, so the guard never fires; write it anyway rather than
+asserting, and TypeScript narrows the rest of the function for you.
 
 ## Choosing a credentials configuration
 
@@ -124,20 +128,21 @@ complete the authorization flow.` and the wrapped function does not run.
 - **A credential ADK cannot re-authorize.** A service account or metadata
   credential carries no refresh token. The manager refreshes it best-effort and
   returns it either way, because the calling library may refresh it internally.
-- **Anything thrown.** The tool returns `{status: 'ERROR', error_details}` with
-  the root-cause message, so one failing tool does not end the turn.
+- **Anything thrown.** The error propagates like any other tool error, so a
+  plugin's `onToolErrorCallback` sees it and the framework reports it to the
+  model. `GoogleTool` does not convert it to a payload of its own.
 
 ## Toolset settings
 
-`toolSettings` is passed straight through to the function as `auth.settings`,
-untouched. A toolset uses it to give every one of its tools the same
-configuration.
+A toolset that gives every one of its tools the same configuration captures it
+in the closure it already builds.
 
 ```ts
+const settings = {maxRows: 50};
+
 const query = new GoogleTool({
   name: 'query',
   description: 'Runs a query.',
-  toolSettings: {maxRows: 50},
-  execute: (_input, {settings}) => `at most ${settings?.maxRows} rows`,
+  execute: (_input, {credentials}) => runQuery(credentials, settings.maxRows),
 });
 ```

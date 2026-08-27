@@ -10,7 +10,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../agents/context.js';
 import {AuthCredentialTypes} from '../auth/auth_credential.js';
 import {AuthConfig} from '../auth/auth_tool.js';
-import {asRecord, formatError} from '../utils/error_utils.js';
+import {asRecord, formatError, readHttpStatus} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 
 /** Google's OAuth2 authorization endpoint. */
@@ -21,10 +21,6 @@ const GOOGLE_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 /** `AuthConfig.credentialKey` used when the config declares no token cache key. */
 const DEFAULT_GOOGLE_CREDENTIAL_KEY = 'google_credentials';
-
-/** Lowest and highest HTTP status a token endpoint uses to reject a client. */
-const MIN_CLIENT_ERROR_STATUS = 400;
-const MAX_CLIENT_ERROR_STATUS = 499;
 
 /** The OAuth2 error code returned for a refresh token that no longer works. */
 const INVALID_GRANT = 'invalid_grant';
@@ -118,6 +114,7 @@ export class BaseGoogleCredentialsConfig {
  * authorize interactively. Several tools may share one manager, so that they
  * share an authenticated session instead of each running its own flow.
  */
+@experimental
 export class GoogleCredentialsManager {
   constructor(readonly credentialsConfig: BaseGoogleCredentialsConfig) {}
 
@@ -170,17 +167,17 @@ export class GoogleCredentialsManager {
     }
     const payload = asRecord(JSON.parse(cached));
     return createAuthorizedUserClient({
-      accessToken: readString(payload, 'token'),
-      refreshToken: readString(payload, 'refresh_token'),
-      clientId: readString(payload, 'client_id'),
-      clientSecret: readString(payload, 'client_secret'),
+      accessToken: asString(payload?.['token']),
+      refreshToken: asString(payload?.['refresh_token']),
+      clientId: asString(payload?.['client_id']),
+      clientSecret: asString(payload?.['client_secret']),
       scopes:
         this.credentialsConfig.scopes ?? readStringArray(payload, 'scopes'),
       // An entry that recorded no expiry counts as already expired, so the
       // token is refreshed instead of served forever. adk-python's
       // `from_authorized_user_info` does the same ("auto-expire if not
       // saved"), which also keeps a cache written by that SDK readable here.
-      expiryDate: parseExpiry(readString(payload, 'expiry')) ?? Date.now(),
+      expiryDate: parseExpiry(asString(payload?.['expiry'])) ?? Date.now(),
     });
   }
 
@@ -371,19 +368,9 @@ async function refreshReauthorizableCredential(
 function isTokenEndpointRejection(error: unknown): boolean {
   const status = readHttpStatus(error);
   if (status !== undefined) {
-    return (
-      status >= MIN_CLIENT_ERROR_STATUS && status <= MAX_CLIENT_ERROR_STATUS
-    );
+    return status >= 400 && status < 500;
   }
   return formatError(error).includes(INVALID_GRANT);
-}
-
-/** Reads an HTTP status off an error that carries one, directly or nested. */
-function readHttpStatus(error: unknown): number | undefined {
-  const record = asRecord(error);
-  const status =
-    record?.['status'] ?? asRecord(record?.['response'])?.['status'];
-  return typeof status === 'number' ? status : undefined;
 }
 
 /** The OAuth identity an authorized-user client carries, when it carries one. */
@@ -394,9 +381,10 @@ function readClientIdentity(client: AuthClient):
       scopes?: string[];
     }
   | undefined {
-  const record = asRecord(client);
-  const clientId = readString(record, '_clientId');
-  const clientSecret = readString(record, '_clientSecret');
+  const clientId =
+    '_clientId' in client ? asString(client._clientId) : undefined;
+  const clientSecret =
+    '_clientSecret' in client ? asString(client._clientSecret) : undefined;
   if (!clientId && !clientSecret) {
     return undefined;
   }
@@ -466,12 +454,8 @@ function parseExpiry(expiry: string | undefined): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-/** Reads a string field, treating a missing or mistyped one as unknown. */
-function readString(
-  record: Record<string, unknown> | undefined,
-  key: string,
-): string | undefined {
-  const value = record?.[key];
+/** Narrows an unknown value to a string, treating any other type as unknown. */
+function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 

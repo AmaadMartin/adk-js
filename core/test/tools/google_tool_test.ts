@@ -6,23 +6,35 @@
 
 import {
   BaseGoogleCredentialsConfig,
+  BasePlugin,
   Context,
+  GoogleCredentialsManager,
   GoogleTool,
   GoogleToolAuth,
   InvocationContext,
   LlmAgent,
   PluginManager,
   createSession,
+  functionsExportedForTestingOnly,
 } from '@google/adk';
 import {AuthClient, OAuth2Client} from 'google-auth-library';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod/v3';
+import {withGoogleCredentials} from '../../src/tools/google_tool.js';
 
-interface SpannerSettings {
-  maxRows: number;
+const {handleFunctionCallList} = functionsExportedForTestingOnly;
+
+/** Records the error the framework reports to a plugin. */
+class RecordingErrorPlugin extends BasePlugin {
+  seen?: Error;
+
+  override async onToolErrorCallback(params: {
+    error: Error;
+  }): Promise<undefined> {
+    this.seen = params.error;
+    return undefined;
+  }
 }
-
-const SETTINGS: SpannerSettings = {maxRows: 50};
 
 function makeContext(state: Record<string, unknown> = {}): Context {
   const session = createSession({
@@ -64,7 +76,7 @@ describe('GoogleTool credential injection', () => {
       description: 'Lists Spanner databases.',
       parameters: z.object({instanceId: z.string()}),
       credentialsConfig: externalTokenConfig(),
-      execute: (input, auth: GoogleToolAuth<undefined>) => {
+      execute: (input, auth: GoogleToolAuth) => {
         received = auth.credentials;
         return `listed ${input.instanceId}`;
       },
@@ -104,11 +116,11 @@ describe('GoogleTool credential injection', () => {
   });
 
   it('runs without a credential when no credentials config is given', async () => {
-    let received: GoogleToolAuth<undefined> | undefined;
+    let received: GoogleToolAuth | undefined;
     const tool = new GoogleTool({
       name: 'ping',
       description: 'Pings.',
-      execute: (_input, auth: GoogleToolAuth<undefined>) => {
+      execute: (_input, auth: GoogleToolAuth) => {
         received = auth;
         return 'pong';
       },
@@ -120,26 +132,26 @@ describe('GoogleTool credential injection', () => {
     expect(received?.credentials).toBeUndefined();
   });
 
-  it('passes the tool settings through unchanged', async () => {
-    let received: SpannerSettings | undefined;
+  it('lets the wrapped function close over its toolset settings', async () => {
+    const settings = {maxRows: 50};
+    let received = 0;
     const tool = new GoogleTool({
       name: 'query',
       description: 'Runs a query.',
-      toolSettings: SETTINGS,
-      execute: (_input, auth: GoogleToolAuth<SpannerSettings>) => {
-        received = auth.settings;
+      execute: () => {
+        received = settings.maxRows;
         return 'queried';
       },
     });
 
     await tool.runAsync({args: {}, toolContext: makeContext()});
 
-    expect(received).toBe(SETTINGS);
+    expect(received).toBe(50);
   });
 });
 
 describe('GoogleTool error reporting', () => {
-  it('reports a failure of the wrapped function as an error payload', async () => {
+  it('propagates a failure of the wrapped function', async () => {
     const tool = new GoogleTool({
       name: 'query',
       description: 'Runs a query.',
@@ -148,15 +160,12 @@ describe('GoogleTool error reporting', () => {
       },
     });
 
-    const result = await tool.runAsync({args: {}, toolContext: makeContext()});
-
-    expect(result).toEqual({
-      status: 'ERROR',
-      error_details: expect.stringContaining('table not found'),
-    });
+    await expect(
+      tool.runAsync({args: {}, toolContext: makeContext()}),
+    ).rejects.toThrow('table not found');
   });
 
-  it('reports a failure of credential resolution as an error payload', async () => {
+  it('propagates a failure of credential resolution', async () => {
     const tool = new GoogleTool({
       name: 'query',
       description: 'Runs a query.',
@@ -164,14 +173,51 @@ describe('GoogleTool error reporting', () => {
       execute: () => 'queried',
     });
 
-    const result = await tool.runAsync({args: {}, toolContext: makeContext()});
+    await expect(
+      tool.runAsync({args: {}, toolContext: makeContext()}),
+    ).rejects.toThrow(
+      'externalAccessTokenKey is provided but no access token found',
+    );
+  });
 
-    expect(result).toEqual({
-      status: 'ERROR',
-      error_details: expect.stringContaining(
-        'externalAccessTokenKey is provided but no access token found',
-      ),
+  it('reaches the plugin tool-error callback when the function fails', async () => {
+    const plugin = new RecordingErrorPlugin('recorder');
+    const tool = new GoogleTool({
+      name: 'query',
+      description: 'Runs a query.',
+      execute: () => {
+        throw new Error('table not found');
+      },
     });
+    const session = createSession({id: 's1', appName: 'app', userId: 'u1'});
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LlmAgent({name: 'a', model: 'gemini-2.5-flash'}),
+      session,
+      pluginManager: new PluginManager([plugin]),
+    });
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: 'fc-1', name: 'query', args: {}}],
+      toolsDict: {'query': tool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(plugin.seen?.message).toContain('table not found');
+  });
+
+  it('needs a tool context to resolve credentials', async () => {
+    const execute = withGoogleCredentials(
+      () => 'queried',
+      new GoogleCredentialsManager(externalTokenConfig()),
+      'query',
+    );
+
+    await expect(execute('', undefined)).rejects.toThrow(
+      "Tool 'query' needs a tool context to resolve credentials.",
+    );
   });
 });
 
@@ -182,7 +228,6 @@ describe('GoogleTool declaration and construction', () => {
       description: 'Lists Spanner databases.',
       parameters: z.object({instanceId: z.string()}),
       credentialsConfig: externalTokenConfig(),
-      toolSettings: SETTINGS,
       execute: () => 'listed',
     });
 
@@ -270,7 +315,7 @@ describe('GoogleTool with a pre-built client', () => {
       credentialsConfig: new BaseGoogleCredentialsConfig({
         credentials: client,
       }),
-      execute: (_input, auth: GoogleToolAuth<undefined>) => {
+      execute: (_input, auth: GoogleToolAuth) => {
         received = auth.credentials;
         return 'queried';
       },
