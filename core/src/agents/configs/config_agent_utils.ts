@@ -42,7 +42,7 @@ import {
   SingleBeforeToolCallback,
   ToolUnion,
 } from '../llm_agent.js';
-import {LoopAgent, LoopAgentConfig} from '../loop_agent.js';
+import {LoopAgent} from '../loop_agent.js';
 import {ParallelAgent} from '../parallel_agent.js';
 import {SequentialAgent} from '../sequential_agent.js';
 import {
@@ -59,7 +59,6 @@ import {
   DEFAULT_AGENT_CLASS,
   LlmAgentYamlConfig,
   llmAgentYamlConfigSchema,
-  LoopAgentYamlConfig,
   loopAgentYamlConfigSchema,
   parallelAgentYamlConfigSchema,
   parseWithSchema,
@@ -250,7 +249,7 @@ async function createAgentTool(
   options: LoadAgentOptions | undefined,
   inFlight: InFlightPaths,
 ): Promise<AgentTool> {
-  const parsed = parseWithSchema(agentToolArgsSchema, args);
+  const parsed = parseWithSchema(agentToolArgsSchema, args, configAbsPath);
   return new AgentTool({
     agent: await resolveRef(parsed.agent, configAbsPath, options, inFlight),
     skipSummarization: parsed.skip_summarization,
@@ -508,17 +507,6 @@ async function createLlmAgent(
   return new LlmAgent(llmConfig);
 }
 
-function createLoopAgent(
-  parsed: LoopAgentYamlConfig,
-  baseConfig: BaseAgentConfig,
-): LoopAgent {
-  const loopConfig: LoopAgentConfig = {...baseConfig};
-  if (parsed.max_iterations) {
-    loopConfig.maxIterations = parsed.max_iterations;
-  }
-  return new LoopAgent(loopConfig);
-}
-
 /**
  * Builds an agent of a class that is not one of the built-ins.
  *
@@ -587,7 +575,11 @@ async function buildAgent(
 
   switch (BUILT_IN_AGENT_CLASSES.get(agentClass)) {
     case 'LlmAgent': {
-      const parsed = parseWithSchema(llmAgentYamlConfigSchema, config);
+      const parsed = parseWithSchema(
+        llmAgentYamlConfigSchema,
+        config,
+        configAbsPath,
+      );
       return createLlmAgent(
         parsed,
         await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
@@ -597,26 +589,49 @@ async function buildAgent(
       );
     }
     case 'LoopAgent': {
-      const parsed = parseWithSchema(loopAgentYamlConfigSchema, config);
-      return createLoopAgent(
-        parsed,
-        await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
+      const parsed = parseWithSchema(
+        loopAgentYamlConfigSchema,
+        config,
+        configAbsPath,
       );
+      return new LoopAgent({
+        ...(await createBaseAgentConfig(
+          parsed,
+          configAbsPath,
+          options,
+          inFlight,
+        )),
+        // `max_iterations: 0` leaves the default, matching adk-python's
+        // `if config.max_iterations` in loop_agent.py.
+        maxIterations: parsed.max_iterations || undefined,
+      });
     }
     case 'ParallelAgent': {
-      const parsed = parseWithSchema(parallelAgentYamlConfigSchema, config);
+      const parsed = parseWithSchema(
+        parallelAgentYamlConfigSchema,
+        config,
+        configAbsPath,
+      );
       return new ParallelAgent(
         await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
       );
     }
     case 'SequentialAgent': {
-      const parsed = parseWithSchema(sequentialAgentYamlConfigSchema, config);
+      const parsed = parseWithSchema(
+        sequentialAgentYamlConfigSchema,
+        config,
+        configAbsPath,
+      );
       return new SequentialAgent(
         await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
       );
     }
     default: {
-      const parsed = parseWithSchema(baseAgentYamlConfigSchema, config);
+      const parsed = parseWithSchema(
+        baseAgentYamlConfigSchema,
+        config,
+        configAbsPath,
+      );
       return createCustomAgent(
         parsed,
         await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
@@ -692,6 +707,7 @@ async function resolveRef(
  * @returns The created agent.
  * @throws {AgentConfigError} If the file is missing, the document is invalid,
  *     the agent class is unsupported, or a reference cannot be resolved.
+ * @experimental  (Experimental, subject to change)
  */
 export async function loadAgentFromConfigFile(
   configPath: string,

@@ -9,11 +9,7 @@ import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {beforeAll, describe, expect, it} from 'vitest';
 
-import {
-  AGENT_CONFIG_SCHEMA_FILENAME,
-  AGENT_CONFIG_SCHEMA_SCRIPT,
-  buildAgentConfigJsonSchema,
-} from '../../../src/agents/configs/agent_config_json_schema.js';
+import {buildAgentConfigJsonSchema} from '../../../src/agents/configs/agent_config_json_schema.js';
 
 const ARTEFACT_PATH = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -23,7 +19,7 @@ const ARTEFACT_PATH = path.join(
   'src',
   'agents',
   'configs',
-  AGENT_CONFIG_SCHEMA_FILENAME,
+  'AgentConfig.json',
 );
 
 /** Every `$defs` entry the artefact is expected to carry. */
@@ -57,7 +53,7 @@ describe('AgentConfig.json', () => {
   it('matches what the Zod schemas produce', () => {
     expect(
       contents,
-      `The checked-in ${AGENT_CONFIG_SCHEMA_FILENAME} is stale. Run \`${AGENT_CONFIG_SCHEMA_SCRIPT}\`.`,
+      'The checked-in AgentConfig.json is stale. Run `npm run generate:agent-config-schema`.',
     ).toBe(buildAgentConfigJsonSchema());
   });
 

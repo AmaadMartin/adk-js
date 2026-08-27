@@ -62,6 +62,41 @@ const rootAgent = await loadAgentFromConfigFile('./root_agent.yaml');
 A relative path resolves against the working directory. A `config_path` inside a
 file resolves against the directory of the file that names it.
 
+## Run a config with the CLI
+
+You do not need the TypeScript above. Name the root config `root_agent.yaml`
+and the ADK CLI loads it for you:
+
+```
+my_agents/
+  greeter/
+    root_agent.yaml
+    sub_agents/
+      code_writer_agent.yaml
+```
+
+```sh
+adk web my_agents          # "greeter" appears in the agent list
+adk api_server my_agents   # GET /list-apps returns ["greeter"]
+adk run my_agents/greeter/root_agent.yaml
+```
+
+`adk web` and `adk api_server` read one agent per directory. A directory becomes
+an agent when it holds `root_agent.yaml` or `root_agent.yml`. An `app` or
+`agent` file still wins over a config, so adding a config to a directory that
+already has TypeScript changes nothing.
+
+`adk run` takes the config file itself. Nothing is compiled on this path, so a
+config agent needs no build step.
+
+A config that fails validation stops the load and names the file:
+
+```
+AgentConfigError: Invalid agent config in /tmp/yaml_agents/greeter/root_agent.yaml: ✖ Unrecognized key: "instuction"
+✖ Invalid input: expected string, received undefined
+  → at instruction
+```
+
 ## Agent classes
 
 `agent_class` selects the shape the document is validated against. Omit it and

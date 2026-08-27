@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App, BaseAgent, isApp, isBaseAgent} from '@google/adk';
+import {
+  App,
+  BaseAgent,
+  isApp,
+  isBaseAgent,
+  loadAgentFromConfigFile,
+} from '@google/adk';
 import esbuild from 'esbuild';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
@@ -32,6 +38,17 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
  * Supported file extensions for JavaScript and TypeScript.
  */
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
+
+/**
+ * Supported file extensions for a declarative agent config.
+ */
+const YAML_FILES_EXTENSIONS = ['.yaml', '.yml'];
+
+/**
+ * File name, without an extension, of the declarative agent config that makes
+ * a directory an agent. Matches adk-python's `root_agent.yaml`.
+ */
+const ROOT_AGENT_CONFIG_NAME = 'root_agent';
 
 /**
  * Supported JS/TS file module types.
@@ -131,6 +148,9 @@ export function replaceDirnamePlugin(filePath: string, originalDir: string) {
  * Wrapper class which loads file that contains base agent or app (support both .js and
  * .ts) and has a dispose function to cleanup the compiled artifact after file
  * usage.
+ *
+ * A `.yaml` or `.yml` file is read as a declarative agent config instead, which
+ * builds the agent directly and compiles nothing.
  */
 export class AgentFile {
   private cleanupFilePath: string | undefined;
@@ -160,6 +180,10 @@ export class AgentFile {
           `Agent file ${this.filePath} does not exists`,
         );
       }
+    }
+
+    if (isYamlFile(path.extname(this.filePath))) {
+      return (this.agent = await loadAgentFromConfigFile(this.filePath));
     }
 
     let filePath = this.filePath;
@@ -353,9 +377,12 @@ export class AgentFile {
  * - agents_dir/{agentOrAppName}.[js | ts | mjs | cjs]
  * - agents_dir/{agentOrAppName}/agent.[js | ts | mjs | cjs]
  * - agents_dir/{agentOrAppName}/app.[js | ts | mjs | cjs]
+ * - agents_dir/{agentName}/root_agent.[yaml | yml]
  *
  * Agent/App file should have export of the rootAgent as instance of BaseAgent or
- * app/rootApp as instance of App.
+ * app/rootApp as instance of App. A `root_agent` config file describes the
+ * agent declaratively instead, and is used only when the directory holds no
+ * `app` or `agent` file.
  */
 export class AgentLoader {
   private agentsAlreadyPreloaded = false;
@@ -406,7 +433,7 @@ export class AgentLoader {
         this.agentsDirPath,
         {recursive: true},
         (_event, filename) => {
-          if (filename && isJsFile(path.extname(filename))) {
+          if (filename && isAgentEntryFile(path.extname(filename))) {
             logger.info(`Detected change in ${filename}, reloading agents...`);
             this.invalidateAll();
           }
@@ -525,7 +552,11 @@ export class AgentLoader {
     const subFiles = await getDirFiles(dir.path);
     const possibleEntryFile =
       subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
-      subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext));
+      subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext)) ??
+      subFiles.find(
+        (f) =>
+          f.isFile && f.name === ROOT_AGENT_CONFIG_NAME && isYamlFile(f.ext),
+      );
 
     if (!possibleEntryFile) {
       return;
@@ -546,6 +577,15 @@ export class AgentLoader {
 
 function isJsFile(fileExt?: string): boolean {
   return !!fileExt && JS_FILES_EXTENSIONS.includes(fileExt);
+}
+
+function isYamlFile(fileExt?: string): boolean {
+  return !!fileExt && YAML_FILES_EXTENSIONS.includes(fileExt);
+}
+
+/** Whether a file with this extension can define an agent. */
+function isAgentEntryFile(fileExt?: string): boolean {
+  return isJsFile(fileExt) || isYamlFile(fileExt);
 }
 
 async function getDirFiles(dir: string): Promise<FileMetadata[]> {

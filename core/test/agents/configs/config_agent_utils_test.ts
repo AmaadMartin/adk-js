@@ -126,6 +126,14 @@ function errorWithCode(code: AgentConfigErrorCode) {
   return expect.objectContaining({code});
 }
 
+/** Returns the text of the error `promise` rejects with. */
+async function rejectionMessage(promise: Promise<unknown>): Promise<string> {
+  return promise.then(
+    () => expect.fail('expected the load to reject'),
+    (error: unknown) => String(error),
+  );
+}
+
 describe('loadAgentFromConfigFile', () => {
   it.each([
     ['LlmAgent', 'llm_agent', isLlmAgent, 'instruction: Do the thing.'],
@@ -430,6 +438,44 @@ name: writer
     await expect(
       loadAgentFromConfigFile(path.join(dir, 'root.yaml')),
     ).rejects.toThrowError(errorWithCode(AgentConfigErrorCode.INVALID_CONFIG));
+  });
+
+  it('names the file and the field in a validation failure', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: writer
+instuction: Write code.
+`,
+    });
+    const configPath = path.join(dir, 'root.yaml');
+
+    const message = await rejectionMessage(loadAgentFromConfigFile(configPath));
+
+    expect(message).toContain(await fs.realpath(configPath));
+    expect(message).toContain('instuction');
+  });
+
+  it('names the file that holds an invalid sub-agent, not the parent', async () => {
+    const dir = await writeConfigs({
+      'root.yaml': `
+name: parent
+instruction: Delegate.
+sub_agents:
+  - config_path: sub/child.yaml
+`,
+      'sub/child.yaml': `
+name: child
+max_iterations: 3
+`,
+    });
+
+    const message = await rejectionMessage(
+      loadAgentFromConfigFile(path.join(dir, 'root.yaml')),
+    );
+
+    expect(message).toContain(
+      await fs.realpath(path.join(dir, 'sub', 'child.yaml')),
+    );
   });
 
   it('ignores a camelCase agentClass key', async () => {

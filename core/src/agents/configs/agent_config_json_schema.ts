@@ -8,13 +8,6 @@ import {toJSONSchema, z} from 'zod/v4';
 
 import {AGENT_YAML_CONFIG_SCHEMAS} from './agent_config.js';
 
-/** The name of the checked-in JSON Schema artefact. */
-export const AGENT_CONFIG_SCHEMA_FILENAME = 'AgentConfig.json';
-
-/** The npm script that rewrites the checked-in artefact. */
-export const AGENT_CONFIG_SCHEMA_SCRIPT =
-  'npm run generate:agent-config-schema';
-
 /**
  * Builds the JSON Schema describing an agent config document.
  *
