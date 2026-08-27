@@ -11,6 +11,7 @@ import {
   PluginManager,
   Session,
   TrajectoryThoughtPruningCompactor,
+  createEvent,
 } from '@google/adk';
 import {FunctionCall, FunctionResponse} from '@google/genai';
 import {describe, expect, it} from 'vitest';
@@ -24,7 +25,7 @@ function createMockEvent(
     functionResponse?: FunctionResponse;
   }>,
 ): Event {
-  return {
+  return createEvent({
     id,
     timestamp: Date.now(),
     content: {
@@ -33,13 +34,7 @@ function createMockEvent(
         ...p,
       })),
     },
-    actions: {
-      stateDelta: {},
-      artifactDelta: {},
-      requestedAuthConfigs: {},
-      requestedToolConfirmations: {},
-    },
-  } as unknown as Event;
+  });
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
@@ -170,7 +165,7 @@ describe('TrajectoryThoughtPruningCompactor', () => {
       const compactor = new TrajectoryThoughtPruningCompactor({
         eventRetentionSize: 1,
       });
-      const event1 = {id: '1', timestamp: Date.now()} as Event;
+      const event1 = createEvent({id: '1', timestamp: Date.now()});
       const event2 = createMockEvent('2', [{text: 'thought', thought: true}]);
 
       const context = createMockInvocationContext([event1, event2]);

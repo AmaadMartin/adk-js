@@ -13,24 +13,17 @@ import {
   InvocationContext,
   PluginManager,
   Session,
+  createCompactedEvent,
+  createEvent,
   isScratchpadEvent,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {assert, describe, expect, it} from 'vitest';
 
 class MockSummarizer implements BaseSummarizer {
   async summarize(events: Event[]): Promise<CompactedEvent> {
-    return {
+    return createCompactedEvent({
       id: 'mock-id',
-      invocationId: '',
       author: 'system',
-      actions: {
-        stateDelta: {},
-        artifactDelta: {},
-        requestedAuthConfigs: {},
-        requestedToolConfirmations: {},
-      },
-      timestamp: Date.now(),
-      isCompacted: true,
       startTime: events[0].timestamp,
       endTime: events[events.length - 1].timestamp,
       compactedContent: `Mock summary of ${events.length} events`,
@@ -38,7 +31,7 @@ class MockSummarizer implements BaseSummarizer {
         role: 'model',
         parts: [{text: `Mock summary of ${events.length} events`}],
       },
-    };
+    });
   }
 }
 
@@ -54,11 +47,11 @@ function createMockEvent(
   isFuncCall?: boolean,
   isFuncResp?: boolean,
 ): Event {
-  const event: Event = {
+  const event = createEvent({
     id,
     timestamp: Date.now(),
     content: {parts: []},
-  } as unknown as Event;
+  });
   if (tokenCount !== undefined) {
     event.usageMetadata = {promptTokenCount: tokenCount};
   }
@@ -78,15 +71,14 @@ function createMockScratchpadEvent(
   tokenCount?: number,
   contentStr?: string,
 ): CompactedEvent {
-  return {
+  return createCompactedEvent({
     ...createMockEvent(id, tokenCount),
-    isCompacted: true,
     isScratchpad: true,
     author: 'system',
     startTime: Date.now() - 10000,
     endTime: Date.now() - 5000,
     compactedContent: contentStr || 'Existing scratchpad content',
-  };
+  });
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
@@ -168,10 +160,8 @@ describe('AnchoredContextCompactor', () => {
     // Result events array should be [scratchpad, '3', '4'].
     expect(context.session.events.length).toBe(3);
     const firstEvent = context.session.events[0];
-    expect(isScratchpadEvent(firstEvent)).toBe(true);
-    expect((firstEvent as CompactedEvent).compactedContent).toBe(
-      'Mock summary of 2 events',
-    );
+    assert(isScratchpadEvent(firstEvent));
+    expect(firstEvent.compactedContent).toBe('Mock summary of 2 events');
     expect(context.session.events[1].id).toBe('3');
     expect(context.session.events[2].id).toBe('4');
   });
@@ -203,10 +193,8 @@ describe('AnchoredContextCompactor', () => {
     // Result events array: [new_scratchpad, '3', '4'].
     expect(context.session.events.length).toBe(3);
     const firstEvent = context.session.events[0];
-    expect(isScratchpadEvent(firstEvent)).toBe(true);
-    expect((firstEvent as CompactedEvent).compactedContent).toBe(
-      'Mock summary of 3 events',
-    );
+    assert(isScratchpadEvent(firstEvent));
+    expect(firstEvent.compactedContent).toBe('Mock summary of 3 events');
     expect(context.session.events[1].id).toBe('3');
     expect(context.session.events[2].id).toBe('4');
   });
@@ -232,10 +220,9 @@ describe('AnchoredContextCompactor', () => {
     await compactor.compact(context);
 
     expect(context.session.events.length).toBe(4); // scratchpad, '2', '3', '4'
-    expect(isScratchpadEvent(context.session.events[0])).toBe(true);
-    expect((context.session.events[0] as CompactedEvent).compactedContent).toBe(
-      'Mock summary of 1 events',
-    );
+    const scratchpad = context.session.events[0];
+    assert(isScratchpadEvent(scratchpad));
+    expect(scratchpad.compactedContent).toBe('Mock summary of 1 events');
     expect(context.session.events[1].id).toBe('2');
     expect(context.session.events[2].id).toBe('3');
     expect(context.session.events[3].id).toBe('4');
