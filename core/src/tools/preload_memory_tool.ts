@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {extractText} from '../memory/memory_entry_utils.js';
 import {appendInstructions} from '../models/llm_request.js';
 import {logger} from '../utils/logger.js';
 import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
@@ -63,8 +64,7 @@ export class PreloadMemoryTool extends BaseTool {
       const timeStr = memory.timestamp ? `Time: ${memory.timestamp}` : '';
       if (timeStr) memoryTextLines.push(timeStr);
 
-      const memoryText =
-        memory.content.parts?.map((p) => p.text ?? '').join(' ') ?? '';
+      const memoryText = extractText(memory);
       if (memoryText) {
         memoryTextLines.push(
           memory.author ? `${memory.author}: ${memoryText}` : memoryText,

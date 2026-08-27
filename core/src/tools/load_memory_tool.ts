@@ -7,6 +7,7 @@
 import type {FunctionDeclaration} from '@google/genai';
 import {Type} from '@google/genai';
 
+import {extractText} from '../memory/memory_entry_utils.js';
 import {appendInstructions} from '../models/llm_request.js';
 import {logger} from '../utils/logger.js';
 import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
@@ -55,8 +56,7 @@ export class LoadMemoryTool extends BaseTool {
       const searchMemoryResponse = await toolContext.searchMemory(query);
       return {
         memories: searchMemoryResponse.memories.map((m) => ({
-          // Join all text parts by a space, or empty string if no text parts
-          content: m.content.parts?.map((p) => p.text ?? '').join(' ') ?? '',
+          content: extractText(m),
           author: m.author,
           timestamp: m.timestamp,
         })),
