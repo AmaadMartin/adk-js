@@ -679,19 +679,32 @@ describe('GoogleCredentialsManager OAuth flow', () => {
     const context = makeContext({
       [`temp:${CACHE_KEY}`]: {
         authType: 'oauth2',
-        oauth2: {accessToken: 'granted-token', refreshToken: 'granted-refresh'},
+        oauth2: {
+          accessToken: 'granted-token',
+          refreshToken: 'granted-refresh',
+          expiresAt: Date.now() + HOUR_MS,
+        },
       },
     });
     await new GoogleCredentialsManager(oauthConfig()).getValidCredentials(
       context,
     );
 
-    const second = makeContext(context.state.toRecord());
+    // Carry over the persisted cache but not the temp slot holding the grant,
+    // so the second manager can resolve the credential from nowhere else.
+    const persisted = context.state.toRecord();
+    delete persisted[`temp:${CACHE_KEY}`];
+    const refresh = vi
+      .spyOn(oauth2ClientPrototype, 'getAccessToken')
+      .mockRejectedValue(new Error('a valid cached token must not refresh'));
+    const second = makeContext(persisted);
+
     const client = await new GoogleCredentialsManager(
       oauthConfig(),
     ).getValidCredentials(second);
 
     expect(client?.credentials.access_token).toBe('granted-token');
+    expect(refresh).not.toHaveBeenCalled();
     expect(second.eventActions.requestedAuthConfigs).toEqual({});
   });
 });
