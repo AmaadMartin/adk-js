@@ -63,16 +63,18 @@ const agent = new LlmAgent({
 
 ## Expose a subset of the tools
 
-`toolFilter` takes the tool names without the `gcs_` prefix, which is what the same filter takes in adk-python:
+`toolFilter` takes the tool names the model sees, so each one carries the `gcs_` prefix:
 
 ```ts
 const admin = new GcsAdminToolset({
   settings: {capabilities: [GcsCapability.READ_WRITE]},
-  toolFilter: ['get_bucket', 'list_buckets', 'create_bucket'],
+  toolFilter: ['gcs_get_bucket', 'gcs_list_buckets', 'gcs_create_bucket'],
 });
 ```
 
-A filter cannot add a tool the capabilities did not build. A predicate filter is also accepted; it receives the tool with the prefix, as the model sees it, and ADK skips it and logs a warning when `getTools()` runs without a `ReadonlyContext`.
+A filter cannot add a tool the capabilities did not build. A predicate filter is also accepted, and ADK skips it and logs a warning when `getTools()` runs without a `ReadonlyContext`.
+
+If you come from adk-python, note that its `tool_filter` matches the unprefixed name, because its framework adds the prefix after the filter runs. adk-js filters after prefixing, as `MCPToolset` does.
 
 ## What a tool returns
 

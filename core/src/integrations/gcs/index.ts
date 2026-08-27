@@ -4,17 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type {
-  GcsListBucketsSuccess,
-  GcsToolError,
-  GcsToolResponse,
-  GcsToolSuccess,
-} from './admin_tool.js';
 export {
   DEFAULT_GCS_TOOL_NAME_PREFIX,
-  GcsAdminToolset,
-  type GcsAdminToolsetOptions,
-} from './admin_toolset.js';
+  type GcsListBucketsSuccess,
+  type GcsToolError,
+  type GcsToolResponse,
+  type GcsToolSuccess,
+} from './admin_tool.js';
+export {GcsAdminToolset, type GcsAdminToolsetOptions} from './admin_toolset.js';
 export {
   DEFAULT_GCS_TOOL_SETTINGS,
   GcsCapability,

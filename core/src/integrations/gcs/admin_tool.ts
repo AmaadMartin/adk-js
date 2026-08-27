@@ -16,6 +16,9 @@ import {FunctionTool} from '../../tools/function_tool.js';
 import {formatError} from '../../utils/error_utils.js';
 import {getGcsClient} from './client.js';
 
+/** Prepended to every tool name the Cloud Storage toolsets expose. */
+export const DEFAULT_GCS_TOOL_NAME_PREFIX = 'gcs';
+
 /**
  * A successful Cloud Storage tool call and its payload.
  *
@@ -159,22 +162,20 @@ export async function listBuckets(
     if (args.page_token !== undefined) {
       request.pageToken = args.page_token;
     }
-    if (args.page_size === undefined) {
-      const [buckets] = await storage.getBuckets(request);
-      return {
-        status: 'SUCCESS',
-        results: buckets.map((bucket) => bucket.name),
-      };
+    const onePage = args.page_size !== undefined;
+    if (onePage) {
+      request.maxResults = args.page_size;
+      request.autoPaginate = false;
     }
 
-    request.maxResults = args.page_size;
-    request.autoPaginate = false;
     const [page, nextQuery] = await storage.getBuckets(request);
     const response: GcsListBucketsSuccess = {
       status: 'SUCCESS',
       results: page.map((bucket) => bucket.name),
     };
-    const nextPageToken = readNextPageToken(nextQuery);
+    // A client that auto-paginates echoes the request query back in place of
+    // the next-page one, so only a single-page request can report a token.
+    const nextPageToken = onePage ? readNextPageToken(nextQuery) : undefined;
     if (nextPageToken) {
       response.next_page_token = nextPageToken;
     }
@@ -291,24 +292,22 @@ export async function deleteBucket(
 /**
  * Builds the bucket-administration tools that only read.
  *
- * @param namePrefix Prepended to each tool name, followed by an underscore.
  * @param storageOptions Options for the Cloud Storage client.
  * @return The `get_bucket` and `list_buckets` tools, in the order adk-python
  *   builds them.
  */
 export function createGcsAdminReadTools(
-  namePrefix: string,
   storageOptions?: StorageOptions,
 ): BaseTool[] {
   return [
     new FunctionTool({
-      name: `${namePrefix}_get_bucket`,
+      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_get_bucket`,
       description: 'Get metadata information about a GCS bucket.',
       parameters: getBucketParameters,
       execute: (input) => getBucket(input, storageOptions),
     }),
     new FunctionTool({
-      name: `${namePrefix}_list_buckets`,
+      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_list_buckets`,
       description: 'List GCS bucket names in a Google Cloud project.',
       parameters: listBucketsParameters,
       execute: (input) => listBuckets(input, storageOptions),
@@ -319,30 +318,28 @@ export function createGcsAdminReadTools(
 /**
  * Builds the bucket-administration tools that mutate cloud resources.
  *
- * @param namePrefix Prepended to each tool name, followed by an underscore.
  * @param storageOptions Options for the Cloud Storage client.
  * @return The `create_bucket`, `update_bucket` and `delete_bucket` tools, in
  *   the order adk-python builds them.
  */
 export function createGcsAdminWriteTools(
-  namePrefix: string,
   storageOptions?: StorageOptions,
 ): BaseTool[] {
   return [
     new FunctionTool({
-      name: `${namePrefix}_create_bucket`,
+      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_create_bucket`,
       description: 'Create a new GCS bucket.',
       parameters: createBucketParameters,
       execute: (input) => createBucket(input, storageOptions),
     }),
     new FunctionTool({
-      name: `${namePrefix}_update_bucket`,
+      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_update_bucket`,
       description: 'Update properties of a GCS bucket.',
       parameters: updateBucketParameters,
       execute: (input) => updateBucket(input, storageOptions),
     }),
     new FunctionTool({
-      name: `${namePrefix}_delete_bucket`,
+      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_delete_bucket`,
       description: 'Delete a GCS bucket.',
       parameters: deleteBucketParameters,
       execute: (input) => deleteBucket(input, storageOptions),

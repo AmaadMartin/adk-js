@@ -116,10 +116,10 @@ describe('GcsAdminToolset.getTools', () => {
     expect(await toolset.getTools()).toStrictEqual([]);
   });
 
-  it('matches a string filter against the unprefixed tool names', async () => {
+  it('matches a string filter against the names the model sees', async () => {
     const toolset = new GcsAdminToolset({
       settings: readWrite,
-      toolFilter: ['get_bucket', 'delete_bucket'],
+      toolFilter: ['gcs_get_bucket', 'gcs_delete_bucket'],
     });
 
     const tools = await toolset.getTools();
@@ -130,8 +130,8 @@ describe('GcsAdminToolset.getTools', () => {
     ]);
   });
 
-  it('drops every tool when a string filter matches the prefixed names', async () => {
-    const toolset = new GcsAdminToolset({toolFilter: ['gcs_get_bucket']});
+  it('drops every tool when a string filter omits the prefix', async () => {
+    const toolset = new GcsAdminToolset({toolFilter: ['get_bucket']});
 
     expect(await toolset.getTools()).toStrictEqual([]);
   });

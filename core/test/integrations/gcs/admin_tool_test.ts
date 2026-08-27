@@ -115,6 +115,26 @@ describe('listBuckets', () => {
     });
   });
 
+  it('returns no token for a page token without a page size', async () => {
+    // The client auto-paginates here and hands the request query back in
+    // place of a next-page one, so the caller's own token must not be echoed.
+    mocks.getBuckets.mockResolvedValue([
+      [{name: 'test-bucket'}],
+      {pageToken: 'token'},
+    ]);
+
+    const result = await listBuckets({
+      project_id: 'test-project',
+      page_token: 'token',
+    });
+
+    expect(result).toStrictEqual({
+      status: 'SUCCESS',
+      results: ['test-bucket'],
+    });
+    expect(mocks.getBuckets).toHaveBeenCalledWith({pageToken: 'token'});
+  });
+
   it('reports the failure instead of throwing', async () => {
     mocks.getBuckets.mockRejectedValue(new Error('list failed'));
 

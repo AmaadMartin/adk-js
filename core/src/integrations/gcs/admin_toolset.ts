@@ -20,15 +20,11 @@ import {
   GcsToolSettings,
 } from './settings.js';
 
-/** Prepended to every tool name the toolset exposes. */
-export const DEFAULT_GCS_TOOL_NAME_PREFIX = 'gcs';
-
 /** Options for {@link GcsAdminToolset}. */
 export interface GcsAdminToolsetOptions {
   /**
-   * Selects which of the tools to expose. A string array matches the tool
-   * names without the `gcs_` prefix; a predicate receives the tool as the
-   * model sees it, with the prefix.
+   * Selects which of the tools to expose. Both a string array and a predicate
+   * match the tool as the model sees it, so a name carries the `gcs_` prefix.
    */
   toolFilter?: ToolPredicate | string[];
   /** Which operations the tools may perform. Read-only by default. */
@@ -38,18 +34,6 @@ export interface GcsAdminToolsetOptions {
    * Credentials.
    */
   storageOptions?: StorageOptions;
-}
-
-/**
- * Removes the toolset's name prefix, so a string `toolFilter` names the same
- * tools it names in adk-python, where the framework adds the prefix after the
- * filter runs.
- *
- * @param name The prefixed tool name.
- * @return The name without the prefix.
- */
-function unprefixedName(name: string): string {
-  return name.slice(DEFAULT_GCS_TOOL_NAME_PREFIX.length + 1);
 }
 
 /**
@@ -92,7 +76,7 @@ export class GcsAdminToolset extends BaseToolset {
    * @param options The toolset options. Every field is optional.
    */
   constructor(options: GcsAdminToolsetOptions = {}) {
-    super(options.toolFilter ?? [], DEFAULT_GCS_TOOL_NAME_PREFIX);
+    super(options.toolFilter ?? []);
     this.settings = options.settings ?? DEFAULT_GCS_TOOL_SETTINGS;
     this.storageOptions = options.storageOptions;
   }
@@ -111,20 +95,10 @@ export class GcsAdminToolset extends BaseToolset {
       capabilities.includes(GcsCapability.READ_ONLY) ||
       capabilities.includes(GcsCapability.READ_WRITE)
     ) {
-      tools.push(
-        ...createGcsAdminReadTools(
-          DEFAULT_GCS_TOOL_NAME_PREFIX,
-          this.storageOptions,
-        ),
-      );
+      tools.push(...createGcsAdminReadTools(this.storageOptions));
     }
     if (capabilities.includes(GcsCapability.READ_WRITE)) {
-      tools.push(
-        ...createGcsAdminWriteTools(
-          DEFAULT_GCS_TOOL_NAME_PREFIX,
-          this.storageOptions,
-        ),
-      );
+      tools.push(...createGcsAdminWriteTools(this.storageOptions));
     }
 
     const filter = this.toolFilter;
@@ -142,7 +116,7 @@ export class GcsAdminToolset extends BaseToolset {
     if (filter.length === 0) {
       return tools;
     }
-    return tools.filter((tool) => filter.includes(unprefixedName(tool.name)));
+    return tools.filter((tool) => filter.includes(tool.name));
   }
 
   /**
