@@ -42,7 +42,7 @@ import {
   SingleBeforeToolCallback,
   ToolUnion,
 } from '../llm_agent.js';
-import {LoopAgent, LoopAgentConfig} from '../loop_agent.js';
+import {LoopAgent} from '../loop_agent.js';
 import {ParallelAgent} from '../parallel_agent.js';
 import {SequentialAgent} from '../sequential_agent.js';
 import {
@@ -59,7 +59,6 @@ import {
   DEFAULT_AGENT_CLASS,
   LlmAgentYamlConfig,
   llmAgentYamlConfigSchema,
-  LoopAgentYamlConfig,
   loopAgentYamlConfigSchema,
   parallelAgentYamlConfigSchema,
   parseWithSchema,
@@ -508,17 +507,6 @@ async function createLlmAgent(
   return new LlmAgent(llmConfig);
 }
 
-function createLoopAgent(
-  parsed: LoopAgentYamlConfig,
-  baseConfig: BaseAgentConfig,
-): LoopAgent {
-  const loopConfig: LoopAgentConfig = {...baseConfig};
-  if (parsed.max_iterations) {
-    loopConfig.maxIterations = parsed.max_iterations;
-  }
-  return new LoopAgent(loopConfig);
-}
-
 /**
  * Builds an agent of a class that is not one of the built-ins.
  *
@@ -606,10 +594,17 @@ async function buildAgent(
         config,
         configAbsPath,
       );
-      return createLoopAgent(
-        parsed,
-        await createBaseAgentConfig(parsed, configAbsPath, options, inFlight),
-      );
+      return new LoopAgent({
+        ...(await createBaseAgentConfig(
+          parsed,
+          configAbsPath,
+          options,
+          inFlight,
+        )),
+        // `max_iterations: 0` leaves the default, matching adk-python's
+        // `if config.max_iterations` in loop_agent.py.
+        maxIterations: parsed.max_iterations || undefined,
+      });
     }
     case 'ParallelAgent': {
       const parsed = parseWithSchema(

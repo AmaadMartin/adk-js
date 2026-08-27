@@ -46,10 +46,10 @@ await build({
   logLevel: 'error',
 });
 
-const {AGENT_CONFIG_SCHEMA_FILENAME, buildAgentConfigJsonSchema} = await import(
+const {buildAgentConfigJsonSchema} = await import(
   pathToFileURL(BUNDLE_PATH).href
 );
 
-const outputPath = path.join(CONFIGS_DIR, AGENT_CONFIG_SCHEMA_FILENAME);
+const outputPath = path.join(CONFIGS_DIR, 'AgentConfig.json');
 await fs.writeFile(outputPath, buildAgentConfigJsonSchema(), 'utf-8');
 process.stdout.write(`Wrote ${path.relative(REPO_ROOT, outputPath)}\n`);

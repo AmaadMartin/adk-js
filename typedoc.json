@@ -9,16 +9,5 @@
   "tsconfig": "./core/tsconfig.json",
   "plugin": ["typedoc-theme-fresh"],
   "theme": "fresh",
-  "excludeExternals": true,
-  "intentionallyNotExported": [
-    "ADK_AGENT_CLASSES",
-    "agentRefYamlConfigSchema",
-    "baseAgentYamlConfigSchema",
-    "codeYamlConfigSchema",
-    "llmAgentYamlConfigSchema",
-    "loopAgentYamlConfigSchema",
-    "parallelAgentYamlConfigSchema",
-    "sequentialAgentYamlConfigSchema",
-    "toolYamlConfigSchema"
-  ]
+  "excludeExternals": true
 }

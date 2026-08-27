@@ -17,19 +17,6 @@ export {
   AgentConfigError,
   AgentConfigErrorCode,
 } from './agents/configs/agent_config.js';
-export type {
-  AdkAgentClass,
-  AgentRefYamlConfig,
-  AgentYamlConfig,
-  AgentYamlConfigTag,
-  BaseAgentYamlConfig,
-  CodeYamlConfig,
-  LlmAgentYamlConfig,
-  LoopAgentYamlConfig,
-  ParallelAgentYamlConfig,
-  SequentialAgentYamlConfig,
-  ToolYamlConfig,
-} from './agents/configs/agent_config.js';
 export {Context} from './agents/context.js';
 export {
   findEventByFunctionCallId,
