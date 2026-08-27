@@ -7,15 +7,12 @@
 import {describe, expect, it} from 'vitest';
 
 import {
-  BaseMemoryService,
   Context,
   createEvent,
   createSession,
   InMemoryMemoryService,
-  InvocationContext,
   LlmRequest,
   MemoryEntry,
-  PluginManager,
   PRELOAD_MEMORY,
   PreloadMemoryTool,
   SearchMemoryResponse,
@@ -24,44 +21,7 @@ import {
 // We mock the logger.warn since we test a failing case
 import {vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
-
-/**
- * A memory service that returns a fixed list of entries, as a Memory Bank
- * backend does when a remembered turn holds no text.
- * {@link InMemoryMemoryService} cannot produce such an entry: it skips an
- * event whose parts hold no words.
- */
-class FixedMemoryService implements BaseMemoryService {
-  constructor(private readonly memories: MemoryEntry[]) {}
-
-  async addSessionToMemory(): Promise<void> {}
-
-  async searchMemory(): Promise<SearchMemoryResponse> {
-    return {memories: this.memories};
-  }
-}
-
-/**
- * Builds a real `Context` over a real `InvocationContext` and `Session`, so
- * the tool runs against the same plumbing the agent request loop uses.
- */
-function createRealToolContext(
-  memories: MemoryEntry[],
-  memoryService: BaseMemoryService = new FixedMemoryService(memories),
-): Context {
-  const invocationContext = new InvocationContext({
-    invocationId: 'test-invocation',
-    session: createSession({
-      id: 'test-session',
-      appName: 'test-app',
-      userId: 'test-user',
-    }),
-    pluginManager: new PluginManager([]),
-    memoryService,
-    userContent: {role: 'user', parts: [{text: 'hello'}]},
-  });
-  return new Context({invocationContext});
-}
+import {createMemoryToolContext} from './test_helpers.js';
 
 class StubToolContext {
   private memories: MemoryEntry[];
@@ -170,7 +130,7 @@ describe('PreloadMemoryTool', () => {
   });
 
   it('does not append instruction if every memory is text-free and untimestamped', async () => {
-    const toolContext = createRealToolContext([
+    const toolContext = createMemoryToolContext([
       {
         content: {
           role: 'user',
@@ -196,7 +156,7 @@ describe('PreloadMemoryTool', () => {
   });
 
   it('joins mixed text and text-free parts with a single space', async () => {
-    const toolContext = createRealToolContext([
+    const toolContext = createMemoryToolContext([
       {
         content: {
           role: 'user',
@@ -245,7 +205,7 @@ describe('PreloadMemoryTool', () => {
       ],
     });
     await memoryService.addSessionToMemory(session);
-    const toolContext = createRealToolContext([], memoryService);
+    const toolContext = createMemoryToolContext([], memoryService);
 
     const llmRequest: LlmRequest = {
       contents: [],

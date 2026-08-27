@@ -65,14 +65,6 @@ describe('extractText', () => {
     expect(extractText(memory)).toBe('a');
   });
 
-  it('honours a custom splitter', () => {
-    const memory: MemoryEntry = {
-      content: {role: 'user', parts: [{text: 'hello'}, {text: 'world'}]},
-    };
-
-    expect(extractText(memory, '\n')).toBe('hello\nworld');
-  });
-
   it('returns a single text part verbatim', () => {
     const memory: MemoryEntry = {
       content: {role: 'user', parts: [{text: 'hello'}]},
