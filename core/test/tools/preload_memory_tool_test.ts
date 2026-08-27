@@ -125,6 +125,61 @@ describe('PreloadMemoryTool', () => {
     expect(instructions).toContain('<PAST_CONVERSATIONS>');
   });
 
+  it('does not append instruction if every memory is text-free and untimestamped', async () => {
+    const toolContext = new StubToolContext([
+      {
+        content: {
+          role: 'user',
+          parts: [
+            {functionCall: {name: 'f'}},
+            {inlineData: {mimeType: 'audio/wav', data: 'AAAA'}},
+          ],
+        },
+        author: 'user',
+      },
+    ]) as unknown as Context;
+
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {},
+    };
+    const tool = new PreloadMemoryTool();
+    await tool.processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.config?.systemInstruction).toBeUndefined();
+  });
+
+  it('joins mixed text and text-free parts with a single space', async () => {
+    const toolContext = new StubToolContext([
+      {
+        content: {
+          role: 'user',
+          parts: [
+            {text: 'hello'},
+            {functionCall: {name: 'f'}},
+            {text: 'world'},
+          ],
+        },
+        author: 'user',
+      },
+    ]) as unknown as Context;
+
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {},
+    };
+    const tool = new PreloadMemoryTool();
+    await tool.processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.config?.systemInstruction).toContain(
+      '<PAST_CONVERSATIONS>\nuser: hello world\n</PAST_CONVERSATIONS>',
+    );
+  });
+
   it('handles searchMemory throwing an error gracefully', async () => {
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     const toolContext = new StubToolContext([]) as unknown as Context;
