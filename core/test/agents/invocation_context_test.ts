@@ -12,6 +12,7 @@ import {
   LoopAgent,
   PluginManager,
   Session,
+  createContextCacheConfig,
   createEvent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -170,5 +171,61 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+/** Records the context that {@link BaseAgent.runAsync} builds for it. */
+class ContextCapturingAgent extends BaseAgent {
+  captured?: InvocationContext;
+
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    this.captured = context;
+    yield createEvent({author: this.name});
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for this test.
+  }
+}
+
+describe('InvocationContext context cache config', () => {
+  const cacheConfig = createContextCacheConfig({cacheIntervals: 5});
+
+  it('keeps the context cache config across clone()', () => {
+    const root = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      contextCacheConfig: cacheConfig,
+    });
+
+    expect(root.clone().contextCacheConfig).toBe(cacheConfig);
+  });
+
+  it('propagates the context cache config to a sub-agent context', async () => {
+    const inner = new ContextCapturingAgent({name: 'inner'});
+    const loop = new LoopAgent({
+      name: 'loop',
+      subAgents: [inner],
+      maxIterations: 1,
+    });
+    const root = new InvocationContext({
+      invocationId: 'inv-2',
+      agent: loop,
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      contextCacheConfig: cacheConfig,
+    });
+
+    for await (const _ of loop.runAsync(root)) {
+      // The run only exists to build the sub-agent's context.
+    }
+
+    expect(inner.captured?.contextCacheConfig).toBe(cacheConfig);
   });
 });
