@@ -8,8 +8,11 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
   InvocationContext,
+  LlmAgent,
   OpenAPIToolset,
+  PluginManager,
   RestApiTool,
 } from '@google/adk';
 import {createServer, Server} from 'node:http';
@@ -109,10 +112,17 @@ function createRequestingContext(
   sessionState: Record<string, unknown>,
 ): Context {
   return new Context({
-    invocationContext: {
-      session: {state: sessionState},
-      agent: {name: 'openapi-credential-cache-agent'},
-    } as unknown as InvocationContext,
+    invocationContext: new InvocationContext({
+      invocationId: 'invocation-1',
+      agent: new LlmAgent({name: 'openapi_credential_cache_agent'}),
+      session: createSession({
+        id: 'session-1',
+        appName: 'app',
+        userId: 'user',
+        state: sessionState,
+      }),
+      pluginManager: new PluginManager(),
+    }),
     functionCallId: FUNCTION_CALL_ID,
   });
 }

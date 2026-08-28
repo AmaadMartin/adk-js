@@ -8,7 +8,10 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
   InvocationContext,
+  LlmAgent,
+  PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
@@ -68,10 +71,17 @@ function createRequestingContext(
   sessionState: Record<string, unknown>,
 ): Context {
   return new Context({
-    invocationContext: {
-      session: {state: sessionState},
-      agent: {name: 'tool-auth-handler-agent'},
-    } as unknown as InvocationContext,
+    invocationContext: new InvocationContext({
+      invocationId: 'invocation-1',
+      agent: new LlmAgent({name: 'tool_auth_handler_agent'}),
+      session: createSession({
+        id: 'session-1',
+        appName: 'app',
+        userId: 'user',
+        state: sessionState,
+      }),
+      pluginManager: new PluginManager(),
+    }),
     functionCallId: FUNCTION_CALL_ID,
   });
 }
