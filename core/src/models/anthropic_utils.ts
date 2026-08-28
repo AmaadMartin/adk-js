@@ -245,11 +245,15 @@ export function partToMessageBlock(
     return {type: 'text', text: part.text};
   }
   if (part.functionCall) {
+    const {id, name, args} = part.functionCall;
+    if (!name) {
+      throw new Error('A function call sent to Claude must have a name.');
+    }
     return {
       type: 'tool_use',
-      id: sanitizer.sanitize(part.functionCall.id),
-      name: part.functionCall.name ?? '',
-      input: part.functionCall.args ?? {},
+      id: sanitizer.sanitize(id),
+      name,
+      input: args ?? {},
     };
   }
   if (part.functionResponse) {
