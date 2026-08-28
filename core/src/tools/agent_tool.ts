@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, FunctionDeclaration, Schema, Type} from '@google/genai';
+import {Content, FunctionDeclaration, Part, Type} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
-import {isLlmAgent} from '../agents/llm_agent.js';
+import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
 import {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
+import {parseWithSchema} from '../utils/schema.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
@@ -54,17 +55,72 @@ export function isAgentTool(obj: unknown): obj is AgentTool {
   );
 }
 
+/** Prefix marking a state key as ADK-internal, so it stays in the parent. */
+const ADK_INTERNAL_STATE_PREFIX = '_adk';
+
 /**
- * Resolves the input schema an `AgentTool` should advertise for `agent`: an
- * `LlmAgent` answers for itself, any other agent resolves through its first
- * sub-agent. Mirrors `_get_input_schema` in adk-python's `agent_tool.py`.
+ * Resolves the agent whose schema an `AgentTool` speaks for. An `LlmAgent`
+ * answers for itself; any other agent resolves through the sub-agent at
+ * `edge`, because a composite agent reads its input at the first leg and
+ * produces its output at the last. Mirrors `_get_input_schema` and
+ * `_get_output_schema` in adk-python's `agent_tool.py`.
  */
-function resolveInputSchema(agent: BaseAgent): Schema | undefined {
+function resolveSchemaAgent(
+  agent: BaseAgent,
+  edge: 'first' | 'last',
+): LlmAgent | undefined {
   if (isLlmAgent(agent)) {
-    return agent.inputSchema;
+    return agent;
   }
-  const firstSubAgent = agent.subAgents?.[0];
-  return firstSubAgent ? resolveInputSchema(firstSubAgent) : undefined;
+  const subAgents = agent.subAgents ?? [];
+  const next =
+    edge === 'first' ? subAgents[0] : subAgents[subAgents.length - 1];
+  return next ? resolveSchemaAgent(next, edge) : undefined;
+}
+
+/**
+ * Drops null-valued properties from a serialized value, matching
+ * `exclude_none=True` in adk-python's `agent_tool.py`.
+ */
+function withoutNulls(_key: string, value: unknown): unknown {
+  return value === null ? undefined : value;
+}
+
+/**
+ * Renders `args` as prompt text for an agent that declares no input schema.
+ *
+ * A string `request` argument passes through unchanged, an empty one
+ * included. Anything else is serialized with its keys in a fixed order, so the
+ * same arguments always produce the same text. A `request` the model filled
+ * with something other than a string takes that same path rather than a cast,
+ * because the declared schema does not bind the model. Mirrors the no-schema
+ * branch of `run_async` in adk-python's `agent_tool.py`.
+ */
+function requestText(args: Record<string, unknown>): string {
+  const request = args['request'];
+  if (typeof request === 'string') {
+    return request;
+  }
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(args).sort()) {
+    sorted[key] = args[key];
+  }
+  return JSON.stringify(sorted);
+}
+
+/**
+ * Returns the reader-visible text of `part`, including the result of a code
+ * execution. Mirrors `_part_to_text` in adk-python's `agent_tool.py`.
+ */
+function partToText(part: Part): string {
+  if (part.text) {
+    return part.text;
+  }
+  const output = part.codeExecutionResult?.output;
+  if (output) {
+    return output.replace(/\n+$/, '');
+  }
+  return part.executableCode?.code ?? '';
 }
 
 /**
@@ -96,7 +152,7 @@ export class AgentTool extends BaseTool {
   override _getDeclaration(): FunctionDeclaration {
     let declaration: FunctionDeclaration;
 
-    const inputSchema = resolveInputSchema(this.agent);
+    const inputSchema = resolveSchemaAgent(this.agent, 'first')?.inputSchema;
     if (inputSchema) {
       declaration = {
         name: this.name,
@@ -123,8 +179,8 @@ export class AgentTool extends BaseTool {
     }
 
     if (this.apiVariant !== GoogleLLMVariant.GEMINI_API) {
-      const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
-      declaration.response = hasOutputSchema
+      const outputSchema = resolveSchemaAgent(this.agent, 'last')?.outputSchema;
+      declaration.response = outputSchema
         ? {type: Type.OBJECT}
         : {type: Type.STRING};
     }
@@ -144,22 +200,34 @@ export class AgentTool extends BaseTool {
     // returned verbatim below, which is the intended effect of
     // skipSummarization.
 
-    const inputSchema = resolveInputSchema(this.agent);
+    const inputAgent = resolveSchemaAgent(this.agent, 'first');
+    const inputSchema =
+      inputAgent?.inputSchemaSource ?? inputAgent?.inputSchema;
     const content: Content = {
       role: 'user',
       parts: [
         {
-          // TODO(b/425992518): Should be validated. Consider similar
-          // logic to one we have in Python ADK.
+          // The sub-agent re-validates this text against the same schema, so
+          // it must stay a bare JSON document with no surrounding prose.
           text: inputSchema
-            ? JSON.stringify(args)
-            : (args['request'] as string),
+            ? JSON.stringify(parseWithSchema(inputSchema, args), withoutNulls)
+            : requestText(args),
         },
       ],
     };
 
+    // The sub-agent runs under the caller's app, so both sides share one app
+    // namespace. It falls back to its own name when the caller names no app.
+    const childAppName =
+      toolContext.invocationContext.appName || this.agent.name;
+    const seedState = Object.fromEntries(
+      Object.entries(toolContext.state.toRecord()).filter(
+        ([key]) => !key.startsWith(ADK_INTERNAL_STATE_PREFIX),
+      ),
+    );
+
     const runner = new Runner({
-      appName: this.agent.name,
+      appName: childAppName,
       agent: this.agent,
       artifactService: new ForwardingArtifactService(toolContext),
       sessionService:
@@ -172,10 +240,10 @@ export class AgentTool extends BaseTool {
     });
 
     const session = await runner.sessionService.getOrCreateSession({
-      appName: this.agent.name,
+      appName: childAppName,
       userId: toolContext.invocationContext.userId,
       sessionId: toolContext.invocationContext.session.id,
-      state: toolContext.state.toRecord(),
+      state: seedState,
     });
 
     if (toolContext.abortSignal?.aborted) {
@@ -211,11 +279,14 @@ export class AgentTool extends BaseTool {
       return '';
     }
 
-    const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
+    const hasOutputSchema = resolveSchemaAgent(
+      this.agent,
+      'last',
+    )?.outputSchema;
     // Exclude thoughts from the merged text.
     const mergedText = lastEvent.content.parts
       .filter((part) => !part.thought)
-      .map((part) => part.text)
+      .map(partToText)
       .filter((text) => text)
       .join('\n');
 
