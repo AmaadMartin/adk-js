@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event, Session} from '@google/adk';
+import {Session} from '@google/adk';
 
 const USER_AUTHOR = 'user';
 const DEFAULT_AGENT_AUTHOR = 'agent';
@@ -27,49 +27,6 @@ export interface EvalTurn {
   expected_tool_use: ExpectedToolUse[];
   expected_intermediate_agent_responses: IntermediateAgentResponse[];
   reference: string;
-}
-
-/** What an agent produced between one user event and the next. */
-interface TurnBody {
-  toolUses: ExpectedToolUse[];
-  responses: IntermediateAgentResponse[];
-}
-
-/**
- * Collects the agent output of the turn that starts at `startIndex`, stopping
- * at the next user event or at the end of the list.
- */
-function collectTurnBody(events: Event[], startIndex: number): TurnBody {
-  const toolUses: ExpectedToolUse[] = [];
-  const responses: IntermediateAgentResponse[] = [];
-
-  for (let i = startIndex; i < events.length; i++) {
-    const event = events[i];
-    // `||` rather than `??`: an empty-string author must also default to
-    // 'agent', because Python's `or` replaces it too.
-    const author = event.author || DEFAULT_AGENT_AUTHOR;
-    if (author === USER_AUTHOR) {
-      break;
-    }
-    // Length test, not a truthiness test: an empty `parts` array is falsy in
-    // Python but truthy in JavaScript.
-    if (!event.content?.parts?.length) {
-      continue;
-    }
-
-    for (const part of event.content.parts) {
-      if (part.functionCall) {
-        toolUses.push({
-          tool_name: part.functionCall.name || '',
-          tool_input: part.functionCall.args || {},
-        });
-      } else if (part.text) {
-        responses.push({author, text: part.text});
-      }
-    }
-  }
-
-  return {toolUses, responses};
 }
 
 /**
@@ -99,10 +56,38 @@ export function convertSessionToEvalFormat(
       continue;
     }
 
+    const toolUses: ExpectedToolUse[] = [];
+    const responses: IntermediateAgentResponse[] = [];
+
     // Scan from the positional index. The reference resolves the scan start
     // with `events.index(event)`, which finds the first structurally equal
     // event, so a repeated event restarts the scan at the wrong position.
-    const {toolUses, responses} = collectTurnBody(events, i + 1);
+    for (let j = i + 1; j < events.length; j++) {
+      const next = events[j];
+      // `||` rather than `??`: an empty-string author must also default to
+      // 'agent', because Python's `or` replaces it too.
+      const author = next.author || DEFAULT_AGENT_AUTHOR;
+      if (author === USER_AUTHOR) {
+        break;
+      }
+      // Length test, not a truthiness test: an empty `parts` array is falsy in
+      // Python but truthy in JavaScript.
+      if (!next.content?.parts?.length) {
+        continue;
+      }
+
+      for (const part of next.content.parts) {
+        if (part.functionCall) {
+          toolUses.push({
+            tool_name: part.functionCall.name || '',
+            tool_input: part.functionCall.args || {},
+          });
+        } else if (part.text) {
+          responses.push({author, text: part.text});
+        }
+      }
+    }
+
     const last = responses[responses.length - 1];
 
     turns.push({
