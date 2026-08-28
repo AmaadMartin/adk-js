@@ -84,67 +84,45 @@ export interface AuthenticatedFunctionToolOptions<
 export class AuthenticatedFunctionTool<
   TParameters extends ToolInputParameters = undefined,
 > extends FunctionTool<TParameters> {
-  private readonly authenticatedExecute: AuthenticatedToolExecuteFunction<TParameters>;
-  private readonly responseForAuthRequired?: Record<string, unknown> | string;
-  private readonly credentialManager?: CredentialManager;
-
   /**
    * @param options The configuration for the tool.
    */
   constructor(options: AuthenticatedFunctionToolOptions<TParameters>) {
     const {authConfig, responseForAuthRequired, execute, ...toolOptions} =
       options;
+    // `FunctionTool` names an unnamed tool after its `execute` property, which
+    // is the wrapper below rather than the user's function. Resolve the name
+    // from the user's function here instead.
+    const name = options.name ?? execute.name;
+    const credentialManager = authConfig
+      ? new CredentialManager(authConfig)
+      : undefined;
     super({
       ...toolOptions,
-      // The forwarding function below is named after the property it is
-      // assigned to, so `FunctionTool`'s fallback would name every unnamed
-      // tool "execute". Resolve the user's function name here instead.
-      name: options.name ?? execute.name,
-      execute: (input, toolContext) => execute(input, toolContext, undefined),
+      name,
+      // Resolving here rather than in `runAsync` keeps the credential lookup
+      // behind argument validation and the confirmation gate, so a rejected
+      // call never starts a consent flow.
+      execute: async (input, toolContext) => {
+        if (!credentialManager) {
+          return execute(input, toolContext, undefined);
+        }
+        // `RunAsyncToolRequest.toolContext` is required, so a tool the
+        // framework runs always has one.
+        const context = toolContext!;
+        const credential = await credentialManager.getAuthCredential(context);
+        if (!credential) {
+          credentialManager.requestCredential(context);
+          return responseForAuthRequired ?? PENDING_USER_AUTHORIZATION;
+        }
+        return execute(input, context, credential);
+      },
     });
-    this.authenticatedExecute = execute;
-    this.responseForAuthRequired = responseForAuthRequired;
-    if (authConfig) {
-      this.credentialManager = new CredentialManager(authConfig);
-    } else {
+    if (!authConfig) {
       logger.warn(
-        `Tool '${this.name}' has no authConfig, so it skips authentication. ` +
+        `Tool '${name}' has no authConfig, so it skips authentication. ` +
           'Use FunctionTool instead when the tool needs no credential.',
       );
     }
-  }
-
-  /**
-   * Resolves the credential, then runs the function with it.
-   *
-   * Resolution happens here rather than in {@link FunctionTool.runAsync}, so a
-   * call with invalid arguments, or one the user rejected at the confirmation
-   * gate, never starts a consent flow.
-   *
-   * @param input The call arguments, already validated against the schema.
-   * @param toolContext The context of the call, when there is one.
-   * @returns The function's return value, or the pending-authorization
-   *   response when the client must supply a credential first.
-   */
-  protected override async invokeExecute(
-    input: ToolExecuteArgument<TParameters>,
-    toolContext?: Context,
-  ): Promise<unknown> {
-    if (!this.credentialManager) {
-      return super.invokeExecute(input, toolContext);
-    }
-    if (!toolContext) {
-      throw new Error(
-        `Tool '${this.name}' requires authentication but no tool context was provided.`,
-      );
-    }
-
-    const credential =
-      await this.credentialManager.getAuthCredential(toolContext);
-    if (!credential) {
-      this.credentialManager.requestCredential(toolContext);
-      return this.responseForAuthRequired ?? PENDING_USER_AUTHORIZATION;
-    }
-    return this.authenticatedExecute(input, toolContext, credential);
   }
 }

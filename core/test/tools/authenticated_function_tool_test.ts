@@ -112,17 +112,6 @@ class PerUserCredentialService implements BaseCredentialService {
   }
 }
 
-/**
- * Reaches the `invokeExecute` seam the way a subclass would, with no tool
- * context. `RunAsyncToolRequest` always carries one, so this path is only
- * reachable from a subclass.
- */
-class ContextFreeTool extends AuthenticatedFunctionTool {
-  invokeWithoutContext(): Promise<unknown> {
-    return this.invokeExecute('');
-  }
-}
-
 describe('AuthenticatedFunctionTool', () => {
   describe('with a credential available', () => {
     it('passes the credential to the function as the third argument', async () => {
@@ -297,19 +286,6 @@ describe('AuthenticatedFunctionTool', () => {
         "Error in tool 'list_documents': rawAuthCredential is required for authScheme type oauth2.",
       );
       expect(executed).toBe(false);
-    });
-
-    it('rejects a subclass that invokes the seam without a tool context', async () => {
-      const tool = new ContextFreeTool({
-        name: 'list_documents',
-        description: 'Lists the documents in a folder.',
-        authConfig: API_KEY_AUTH_CONFIG,
-        execute: () => 'ok',
-      });
-
-      await expect(tool.invokeWithoutContext()).rejects.toThrow(
-        "Tool 'list_documents' requires authentication but no tool context was provided.",
-      );
     });
   });
 

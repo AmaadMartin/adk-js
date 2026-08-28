@@ -196,32 +196,12 @@ export class FunctionTool<
         return pending;
       }
 
-      return await this.invokeExecute(validatedArgs, req.toolContext);
+      return await this.execute(validatedArgs, req.toolContext);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       throw new Error(`Error in tool '${this.name}': ${errorMessage}`);
     }
-  }
-
-  /**
-   * Invokes the user-provided `execute`.
-   *
-   * A subclass that must hand the function something beyond the validated
-   * arguments and the context overrides this, so argument validation, the
-   * confirmation gate and error wrapping stay in {@link runAsync}. Everything
-   * an override needs is a parameter, so concurrent calls on one tool instance
-   * cannot see each other's state.
-   *
-   * @param input The call arguments, already validated against the schema.
-   * @param toolContext The context of the call, when there is one.
-   * @returns A promise resolving to the function's return value.
-   */
-  protected async invokeExecute(
-    input: ToolExecuteArgument<TParameters>,
-    toolContext?: Context,
-  ): Promise<unknown> {
-    return this.execute(input, toolContext);
   }
 
   /**
