@@ -13,6 +13,7 @@ import {
   BasePlanner,
   BasePlugin,
   BaseTool,
+  BuiltInPlanner,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
@@ -47,6 +48,7 @@ import {
 } from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import {BASIC_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/basic_llm_request_processor.js';
 import {CODE_EXECUTION_REQUEST_PROCESSOR} from '../../src/agents/processors/code_execution_request_processor.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -1492,5 +1494,69 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+describe('LlmAgent with a BuiltInPlanner', () => {
+  const thinkingConfig = {includeThoughts: true};
+
+  it('runs NL planning after the generateContentConfig is copied in', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    const planningIndex = agent.requestProcessors.indexOf(
+      NL_PLANNING_REQUEST_PROCESSOR,
+    );
+    const basicIndex = agent.requestProcessors.indexOf(
+      BASIC_LLM_REQUEST_PROCESSOR,
+    );
+    expect(basicIndex).toBeGreaterThanOrEqual(0);
+    expect(planningIndex).toBeGreaterThan(basicIndex);
+  });
+
+  it('warns once when generateContentConfig also carries a thinking config', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      generateContentConfig: {thinkingConfig: {includeThoughts: false}},
+      planner: new BuiltInPlanner({thinkingConfig}),
+    });
+
+    expect(agent.planner).toBeDefined();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0][0]).toContain('takes precedence');
+    warn.mockRestore();
+  });
+
+  it('stays silent when only one of the two sources is set', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    new LlmAgent({
+      name: 'config_only',
+      generateContentConfig: {thinkingConfig: {includeThoughts: false}},
+    });
+    new LlmAgent({
+      name: 'planner_only',
+      planner: new BuiltInPlanner({thinkingConfig}),
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('stays silent for a planner that is not a BuiltInPlanner', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    new LlmAgent({
+      name: 'test_agent',
+      generateContentConfig: {thinkingConfig: {includeThoughts: false}},
+      planner: {
+        buildPlanningInstruction: () => 'plan first',
+        processPlanningResponse: () => undefined,
+      },
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

@@ -11,8 +11,8 @@ import type {
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
-import {LlmAgent, stringifyContent} from '@google/adk';
-import type {Content, Part} from '@google/genai';
+import {BuiltInPlanner, LlmAgent, stringifyContent} from '@google/adk';
+import type {Content, Part, ThinkingConfig} from '@google/genai';
 import {FinishReason} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
@@ -28,6 +28,7 @@ const THOUGHT_MARKER = '[PLAN]';
 interface RecordedRequest {
   systemInstruction: string | undefined;
   contents: Content[];
+  thinkingConfig: ThinkingConfig | undefined;
 }
 
 /**
@@ -47,6 +48,7 @@ class RecordingGemini extends GeminiWithMockResponses {
       systemInstruction:
         typeof systemInstruction === 'string' ? systemInstruction : undefined,
       contents: structuredClone(llmRequest.contents),
+      thinkingConfig: llmRequest.config?.thinkingConfig,
     });
     yield* super.generateContentAsync(llmRequest, stream, abortSignal);
   }
@@ -76,6 +78,24 @@ function modelTurn(...texts: string[]): RawGenerateContentResponse {
     candidates: [
       {
         content: {parts: texts.map((text) => ({text})), role: 'model'},
+        finishReason: FinishReason.STOP,
+      },
+    ],
+  };
+}
+
+/** A model turn whose first part is a native thought, as a thinking model sends. */
+function thinkingTurn(
+  thought: string,
+  answer: string,
+): RawGenerateContentResponse {
+  return {
+    candidates: [
+      {
+        content: {
+          parts: [{text: thought, thought: true}, {text: answer}],
+          role: 'model',
+        },
         finishReason: FinishReason.STOP,
       },
     ],
@@ -149,5 +169,84 @@ describe('LlmAgent with a planner', () => {
     );
     const modelEvent = events.find((event) => event.author === 'plain_agent');
     expect(modelEvent?.content?.parts?.[0].thought).toBeUndefined();
+  });
+});
+
+describe('LlmAgent with a BuiltInPlanner', () => {
+  const plannerThinking: ThinkingConfig = {
+    includeThoughts: true,
+    thinkingBudget: 2048,
+  };
+
+  it('carries the planner thinking config into the model request', async () => {
+    const model = new RecordingGemini([modelTurn('The store is open.')]);
+    const agent = new LlmAgent({
+      model,
+      name: 'thinking_agent',
+      instruction: 'Answer store questions.',
+      planner: new BuiltInPlanner({thinkingConfig: plannerThinking}),
+    });
+    const {run} = await createRunner(agent);
+
+    await collect(run('Is the store open?'));
+
+    expect(model.requests[0].thinkingConfig).toEqual(plannerThinking);
+    expect(model.requests[0].systemInstruction).not.toContain(
+      PLANNING_INSTRUCTION,
+    );
+  });
+
+  it('wins over the thinking config in generateContentConfig', async () => {
+    const model = new RecordingGemini([modelTurn('The store is open.')]);
+    const agent = new LlmAgent({
+      model,
+      name: 'thinking_agent',
+      instruction: 'Answer store questions.',
+      generateContentConfig: {thinkingConfig: {includeThoughts: false}},
+      planner: new BuiltInPlanner({thinkingConfig: plannerThinking}),
+    });
+    const {run} = await createRunner(agent);
+
+    await collect(run('Is the store open?'));
+
+    expect(model.requests[0].thinkingConfig).toEqual(plannerThinking);
+  });
+
+  it('keeps the thought markers a previous turn left in the history', async () => {
+    const model = new RecordingGemini([
+      thinkingTurn('check the store', 'The store is open.'),
+      modelTurn('It closes at six.'),
+    ]);
+    const agent = new LlmAgent({
+      model,
+      name: 'thinking_agent',
+      instruction: 'Answer store questions.',
+      planner: new BuiltInPlanner({thinkingConfig: plannerThinking}),
+    });
+    const {run} = await createRunner(agent);
+    await collect(run('Is the store open?'));
+
+    await collect(run('When does it close?'));
+
+    const secondTurnParts = model.requests[1].contents.flatMap(
+      (content) => content.parts ?? [],
+    );
+    expect(
+      secondTurnParts.filter((part) => part.thought === true),
+    ).toHaveLength(1);
+  });
+
+  it('sends no thinking config without a planner', async () => {
+    const model = new RecordingGemini([modelTurn('The store is open.')]);
+    const agent = new LlmAgent({
+      model,
+      name: 'plain_agent',
+      instruction: 'Answer store questions.',
+    });
+    const {run} = await createRunner(agent);
+
+    await collect(run('Is the store open?'));
+
+    expect(model.requests[0].thinkingConfig).toBeUndefined();
   });
 });

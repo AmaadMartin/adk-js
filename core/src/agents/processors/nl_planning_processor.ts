@@ -8,6 +8,7 @@ import {createEvent, Event} from '../../events/event.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {LlmResponse} from '../../models/llm_response.js';
 import {BasePlanner} from '../../planners/base_planner.js';
+import {isBuiltInPlanner} from '../../planners/built_in_planner.js';
 import {Context} from '../context.js';
 import {InvocationContext, requireAgent} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
@@ -18,8 +19,9 @@ import {
 } from './base_llm_processor.js';
 
 /**
- * Appends the agent planner's instruction to the request, and clears the
- * thought markers the previous turns left on the request contents.
+ * Applies a built-in planner's thinking config to the request, or appends
+ * another planner's instruction and clears the thought markers the previous
+ * turns left on the request contents.
  */
 export class NlPlanningRequestProcessor extends BaseLlmRequestProcessor {
   // eslint-disable-next-line require-yield -- the AsyncGenerator return type comes from BaseLlmRequestProcessor; this processor only mutates the request.
@@ -29,6 +31,13 @@ export class NlPlanningRequestProcessor extends BaseLlmRequestProcessor {
   ): AsyncGenerator<Event, void, void> {
     const planner = getPlanner(invocationContext);
     if (!planner) {
+      return;
+    }
+
+    // A native thinking model reads the thought markers in the history, so
+    // this branch returns before removeThoughtFromRequest clears them.
+    if (isBuiltInPlanner(planner)) {
+      planner.applyThinkingConfig(llmRequest);
       return;
     }
 
@@ -63,7 +72,8 @@ export class NlPlanningResponseProcessor extends BaseLlmResponseProcessor {
       return;
     }
 
-    // adk-python skips BuiltInPlanner's inherited no-op here; adk-js has none.
+    // adk-python skips a planner that inherits BuiltInPlanner's no-op. Here
+    // the no-op returns undefined, so calling it changes nothing.
     const callbackContext = new Context({invocationContext});
     const processedParts = await planner.processPlanningResponse(
       callbackContext,
