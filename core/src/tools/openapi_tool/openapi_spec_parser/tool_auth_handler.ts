@@ -8,6 +8,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential, OAuth2Auth} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {stableDigest} from '../../../utils/hash_utils.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
@@ -112,6 +113,36 @@ class ToolContextCredentialStore {
   }
 }
 
+/**
+ * Returns `stored` with a fresh access token when its own has expired, and
+ * writes the refreshed credential back to `store`.
+ *
+ * The write-back is what makes the next invocation work against a provider
+ * that rotates the refresh token on every refresh: without it the tool keeps
+ * presenting a refresh token the provider has already invalidated.
+ * `OAuth2CredentialRefresher` returns `stored` unchanged when it cannot
+ * refresh, so a failure costs a redundant write and never a lost credential.
+ * It also reports no refresh for a credential that holds no OAuth2 tokens.
+ */
+async function refreshIfExpired(
+  store: ToolContextCredentialStore,
+  authScheme: OpenAPIV3.SecuritySchemeObject,
+  authCredential: AuthCredential | undefined,
+  stored: AuthCredential,
+): Promise<AuthCredential> {
+  const refresher = new OAuth2CredentialRefresher();
+  if (!(await refresher.isRefreshNeeded(stored))) {
+    return stored;
+  }
+
+  const refreshed = await refresher.refresh(stored, authScheme);
+  store.storeCredential(
+    await store.getCredentialKey(authScheme, authCredential),
+    refreshed,
+  );
+  return refreshed;
+}
+
 @experimental
 export class ToolAuthHandler {
   constructor(
@@ -152,7 +183,15 @@ export class ToolAuthHandler {
     );
 
     if (storedCredential) {
-      return {state: 'done', authCredential: storedCredential};
+      return {
+        state: 'done',
+        authCredential: await refreshIfExpired(
+          store,
+          this.authScheme,
+          this.authCredential,
+          storedCredential,
+        ),
+      };
     }
 
     const authConfig: AuthConfig = {

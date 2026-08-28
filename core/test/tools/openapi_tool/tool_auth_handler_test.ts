@@ -12,7 +12,7 @@ import {
   ToolAuthHandler,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -643,5 +643,162 @@ describe('ToolAuthHandler auth request slot', () => {
     expect(requestedCredentialKey(toolB)).not.toBe(
       requestedCredentialKey(toolA),
     );
+  });
+});
+
+describe('ToolAuthHandler stored OAuth2 credential', () => {
+  const SCHEME: OpenAPIV3.SecuritySchemeObject = {
+    type: 'oauth2',
+    flows: {
+      clientCredentials: {
+        tokenUrl: 'https://provider.example.com/token',
+        scopes: {},
+      },
+    },
+  };
+  const CONFIGURED_CREDENTIAL: AuthCredential = {
+    authType: AuthCredentialTypes.OAUTH2,
+    oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+  };
+
+  /**
+   * Stubs the provider's token endpoint. The real OAuth2CredentialRefresher
+   * runs against it, so the expiry check, the token request and the write-back
+   * are the shipped ones.
+   */
+  function stubTokenEndpoint(): ReturnType<typeof vi.fn> {
+    const fetchStub = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: 'rotated-access-token',
+          refresh_token: 'rotated-refresh-token',
+          expires_in: 3600,
+        }),
+        {status: 200, headers: {'Content-Type': 'application/json'}},
+      ),
+    );
+    vi.stubGlobal('fetch', fetchStub);
+    return fetchStub;
+  }
+
+  /**
+   * Runs the tool once so the handler caches a credential, then replaces the
+   * cached value with `credential`. Returns the slot it went into, which only
+   * the handler knows how to derive.
+   */
+  async function cacheCredential(
+    sessionState: Record<string, unknown>,
+    credential: AuthCredential,
+  ): Promise<string> {
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      SCHEME,
+      CONFIGURED_CREDENTIAL,
+    ).prepareAuthCredentials();
+
+    const [key, ...otherKeys] = cachedCredentialKeys(sessionState);
+    expect(otherKeys).toEqual([]);
+    sessionState[key] = credential;
+    return key;
+  }
+
+  function oauth2Credential(expiresAt: number): AuthCredential {
+    return {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        accessToken: 'stale-access-token',
+        refreshToken: 'stale-refresh-token',
+        expiresAt,
+      },
+    };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('refreshes an expired credential before handing it to the tool', async () => {
+    const fetchStub = stubTokenEndpoint();
+    const sessionState: Record<string, unknown> = {};
+    await cacheCredential(sessionState, oauth2Credential(Date.now() - 1000));
+
+    const result = await new ToolAuthHandler(
+      createContext(sessionState),
+      SCHEME,
+      CONFIGURED_CREDENTIAL,
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(result.authCredential?.oauth2?.accessToken).toBe(
+      'rotated-access-token',
+    );
+    expect(fetchStub).toHaveBeenCalledOnce();
+  });
+
+  it('writes the rotated tokens back to the slot it read', async () => {
+    stubTokenEndpoint();
+    const sessionState: Record<string, unknown> = {};
+    const key = await cacheCredential(
+      sessionState,
+      oauth2Credential(Date.now() - 1000),
+    );
+
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      SCHEME,
+      CONFIGURED_CREDENTIAL,
+    ).prepareAuthCredentials();
+
+    // A provider that rotates the refresh token invalidates the old one, so
+    // the next invocation has to read the rotated pair, not the stale one.
+    const persisted = sessionState[key] as AuthCredential;
+    expect(persisted.oauth2?.accessToken).toBe('rotated-access-token');
+    expect(persisted.oauth2?.refreshToken).toBe('rotated-refresh-token');
+  });
+
+  it('leaves a credential that has not expired alone', async () => {
+    const fetchStub = stubTokenEndpoint();
+    const sessionState: Record<string, unknown> = {};
+    await cacheCredential(
+      sessionState,
+      oauth2Credential(Date.now() + 60 * 60 * 1000),
+    );
+    const context = createContext(sessionState);
+
+    const result = await new ToolAuthHandler(
+      context,
+      SCHEME,
+      CONFIGURED_CREDENTIAL,
+    ).prepareAuthCredentials();
+
+    expect(result.authCredential?.oauth2?.accessToken).toBe(
+      'stale-access-token',
+    );
+    expect(fetchStub).not.toHaveBeenCalled();
+    // Re-writing an unchanged credential would put the whole credential in
+    // the state delta of every single tool call.
+    expect(context.state.hasDelta()).toBe(false);
+  });
+
+  it('leaves a credential that is not OAuth2 alone', async () => {
+    const fetchStub = stubTokenEndpoint();
+    const sessionState: Record<string, unknown> = {};
+    await cacheCredential(sessionState, {
+      authType: AuthCredentialTypes.HTTP,
+      http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
+    });
+    const context = createContext(sessionState);
+
+    const result = await new ToolAuthHandler(
+      context,
+      SCHEME,
+      CONFIGURED_CREDENTIAL,
+    ).prepareAuthCredentials();
+
+    expect(result.authCredential?.http?.credentials.token).toBe('cached-token');
+    expect(fetchStub).not.toHaveBeenCalled();
+    expect(context.state.hasDelta()).toBe(false);
   });
 });
