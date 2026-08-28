@@ -943,6 +943,60 @@ describe('AgentTool parity with adk-python', () => {
     expect(result).toBe('42');
   });
 
+  /** Returns the tool result for a sub-agent that emits `events`. */
+  async function resultForEvents(events: Event[]): Promise<unknown> {
+    const agent = new LlmAgent({name: SUB_AGENT_NAME});
+    mockSubAgentRun(events);
+
+    return new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: parentContext(agent),
+    });
+  }
+
+  it('returns the error message of a sub-agent that produced no content', async () => {
+    const result = await resultForEvents([
+      createEvent({author: SUB_AGENT_NAME, errorMessage: 'the model refused'}),
+    ]);
+
+    expect(result).toBe('the model refused');
+  });
+
+  it('prefers the error message when the reply is all thought parts', async () => {
+    const result = await resultForEvents([
+      createEvent({
+        author: SUB_AGENT_NAME,
+        content: {role: 'model', parts: [{text: 'thinking', thought: true}]},
+      }),
+      createEvent({author: SUB_AGENT_NAME, errorMessage: 'the model refused'}),
+    ]);
+
+    expect(result).toBe('the model refused');
+  });
+
+  it('keeps the last event that carried content', async () => {
+    const result = await resultForEvents([
+      createEvent({
+        author: SUB_AGENT_NAME,
+        content: {role: 'model', parts: [{text: 'the answer'}]},
+      }),
+      createEvent({
+        author: SUB_AGENT_NAME,
+        actions: createEventActions({stateDelta: {bookkeeping: 'done'}}),
+      }),
+    ]);
+
+    expect(result).toBe('the answer');
+  });
+
+  it('returns an empty string when the reply has no parts and no error', async () => {
+    const result = await resultForEvents([
+      createEvent({author: SUB_AGENT_NAME, content: {role: 'model'}}),
+    ]);
+
+    expect(result).toBe('');
+  });
+
   it('does not seed _adk-prefixed parent state into the sub-agent session', async () => {
     const agent = new LlmAgent({name: SUB_AGENT_NAME});
     const sessionService = new InMemorySessionService();

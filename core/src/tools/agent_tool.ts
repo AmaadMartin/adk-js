@@ -8,7 +8,6 @@ import {Content, FunctionDeclaration, Part, Type} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
-import {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
@@ -246,7 +245,8 @@ export class AgentTool extends BaseTool {
       return '';
     }
 
-    let lastEvent: Event | undefined;
+    let lastContent: Content | undefined;
+    let lastErrorMessage: string | undefined;
     for await (const event of runner.runAsync({
       userId: session.userId,
       sessionId: session.id,
@@ -268,11 +268,18 @@ export class AgentTool extends BaseTool {
         }
       }
 
-      lastEvent = event;
+      if (event.errorMessage) {
+        lastErrorMessage = event.errorMessage;
+      }
+      // A run can end on an event that carries no content, such as one that
+      // only reports an error. Keep the last event that did carry content.
+      if (event.content) {
+        lastContent = event.content;
+      }
     }
 
-    if (!lastEvent?.content?.parts?.length) {
-      return '';
+    if (!lastContent?.parts?.length) {
+      return lastErrorMessage ?? '';
     }
 
     const hasOutputSchema = resolveSchemaAgent(
@@ -280,11 +287,17 @@ export class AgentTool extends BaseTool {
       'last',
     )?.outputSchema;
     // Exclude thoughts from the merged text.
-    const mergedText = lastEvent.content.parts
+    const mergedText = lastContent.parts
       .filter((part) => !part.thought)
       .map(partToText)
       .filter((text) => text)
       .join('\n');
+
+    // An error message tells the calling model why the sub-agent produced
+    // nothing, so it beats an empty result.
+    if (!mergedText && lastErrorMessage) {
+      return lastErrorMessage;
+    }
 
     // TODO - b/425992518: In case of output schema, the output should be
     // validated. Consider similar logic to one we have in Python ADK.
