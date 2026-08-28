@@ -13,9 +13,15 @@ import type {
 } from '@langchain/core/messages';
 
 import {createEvent, Event} from '../events/event.js';
+import {loadOptionalPeer, OptionalPeer} from '../utils/optional_peer.js';
 
 import {BaseAgent, BaseAgentConfig} from './base_agent.js';
 import {InvocationContext} from './invocation_context.js';
+
+const LANGCHAIN_CORE: OptionalPeer = {
+  packageName: '@langchain/core',
+  feature: 'LangGraphAgent',
+};
 
 /**
  * The LangGraph thread configuration used to address a conversation thread.
@@ -255,7 +261,10 @@ export class LangGraphAgent extends BaseAgent<LangGraphAgentConfig> {
         Array.isArray(graphMessages) && graphMessages.length > 0;
     }
 
-    const ctors = await import('@langchain/core/messages');
+    const ctors = await loadOptionalPeer(
+      LANGCHAIN_CORE,
+      () => import('@langchain/core/messages'),
+    );
 
     const messages: BaseMessage[] = [];
     if (this.instruction && !hasGraphHistory) {
