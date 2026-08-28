@@ -11,11 +11,7 @@ export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
 // Node-only: the thread id is a `node:crypto` digest, so these stay out of
 // `common.ts` and therefore out of the web bundle.
-export {
-  LangGraphAgent,
-  getThreadId,
-  isLangGraphAgent,
-} from './agents/langgraph_agent.js';
+export {LangGraphAgent, isLangGraphAgent} from './agents/langgraph_agent.js';
 export type {
   CompiledLangGraph,
   LangGraphAgentConfig,

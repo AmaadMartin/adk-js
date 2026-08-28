@@ -48,6 +48,10 @@ export interface LangGraphThreadConfig {
  * The length prefix counts code points, not UTF-16 code units, so adk-js and
  * adk-python derive the same thread id for the same session.
  *
+ * Not part of the package's public API, like adk-python's `_get_thread_id`,
+ * which leaves the scheme free to change. adk-python has already changed it
+ * once.
+ *
  * @param appName The app the session belongs to.
  * @param userId The user the session belongs to.
  * @param sessionId The session id.
@@ -87,7 +91,7 @@ export interface CompiledLangGraph {
   invoke(
     input: unknown,
     config: LangGraphThreadConfig,
-  ): Promise<{messages: Array<{content: unknown}>}>;
+  ): Promise<{messages: BaseMessage[]}>;
 }
 
 /** The configuration options for creating a LangGraph agent. */
@@ -106,12 +110,6 @@ export interface LangGraphAgentConfig extends BaseAgentConfig {
 interface MessageConstructors {
   AIMessage: typeof AIMessage;
   HumanMessage: typeof HumanMessage;
-}
-
-/** A `{type: 'text'}` block of a structured LangChain message content. */
-interface TextContentBlock {
-  type: 'text';
-  text: string;
 }
 
 /**
@@ -135,34 +133,6 @@ export function isLangGraphAgent(obj: unknown): obj is LangGraphAgent {
     LANGGRAPH_AGENT_SIGNATURE_SYMBOL in obj &&
     obj[LANGGRAPH_AGENT_SIGNATURE_SYMBOL] === true
   );
-}
-
-function isTextContentBlock(block: unknown): block is TextContentBlock {
-  return (
-    typeof block === 'object' &&
-    block !== null &&
-    'type' in block &&
-    block.type === 'text' &&
-    'text' in block &&
-    typeof block.text === 'string'
-  );
-}
-
-/**
- * Extracts plain text from a LangChain message `content`, which is either a
- * string or a list of structured content blocks.
- */
-function messageText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .filter(isTextContentBlock)
-      .map((block) => block.text)
-      .join('');
-  }
-  return '';
 }
 
 /**
@@ -287,7 +257,7 @@ export class LangGraphAgent extends BaseAgent<LangGraphAgentConfig> {
       branch: context.branch,
       content: {
         role: 'model',
-        parts: [{text: messageText(lastMessage.content)}],
+        parts: [{text: lastMessage.text}],
       },
     });
   }

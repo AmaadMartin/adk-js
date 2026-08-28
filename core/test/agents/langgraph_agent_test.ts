@@ -14,7 +14,6 @@ import {
   PluginManager,
   createEvent,
   createSession,
-  getThreadId,
   isLangGraphAgent,
 } from '@google/adk';
 import {AIMessage, BaseMessage} from '@langchain/core/messages';
@@ -24,6 +23,7 @@ import {
   StateGraph,
 } from '@langchain/langgraph';
 import {describe, expect, it, vi} from 'vitest';
+import {getThreadId} from '../../src/agents/langgraph_agent.js';
 
 const SESSION_ID = 'test-session';
 const APP_NAME = 'test-app';
@@ -48,14 +48,14 @@ interface GraphInput {
 function createStubGraph(options: {
   checkpointer?: unknown;
   stateValues?: Record<string, unknown>;
-  responseContent?: unknown;
+  response?: BaseMessage;
 }) {
   const invoke = vi.fn(
     async (
       _input: GraphInput,
       _config: LangGraphThreadConfig,
-    ): Promise<{messages: Array<{content: unknown}>}> => ({
-      messages: [{content: options.responseContent ?? 'test response'}],
+    ): Promise<{messages: BaseMessage[]}> => ({
+      messages: [options.response ?? new AIMessage('test response')],
     }),
   );
   const getState = vi.fn(
@@ -348,28 +348,21 @@ describe('LangGraphAgent', () => {
     ).toEqual([['HumanMessage', '']]);
   });
 
-  it('concatenates the text blocks of a structured response content', async () => {
+  it('concatenates the text blocks of a structured response message', async () => {
     const graph = createStubGraph({
-      responseContent: [
-        {type: 'text', text: 'a'},
-        {type: 'image_url', image_url: {url: 'https://example.com/i.png'}},
-        {type: 'text', text: 'b'},
-      ],
+      response: new AIMessage({
+        content: [
+          {type: 'text', text: 'a'},
+          {type: 'image_url', image_url: {url: 'https://example.com/i.png'}},
+          {type: 'text', text: 'b'},
+        ],
+      }),
     });
     const agent = createAgent(graph);
 
     const events = await runAgent(agent, [userEvent('hello')]);
 
     expect(events[0].content?.parts?.[0].text).toBe('ab');
-  });
-
-  it('renders a response content that is neither string nor array as empty text', async () => {
-    const graph = createStubGraph({responseContent: 42});
-    const agent = createAgent(graph);
-
-    const events = await runAgent(agent, [userEvent('hello')]);
-
-    expect(events[0].content?.parts?.[0].text).toBe('');
   });
 
   it('is recognised by isLangGraphAgent', () => {

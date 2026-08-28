@@ -92,13 +92,7 @@ two different threads.
 
 The derivation is a SHA-256 digest of the three length-prefixed components. It
 is stable across processes, and adk-python derives the same id for the same
-triple. `getThreadId` is exported if you need to address a thread yourself:
-
-```ts
-import {getThreadId} from '@google/adk';
-
-const threadId = getThreadId('weather', 'user-1', session.id);
-```
+triple. The scheme is internal, so do not depend on the exact digest.
 
 ## Limitations
 

@@ -13,6 +13,7 @@ import {
   createEvent,
   createSession,
 } from '@google/adk';
+import {AIMessage} from '@langchain/core/messages';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {loadOptionalPeer} from '../../src/utils/optional_peer.js';
 
@@ -26,7 +27,7 @@ vi.mock('../../src/utils/optional_peer.js', async (importOriginal) => {
 
 const graph: CompiledLangGraph = {
   getState: async () => ({values: {}}),
-  invoke: async () => ({messages: [{content: 'unreachable'}]}),
+  invoke: async () => ({messages: [new AIMessage('unreachable')]}),
 };
 
 /** Builds the error Node raises for an unresolvable ESM specifier. */
