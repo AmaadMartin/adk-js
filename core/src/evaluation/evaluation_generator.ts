@@ -187,11 +187,10 @@ export class EvaluationGenerator {
       }
     }
 
-    const appDetailsByInvocationId =
-      EvaluationGenerator.getAppDetailsByInvocationId(
-        events,
-        requestIntercepterPlugin,
-      );
+    const appDetailsByInvocationId = getAppDetailsByInvocationId(
+      events,
+      requestIntercepterPlugin,
+    );
     return EvaluationGenerator.convertEventsToEvalInvocations(
       events,
       appDetailsByInvocationId,
@@ -205,8 +204,7 @@ export class EvaluationGenerator {
     events: Event[],
     appDetailsPerInvocation?: Record<string, AppDetails>,
   ): Invocation[] {
-    const eventsByInvocationId =
-      EvaluationGenerator.collectEventsByInvocationId(events);
+    const eventsByInvocationId = collectEventsByInvocationId(events);
 
     const invocations: Invocation[] = [];
     for (const [invocationId, invocationEvents] of eventsByInvocationId) {
@@ -270,69 +268,63 @@ export class EvaluationGenerator {
 
     return invocations;
   }
+}
 
-  /**
-   * Builds per-invocation {@link AppDetails} by recovering the LLM request that
-   * produced each agent event (via the request intercepter).
-   *
-   * Internal: takes the internal `RequestIntercepterPlugin`, so it is kept off
-   * the public surface.
-   */
-  private static getAppDetailsByInvocationId(
-    events: Event[],
-    requestIntercepter: RequestIntercepterPlugin,
-  ): Record<string, AppDetails> {
-    const eventsByInvocationId =
-      EvaluationGenerator.collectEventsByInvocationId(events);
-    const appDetailsByInvocationId: Record<string, AppDetails> = {};
+/**
+ * Builds per-invocation {@link AppDetails} by recovering the LLM request that
+ * produced each agent event (via the request intercepter).
+ */
+export function getAppDetailsByInvocationId(
+  events: Event[],
+  requestIntercepter: RequestIntercepterPlugin,
+): Record<string, AppDetails> {
+  const eventsByInvocationId = collectEventsByInvocationId(events);
+  const appDetailsByInvocationId: Record<string, AppDetails> = {};
 
-    for (const [invocationId, invocationEvents] of eventsByInvocationId) {
-      const appDetails: AppDetails = {agentDetails: {}};
-      appDetailsByInvocationId[invocationId] = appDetails;
+  for (const [invocationId, invocationEvents] of eventsByInvocationId) {
+    const appDetails: AppDetails = {agentDetails: {}};
+    appDetailsByInvocationId[invocationId] = appDetails;
 
-      for (const event of invocationEvents) {
-        if (event.author === USER_AUTHOR) {
-          continue;
-        }
+    for (const event of invocationEvents) {
+      if (event.author === USER_AUTHOR) {
+        continue;
+      }
 
-        const llmRequest = requestIntercepter.getModelRequest(event);
-        if (!llmRequest) {
-          continue;
-        }
+      const llmRequest = requestIntercepter.getModelRequest(event);
+      if (!llmRequest) {
+        continue;
+      }
 
-        const author = event.author;
-        if (author !== undefined && !(author in appDetails.agentDetails)) {
-          const systemInstruction = llmRequest.config?.systemInstruction;
-          appDetails.agentDetails[author] = {
-            name: author,
-            instructions:
-              typeof systemInstruction === 'string' ? systemInstruction : '',
-            toolDeclarations: llmRequest.config?.tools ?? [],
-          };
-        }
+      const author = event.author;
+      if (author !== undefined && !(author in appDetails.agentDetails)) {
+        const systemInstruction = llmRequest.config?.systemInstruction;
+        appDetails.agentDetails[author] = {
+          name: author,
+          instructions:
+            typeof systemInstruction === 'string' ? systemInstruction : '',
+          toolDeclarations: llmRequest.config?.tools ?? [],
+        };
       }
     }
-
-    return appDetailsByInvocationId;
   }
 
-  /**
-   * Groups events by invocation id, preserving first-seen order.
-   */
-  private static collectEventsByInvocationId(
-    events: Event[],
-  ): Map<string, Event[]> {
-    const eventsByInvocationId = new Map<string, Event[]>();
+  return appDetailsByInvocationId;
+}
 
-    for (const event of events) {
-      const existing = eventsByInvocationId.get(event.invocationId);
-      if (existing === undefined) {
-        eventsByInvocationId.set(event.invocationId, [event]);
-      } else {
-        existing.push(event);
-      }
+/**
+ * Groups events by invocation id, preserving first-seen order.
+ */
+function collectEventsByInvocationId(events: Event[]): Map<string, Event[]> {
+  const eventsByInvocationId = new Map<string, Event[]>();
+
+  for (const event of events) {
+    const existing = eventsByInvocationId.get(event.invocationId);
+    if (existing === undefined) {
+      eventsByInvocationId.set(event.invocationId, [event]);
+    } else {
+      existing.push(event);
     }
-
-    return eventsByInvocationId;
   }
+
+  return eventsByInvocationId;
 }

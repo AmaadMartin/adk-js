@@ -5,12 +5,16 @@
  */
 
 import {
+  BaseAgent,
   Context,
   DEFAULT_HTTP_RETRY_OPTIONS,
   EnsureRetryOptionsPlugin,
+  Event,
   InvocationContext,
   LlmRequest,
+  PluginManager,
   addDefaultRetryOptionsIfNotPresent,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -18,11 +22,19 @@ function makeLlmRequest(): LlmRequest {
   return {contents: [], toolsDict: {}, liveConnectConfig: {}};
 }
 
+/** An agent that yields nothing; these tests never run it. */
+class SilentAgent extends BaseAgent {
+  protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {}
+  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {}
+}
+
 function makeCallbackContext(): Context {
-  const invocationContext = {
-    session: {state: {}},
-    abortSignal: undefined,
-  } as unknown as InvocationContext;
+  const invocationContext = new InvocationContext({
+    invocationId: 'inv1',
+    agent: new SilentAgent({name: 'test_agent'}),
+    session: createSession({id: 'session1', appName: 'test_app'}),
+    pluginManager: new PluginManager([]),
+  });
   return new Context({invocationContext});
 }
 

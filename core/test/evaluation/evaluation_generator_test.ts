@@ -9,7 +9,6 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InMemoryArtifactService} from '../../src/artifacts/in_memory_artifact_service.js';
-import {AppDetails} from '../../src/evaluation/app_details.js';
 import {
   getAllToolCalls,
   InvocationEvents,
@@ -18,6 +17,7 @@ import {
   DEFAULT_EVAL_APP_NAME,
   DEFAULT_EVAL_USER_ID,
   EvaluationGenerator,
+  getAppDetailsByInvocationId,
 } from '../../src/evaluation/evaluation_generator.js';
 import {RequestIntercepterPlugin} from '../../src/evaluation/request_intercepter_plugin.js';
 import {
@@ -31,6 +31,12 @@ import {InMemoryMemoryService} from '../../src/memory/in_memory_memory_service.j
 import {LlmRequest} from '../../src/models/llm_request.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
+
+/** An agent that yields nothing; these tests never let it run. */
+class SilentAgent extends BaseAgent {
+  protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {}
+  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {}
+}
 
 function buildEvent(
   author: string,
@@ -48,24 +54,15 @@ function invocationEventsOf(event: {
 }
 
 /** A simulator that immediately stops, so the drive loop runs zero turns. */
-function stoppedUserSimulator(): UserSimulator {
-  return {
-    getNextUserMessage: vi.fn(
-      async (): Promise<NextUserMessage> => ({
-        status: Status.STOP_SIGNAL_DETECTED,
-      }),
-    ),
-  } as unknown as UserSimulator;
+class StoppedUserSimulator extends UserSimulator {
+  async getNextUserMessage(): Promise<NextUserMessage> {
+    return {status: Status.STOP_SIGNAL_DETECTED};
+  }
 }
 
-// `getAppDetailsByInvocationId` is a package-private static (it takes the
-// internal RequestIntercepterPlugin); reach it for direct testing.
-const generatorInternals = EvaluationGenerator as unknown as {
-  getAppDetailsByInvocationId(
-    events: Event[],
-    requestIntercepter: RequestIntercepterPlugin,
-  ): Record<string, AppDetails>;
-};
+function stoppedUserSimulator(): UserSimulator {
+  return new StoppedUserSimulator();
+}
 
 describe('EvaluationGenerator.convertEventsToEvalInvocations', () => {
   it('returns an empty list for no events', () => {
@@ -312,14 +309,16 @@ describe('EvaluationGenerator.convertEventsToEvalInvocations', () => {
 
 describe('EvaluationGenerator.getAppDetailsByInvocationId', () => {
   function mockIntercepter(): RequestIntercepterPlugin {
-    return {getModelRequest: vi.fn()} as unknown as RequestIntercepterPlugin;
+    const intercepter = new RequestIntercepterPlugin(
+      'request_intercepter_plugin',
+    );
+    vi.spyOn(intercepter, 'getModelRequest');
+    return intercepter;
   }
 
   it('returns an empty record for no events', () => {
     const requestIntercepter = mockIntercepter();
-    expect(
-      generatorInternals.getAppDetailsByInvocationId([], requestIntercepter),
-    ).toEqual({});
+    expect(getAppDetailsByInvocationId([], requestIntercepter)).toEqual({});
   });
 
   it('creates an empty AppDetails when there are no model requests', () => {
@@ -330,10 +329,7 @@ describe('EvaluationGenerator.getAppDetailsByInvocationId', () => {
       buildEvent('agent', [{text: 'Hi there!'}], 'inv1'),
     ];
 
-    const appDetails = generatorInternals.getAppDetailsByInvocationId(
-      events,
-      requestIntercepter,
-    );
+    const appDetails = getAppDetailsByInvocationId(events, requestIntercepter);
 
     expect(appDetails).toEqual({inv1: {agentDetails: {}}});
     expect(requestIntercepter.getModelRequest).toHaveBeenCalledTimes(1);
@@ -355,10 +351,7 @@ describe('EvaluationGenerator.getAppDetailsByInvocationId', () => {
       buildEvent('agent', [{text: 'Hi there!'}], 'inv1'),
     ];
 
-    const appDetails = generatorInternals.getAppDetailsByInvocationId(
-      events,
-      requestIntercepter,
-    );
+    const appDetails = getAppDetailsByInvocationId(events, requestIntercepter);
 
     expect(appDetails).toEqual({
       inv1: {
@@ -410,10 +403,7 @@ describe('EvaluationGenerator.getAppDetailsByInvocationId', () => {
       buildEvent('agent1', [{text: 'Hi again from agent1'}], 'inv2'),
     ];
 
-    const appDetails = generatorInternals.getAppDetailsByInvocationId(
-      events,
-      requestIntercepter,
-    );
+    const appDetails = getAppDetailsByInvocationId(events, requestIntercepter);
 
     expect(appDetails).toEqual({
       inv1: {
@@ -450,10 +440,7 @@ describe('EvaluationGenerator.getAppDetailsByInvocationId', () => {
       buildEvent('agent', [{text: 'Hi there!'}], 'inv1'),
     ];
 
-    const appDetails = generatorInternals.getAppDetailsByInvocationId(
-      events,
-      requestIntercepter,
-    );
+    const appDetails = getAppDetailsByInvocationId(events, requestIntercepter);
 
     expect(appDetails).toEqual({
       inv1: {
@@ -476,10 +463,7 @@ describe('EvaluationGenerator.getAppDetailsByInvocationId', () => {
       createEvent({content: {parts: [{text: 'x'}]}, invocationId: 'inv1'}),
     ];
 
-    const appDetails = generatorInternals.getAppDetailsByInvocationId(
-      events,
-      requestIntercepter,
-    );
+    const appDetails = getAppDetailsByInvocationId(events, requestIntercepter);
 
     expect(appDetails).toEqual({inv1: {agentDetails: {}}});
   });
@@ -497,15 +481,23 @@ describe('EvaluationGenerator.getAppDetailsByInvocationId', () => {
       buildEvent('agent', [{text: 'b'}], 'inv1'),
     ];
 
-    const appDetails = generatorInternals.getAppDetailsByInvocationId(
-      events,
-      requestIntercepter,
-    );
+    const appDetails = getAppDetailsByInvocationId(events, requestIntercepter);
 
     expect(Object.keys(appDetails['inv1'].agentDetails)).toEqual(['agent']);
     expect(appDetails['inv1'].agentDetails['agent'].instructions).toBe('first');
   });
 });
+
+/** A real Runner whose `runAsync` replays the given events. */
+function fakeRunner(events: AsyncGenerator<Event>): Runner {
+  const runner = new Runner({
+    appName: 'test_app',
+    agent: new SilentAgent({name: 'agent'}),
+    sessionService: new InMemorySessionService(),
+  });
+  vi.spyOn(runner, 'runAsync').mockReturnValue(events);
+  return runner;
+}
 
 describe('EvaluationGenerator.generateInferencesForSingleUserInvocation', () => {
   it('prefixes a synthetic user event and yields agent events', async () => {
@@ -513,12 +505,12 @@ describe('EvaluationGenerator.generateInferencesForSingleUserInvocation', () => 
     async function* mockRunAsync(): AsyncGenerator<Event> {
       yield buildEvent('agent', agentParts, 'inv1');
     }
-    const runner = {runAsync: vi.fn().mockReturnValue(mockRunAsync())};
+    const runner = fakeRunner(mockRunAsync());
     const userContent: Content = {parts: [{text: 'User query'}]};
 
     const events: Event[] = [];
     for await (const event of EvaluationGenerator.generateInferencesForSingleUserInvocation(
-      runner as unknown as Runner,
+      runner,
       'test_user',
       'test_session',
       userContent,
@@ -544,11 +536,11 @@ describe('EvaluationGenerator.generateInferencesForSingleUserInvocation', () => 
       yield buildEvent('agent', [{text: 'first'}], 'inv1');
       yield buildEvent('agent', [{text: 'second'}], 'inv1');
     }
-    const runner = {runAsync: vi.fn().mockReturnValue(mockRunAsync())};
+    const runner = fakeRunner(mockRunAsync());
 
     const events: Event[] = [];
     for await (const event of EvaluationGenerator.generateInferencesForSingleUserInvocation(
-      runner as unknown as Runner,
+      runner,
       'user',
       'session',
       {parts: [{text: 'query'}]},
@@ -570,10 +562,10 @@ describe('EvaluationGenerator.generateInferencesFromRootAgent', () => {
   });
 
   it('drives the agent with the user simulator until it stops', async () => {
-    const rootAgent = {name: 'mock_agent'} as unknown as BaseAgent;
+    const rootAgent = new SilentAgent({name: 'mock_agent'});
     let calls = 0;
-    const userSimulator = {
-      getNextUserMessage: vi.fn(async (): Promise<NextUserMessage> => {
+    const userSimulator = new (class extends UserSimulator {
+      async getNextUserMessage(): Promise<NextUserMessage> {
         calls += 1;
         if (calls === 1) {
           return {
@@ -582,8 +574,9 @@ describe('EvaluationGenerator.generateInferencesFromRootAgent', () => {
           };
         }
         return {status: Status.STOP_SIGNAL_DETECTED};
-      }),
-    } as unknown as UserSimulator;
+      }
+    })();
+    vi.spyOn(userSimulator, 'getNextUserMessage');
 
     const singleTurnSpy = vi
       .spyOn(EvaluationGenerator, 'generateInferencesForSingleUserInvocation')
@@ -614,8 +607,38 @@ describe('EvaluationGenerator.generateInferencesFromRootAgent', () => {
     );
   });
 
+  it('stops on a non-success status even when a message is present', async () => {
+    const rootAgent = new SilentAgent({name: 'mock_agent'});
+    let calls = 0;
+    const userSimulator = new (class extends UserSimulator {
+      async getNextUserMessage(): Promise<NextUserMessage> {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            status: Status.NO_MESSAGE_GENERATED,
+            userMessage: {parts: [{text: 'must not be sent'}]},
+          };
+        }
+        return {status: Status.STOP_SIGNAL_DETECTED};
+      }
+    })();
+    const singleTurnSpy = vi.spyOn(
+      EvaluationGenerator,
+      'generateInferencesForSingleUserInvocation',
+    );
+
+    const invocations =
+      await EvaluationGenerator.generateInferencesFromRootAgent({
+        rootAgent,
+        userSimulator,
+      });
+
+    expect(singleTurnSpy).not.toHaveBeenCalled();
+    expect(invocations).toEqual([]);
+  });
+
   it('uses the provided session, ids, and services', async () => {
-    const rootAgent = {name: 'mock_agent'} as unknown as BaseAgent;
+    const rootAgent = new SilentAgent({name: 'mock_agent'});
     const userSimulator = stoppedUserSimulator();
     const sessionService = new InMemorySessionService();
     const createSpy = vi.spyOn(sessionService, 'createSession');
@@ -647,7 +670,7 @@ describe('EvaluationGenerator.generateInferencesFromRootAgent', () => {
     const createSpy = vi.spyOn(sessionService, 'createSession');
 
     await EvaluationGenerator.generateInferencesFromRootAgent({
-      rootAgent: {name: 'mock_agent'} as unknown as BaseAgent,
+      rootAgent: new SilentAgent({name: 'mock_agent'}),
       userSimulator: stoppedUserSimulator(),
       // The caller's app name wins over the eval case's session input, so the
       // session can be read back with the app name of the eval request.
@@ -677,7 +700,7 @@ describe('EvaluationGenerator.generateInferencesFromRootAgent', () => {
     const sessionService = new InMemorySessionService();
 
     await EvaluationGenerator.generateInferencesFromRootAgent({
-      rootAgent: {name: 'mock_agent'} as unknown as BaseAgent,
+      rootAgent: new SilentAgent({name: 'mock_agent'}),
       userSimulator: stoppedUserSimulator(),
       sessionId: 'sess-3',
       sessionService,

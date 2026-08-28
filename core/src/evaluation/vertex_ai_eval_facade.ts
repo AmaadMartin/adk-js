@@ -145,8 +145,7 @@ export abstract class VertexAiEvalFacade extends Evaluator {
    * Calls the external Vertex Gen AI Eval service. This is a mockable seam;
    * the real SDK is not available in adk-js, so it throws by default.
    */
-  performEval(request: PerformEvalRequest): VertexEvalResult {
-    void request;
+  performEval(_request: PerformEvalRequest): VertexEvalResult {
     throw new Error(
       'Vertex Gen AI Eval SDK is not available in adk-js; this metric requires' +
         ' a service-backed implementation. See the queued follow-up to wire in' +
@@ -162,13 +161,12 @@ export class SingleTurnVertexAiEvalFacade extends VertexAiEvalFacade {
   evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-    conversationScenario?: ConversationScenario,
+    _conversationScenario?: ConversationScenario,
   ): EvaluationResult {
     if (this.expectedInvocationsRequired && expectedInvocations === undefined) {
       throw new Error('expected_invocations is needed by this metric.');
     }
     validateInvocationLengths(actualInvocations, expectedInvocations);
-    void conversationScenario; // not supported for per-invocation evaluation.
 
     // If expected invocations are not required and not supplied, pair each
     // actual invocation with `undefined`.

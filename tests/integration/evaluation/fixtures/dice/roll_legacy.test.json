@@ -1,0 +1,15 @@
+[
+  {
+    "query": "Roll a 17 sided dice",
+    "expected_tool_use": [
+      {
+        "tool_name": "roll_die",
+        "tool_input": {
+          "sides": 17
+        }
+      }
+    ],
+    "expected_intermediate_agent_responses": [],
+    "reference": "I rolled a 17 sided die and got 13.\n"
+  }
+]

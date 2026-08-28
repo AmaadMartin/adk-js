@@ -6,27 +6,17 @@
 
 import {ConversationScenario} from './conversation_scenarios.js';
 import {Invocation} from './eval_case.js';
-import {EvalMetric, PrebuiltMetrics} from './eval_metrics.js';
-import {EvaluationResult, Evaluator} from './evaluator.js';
+import {PrebuiltMetrics} from './eval_metrics.js';
+import {
+  EvaluationResult,
+  Evaluator,
+  EvaluatorConstructorOptions,
+} from './evaluator.js';
 import {RougeEvaluator} from './final_response_match_v1.js';
 import {
   PrebuiltMetric,
   SingleTurnVertexAiEvalFacade,
 } from './vertex_ai_eval_facade.js';
-
-/**
- * Options for constructing a {@link ResponseEvaluator}.
- *
- * Either `evalMetric`, or both `threshold` and `metricName`, may be supplied.
- */
-export interface ResponseEvaluatorOptions {
-  /** The pass/fail threshold. */
-  threshold?: number;
-  /** The metric name (`response_evaluation_score` or `response_match_score`). */
-  metricName?: string;
-  /** The metric whose threshold/name drives the evaluation. */
-  evalMetric?: EvalMetric;
-}
 
 /**
  * Evaluates an agent's responses.
@@ -45,38 +35,17 @@ export class ResponseEvaluator extends Evaluator {
     | PrebuiltMetrics.RESPONSE_MATCH_SCORE;
   private readonly threshold?: number;
 
-  constructor({
-    threshold,
-    metricName,
-    evalMetric,
-  }: ResponseEvaluatorOptions = {}) {
+  constructor({evalMetric}: EvaluatorConstructorOptions) {
     super();
-    if (
-      (threshold !== undefined && evalMetric !== undefined) ||
-      (metricName !== undefined && evalMetric !== undefined)
-    ) {
-      throw new Error(
-        'Either eval_metric should be specified or both threshold and' +
-          ' metric_name should be specified.',
-      );
-    }
-
-    let resolvedThreshold = threshold;
-    let resolvedMetricName = metricName;
-    if (evalMetric !== undefined) {
-      resolvedThreshold = evalMetric.threshold;
-      resolvedMetricName = evalMetric.metricName;
-    }
-
-    if (resolvedMetricName === PrebuiltMetrics.RESPONSE_EVALUATION_SCORE) {
+    if (evalMetric.metricName === PrebuiltMetrics.RESPONSE_EVALUATION_SCORE) {
       this.metricName = PrebuiltMetric.COHERENCE;
-    } else if (resolvedMetricName === PrebuiltMetrics.RESPONSE_MATCH_SCORE) {
+    } else if (evalMetric.metricName === PrebuiltMetrics.RESPONSE_MATCH_SCORE) {
       this.metricName = PrebuiltMetrics.RESPONSE_MATCH_SCORE;
     } else {
-      throw new Error(`\`${resolvedMetricName}\` is not supported.`);
+      throw new Error(`\`${evalMetric.metricName}\` is not supported.`);
     }
 
-    this.threshold = resolvedThreshold;
+    this.threshold = evalMetric.threshold;
   }
 
   evaluateInvocations(

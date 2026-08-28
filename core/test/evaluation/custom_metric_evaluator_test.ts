@@ -61,6 +61,12 @@ describe('evaluation/custom_metric_evaluator', () => {
       expect(result.overallScore).toBe(1.0);
     });
 
+    it('rejects construction without a custom function path', () => {
+      expect(() => new CustomMetricEvaluator({evalMetric})).toThrow(
+        'Custom metric custom_metric needs a customFunctionPath.',
+      );
+    });
+
     it('runs an asynchronous metric function', async () => {
       const evaluator = new CustomMetricEvaluator({
         evalMetric,

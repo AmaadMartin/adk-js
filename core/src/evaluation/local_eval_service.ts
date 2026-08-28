@@ -12,6 +12,7 @@ import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
 import {runWithClientLabel} from '../utils/client_labels.js';
+import {mapWithConcurrency} from '../utils/concurrency_utils.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
@@ -42,7 +43,7 @@ import {
 } from './evaluation_generator.js';
 import {EvaluationResult, PerInvocationResult} from './evaluator.js';
 import {
-  DEFAULT_METRIC_EVALUATOR_REGISTRY,
+  getDefaultMetricEvaluatorRegistry,
   MetricEvaluatorRegistry,
 } from './metric_evaluator_registry.js';
 import {UserSimulatorProvider} from './simulation/user_simulator_provider.js';
@@ -160,54 +161,6 @@ function resultGroupKey(appName: string, evalSetId: string): string {
   return `${appName}\u0000${evalSetId}`;
 }
 
-/**
- * Runs `fn` over `items` with at most `limit` concurrent executions, yielding
- * each result as soon as it settles (completion order, not input order).
- *
- * The first rejection is propagated to the consumer; in-flight siblings are
- * abandoned but never surface as unhandled rejections.
- */
-async function* mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): AsyncGenerator<R> {
-  // A comparison against NaN is always false, so `Math.max` would leave the
-  // limit NaN and silently starve the pool; treat any non-positive or
-  // non-numeric limit as 1.
-  const effectiveLimit = limit >= 1 ? Math.floor(limit) : 1;
-  type Settled =
-    | {index: number; ok: true; result: R}
-    | {index: number; ok: false; error: unknown};
-  const executing = new Map<number, Promise<Settled>>();
-  let nextIndex = 0;
-
-  const startNext = (): void => {
-    const index = nextIndex++;
-    const promise = fn(items[index]).then(
-      (result): Settled => ({index, ok: true, result}),
-      (error): Settled => ({index, ok: false, error}),
-    );
-    executing.set(index, promise);
-  };
-
-  while (nextIndex < items.length && executing.size < effectiveLimit) {
-    startNext();
-  }
-
-  while (executing.size > 0) {
-    const settled = await Promise.race(executing.values());
-    executing.delete(settled.index);
-    if (!settled.ok) {
-      throw settled.error;
-    }
-    if (nextIndex < items.length) {
-      startNext();
-    }
-    yield settled.result;
-  }
-}
-
 /** Options for constructing a {@link LocalEvalService}. */
 export interface LocalEvalServiceOptions {
   /** The agent to run over each eval case. */
@@ -255,7 +208,7 @@ export class LocalEvalService extends BaseEvalService {
     this.rootAgent = options.rootAgent;
     this.evalSetsManager = options.evalSetsManager;
     this.metricEvaluatorRegistry =
-      options.metricEvaluatorRegistry ?? DEFAULT_METRIC_EVALUATOR_REGISTRY;
+      options.metricEvaluatorRegistry ?? getDefaultMetricEvaluatorRegistry();
     this.sessionService =
       options.sessionService ?? new InMemorySessionService();
     this.artifactService =
@@ -265,6 +218,25 @@ export class LocalEvalService extends BaseEvalService {
     this.userSimulatorProvider =
       options.userSimulatorProvider ?? new UserSimulatorProvider();
     this.memoryService = options.memoryService;
+  }
+
+  private evaluateDeps(): EvaluateDeps {
+    return {
+      evalSetsManager: this.evalSetsManager,
+      sessionService: this.sessionService,
+      metricEvaluatorRegistry: this.metricEvaluatorRegistry,
+    };
+  }
+
+  private inferenceDeps(): InferenceDeps {
+    return {
+      rootAgent: this.rootAgent,
+      userSimulatorProvider: this.userSimulatorProvider,
+      sessionIdSupplier: this.sessionIdSupplier,
+      sessionService: this.sessionService,
+      artifactService: this.artifactService,
+      memoryService: this.memoryService,
+    };
   }
 
   override async *performInference(
@@ -294,7 +266,11 @@ export class LocalEvalService extends BaseEvalService {
       evalCases,
       inferenceConfig.parallelism,
       (evalCase) =>
-        this.performInferenceSingleEvalItem({appName, evalSetId, evalCase}),
+        performInferenceSingleEvalItem(this.inferenceDeps(), {
+          appName,
+          evalSetId,
+          evalCase,
+        }),
     );
   }
 
@@ -309,7 +285,11 @@ export class LocalEvalService extends BaseEvalService {
       inferenceResults,
       evaluateConfig.parallelism,
       (inferenceResult) =>
-        this.evaluateSingleInferenceResult(inferenceResult, evaluateConfig),
+        evaluateSingleInferenceResult(
+          this.evaluateDeps(),
+          inferenceResult,
+          evaluateConfig,
+        ),
     );
 
     try {
@@ -354,236 +334,262 @@ export class LocalEvalService extends BaseEvalService {
       );
     }
   }
+}
 
-  private async evaluateSingleInferenceResult(
-    inferenceResult: InferenceResult,
-    evaluateConfig: EvaluateConfig,
-  ): Promise<[InferenceResult, EvalCaseResult]> {
-    const {appName, evalSetId, evalCaseId} = inferenceResult;
+/** The collaborators {@link evaluateSingleInferenceResult} reads. */
+export interface EvaluateDeps {
+  evalSetsManager: EvalSetsManager;
+  sessionService: BaseSessionService;
+  metricEvaluatorRegistry: MetricEvaluatorRegistry;
+}
 
-    const evalCase = await this.evalSetsManager.getEvalCase(
-      appName,
-      evalSetId,
-      evalCaseId,
+/** The collaborators {@link performInferenceSingleEvalItem} reads. */
+export interface InferenceDeps {
+  rootAgent: BaseAgent;
+  userSimulatorProvider: UserSimulatorProvider;
+  sessionIdSupplier: () => string;
+  sessionService: BaseSessionService;
+  artifactService: BaseArtifactService;
+  memoryService?: BaseMemoryService;
+}
+
+/**
+ * Scores one inference result against its recorded eval case.
+ *
+ * @throws {NotFoundError} If the eval case the result names is missing.
+ * @throws {Error} If the inferences do not line up with the recorded
+ *     conversation.
+ */
+export async function evaluateSingleInferenceResult(
+  deps: EvaluateDeps,
+  inferenceResult: InferenceResult,
+  evaluateConfig: EvaluateConfig,
+): Promise<[InferenceResult, EvalCaseResult]> {
+  const {appName, evalSetId, evalCaseId} = inferenceResult;
+
+  const evalCase = await deps.evalSetsManager.getEvalCase(
+    appName,
+    evalSetId,
+    evalCaseId,
+  );
+  // Data-consistency problems (a missing eval case, or inferences that do not
+  // line up with the recorded conversation below) fail fast rather than
+  // degrade to a FAILED result: they mean the eval set itself is inconsistent
+  // with the inferences it is being scored against, and reporting them as
+  // ordinary failed cases would hide that behind what looks like a bad model
+  // run. Runtime failures — a flaky inference or a throwing metric — stay
+  // isolated per item, as the sibling paths below do. Results already scored
+  // are still persisted; see `evaluate`.
+  if (evalCase == null) {
+    throw new NotFoundError(
+      `Eval case with id ${evalCaseId} not found for app ${appName} and` +
+        ` eval set ${evalSetId}.`,
     );
-    // Data-consistency problems (a missing eval case, or inferences that do not
-    // line up with the recorded conversation below) fail fast rather than
-    // degrade to a FAILED result: they mean the eval set itself is inconsistent
-    // with the inferences it is being scored against, and reporting them as
-    // ordinary failed cases would hide that behind what looks like a bad model
-    // run. Runtime failures — a flaky inference or a throwing metric — stay
-    // isolated per item, as the sibling paths below do. Results already scored
-    // are still persisted; see `evaluate`.
-    if (evalCase == null) {
-      throw new NotFoundError(
-        `Eval case with id ${evalCaseId} not found for app ${appName} and` +
-          ` eval set ${evalSetId}.`,
-      );
-    }
+  }
 
-    const userId = evalCase.sessionInput?.userId ?? DEFAULT_EVAL_USER_ID;
+  const userId = evalCase.sessionInput?.userId ?? DEFAULT_EVAL_USER_ID;
 
-    if (inferenceResult.inferences == null) {
-      const sessionId = inferenceResult.sessionId;
-      const sessionDetails =
-        sessionId != null
-          ? await this.sessionService.getSession({appName, userId, sessionId})
-          : undefined;
-      return [
-        inferenceResult,
-        {
-          evalSetFile: evalSetId,
-          evalSetId,
-          evalId: evalCaseId,
-          finalEvalStatus: EvalStatus.FAILED,
-          overallEvalMetricResults: [],
-          evalMetricResultPerInvocation: [],
-          sessionId: sessionId ?? '',
-          sessionDetails,
-          userId,
-        },
-      ];
-    }
-
-    const inferences = inferenceResult.inferences;
-    if (
-      evalCase.conversationScenario == null &&
-      inferences.length !== (evalCase.conversation?.length ?? 0)
-    ) {
-      throw new Error(
-        'Inferences should match conversations in eval case. Found ' +
-          `${inferences.length} inferences and ` +
-          `${evalCase.conversation?.length ?? 0} conversations in eval cases.`,
-      );
-    }
-
-    const evalMetricResultPerInvocation: EvalMetricResultPerInvocation[] =
-      inferences.map((actual, idx) => ({
-        actualInvocation: actual,
-        expectedInvocation: evalCase.conversation?.[idx],
-        evalMetricResults: [],
-      }));
-
-    const actualInvocations = inferences;
-    const expectedInvocations = evalCase.conversation;
-
-    // 1. Copy eval-case-level rubrics onto all actual invocations.
-    copyEvalCaseRubricsToActualInvocations(evalCase, actualInvocations);
-    // 2. Copy invocation-level rubrics onto the aligned actual invocations.
-    copyInvocationRubricsToActualInvocations(
-      expectedInvocations,
-      actualInvocations,
-    );
-
-    const overallEvalMetricResults: EvalMetricResult[] = [];
-    for (const evalMetric of evaluateConfig.evalMetrics) {
-      await this.evaluateMetricForEvalCase(
-        evalMetric,
-        evalCase,
-        actualInvocations,
-        evalMetricResultPerInvocation,
-        overallEvalMetricResults,
-      );
-    }
-
-    const finalEvalStatus = generateFinalEvalStatus(overallEvalMetricResults);
+  if (inferenceResult.inferences == null) {
     const sessionId = inferenceResult.sessionId;
     const sessionDetails =
       sessionId != null
-        ? await this.sessionService.getSession({appName, userId, sessionId})
+        ? await deps.sessionService.getSession({appName, userId, sessionId})
         : undefined;
+    return [
+      inferenceResult,
+      {
+        evalSetFile: evalSetId,
+        evalSetId,
+        evalId: evalCaseId,
+        finalEvalStatus: EvalStatus.FAILED,
+        overallEvalMetricResults: [],
+        evalMetricResultPerInvocation: [],
+        sessionId: sessionId ?? '',
+        sessionDetails,
+        userId,
+      },
+    ];
+  }
 
-    const evalCaseResult: EvalCaseResult = {
-      evalSetFile: evalSetId,
-      evalSetId,
-      evalId: evalCaseId,
-      finalEvalStatus,
-      overallEvalMetricResults,
+  const inferences = inferenceResult.inferences;
+  if (
+    evalCase.conversationScenario == null &&
+    inferences.length !== (evalCase.conversation?.length ?? 0)
+  ) {
+    throw new Error(
+      'Inferences should match conversations in eval case. Found ' +
+        `${inferences.length} inferences and ` +
+        `${evalCase.conversation?.length ?? 0} conversations in eval cases.`,
+    );
+  }
+
+  const evalMetricResultPerInvocation: EvalMetricResultPerInvocation[] =
+    inferences.map((actual, idx) => ({
+      actualInvocation: actual,
+      expectedInvocation: evalCase.conversation?.[idx],
+      evalMetricResults: [],
+    }));
+
+  const actualInvocations = inferences;
+  const expectedInvocations = evalCase.conversation;
+
+  // 1. Copy eval-case-level rubrics onto all actual invocations.
+  copyEvalCaseRubricsToActualInvocations(evalCase, actualInvocations);
+  // 2. Copy invocation-level rubrics onto the aligned actual invocations.
+  copyInvocationRubricsToActualInvocations(
+    expectedInvocations,
+    actualInvocations,
+  );
+
+  const overallEvalMetricResults: EvalMetricResult[] = [];
+  for (const evalMetric of evaluateConfig.evalMetrics) {
+    await evaluateMetricForEvalCase(
+      deps.metricEvaluatorRegistry,
+      evalMetric,
+      evalCase,
+      actualInvocations,
       evalMetricResultPerInvocation,
-      sessionId: sessionId ?? '',
-      sessionDetails,
-      userId,
+      overallEvalMetricResults,
+    );
+  }
+
+  const finalEvalStatus = generateFinalEvalStatus(overallEvalMetricResults);
+  const sessionId = inferenceResult.sessionId;
+  const sessionDetails =
+    sessionId != null
+      ? await deps.sessionService.getSession({appName, userId, sessionId})
+      : undefined;
+
+  const evalCaseResult: EvalCaseResult = {
+    evalSetFile: evalSetId,
+    evalSetId,
+    evalId: evalCaseId,
+    finalEvalStatus,
+    overallEvalMetricResults,
+    evalMetricResultPerInvocation,
+    sessionId: sessionId ?? '',
+    sessionDetails,
+    userId,
+  };
+
+  return [inferenceResult, evalCaseResult];
+}
+
+async function evaluateMetricForEvalCase(
+  metricEvaluatorRegistry: MetricEvaluatorRegistry,
+  evalMetric: EvalMetric,
+  evalCase: EvalCase,
+  actualInvocations: Invocation[],
+  evalMetricResultPerInvocation: EvalMetricResultPerInvocation[],
+  overallEvalMetricResults: EvalMetricResult[],
+): Promise<void> {
+  let evaluationResult: EvaluationResult;
+  try {
+    // `await` handles both sync and async evaluators, so no reflection is
+    // needed (unlike adk-python's `inspect.iscoroutinefunction` branch).
+    evaluationResult = await runWithClientLabel(EVAL_CLIENT_LABEL, () =>
+      metricEvaluatorRegistry
+        .getEvaluator(evalMetric)
+        .evaluateInvocations(
+          actualInvocations,
+          evalCase.conversation,
+          evalCase.conversationScenario,
+        ),
+    );
+  } catch (error) {
+    // A single metric failure must not abort other metrics or eval cases.
+    logger.error(
+      `Metric evaluation failed for metric \`${evalMetric.metricName}\` for` +
+        ` eval case id '${evalCase.evalId}' with following error` +
+        ` \`${error}\`.`,
+    );
+    evaluationResult = {
+      overallEvalStatus: EvalStatus.NOT_EVALUATED,
+      perInvocationResults: [],
     };
-
-    return [inferenceResult, evalCaseResult];
   }
 
-  private async evaluateMetricForEvalCase(
-    evalMetric: EvalMetric,
-    evalCase: EvalCase,
-    actualInvocations: Invocation[],
-    evalMetricResultPerInvocation: EvalMetricResultPerInvocation[],
-    overallEvalMetricResults: EvalMetricResult[],
-  ): Promise<void> {
-    let evaluationResult: EvaluationResult;
-    try {
-      // `await` handles both sync and async evaluators, so no reflection is
-      // needed (unlike adk-python's `inspect.iscoroutinefunction` branch).
-      evaluationResult = await runWithClientLabel(EVAL_CLIENT_LABEL, () =>
-        this.metricEvaluatorRegistry
-          .getEvaluator(evalMetric)
-          .evaluateInvocations(
-            actualInvocations,
-            evalCase.conversation,
-            evalCase.conversationScenario,
-          ),
-      );
-    } catch (error) {
-      // A single metric failure must not abort other metrics or eval cases.
-      logger.error(
-        `Metric evaluation failed for metric \`${evalMetric.metricName}\` for` +
-          ` eval case id '${evalCase.evalId}' with following error` +
-          ` \`${error}\`.`,
-      );
-      evaluationResult = {
-        overallEvalStatus: EvalStatus.NOT_EVALUATED,
-        perInvocationResults: [],
-      };
-    }
+  overallEvalMetricResults.push({
+    ...evalMetric,
+    score: evaluationResult.overallScore,
+    evalStatus: evaluationResult.overallEvalStatus,
+    details: {rubricScores: evaluationResult.overallRubricScores},
+  });
 
-    overallEvalMetricResults.push({
+  if (
+    evaluationResult.overallEvalStatus !== EvalStatus.NOT_EVALUATED &&
+    evaluationResult.perInvocationResults.length !==
+      evalMetricResultPerInvocation.length
+  ) {
+    throw new Error(
+      'Eval metric should return results for each invocation. Found ' +
+        `${evaluationResult.perInvocationResults.length} results for ` +
+        `${evalMetricResultPerInvocation.length} invocations.`,
+    );
+  }
+
+  evalMetricResultPerInvocation.forEach((invocation, idx) => {
+    const invocationResult: PerInvocationResult =
+      evaluationResult.overallEvalStatus !== EvalStatus.NOT_EVALUATED
+        ? evaluationResult.perInvocationResults[idx]
+        : {
+            actualInvocation: invocation.actualInvocation,
+            evalStatus: EvalStatus.NOT_EVALUATED,
+          };
+    invocation.evalMetricResults.push({
       ...evalMetric,
-      score: evaluationResult.overallScore,
-      evalStatus: evaluationResult.overallEvalStatus,
-      details: {rubricScores: evaluationResult.overallRubricScores},
+      score: invocationResult.score,
+      evalStatus: invocationResult.evalStatus,
+      details: {rubricScores: invocationResult.rubricScores},
     });
+  });
+}
 
-    if (
-      evaluationResult.overallEvalStatus !== EvalStatus.NOT_EVALUATED &&
-      evaluationResult.perInvocationResults.length !==
-        evalMetricResultPerInvocation.length
-    ) {
-      throw new Error(
-        'Eval metric should return results for each invocation. Found ' +
-          `${evaluationResult.perInvocationResults.length} results for ` +
-          `${evalMetricResultPerInvocation.length} invocations.`,
-      );
-    }
-
-    evalMetricResultPerInvocation.forEach((invocation, idx) => {
-      const invocationResult: PerInvocationResult =
-        evaluationResult.overallEvalStatus !== EvalStatus.NOT_EVALUATED
-          ? evaluationResult.perInvocationResults[idx]
-          : {
-              actualInvocation: invocation.actualInvocation,
-              evalStatus: EvalStatus.NOT_EVALUATED,
-            };
-      invocation.evalMetricResults.push({
-        ...evalMetric,
-        score: invocationResult.score,
-        evalStatus: invocationResult.evalStatus,
-        details: {rubricScores: invocationResult.rubricScores},
-      });
-    });
-  }
-
-  private async performInferenceSingleEvalItem({
+export async function performInferenceSingleEvalItem(
+  deps: InferenceDeps,
+  {
     appName,
     evalSetId,
     evalCase,
-  }: {
-    appName: string;
-    evalSetId: string;
-    evalCase: EvalCase;
-  }): Promise<InferenceResult> {
-    const initialSession = evalCase.sessionInput;
-    const sessionId = this.sessionIdSupplier();
-    const inferenceResult: InferenceResult = {
-      appName,
-      evalSetId,
-      evalCaseId: evalCase.evalId,
-      sessionId,
-      status: InferenceStatus.UNKNOWN,
-    };
+  }: {appName: string; evalSetId: string; evalCase: EvalCase},
+): Promise<InferenceResult> {
+  const initialSession = evalCase.sessionInput;
+  const sessionId = deps.sessionIdSupplier();
+  const inferenceResult: InferenceResult = {
+    appName,
+    evalSetId,
+    evalCaseId: evalCase.evalId,
+    sessionId,
+    status: InferenceStatus.UNKNOWN,
+  };
 
-    try {
-      const inferences = await runWithClientLabel(EVAL_CLIENT_LABEL, () =>
-        EvaluationGenerator.generateInferencesFromRootAgent({
-          rootAgent: this.rootAgent,
-          userSimulator: this.userSimulatorProvider.provide(evalCase),
-          // The session must be created under the app name the evaluation
-          // stage reads it back with, otherwise `sessionDetails` silently
-          // resolves to undefined.
-          appName,
-          initialSession,
-          sessionId,
-          sessionService: this.sessionService,
-          artifactService: this.artifactService,
-          memoryService: this.memoryService,
-        }),
-      );
-      inferenceResult.inferences = inferences;
-      inferenceResult.status = InferenceStatus.SUCCESS;
-      return inferenceResult;
-    } catch (error) {
-      // A single inference failure must not affect other inferences.
-      logger.error(
-        `Inference failed for eval case \`${evalCase.evalId}\` with error` +
-          ` ${error}.`,
-      );
-      inferenceResult.status = InferenceStatus.FAILURE;
-      inferenceResult.errorMessage = String(error);
-      return inferenceResult;
-    }
+  try {
+    const inferences = await runWithClientLabel(EVAL_CLIENT_LABEL, () =>
+      EvaluationGenerator.generateInferencesFromRootAgent({
+        rootAgent: deps.rootAgent,
+        userSimulator: deps.userSimulatorProvider.provide(evalCase),
+        // The session must be created under the app name the evaluation
+        // stage reads it back with, otherwise `sessionDetails` silently
+        // resolves to undefined.
+        appName,
+        initialSession,
+        sessionId,
+        sessionService: deps.sessionService,
+        artifactService: deps.artifactService,
+        memoryService: deps.memoryService,
+      }),
+    );
+    inferenceResult.inferences = inferences;
+    inferenceResult.status = InferenceStatus.SUCCESS;
+    return inferenceResult;
+  } catch (error) {
+    // A single inference failure must not affect other inferences.
+    logger.error(
+      `Inference failed for eval case \`${evalCase.evalId}\` with error` +
+        ` ${error}.`,
+    );
+    inferenceResult.status = InferenceStatus.FAILURE;
+    inferenceResult.errorMessage = String(error);
+    return inferenceResult;
   }
 }

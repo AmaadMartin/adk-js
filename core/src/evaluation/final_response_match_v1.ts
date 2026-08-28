@@ -72,7 +72,7 @@ export function isWordChar(char: string): boolean {
 }
 
 function isAscii(word: string): boolean {
-  return [...word].every((char) => char.codePointAt(0)! <= 0x7f);
+  return [...word].every((char) => char.charCodeAt(0) <= 0x7f);
 }
 
 /**
@@ -248,13 +248,12 @@ export class RougeEvaluator extends Evaluator {
   evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-    conversationScenario?: ConversationScenario,
+    _conversationScenario?: ConversationScenario,
   ): EvaluationResult {
     if (expectedInvocations === undefined) {
       throw new Error('expected_invocations is required for this metric.');
     }
     validateInvocationLengths(actualInvocations, expectedInvocations);
-    void conversationScenario; // not used by this metric.
 
     let totalScore = 0.0;
     const perInvocationResults: PerInvocationResult[] = [];

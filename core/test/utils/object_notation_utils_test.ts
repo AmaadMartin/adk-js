@@ -151,3 +151,41 @@ describe('toSnakeCase', () => {
     expect(toSnakeCase(undefined)).toBe(undefined);
   });
 });
+
+describe('toCamelCase with dropNulls', () => {
+  it('drops properties whose value is null', () => {
+    expect(
+      toCamelCase({name: 'a', a_description: null, count: 0}, [], true),
+    ).toEqual({name: 'a', count: 0});
+  });
+
+  it('keeps a null property when dropNulls is off', () => {
+    expect(toCamelCase({a_description: null})).toEqual({aDescription: null});
+  });
+
+  it('drops nested and in-array null properties', () => {
+    expect(
+      toCamelCase(
+        {cases: [{id: 'a', session_input: null, data: {inner: null, kept: 1}}]},
+        [],
+        true,
+      ),
+    ).toEqual({cases: [{id: 'a', data: {kept: 1}}]});
+  });
+
+  it('keeps a null held under a preserved path', () => {
+    expect(
+      toCamelCase(
+        {tool: {args: {opt_out: null}, id: null}},
+        ['tool.args'],
+        true,
+      ),
+    ).toEqual({tool: {args: {opt_out: null}}});
+  });
+
+  it('passes primitives and a bare null through', () => {
+    expect(toCamelCase('string', [], true)).toBe('string');
+    expect(toCamelCase(null, [], true)).toBe(null);
+    expect(toCamelCase(undefined, [], true)).toBe(undefined);
+  });
+});

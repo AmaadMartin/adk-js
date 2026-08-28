@@ -10,7 +10,7 @@ import {logger} from '../utils/logger.js';
 import {CustomMetricEvaluator} from './custom_metric_evaluator.js';
 import {EvalConfig} from './eval_config.js';
 import {EvalMetric, MetricInfo, PrebuiltMetrics} from './eval_metrics.js';
-import {Evaluator} from './evaluator.js';
+import {Evaluator, EvaluatorConstructor} from './evaluator.js';
 import {
   ResponseEvaluatorMetricInfoProvider,
   SafetyEvaluatorV1MetricInfoProvider,
@@ -20,42 +20,12 @@ import {ResponseEvaluator} from './response_evaluator.js';
 import {SafetyEvaluatorV1} from './safety_evaluator.js';
 import {TrajectoryEvaluator} from './trajectory_evaluator.js';
 
-// Providers are re-exported here for parity with adk-python, whose registry
-// module re-exports them (the registry tests import them from here).
-export * from './metric_info_providers.js';
-
-/**
- * The options an evaluator constructor may receive from the registry. The
- * registry always supplies `evalMetric`, plus `customFunctionPath` for custom
- * metrics; each concrete evaluator reads the subset of fields it needs.
- */
-export interface EvaluatorConstructorOptions {
-  evalMetric: EvalMetric;
-  customFunctionPath?: string;
-}
-
-/**
- * A constructor for an {@link Evaluator} that can be registered in the registry.
- */
-export type EvaluatorConstructor = new (
-  options: EvaluatorConstructorOptions,
-) => Evaluator;
-
-function isCustomMetricEvaluatorConstructor(
-  evaluator: EvaluatorConstructor,
-): boolean {
-  return (
-    evaluator === (CustomMetricEvaluator as unknown as EvaluatorConstructor) ||
-    evaluator.prototype instanceof CustomMetricEvaluator
-  );
-}
-
 /**
  * A registry for metric {@link Evaluator}s.
  *
  * Unlike adk-python, which stores the registry as class-level shared state, this
- * uses an instance-level map. {@link DEFAULT_METRIC_EVALUATOR_REGISTRY} is a
- * module-level singleton. No behavior depends on cross-instance sharing, and
+ * uses an instance-level map. {@link getDefaultMetricEvaluatorRegistry} returns
+ * a module-level singleton. No behavior depends on cross-instance sharing, and
  * this removes the shared-mutable-state hazard.
  */
 @experimental
@@ -79,13 +49,10 @@ export class MetricEvaluatorRegistry {
     }
 
     const [evaluatorType] = entry;
-    if (isCustomMetricEvaluatorConstructor(evaluatorType)) {
-      return new evaluatorType({
-        evalMetric,
-        customFunctionPath: evalMetric.customFunctionPath,
-      });
-    }
-    return new evaluatorType({evalMetric});
+    return new evaluatorType({
+      evalMetric,
+      customFunctionPath: evalMetric.customFunctionPath,
+    });
   }
 
   /**
@@ -113,7 +80,7 @@ export class MetricEvaluatorRegistry {
   }
 }
 
-function getDefaultMetricEvaluatorRegistry(): MetricEvaluatorRegistry {
+function buildDefaultMetricEvaluatorRegistry(): MetricEvaluatorRegistry {
   const registry = new MetricEvaluatorRegistry();
 
   registry.registerEvaluator(
@@ -140,12 +107,21 @@ function getDefaultMetricEvaluatorRegistry(): MetricEvaluatorRegistry {
   return registry;
 }
 
+let defaultMetricEvaluatorRegistry: MetricEvaluatorRegistry | undefined;
+
 /**
- * A singleton {@link MetricEvaluatorRegistry} preloaded with the deterministic
- * evaluators ported in this module.
+ * Returns the singleton {@link MetricEvaluatorRegistry}, preloaded with the
+ * deterministic evaluators ported in this module.
+ *
+ * The registry is built on the first call rather than at module scope, because
+ * {@link MetricEvaluatorRegistry} is `@experimental` and warns when it is
+ * constructed. A module-scope singleton makes that warning fire for everyone
+ * who imports the package, including callers that never run an evaluation.
  */
-export const DEFAULT_METRIC_EVALUATOR_REGISTRY =
-  getDefaultMetricEvaluatorRegistry();
+export function getDefaultMetricEvaluatorRegistry(): MetricEvaluatorRegistry {
+  defaultMetricEvaluatorRegistry ??= buildDefaultMetricEvaluatorRegistry();
+  return defaultMetricEvaluatorRegistry;
+}
 
 function getDefaultMetricInfo(
   metricName: string,
@@ -174,12 +150,12 @@ function getDefaultMetricInfo(
  *
  * @param evalConfig The eval config whose `customMetrics` should be registered.
  * @param metricEvaluatorRegistry The registry to register into. Defaults to
- *     {@link DEFAULT_METRIC_EVALUATOR_REGISTRY}.
+ *     {@link getDefaultMetricEvaluatorRegistry}.
  * @returns The registry the metrics were registered in.
  */
 export function registerCustomMetricsFromConfig(
   evalConfig: EvalConfig,
-  metricEvaluatorRegistry: MetricEvaluatorRegistry = DEFAULT_METRIC_EVALUATOR_REGISTRY,
+  metricEvaluatorRegistry: MetricEvaluatorRegistry = getDefaultMetricEvaluatorRegistry(),
 ): MetricEvaluatorRegistry {
   const customMetrics = evalConfig.customMetrics;
   if (customMetrics === undefined || Object.keys(customMetrics).length === 0) {
@@ -192,7 +168,7 @@ export function registerCustomMetricsFromConfig(
       : getDefaultMetricInfo(metricName, config.description);
     metricEvaluatorRegistry.registerEvaluator(
       metricInfo,
-      CustomMetricEvaluator as unknown as EvaluatorConstructor,
+      CustomMetricEvaluator,
     );
   }
 

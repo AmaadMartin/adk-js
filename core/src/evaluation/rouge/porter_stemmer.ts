@@ -90,6 +90,22 @@ const CONTAINS_VOWEL = new RegExp('^(' + CONSONANT_SEQ + ')?' + VOWEL);
 // stem ends in cvc where the final consonant is not w, x, or y.
 const CVC = new RegExp('^' + CONSONANT_SEQ + VOWEL + '[^aeiouwxy]$');
 
+const STEP1A_ES = /^(.+?)(ss|i)es$/;
+const STEP1A_S = /^(.+?)([^s])s$/;
+const STEP1B_EED = /^(.+?)eed$/;
+const STEP1B_ED_ING = /^(.+?)(ed|ing)$/;
+const STEP1B_DOUBLE_CONSONANT = /([^aeiouylsz])\1$/;
+const STEP1B_CVC_EXTENSION = /(at|bl|iz)$/;
+const STEP1C_Y = /^(.+?)y$/;
+const STEP2 =
+  /^(.+?)(ational|tional|enci|anci|izer|bli|alli|entli|eli|ousli|ization|ation|ator|alism|iveness|fulness|ousness|aliti|iviti|biliti|logi)$/;
+const STEP3 = /^(.+?)(icate|ative|alize|iciti|ical|ful|ness)$/;
+const STEP4 =
+  /^(.+?)(al|ance|ence|er|ic|able|ible|ant|ement|ment|ent|ou|ism|ate|iti|ous|ive|ize)$/;
+const STEP4_ION = /^(.+?)(s|t)(ion)$/;
+const STEP5_E = /^(.+?)e$/;
+const LAST_CHAR = /.$/;
+
 /**
  * Returns the Porter stem of a single word.
  *
@@ -108,31 +124,26 @@ export function porterStem(word: string): string {
   }
 
   // Step 1a
-  let re = /^(.+?)(ss|i)es$/;
-  let re2 = /^(.+?)([^s])s$/;
-  if (re.test(w)) {
-    w = w.replace(re, '$1$2');
-  } else if (re2.test(w)) {
-    w = w.replace(re2, '$1$2');
+  if (STEP1A_ES.test(w)) {
+    w = w.replace(STEP1A_ES, '$1$2');
+  } else if (STEP1A_S.test(w)) {
+    w = w.replace(STEP1A_S, '$1$2');
   }
 
   // Step 1b
-  re = /^(.+?)eed$/;
-  re2 = /^(.+?)(ed|ing)$/;
-  if (re.test(w)) {
-    const fp = re.exec(w)!;
-    if (MGR0.test(fp[1])) {
-      w = w.replace(/.$/, '');
+  const eed = STEP1B_EED.exec(w);
+  if (eed) {
+    if (MGR0.test(eed[1])) {
+      w = w.replace(LAST_CHAR, '');
     }
-  } else if (re2.test(w)) {
-    const fp = re2.exec(w)!;
-    const stem = fp[1];
-    if (CONTAINS_VOWEL.test(stem)) {
-      w = stem;
-      if (/(at|bl|iz)$/.test(w)) {
+  } else {
+    const edIng = STEP1B_ED_ING.exec(w);
+    if (edIng && CONTAINS_VOWEL.test(edIng[1])) {
+      w = edIng[1];
+      if (STEP1B_CVC_EXTENSION.test(w)) {
         w = w + 'e';
-      } else if (/([^aeiouylsz])\1$/.test(w)) {
-        w = w.replace(/.$/, '');
+      } else if (STEP1B_DOUBLE_CONSONANT.test(w)) {
+        w = w.replace(LAST_CHAR, '');
       } else if (CVC.test(w)) {
         w = w + 'e';
       }
@@ -140,60 +151,46 @@ export function porterStem(word: string): string {
   }
 
   // Step 1c
-  re = /^(.+?)y$/;
-  if (re.test(w)) {
-    const stem = re.exec(w)![1];
-    if (CONTAINS_VOWEL.test(stem)) {
-      w = stem + 'i';
-    }
+  const endsInY = STEP1C_Y.exec(w);
+  if (endsInY && CONTAINS_VOWEL.test(endsInY[1])) {
+    w = endsInY[1] + 'i';
   }
 
   // Step 2
-  re =
-    /^(.+?)(ational|tional|enci|anci|izer|bli|alli|entli|eli|ousli|ization|ation|ator|alism|iveness|fulness|ousness|aliti|iviti|biliti|logi)$/;
-  if (re.test(w)) {
-    const fp = re.exec(w)!;
-    if (MGR0.test(fp[1])) {
-      w = fp[1] + STEP2_SUFFIXES[fp[2]];
-    }
+  const step2 = STEP2.exec(w);
+  if (step2 && MGR0.test(step2[1])) {
+    w = step2[1] + STEP2_SUFFIXES[step2[2]];
   }
 
   // Step 3
-  re = /^(.+?)(icate|ative|alize|iciti|ical|ful|ness)$/;
-  if (re.test(w)) {
-    const fp = re.exec(w)!;
-    if (MGR0.test(fp[1])) {
-      w = fp[1] + STEP3_SUFFIXES[fp[2]];
-    }
+  const step3 = STEP3.exec(w);
+  if (step3 && MGR0.test(step3[1])) {
+    w = step3[1] + STEP3_SUFFIXES[step3[2]];
   }
 
   // Step 4
-  re =
-    /^(.+?)(al|ance|ence|er|ic|able|ible|ant|ement|ment|ent|ou|ism|ate|iti|ous|ive|ize)$/;
-  re2 = /^(.+?)(s|t)(ion)$/;
-  if (re.test(w)) {
-    const fp = re.exec(w)!;
-    if (MGR1.test(fp[1])) {
-      w = fp[1];
+  const step4 = STEP4.exec(w);
+  if (step4) {
+    if (MGR1.test(step4[1])) {
+      w = step4[1];
     }
-  } else if (re2.test(w)) {
-    const fp = re2.exec(w)!;
-    const stem = fp[1] + fp[2];
-    if (MGR1.test(stem)) {
-      w = stem;
+  } else {
+    const ion = STEP4_ION.exec(w);
+    if (ion && MGR1.test(ion[1] + ion[2])) {
+      w = ion[1] + ion[2];
     }
   }
 
   // Step 5
-  re = /^(.+?)e$/;
-  if (re.test(w)) {
-    const stem = re.exec(w)![1];
-    if (MGR1.test(stem) || (MEQ1.test(stem) && !CVC.test(stem))) {
-      w = stem;
-    }
+  const endsInE = STEP5_E.exec(w);
+  if (
+    endsInE &&
+    (MGR1.test(endsInE[1]) || (MEQ1.test(endsInE[1]) && !CVC.test(endsInE[1])))
+  ) {
+    w = endsInE[1];
   }
   if (/ll$/.test(w) && MGR1.test(w)) {
-    w = w.replace(/.$/, '');
+    w = w.replace(LAST_CHAR, '');
   }
 
   // Restore an initial 'y' that was upper-cased for consonant handling.

@@ -7,8 +7,8 @@
 import * as fs from 'node:fs';
 import {z} from 'zod';
 
-import {CodeConfigSchema} from '../agents/common_configs.js';
 import {logger} from '../utils/logger.js';
+import {toCamelCase, toSnakeCaseKey} from '../utils/object_notation_utils.js';
 import {DEFAULT_LIVE_TIMEOUT_SECONDS} from './constants.js';
 import {
   BaseCriterion,
@@ -16,6 +16,27 @@ import {
   EvalMetric,
   MetricInfoSchema,
 } from './eval_metrics.js';
+
+/**
+ * Code reference config for a variable, a function, or a class.
+ *
+ * Only references an object by name. Declarative configs cannot pass
+ * constructor arguments, so build the object elsewhere and reference its fully
+ * qualified name here.
+ *
+ * Rejects unknown keys (parity with adk-python's `extra="forbid"`).
+ */
+export const CodeConfigSchema = z
+  .object({
+    /** The fully qualified name of the variable, function, or class. */
+    name: z.string(),
+  })
+  .strict();
+
+/**
+ * Code reference config for a variable, a function, or a class.
+ */
+export type CodeConfig = z.infer<typeof CodeConfigSchema>;
 
 /**
  * Configuration for a custom metric.
@@ -95,6 +116,48 @@ const DEFAULT_EVAL_CONFIG: EvalConfig = EvalConfigSchema.parse({
   },
 });
 
+/** Config fields whose keys are metric names chosen by the user. */
+const METRIC_KEYED_FIELDS = ['criteria', 'customMetrics'] as const;
+
+/** The paths those fields are reached by, in either spelling. */
+const METRIC_KEYED_PATHS = METRIC_KEYED_FIELDS.flatMap((field) => [
+  field,
+  toSnakeCaseKey(field),
+]);
+
+/**
+ * Rewrites an eval config's own field names to camelCase, so a config file
+ * written by adk-python loads here. A criterion spells its match type
+ * `match_type` there and `matchType` here, and the whole criterion is dropped
+ * silently without this step.
+ *
+ * The keys of `criteria` and `customMetrics` are metric names, so they are
+ * left exactly as written; only the values under them are rewritten.
+ */
+function toCamelCaseEvalConfig(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return raw;
+  }
+
+  const config = toCamelCase(raw, METRIC_KEYED_PATHS) as Record<
+    string,
+    unknown
+  >;
+  for (const field of METRIC_KEYED_FIELDS) {
+    const metricMap = config[field];
+    if (typeof metricMap !== 'object' || metricMap === null) {
+      continue;
+    }
+    config[field] = Object.fromEntries(
+      Object.entries(metricMap).map(([metricName, value]) => [
+        metricName,
+        toCamelCase(value),
+      ]),
+    );
+  }
+  return config;
+}
+
 /**
  * Returns the `EvalConfig` read from the config file, if present. Otherwise a
  * default one is returned.
@@ -110,7 +173,9 @@ export function getEvaluationCriteriaOrDefault(
 ): EvalConfig {
   if (evalConfigFilePath && fs.existsSync(evalConfigFilePath)) {
     const content = fs.readFileSync(evalConfigFilePath, 'utf-8');
-    return EvalConfigSchema.parse(JSON.parse(content));
+    return EvalConfigSchema.parse(
+      toCamelCaseEvalConfig(JSON.parse(content) as unknown),
+    );
   }
 
   logger.info(
@@ -120,28 +185,27 @@ export function getEvaluationCriteriaOrDefault(
 }
 
 /**
+ * An {@link EvalMetric} whose criterion, and therefore whose threshold, is
+ * known to be present. Every metric derived from an `EvalConfig` is one.
+ */
+export type CriterionBackedEvalMetric = EvalMetric & {criterion: BaseCriterion};
+
+/**
  * Flattens an `EvalConfig`'s criteria into the list of `EvalMetric`s that an
  * eval run consumes, preserving criteria insertion order.
- *
- * @throws {Error} If a criterion is neither a numeric threshold nor a
- *     criterion object.
  */
-export function getEvalMetricsFromConfig(evalConfig: EvalConfig): EvalMetric[] {
-  const evalMetricList: EvalMetric[] = [];
+export function getEvalMetricsFromConfig(
+  evalConfig: EvalConfig,
+): CriterionBackedEvalMetric[] {
+  const evalMetricList: CriterionBackedEvalMetric[] = [];
   for (const [metricName, criterion] of Object.entries(evalConfig.criteria)) {
     const customFunctionPath =
       evalConfig.customMetrics?.[metricName]?.codeConfig.name;
 
-    let resolvedCriterion: BaseCriterion;
-    if (typeof criterion === 'number') {
-      resolvedCriterion = BaseCriterionSchema.parse({threshold: criterion});
-    } else if (typeof criterion === 'object' && criterion !== null) {
-      resolvedCriterion = criterion;
-    } else {
-      throw new Error(
-        `Unexpected criterion type. ${typeof criterion} not supported.`,
-      );
-    }
+    const resolvedCriterion: BaseCriterion =
+      typeof criterion === 'number'
+        ? BaseCriterionSchema.parse({threshold: criterion})
+        : criterion;
 
     evalMetricList.push({
       metricName,

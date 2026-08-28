@@ -5,10 +5,10 @@
  */
 
 import {
+  CodeConfigSchema,
   EvalConfigSchema,
   getEvalMetricsFromConfig,
   getEvaluationCriteriaOrDefault,
-  type EvalConfig,
   type LlmAsAJudgeCriterion,
   type Rubric,
   type RubricsBasedCriterion,
@@ -17,6 +17,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
+import {ZodError} from 'zod';
 
 // The `userSimulatorConfig` discriminator tests from adk-python
 // (`test_user_simulator_config_*`) are intentionally NOT ported here: the
@@ -35,8 +36,7 @@ describe('evaluation/eval_config', () => {
   const createdDirs: string[] = [];
 
   afterEach(() => {
-    while (createdDirs.length > 0) {
-      const dir = createdDirs.pop()!;
+    for (const dir of createdDirs.splice(0)) {
       fs.rmSync(dir, {recursive: true, force: true});
     }
   });
@@ -68,6 +68,57 @@ describe('evaluation/eval_config', () => {
       const filePath = writeTempConfig(JSON.stringify(evalConfig));
 
       expect(getEvaluationCriteriaOrDefault(filePath)).toEqual(evalConfig);
+    });
+
+    it('reads a criterion field written in snake_case', () => {
+      // adk-python spells MatchType.IN_ORDER as `"match_type": 1`.
+      const filePath = writeTempConfig(
+        JSON.stringify({
+          criteria: {
+            tool_trajectory_avg_score: {threshold: 1.0, match_type: 1},
+          },
+        }),
+      );
+
+      const criterion =
+        getEvaluationCriteriaOrDefault(filePath).criteria[
+          'tool_trajectory_avg_score'
+        ];
+
+      expect(criterion).toMatchObject({threshold: 1.0, matchType: 1});
+    });
+
+    it('reads custom_metrics as well as customMetrics', () => {
+      const filePath = writeTempConfig(
+        JSON.stringify({
+          criteria: {my_metric: 0.5},
+          custom_metrics: {
+            my_metric: {code_config: {name: 'scorers.my_metric'}},
+          },
+        }),
+      );
+
+      const config = getEvaluationCriteriaOrDefault(filePath);
+
+      expect(config.customMetrics?.['my_metric'].codeConfig.name).toBe(
+        'scorers.my_metric',
+      );
+    });
+
+    it('never renames a metric name inside criteria', () => {
+      const filePath = writeTempConfig(
+        JSON.stringify({criteria: {tool_trajectory_avg_score: 1.0}}),
+      );
+
+      expect(
+        Object.keys(getEvaluationCriteriaOrDefault(filePath).criteria),
+      ).toEqual(['tool_trajectory_avg_score']);
+    });
+
+    it('rejects a config file that does not hold an object', () => {
+      const filePath = writeTempConfig('null');
+
+      expect(() => getEvaluationCriteriaOrDefault(filePath)).toThrow(ZodError);
     });
 
     it('returns the default config when the file does not exist', () => {
@@ -172,14 +223,10 @@ describe('evaluation/eval_config', () => {
       expect(getEvalMetricsFromConfig(evalConfig)).toEqual([]);
     });
 
-    it('throws for an unexpected criterion type', () => {
-      const evalConfig = {
-        criteria: {bad_metric: 'not-a-valid-criterion'},
-      } as unknown as EvalConfig;
-
-      expect(() => getEvalMetricsFromConfig(evalConfig)).toThrow(
-        /Unexpected criterion type/,
-      );
+    it('rejects a criterion that is neither a number nor an object', () => {
+      expect(() =>
+        EvalConfigSchema.parse({criteria: {bad_metric: 'not-a-criterion'}}),
+      ).toThrow(ZodError);
     });
   });
 
@@ -206,6 +253,25 @@ describe('evaluation/eval_config', () => {
       });
 
       expect(evalConfig.liveModelConfig?.timeoutSeconds).toBe(300);
+    });
+  });
+
+  describe('CodeConfigSchema', () => {
+    it('parses a valid code config', () => {
+      const config = CodeConfigSchema.parse({name: 'my.module.my_function'});
+      expect(config.name).toBe('my.module.my_function');
+    });
+
+    it('requires the name field', () => {
+      expect(CodeConfigSchema.safeParse({}).success).toBe(false);
+    });
+
+    it('rejects unknown keys', () => {
+      const result = CodeConfigSchema.safeParse({
+        name: 'my.module.my_function',
+        extra: 'not-allowed',
+      });
+      expect(result.success).toBe(false);
     });
   });
 });

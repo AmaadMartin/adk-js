@@ -10,9 +10,10 @@ import {
   getAllToolCallsWithResponses,
   getAllToolResponses,
   IntermediateDataSchema,
-  type IntermediateDataType,
+  IntermediateDataTypeSchema,
   InvocationEventSchema,
   InvocationEventsSchema,
+  InvocationSchema,
   SessionInputSchema,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
@@ -46,6 +47,27 @@ describe('evaluation/eval_case', () => {
       const event = InvocationEventSchema.parse({author: 'agent'});
       expect(event.content).toBeUndefined();
       expect(InvocationEventSchema.parse({...event}).content).toBeUndefined();
+    });
+  });
+
+  describe('IntermediateDataTypeSchema', () => {
+    it('rejects a shape that is neither of the two supported ones', () => {
+      expect(() => IntermediateDataTypeSchema.parse({foo: 'bar'})).toThrow();
+    });
+
+    it('rejects a non-object', () => {
+      expect(() =>
+        IntermediateDataTypeSchema.parse('this is not a valid type'),
+      ).toThrow();
+    });
+
+    it('rejects an invocation carrying an unsupported intermediate shape', () => {
+      expect(() =>
+        InvocationSchema.parse({
+          userContent: {parts: [{text: 'hi'}], role: 'user'},
+          intermediateData: {foo: 'bar'},
+        }),
+      ).toThrow();
     });
   });
 
@@ -105,20 +127,6 @@ describe('evaluation/eval_case', () => {
       });
       expect(getAllToolCalls(data)).toEqual([call1, call2]);
     });
-
-    it('throws for an unsupported type (string)', () => {
-      expect(() =>
-        getAllToolCalls(
-          'this is not a valid type' as unknown as IntermediateDataType,
-        ),
-      ).toThrow('Unsupported type for intermediate_data');
-    });
-
-    it('throws for an unsupported object shape', () => {
-      expect(() =>
-        getAllToolCalls({foo: 'bar'} as unknown as IntermediateDataType),
-      ).toThrow('Unsupported type for intermediate_data');
-    });
   });
 
   describe('getAllToolResponses', () => {
@@ -171,18 +179,6 @@ describe('evaluation/eval_case', () => {
         ],
       });
       expect(getAllToolResponses(data)).toEqual([resp1, resp2]);
-    });
-
-    it('throws for an unsupported type (string)', () => {
-      expect(() =>
-        getAllToolResponses('nope' as unknown as IntermediateDataType),
-      ).toThrow('Unsupported type for intermediate_data');
-    });
-
-    it('throws for an unsupported object shape', () => {
-      expect(() =>
-        getAllToolResponses({foo: 1} as unknown as IntermediateDataType),
-      ).toThrow('Unsupported type for intermediate_data');
     });
   });
 

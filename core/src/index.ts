@@ -37,6 +37,17 @@ export {
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
 export * from './common.js';
+export {AgentEvaluator, NUM_RUNS} from './evaluation/agent_evaluator.js';
+export type {
+  EvaluateBaseOptions,
+  EvaluateEvalSetOptions,
+  EvaluateOptions,
+} from './evaluation/agent_evaluator.js';
+export {EvalFailureError, UnsupportedMetricError} from './evaluation/errors.js';
+export {
+  loadEvalSetFromFile,
+  toEvalSetJson,
+} from './evaluation/eval_data_loader.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';

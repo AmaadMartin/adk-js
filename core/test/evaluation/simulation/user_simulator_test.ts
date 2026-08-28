@@ -48,10 +48,12 @@ describe('StaticUserSimulator', () => {
 describe('UserSimulatorProvider', () => {
   it('provides a StaticUserSimulator for a static conversation', async () => {
     const provider = new UserSimulatorProvider();
-    const evalCase = {
+    const evalCase: EvalCase = {
       evalId: 'case1',
+      creationTimestamp: 0,
+      finalSessionState: {},
       conversation: [makeInvocation('m1')],
-    } as unknown as EvalCase;
+    };
 
     const simulator = provider.provide(evalCase);
 
@@ -63,11 +65,13 @@ describe('UserSimulatorProvider', () => {
 
   it('throws for an eval case without a static conversation', () => {
     const provider = new UserSimulatorProvider();
-    const evalCase = {
+    const evalCase: EvalCase = {
       evalId: 'case1',
+      creationTimestamp: 0,
+      finalSessionState: {},
       conversation: undefined,
       conversationScenario: {startingPrompt: 'x', conversationPlan: 'y'},
-    } as unknown as EvalCase;
+    };
 
     expect(() => provider.provide(evalCase)).toThrow(/not yet supported/i);
   });

@@ -42,8 +42,10 @@ describe('evaluation/response_evaluator', () => {
     const performEval = vi.spyOn(VertexAiEvalFacade.prototype, 'performEval');
     const [actual, expected] = testInvocations();
     const evaluator = new ResponseEvaluator({
-      threshold: 0.8,
-      metricName: PrebuiltMetrics.RESPONSE_MATCH_SCORE,
+      evalMetric: {
+        metricName: PrebuiltMetrics.RESPONSE_MATCH_SCORE,
+        threshold: 0.8,
+      },
     });
 
     const result = evaluator.evaluateInvocations(actual, expected);
@@ -59,8 +61,10 @@ describe('evaluation/response_evaluator', () => {
       .mockReturnValue({summaryMetrics: [{meanScore: 0.9}]});
     const [actual, expected] = testInvocations();
     const evaluator = new ResponseEvaluator({
-      threshold: 0.8,
-      metricName: PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
+      evalMetric: {
+        metricName: PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
+        threshold: 0.8,
+      },
     });
 
     const result = evaluator.evaluateInvocations(actual, expected);
@@ -73,56 +77,12 @@ describe('evaluation/response_evaluator', () => {
     ]);
   });
 
-  it('resolves threshold and metric name from an eval metric', () => {
-    vi.spyOn(VertexAiEvalFacade.prototype, 'performEval');
-    const [actual, expected] = testInvocations();
-    const evaluator = new ResponseEvaluator({
-      evalMetric: {
-        metricName: PrebuiltMetrics.RESPONSE_MATCH_SCORE,
-        threshold: 0.8,
-      },
-    });
-
-    const result = evaluator.evaluateInvocations(actual, expected);
-
-    expect(result.overallScore).toBeCloseTo(8 / 11, 10);
-  });
-
-  it('throws when both threshold and evalMetric are specified', () => {
-    expect(
-      () =>
-        new ResponseEvaluator({
-          threshold: 0.8,
-          evalMetric: {
-            metricName: PrebuiltMetrics.RESPONSE_MATCH_SCORE,
-            threshold: 0.8,
-          },
-        }),
-    ).toThrow(
-      'Either eval_metric should be specified or both threshold and metric_name' +
-        ' should be specified.',
-    );
-  });
-
-  it('throws when both metricName and evalMetric are specified', () => {
-    expect(
-      () =>
-        new ResponseEvaluator({
-          metricName: PrebuiltMetrics.RESPONSE_MATCH_SCORE,
-          evalMetric: {
-            metricName: PrebuiltMetrics.RESPONSE_MATCH_SCORE,
-            threshold: 0.8,
-          },
-        }),
-    ).toThrow(
-      'Either eval_metric should be specified or both threshold and metric_name' +
-        ' should be specified.',
-    );
-  });
-
   it('throws for an unsupported metric', () => {
     expect(
-      () => new ResponseEvaluator({threshold: 0.8, metricName: 'bogus_metric'}),
+      () =>
+        new ResponseEvaluator({
+          evalMetric: {metricName: 'bogus_metric', threshold: 0.8},
+        }),
     ).toThrow('`bogus_metric` is not supported.');
   });
 });

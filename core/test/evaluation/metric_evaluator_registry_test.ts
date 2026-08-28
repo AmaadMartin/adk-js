@@ -6,14 +6,13 @@
 
 import {
   CustomMetricEvaluator,
-  DEFAULT_METRIC_EVALUATOR_REGISTRY,
   EvalConfigSchema,
   type EvalMetric,
   EvalStatus,
   type EvaluationResult,
   Evaluator,
-  type EvaluatorConstructor,
   FinalResponseMatchV2EvaluatorMetricInfoProvider,
+  getDefaultMetricEvaluatorRegistry,
   HallucinationsV1EvaluatorMetricInfoProvider,
   type Invocation,
   InvocationSchema,
@@ -36,7 +35,44 @@ import {
   TrajectoryEvaluator,
   TrajectoryEvaluatorMetricInfoProvider,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
+import type {Logger} from '../../src/utils/logger.js';
+
+/**
+ * Loads the package entry point in a fresh module graph and records every
+ * warning it logs. The caller gets the freshly loaded module back, so it can
+ * exercise the same instances the recorded warnings came from.
+ */
+async function loadPackageAndRecordWarnings(): Promise<{
+  adk: typeof import('../../src/common.js');
+  warnings: string[];
+  restore: () => void;
+}> {
+  vi.resetModules();
+  const {resetLogger, setLogger} = await import('../../src/utils/logger.js');
+  const warnings: string[] = [];
+  const recordingLogger: Logger = {
+    setLogLevel: () => {},
+    log: () => {},
+    debug: () => {},
+    info: () => {},
+    warn: (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(' '));
+    },
+    error: () => {},
+  };
+  setLogger(recordingLogger);
+
+  const adk = await import('../../src/common.js');
+  return {
+    adk,
+    warnings,
+    restore: () => {
+      resetLogger();
+      vi.resetModules();
+    },
+  };
+}
 
 function intervalMetricInfo(
   metricName: string,
@@ -96,10 +132,14 @@ class SubclassedCustomMetricEvaluator extends CustomMetricEvaluator {}
 function registeredMetricInfo(
   registry: MetricEvaluatorRegistry,
   metricName: string,
-): MetricInfo | undefined {
-  return registry
+): MetricInfo {
+  const info = registry
     .getRegisteredMetrics()
-    .find((info) => info.metricName === metricName);
+    .find((entry) => entry.metricName === metricName);
+  if (!info) {
+    expect.fail(`No metric named ${metricName} is registered.`);
+  }
+  return info;
 }
 
 describe('evaluation/metric_evaluator_registry', () => {
@@ -149,9 +189,9 @@ describe('evaluation/metric_evaluator_registry', () => {
     it('returns deep copies from getRegisteredMetrics', () => {
       const registry = new MetricEvaluatorRegistry();
       registry.registerEvaluator(DUMMY_METRIC_INFO, DummyEvaluator);
-      const first = registeredMetricInfo(registry, DUMMY_METRIC_NAME)!;
+      const first = registeredMetricInfo(registry, DUMMY_METRIC_NAME);
       first.description = 'mutated';
-      const second = registeredMetricInfo(registry, DUMMY_METRIC_NAME)!;
+      const second = registeredMetricInfo(registry, DUMMY_METRIC_NAME);
       expect(second.description).toBe('Dummy metric description');
     });
   });
@@ -178,7 +218,7 @@ describe('evaluation/metric_evaluator_registry', () => {
       const result = registerCustomMetricsFromConfig(evalConfig, registry);
 
       expect(result).toBe(registry);
-      const info = registeredMetricInfo(registry, CUSTOM_METRIC_NAME)!;
+      const info = registeredMetricInfo(registry, CUSTOM_METRIC_NAME);
       expect(info.metricValueInfo.interval?.maxValue).toBe(5.0);
       expect(
         registry
@@ -206,7 +246,7 @@ describe('evaluation/metric_evaluator_registry', () => {
 
       registerCustomMetricsFromConfig(evalConfig, registry);
 
-      const info = registeredMetricInfo(registry, CUSTOM_METRIC_NAME)!;
+      const info = registeredMetricInfo(registry, CUSTOM_METRIC_NAME);
       expect(info.description).toBe('A custom metric');
       expect(info.metricValueInfo.interval?.minValue).toBe(0.0);
       expect(info.metricValueInfo.interval?.maxValue).toBe(1.0);
@@ -223,7 +263,7 @@ describe('evaluation/metric_evaluator_registry', () => {
       expect(registry.getRegisteredMetrics()).toEqual(before);
     });
 
-    it('defaults to the DEFAULT_METRIC_EVALUATOR_REGISTRY', () => {
+    it('defaults to the singleton registry', () => {
       const evalConfig = EvalConfigSchema.parse({
         customMetrics: {
           [CUSTOM_METRIC_NAME]: {codeConfig: {name: 'math.sqrt'}},
@@ -232,10 +272,10 @@ describe('evaluation/metric_evaluator_registry', () => {
 
       const result = registerCustomMetricsFromConfig(evalConfig);
 
-      expect(result).toBe(DEFAULT_METRIC_EVALUATOR_REGISTRY);
+      expect(result).toBe(getDefaultMetricEvaluatorRegistry());
       expect(
         registeredMetricInfo(
-          DEFAULT_METRIC_EVALUATOR_REGISTRY,
+          getDefaultMetricEvaluatorRegistry(),
           CUSTOM_METRIC_NAME,
         )?.metricName,
       ).toBe(CUSTOM_METRIC_NAME);
@@ -245,7 +285,7 @@ describe('evaluation/metric_evaluator_registry', () => {
       const registry = new MetricEvaluatorRegistry();
       registry.registerEvaluator(
         intervalMetricInfo('subclassed_custom', '', 0.0, 1.0),
-        SubclassedCustomMetricEvaluator as unknown as EvaluatorConstructor,
+        SubclassedCustomMetricEvaluator,
       );
       const evaluator = registry.getEvaluator({
         metricName: 'subclassed_custom',
@@ -256,28 +296,49 @@ describe('evaluation/metric_evaluator_registry', () => {
     });
   });
 
-  describe('DEFAULT_METRIC_EVALUATOR_REGISTRY', () => {
+  describe('getDefaultMetricEvaluatorRegistry', () => {
+    it('builds the singleton on first call, not on import', async () => {
+      const {adk, warnings, restore} = await loadPackageAndRecordWarnings();
+      try {
+        expect(warnings).toEqual([]);
+
+        adk.getDefaultMetricEvaluatorRegistry();
+
+        expect(warnings).toEqual([
+          'Class MetricEvaluatorRegistry is experimental and may change in the future.',
+        ]);
+      } finally {
+        restore();
+      }
+    });
+
+    it('returns the same instance on every call', () => {
+      expect(getDefaultMetricEvaluatorRegistry()).toBe(
+        getDefaultMetricEvaluatorRegistry(),
+      );
+    });
+
     it('resolves the ported deterministic evaluators', () => {
       expect(
-        DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator({
+        getDefaultMetricEvaluatorRegistry().getEvaluator({
           metricName: PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
           threshold: 1.0,
         }),
       ).toBeInstanceOf(TrajectoryEvaluator);
       expect(
-        DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator({
+        getDefaultMetricEvaluatorRegistry().getEvaluator({
           metricName: PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
           threshold: 0.8,
         }),
       ).toBeInstanceOf(ResponseEvaluator);
       expect(
-        DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator({
+        getDefaultMetricEvaluatorRegistry().getEvaluator({
           metricName: PrebuiltMetrics.RESPONSE_MATCH_SCORE,
           threshold: 0.8,
         }),
       ).toBeInstanceOf(ResponseEvaluator);
       expect(
-        DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator({
+        getDefaultMetricEvaluatorRegistry().getEvaluator({
           metricName: PrebuiltMetrics.SAFETY_V1,
           threshold: 0.8,
         }),
@@ -285,7 +346,7 @@ describe('evaluation/metric_evaluator_registry', () => {
     });
 
     it('scores a hand-built trajectory pair end-to-end', async () => {
-      const evaluator = DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator({
+      const evaluator = getDefaultMetricEvaluatorRegistry().getEvaluator({
         metricName: PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
         threshold: 1.0,
       });
@@ -302,7 +363,7 @@ describe('evaluation/metric_evaluator_registry', () => {
     });
 
     it('scores a hand-built response-match pair end-to-end', async () => {
-      const evaluator = DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator({
+      const evaluator = getDefaultMetricEvaluatorRegistry().getEvaluator({
         metricName: PrebuiltMetrics.RESPONSE_MATCH_SCORE,
         threshold: 0.8,
       });

@@ -13,8 +13,6 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
-export {CodeConfigSchema} from './agents/common_configs.js';
-export type {CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
   findEventByFunctionCallId,
@@ -317,10 +315,7 @@ export type {
   InferenceRequest,
   InferenceResult,
 } from './evaluation/base_eval_service.js';
-export {
-  DEFAULT_LIVE_TIMEOUT_SECONDS,
-  MISSING_EVAL_DEPENDENCIES_MESSAGE,
-} from './evaluation/constants.js';
+export {DEFAULT_LIVE_TIMEOUT_SECONDS} from './evaluation/constants.js';
 export {
   ConversationGenerationConfigSchema,
   ConversationScenarioSchema,
@@ -335,10 +330,7 @@ export {
   CustomMetricEvaluator,
   getMetricFunction,
 } from './evaluation/custom_metric_evaluator.js';
-export type {
-  CustomMetricEvaluatorOptions,
-  CustomMetricFunction,
-} from './evaluation/custom_metric_evaluator.js';
+export type {CustomMetricFunction} from './evaluation/custom_metric_evaluator.js';
 export {
   EvalCaseSchema,
   IntermediateDataSchema,
@@ -364,6 +356,7 @@ export type {
   ToolCallAndResponse,
 } from './evaluation/eval_case.js';
 export {
+  CodeConfigSchema,
   CustomMetricConfigSchema,
   EvalConfigSchema,
   LiveModelConfigSchema,
@@ -371,6 +364,8 @@ export {
   getEvaluationCriteriaOrDefault,
 } from './evaluation/eval_config.js';
 export type {
+  CodeConfig,
+  CriterionBackedEvalMetric,
   CustomMetricConfig,
   EvalConfig,
   LiveModelConfig,
@@ -446,6 +441,8 @@ export {
 } from './evaluation/evaluator.js';
 export type {
   EvaluationResult,
+  EvaluatorConstructor,
+  EvaluatorConstructorOptions,
   PerInvocationResult,
 } from './evaluation/evaluator.js';
 export {
@@ -468,13 +465,9 @@ export {
 } from './evaluation/local_eval_service.js';
 export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
 export {
-  DEFAULT_METRIC_EVALUATOR_REGISTRY,
   MetricEvaluatorRegistry,
+  getDefaultMetricEvaluatorRegistry,
   registerCustomMetricsFromConfig,
-} from './evaluation/metric_evaluator_registry.js';
-export type {
-  EvaluatorConstructor,
-  EvaluatorConstructorOptions,
 } from './evaluation/metric_evaluator_registry.js';
 export {
   FinalResponseMatchV2EvaluatorMetricInfoProvider,
@@ -491,7 +484,6 @@ export {
   TrajectoryEvaluatorMetricInfoProvider,
 } from './evaluation/metric_info_providers.js';
 export {ResponseEvaluator} from './evaluation/response_evaluator.js';
-export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
 export {
   DEFAULT_HTTP_RETRY_OPTIONS,
   EnsureRetryOptionsPlugin,
@@ -514,7 +506,6 @@ export type {
 } from './evaluation/simulation/user_simulator_personas.js';
 export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
 export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
-export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {
   PrebuiltMetric,
   SingleTurnVertexAiEvalFacade,
