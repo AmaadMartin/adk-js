@@ -13,7 +13,6 @@ import {
   LlmAgent,
   LlmRequest,
   PluginManager,
-  createCacheMetadata,
   createContextCacheConfig,
   createEvent,
   createSession,
@@ -31,14 +30,14 @@ function makeCacheMetadata(
   invocationsUsed: number,
   cacheName = 'test-cache',
 ): CacheMetadata {
-  return createCacheMetadata({
+  return {
     cacheName: `projects/test/locations/us-central1/cachedContents/${cacheName}`,
     expireTime: 1800,
     fingerprint: 'test_fingerprint',
     invocationsUsed,
     contentsCount: 3,
     createdAt: 600,
-  });
+  };
 }
 
 function makeInvocationContext(
@@ -489,8 +488,8 @@ describe('ContextCacheRequestProcessor', () => {
   });
 
   it('should reject an active cache from another invocation with no use count', async () => {
-    // A rehydrated event bypasses createCacheMetadata, so it can hold a state
-    // the factory forbids.
+    // An active cache always carries a use count, but an event rehydrated
+    // from storage can arrive without one.
     const rehydrated: CacheMetadata = {
       cacheName: 'projects/test/locations/us-central1/cachedContents/test',
       expireTime: 1800,
@@ -536,6 +535,23 @@ describe('ContextCacheRequestProcessor', () => {
 
     expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(6);
     expect(llmRequest.cacheableContentsTokenCount).toBe(512);
+  });
+
+  it('should not throw for a bare node when caching is off', async () => {
+    const context = new InvocationContext({
+      invocationId: 'test_invocation',
+      session: createSession({
+        id: 'test_session',
+        appName: 'test_app',
+        userId: 'test_user',
+        events: [],
+      }),
+      pluginManager: new PluginManager(),
+    });
+    const llmRequest = makeLlmRequest();
+
+    await expect(runProcessor(context, llmRequest)).resolves.toEqual([]);
+    expect(llmRequest.cacheConfig).toBeUndefined();
   });
 
   it('should throw when the invocation runs a node rather than an agent', async () => {

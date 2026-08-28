@@ -45,33 +45,3 @@ export interface CacheMetadata {
   /** Unix timestamp in seconds when the cache was created. */
   createdAt?: number;
 }
-
-/**
- * Creates a validated {@link CacheMetadata}.
- *
- * @param params The metadata fields.
- * @returns The same fields, once they satisfy the active-state invariant.
- * @throws Error if the three active-cache fields are partially set, or if a
- *     count is negative.
- */
-export function createCacheMetadata(params: CacheMetadata): CacheMetadata {
-  const activeFields = [
-    params.cacheName,
-    params.expireTime,
-    params.invocationsUsed,
-  ];
-  const setCount = activeFields.filter((field) => field !== undefined).length;
-  if (setCount !== 0 && setCount !== activeFields.length) {
-    throw new Error(
-      'cacheName, expireTime, and invocationsUsed must all be set (active ' +
-        'cache) or all be undefined (fingerprint-only state)',
-    );
-  }
-  if (params.invocationsUsed !== undefined && params.invocationsUsed < 0) {
-    throw new Error('invocationsUsed must be greater than or equal to 0.');
-  }
-  if (params.contentsCount < 0) {
-    throw new Error('contentsCount must be greater than or equal to 0.');
-  }
-  return {...params};
-}

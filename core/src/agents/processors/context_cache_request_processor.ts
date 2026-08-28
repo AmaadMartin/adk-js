@@ -39,11 +39,13 @@ export class ContextCacheRequestProcessor extends BaseLlmRequestProcessor {
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
   ): AsyncGenerator<Event, void, void> {
-    const agentName = requireAgent(invocationContext).name;
-
     if (!invocationContext.contextCacheConfig) {
       return;
     }
+
+    // After the guard, so an invocation that leaves caching off cannot throw
+    // for running a bare node rather than an agent.
+    const agentName = requireAgent(invocationContext).name;
 
     llmRequest.cacheConfig = invocationContext.contextCacheConfig;
 
@@ -67,8 +69,6 @@ export class ContextCacheRequestProcessor extends BaseLlmRequestProcessor {
         `Found previous prompt token count for agent ${agentName}: ${previousTokenCount}`,
       );
     }
-
-    logger.debug(`Context caching enabled for agent ${agentName}`);
   }
 }
 
@@ -152,8 +152,8 @@ function carryCacheMetadataForward(
     return {...eventMetadata};
   }
 
-  // Storage rehydrates an event without the factory, so the active-state
-  // invariant createCacheMetadata enforces can still be broken here.
+  // An active cache always carries a use count, but a rehydrated event comes
+  // straight from storage, so the invariant is not guaranteed here.
   if (eventMetadata.invocationsUsed === undefined) {
     throw new Error('Active cache metadata must include invocationsUsed.');
   }
