@@ -159,6 +159,10 @@ export function getTypeHint(schema: OpenAPIV3.SchemaObject): string {
 /**
  * Converts an OpenAPI parameter name to the snake_case argument name.
  *
+ * Handles lowerCamelCase, UpperCamelCase, space-separated text and acronyms:
+ * `getHTTPResponse` becomes `get_http_response` and `REST API` becomes
+ * `rest_api`.
+ *
  * This is the OpenAPI parameter-naming rule, not the recursive object-key
  * conversion that `utils/object_notation_utils.ts` exports as `toSnakeCase`.
  *
@@ -167,8 +171,12 @@ export function getTypeHint(schema: OpenAPIV3.SchemaObject): string {
  */
 export function toSnakeCaseName(originalName: string): string {
   return originalName
-    .replace(/[A-Z]/g, (g) => '_' + g.toLowerCase())
-    .replace(/^_/, '');
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 /**

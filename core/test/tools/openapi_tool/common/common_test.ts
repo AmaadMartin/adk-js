@@ -629,3 +629,27 @@ describe('generateReturnDoc', () => {
     );
   });
 });
+
+describe('toSnakeCaseName parity', () => {
+  const cases: Array<[string, string]> = [
+    ['camelCase', 'camel_case'],
+    ['UpperCamelCase', 'upper_camel_case'],
+    ['space separated', 'space_separated'],
+    ['REST API', 'rest_api'],
+    ['getHTTPResponse', 'get_http_response'],
+    ['my param-name', 'my_param_name'],
+    ['a__b', 'a_b'],
+    ['__a__b__', 'a_b'],
+    ['_leading_', 'leading'],
+    ['already_snake', 'already_snake'],
+    ['id2Value', 'id2_value'],
+    ['', ''],
+    ['---', ''],
+  ];
+
+  for (const [input, expected] of cases) {
+    it(`should convert ${JSON.stringify(input)} to ${JSON.stringify(expected)}`, () => {
+      expect(toSnakeCaseName(input)).toBe(expected);
+    });
+  }
+});

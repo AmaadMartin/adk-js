@@ -205,7 +205,7 @@ describe('OpenApiSpecParser', () => {
 
     expect(parsed.length).toBe(1);
     const op = parsed[0];
-    expect(op.name).toBe('get__users__id_');
+    expect(op.name).toBe('get_users_id');
     expect(op.parameters.length).toBe(1);
     expect(op.parameters[0].name).toBe('id');
   });
@@ -259,7 +259,62 @@ describe('OpenApiSpecParser', () => {
     expect(postOp?.authScheme?.type).toBe('oauth2');
   });
 
-  it('should fall back to the global scheme when a requirement is empty', () => {
+  it('should attach no scheme when the operation opts out of auth', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Security API', version: '1.0.0'},
+      security: [{ApiKeyAuth: []}],
+      paths: {
+        '/secure': {
+          get: {
+            operationId: 'secureOp',
+            security: [{ApiKeyAuth: []}, {}],
+            responses: {},
+          },
+        },
+      },
+      components: {
+        securitySchemes: {
+          ApiKeyAuth: {type: 'apiKey', in: 'header', name: 'X-API-KEY'},
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed[0].authScheme).toBeUndefined();
+  });
+
+  it('should surface the parsed return value on the operation', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Pet API', version: '1.0.0'},
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'listPets',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {type: 'array', items: {type: 'string'}},
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed[0].returnValue?.name).toBe('value');
+    expect(parsed[0].returnValue?.paramSchema.type).toBe('array');
+  });
+
+  it('should let an empty operation requirement override the global one', () => {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: {title: 'Security API', version: '1.0.0'},
@@ -282,7 +337,29 @@ describe('OpenApiSpecParser', () => {
 
     const parsed = new OpenApiSpecParser().parse(spec);
 
-    expect(parsed[0].authScheme?.type).toBe('apiKey');
+    expect(parsed[0].authScheme).toBeUndefined();
+  });
+
+  it('should attach no scheme when the document opts out of auth', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Security API', version: '1.0.0'},
+      security: [{ApiKeyAuth: []}, {}],
+      paths: {
+        '/secure': {
+          get: {operationId: 'secureOp', responses: {}},
+        },
+      },
+      components: {
+        securitySchemes: {
+          ApiKeyAuth: {type: 'apiKey', in: 'header', name: 'X-API-KEY'},
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed[0].authScheme).toBeUndefined();
   });
 
   describe('server URL resolution', () => {

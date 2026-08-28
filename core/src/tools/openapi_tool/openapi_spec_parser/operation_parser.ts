@@ -16,6 +16,48 @@ import {
   toSnakeCaseName,
 } from '../common/common.js';
 
+/**
+ * Returns the scheme name a security list requires, or `''` when it requires
+ * none.
+ *
+ * An empty requirement object is the OpenAPI idiom for optional
+ * authentication. A tool that carries an auth scheme stops and asks the caller
+ * for a credential instead of sending the request, so an optional requirement
+ * resolves to no scheme; a caller that does want to authenticate passes the
+ * scheme and the credential to the toolset.
+ *
+ * @param security The security requirements to read.
+ * @returns The scheme name, or `''`.
+ */
+export function requiredSchemeName(
+  security: OpenAPIV3.SecurityRequirementObject[] | undefined,
+): string {
+  if (!security || security.length === 0) {
+    return '';
+  }
+  if (security.some((requirement) => Object.keys(requirement).length === 0)) {
+    return '';
+  }
+  return Object.keys(security[0])[0];
+}
+
+/**
+ * Names a request body that is not an object.
+ *
+ * A body with no type of its own, including a `oneOf`/`anyOf`/`allOf` body,
+ * takes the explicit name. A plain scalar keeps an empty name and picks up
+ * `body` from its location, which is the name adk-python gives it.
+ */
+function bodyArgumentName(schema: OpenAPIV3.SchemaObject): string {
+  if (schema.type === 'array') {
+    return 'array';
+  }
+  if (schema.oneOf || schema.anyOf || schema.allOf) {
+    return 'body';
+  }
+  return schema.type ? '' : 'body';
+}
+
 /** Accepts the JSON form of an operation, as adk-python's parser does. */
 function readOperation(
   operation: OpenAPIV3.OperationObject | string,
@@ -116,63 +158,63 @@ export class OperationParser {
 
   private processRequestBody() {
     const requestBody = this.operation.requestBody;
-    if (!requestBody || '$ref' in requestBody) {
+    if (!requestBody) {
       return;
+    }
+    if ('$ref' in requestBody) {
+      throw new Error(
+        `Request body contains unresolved reference '${requestBody.$ref}'`,
+      );
     }
 
     const content = requestBody.content || {};
     // Process first mime type only, similar to python
-    const firstMimeType = Object.keys(content)[0];
-    if (!firstMimeType) {
+    const mediaType = Object.keys(content)[0];
+    if (!mediaType) {
       return;
     }
 
-    const mediaTypeObject = content[firstMimeType];
-    const schema = mediaTypeObject.schema;
+    const schema = normalizeSchema(
+      content[mediaType].schema,
+      `request body media type '${mediaType}'`,
+    );
     const description = requestBody.description || '';
 
-    if (schema && !('$ref' in schema)) {
-      if (schema.type === 'object') {
-        const properties = schema.properties || {};
-        if (Object.keys(properties).length > 0) {
-          for (const [propName, propDetails] of Object.entries(properties)) {
-            this.params.push(
-              createApiParameter({
-                originalName: propName,
-                paramLocation: 'body',
-                paramSchema: normalizeSchema(
-                  propDetails,
-                  `request body property '${propName}'`,
-                ),
-                required: (schema.required || []).includes(propName),
-                name: this.getParamName(propName),
-              }),
-            );
-          }
-        } else {
-          this.params.push(
-            createApiParameter({
-              originalName: '',
-              paramLocation: 'body',
-              paramSchema: schema,
-              description,
-              required: true,
-              name: 'body',
-            }),
-          );
-        }
-      } else {
-        this.params.push(
-          createApiParameter({
-            originalName: schema.type === 'array' ? 'array' : 'body',
-            paramLocation: 'body',
-            paramSchema: schema,
-            description,
-            required: true,
-            name: 'body',
-          }),
-        );
-      }
+    if (schema.type === 'object') {
+      this.addBodyProperties(schema);
+      return;
+    }
+
+    this.params.push(
+      createApiParameter({
+        originalName: bodyArgumentName(schema),
+        paramLocation: 'body',
+        paramSchema: schema,
+        description,
+      }),
+    );
+  }
+
+  /** Expands an object body into one parameter per property. */
+  private addBodyProperties(schema: OpenAPIV3.SchemaObject) {
+    const required = new Set(schema.required || []);
+    for (const [propName, propDetails] of Object.entries(
+      schema.properties || {},
+    )) {
+      const propSchema = normalizeSchema(
+        propDetails,
+        `request body property '${propName}'`,
+      );
+      this.params.push(
+        createApiParameter({
+          originalName: propName,
+          paramLocation: 'body',
+          paramSchema: propSchema,
+          description: propSchema.description || '',
+          required: required.has(propName),
+          name: this.getParamName(propName),
+        }),
+      );
     }
   }
 
@@ -186,13 +228,20 @@ export class OperationParser {
 
     if (min20x) {
       const response = responses[min20x];
-      if (!('$ref' in response) && response.content) {
-        const firstMimeType = Object.keys(response.content)[0];
-        if (firstMimeType) {
+      if ('$ref' in response) {
+        throw new Error(
+          `Response contains unresolved reference '${response.$ref}'`,
+        );
+      }
+      for (const [mimeType, mediaTypeObject] of Object.entries(
+        response.content || {},
+      )) {
+        if (mediaTypeObject.schema !== undefined) {
           returnSchema = normalizeSchema(
-            response.content[firstMimeType].schema,
-            `response '${min20x}' body`,
+            mediaTypeObject.schema,
+            `response media type '${mimeType}'`,
           );
+          break;
         }
       }
     }
@@ -201,8 +250,6 @@ export class OperationParser {
       originalName: '',
       paramLocation: '',
       paramSchema: returnSchema,
-      required: true,
-      name: 'return',
     });
   }
 
@@ -210,11 +257,13 @@ export class OperationParser {
     const nameCounts = new Map<string, number>();
     for (const param of this.params) {
       const name = param.name;
-      const count = nameCounts.get(name) || 0;
-      if (count > 0) {
-        param.name = `${name}_${count}`;
+      const count = nameCounts.get(name);
+      if (count === undefined) {
+        nameCounts.set(name, 0);
+        continue;
       }
       nameCounts.set(name, count + 1);
+      param.name = `${name}_${count}`;
     }
   }
 
@@ -265,7 +314,9 @@ export class OperationParser {
     if (!operationId) {
       throw new Error('Operation ID is missing');
     }
-    return this.getParamName(operationId).substring(0, 60);
+    // The tool name is always snake_case: preservePropertyNames governs the
+    // argument names the API sees, not the name the model calls.
+    return toSnakeCaseName(operationId).substring(0, 60);
   }
 
   /**
@@ -279,31 +330,38 @@ export class OperationParser {
   }
 
   /**
+   * Gets the value the operation returns.
+   *
+   * @throws {Error} If the operation was never parsed.
+   * @returns The return value.
+   */
+  @experimental
+  public getReturnValue(): ApiParameter {
+    if (!this.returnValue) {
+      throw new Error('Operation return value has not been parsed');
+    }
+    return this.returnValue;
+  }
+
+  /**
    * Gets the TypeScript type name of the value the operation returns.
    *
+   * @throws {Error} If the operation was never parsed.
    * @returns A type name; `unknown` when the operation declares no schema.
    */
   @experimental
   public getReturnTypeHint(): string {
-    return getTypeHint(this.returnValue?.paramSchema ?? {});
+    return getTypeHint(this.getReturnValue().paramSchema);
   }
 
   /**
    * Gets the name of the security scheme this operation requires.
    *
-   * The spec may list several requirements; the first one wins, as it does in
-   * adk-python. A requirement that names no scheme yields `''`, which leaves
-   * the caller free to fall back to the document-level scheme.
-   *
-   * @returns The scheme name, or `''` when the operation names none.
+   * @returns The scheme name, or `''` when the operation requires none.
    */
   @experimental
   public getAuthSchemeName(): string {
-    const security = this.operation.security;
-    if (!security || security.length === 0) {
-      return '';
-    }
-    return Object.keys(security[0])[0] ?? '';
+    return requiredSchemeName(this.operation.security);
   }
 
   /**

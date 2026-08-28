@@ -11,6 +11,7 @@ import {
   Context,
   createRestApiTool,
   OpenApiSpecParser,
+  OperationParser,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -1151,5 +1152,59 @@ describe('RestApiTool Utilities', () => {
         'Content-Type': 'application/json',
       });
     });
+  });
+});
+
+describe('RestApiTool whole-body arguments', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/pets',
+    method: 'POST',
+  };
+
+  function bodyOperation(
+    schema: OpenAPIV3.SchemaObject,
+  ): OpenAPIV3.OperationObject {
+    return {
+      operationId: 'createPets',
+      requestBody: {content: {'application/json': {schema}}},
+      responses: {},
+    };
+  }
+
+  it('should send an array body under the array argument', () => {
+    const operation = bodyOperation({type: 'array', items: {type: 'string'}});
+    const parameters = new OperationParser(operation).getParameters();
+
+    const result = prepareRequestParams(endpoint, parameters, {
+      array: ['rex', 'bella'],
+    });
+
+    expect(result.body).toEqual(['rex', 'bella']);
+    expect(result.bodyData).toEqual({});
+  });
+
+  it('should send a scalar body under the body argument', () => {
+    const operation = bodyOperation({type: 'string'});
+    const parameters = new OperationParser(operation).getParameters();
+
+    const result = prepareRequestParams(endpoint, parameters, {body: 'rex'});
+
+    expect(result.body).toBe('rex');
+    expect(result.bodyData).toEqual({});
+  });
+
+  it('should send object body properties as named fields', () => {
+    const operation = bodyOperation({
+      type: 'object',
+      properties: {petName: {type: 'string'}},
+    });
+    const parameters = new OperationParser(operation).getParameters();
+
+    const result = prepareRequestParams(endpoint, parameters, {
+      pet_name: 'rex',
+    });
+
+    expect(result.bodyData).toEqual({petName: 'rex'});
   });
 });

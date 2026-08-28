@@ -37,7 +37,7 @@ describe('OperationParser', () => {
     const params = parser.getParameters();
 
     expect(params.length).toBe(1);
-    expect(params[0].name).toBe('body');
+    expect(params[0].name).toBe('array');
     expect(params[0].paramLocation).toBe('body');
     expect(params[0].paramSchema.type).toBe('array');
   });
@@ -146,7 +146,7 @@ describe('OperationParser schema normalization', () => {
     };
 
     expect(() => new OperationParser(op)).toThrow(
-      "response '200' body contains unresolved reference" +
+      "response media type 'application/json' contains unresolved reference" +
         " '#/components/schemas/Pet'",
     );
   });
@@ -384,7 +384,7 @@ describe('OperationParser.getReturnTypeHint', () => {
     expect(new OperationParser(op).getReturnTypeHint()).toBe('unknown');
   });
 
-  it('should be unknown when the operation was not parsed', () => {
+  it('should reject a hint when the operation was not parsed', () => {
     const op: OpenAPIV3.OperationObject = {
       operationId: 'getPet',
       responses: {
@@ -397,7 +397,9 @@ describe('OperationParser.getReturnTypeHint', () => {
 
     const parser = new OperationParser(op, {shouldParse: false});
 
-    expect(parser.getReturnTypeHint()).toBe('unknown');
+    expect(() => parser.getReturnTypeHint()).toThrow(
+      'Operation return value has not been parsed',
+    );
   });
 });
 
@@ -534,5 +536,329 @@ describe('OperationParser.load', () => {
     });
 
     expect(parser.getParameters()[0].name).toBe('pet_id');
+  });
+});
+
+describe('OperationParser request body parity', () => {
+  function bodyParams(schema: OpenAPIV3.SchemaObject): ApiParameter[] {
+    return new OperationParser({
+      operationId: 'testOp',
+      requestBody: {content: {'application/json': {schema}}},
+      responses: {},
+    }).getParameters();
+  }
+
+  it('should emit no parameter for an object body with no properties', () => {
+    expect(bodyParams({type: 'object'})).toEqual([]);
+    expect(bodyParams({type: 'object', properties: {}})).toEqual([]);
+  });
+
+  it('should leave a scalar body an empty original name', () => {
+    const params = bodyParams({type: 'string'});
+
+    expect(params.length).toBe(1);
+    expect(params[0].originalName).toBe('');
+    expect(params[0].name).toBe('body');
+  });
+
+  it('should name a oneOf body body', () => {
+    const params = bodyParams({oneOf: [{type: 'string'}, {type: 'integer'}]});
+
+    expect(params[0].originalName).toBe('body');
+    expect(params[0].name).toBe('body');
+  });
+
+  it('should name an anyOf body body', () => {
+    expect(bodyParams({anyOf: [{type: 'string'}]})[0].originalName).toBe(
+      'body',
+    );
+  });
+
+  it('should name an allOf body body', () => {
+    expect(bodyParams({allOf: [{type: 'object'}]})[0].originalName).toBe(
+      'body',
+    );
+  });
+
+  it('should name a typeless body body', () => {
+    expect(bodyParams({})[0].originalName).toBe('body');
+  });
+
+  it('should name an array body array', () => {
+    const params = bodyParams({type: 'array', items: {type: 'string'}});
+
+    expect(params[0].originalName).toBe('array');
+    expect(params[0].name).toBe('array');
+  });
+
+  it('should not require a body the schema does not mark required', () => {
+    for (const schema of [
+      {type: 'string'} as OpenAPIV3.SchemaObject,
+      {type: 'array', items: {type: 'string'}} as OpenAPIV3.SchemaObject,
+      {oneOf: [{type: 'string'}]} as OpenAPIV3.SchemaObject,
+    ]) {
+      expect(bodyParams(schema)[0].required).toBe(false);
+    }
+  });
+
+  it('should require only the properties the object body lists', () => {
+    const params = bodyParams({
+      type: 'object',
+      properties: {spaceName: {type: 'string'}, note: {type: 'string'}},
+      required: ['spaceName'],
+    });
+
+    expect(params.map((param) => [param.name, param.required])).toEqual([
+      ['space_name', true],
+      ['note', false],
+    ]);
+  });
+
+  it('should keep an empty name out of the argument schema', () => {
+    const parser = new OperationParser({
+      operationId: 'testOp',
+      requestBody: {content: {'application/json': {schema: {type: 'string'}}}},
+      responses: {},
+    });
+
+    expect(Object.keys(parser.getJsonSchema().properties ?? {})).toEqual([
+      'body',
+    ]);
+  });
+
+  it('should emit no parameter for a body with an empty content map', () => {
+    const parser = new OperationParser({
+      operationId: 'testOp',
+      requestBody: {content: {}},
+      responses: {},
+    });
+
+    expect(parser.getParameters()).toEqual([]);
+  });
+
+  it('should emit no parameter for a body that declares no content', () => {
+    const parser = new OperationParser(
+      '{"operationId":"testOp","requestBody":{},"responses":{}}',
+    );
+
+    expect(parser.getParameters()).toEqual([]);
+  });
+
+  it('should reject a request body that is an unresolved reference', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      requestBody: {$ref: '#/components/requestBodies/Pet'},
+      responses: {},
+    };
+
+    expect(() => new OperationParser(op)).toThrow(
+      "Request body contains unresolved reference '#/components/requestBodies/Pet'",
+    );
+  });
+
+  it('should reject a request body media type schema that is a reference', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      requestBody: {
+        content: {
+          'application/json': {schema: {$ref: '#/components/schemas/Pet'}},
+        },
+      },
+      responses: {},
+    };
+
+    expect(() => new OperationParser(op)).toThrow(
+      "request body media type 'application/json' contains unresolved" +
+        " reference '#/components/schemas/Pet'",
+    );
+  });
+});
+
+describe('OperationParser.getReturnValue', () => {
+  it('should name the return value after its empty location', () => {
+    const parser = new OperationParser({
+      operationId: 'getPet',
+      responses: {
+        '200': {
+          description: 'OK',
+          content: {'application/json': {schema: {type: 'string'}}},
+        },
+      },
+    });
+
+    expect(parser.getReturnValue()).toEqual({
+      originalName: '',
+      paramLocation: '',
+      paramSchema: {type: 'string'},
+      description: '',
+      name: 'value',
+      required: false,
+    });
+  });
+
+  it('should take the smallest 2xx response', () => {
+    const parser = new OperationParser({
+      operationId: 'getPet',
+      responses: {
+        '202': {
+          description: 'Accepted',
+          content: {'application/json': {schema: {type: 'string'}}},
+        },
+        '200': {
+          description: 'OK',
+          content: {'application/json': {schema: {type: 'boolean'}}},
+        },
+        '201': {
+          description: 'Created',
+          content: {'application/json': {schema: {type: 'integer'}}},
+        },
+      },
+    });
+
+    expect(parser.getReturnTypeHint()).toBe('boolean');
+  });
+
+  it('should skip a media type that declares no schema', () => {
+    const parser = new OperationParser({
+      operationId: 'getPet',
+      responses: {
+        '200': {
+          description: 'OK',
+          content: {
+            'application/xml': {},
+            'application/json': {schema: {type: 'integer'}},
+          },
+        },
+      },
+    });
+
+    expect(parser.getReturnTypeHint()).toBe('number');
+  });
+
+  it('should be unknown for a 2xx response with an empty content map', () => {
+    const parser = new OperationParser({
+      operationId: 'getPet',
+      responses: {'200': {description: 'OK', content: {}}},
+    });
+
+    expect(parser.getReturnTypeHint()).toBe('unknown');
+  });
+
+  it('should reject a response that is an unresolved reference', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'getPet',
+      responses: {'200': {$ref: '#/components/responses/Ok'}},
+    };
+
+    expect(() => new OperationParser(op)).toThrow(
+      "Response contains unresolved reference '#/components/responses/Ok'",
+    );
+  });
+
+  it('should reject a return value the operation never parsed', () => {
+    const parser = new OperationParser(
+      {operationId: 'getPet', responses: {}},
+      {shouldParse: false},
+    );
+
+    expect(() => parser.getReturnValue()).toThrow(
+      'Operation return value has not been parsed',
+    );
+  });
+});
+
+describe('OperationParser duplicate argument names', () => {
+  it('should number the duplicates from zero', () => {
+    const parser = new OperationParser({
+      operationId: 'testOp',
+      parameters: [
+        {name: 'test', in: 'query', schema: {type: 'string'}},
+        {name: 'test', in: 'header', schema: {type: 'string'}},
+        {name: 'test', in: 'path', schema: {type: 'string'}},
+      ],
+      responses: {},
+    });
+
+    expect(parser.getParameters().map((param) => param.name)).toEqual([
+      'test',
+      'test_0',
+      'test_1',
+    ]);
+  });
+
+  it('should leave a name that occurs once alone', () => {
+    const parser = new OperationParser({
+      operationId: 'testOp',
+      parameters: [
+        {name: 'first', in: 'query', schema: {type: 'string'}},
+        {name: 'second', in: 'query', schema: {type: 'string'}},
+      ],
+      responses: {},
+    });
+
+    expect(parser.getParameters().map((param) => param.name)).toEqual([
+      'first',
+      'second',
+    ]);
+  });
+});
+
+describe('OperationParser.getFunctionName parity', () => {
+  function functionName(
+    operationId: string,
+    preservePropertyNames = false,
+  ): string {
+    return new OperationParser(
+      {operationId, responses: {}},
+      {preservePropertyNames},
+    ).getFunctionName();
+  }
+
+  it('should split an acronym', () => {
+    expect(functionName('getHTTPResponse')).toBe('get_http_response');
+  });
+
+  it('should snake_case regardless of preservePropertyNames', () => {
+    expect(functionName('getHTTPResponse', true)).toBe('get_http_response');
+  });
+
+  it('should keep the spec argument name when preserving property names', () => {
+    const parser = new OperationParser(
+      {
+        operationId: 'getPet',
+        parameters: [{name: 'petId', in: 'path', schema: {type: 'integer'}}],
+        responses: {},
+      },
+      {preservePropertyNames: true},
+    );
+
+    expect(parser.getParameters()[0].name).toBe('petId');
+    expect(parser.getFunctionName()).toBe('get_pet');
+  });
+
+  it('should truncate a long name to 60 characters', () => {
+    expect(functionName('a'.repeat(80))).toBe('a'.repeat(60));
+  });
+});
+
+describe('OperationParser optional authentication', () => {
+  function schemeName(security: Array<Record<string, string[]>>): string {
+    return new OperationParser({
+      operationId: 'getPet',
+      security,
+      responses: {},
+    }).getAuthSchemeName();
+  }
+
+  it('should require no scheme when a later requirement is empty', () => {
+    expect(schemeName([{apiKey: []}, {}])).toBe('');
+  });
+
+  it('should require no scheme when an earlier requirement is empty', () => {
+    expect(schemeName([{}, {apiKey: []}])).toBe('');
+  });
+
+  it('should keep the scheme when every requirement names one', () => {
+    expect(schemeName([{apiKey: []}, {oauth2: ['read']}])).toBe('apiKey');
   });
 });
