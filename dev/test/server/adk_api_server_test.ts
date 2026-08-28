@@ -9,6 +9,8 @@ import {
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
+  BaseTool,
+  BaseToolset,
   createEvent,
   createSession,
   Event,
@@ -201,6 +203,23 @@ class TestAgent extends LlmAgent {
         role: 'model',
       },
     });
+  }
+}
+
+/** A toolset that counts how many times the runner closed it. */
+class RecordingToolset extends BaseToolset {
+  closeCount = 0;
+
+  constructor() {
+    super([]);
+  }
+
+  async getTools(): Promise<BaseTool[]> {
+    return [];
+  }
+
+  async close(): Promise<void> {
+    this.closeCount++;
   }
 }
 
@@ -1779,6 +1798,80 @@ describe('AdkWebServer', () => {
         const response = await fetch(`${server.url}/debug/trace/${eventId}`);
         expect(response.status).toBe(404);
       }
+    });
+  });
+
+  describe('Teardown', () => {
+    let toolset: RecordingToolset;
+    let teardownServer: AdkApiServer;
+    let teardownClient: HttpClient;
+
+    beforeEach(async () => {
+      toolset = new RecordingToolset();
+      const agent = new TestAgent({name: 'testAgent', tools: [toolset]});
+      teardownServer = new AdkApiServer({
+        agentLoader: {
+          listAgents: () => Promise.resolve(['testApp']),
+          getAgentFile: () =>
+            Promise.resolve({
+              load: () => Promise.resolve(agent),
+              async [Symbol.asyncDispose](): Promise<void> {
+                return;
+              },
+            }),
+        } as unknown as AgentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+      await teardownServer.start();
+      teardownClient = new HttpClient(teardownServer.url);
+    });
+
+    afterEach(async () => {
+      // Closing an already-closed HTTP server rejects with
+      // ERR_SERVER_NOT_RUNNING, which is not the behaviour under test.
+      await teardownServer.stop().catch(() => {});
+    });
+
+    async function runOnce(sessionId: string): Promise<void> {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId,
+      });
+      const response = await teardownClient.post<Event[]>('/run', {
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId,
+        newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+      });
+      expect(response.status).toBe(200);
+    }
+
+    it('should close the cached runners when the server stops', async () => {
+      await runOnce('teardownSession');
+      const afterRun = toolset.closeCount;
+
+      await teardownServer.stop();
+
+      expect(toolset.closeCount).toBeGreaterThan(afterRun);
+    });
+
+    it('should build a fresh runner after a restart', async () => {
+      await runOnce('firstSession');
+      await teardownServer.stop();
+
+      await teardownServer.start();
+      teardownClient = new HttpClient(teardownServer.url);
+      await runOnce('secondSession');
+      const afterSecondRun = toolset.closeCount;
+      await teardownServer.stop();
+
+      // A closed runner treats a second close() as a no-op, so the toolset
+      // only closes again if stop() emptied the cache and the second run
+      // built a fresh runner.
+      expect(toolset.closeCount).toBeGreaterThan(afterSecondRun);
     });
   });
 });

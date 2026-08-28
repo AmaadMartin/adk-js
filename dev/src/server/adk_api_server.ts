@@ -35,6 +35,7 @@ import * as path from 'node:path';
 import {version} from '../version.js';
 
 import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {closeRunners} from '../utils/cleanup.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -1157,25 +1158,31 @@ export class AdkApiServer {
     });
   }
 
-  stop(): Promise<void> {
-    if (!this.server) {
-      return Promise.resolve();
-    }
+  async stop(): Promise<void> {
+    const server = this.server;
+    try {
+      if (server) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((err) => {
+            if (err) {
+              reject(err);
+              return;
+            }
 
-    return new Promise((resolve, reject) => {
-      this.server!.close((err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        console.log(`
+            console.log(`
 +-----------------------------------------------------------------------------+
 | ADK API Server stopped                                                      |
 +-----------------------------------------------------------------------------+`);
-        resolve();
-      });
-    });
+            resolve();
+          });
+        });
+      }
+    } finally {
+      await closeRunners(Object.values(this.runnerCache));
+      for (const appName of Object.keys(this.runnerCache)) {
+        delete this.runnerCache[appName];
+      }
+    }
   }
 
   /**
