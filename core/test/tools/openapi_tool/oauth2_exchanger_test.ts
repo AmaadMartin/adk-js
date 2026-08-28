@@ -149,15 +149,16 @@ describe('OAuth2CredentialExchanger', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects when the credential is missing', async () => {
+  it('rejects when the scheme is not an oauth2 scheme', async () => {
     const exchanger = new OAuth2CredentialExchanger();
 
     await expect(
       exchanger.exchange({
-        authScheme,
-        authCredential: undefined as unknown as AuthCredential,
+        authScheme: apiKeyScheme,
+        authCredential: oauth2Credential({accessToken: 'test_access_token'}),
       }),
-    ).rejects.toThrow(/authCredential is empty/);
+    ).rejects.toThrow(/Invalid security scheme/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('passes an http credential through untouched', async () => {
