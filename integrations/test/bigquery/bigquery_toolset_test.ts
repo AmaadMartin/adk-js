@@ -4,10 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {FunctionDeclaration} from '@google/genai';
+
 import {
   BaseTool,
+  Context,
   InvocationContext,
   LlmAgent,
+  LlmRequest,
   PluginManager,
   ReadonlyContext,
   createSession,
@@ -22,6 +26,7 @@ const ALL_TOOL_NAMES = [
   'list_dataset_ids',
   'list_table_ids',
   'get_job_info',
+  'execute_sql',
 ];
 
 function makeReadonlyContext(): ReadonlyContext {
@@ -33,6 +38,18 @@ function makeReadonlyContext(): ReadonlyContext {
       pluginManager: new PluginManager([]),
     }),
   );
+}
+
+function makeContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LlmAgent({name: 'a', model: 'gemini-2.5-flash'}),
+      session: createSession({id: 's1', appName: 'app', userId: 'u1'}),
+      pluginManager: new PluginManager([]),
+    }),
+    functionCallId: 'fc-1',
+  });
 }
 
 function names(tools: BaseTool[]): string[] {
@@ -201,5 +218,72 @@ describe('BigQueryToolset', () => {
     const tools = await toolset.getTools();
 
     expect(tools).toEqual([]);
+  });
+
+  it('exposes only the SQL tool the filter names', async () => {
+    const toolset = new BigQueryToolset({toolFilter: ['execute_sql']});
+
+    const tools = await toolset.getTools();
+
+    expect(names(tools)).toEqual(['execute_sql']);
+  });
+
+  it('rejects a byte cap below the BigQuery minimum', () => {
+    expect(
+      () => new BigQueryToolset({toolConfig: {maximumBytesBilled: 10_485_759}}),
+    ).toThrowError(/max_bytes_billed must be set >=10485760/);
+  });
+
+  it('rejects a job label key ADK reserves', () => {
+    expect(
+      () =>
+        new BigQueryToolset({
+          toolConfig: {jobLabels: {'adk-bigquery-tool': 'mine'}},
+        }),
+    ).toThrowError(
+      'Label key cannot start with "adk-bigquery-" as it is reserved for ' +
+        'internal usage, found "adk-bigquery-tool".',
+    );
+  });
+
+  it('declares every tool on the request the model receives', async () => {
+    const agent = new LlmAgent({
+      name: 'data_analyst',
+      model: 'gemini-2.5-flash',
+      instruction: 'Answer questions about our BigQuery data.',
+      tools: [new BigQueryToolset()],
+    });
+    const llmRequest: LlmRequest = {
+      contents: [],
+      liveConnectConfig: {},
+      toolsDict: {},
+    };
+    const toolContext = makeContext();
+
+    for (const tool of await agent.canonicalTools()) {
+      await tool.processLlmRequest({toolContext, llmRequest});
+    }
+
+    const [declared] = llmRequest.config?.tools ?? [];
+    const declarations: FunctionDeclaration[] =
+      declared && 'functionDeclarations' in declared
+        ? (declared.functionDeclarations ?? [])
+        : [];
+    expect(declarations.map((declaration) => declaration.name).sort()).toEqual(
+      [...ALL_TOOL_NAMES].sort(),
+    );
+    const executeSql = declarations.find(
+      (declaration) => declaration.name === 'execute_sql',
+    );
+    expect(executeSql?.description).toContain(
+      'Run a BigQuery or BigQuery ML SQL query',
+    );
+    expect(
+      Object.keys(executeSql?.parameters?.properties ?? {}).sort(),
+    ).toEqual(['dry_run', 'project_id', 'query']);
+    expect(executeSql?.parameters?.required?.sort()).toEqual([
+      'project_id',
+      'query',
+    ]);
   });
 });

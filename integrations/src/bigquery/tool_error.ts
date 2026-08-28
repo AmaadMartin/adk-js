@@ -5,6 +5,18 @@
  */
 
 /**
+ * How a BigQuery tool call ended (experimental).
+ *
+ * The two values reach the model, so they match adk-python.
+ *
+ * @experimental Subject to change; not recommended for production use.
+ */
+export enum BigQueryToolStatus {
+  SUCCESS = 'SUCCESS',
+  ERROR = 'ERROR',
+}
+
+/**
  * The payload a BigQuery tool returns to the model when a call fails
  * (experimental).
  *
@@ -14,7 +26,7 @@
  * @experimental Subject to change; not recommended for production use.
  */
 export interface BigQueryToolError {
-  status: 'ERROR';
+  status: BigQueryToolStatus.ERROR;
   error_details: string;
 }
 
@@ -25,8 +37,18 @@ export interface BigQueryToolError {
  * @return The error payload, carrying the message unchanged.
  */
 export function toBigQueryToolError(error: unknown): BigQueryToolError {
-  return {
-    status: 'ERROR',
-    error_details: error instanceof Error ? error.message : String(error),
-  };
+  return bigQueryToolError(
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
+/**
+ * The payload a tool returns when it refuses a call itself, rather than
+ * relaying a BigQuery failure.
+ *
+ * @param message What the model must know to correct the call.
+ * @return The error payload.
+ */
+export function bigQueryToolError(message: string): BigQueryToolError {
+  return {status: BigQueryToolStatus.ERROR, error_details: message};
 }
