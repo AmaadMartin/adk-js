@@ -50,14 +50,18 @@ const session = await runner.sessionService.createSession({
   userId: 'user-1',
 });
 
+const replies: string[] = [];
 for await (const event of runner.runAsync({
   userId: 'user-1',
   sessionId: session.id,
   newMessage: {role: 'user', parts: [{text: 'Is it raining?'}]},
 })) {
-  console.log(event.author, event.content?.parts?.[0].text);
+  replies.push(event.content?.parts?.[0].text ?? '');
 }
 ```
+
+`replies` holds one entry, `'echo: Is it raining?'`, because the agent yields
+one event per run.
 
 ## Which messages the graph receives
 
