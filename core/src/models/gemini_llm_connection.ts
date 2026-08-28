@@ -39,9 +39,9 @@ export class GeminiLlmConnection implements BaseLlmConnection {
    */
   async sendHistory(history: Content[]): Promise<void> {
     // We ignore any audio from user during the agent transfer phase.
-    const contents = history
-      .map(filterAudioParts)
-      .filter((content): content is Content => content !== undefined);
+    const contents = history.flatMap(
+      (content) => filterAudioParts(content) ?? [],
+    );
 
     if (contents.length > 0) {
       const isGemini3x = isGemini3xFlashLive(this.modelVersion);

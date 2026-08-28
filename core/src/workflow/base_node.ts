@@ -253,12 +253,6 @@ export function isBaseNode(value: unknown): value is BaseNode {
 }
 
 /**
- * Re-exported from `utils/content_utils.js`, where the guard lives so the
- * models and plugins layers can use it without importing the workflow graph.
- */
-export {isContent};
-
-/**
  * The sentinel node marking the entry point of a workflow graph. It is never
  * executed — the orchestrator seeds triggers for its successors directly.
  *

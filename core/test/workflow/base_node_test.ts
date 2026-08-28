@@ -6,12 +6,8 @@
 
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {
-  isBaseNode,
-  isContent,
-  START,
-  toContent,
-} from '../../src/workflow/base_node.js';
+import {isContent} from '../../src/utils/content_utils.js';
+import {isBaseNode, START, toContent} from '../../src/workflow/base_node.js';
 import {node} from '../../src/workflow/node.js';
 import {isWorkflow, Workflow} from '../../src/workflow/workflow.js';
 import {FnNode} from './test_helpers.js';
