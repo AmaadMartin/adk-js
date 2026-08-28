@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleAuth, JWT} from 'google-auth-library';
+import {GoogleAuth, IdTokenClient, JWT} from 'google-auth-library';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AuthCredential,
@@ -12,7 +12,10 @@ import {
   ServiceAccountCredential,
 } from '../../../src/auth/auth_credential.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
-import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
+import {
+  resetCredentialCaches,
+  ServiceAccountCredentialExchanger,
+} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
 
 const AUDIENCE = 'https://my-service.run.app';
 
@@ -28,27 +31,34 @@ const idTokenMocks = vi.hoisted(() => {
   const jwtFetchIdToken = vi.fn<(targetAudience: string) => Promise<string>>();
   const adcFetchIdToken = vi.fn<(targetAudience: string) => Promise<string>>();
   const getIdTokenClient =
-    vi.fn<
-      (
-        targetAudience: string,
-      ) => Promise<{idTokenProvider: {fetchIdToken: typeof adcFetchIdToken}}>
-    >();
+    vi.fn<(targetAudience: string) => Promise<IdTokenClient>>();
   return {jwtFetchIdToken, adcFetchIdToken, getIdTokenClient};
 });
 
-vi.mock('google-auth-library', () => {
+// `IdTokenClient` is kept real: the exchange goes through its caching, and it
+// drives the faked `fetchIdToken` exactly as the library does.
+vi.mock('google-auth-library', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('google-auth-library')>();
   return {
+    IdTokenClient: actual.IdTokenClient,
     JWT: vi.fn().mockImplementation(() => ({
       authorize: vi.fn().mockResolvedValue({access_token: 'mock-token'}),
       fetchIdToken: idTokenMocks.jwtFetchIdToken,
     })),
     GoogleAuth: vi.fn().mockImplementation(() => ({
       getClient: vi.fn().mockResolvedValue({
+        credentials: {},
         getAccessToken: vi.fn().mockResolvedValue({token: 'mock-adc-token'}),
       }),
       getIdTokenClient: idTokenMocks.getIdTokenClient,
     })),
   };
+});
+
+// The exchanger caches minted tokens process-wide, so one test's token would
+// otherwise satisfy the next test that uses the same configuration.
+beforeEach(() => {
+  resetCredentialCaches();
 });
 
 describe('AutoAuthCredentialExchanger', () => {
@@ -231,9 +241,13 @@ describe('ServiceAccountCredentialExchanger ID token', () => {
     idTokenMocks.adcFetchIdToken
       .mockReset()
       .mockResolvedValue('mock-adc-id-token');
-    idTokenMocks.getIdTokenClient.mockReset().mockResolvedValue({
-      idTokenProvider: {fetchIdToken: idTokenMocks.adcFetchIdToken},
-    });
+    idTokenMocks.getIdTokenClient.mockReset().mockImplementation(
+      async (targetAudience: string) =>
+        new IdTokenClient({
+          targetAudience,
+          idTokenProvider: {fetchIdToken: idTokenMocks.adcFetchIdToken},
+        }),
+    );
   });
 
   it('should mint an ID token with explicit keys', async () => {
