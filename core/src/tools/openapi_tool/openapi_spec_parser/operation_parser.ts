@@ -265,7 +265,6 @@ export class OperationParser {
   /**
    * Gets the TypeScript type name of the value the operation returns.
    *
-   * @throws {Error} If the operation was never parsed.
    * @returns A type name; `unknown` when the operation declares no schema.
    */
   @experimental
