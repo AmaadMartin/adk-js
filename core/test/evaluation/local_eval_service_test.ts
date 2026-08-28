@@ -4,48 +4,58 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
+
+import {BaseAgent} from '../../src/agents/base_agent.js';
+import {InMemoryArtifactService} from '../../src/artifacts/in_memory_artifact_service.js';
+import {NotFoundError} from '../../src/errors/not_found_error.js';
 import {
-  BaseAgent,
-  ConversationScenario,
-  EvalCase,
-  EvalCaseResult,
+  InferenceResult,
+  InferenceStatus,
+} from '../../src/evaluation/base_eval_service.js';
+import {ConversationScenario} from '../../src/evaluation/conversation_scenarios.js';
+import {EvalCase, Invocation} from '../../src/evaluation/eval_case.js';
+import {
   EvalMetricResult,
-  EvalSet,
-  EvalSetResult,
-  EvalSetResultsManager,
-  EvalSetsManager,
   EvalStatus,
-  EvaluateDeps,
-  EvaluationGenerator,
+  MetricInfo,
+} from '../../src/evaluation/eval_metrics.js';
+import {
+  EvalCaseResult,
+  EvalSetResult,
+} from '../../src/evaluation/eval_result.js';
+import {Rubric} from '../../src/evaluation/eval_rubrics.js';
+import {EvalSet} from '../../src/evaluation/eval_set.js';
+import {EvalSetResultsManager} from '../../src/evaluation/eval_set_results_manager.js';
+import {EvalSetsManager} from '../../src/evaluation/eval_sets_manager.js';
+import {EvaluationGenerator} from '../../src/evaluation/evaluation_generator.js';
+import {
   EvaluationResult,
   Evaluator,
   EvaluatorConstructorOptions,
-  Event,
-  InMemoryArtifactService,
-  InMemorySessionService,
-  InferenceDeps,
-  InferenceResult,
-  InferenceStatus,
-  Invocation,
-  LocalEvalService,
-  LocalEvalServiceOptions,
-  MetricInfo,
-  NextUserMessage,
-  NotFoundError,
-  Rubric,
-  Status as SimulatorStatus,
-  UserSimulator,
-  UserSimulatorProvider,
+} from '../../src/evaluation/evaluator.js';
+import {
   addRubricsToInvocation,
   copyEvalCaseRubricsToActualInvocations,
   copyInvocationRubricsToActualInvocations,
+  EvaluateDeps,
   evaluateSingleInferenceResult,
   generateFinalEvalStatus,
-  getDefaultMetricEvaluatorRegistry,
   getSessionId,
+  InferenceDeps,
+  LocalEvalService,
+  LocalEvalServiceOptions,
   performInferenceSingleEvalItem,
-} from '@google/adk';
-import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
+} from '../../src/evaluation/local_eval_service.js';
+import {getDefaultMetricEvaluatorRegistry} from '../../src/evaluation/metric_evaluator_registry.js';
+import {
+  NextUserMessage,
+  Status as SimulatorStatus,
+  UserSimulator,
+} from '../../src/evaluation/simulation/user_simulator.js';
+import {UserSimulatorProvider} from '../../src/evaluation/simulation/user_simulator_provider.js';
+import {Event} from '../../src/events/event.js';
+import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
 
 // --- Fake evaluators, mirroring the adk-python reference test doubles. ---
 

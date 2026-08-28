@@ -460,16 +460,10 @@ export {
   addRubricsToInvocation,
   copyEvalCaseRubricsToActualInvocations,
   copyInvocationRubricsToActualInvocations,
-  evaluateSingleInferenceResult,
   generateFinalEvalStatus,
   getSessionId,
-  performInferenceSingleEvalItem,
 } from './evaluation/local_eval_service.js';
-export type {
-  EvaluateDeps,
-  InferenceDeps,
-  LocalEvalServiceOptions,
-} from './evaluation/local_eval_service.js';
+export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
 export {
   MetricEvaluatorRegistry,
   getDefaultMetricEvaluatorRegistry,
