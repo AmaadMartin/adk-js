@@ -155,7 +155,12 @@ export function truncateText(
 const CREDENTIAL_HEADER_PATTERN =
   /^([ \t]*(?:authorization|proxy-authorization|x-api-key|api-key)[ \t]*:)[^\r\n]*/gim;
 
-/** An `Authorization` value, wherever it appears without its header name. */
+/**
+ * An `Authorization` value, wherever it appears without its header name. The
+ * scheme name goes with the token, so an inline `Authorization: Bearer x`
+ * leaves one marker: the key-value pass below skips a value that already opens
+ * a bracket.
+ */
 const BEARER_PATTERN = /\bbearer[ \t]+[^\s,;"']+/gi;
 
 /**
@@ -170,9 +175,14 @@ const QUERY_KEY_PATTERN = /([?&]key=)[^\s&#"']+/gi;
  * {@link isSensitiveKey}, so free text and structured payloads redact the same
  * set of names. The value must be non-empty and must not open a bracket, which
  * keeps the pass idempotent over text that already reads `token: [REDACTED]`.
+ *
+ * The leading lookbehind rejects a name that starts mid-word. Without it, one
+ * unbroken run of name characters costs a greedy scan per character, which is
+ * quadratic: 16,000 characters take 1.3 seconds, so a payload at the default
+ * length limit blocks the event loop for minutes.
  */
 const KEY_VALUE_PATTERN =
-  /(["']?)([A-Za-z_][A-Za-z0-9_.:-]*)\1(\s*[:=]\s*)(["']?)([^\s,;&)}\]["']+)\4/g;
+  /(?<![A-Za-z0-9_.:-])(["']?)([A-Za-z_][A-Za-z0-9_.:-]*)\1(\s*[:=]\s*)(["']?)([^\s,;&)}\]["']+)\4/g;
 
 /**
  * Replaces the credentials in `text`, leaving every other character in place.
@@ -189,7 +199,7 @@ function redactFreeText(text: string): string {
     .replace(CREDENTIAL_HEADER_PATTERN, (_match, header: string) => {
       return `${header} ${REDACTED}`;
     })
-    .replace(BEARER_PATTERN, () => `Bearer ${REDACTED}`)
+    .replace(BEARER_PATTERN, () => REDACTED)
     .replace(QUERY_KEY_PATTERN, (_match, prefix: string) => {
       return `${prefix}${REDACTED}`;
     })
@@ -219,9 +229,9 @@ function redactFreeText(text: string): string {
  * `name=value` pair whose name is a credential. Ordinary prose comes back
  * unchanged.
  *
- * Truncation runs first, so the work is bounded by `maxLength` rather than by
- * the length of the input. A credential cut in half is still redacted, because
- * every pattern is anchored on the name that precedes the secret.
+ * Redaction runs before truncation, so a credential the length limit would
+ * have cut in half is already gone. Only {@link MAX_INSPECT_CHARS} characters
+ * are inspected, which bounds the work regardless of the caller's limit.
  *
  * @param text The free text to sanitize.
  * @param maxLength Maximum length of the result, or -1 for no limit.
@@ -231,15 +241,12 @@ export function sanitizeErrorText(
   text: string,
   maxLength: number,
 ): {text: string; truncated: boolean} {
-  const bounded = truncateText(text, boundedInspectLength(maxLength));
-  return {text: redactFreeText(bounded.text), truncated: bounded.truncated};
-}
-
-/** Caps a caller's length limit at what this module is willing to inspect. */
-function boundedInspectLength(maxLength: number): number {
-  return maxLength === -1
-    ? MAX_INSPECT_CHARS
-    : Math.min(maxLength, MAX_INSPECT_CHARS);
+  const inspected = text.slice(0, MAX_INSPECT_CHARS);
+  const bounded = truncateText(redactFreeText(inspected), maxLength);
+  return {
+    text: bounded.text,
+    truncated: bounded.truncated || inspected.length < text.length,
+  };
 }
 
 /** Whether `text` is shaped like a JSON object or array. */

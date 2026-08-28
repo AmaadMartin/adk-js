@@ -218,7 +218,7 @@ export function deriveScope(
     onUnknown(value);
     return {id: String(value), kind: AnalyticsScopeKind.UNKNOWN};
   }
-  const last = value.split(NODE_PATH_SEPARATOR).at(-1) ?? '';
+  const last = value.slice(value.lastIndexOf(NODE_PATH_SEPARATOR) + 1);
   return {
     id: value,
     kind: last.includes(NODE_RUN_SEPARATOR)

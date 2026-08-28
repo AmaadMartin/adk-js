@@ -13,7 +13,7 @@ The table schema is the same one `google/adk-python`'s plugin of the same name w
 Three properties are worth knowing before you enable it:
 
 - **It never breaks a run.** Every callback catches its own failures and logs them. A BigQuery outage costs you rows, not requests.
-- **It redacts credentials by property name.** A property named `apiKey`, `access_token`, `Authorization` or anything under `temp:` is replaced with `[REDACTED]`. Redaction reads names, not values, so a secret pasted into a prompt string is written like any other text. Deny `LLM_REQUEST` when your prompts can carry one.
+- **It redacts credentials.** A property named `apiKey`, `access_token`, `Authorization` or anything under `temp:` is replaced with `[REDACTED]`. Free text is redacted by pattern: an `Authorization` header, a bearer token, an API key in a URL query, and a `name=value` pair whose name is one of those names. A secret in a shape none of these match is written like any other text, so deny `LLM_REQUEST` when your prompts can carry one.
 - **It is bounded.** The row queue, the string lengths, the sanitizer's depth and the per-invocation span bookkeeping all have caps, so a runaway payload cannot grow the process without limit.
 
 ## Get started

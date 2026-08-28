@@ -135,7 +135,6 @@ export class BigQueryRowWriter {
     [AnalyticsDropReason.FORMATTER_FAILED]: 0,
     [AnalyticsDropReason.CONTENT_PARSE_FAILED]: 0,
   };
-  private table?: Table;
   private tablePromise?: Promise<Table>;
   private timer?: ReturnType<typeof setTimeout>;
   private pendingRows = 0;
@@ -218,21 +217,18 @@ export class BigQueryRowWriter {
 
   /**
    * Resolves the table handle, opening the client and creating the table on
-   * first use. Returns `undefined` when setup failed, having logged the cause;
-   * the next call retries, so a transient control-plane failure does not
-   * disable the plugin for the rest of the process.
+   * first use. The promise is kept, so later writes reuse the same handle.
+   * Returns `undefined` when setup failed, having logged the cause; the next
+   * call retries, so a transient control-plane failure does not disable the
+   * plugin for the rest of the process.
    */
   private async openTableOnce(): Promise<Table | undefined> {
-    if (this.table !== undefined) {
-      return this.table;
-    }
     if (Date.now() < this.nextSetupAttemptMs) {
       return undefined;
     }
     const pending = (this.tablePromise ??= this.openTable());
     try {
-      this.table = await pending;
-      return this.table;
+      return await pending;
     } catch (err: unknown) {
       if (this.tablePromise === pending) {
         this.tablePromise = undefined;

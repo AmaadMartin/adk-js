@@ -28,6 +28,13 @@ import {Content, FinishReason, Language, Outcome} from '@google/genai';
 import {trace, TraceFlags} from '@opentelemetry/api';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {AnalyticsRow} from '../../src/plugins/bigquery_analytics_schema.js';
+import {
+  AnalyticsScopeKind,
+  deriveScope,
+} from '../../src/plugins/bigquery_analytics_schema.js';
+import {AsyncQueue} from '../../src/utils/async_queue.js';
+import {NodeContext} from '../../src/workflow/node_context.js';
+import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 
 /** Table metadata the fake records when the plugin creates the table. */
 interface CreatedTable {
@@ -46,7 +53,7 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     tableExists: boolean;
     clientError?: Error;
     createError?: Error;
-    insertError?: Error;
+    insertError?: unknown;
     insertGate?: Promise<void>;
   }
 
@@ -2168,5 +2175,175 @@ describe('BigQueryAgentAnalyticsPlugin end to end turn', () => {
       formatter_failed: 0,
       content_parse_failed: 0,
     });
+  });
+});
+
+describe('BigQueryAgentAnalyticsPlugin configuration validation', () => {
+  it('refuses a batch size below one', () => {
+    expect(() => makePlugin({batchSize: 0})).toThrow(
+      'batchSize must be a finite number of at least 1, got 0.',
+    );
+  });
+
+  it('refuses a content limit that is neither positive nor the no-limit value', () => {
+    expect(() => makePlugin({maxContentLength: 0})).toThrow(
+      'maxContentLength must be a finite number of at least 1, or -1 for no ' +
+        'limit, got 0.',
+    );
+  });
+});
+
+describe('BigQueryAgentAnalyticsPlugin workflow nodes', () => {
+  it('writes a NODE_OUTPUT row naming the node run and its parent run', async () => {
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext();
+    await plugin.afterNodeCallback({
+      node: new FunctionNode('summarize', () => 'done'),
+      nodeContext: new NodeContext({
+        invocationContext,
+        channel: new AsyncQueue<Event>(),
+        nodePath: 'wf/draft@1/summarize@2',
+        runId: '2',
+      }),
+      output: 'done',
+    });
+    await plugin.flush();
+    const row = onlyRow();
+    expect(row.event_type).toBe(AnalyticsEventType.NODE_OUTPUT);
+    expect(parseColumn(row.attributes)).toMatchObject({
+      adk: {
+        node: {
+          path: 'wf/draft@1/summarize@2',
+          run_id: '2',
+          parent_run_id: '1',
+        },
+      },
+    });
+    expect(parseColumn(row.content)).toEqual({
+      node: 'summarize',
+      output: 'done',
+    });
+  });
+
+  it('records null run ids for a node path that carries none', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        content: {role: 'model', parts: [{text: 'sunny'}]},
+        nodeInfo: {path: 'summarize'},
+      }),
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      adk: {node: {path: 'summarize', run_id: null, parent_run_id: null}},
+    });
+  });
+
+  it.each([
+    ['wf/summarize@2', 'node_run'],
+    ['call-7', 'function_call'],
+  ])('classifies the isolation scope %s as %s', async (scope, kind) => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        content: {role: 'model', parts: [{text: 'sunny'}]},
+        isolationScope: scope,
+      }),
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      adk: {scope: {id: scope, kind}},
+    });
+  });
+
+  it('warns and marks the scope unknown when the event carries an empty one', async () => {
+    const warnings: string[] = [];
+    const restore = captureWarnings(warnings);
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        content: {role: 'model', parts: [{text: 'sunny'}]},
+        isolationScope: '',
+      }),
+    });
+    await plugin.flush();
+    restore();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      adk: {scope: {id: '', kind: 'unknown'}},
+    });
+    expect(warnings.join('\n')).toContain('isolation scope');
+  });
+
+  it('carries the route a routing node emitted', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        content: {role: 'model', parts: [{text: 'sunny'}]},
+        route: 'escalate',
+      }),
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      adk: {route: 'escalate'},
+    });
+  });
+});
+
+describe('deriveScope', () => {
+  it('marks a scope that storage returned as a non-string unknown', () => {
+    const seen: unknown[] = [];
+    expect(deriveScope(42, (value) => seen.push(value))).toEqual({
+      id: '42',
+      kind: AnalyticsScopeKind.UNKNOWN,
+    });
+    expect(seen).toEqual([42]);
+  });
+});
+
+describe('BigQueryAgentAnalyticsPlugin insert failures', () => {
+  it('counts every row of the batch when the insert throws a non-object', async () => {
+    fake.insertError = 'connection reset';
+    const plugin = makePlugin();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await plugin.flush();
+    expect(plugin.getDropStats()['write_failed']).toBe(1);
+  });
+
+  it('counts only the rejected rows of a partial failure', async () => {
+    fake.insertError = Object.assign(new Error('some rows failed'), {
+      name: 'PartialFailureError',
+      errors: [{row: {}, errors: [{reason: 'invalid'}]}],
+    });
+    const plugin = makePlugin({batchSize: 5, flushOnRunEnd: false});
+    const invocationContext = makeInvocationContext();
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.beforeAgentCallback({
+      agent: makeAgent(),
+      callbackContext: makeContext(invocationContext),
+    });
+    await plugin.flush();
+    expect(fake.insertCalls).toBe(1);
+    expect(plugin.getDropStats()['write_failed']).toBe(1);
+  });
+
+  it('opens the table once across two flushes', async () => {
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext();
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.flush();
+    await plugin.afterRunCallback({invocationContext});
+    await plugin.flush();
+    expect(rows()).toHaveLength(2);
+    expect(fake.created).toHaveLength(1);
   });
 });

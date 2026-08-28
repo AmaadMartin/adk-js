@@ -7,8 +7,15 @@
 import {describe, expect, it} from 'vitest';
 import {
   recursiveSmartTruncate,
+  sanitizeErrorText,
   truncateText,
 } from '../../src/utils/sanitize_utils.js';
+
+/**
+ * Budget for the linear-scan test. A linear pass over 500,000 characters takes
+ * about 7 ms; a quadratic one takes minutes, so the test fails by timeout.
+ */
+const LINEAR_SCAN_BUDGET_MS = 5_000;
 
 /** Builds an object nested `depth` levels deep under the key `next`. */
 function nest(depth: number): Record<string, unknown> {
@@ -199,5 +206,148 @@ describe('recursiveSmartTruncate', () => {
       value: undefined,
       truncated: false,
     });
+  });
+});
+
+describe('sanitizeErrorText', () => {
+  it('leaves ordinary prose byte for byte', () => {
+    const prose = '[INFO] starting up: 3 agents, 2 tools (ratio = 1.5)';
+    expect(sanitizeErrorText(prose, -1)).toEqual({
+      text: prose,
+      truncated: false,
+    });
+  });
+
+  it('redacts a whole Authorization header line', () => {
+    const text = 'POST /v1\nAuthorization: Basic dXNlcjpwYXNzd29yZA==\nHost: x';
+    expect(sanitizeErrorText(text, -1).text).toBe(
+      'POST /v1\nAuthorization: [REDACTED]\nHost: x',
+    );
+  });
+
+  it.each(['Proxy-Authorization', 'X-Api-Key', 'Api-Key'])(
+    'redacts the %s header line',
+    (header) => {
+      expect(sanitizeErrorText(`${header}: abc123`, -1).text).toBe(
+        `${header}: [REDACTED]`,
+      );
+    },
+  );
+
+  it('redacts a bearer token that carries no header name', () => {
+    expect(
+      sanitizeErrorText('sent Bearer oauth-token-1 then failed', -1).text,
+    ).toBe('sent [REDACTED] then failed');
+  });
+
+  it('redacts an API key carried in a URL query', () => {
+    const text = 'GET https://api/v1/models?alt=json&key=AIzaSyC7 failed';
+    expect(sanitizeErrorText(text, -1).text).toBe(
+      'GET https://api/v1/models?alt=json&key=[REDACTED] failed',
+    );
+  });
+
+  it.each([
+    ['access_token=oauth-token-1', 'access_token=[REDACTED]'],
+    ['client_secret: shh', 'client_secret: [REDACTED]'],
+    ['"apiKey": "AIzaSyC7"', '"apiKey": "[REDACTED]"'],
+    ['x-api-key=abc', 'x-api-key=[REDACTED]'],
+    ['temp:oauth_state=xyz', 'temp:oauth_state=[REDACTED]'],
+  ])('redacts the credential in %s', (text, expected) => {
+    expect(sanitizeErrorText(text, -1).text).toBe(expected);
+  });
+
+  it('leaves a name that is not a credential alone', () => {
+    expect(
+      sanitizeErrorText('model=gemini-2.0-flash, retries=3', -1).text,
+    ).toBe('model=gemini-2.0-flash, retries=3');
+  });
+
+  it('does not expand a dollar pattern the payload supplied', () => {
+    const text = 'token=abc and the literal $& $1 $` survive';
+    expect(sanitizeErrorText(text, -1).text).toBe(
+      'token=[REDACTED] and the literal $& $1 $` survive',
+    );
+  });
+
+  it('is idempotent, so a second pass adds no second marker', () => {
+    const once = sanitizeErrorText('Authorization: Bearer abc', -1).text;
+    expect(sanitizeErrorText(once, -1).text).toBe(once);
+  });
+
+  it('redacts before it truncates, so a cut credential is still gone', () => {
+    const result = sanitizeErrorText('password=supersecretvalue', 12);
+    expect(result.text).not.toContain('supersecret');
+    expect(result.text).toBe('password=[RE...[TRUNCATED]');
+    expect(result.truncated).toBe(true);
+  });
+
+  it('reports the loss when the text passes the inspection ceiling', () => {
+    const result = sanitizeErrorText('x'.repeat(4_000_050), -1);
+    expect(result.text).toHaveLength(4_000_000);
+    expect(result.truncated).toBe(true);
+  });
+
+  it(
+    'scans a long unbroken word once, not once per character',
+    () => {
+      const word = 'x'.repeat(500_000);
+      expect(sanitizeErrorText(`${word} token=abc`, -1).text).toBe(
+        `${word} token=[REDACTED]`,
+      );
+    },
+    LINEAR_SCAN_BUDGET_MS,
+  );
+});
+
+describe('recursiveSmartTruncate on strings', () => {
+  it('redacts a credential inside a nested string', () => {
+    const result = recursiveSmartTruncate(
+      {note: 'call failed, Authorization: Bearer oauth-token-1'},
+      -1,
+    );
+    expect(result.value).toEqual({
+      note: 'call failed, Authorization: [REDACTED]',
+    });
+    expect(result.truncated).toBe(false);
+  });
+
+  it('redacts a credential inside an opaque JSON string', () => {
+    const result = recursiveSmartTruncate(
+      {result: '{"user":"ada","access_token":"oauth-token-1"}'},
+      -1,
+    );
+    expect(result.value).toEqual({
+      result: '{"user":"ada","access_token":"[REDACTED]"}',
+    });
+  });
+
+  it('re-serializes a blob so a duplicate key cannot smuggle a secret', () => {
+    const result = recursiveSmartTruncate(
+      {body: '{"token":"secret-one","token":"secret-two"}'},
+      -1,
+    );
+    expect(result.value).toEqual({body: '{"token":"[REDACTED]"}'});
+    expect(JSON.stringify(result.value)).not.toContain('secret-one');
+  });
+
+  it('drops a string that looks like JSON but does not parse', () => {
+    const result = recursiveSmartTruncate({body: '{"token": "abc"'}, -1);
+    expect(result.value).toEqual({body: '[UNPARSEABLE_JSON_BLOB]'});
+    expect(result.truncated).toBe(true);
+  });
+
+  it('drops a container-shaped string past the inspection ceiling', () => {
+    const huge = `[${'"x",'.repeat(1_000_001)}"x"]`;
+    expect(huge.length).toBeGreaterThan(4_000_000);
+    const result = recursiveSmartTruncate({body: huge}, -1);
+    expect(result.value).toEqual({body: '[UNPARSEABLE_JSON_BLOB]'});
+    expect(result.truncated).toBe(true);
+  });
+
+  it('redacts a credential nested inside a blob inside a blob', () => {
+    const inner = JSON.stringify({api_key: 'AIzaSyC7'});
+    const result = recursiveSmartTruncate({body: JSON.stringify({inner})}, -1);
+    expect(JSON.stringify(result.value)).not.toContain('AIzaSyC7');
   });
 });
