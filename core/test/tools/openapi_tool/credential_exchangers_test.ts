@@ -16,6 +16,9 @@ import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool
 
 const AUDIENCE = 'https://my-service.run.app';
 
+/** Explicit access-token exchange requires scopes, so every fixture sets them. */
+const SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
+
 /**
  * Shared ID-token fakes. They are hoisted so the `google-auth-library` factory
  * can install them, and so a test can re-arm one without rebuilding the module
@@ -100,6 +103,7 @@ describe('ServiceAccountCredentialExchanger', () => {
           clientEmail: 'test@example.com',
           privateKey: 'key',
         },
+        scopes: SCOPES,
       },
     };
 
@@ -153,6 +157,7 @@ describe('ServiceAccountCredentialExchanger', () => {
           clientEmail: 'test@example.com',
           privateKey: 'key',
         },
+        scopes: SCOPES,
       },
     };
 
@@ -170,7 +175,7 @@ describe('ServiceAccountCredentialExchanger', () => {
         authCredential: credential as unknown as AuthCredential,
       }),
     ).rejects.toThrow(
-      'Failed to exchange explicit service account token: Failed to get access token from explicit credentials',
+      'Failed to exchange service account token: Failed to get access token from explicit credentials',
     );
   });
 
@@ -183,6 +188,7 @@ describe('ServiceAccountCredentialExchanger', () => {
           clientEmail: 'test@example.com',
           privateKey: 'key',
         },
+        scopes: SCOPES,
       },
     };
 
@@ -199,9 +205,7 @@ describe('ServiceAccountCredentialExchanger', () => {
       exchanger.exchange({
         authCredential: credential as unknown as AuthCredential,
       }),
-    ).rejects.toThrow(
-      'Failed to exchange explicit service account token: Auth failed',
-    );
+    ).rejects.toThrow('Failed to exchange service account token: Auth failed');
   });
 });
 
@@ -299,7 +303,9 @@ describe('ServiceAccountCredentialExchanger ID token', () => {
 
     await expect(
       exchanger.exchange({authCredential: credential}),
-    ).rejects.toThrow(/^Service account credentials are missing\.$/);
+    ).rejects.toThrow(
+      /^Service account credentials are missing\. serviceAccountCredential is required when useDefaultCredential is false\.$/,
+    );
   });
 
   it('should prefer default credentials over explicit keys', async () => {
@@ -368,6 +374,7 @@ describe('ServiceAccountCredentialExchanger ID token', () => {
       authType: AuthCredentialTypes.SERVICE_ACCOUNT,
       serviceAccount: {
         serviceAccountCredential: explicitKey,
+        scopes: SCOPES,
         useIdToken: false,
         audience: AUDIENCE,
       },
