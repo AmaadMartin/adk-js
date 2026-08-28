@@ -32,7 +32,7 @@ export class NlPlanningRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    const instruction = planner.buildPlanningInstruction(
+    const instruction = await planner.buildPlanningInstruction(
       new ReadonlyContext(invocationContext),
       llmRequest,
     );
@@ -63,8 +63,11 @@ export class NlPlanningResponseProcessor extends BaseLlmResponseProcessor {
       return;
     }
 
+    // Every planner here supplies processPlanningResponse, so there is no
+    // no-op implementation to skip. A future BuiltInPlanner port owns adding
+    // an opt-out if it wants one.
     const callbackContext = new Context({invocationContext});
-    const processedParts = planner.processPlanningResponse(
+    const processedParts = await planner.processPlanningResponse(
       callbackContext,
       content.parts,
     );

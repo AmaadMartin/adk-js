@@ -23,12 +23,13 @@ export interface BasePlanner {
    * @param readonlyContext The readonly context of the invocation.
    * @param llmRequest The LLM request. Readonly.
    * @returns The planning system instruction, or `undefined` when the request
-   *     needs no instruction.
+   *     needs no instruction. A planner that fetches its instruction may
+   *     return a promise.
    */
   buildPlanningInstruction(
     readonlyContext: ReadonlyContext,
     llmRequest: LlmRequest,
-  ): string | undefined;
+  ): string | undefined | Promise<string | undefined>;
 
   /**
    * Processes the LLM response for planning.
@@ -36,10 +37,11 @@ export interface BasePlanner {
    * @param callbackContext The callback context of the invocation.
    * @param responseParts The LLM response parts.
    * @returns The replacement response parts, or `undefined` to keep the parts
-   *     the model returned.
+   *     the model returned. A planner that defers the work may return a
+   *     promise.
    */
   processPlanningResponse(
     callbackContext: Context,
     responseParts: Part[],
-  ): Part[] | undefined;
+  ): Part[] | undefined | Promise<Part[] | undefined>;
 }

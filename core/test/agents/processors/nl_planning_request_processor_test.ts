@@ -247,6 +247,15 @@ describe('NlPlanningRequestProcessor', () => {
     ).rejects.toThrow('planner failed');
     expect(llmRequest.contents[1].parts?.[0].thought).toBe(true);
   });
+
+  it('awaits a planner that returns the instruction as a promise', async () => {
+    const planner = createSpyPlanner(async () => CUSTOM_INSTRUCTION);
+    const llmRequest = createLlmRequest();
+
+    await runRequestProcessor(createAgent(planner), llmRequest);
+
+    expect(llmRequest.config?.systemInstruction).toBe(CUSTOM_INSTRUCTION);
+  });
 });
 
 describe('NlPlanningResponseProcessor', () => {
@@ -360,5 +369,17 @@ describe('NlPlanningResponseProcessor', () => {
       runResponseProcessor(createAgent(planner), llmResponse),
     ).rejects.toThrow('planner failed');
     expect(llmResponse.content?.parts).toBe(parts);
+  });
+
+  it('awaits a planner that returns the parts as a promise', async () => {
+    const replacement: Part[] = [{text: 'planned', thought: true}];
+    const planner = createSpyPlanner(undefined, async () => replacement);
+    const llmResponse: LlmResponse = {
+      content: {role: 'model', parts: [{text: 'raw'}]},
+    };
+
+    await runResponseProcessor(createAgent(planner), llmResponse);
+
+    expect(llmResponse.content?.parts).toBe(replacement);
   });
 });

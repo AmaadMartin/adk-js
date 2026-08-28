@@ -78,6 +78,8 @@ in the agent's user-facing text.
   planner.
 - Parts are mutated in place. A planner may set `thought` on the array it was
   handed and return that same array.
+- Both methods may be async. The flow awaits each one, so a planner that fetches
+  its instruction or defers the parsing returns a promise.
 
 Writing to `callbackContext.state` in `processPlanningResponse` makes the flow
 emit one extra event carrying the state delta, and only when the planner wrote
