@@ -33,6 +33,9 @@ TypeScript implementation. For the official ADK documentation, visit
 - [adkToMcpToolType and geminiToJsonSchema](tools/mcp_conversion_utils/index.md) -
   Convert an ADK tool into an MCP tool descriptor so an MCP server can
   advertise it.
+- [MCP tool error handling](tools/mcp_tool/error_handling/index.md) - Turning a
+  failed MCP tool call into a result the model can read, and the MCP-App
+  metadata accessors.
 
 ### Utils
 
