@@ -10,7 +10,7 @@
  * Vendored from adk-python's
  * `src/google/adk/tools/bigquery/skills/bigquery-ai-ml/`. The markdown is
  * embedded rather than read from disk so the published package carries it: the
- * build compiles only TypeScript, and the browser bundle has no `node:fs`.
+ * build compiles only TypeScript, so a sibling `.md` never reaches `dist`.
  */
 export const BIGQUERY_AI_ML_SKILL_MD = `---
 name: bigquery-ai-ml
