@@ -12,6 +12,7 @@ import {
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  BaseToolset,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
@@ -1427,5 +1428,82 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+/** One dispatch of `processLlmRequest`, by a toolset or by one of its tools. */
+interface DispatchRecord {
+  source: 'toolset' | 'tool';
+  toolContext: Context;
+}
+
+class RecordingToolsetTool extends BaseTool {
+  constructor(private readonly dispatches: DispatchRecord[]) {
+    super({name: 'recording_tool', description: 'records dispatch order'});
+  }
+  override async processLlmRequest(
+    request: ToolProcessLlmRequest,
+  ): Promise<void> {
+    this.dispatches.push({source: 'tool', toolContext: request.toolContext});
+  }
+  async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
+    return {result: 'ok'};
+  }
+}
+
+/**
+ * A toolset that both records its own dispatch and writes to the request, the
+ * way `ComputerUseToolset` attaches its tool config.
+ */
+class RecordingToolset extends BaseToolset {
+  private readonly tool: RecordingToolsetTool;
+
+  constructor(private readonly dispatches: DispatchRecord[]) {
+    super([]);
+    this.tool = new RecordingToolsetTool(dispatches);
+  }
+  override async getTools(): Promise<BaseTool[]> {
+    return [this.tool];
+  }
+  override async close(): Promise<void> {}
+  override async processLlmRequest(
+    toolContext: Context,
+    llmRequest: LlmRequest,
+  ): Promise<void> {
+    this.dispatches.push({source: 'toolset', toolContext});
+    llmRequest.config = llmRequest.config ?? {};
+    llmRequest.config.tools = [...(llmRequest.config.tools ?? []), {}];
+  }
+}
+
+describe('LlmAgent toolset processLlmRequest dispatch', () => {
+  it('runs a toolset processLlmRequest once, before its tools', async () => {
+    const dispatches: DispatchRecord[] = [];
+    const mockLlm = new MockLlm({
+      content: {role: 'model', parts: [{text: 'Done'}]},
+    });
+    const agent = new LlmAgent({
+      name: 'toolset_agent',
+      model: mockLlm,
+      tools: [new RecordingToolset(dispatches)],
+    });
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({appName: 'test_app', agent, sessionService});
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+      sessionId: 'test_session',
+    });
+
+    for await (const _event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'go'}]},
+    })) {
+      // Consume the stream.
+    }
+
+    expect(dispatches.map((d) => d.source)).toEqual(['toolset', 'tool']);
+    expect(dispatches[0].toolContext).toBe(dispatches[1].toolContext);
   });
 });

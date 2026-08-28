@@ -9,6 +9,8 @@ import {
   BaseLlm,
   BaseLlmConnection,
   BaseTool,
+  BaseToolset,
+  Context,
   Event,
   InMemoryArtifactService,
   InMemorySessionService,
@@ -1111,5 +1113,77 @@ describe('Runner.runLive', () => {
     }).rejects.toThrow('Simulated outbound connection error on empty receive');
 
     expect(llm.connection!.closed).toBe(true);
+  });
+});
+
+describe('live toolset processLlmRequest dispatch', () => {
+  class LiveRecordingTool extends BaseTool {
+    constructor(private readonly dispatches: string[]) {
+      super({name: 'live_recording_tool', description: 'records dispatch'});
+    }
+    override _getDeclaration(): FunctionDeclaration | undefined {
+      return {name: this.name, description: this.description};
+    }
+    override async processLlmRequest(): Promise<void> {
+      this.dispatches.push('tool');
+    }
+    override async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
+      return {};
+    }
+  }
+
+  class LiveRecordingToolset extends BaseToolset {
+    private readonly tool: LiveRecordingTool;
+
+    constructor(private readonly dispatches: string[]) {
+      super([]);
+      this.tool = new LiveRecordingTool(dispatches);
+    }
+    override async getTools(): Promise<BaseTool[]> {
+      return [this.tool];
+    }
+    override async close(): Promise<void> {}
+    override async processLlmRequest(
+      _toolContext: Context,
+      llmRequest: LlmRequest,
+    ): Promise<void> {
+      this.dispatches.push('toolset');
+      llmRequest.config = llmRequest.config ?? {};
+      llmRequest.config.tools = [...(llmRequest.config.tools ?? []), {}];
+    }
+  }
+
+  it('runs a toolset processLlmRequest before its tools on the live path', async () => {
+    const dispatches: string[] = [];
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({
+      name: 'live_toolset_agent',
+      model: llm,
+      tools: [new LiveRecordingToolset(dispatches)],
+    });
+    const sessionService = new InMemorySessionService();
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+    })) {
+      // Consume the stream.
+    }
+
+    expect(dispatches).toEqual(['toolset', 'tool']);
   });
 });
