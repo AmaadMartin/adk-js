@@ -216,10 +216,6 @@ export class AgentTool extends BaseTool {
       ],
     };
 
-    // The sub-agent runs under the caller's app, so both sides share one app
-    // namespace. It falls back to its own name when the caller names no app.
-    const childAppName =
-      toolContext.invocationContext.appName || this.agent.name;
     const seedState = Object.fromEntries(
       Object.entries(toolContext.state.toRecord()).filter(
         ([key]) => !key.startsWith(ADK_INTERNAL_STATE_PREFIX),
@@ -227,7 +223,7 @@ export class AgentTool extends BaseTool {
     );
 
     const runner = new Runner({
-      appName: childAppName,
+      appName: this.agent.name,
       agent: this.agent,
       artifactService: new ForwardingArtifactService(toolContext),
       sessionService:
@@ -240,7 +236,7 @@ export class AgentTool extends BaseTool {
     });
 
     const session = await runner.sessionService.getOrCreateSession({
-      appName: childAppName,
+      appName: this.agent.name,
       userId: toolContext.invocationContext.userId,
       sessionId: toolContext.invocationContext.session.id,
       state: seedState,

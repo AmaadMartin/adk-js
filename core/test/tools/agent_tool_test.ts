@@ -724,10 +724,9 @@ describe('AgentTool parity with adk-python', () => {
     return {received, runAsync};
   }
 
-  /** Builds a parent tool context whose session belongs to `appName`. */
+  /** Builds the tool context of a parent agent that calls the sub-agent. */
   function parentContext(
     agent: BaseAgent,
-    appName = PARENT_APP_NAME,
     state: Record<string, unknown> = {},
     sessionService = new InMemorySessionService(),
   ): Context {
@@ -737,7 +736,7 @@ describe('AgentTool parity with adk-python', () => {
         agent,
         session: createSession({
           id: 'parent-session',
-          appName,
+          appName: PARENT_APP_NAME,
           userId: 'parent-user',
           state,
         }),
@@ -944,45 +943,6 @@ describe('AgentTool parity with adk-python', () => {
     expect(result).toBe('42');
   });
 
-  it("runs the sub-agent under the parent's app name", async () => {
-    const agent = new LlmAgent({name: SUB_AGENT_NAME});
-    const sessionService = new InMemorySessionService();
-    vi.spyOn(sessionService, 'getOrCreateSession');
-    const {received} = mockSubAgentRun([
-      createEvent({
-        author: SUB_AGENT_NAME,
-        content: {role: 'model', parts: [{text: 'done'}]},
-      }),
-    ]);
-
-    await new AgentTool({agent}).runAsync({
-      args: {request: 'go'},
-      toolContext: parentContext(agent, PARENT_APP_NAME, {}, sessionService),
-    });
-
-    expect(received.appName).toBe(PARENT_APP_NAME);
-    expect(sessionService.getOrCreateSession).toHaveBeenCalledWith(
-      expect.objectContaining({appName: PARENT_APP_NAME}),
-    );
-  });
-
-  it('falls back to the agent name when the parent names no app', async () => {
-    const agent = new LlmAgent({name: SUB_AGENT_NAME});
-    const {received} = mockSubAgentRun([
-      createEvent({
-        author: SUB_AGENT_NAME,
-        content: {role: 'model', parts: [{text: 'done'}]},
-      }),
-    ]);
-
-    await new AgentTool({agent}).runAsync({
-      args: {request: 'go'},
-      toolContext: parentContext(agent, ''),
-    });
-
-    expect(received.appName).toBe(SUB_AGENT_NAME);
-  });
-
   it('does not seed _adk-prefixed parent state into the sub-agent session', async () => {
     const agent = new LlmAgent({name: SUB_AGENT_NAME});
     const sessionService = new InMemorySessionService();
@@ -997,14 +957,13 @@ describe('AgentTool parity with adk-python', () => {
       args: {request: 'go'},
       toolContext: parentContext(
         agent,
-        PARENT_APP_NAME,
         {_adk_internal: 'dropMe', visibleKey: 'keepMe'},
         sessionService,
       ),
     });
 
     const childSession = await sessionService.getSession({
-      appName: PARENT_APP_NAME,
+      appName: SUB_AGENT_NAME,
       userId: 'parent-user',
       sessionId: 'parent-session',
     });
