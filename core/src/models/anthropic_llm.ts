@@ -10,6 +10,9 @@ import type {
   RawContentBlockDeltaEvent,
   RawContentBlockStartEvent,
   RawMessageStreamEvent,
+  RedactedThinkingBlock,
+  TextBlock,
+  ThinkingBlock,
 } from '@anthropic-ai/sdk/resources/messages';
 import type {Part} from '@google/genai';
 
@@ -18,6 +21,7 @@ import {loadOptionalPeer} from '../utils/optional_peer.js';
 
 import {
   buildThinkingParam,
+  contentBlockToPart,
   contentToMessageParam,
   functionDeclarationToToolParam,
   messageToLlmResponse,
@@ -67,22 +71,25 @@ export interface AnthropicLlmParams {
   maxTokens?: number;
 }
 
-/** Parameters for creating a {@link Claude}. */
-export interface ClaudeParams extends AnthropicLlmParams {
-  /** The Claude model name. Defaults to `claude-3-5-sonnet-v2@20241022`. */
-  model?: string;
-}
-
-interface ToolUseAccumulator {
+/**
+ * A `tool_use` block being streamed.
+ *
+ * Its arguments arrive as JSON fragments, so they cannot be held in
+ * `ToolUseBlock.input` until the stream ends.
+ */
+interface StreamedToolUse {
+  type: 'tool_use';
   id: string;
   name: string;
   argsJson: string;
 }
 
-interface ThinkingAccumulator {
-  thinking: string;
-  signature: string;
-}
+/** One content block of a streamed message, as far as it has arrived. */
+type StreamedBlock =
+  | TextBlock
+  | ThinkingBlock
+  | RedactedThinkingBlock
+  | StreamedToolUse;
 
 /**
  * Collects the content blocks of one streamed Claude message.
@@ -93,10 +100,7 @@ interface ThinkingAccumulator {
  * equivalent non-streaming response would.
  */
 class StreamedMessage {
-  private readonly textBlocks = new Map<number, string>();
-  private readonly toolUseBlocks = new Map<number, ToolUseAccumulator>();
-  private readonly thinkingBlocks = new Map<number, ThinkingAccumulator>();
-  private readonly redactedThinkingBlocks = new Map<number, string>();
+  private readonly blocks = new Map<number, StreamedBlock>();
   private inputTokens = 0;
   private outputTokens = 0;
 
@@ -112,20 +116,13 @@ class StreamedMessage {
     const block = event.content_block;
     switch (block.type) {
       case 'thinking':
-        this.thinkingBlocks.set(event.index, {
-          thinking: block.thinking,
-          signature: block.signature,
-        });
-        break;
       case 'redacted_thinking':
-        // A redacted block arrives complete; no deltas follow it.
-        this.redactedThinkingBlocks.set(event.index, block.data);
-        break;
       case 'text':
-        this.textBlocks.set(event.index, block.text);
+        this.blocks.set(event.index, block);
         break;
       case 'tool_use':
-        this.toolUseBlocks.set(event.index, {
+        this.blocks.set(event.index, {
+          type: 'tool_use',
           id: block.id,
           name: block.name,
           argsJson: '',
@@ -145,13 +142,8 @@ class StreamedMessage {
   applyDelta(event: RawContentBlockDeltaEvent): LlmResponse | undefined {
     const delta = event.delta;
     switch (delta.type) {
-      case 'thinking_delta': {
-        const acc = this.thinkingBlocks.get(event.index) ?? {
-          thinking: '',
-          signature: '',
-        };
-        acc.thinking += delta.thinking;
-        this.thinkingBlocks.set(event.index, acc);
+      case 'thinking_delta':
+        this.thinkingBlockAt(event.index).thinking += delta.thinking;
         return {
           content: {
             role: 'model',
@@ -159,19 +151,16 @@ class StreamedMessage {
           },
           partial: true,
         };
-      }
-      case 'text_delta': {
-        const text = (this.textBlocks.get(event.index) ?? '') + delta.text;
-        this.textBlocks.set(event.index, text);
+      case 'text_delta':
+        this.textBlockAt(event.index).text += delta.text;
         return {
           content: {role: 'model', parts: [{text: delta.text}]},
           partial: true,
         };
-      }
       case 'input_json_delta': {
-        const acc = this.toolUseBlocks.get(event.index);
-        if (acc) {
-          acc.argsJson += delta.partial_json;
+        const block = this.blocks.get(event.index);
+        if (block?.type === 'tool_use') {
+          block.argsJson += delta.partial_json;
         }
         return undefined;
       }
@@ -182,41 +171,13 @@ class StreamedMessage {
 
   /** Builds the single aggregated response that closes the stream. */
   finalResponse(): LlmResponse {
-    const indices = new Set<number>([
-      ...this.thinkingBlocks.keys(),
-      ...this.redactedThinkingBlocks.keys(),
-      ...this.textBlocks.keys(),
-      ...this.toolUseBlocks.keys(),
-    ]);
-    const parts: Part[] = [];
-    for (const index of [...indices].sort((a, b) => a - b)) {
-      const thinking = this.thinkingBlocks.get(index);
-      if (thinking) {
-        const part: Part = {text: thinking.thinking, thought: true};
-        if (thinking.signature) {
-          part.thoughtSignature = thinking.signature;
-        }
-        parts.push(part);
-      }
-      const redacted = this.redactedThinkingBlocks.get(index);
-      if (redacted !== undefined) {
-        parts.push({thought: true, thoughtSignature: redacted});
-      }
-      const text = this.textBlocks.get(index);
-      if (text !== undefined) {
-        parts.push({text});
-      }
-      const toolUse = this.toolUseBlocks.get(index);
-      if (toolUse) {
-        parts.push({
-          functionCall: {
-            id: toolUse.id,
-            name: toolUse.name,
-            args: parseToolUseArgs(toolUse.argsJson),
-          },
-        });
-      }
-    }
+    const parts: Part[] = [...this.blocks]
+      .sort(([left], [right]) => left - right)
+      .map(([, block]) =>
+        block.type === 'tool_use'
+          ? toolUsePart(block)
+          : contentBlockToPart(block),
+      );
     return {
       content: {role: 'model', parts},
       usageMetadata: {
@@ -227,6 +188,45 @@ class StreamedMessage {
       partial: false,
     };
   }
+
+  /**
+   * Returns the text block at `index`, seeding an empty one when a delta
+   * arrives before the matching start event.
+   */
+  private textBlockAt(index: number): TextBlock {
+    const block = this.blocks.get(index);
+    if (block?.type === 'text') {
+      return block;
+    }
+    const seeded: TextBlock = {type: 'text', text: '', citations: null};
+    this.blocks.set(index, seeded);
+    return seeded;
+  }
+
+  /** The thinking counterpart of {@link StreamedMessage.textBlockAt}. */
+  private thinkingBlockAt(index: number): ThinkingBlock {
+    const block = this.blocks.get(index);
+    if (block?.type === 'thinking') {
+      return block;
+    }
+    const seeded: ThinkingBlock = {
+      type: 'thinking',
+      thinking: '',
+      signature: '',
+    };
+    this.blocks.set(index, seeded);
+    return seeded;
+  }
+}
+
+function toolUsePart(block: StreamedToolUse): Part {
+  return {
+    functionCall: {
+      id: block.id,
+      name: block.name,
+      args: parseToolUseArgs(block.argsJson),
+    },
+  };
 }
 
 /**
@@ -388,13 +388,15 @@ export class AnthropicLlm extends BaseLlm {
 /**
  * Claude models served by Vertex AI.
  *
+ * `model` defaults to `claude-3-5-sonnet-v2@20241022`.
+ *
  * The project and the location come from `GOOGLE_CLOUD_PROJECT` and
  * `GOOGLE_CLOUD_LOCATION`, or from a full `projects/.../locations/...` model
  * resource name, which takes precedence. They are read on first use, so
  * constructing the model in an unconfigured environment does not throw.
  */
 export class Claude extends AnthropicLlm {
-  constructor({model, maxTokens}: ClaudeParams = {}) {
+  constructor({model, maxTokens}: AnthropicLlmParams = {}) {
     super({model: model ?? DEFAULT_CLAUDE_VERTEX_MODEL, maxTokens});
   }
 

@@ -210,7 +210,6 @@ export {AnthropicLlm, Claude} from './models/anthropic_llm.js';
 export type {
   AnthropicLlmParams,
   AnthropicMessagesClient,
-  ClaudeParams,
 } from './models/anthropic_llm.js';
 export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';

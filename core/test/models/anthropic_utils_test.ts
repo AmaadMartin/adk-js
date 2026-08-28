@@ -14,8 +14,7 @@ import {
   contentBlockToPart,
   contentToMessageParam,
   functionDeclarationToToolParam,
-  isImagePart,
-  isPdfPart,
+  inlineMediaKind,
   messageToLlmResponse,
   parseToolUseArgs,
   partToMessageBlock,
@@ -57,20 +56,22 @@ describe('toClaudeRole', () => {
   });
 });
 
-describe('isImagePart and isPdfPart', () => {
-  it('detects an image part', () => {
-    expect(isImagePart({inlineData: {mimeType: 'image/png', data: 'x'}})).toBe(
-      true,
-    );
-    expect(isImagePart({text: 'hi'})).toBe(false);
-  });
-
-  it('detects a PDF part with MIME type parameters', () => {
-    expect(
-      isPdfPart({inlineData: {mimeType: 'application/pdf; name=d.pdf'}}),
-    ).toBe(true);
-    expect(isPdfPart({inlineData: {mimeType: 'image/png'}})).toBe(false);
-    expect(isPdfPart({text: 'hi'})).toBe(false);
+describe('inlineMediaKind', () => {
+  it.each<[string, Part, 'image' | 'pdf' | undefined]>([
+    [
+      'an image part',
+      {inlineData: {mimeType: 'image/png', data: 'x'}},
+      'image',
+    ],
+    [
+      'a PDF part with MIME type parameters',
+      {inlineData: {mimeType: 'application/pdf; name=d.pdf'}},
+      'pdf',
+    ],
+    ['an audio part', {inlineData: {mimeType: 'audio/mpeg'}}, undefined],
+    ['a part with no inline data', {text: 'hi'}, undefined],
+  ])('classifies %s', (_name, part, expected) => {
+    expect(inlineMediaKind(part)).toBe(expected);
   });
 });
 
@@ -860,6 +861,37 @@ describe('functionDeclarationToToolParam', () => {
             listed: {type: 'array', prefixItems: [{type: 'boolean'}]},
           },
           required: ['choice'],
+        },
+      },
+    ],
+    [
+      'a JSON Schema using the less common applicator keywords',
+      {
+        name: 'validate_shape',
+        description: 'Validates a shape.',
+        parametersJsonSchema: {
+          type: 'OBJECT',
+          dependentSchemas: {a: {type: 'STRING'}},
+          patternProperties: {'^x-': {type: 'INTEGER'}},
+          propertyNames: {type: 'STRING'},
+          unevaluatedProperties: {type: 'BOOLEAN'},
+          properties: {
+            tags: {type: 'ARRAY', contains: {type: 'STRING'}},
+          },
+        },
+      },
+      {
+        name: 'validate_shape',
+        description: 'Validates a shape.',
+        input_schema: {
+          type: 'object',
+          dependentSchemas: {a: {type: 'string'}},
+          patternProperties: {'^x-': {type: 'integer'}},
+          propertyNames: {type: 'string'},
+          unevaluatedProperties: {type: 'boolean'},
+          properties: {
+            tags: {type: 'array', contains: {type: 'string'}},
+          },
         },
       },
     ],

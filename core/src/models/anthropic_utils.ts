@@ -53,18 +53,21 @@ const ANTHROPIC_IMAGE_MEDIA_TYPES: readonly AnthropicImageMediaType[] = [
 
 const PDF_MIME_TYPE = 'application/pdf';
 
+/** The kinds of inline media Claude accepts, on a user turn only. */
+export type InlineMediaKind = 'image' | 'pdf';
+
+/** How each media kind is named in the warning Claude users see. */
+const MEDIA_KIND_LABELS: Record<InlineMediaKind, string> = {
+  image: 'Image',
+  pdf: 'PDF',
+};
+
 /** An Anthropic tool_use id must match this, or the API rejects the request. */
 const VALID_TOOL_USE_ID = /^[a-zA-Z0-9_-]+$/;
 
-/**
- * JSON Schema keys whose value is itself a map of schemas.
- *
- * Both the camelCase and the snake_case spelling are visited because
- * `parametersJsonSchema` is user-supplied and may use either.
- */
+/** JSON Schema keys whose value is itself a map of schemas. */
 const SCHEMA_MAP_KEYS = [
   '$defs',
-  'defs',
   'dependentSchemas',
   'patternProperties',
   'properties',
@@ -73,18 +76,14 @@ const SCHEMA_MAP_KEYS = [
 /** JSON Schema keys whose value is a schema, or a list of schemas. */
 const SCHEMA_CHILD_KEYS = [
   'additionalProperties',
-  'additional_properties',
   'allOf',
-  'all_of',
   'anyOf',
-  'any_of',
   'contains',
   'else',
   'if',
   'items',
   'not',
   'oneOf',
-  'one_of',
   'prefixItems',
   'propertyNames',
   'then',
@@ -105,15 +104,21 @@ export function toClaudeRole(role?: string): 'user' | 'assistant' {
   return role === 'model' || role === 'assistant' ? 'assistant' : 'user';
 }
 
-/** Returns true when the part carries inline image data. */
-export function isImagePart(part: Part): boolean {
-  return part.inlineData?.mimeType?.startsWith('image') === true;
-}
-
-/** Returns true when the part carries an inline PDF document. */
-export function isPdfPart(part: Part): boolean {
+/**
+ * Classifies the inline media a part carries, if any.
+ *
+ * @param part The part to classify.
+ * @return `'image'`, `'pdf'`, or `undefined` when the part carries neither.
+ */
+export function inlineMediaKind(part: Part): InlineMediaKind | undefined {
   const mimeType = part.inlineData?.mimeType;
-  return mimeType !== undefined && baseMimeType(mimeType) === PDF_MIME_TYPE;
+  if (mimeType === undefined) {
+    return undefined;
+  }
+  if (mimeType.startsWith('image')) {
+    return 'image';
+  }
+  return baseMimeType(mimeType) === PDF_MIME_TYPE ? 'pdf' : undefined;
 }
 
 /**
@@ -200,24 +205,22 @@ function toImageMediaType(mimeType: string): AnthropicImageMediaType {
 function toMediaBlock(
   part: Part,
 ): ImageBlockParam | DocumentBlockParam | undefined {
+  const kind = inlineMediaKind(part);
   const mimeType = part.inlineData?.mimeType;
   const data = part.inlineData?.data;
-  if (mimeType === undefined || data === undefined) {
+  if (kind === undefined || mimeType === undefined || data === undefined) {
     return undefined;
   }
-  if (mimeType.startsWith('image')) {
+  if (kind === 'image') {
     return {
       type: 'image',
       source: {type: 'base64', media_type: toImageMediaType(mimeType), data},
     };
   }
-  if (baseMimeType(mimeType) === PDF_MIME_TYPE) {
-    return {
-      type: 'document',
-      source: {type: 'base64', media_type: PDF_MIME_TYPE, data},
-    };
-  }
-  return undefined;
+  return {
+    type: 'document',
+    source: {type: 'base64', media_type: PDF_MIME_TYPE, data},
+  };
 }
 
 /**
@@ -301,12 +304,12 @@ export function contentToMessageParam(
 ): MessageParam {
   const blocks: AnthropicMessageBlock[] = [];
   for (const part of content.parts ?? []) {
-    if (content.role !== 'user' && isImagePart(part)) {
-      logger.warn('Image data is not supported in Claude for assistant turns.');
-      continue;
-    }
-    if (content.role !== 'user' && isPdfPart(part)) {
-      logger.warn('PDF data is not supported in Claude for assistant turns.');
+    const kind = content.role === 'user' ? undefined : inlineMediaKind(part);
+    if (kind !== undefined) {
+      logger.warn(
+        `${MEDIA_KIND_LABELS[kind]} data is not supported in Claude for ` +
+          `assistant turns.`,
+      );
       continue;
     }
     blocks.push(partToMessageBlock(part, sanitizer));
@@ -420,8 +423,7 @@ function lowercaseSchemaTypes(value: unknown): void {
 
 /** Deep-copies a value to plain JSON, dropping `undefined` properties. */
 function toPlainJson(value: unknown): unknown {
-  const copy: unknown = JSON.parse(JSON.stringify(value));
-  return copy;
+  return JSON.parse(JSON.stringify(value));
 }
 
 function toInputSchema(value: unknown, toolName: string): Tool.InputSchema {
@@ -514,10 +516,9 @@ export function buildThinkingParam(
 export function systemInstructionToText(
   instruction?: ContentUnion,
 ): string | undefined {
-  if (instruction === undefined) {
-    return undefined;
-  }
-  return flattenContentUnion(instruction);
+  return instruction === undefined
+    ? undefined
+    : flattenContentUnion(instruction);
 }
 
 function flattenContentUnion(instruction: ContentUnion): string {
