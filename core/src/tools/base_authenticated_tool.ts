@@ -20,6 +20,12 @@ export interface BaseAuthenticatedToolParams extends BaseToolParams {
   /**
    * What the tool authenticates with. Without it the tool runs its body
    * straight away and the credential is `undefined`.
+   *
+   * Omit it when the tool needs a credential only sometimes, and construction
+   * settles which. An MCP tool is the case this serves: it takes its scheme
+   * from the server it wraps, and most servers declare none. `AuthScheme` has
+   * no member that means "no authentication", so such a tool cannot express
+   * the unauthenticated case through a config and has to leave this unset.
    */
   authConfig?: AuthConfig;
 
@@ -32,7 +38,12 @@ export interface BaseAuthenticatedToolParams extends BaseToolParams {
 
 /** The parameters a {@link BaseAuthenticatedTool} runs its body with. */
 export interface RunAsyncAuthenticatedToolRequest extends RunAsyncToolRequest {
-  /** The resolved credential, or `undefined` when the tool has no authConfig. */
+  /**
+   * The resolved credential. It is `undefined` only when the tool has no
+   * {@link BaseAuthenticatedToolParams.authConfig}; a tool that declares one
+   * always receives a credential here, because `runAsync` returns early
+   * otherwise.
+   */
   credential?: AuthCredential;
 }
 
