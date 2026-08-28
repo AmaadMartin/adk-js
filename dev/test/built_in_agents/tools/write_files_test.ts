@@ -134,6 +134,63 @@ describe('writeFiles', () => {
     expect(await fs.readFile(target, 'utf-8')).toBe('original');
   });
 
+  it('reports the byte length, not the character count', async () => {
+    const root = await tempDir();
+    // Three characters, seven UTF-8 bytes.
+    const content = 'a\u00e9\u20ac';
+
+    const result = await writeFiles(
+      {files: {'notes.md': content}},
+      createTestContext({root_directory: root}),
+    );
+
+    const onDisk = await fs.stat(path.join(root, 'notes.md'));
+    expect(result.files[path.join(root, 'notes.md')].file_size).toBe(6);
+    expect(result.files[path.join(root, 'notes.md')].file_size).toBe(
+      onDisk.size,
+    );
+  });
+
+  it('writes no earlier entry when a later one escapes the root', async () => {
+    const root = await tempDir();
+    const outside = await tempDir();
+
+    const result = await writeFiles(
+      {
+        files: {
+          'agent.ts': 'export {};',
+          [path.relative(root, path.join(outside, 'pwned.txt'))]: 'PWNED',
+        },
+      },
+      createTestContext({root_directory: root}),
+    );
+
+    // The batch reports no writes, so no file may be left behind claiming
+    // otherwise.
+    expect(result).toMatchObject({success: false, successful_writes: 0});
+    await expect(fs.stat(path.join(root, 'agent.ts'))).rejects.toThrow(
+      /ENOENT/,
+    );
+  });
+
+  it('reports an unusable project root as a batch failure', async () => {
+    const result = await writeFiles(
+      {files: {'agent.ts': 'export {};'}},
+      createTestContext({root_directory: 42}),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      files: {},
+      successful_writes: 0,
+      total_files: 1,
+      errors: [
+        "Write operation failed: Session state 'root_directory' must be a " +
+          'non-empty string.',
+      ],
+    });
+  });
+
   it('refuses a relative traversal and writes nothing outside the root', async () => {
     const root = await tempDir();
     const outside = await tempDir();

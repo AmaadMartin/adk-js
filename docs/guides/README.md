@@ -1,0 +1,11 @@
+# ADK Developer Guides
+
+This directory contains specific developer guides for the ADK JavaScript
+implementation. For the official ADK documentation, visit
+[adk.dev](https://adk.dev/).
+
+## Index
+
+### Agents
+
+- [Agent Builder Assistant](agents/agent_builder_assistant/index.md) - Chatting with an assistant that designs an agent and writes it into a project directory.
