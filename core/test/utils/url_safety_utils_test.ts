@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {lookup} from 'node:dns/promises';
+import {LookupAddress} from 'node:dns';
 
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   assertHostnameAllowed,
@@ -15,13 +15,16 @@ import {
   parseAllowedUrl,
 } from '../../src/utils/url_safety_utils.js';
 
-vi.mock('node:dns/promises', () => ({
-  lookup: vi.fn(),
+// Declaring the mock ahead of `vi.mock` pins it to the single `{all: true}`
+// overload the implementation uses, so it stays typed without a cast.
+const {lookupMock} = vi.hoisted(() => ({
+  lookupMock:
+    vi.fn<
+      (hostname: string, options: {all: true}) => Promise<LookupAddress[]>
+    >(),
 }));
 
-// `lookup` is overloaded; treat the mock as a plain Mock so `mockResolvedValue`
-// accepts the `{all: true}` array-return shape used by the implementation.
-const lookupMock = lookup as unknown as Mock;
+vi.mock('node:dns/promises', () => ({lookup: lookupMock}));
 
 /** Resolves any hostname to the given IP list for the DNS `lookup` mock. */
 function resolveTo(...addresses: string[]): void {
