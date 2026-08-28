@@ -11,13 +11,6 @@ import {loadOptionalPeer} from '../utils/optional_peer.js';
 import type {InvocationContext} from './invocation_context.js';
 import type {TranscriptionEntry} from './transcription_entry.js';
 
-/** Audio encoding the cached blobs are required to use. */
-const RECOGNITION_ENCODING = 'LINEAR16';
-/** Sample rate the cached blobs are required to use, in hertz. */
-const RECOGNITION_SAMPLE_RATE_HERTZ = 16000;
-/** Language Cloud Speech-to-Text recognizes. */
-const RECOGNITION_LANGUAGE_CODE = 'en-US';
-
 /**
  * One unit of work produced by bundling the transcription cache: either audio
  * that needs a recognition request, or content that is already text.
@@ -56,21 +49,22 @@ function bundleTranscriptionCache(
   let currentSpeaker: string | undefined;
   let currentChunks: Buffer[] = [];
 
-  const flush = (speaker: string) => {
+  const flush = () => {
+    if (currentSpeaker === undefined) {
+      return;
+    }
     segments.push({
       kind: 'audio',
-      speaker,
+      speaker: currentSpeaker,
       audio: Buffer.concat(currentChunks),
     });
+    currentSpeaker = undefined;
+    currentChunks = [];
   };
 
   for (const {role, data} of cache) {
     if (isContent(data)) {
-      if (currentSpeaker !== undefined) {
-        flush(currentSpeaker);
-        currentSpeaker = undefined;
-        currentChunks = [];
-      }
+      flush();
       segments.push({kind: 'content', content: data});
       continue;
     }
@@ -86,17 +80,13 @@ function bundleTranscriptionCache(
     if (role === currentSpeaker) {
       currentChunks.push(chunk);
     } else {
-      if (currentSpeaker !== undefined) {
-        flush(currentSpeaker);
-      }
+      flush();
       currentSpeaker = role;
       currentChunks = [chunk];
     }
   }
 
-  if (currentSpeaker !== undefined) {
-    flush(currentSpeaker);
-  }
+  flush();
 
   return segments;
 }
@@ -149,18 +139,24 @@ export class AudioTranscriber {
           `${segment.speaker}.`,
       );
       const client = await this.getClient();
+      // The cached blobs are required to be 16 kHz mono LINEAR16 PCM, so the
+      // recognition config is fixed rather than configurable.
       const [response] = await client.recognize({
         config: {
-          encoding: RECOGNITION_ENCODING,
-          sampleRateHertz: RECOGNITION_SAMPLE_RATE_HERTZ,
-          languageCode: RECOGNITION_LANGUAGE_CODE,
+          encoding: 'LINEAR16',
+          sampleRateHertz: 16000,
+          languageCode: 'en-US',
         },
         audio: {content: segment.audio},
       });
       for (const result of response.results ?? []) {
+        const transcript = result.alternatives?.[0]?.transcript;
+        if (transcript === undefined || transcript === null) {
+          continue;
+        }
         contents.push({
           role: segment.speaker.toLowerCase(),
-          parts: [{text: result.alternatives![0].transcript!}],
+          parts: [{text: transcript}],
         });
       }
     }

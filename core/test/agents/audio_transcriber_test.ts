@@ -267,6 +267,30 @@ describe('AudioTranscriber', () => {
     ]);
   });
 
+  it('skips a result that carries no transcript', async () => {
+    // The generated protos make `alternatives` and `transcript` optional, so
+    // a result can arrive with neither. Emitting `{text: undefined}` would put
+    // an empty part into the session history.
+    const invocationContext = contextWithCache([audioEntry('user', 'aa')]);
+    speech.responses = [
+      {
+        results: [
+          {},
+          {alternatives: []},
+          {alternatives: [{}]},
+          {alternatives: [{transcript: null}]},
+          {alternatives: [{transcript: 'kept'}]},
+        ],
+      },
+    ];
+
+    const contents = await new AudioTranscriber().transcribeFile(
+      invocationContext,
+    );
+
+    expect(contents).toEqual([textContent('user', 'kept')]);
+  });
+
   it('contributes nothing for a response with no results', async () => {
     const invocationContext = contextWithCache([audioEntry('user', 'aa')]);
     speech.responses = [{}];
