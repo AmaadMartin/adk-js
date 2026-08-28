@@ -14,6 +14,13 @@ const DOTENV_KEY = 'ADK_TEST_FROM_DOTENV';
 const DISABLE_FLAG = 'ADK_DISABLE_LOAD_DOTENV';
 
 /**
+ * Budget (ms) for every test here. `vi.resetModules()` makes the next import
+ * re-evaluate the whole `@google/adk` source graph, and that cold import
+ * passed Vitest's 5s default on a macOS CI runner.
+ */
+const TEST_TIMEOUT_MS = 30000;
+
+/**
  * Re-imports the module so the memoized snapshot of explicit environment keys
  * starts empty, the way it does in a fresh process.
  */
@@ -22,7 +29,7 @@ async function importEnvs() {
   return import('../../src/utils/envs.js');
 }
 
-describe('envs', () => {
+describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
   let tmpDir: string;
   let agentsDir: string;
   let agentDir: string;
