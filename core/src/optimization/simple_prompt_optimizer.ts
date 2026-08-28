@@ -18,7 +18,6 @@ import type {
   AgentWithScores,
   OptimizerResult,
   SamplingResult,
-  UnstructuredSamplingResult,
 } from './data_types.js';
 import type {Sampler} from './sampler.js';
 
@@ -104,7 +103,7 @@ function clampBatchSize(batchSize: number, trainExampleCount: number): number {
 /** Scores a candidate on a fresh random batch of training examples. */
 async function scoreOnTrainBatch(
   candidate: LlmAgent,
-  sampler: Sampler<UnstructuredSamplingResult>,
+  sampler: Sampler,
   trainExampleIds: string[],
   batchSize: number,
 ): Promise<number> {
@@ -153,10 +152,7 @@ export interface SimplePromptOptimizerConfig {
  * never decides which instruction wins, so a run can return a rewritten
  * instruction that scores below the initial agent on the validation set.
  */
-export class SimplePromptOptimizer implements AgentOptimizer<
-  UnstructuredSamplingResult,
-  AgentWithScores
-> {
+export class SimplePromptOptimizer implements AgentOptimizer {
   private readonly optimizerModel: string;
   private readonly modelConfiguration: GenerateContentConfig;
   private readonly numIterations: number;
@@ -192,7 +188,7 @@ export class SimplePromptOptimizer implements AgentOptimizer<
    */
   async optimize(
     initialAgent: LlmAgent,
-    sampler: Sampler<UnstructuredSamplingResult>,
+    sampler: Sampler,
   ): Promise<OptimizerResult<AgentWithScores>> {
     let bestInstruction = requireStaticInstruction(initialAgent);
     const trainExampleIds = sampler.getTrainExampleIds();
