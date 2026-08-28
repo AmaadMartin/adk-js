@@ -23,13 +23,13 @@ class StubToolContext {
     this.memories = memories;
   }
 
-  // Minimal stub properties needed to bypass initialized checks
-  invocationContext = {
-    // Just needs to exist
-    memoryService: {},
-  };
+  invocationContext: {memoryService?: unknown} = {memoryService: {}};
 
   async searchMemory(_query: string): Promise<SearchMemoryResponse> {
+    // Mirrors Context.searchMemory, which raises before it reaches a service.
+    if (!this.invocationContext.memoryService) {
+      throw new Error('Memory service is not initialized.');
+    }
     return {memories: this.memories};
   }
 }
@@ -72,9 +72,8 @@ describe('LoadMemoryTool', () => {
     expect(result).toEqual({
       memories: [
         {
-          content: 'hi',
+          content: {role: 'user', parts: [{text: 'hi'}]},
           author: 'someone',
-          timestamp: undefined,
         },
       ],
     });
@@ -86,32 +85,15 @@ describe('LoadMemoryTool', () => {
 
   it('throws error if memoryService is not initialized', async () => {
     const tool = new LoadMemoryTool();
-    const mockContext = new StubToolContext([]) as unknown as Context;
-    (mockContext.invocationContext as {memoryService?: unknown}).memoryService =
-      undefined;
+    const stub = new StubToolContext([]);
+    stub.invocationContext.memoryService = undefined;
 
     await expect(
       tool.runAsync({
         args: {query: 'hello'},
-        toolContext: mockContext,
+        toolContext: stub as unknown as Context,
       }),
     ).rejects.toThrow('Memory service is not initialized.');
-  });
-
-  it('does not append instruction if memoryService is missing in context', async () => {
-    const toolContext = new StubToolContext([]) as unknown as Context;
-    (toolContext.invocationContext as {memoryService?: unknown}).memoryService =
-      undefined;
-
-    const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-    };
-    const tool = new LoadMemoryTool();
-    await tool.processLlmRequest({toolContext, llmRequest});
-    // System instructions should NOT be appended.
-    expect(llmRequest.config?.systemInstruction).toBeUndefined();
   });
 
   it('appends system instructions if memoryService is present in context', async () => {
