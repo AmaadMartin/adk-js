@@ -4,6 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {PrebuiltMetrics} from './eval_metrics.js';
+
+/**
+ * Metric names the registry resolves but adk-js cannot score.
+ *
+ * Their evaluators call the Vertex Gen AI Eval service, which adk-js does not
+ * ship, so each one throws when it runs. adk-python allows them because it can
+ * reach that service.
+ */
+export const UNSUPPORTED_METRICS: readonly string[] = [
+  PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
+  PrebuiltMetrics.SAFETY_V1,
+];
+
 /**
  * Thrown when an eval run finishes with at least one metric below its
  * threshold. The message carries the full failure report.

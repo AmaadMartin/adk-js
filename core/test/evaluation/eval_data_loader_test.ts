@@ -18,10 +18,10 @@ import {afterEach, describe, expect, it} from 'vitest';
 
 // Package-internal: these are not on the public barrel, so they are imported
 // by module path, as the sibling evaluation tests do.
+import {UNSUPPORTED_METRICS} from '../../src/evaluation/errors.js';
 import {
   convertLegacyEvalSet,
   LegacyInvocationSchema,
-  UNSUPPORTED_METRICS,
   validateLegacyInput,
 } from '../../src/evaluation/eval_data_loader.js';
 
@@ -119,7 +119,7 @@ describe('loadEvalSetFromFile', () => {
   it('reads an eval set written with snake_case keys', () => {
     const file = writeJson(makeTempDir(), 'a.test.json', SNAKE_CASE_EVAL_SET);
 
-    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG, {});
+    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG);
 
     expect(evalSet.evalSetId).toBe('dice_set');
     expect(evalSet.evalCases[0].evalId).toBe('roll_a_die');
@@ -129,7 +129,7 @@ describe('loadEvalSetFromFile', () => {
   it('reads the same eval set written with camelCase keys', () => {
     const file = writeJson(makeTempDir(), 'a.test.json', CAMEL_CASE_EVAL_SET);
 
-    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG, {});
+    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG);
 
     expect(evalSet.evalSetId).toBe('dice_set');
     expect(evalSet.evalCases[0].conversation?.[0].invocationId).toBe('inv-1');
@@ -141,7 +141,7 @@ describe('loadEvalSetFromFile', () => {
   it('keeps user-defined keys in tool args and session state verbatim', () => {
     const file = writeJson(makeTempDir(), 'a.test.json', SNAKE_CASE_EVAL_SET);
 
-    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG, {});
+    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG);
 
     const intermediateData =
       evalSet.evalCases[0].conversation?.[0].intermediateData;
@@ -187,7 +187,7 @@ describe('loadEvalSetFromFile', () => {
       ],
     });
 
-    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG, {});
+    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG);
 
     expect(evalSet.evalCases[0].sessionInput).toBeUndefined();
     expect(evalSet.evalCases[0].conversation?.[0].userContent).toEqual({
@@ -206,14 +206,18 @@ describe('loadEvalSetFromFile', () => {
     const file = writeJson(makeTempDir(), 'a.test.json', SNAKE_CASE_EVAL_SET);
 
     expect(() =>
-      loadEvalSetFromFile(file, DEFAULT_CONFIG, {app_name: 'dice'}),
+      loadEvalSetFromFile(file, DEFAULT_CONFIG, {
+        app_name: 'dice',
+        user_id: '',
+        state: {},
+      }),
     ).toThrow(/Initial session should be specified as a part of the EvalSet/);
   });
 
   it('falls back to the legacy format and converts it', () => {
     const file = writeJson(makeTempDir(), 'a.test.json', LEGACY_EVAL_FILE);
 
-    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG, {});
+    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG);
 
     expect(evalSet.evalCases).toHaveLength(1);
     expect(evalSet.evalCases[0].evalId).toBe(file);
@@ -253,7 +257,7 @@ describe('loadEvalSetFromFile', () => {
   it('leaves the session input unset when no initial session is given', () => {
     const file = writeJson(makeTempDir(), 'a.test.json', LEGACY_EVAL_FILE);
 
-    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG, {});
+    const evalSet = loadEvalSetFromFile(file, DEFAULT_CONFIG);
 
     expect(evalSet.evalCases[0].sessionInput).toBeUndefined();
   });
@@ -261,7 +265,7 @@ describe('loadEvalSetFromFile', () => {
   it('rejects a path that is not a file', () => {
     const dir = makeTempDir();
 
-    expect(() => loadEvalSetFromFile(dir, DEFAULT_CONFIG, {})).toThrow(
+    expect(() => loadEvalSetFromFile(dir, DEFAULT_CONFIG)).toThrow(
       `Input path ${dir} is invalid.`,
     );
   });
@@ -269,7 +273,7 @@ describe('loadEvalSetFromFile', () => {
   it('rejects a path that does not exist', () => {
     const missing = path.join(makeTempDir(), 'missing.test.json');
 
-    expect(() => loadEvalSetFromFile(missing, DEFAULT_CONFIG, {})).toThrow(
+    expect(() => loadEvalSetFromFile(missing, DEFAULT_CONFIG)).toThrow(
       `Input path ${missing} is invalid.`,
     );
   });
@@ -279,7 +283,7 @@ describe('loadEvalSetFromFile', () => {
     const file = path.join(dir, 'a.test.json');
     fs.writeFileSync(file, '{not json', 'utf-8');
 
-    expect(() => loadEvalSetFromFile(file, DEFAULT_CONFIG, {})).toThrow(
+    expect(() => loadEvalSetFromFile(file, DEFAULT_CONFIG)).toThrow(
       SyntaxError,
     );
   });

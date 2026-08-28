@@ -20,25 +20,13 @@ import {PrebuiltMetrics} from './eval_metrics.js';
 import {EvalSet, EvalSetSchema} from './eval_set.js';
 
 /**
- * Metric names the registry resolves but adk-js cannot score.
- *
- * Their evaluators call the Vertex Gen AI Eval service, which adk-js does not
- * ship, so each one throws when it runs. adk-python allows them because it can
- * reach that service.
- */
-export const UNSUPPORTED_METRICS: readonly string[] = [
-  PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
-  PrebuiltMetrics.SAFETY_V1,
-];
-
-/**
  * Metric names an eval config may use with a legacy-format test file.
  *
- * Mirrors adk-python's `ALLOWED_CRITERIA`, less {@link UNSUPPORTED_METRICS}.
- * Richer metrics exist in the registry but need data the legacy format cannot
- * express.
+ * Mirrors adk-python's `ALLOWED_CRITERIA`, less the metrics adk-js cannot
+ * score. Richer metrics exist in the registry but need data the legacy format
+ * cannot express.
  */
-export const ALLOWED_CRITERIA: readonly string[] = [
+const ALLOWED_CRITERIA: readonly string[] = [
   PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
   PrebuiltMetrics.RESPONSE_MATCH_SCORE,
 ];
@@ -85,7 +73,7 @@ const PRESERVE_KEYS_ON_READ = [
  * The legacy format is written with fixed snake_case keys, so it is parsed
  * verbatim rather than through the generic key converter.
  */
-export const LegacyToolUseSchema = z
+const LegacyToolUseSchema = z
   .object({
     /** The tool name, mapped to `FunctionCall.name`. */
     tool_name: z.string(),
@@ -94,11 +82,8 @@ export const LegacyToolUseSchema = z
   })
   .loose();
 
-/** A tool call in the legacy eval file format. */
-export type LegacyToolUse = z.infer<typeof LegacyToolUseSchema>;
-
 /** An intermediate agent response in the legacy eval file format. */
-export const LegacyIntermediateResponseSchema = z
+const LegacyIntermediateResponseSchema = z
   .object({
     /** The sub-agent that produced the response. */
     author: z.string(),
@@ -106,11 +91,6 @@ export const LegacyIntermediateResponseSchema = z
     text: z.string(),
   })
   .loose();
-
-/** An intermediate agent response in the legacy eval file format. */
-export type LegacyIntermediateResponse = z.infer<
-  typeof LegacyIntermediateResponseSchema
->;
 
 /** A single recorded turn in the legacy eval file format. */
 export const LegacyInvocationSchema = z
@@ -132,7 +112,7 @@ export const LegacyInvocationSchema = z
 export type LegacyInvocation = z.infer<typeof LegacyInvocationSchema>;
 
 /** The initial session in the legacy eval file format. */
-export const LegacyInitialSessionSchema = z
+const LegacyInitialSessionSchema = z
   .object({
     /** The app name of the session. */
     app_name: z.string().default(''),
@@ -294,9 +274,9 @@ function readJsonFile(filePath: string): unknown {
  */
 export function readInitialSessionFile(
   initialSessionFile?: string,
-): Record<string, unknown> {
+): LegacyInitialSession | undefined {
   if (!initialSessionFile) {
-    return {};
+    return undefined;
   }
   const parsed: unknown = readJsonFile(initialSessionFile);
   if (!isRecord(parsed)) {
@@ -304,7 +284,7 @@ export function readInitialSessionFile(
       `Initial session file ${initialSessionFile} must hold a JSON object.`,
     );
   }
-  return parsed;
+  return LegacyInitialSessionSchema.parse(parsed);
 }
 
 /**
@@ -327,7 +307,7 @@ export function readInitialSessionFile(
 export function loadEvalSetFromFile(
   evalSetFile: string,
   evalConfig: EvalConfig,
-  initialSession: Record<string, unknown>,
+  initialSession?: LegacyInitialSession,
 ): EvalSet {
   const parsed: unknown = readJsonFile(evalSetFile);
   const asEvalSet = EvalSetSchema.safeParse(
@@ -335,7 +315,7 @@ export function loadEvalSetFromFile(
   );
 
   if (asEvalSet.success) {
-    if (Object.keys(initialSession).length > 0) {
+    if (initialSession) {
       throw new Error(
         'Initial session should be specified as a part of the EvalSet file.' +
           ' An explicit initial session is only needed when specifying data' +
@@ -357,10 +337,7 @@ export function loadEvalSetFromFile(
     {
       name: evalSetFile,
       data: LegacyFileSchema.parse(parsed),
-      initial_session:
-        Object.keys(initialSession).length > 0
-          ? LegacyInitialSessionSchema.parse(initialSession)
-          : undefined,
+      initial_session: initialSession,
     },
   ]);
 }

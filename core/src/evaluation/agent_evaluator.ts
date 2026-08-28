@@ -10,7 +10,11 @@ import * as path from 'node:path';
 import {BaseAgent} from '../agents/base_agent.js';
 import {logger} from '../utils/logger.js';
 
-import {EvalFailureError, UnsupportedMetricError} from './errors.js';
+import {
+  EvalFailureError,
+  UNSUPPORTED_METRICS,
+  UnsupportedMetricError,
+} from './errors.js';
 import {EvalCase} from './eval_case.js';
 import {
   CriterionBackedEvalMetric,
@@ -22,7 +26,6 @@ import {
   loadEvalSetFromFile,
   readInitialSessionFile,
   toEvalSetJson,
-  UNSUPPORTED_METRICS,
 } from './eval_data_loader.js';
 import {EvalStatus} from './eval_metrics.js';
 import {formatMetricDetails} from './eval_report.js';

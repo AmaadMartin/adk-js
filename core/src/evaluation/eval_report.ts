@@ -25,7 +25,7 @@ const DETAIL_FIELDS = [
 const LABEL_WIDTH = Math.max(...DETAIL_FIELDS.map((field) => field.length));
 
 /** Joins the text of every part of `content` that carries text. */
-export function convertContentToText(content?: Content): string {
+function convertContentToText(content?: Content): string {
   return (content?.parts ?? [])
     .filter((part) => part.text)
     .map((part) => part.text)
@@ -33,7 +33,7 @@ export function convertContentToText(content?: Content): string {
 }
 
 /** Renders the tool calls held by `intermediateData`, one per line. */
-export function convertToolCallsToText(
+function convertToolCallsToText(
   intermediateData?: IntermediateDataType,
 ): string {
   return getAllToolCalls(intermediateData)
