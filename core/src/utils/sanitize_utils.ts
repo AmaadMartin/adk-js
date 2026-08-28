@@ -20,6 +20,9 @@
 
 import {toSnakeCaseName} from './case_utils.js';
 
+/** A length limit of this value means the caller wants no limit at all. */
+export const NO_LENGTH_LIMIT = -1;
+
 /** Appended to a string that was cut down to the caller's length limit. */
 const TRUNCATED_SUFFIX = '...[TRUNCATED]';
 
@@ -138,14 +141,14 @@ function isSensitiveKey(key: string): boolean {
  * Cuts `text` down to `maxLength`, or leaves it whole when `maxLength` is -1.
  *
  * @param text The text to bound.
- * @param maxLength Maximum length, or -1 for no limit.
+ * @param maxLength Maximum length, or {@link NO_LENGTH_LIMIT} for no limit.
  * @return The bounded text and whether anything was cut.
  */
 export function truncateText(
   text: string,
   maxLength: number,
 ): {text: string; truncated: boolean} {
-  if (maxLength === -1 || text.length <= maxLength) {
+  if (maxLength === NO_LENGTH_LIMIT || text.length <= maxLength) {
     return {text, truncated: false};
   }
   return {text: text.slice(0, maxLength) + TRUNCATED_SUFFIX, truncated: true};

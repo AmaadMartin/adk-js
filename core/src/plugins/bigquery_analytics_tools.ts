@@ -68,44 +68,31 @@ function findTransferTarget(
 }
 
 /**
- * The target of a handoff, which decides `TRANSFER_A2A` against
- * `TRANSFER_AGENT`. A target the tree does not resolve stays the local kind:
- * the transfer is still local as far as this process can tell.
+ * Whether the agent named by `targetName` is remote, as the `remote` or the
+ * `local` origin.
+ *
+ * A handoff names its target in the call arguments. An `AgentTool` keeps its
+ * agent private, so it names it by the tool name, which `AgentTool` takes from
+ * that agent. Either way a name the tree does not resolve stays local: the
+ * call is local as far as this process can tell.
+ *
+ * @param targetName The name to resolve, from a call argument or a tool name.
+ * @param agent The agent making the call, whose tree resolves that name.
+ * @param remote The origin to report for an agent behind the A2A protocol.
+ * @param local The origin to report otherwise.
  */
-function transferOrigin(
-  toolArgs: Record<string, unknown>,
+function resolveOrigin(
+  targetName: unknown,
   agent: BaseAgent | undefined,
+  remote: ToolOrigin,
+  local: ToolOrigin,
 ): ToolOrigin {
-  const targetName = toolArgs[TRANSFER_TARGET_ARG];
   if (agent === undefined || typeof targetName !== 'string') {
-    return ToolOrigin.TRANSFER_AGENT;
+    return local;
   }
   return isRemoteA2AAgent(findTransferTarget(agent, targetName))
-    ? ToolOrigin.TRANSFER_A2A
-    : ToolOrigin.TRANSFER_AGENT;
-}
-
-/**
- * The kind of agent an `AgentTool` reaches.
- *
- * `AgentTool` keeps its agent private, so the name is resolved against the
- * caller's tree, exactly as a handoff target is. `AgentTool` takes its name
- * from that agent, so the lookup is by the right name. An agent the tree does
- * not resolve stays the local kind, which is the same fallback a handoff uses.
- *
- * @param toolName The tool's name, which `AgentTool` takes from its agent.
- * @param agent The agent making the call.
- */
-function agentToolOrigin(
-  toolName: string,
-  agent: BaseAgent | undefined,
-): ToolOrigin {
-  if (agent === undefined) {
-    return ToolOrigin.SUB_AGENT;
-  }
-  return isRemoteA2AAgent(findTransferTarget(agent, toolName))
-    ? ToolOrigin.A2A
-    : ToolOrigin.SUB_AGENT;
+    ? remote
+    : local;
 }
 
 /**
@@ -131,10 +118,20 @@ export function getToolOrigin(
     return ToolOrigin.MCP;
   }
   if (tool.name === TRANSFER_TOOL_NAME) {
-    return transferOrigin(toolArgs, agent);
+    return resolveOrigin(
+      toolArgs[TRANSFER_TARGET_ARG],
+      agent,
+      ToolOrigin.TRANSFER_A2A,
+      ToolOrigin.TRANSFER_AGENT,
+    );
   }
   if (isAgentTool(tool)) {
-    return agentToolOrigin(tool.name, agent);
+    return resolveOrigin(
+      tool.name,
+      agent,
+      ToolOrigin.A2A,
+      ToolOrigin.SUB_AGENT,
+    );
   }
   if (isFunctionTool(tool)) {
     return ToolOrigin.LOCAL;

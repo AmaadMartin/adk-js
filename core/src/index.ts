@@ -29,7 +29,7 @@ export type {
   AnalyticsContentFormatter,
   BigQueryAgentAnalyticsPluginOptions,
   BigQueryLoggerConfig,
-} from './plugins/bigquery_agent_analytics_plugin.js';
+} from './plugins/bigquery_analytics_config.js';
 export {AnalyticsEventType} from './plugins/bigquery_analytics_schema.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';

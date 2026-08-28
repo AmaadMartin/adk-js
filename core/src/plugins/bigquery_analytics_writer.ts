@@ -223,7 +223,7 @@ export class BigQueryRowWriter {
    */
   async shutdown(): Promise<void> {
     this.clearTimer();
-    await awaitWithTimeout(this.flush(), this.options.shutdownTimeoutMs);
+    await this.flushWithinTimeout();
     const lost = this.queue.length + this.pendingRows;
     if (lost > 0) {
       this.queue.length = 0;

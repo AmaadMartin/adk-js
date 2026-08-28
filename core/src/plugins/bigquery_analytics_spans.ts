@@ -66,11 +66,6 @@ export function ambientOtelIds():
     : undefined;
 }
 
-/** The ambient OpenTelemetry trace id, when a valid span is active. */
-function ambientTraceId(): string | undefined {
-  return ambientOtelIds()?.trace_id;
-}
-
 /** Milliseconds since `span` started, or undefined when there is no span. */
 export function elapsedSince(span: SpanRecord | undefined): number | undefined {
   return span === undefined ? undefined : Date.now() - span.startTimeMs;
@@ -106,7 +101,8 @@ export class SpanTracker {
     const stack = this.stackFor(invocationId);
     const record: SpanRecord = {
       spanId: newSpanId(),
-      traceId: stack.at(-1)?.traceId ?? ambientTraceId() ?? newTraceId(),
+      traceId:
+        stack.at(-1)?.traceId ?? ambientOtelIds()?.trace_id ?? newTraceId(),
       startTimeMs: Date.now(),
       kind,
     };
@@ -145,7 +141,9 @@ export class SpanTracker {
   /** The invocation's trace id, falling back to the ambient span then its id. */
   traceId(invocationId: string): string {
     return (
-      this.current(invocationId)?.traceId ?? ambientTraceId() ?? invocationId
+      this.current(invocationId)?.traceId ??
+      ambientOtelIds()?.trace_id ??
+      invocationId
     );
   }
 
