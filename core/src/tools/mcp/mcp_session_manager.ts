@@ -60,6 +60,30 @@ function toHeaderRecord(init?: TransportHeaders): Record<string, string> {
 }
 
 /**
+ * Merges `overrides` over `base`, matching header names case-insensitively.
+ *
+ * HTTP header names are case-insensitive, so a plain spread would keep both
+ * `authorization` and `Authorization` and the transport would send the two
+ * values joined by a comma. An override replaces the entry it matches, under
+ * the override's own spelling.
+ */
+export function mergeHeaders(
+  base: Record<string, string>,
+  overrides: Record<string, string>,
+): Record<string, string> {
+  const overriddenNames = new Set(
+    Object.keys(overrides).map((name) => name.toLowerCase()),
+  );
+  const merged: Record<string, string> = {};
+  for (const [name, value] of Object.entries(base)) {
+    if (!overriddenNames.has(name.toLowerCase())) {
+      merged[name] = value;
+    }
+  }
+  return {...merged, ...overrides};
+}
+
+/**
  * Defines the parameters for establishing a connection to an MCP server using
  * standard input/output (stdio). This is typically used for running MCP servers
  * as local child processes.
@@ -170,10 +194,10 @@ export class MCPSessionManager {
               ...options,
               requestInit: {
                 ...options.requestInit,
-                headers: {
-                  ...toHeaderRecord(options.requestInit?.headers),
-                  ...extraHeaders,
-                },
+                headers: mergeHeaders(
+                  toHeaderRecord(options.requestInit?.headers),
+                  extraHeaders,
+                ),
               },
             };
           }

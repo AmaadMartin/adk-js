@@ -685,6 +685,56 @@ describe('MCPToolset', () => {
       expect(lastTransportHeaders()).toEqual({'X-Static': 'yes'});
     });
 
+    it('sends the configured API key without an exchange step', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: apiKeyScheme,
+        authCredential: apiKeyCredential,
+      });
+
+      await toolset.getTools();
+
+      expect(lastTransportHeaders()).toEqual({
+        'X-Static': 'yes',
+        'X-API-Key': 'test-api-key',
+      });
+    });
+
+    it('an exchanged credential replaces the configured one', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: apiKeyScheme,
+        authCredential: apiKeyCredential,
+      });
+      setExchangedCredential(toolset, {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'exchanged-api-key',
+      });
+
+      await toolset.getTools();
+
+      expect(lastTransportHeaders()).toEqual({
+        'X-Static': 'yes',
+        'X-API-Key': 'exchanged-api-key',
+      });
+    });
+
+    it('replaces a provider header that differs only in case', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: () => ({authorization: 'Bearer from-provider'}),
+        authScheme: oauth2Scheme,
+      });
+      setExchangedCredential(toolset, accessTokenCredential);
+
+      await toolset.getTools();
+
+      expect(lastTransportHeaders()).toEqual({
+        'X-Static': 'yes',
+        Authorization: 'Bearer exchanged-token',
+      });
+    });
+
     it('sends the exchanged access token as a bearer header', async () => {
       const toolset = new MCPToolset({
         connectionParams: httpParams,
@@ -776,6 +826,20 @@ describe('MCPToolset', () => {
         'X-Static': 'yes',
         'X-API-Key': 'test-api-key',
       });
+    });
+
+    it('readResource resolves the headers once', async () => {
+      const provider = vi
+        .fn<MCPHeaderProvider>()
+        .mockImplementation(() => ({'X-Tenant': 'acme'}));
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: provider,
+      });
+
+      await toolset.readResource('res1');
+
+      expect(provider).toHaveBeenCalledTimes(1);
     });
 
     it('readResource sends the auth header on both sessions', async () => {

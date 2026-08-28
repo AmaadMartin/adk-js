@@ -56,7 +56,9 @@ export function buildAuthHeaders(
 function buildHttpAuthHeaders(
   http: HttpAuth,
 ): Record<string, string> | undefined {
-  const {token, username, password} = http.credentials;
+  // A credential read from a document can omit `credentials` even though the
+  // type makes it mandatory.
+  const {token, username, password} = http.credentials ?? {};
   const scheme = http.scheme.toLowerCase();
 
   let headers: Record<string, string> | undefined;

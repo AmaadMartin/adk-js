@@ -460,6 +460,20 @@ describe('MCPSessionManager', () => {
       });
     });
 
+    it('replaces a static header that differs only in case', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: {authorization: 'old'}}},
+      });
+
+      await manager.createSession({Authorization: 'new'});
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {Authorization: 'new'}},
+      });
+    });
+
     it('ignores extraHeaders for stdio connections', async () => {
       const manager = new MCPSessionManager({
         type: 'StdioConnectionParams',

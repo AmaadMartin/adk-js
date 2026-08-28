@@ -1,33 +1,33 @@
 # Authenticating an MCPToolset
 
 `MCPToolset` reaches a Model Context Protocol server that requires a
-credential. You describe the credential with an auth scheme, ADK fills in the
-exchanged credential, and the toolset sends the matching HTTP header on tool
+credential. You describe the credential with an auth scheme, supply the
+credential itself, and the toolset sends the matching HTTP header on tool
 discovery, on every tool call and on resource reads.
 
 ## Introduction
 
 Most MCP servers you do not run yourself are behind authentication. An API key
 in a header, an OAuth2 access token, or HTTP basic auth are the common cases.
-The credential is a runtime value: an access token expires, and an API key
-belongs in the environment rather than in the agent source.
 
 `MCPToolset` separates the two halves of that problem.
 
 - The **auth scheme** is static configuration. It says what kind of credential
   the server wants, and for an API key it also names the header.
-- The **exchanged credential** is the runtime value. It arrives later, so the
-  toolset keeps one `AuthConfig` object and reads the credential from it each
-  time it opens a session.
+- The **credential** is the value that is sent. A scheme such as `apiKey` or
+  `http` needs no exchange, so `authCredential` is used as it is. OAuth2 does
+  need an exchange, and the access token only exists at runtime.
 
-`getAuthConfig()` returns that object. It is the same instance on every call,
-so whoever obtains the credential can write it onto the config, and the next
-`getTools()` call sends it.
+For the second case the toolset keeps one `AuthConfig` and reads the credential
+from it every time it opens a session. `getAuthConfig()` returns that object,
+and it is the same instance on every call, so whoever obtains the access token
+writes it onto the config and the next `getTools()` call sends it. An exchanged
+credential takes precedence over the one you configured.
 
-Use `headerProvider` instead when the header is not a credential — a tenant id,
-a trace id, a routing hint. The two combine: the toolset merges the auth header
-over the provider's headers, so a credential ADK exchanged always wins over a
-header a caller hardcoded.
+Use `headerProvider` when the header is not a credential — a tenant id, a trace
+id, a routing hint. The two combine: the toolset merges the auth header over
+the provider's headers, matching header names case-insensitively, so the
+credential always wins over a header a caller hardcoded.
 
 Headers only apply to HTTP transports. A `StdioConnectionParams` connection
 runs the server as a child process, which has no request headers, so the
@@ -53,27 +53,61 @@ const toolset = new MCPToolset({
     url: 'https://mcp.example.com/mcp',
   },
   authScheme: apiKeyScheme,
-});
-
-const authConfig = toolset.getAuthConfig();
-if (authConfig) {
-  authConfig.exchangedAuthCredential = {
+  authCredential: {
     authType: AuthCredentialTypes.API_KEY,
     apiKey: process.env['MCP_API_KEY'] ?? '',
-  };
-}
+  },
+});
 
 const tools = await toolset.getTools();
 ```
 
 Every request the toolset makes now carries `X-API-Key`.
 
+## Supplying a token that only exists at runtime
+
+An OAuth2 access token is not known when the toolset is built. Write it onto
+the auth config once you have it.
+
+```ts
+import {AuthCredentialTypes, MCPToolset, type AuthScheme} from '@google/adk';
+
+const oauth2Scheme: AuthScheme = {
+  type: 'oauth2',
+  flows: {
+    authorizationCode: {
+      authorizationUrl: 'https://example.com/auth',
+      tokenUrl: 'https://example.com/token',
+      scopes: {read: 'Read access'},
+    },
+  },
+};
+
+const toolset = new MCPToolset({
+  connectionParams: {
+    type: 'StreamableHTTPConnectionParams',
+    url: 'https://mcp.example.com/mcp',
+  },
+  authScheme: oauth2Scheme,
+});
+
+const authConfig = toolset.getAuthConfig();
+if (authConfig) {
+  authConfig.exchangedAuthCredential = {
+    authType: AuthCredentialTypes.OAUTH2,
+    oauth2: {accessToken: await mintAccessToken()},
+  };
+}
+
+const tools = await toolset.getTools();
+```
+
 ## What each credential sends
 
-The exchanged credential decides the header. The auth scheme is only read for
-an API key, because the credential does not carry a header name.
+The credential decides the header. The auth scheme is only read for an API key,
+because the credential does not carry a header name.
 
-| Exchanged credential                                  | Header sent                           |
+| Credential                                            | Header sent                           |
 | ----------------------------------------------------- | ------------------------------------- |
 | `oauth2.accessToken`                                  | `Authorization: Bearer <accessToken>` |
 | `http` with scheme `bearer` and a token               | `Authorization: Bearer <token>`       |
@@ -89,21 +123,7 @@ sending `Bearer undefined`. An API key whose scheme puts it in the query string
 or a cookie sends nothing and logs a warning: only the header location is
 supported.
 
-## Combining a credential with request headers
-
-`headerProvider` runs first and the auth header is merged over its result.
-
-```ts
-const toolset = new MCPToolset({
-  connectionParams: {
-    type: 'StreamableHTTPConnectionParams',
-    url: 'https://mcp.example.com/mcp',
-  },
-  headerProvider: (context) => ({'X-Tenant-Id': context?.userId ?? 'shared'}),
-  authScheme: apiKeyScheme,
-  credentialKey: 'acme_mcp_key',
-});
-```
+## Naming the credential slot
 
 `credentialKey` names the slot the exchanged credential is stored under. It
 defaults to `default_mcp_key`. Give each toolset its own key when one agent

@@ -22,7 +22,11 @@ import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
-import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
+import {
+  MCPConnectionParams,
+  MCPSessionManager,
+  mergeHeaders,
+} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
 
 /**
@@ -73,6 +77,19 @@ export interface MCPToolsetOptions {
    * `default_mcp_key`.
    */
   credentialKey?: string;
+}
+
+/**
+ * Finds the advertised resource called `name`.
+ *
+ * @throws If the server advertises no resource under that name.
+ */
+function findResource(resources: Resource[], name: string): Resource {
+  const resource = resources.find((candidate) => candidate.name === name);
+  if (!resource) {
+    throw new Error(`Resource with name '${name}' not found.`);
+  }
+  return resource;
 }
 
 /**
@@ -207,14 +224,28 @@ export class MCPToolset extends BaseToolset {
       ? await this.headerProvider(context)
       : undefined;
     const authHeaders = buildAuthHeaders(
-      this.authConfig?.exchangedAuthCredential,
+      this.credential(),
       this.authConfig?.authScheme,
     );
 
     if (!authHeaders) {
       return providerHeaders;
     }
-    return {...providerHeaders, ...authHeaders};
+    return mergeHeaders(providerHeaders ?? {}, authHeaders);
+  }
+
+  /**
+   * The credential to authenticate with.
+   *
+   * A scheme such as `apiKey` or `http` needs no exchange, so the credential
+   * the caller configured is used until ADK stores an exchanged one, following
+   * `ToolAuthHandler`.
+   */
+  private credential(): AuthCredential | undefined {
+    return (
+      this.authConfig?.exchangedAuthCredential ??
+      this.authConfig?.rawAuthCredential
+    );
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
@@ -279,12 +310,20 @@ export class MCPToolset extends BaseToolset {
    * @return The resource names available on the server.
    */
   async listResources(context?: ReadonlyContext): Promise<string[]> {
-    const session = await this.mcpSessionManager.createSession(
+    const resources = await this.listServerResources(
       await this.buildHeaders(context),
     );
+    return resources.map((resource) => resource.name);
+  }
+
+  /** Opens one session with `headers` and returns what the server advertises. */
+  private async listServerResources(
+    headers?: Record<string, string>,
+  ): Promise<Resource[]> {
+    const session = await this.mcpSessionManager.createSession(headers);
     try {
       const result = (await session.listResources()) as ListResourcesResult;
-      return result.resources.map((resource) => resource.name);
+      return result.resources;
     } finally {
       await this.mcpSessionManager.closeSession(session);
     }
@@ -302,23 +341,10 @@ export class MCPToolset extends BaseToolset {
     name: string,
     context?: ReadonlyContext,
   ): Promise<Resource> {
-    const session = await this.mcpSessionManager.createSession(
+    const resources = await this.listServerResources(
       await this.buildHeaders(context),
     );
-    let result: ListResourcesResult;
-    try {
-      result = (await session.listResources()) as ListResourcesResult;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
-
-    const resource = result.resources.find(
-      (candidate) => candidate.name === name,
-    );
-    if (!resource) {
-      throw new Error(`Resource with name '${name}' not found.`);
-    }
-    return resource;
+    return findResource(resources, name);
   }
 
   /**
@@ -337,14 +363,18 @@ export class MCPToolset extends BaseToolset {
     name: string,
     context?: ReadonlyContext,
   ): Promise<Array<TextResourceContents | BlobResourceContents>> {
-    const resourceInfo = await this.getResourceInfo(name, context);
+    // Headers are resolved once: a provider that mints a one-shot token must
+    // not be called twice for one read.
+    const headers = await this.buildHeaders(context);
+    const resourceInfo = findResource(
+      await this.listServerResources(headers),
+      name,
+    );
     if (!resourceInfo.uri) {
       throw new Error(`Resource '${name}' has no URI.`);
     }
 
-    const session = await this.mcpSessionManager.createSession(
-      await this.buildHeaders(context),
-    );
+    const session = await this.mcpSessionManager.createSession(headers);
     try {
       const result = (await session.readResource({
         uri: resourceInfo.uri,

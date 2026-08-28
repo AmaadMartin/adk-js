@@ -130,6 +130,15 @@ describe('buildAuthHeaders', () => {
       expect(buildAuthHeaders(credential)).toBeUndefined();
     });
 
+    it('sends nothing when the credential carries no credentials object', () => {
+      // A credential read from a document can omit the mandatory field.
+      const credential: AuthCredential = JSON.parse(
+        '{"authType": "http", "http": {"scheme": "bearer"}}',
+      );
+
+      expect(buildAuthHeaders(credential)).toBeUndefined();
+    });
+
     it('merges additional headers over the scheme header', () => {
       const credential: AuthCredential = {
         authType: AuthCredentialTypes.HTTP,
