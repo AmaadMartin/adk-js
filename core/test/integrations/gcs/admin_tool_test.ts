@@ -47,7 +47,9 @@ vi.mock('@google-cloud/storage', () => ({
 beforeEach(() => {
   mocks.clientOptions.length = 0;
   mocks.bucketNames.length = 0;
-  vi.clearAllMocks();
+  // Reset, not clear: `updateBucket` reads the bucket, so a rejection left
+  // behind by an earlier test would decide a later one.
+  vi.resetAllMocks();
 });
 
 describe('listBuckets', () => {
@@ -263,15 +265,29 @@ describe('updateBucket', () => {
     });
   });
 
-  it('issues no request when neither field is supplied', async () => {
+  it('reads the bucket and patches nothing when neither field is supplied', async () => {
+    mocks.getMetadata.mockResolvedValue([{name: 'test-bucket'}]);
+
     const result = await updateBucket({bucket_name: 'test-bucket'});
 
     expect(result).toStrictEqual({
       status: 'SUCCESS',
       results: 'Bucket test-bucket updated successfully.',
     });
+    expect(mocks.getMetadata).toHaveBeenCalledOnce();
     expect(mocks.setMetadata).not.toHaveBeenCalled();
-    expect(mocks.clientOptions).toStrictEqual([]);
+  });
+
+  it('reports the failure when the bucket cannot be read and no field is supplied', async () => {
+    mocks.getMetadata.mockRejectedValue(new Error('bucket not found'));
+
+    const result = await updateBucket({bucket_name: 'test-bucket'});
+
+    expect(result).toStrictEqual({
+      status: 'ERROR',
+      error_details: 'bucket not found',
+    });
+    expect(mocks.setMetadata).not.toHaveBeenCalled();
   });
 
   it('reports the failure instead of throwing', async () => {
@@ -313,4 +329,79 @@ describe('deleteBucket', () => {
       error_details: 'bucket is not empty',
     });
   });
+});
+
+describe('bucket name validation', () => {
+  // The client joins a bucket name into the request path unescaped, so this
+  // name reaches `/victim-bucket/o/secret.txt` on the storage host.
+  const traversal = '../../../victim-bucket/o/secret.txt';
+
+  it('reports an error and builds no client for a traversing name', async () => {
+    const result = await getBucket({bucket_name: traversal});
+
+    expect(result).toStrictEqual({
+      status: 'ERROR',
+      error_details: expect.stringContaining(
+        `Invalid bucket name '${traversal}'`,
+      ),
+    });
+    expect(mocks.clientOptions).toStrictEqual([]);
+    expect(mocks.bucketNames).toStrictEqual([]);
+  });
+
+  it('deletes nothing for a traversing name', async () => {
+    const result = await deleteBucket({bucket_name: traversal});
+
+    expect(result.status).toBe('ERROR');
+    expect(mocks.bucketDelete).not.toHaveBeenCalled();
+  });
+
+  it('reads and patches nothing for a traversing name', async () => {
+    const result = await updateBucket({
+      bucket_name: traversal,
+      versioning_enabled: true,
+    });
+
+    expect(result.status).toBe('ERROR');
+    expect(mocks.getMetadata).not.toHaveBeenCalled();
+    expect(mocks.setMetadata).not.toHaveBeenCalled();
+  });
+
+  it('creates nothing for a traversing name', async () => {
+    const result = await createBucket({
+      project_id: 'test-project',
+      bucket_name: traversal,
+    });
+
+    expect(result.status).toBe('ERROR');
+    expect(mocks.createBucket).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a query that redirects the read', 'bucket?alt=media'],
+    ['a fragment', 'bucket#frag'],
+    ['an escaped separator', 'bucket%2fobject'],
+    ['the parent directory', '..'],
+    ['a leading dot', '.bucket'],
+    ['an uppercase letter', 'Bucket'],
+    ['a space', 'my bucket'],
+    ['an empty name', ''],
+  ])('rejects %s', async (_description, bucketName) => {
+    const result = await getBucket({bucket_name: bucketName});
+
+    expect(result.status).toBe('ERROR');
+    expect(mocks.bucketNames).toStrictEqual([]);
+  });
+
+  it.each(['b', '0', 'my-bucket', 'my.bucket_1-x'])(
+    'accepts %s',
+    async (bucketName) => {
+      mocks.getMetadata.mockResolvedValue([{name: bucketName}]);
+
+      const result = await getBucket({bucket_name: bucketName});
+
+      expect(result.status).toBe('SUCCESS');
+      expect(mocks.bucketNames).toStrictEqual([bucketName]);
+    },
+  );
 });

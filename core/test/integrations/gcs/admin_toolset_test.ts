@@ -295,4 +295,20 @@ describe('GcsAdminToolset tool execution', () => {
     ).rejects.toThrow("Error in tool 'gcs_delete_bucket'");
     expect(mocks.bucketDelete).not.toHaveBeenCalled();
   });
+
+  it('answers a traversing bucket name with an error and no request', async () => {
+    const tool = await readWriteTool('gcs_get_bucket');
+
+    const result = await tool.runAsync({
+      args: {bucket_name: '../../../victim-bucket/o/secret.txt'},
+      toolContext: emptyContext,
+    });
+
+    expect(result).toStrictEqual({
+      status: 'ERROR',
+      error_details: expect.stringContaining('Invalid bucket name'),
+    });
+    expect(mocks.getMetadata).not.toHaveBeenCalled();
+    expect(mocks.clientOptions).toStrictEqual([]);
+  });
 });

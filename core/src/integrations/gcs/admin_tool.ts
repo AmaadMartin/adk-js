@@ -20,6 +20,40 @@ import {getGcsClient} from './client.js';
 export const DEFAULT_GCS_TOOL_NAME_PREFIX = 'gcs';
 
 /**
+ * The bucket names these tools accept.
+ *
+ * The character class is the one `@google-cloud/storage` recognises as a
+ * bucket in a `gs://` URL (`GS_URL_REGEXP` in its `src/file.ts`). The client
+ * joins a bucket name into the request path without escaping it, so a name
+ * carrying `/`, `?` or `#` addresses a resource outside the bucket API. The
+ * leading letter or digit keeps a name of dots alone out for the same reason.
+ */
+const BUCKET_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+
+/**
+ * The description the model reads for every `bucket_name` argument, so it can
+ * satisfy {@link BUCKET_NAME_PATTERN} on the first attempt.
+ */
+const BUCKET_NAME_RULE =
+  'It must start with a lowercase letter or a digit, and may contain only ' +
+  'lowercase letters, digits, dots, underscores and hyphens.';
+
+/**
+ * Rejects a bucket name the Cloud Storage client cannot address safely.
+ *
+ * A model populates this argument, so it is checked before it reaches a
+ * request path rather than trusted from the tool schema.
+ *
+ * @param bucketName The name to check.
+ * @throws If the name is not one {@link BUCKET_NAME_PATTERN} allows.
+ */
+function assertBucketName(bucketName: string): void {
+  if (!BUCKET_NAME_PATTERN.test(bucketName)) {
+    throw new Error(`Invalid bucket name '${bucketName}'. ${BUCKET_NAME_RULE}`);
+  }
+}
+
+/**
  * A successful Cloud Storage tool call and its payload.
  *
  * `status` and `results` are the keys adk-python returns, and the model reads
@@ -68,12 +102,16 @@ const listBucketsParameters = z.object({
 });
 
 const getBucketParameters = z.object({
-  bucket_name: z.string().describe('The name of the GCS bucket.'),
+  bucket_name: z
+    .string()
+    .describe(`The name of the GCS bucket. ${BUCKET_NAME_RULE}`),
 });
 
 const createBucketParameters = z.object({
   project_id: z.string().describe('The Google Cloud project id.'),
-  bucket_name: z.string().describe('The name of the GCS bucket to create.'),
+  bucket_name: z
+    .string()
+    .describe(`The name of the GCS bucket to create. ${BUCKET_NAME_RULE}`),
   location: z
     .string()
     .optional()
@@ -81,7 +119,9 @@ const createBucketParameters = z.object({
 });
 
 const updateBucketParameters = z.object({
-  bucket_name: z.string().describe('The name of the GCS bucket to update.'),
+  bucket_name: z
+    .string()
+    .describe(`The name of the GCS bucket to update. ${BUCKET_NAME_RULE}`),
   versioning_enabled: z
     .boolean()
     .optional()
@@ -93,7 +133,9 @@ const updateBucketParameters = z.object({
 });
 
 const deleteBucketParameters = z.object({
-  bucket_name: z.string().describe('The name of the GCS bucket to delete.'),
+  bucket_name: z
+    .string()
+    .describe(`The name of the GCS bucket to delete. ${BUCKET_NAME_RULE}`),
 });
 
 type ListBucketsArgs = z.infer<typeof listBucketsParameters>;
@@ -196,6 +238,7 @@ export async function getBucket(
   storageOptions?: StorageOptions,
 ): Promise<GcsToolResponse<BucketMetadata>> {
   return toGcsToolResponse(async () => {
+    assertBucketName(args.bucket_name);
     const storage = await getGcsClient(storageOptions);
     const [metadata] = await storage.bucket(args.bucket_name).getMetadata();
     return {status: 'SUCCESS', results: metadata};
@@ -214,6 +257,7 @@ export async function createBucket(
   storageOptions?: StorageOptions,
 ): Promise<GcsToolResponse<string>> {
   return toGcsToolResponse(async () => {
+    assertBucketName(args.bucket_name);
     const storage = await getGcsClient({
       ...storageOptions,
       projectId: args.project_id,
@@ -233,8 +277,9 @@ export async function createBucket(
 /**
  * Updates the versioning or the uniform bucket-level access of a bucket.
  *
- * A call that supplies neither field patches nothing and issues no request,
- * which is the condition adk-python guards its patch with.
+ * The bucket is read before it is patched, as adk-python reads it, so an
+ * unknown or forbidden bucket reports `ERROR` even when the call supplies no
+ * field to change. A call that supplies neither field patches nothing.
  *
  * @param args The bucket and the fields to change.
  * @param storageOptions Options for the Cloud Storage client.
@@ -245,6 +290,7 @@ export async function updateBucket(
   storageOptions?: StorageOptions,
 ): Promise<GcsToolResponse<string>> {
   return toGcsToolResponse(async () => {
+    assertBucketName(args.bucket_name);
     const patch: BucketMetadata = {};
     if (args.versioning_enabled !== undefined) {
       patch.versioning = {enabled: args.versioning_enabled};
@@ -257,9 +303,11 @@ export async function updateBucket(
       };
     }
 
+    const storage = await getGcsClient(storageOptions);
+    const bucket = storage.bucket(args.bucket_name);
+    await bucket.getMetadata();
     if (Object.keys(patch).length > 0) {
-      const storage = await getGcsClient(storageOptions);
-      await storage.bucket(args.bucket_name).setMetadata(patch);
+      await bucket.setMetadata(patch);
     }
     return {
       status: 'SUCCESS',
@@ -280,6 +328,7 @@ export async function deleteBucket(
   storageOptions?: StorageOptions,
 ): Promise<GcsToolResponse<string>> {
   return toGcsToolResponse(async () => {
+    assertBucketName(args.bucket_name);
     const storage = await getGcsClient(storageOptions);
     await storage.bucket(args.bucket_name).delete();
     return {

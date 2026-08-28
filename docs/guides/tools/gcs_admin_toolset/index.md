@@ -40,14 +40,14 @@ const agent = new LlmAgent({
 
 ## Allow the agent to change a bucket
 
-Pass the write capability, and pin the project and the credentials with `storageOptions`:
+Pass the write capability, and set the credentials with `storageOptions`:
 
 ```ts
 import {GcsAdminToolset, GcsCapability, LlmAgent} from '@google/adk';
 
 const admin = new GcsAdminToolset({
   settings: {capabilities: [GcsCapability.READ_WRITE]},
-  storageOptions: {projectId: 'my-project'},
+  storageOptions: {keyFilename: process.env.GCS_KEY_FILE},
 });
 
 const agent = new LlmAgent({
@@ -57,9 +57,13 @@ const agent = new LlmAgent({
 });
 ```
 
-`storageOptions` is the `StorageOptions` object of `@google-cloud/storage`, so it carries `projectId`, `credentials`, `authClient` or `keyFilename`. Omit it to use Application Default Credentials. ADK tags every request with the user agent `adk-gcs-tool google-adk/<version>`.
+`storageOptions` is the `StorageOptions` object of `@google-cloud/storage`, so it carries `credentials`, `authClient` or `keyFilename`. Omit it to use Application Default Credentials. ADK tags every request with the user agent `adk-gcs-tool google-adk/<version>`.
+
+A `projectId` in `storageOptions` does not confine the agent: `gcs_list_buckets` and `gcs_create_bucket` take `project_id` as an argument and the model chooses it, so the credentials decide which projects the agent can reach. Give the agent credentials scoped to the projects it is meant to administer.
 
 `gcs_delete_bucket` deletes a bucket permanently. The capability list is the only gate on it, so give an agent the write capability only when it is meant to have it.
+
+The tools accept a bucket name of lowercase letters, digits, dots, underscores and hyphens, starting with a letter or a digit. Any other name reports `ERROR` and sends no request, because the storage client puts the name into the request path unescaped.
 
 ## Expose a subset of the tools
 
