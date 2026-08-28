@@ -170,27 +170,6 @@ describe('AuthenticatedFunctionTool', () => {
     });
   });
 
-  describe('without an auth config', () => {
-    it('runs the function with no credential', async () => {
-      let received: AuthCredential | undefined | 'not called' = 'not called';
-      const tool = new AuthenticatedFunctionTool({
-        name: 'list_documents',
-        description: 'Lists the documents in a folder.',
-        execute: (_input, _toolContext, credential) => {
-          received = credential;
-          return 'ok';
-        },
-      });
-      const toolContext = createToolContext();
-
-      const result = await tool.runAsync({args: {}, toolContext});
-
-      expect(result).toBe('ok');
-      expect(received).toBeUndefined();
-      expect(toolContext.eventActions.requestedAuthConfigs).toEqual({});
-    });
-  });
-
   describe('when the client must supply a credential', () => {
     it('returns the default placeholder and does not run the function', async () => {
       let executed = false;

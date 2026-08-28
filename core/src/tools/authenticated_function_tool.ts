@@ -9,7 +9,6 @@ import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {CredentialManager} from '../auth/credential_manager.js';
 import {experimental} from '../utils/experimental.js';
-import {logger} from '../utils/logger.js';
 
 import {
   FunctionTool,
@@ -41,11 +40,8 @@ export interface AuthenticatedFunctionToolOptions<
   /** The function to run once a credential is available. */
   execute: AuthenticatedToolExecuteFunction<TParameters>;
 
-  /**
-   * What the tool authenticates with. Without it the tool runs the function
-   * straight away and the credential argument is `undefined`.
-   */
-  authConfig?: AuthConfig;
+  /** What the tool authenticates with. */
+  authConfig: AuthConfig;
 
   /**
    * What the tool returns while it waits for the client to supply a
@@ -133,20 +129,12 @@ export class AuthenticatedFunctionTool<
     super({
       ...toolOptions,
       name,
-      execute: authConfig
-        ? withCredential(
-            name,
-            new CredentialManager(authConfig),
-            execute,
-            responseForAuthRequired,
-          )
-        : (input, toolContext) => execute(input, toolContext, undefined),
+      execute: withCredential(
+        name,
+        new CredentialManager(authConfig),
+        execute,
+        responseForAuthRequired,
+      ),
     });
-    if (!authConfig) {
-      logger.warn(
-        `Tool '${name}' has no authConfig, so it skips authentication. ` +
-          'Use FunctionTool instead when the tool needs no credential.',
-      );
-    }
   }
 }
