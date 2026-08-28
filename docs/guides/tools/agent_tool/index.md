@@ -96,14 +96,22 @@ arguments always produce the same prompt text.
 
 ## What the tool returns
 
-The result is the text of the wrapped agent's last event. Thought parts are
-never included. Every other part contributes its text, its code execution output
-with trailing newlines removed, or the code it ran, in that order of preference.
-The pieces are joined with a newline, so a code-executing agent returns its code
-and its output rather than an empty string.
+The result is the text of the last event that carried content. A run can end on
+an event that carries none, such as one that only reports an error, and such an
+event does not replace the answer.
+
+Thought parts are never included. Every other part contributes its text, its
+code execution output with trailing newlines removed, or the code it ran, in
+that order of preference. The pieces are joined with a newline, so a
+code-executing agent returns its code and its output rather than an empty
+string.
 
 When an output schema resolves, the merged text is parsed as JSON and the parsed
 object is returned instead of the string.
+
+A wrapped agent that fails returns its error message, so the caller's model can
+read why it produced nothing. The tool returns an empty string only when there
+is no content and no error to report.
 
 ## State and sessions
 
