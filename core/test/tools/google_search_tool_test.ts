@@ -43,13 +43,18 @@ function makeToolContext(): Context {
 
 describe('GoogleSearchTool', () => {
   describe('processLlmRequest', () => {
-    it('returns early when model is not set', async () => {
+    it('throws when model is not set', async () => {
       const tool = new GoogleSearchTool();
       const req = makeRequest(undefined);
-      await tool.processLlmRequest({
-        llmRequest: req,
-        toolContext: {} as never,
-      });
+
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as never,
+        }),
+      ).rejects.toThrow(
+        'Google search tool is not supported for model undefined',
+      );
 
       expect(req.config?.tools).toEqual([]);
     });
