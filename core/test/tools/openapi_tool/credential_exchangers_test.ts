@@ -108,18 +108,18 @@ describe('AutoAuthCredentialExchanger', () => {
   it('throws CredentialExchangeError when no credential is supplied', async () => {
     const exchanger = new AutoAuthCredentialExchanger();
 
-    await expect(
+    const exchangeWithoutCredential = () =>
       exchanger.exchange({
         authScheme,
         authCredential: undefined as unknown as AuthCredential,
-      }),
-    ).rejects.toThrow(CredentialExchangeError);
-    await expect(
-      exchanger.exchange({
-        authScheme,
-        authCredential: undefined as unknown as AuthCredential,
-      }),
-    ).rejects.toThrow('authCredential is required for credential exchange.');
+      });
+
+    await expect(exchangeWithoutCredential()).rejects.toThrow(
+      CredentialExchangeError,
+    );
+    await expect(exchangeWithoutCredential()).rejects.toThrow(
+      'authCredential is required for credential exchange.',
+    );
   });
 
   it('uses a custom exchanger for a type with no default', async () => {
