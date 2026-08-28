@@ -6,13 +6,13 @@
 
 import {
   BIGQUERY_SCOPES,
-  BIGQUERY_TOKEN_CACHE_KEY,
   BigQueryCredentialsConfig,
   InputValidationError,
-  isOAuth2Client,
 } from '@google/adk';
 import {JWT, OAuth2Client, PassThroughClient} from 'google-auth-library';
 import {describe, expect, it} from 'vitest';
+// By path, because `isOAuth2Client` is deliberately not public API.
+import {isOAuth2Client} from '../../../src/integrations/bigquery/bigquery_credentials.js';
 
 const CLIENT_ID = 'test_client_id';
 const CLIENT_SECRET = 'test_client_secret';
@@ -177,9 +177,8 @@ describe('BigQueryCredentialsConfig', () => {
     ];
 
     for (const config of configs) {
-      expect(config.tokenCacheKey).toBe(BIGQUERY_TOKEN_CACHE_KEY);
+      expect(config.tokenCacheKey).toBe('bigquery_token_cache');
     }
-    expect(BIGQUERY_TOKEN_CACHE_KEY).toBe('bigquery_token_cache');
   });
 
   it('never hands two configurations the same scopes array', () => {

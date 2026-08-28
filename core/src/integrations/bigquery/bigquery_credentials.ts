@@ -9,9 +9,6 @@ import type {AuthClient, OAuth2Client} from 'google-auth-library';
 import {InputValidationError} from '../../errors/input_validation_error.js';
 import {experimental} from '../../utils/experimental.js';
 
-/** Session-state key the BigQuery tools cache their token under. */
-export const BIGQUERY_TOKEN_CACHE_KEY = 'bigquery_token_cache';
-
 /**
  * The scopes the BigQuery tools request when the caller names none. The tools
  * read table data through the BigQuery API and table metadata through Dataplex,
@@ -79,19 +76,29 @@ export class BigQueryCredentialsConfig {
   readonly clientId?: string;
   readonly clientSecret?: string;
   readonly scopes: string[];
-  /** Fixed, so that every BigQuery tool reads the token every other one wrote. */
-  readonly tokenCacheKey = BIGQUERY_TOKEN_CACHE_KEY;
+  /**
+   * Session-state key the BigQuery tools cache their token under. Fixed, so
+   * that every BigQuery tool reads the token every other one wrote.
+   */
+  readonly tokenCacheKey = 'bigquery_token_cache';
 
   constructor(options: BigQueryCredentialsConfigOptions) {
     validateCredentialSource(options);
-    const adopted = adoptOAuthIdentity(options.credentials);
+    // An authorized-user client already carries the OAuth identity and the
+    // granted scopes, so adopt them. adk-python copies the same three fields
+    // off a `google.oauth2.credentials.Credentials`.
+    const oauth =
+      options.credentials && isOAuth2Client(options.credentials)
+        ? options.credentials
+        : undefined;
     this.credentials = options.credentials;
     this.externalAccessTokenKey = options.externalAccessTokenKey;
-    this.clientId = adopted?.clientId ?? options.clientId;
-    this.clientSecret = adopted?.clientSecret ?? options.clientSecret;
+    this.clientId = oauth?._clientId ?? options.clientId;
+    this.clientSecret = oauth?._clientSecret ?? options.clientSecret;
+    const granted = oauth?.credentials.scope?.split(' ').filter(Boolean);
     // Copied rather than referenced, so that a later mutation of either the
     // caller's array or BIGQUERY_SCOPES cannot reach a validated config.
-    const scopes = adopted?.scopes ?? options.scopes;
+    const scopes = granted ?? options.scopes;
     this.scopes = scopes?.length ? [...scopes] : [...BIGQUERY_SCOPES];
   }
 }
@@ -100,6 +107,9 @@ export class BigQueryCredentialsConfig {
  * Whether the client belongs to the OAuth2 family, and so may carry an OAuth
  * identity. Structural rather than `instanceof`, which is false across two
  * copies of google-auth-library in one runtime.
+ *
+ * Exported for the tests only. `core/src/index.ts` names the public symbols of
+ * this module explicitly, so this generic guard stays out of `@google/adk`.
  */
 export function isOAuth2Client(
   credentials: AuthClient,
@@ -146,19 +156,4 @@ function validateCredentialSource(
         'client_id and client_secret pair.',
     );
   }
-}
-
-/**
- * The OAuth identity an authorized-user client carries. adk-python copies the
- * same three fields off a `google.oauth2.credentials.Credentials`.
- */
-function adoptOAuthIdentity(credentials?: AuthClient) {
-  if (!credentials || !isOAuth2Client(credentials)) {
-    return undefined;
-  }
-  return {
-    clientId: credentials._clientId,
-    clientSecret: credentials._clientSecret,
-    scopes: credentials.credentials.scope?.split(' ').filter(Boolean),
-  };
 }
