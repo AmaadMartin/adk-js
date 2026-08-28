@@ -13,33 +13,10 @@ import {
   generateReturnDoc,
   getTypeHint,
   normalizeSchema,
+  requiredSchemeName,
+  returnSchema,
   toSnakeCaseName,
 } from '../common/common.js';
-
-/**
- * Returns the scheme name a security list requires, or `''` when it requires
- * none.
- *
- * An empty requirement object is the OpenAPI idiom for optional
- * authentication. A tool that carries an auth scheme stops and asks the caller
- * for a credential instead of sending the request, so an optional requirement
- * resolves to no scheme; a caller that does want to authenticate passes the
- * scheme and the credential to the toolset.
- *
- * @param security The security requirements to read.
- * @returns The scheme name, or `''`.
- */
-export function requiredSchemeName(
-  security: OpenAPIV3.SecurityRequirementObject[] | undefined,
-): string {
-  if (!security || security.length === 0) {
-    return '';
-  }
-  if (security.some((requirement) => Object.keys(requirement).length === 0)) {
-    return '';
-  }
-  return Object.keys(security[0])[0];
-}
 
 /**
  * Names a request body that is not an object.
@@ -81,47 +58,20 @@ function readOperation(
 @experimental
 export class OperationParser {
   private params: ApiParameter[] = [];
-  private returnValue?: ApiParameter;
+  private readonly returnValue: ApiParameter;
   private preservePropertyNames: boolean;
   private readonly operation: OpenAPIV3.OperationObject;
 
   constructor(
     operation: OpenAPIV3.OperationObject | string,
-    options: {preservePropertyNames?: boolean; shouldParse?: boolean} = {},
+    options: {preservePropertyNames?: boolean} = {},
   ) {
     this.operation = readOperation(operation);
     this.preservePropertyNames = options.preservePropertyNames ?? false;
-    if (options.shouldParse ?? true) {
-      this.processOperationParameters();
-      this.processRequestBody();
-      this.processReturnValue();
-      this.dedupeParamNames();
-    }
-  }
-
-  /**
-   * Builds a parser over parameters that were parsed elsewhere.
-   *
-   * @param operation The operation the parameters came from.
-   * @param params The parameters to carry.
-   * @param returnValue The return value to carry.
-   * @param options How the parser reads names.
-   * @returns A parser that reports the supplied parameters.
-   */
-  @experimental
-  static load(
-    operation: OpenAPIV3.OperationObject | string,
-    params: ApiParameter[],
-    returnValue?: ApiParameter,
-    options: {preservePropertyNames?: boolean} = {},
-  ): OperationParser {
-    const parser = new OperationParser(operation, {
-      ...options,
-      shouldParse: false,
-    });
-    parser.params = params;
-    parser.returnValue = returnValue;
-    return parser;
+    this.processOperationParameters();
+    this.processRequestBody();
+    this.returnValue = this.processReturnValue();
+    this.dedupeParamNames();
   }
 
   private getParamName(originalName: string): string {
@@ -218,38 +168,11 @@ export class OperationParser {
     }
   }
 
-  private processReturnValue() {
-    const responses = this.operation.responses || {};
-    // Find first 2xx response
-    const validCodes = Object.keys(responses).filter((k) => k.startsWith('2'));
-    const min20x = validCodes.sort()[0];
-
-    let returnSchema: OpenAPIV3.SchemaObject = {};
-
-    if (min20x) {
-      const response = responses[min20x];
-      if ('$ref' in response) {
-        throw new Error(
-          `Response contains unresolved reference '${response.$ref}'`,
-        );
-      }
-      for (const [mimeType, mediaTypeObject] of Object.entries(
-        response.content || {},
-      )) {
-        if (mediaTypeObject.schema !== undefined) {
-          returnSchema = normalizeSchema(
-            mediaTypeObject.schema,
-            `response media type '${mimeType}'`,
-          );
-          break;
-        }
-      }
-    }
-
-    this.returnValue = createApiParameter({
+  private processReturnValue(): ApiParameter {
+    return createApiParameter({
       originalName: '',
       paramLocation: '',
-      paramSchema: returnSchema,
+      paramSchema: returnSchema(this.operation.responses || {}),
     });
   }
 
@@ -332,14 +255,10 @@ export class OperationParser {
   /**
    * Gets the value the operation returns.
    *
-   * @throws {Error} If the operation was never parsed.
    * @returns The return value.
    */
   @experimental
   public getReturnValue(): ApiParameter {
-    if (!this.returnValue) {
-      throw new Error('Operation return value has not been parsed');
-    }
     return this.returnValue;
   }
 

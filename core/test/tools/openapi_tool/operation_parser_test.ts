@@ -383,24 +383,6 @@ describe('OperationParser.getReturnTypeHint', () => {
 
     expect(new OperationParser(op).getReturnTypeHint()).toBe('unknown');
   });
-
-  it('should reject a hint when the operation was not parsed', () => {
-    const op: OpenAPIV3.OperationObject = {
-      operationId: 'getPet',
-      responses: {
-        '200': {
-          description: 'OK',
-          content: {'application/json': {schema: {type: 'string'}}},
-        },
-      },
-    };
-
-    const parser = new OperationParser(op, {shouldParse: false});
-
-    expect(() => parser.getReturnTypeHint()).toThrow(
-      'Operation return value has not been parsed',
-    );
-  });
 });
 
 describe('OperationParser construction', () => {
@@ -410,35 +392,11 @@ describe('OperationParser construction', () => {
     responses: {},
   };
 
-  it('should skip parsing when shouldParse is false', () => {
-    const parser = new OperationParser(op, {shouldParse: false});
-
-    expect(parser.getParameters()).toEqual([]);
-    expect(parser.getJsonSchema().properties).toEqual({});
-  });
-
   it('should parse an operation supplied as a JSON string', () => {
     const parser = new OperationParser(JSON.stringify(op));
 
     expect(parser.getFunctionName()).toBe('get_pet');
     expect(parser.getParameters()[0].name).toBe('pet_id');
-  });
-
-  it('should not read a schema the operation cannot resolve', () => {
-    const unresolved: OpenAPIV3.OperationObject = {
-      operationId: 'getPet',
-      parameters: [
-        {name: 'petId', in: 'path', schema: {$ref: '#/components/schemas/Id'}},
-      ],
-      responses: {},
-    };
-
-    expect(() => new OperationParser(unresolved)).toThrow(
-      'unresolved reference',
-    );
-    expect(
-      () => new OperationParser(unresolved, {shouldParse: false}),
-    ).not.toThrow();
   });
 
   it('should reject a JSON string that is not an object', () => {
@@ -451,91 +409,6 @@ describe('OperationParser construction', () => {
     expect(() => new OperationParser('null')).toThrow(
       'Operation must be a JSON object',
     );
-  });
-});
-
-describe('OperationParser.load', () => {
-  const op: OpenAPIV3.OperationObject = {
-    operationId: 'getPet',
-    summary: 'Get a pet',
-    parameters: [{name: 'petId', in: 'path', schema: {type: 'integer'}}],
-    responses: {},
-  };
-
-  const petId: ApiParameter = {
-    originalName: 'petId',
-    paramLocation: 'path',
-    paramSchema: {type: 'string', description: 'The pet id'},
-    description: 'The pet id',
-    name: 'pet_id',
-    required: true,
-  };
-
-  it('should report the supplied parameters instead of parsing', () => {
-    const parser = OperationParser.load(op, [petId]);
-
-    expect(parser.getParameters()).toEqual([petId]);
-    expect(parser.getJsonSchema()).toEqual({
-      type: 'object',
-      properties: {pet_id: {type: 'string', description: 'The pet id'}},
-      required: ['pet_id'],
-      title: 'getPet_Arguments',
-    });
-  });
-
-  it('should report the supplied return value', () => {
-    const returnValue: ApiParameter = {
-      originalName: '',
-      paramLocation: '',
-      paramSchema: {type: 'boolean'},
-      name: 'value',
-      required: false,
-    };
-
-    const parser = OperationParser.load(op, [], returnValue);
-
-    expect(parser.getReturnTypeHint()).toBe('boolean');
-  });
-
-  it('should not re-read an operation whose schema is unresolved', () => {
-    const unresolved: OpenAPIV3.OperationObject = {
-      operationId: 'getPet',
-      parameters: [
-        {name: 'petId', in: 'path', schema: {$ref: '#/components/schemas/Id'}},
-      ],
-      responses: {},
-    };
-
-    const parser = OperationParser.load(unresolved, [petId]);
-
-    expect(parser.getParameters()).toEqual([petId]);
-  });
-
-  it('should still read the function name from the operation', () => {
-    expect(OperationParser.load(op, []).getFunctionName()).toBe('get_pet');
-  });
-
-  it('should document the supplied parameters', () => {
-    const docString = OperationParser.load(op, [petId]).getDocString();
-
-    expect(docString).toBe(
-      'Get a pet\n\nArgs:\n    pet_id (string): The pet id\n\n',
-    );
-  });
-
-  it('should accept an operation supplied as a JSON string', () => {
-    const parser = OperationParser.load(JSON.stringify(op), [petId]);
-
-    expect(parser.getFunctionName()).toBe('get_pet');
-    expect(parser.getParameters()).toEqual([petId]);
-  });
-
-  it('should keep the supplied names when preserving property names', () => {
-    const parser = OperationParser.load(op, [petId], undefined, {
-      preservePropertyNames: true,
-    });
-
-    expect(parser.getParameters()[0].name).toBe('pet_id');
   });
 });
 
@@ -612,6 +485,26 @@ describe('OperationParser request body parity', () => {
       ['space_name', true],
       ['note', false],
     ]);
+  });
+
+  it('should list a required body property in the argument schema', () => {
+    const parser = new OperationParser({
+      operationId: 'testOp',
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {spaceName: {type: 'string'}, note: {type: 'string'}},
+              required: ['spaceName'],
+            },
+          },
+        },
+      },
+      responses: {},
+    });
+
+    expect(parser.getJsonSchema().required).toEqual(['space_name']);
   });
 
   it('should keep an empty name out of the argument schema', () => {
@@ -744,6 +637,22 @@ describe('OperationParser.getReturnValue', () => {
     expect(parser.getReturnTypeHint()).toBe('unknown');
   });
 
+  it('should document the response it also reports', () => {
+    const parser = new OperationParser({
+      operationId: 'getPet',
+      responses: {
+        '200': {description: 'No content'},
+        '201': {
+          description: 'Created',
+          content: {'application/json': {schema: {type: 'string'}}},
+        },
+      },
+    });
+
+    expect(parser.getReturnTypeHint()).toBe('string');
+    expect(parser.getDocString()).toContain('Returns (string): Created');
+  });
+
   it('should reject a response that is an unresolved reference', () => {
     const op: OpenAPIV3.OperationObject = {
       operationId: 'getPet',
@@ -752,17 +661,6 @@ describe('OperationParser.getReturnValue', () => {
 
     expect(() => new OperationParser(op)).toThrow(
       "Response contains unresolved reference '#/components/responses/Ok'",
-    );
-  });
-
-  it('should reject a return value the operation never parsed', () => {
-    const parser = new OperationParser(
-      {operationId: 'getPet', responses: {}},
-      {shouldParse: false},
-    );
-
-    expect(() => parser.getReturnValue()).toThrow(
-      'Operation return value has not been parsed',
     );
   });
 });

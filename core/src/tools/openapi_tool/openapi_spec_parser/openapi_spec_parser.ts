@@ -6,8 +6,8 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../../utils/experimental.js';
-import {ApiParameter} from '../common/common.js';
-import {OperationParser, requiredSchemeName} from './operation_parser.js';
+import {ApiParameter, requiredSchemeName} from '../common/common.js';
+import {OperationParser} from './operation_parser.js';
 
 const VALID_SCHEMA_TYPES = new Set([
   'array',

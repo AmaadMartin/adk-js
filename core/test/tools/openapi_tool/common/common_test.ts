@@ -4,17 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {ApiParameter} from '@google/adk';
+import {OpenAPIV3} from 'openapi-types';
+import {describe, expect, it} from 'vitest';
 import {
-  ApiParameter,
   createApiParameter,
   generateParamDoc,
   generateReturnDoc,
   getTypeHint,
   normalizeSchema,
+  requiredSchemeName,
+  returnSchema,
   toSnakeCaseName,
-} from '@google/adk';
-import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it} from 'vitest';
+} from '../../../../src/tools/openapi_tool/common/common.js';
 
 describe('normalizeSchema', () => {
   it('should return an empty schema for a missing schema', () => {
@@ -250,15 +252,41 @@ describe('createApiParameter', () => {
 
     expect(param.description).toBe('');
   });
+});
 
-  it('should name the parameter in a schema error', () => {
-    expect(() =>
-      createApiParameter({
-        originalName: 'petId',
-        paramLocation: 'path',
-        paramSchema: false,
+describe('requiredSchemeName', () => {
+  it('should take the first scheme of the first requirement', () => {
+    expect(requiredSchemeName([{apiKey: []}, {oauth2: ['read']}])).toBe(
+      'apiKey',
+    );
+  });
+
+  it('should require nothing when a requirement is empty', () => {
+    expect(requiredSchemeName([{apiKey: []}, {}])).toBe('');
+    expect(requiredSchemeName([{}, {apiKey: []}])).toBe('');
+  });
+
+  it('should require nothing for an absent or empty list', () => {
+    expect(requiredSchemeName(undefined)).toBe('');
+    expect(requiredSchemeName([])).toBe('');
+  });
+});
+
+describe('returnSchema', () => {
+  it('should read the smallest 2xx response that has content', () => {
+    expect(
+      returnSchema({
+        '200': {description: 'No content'},
+        '201': {
+          description: 'Created',
+          content: {'application/json': {schema: {type: 'string'}}},
+        },
       }),
-    ).toThrow("parameter 'petId' uses an unsatisfiable false schema");
+    ).toEqual({type: 'string'});
+  });
+
+  it('should be an empty schema when no 2xx response has content', () => {
+    expect(returnSchema({'204': {description: 'No content'}})).toEqual({});
   });
 });
 
@@ -606,12 +634,14 @@ describe('generateReturnDoc', () => {
     expect(generateReturnDoc(responses)).toBe('Returns (string): ');
   });
 
-  it('should skip a referenced response', () => {
+  it('should reject a referenced response', () => {
     const responses: OpenAPIV3.ResponsesObject = {
       '200': {$ref: '#/components/responses/Ok'},
     };
 
-    expect(generateReturnDoc(responses)).toBe('');
+    expect(() => generateReturnDoc(responses)).toThrow(
+      "Response contains unresolved reference '#/components/responses/Ok'",
+    );
   });
 
   it('should reject a referenced response schema', () => {
@@ -625,7 +655,8 @@ describe('generateReturnDoc', () => {
     };
 
     expect(() => generateReturnDoc(responses)).toThrow(
-      "response body contains unresolved reference '#/components/schemas/Pet'",
+      "response media type 'application/json' contains unresolved reference" +
+        " '#/components/schemas/Pet'",
     );
   });
 });
