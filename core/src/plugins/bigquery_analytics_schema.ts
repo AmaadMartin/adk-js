@@ -52,28 +52,16 @@ export enum AnalyticsEventType {
   HITL_CREDENTIAL_REQUEST_COMPLETED = 'HITL_CREDENTIAL_REQUEST_COMPLETED',
   HITL_CONFIRMATION_REQUEST_COMPLETED = 'HITL_CONFIRMATION_REQUEST_COMPLETED',
   HITL_INPUT_REQUEST_COMPLETED = 'HITL_INPUT_REQUEST_COMPLETED',
-  /**
-   * Declared so the enum matches the Python one, never written by this SDK.
-   * adk-js `BasePlugin` has no `onAgentErrorCallback`, so no hook reports an
-   * agent failure to a plugin.
-   */
+  // The four below name rows adk-python writes into a shared table and this
+  // SDK does not, each because adk-js has no source for them: `BasePlugin` has
+  // no `onAgentErrorCallback` or `onRunErrorCallback`, `EventActions` has no
+  // `compaction` field, and agent-to-agent capture is out of scope. They are
+  // declared because this enum is the reader's vocabulary for the column, not
+  // just the writer's: a consumer enumerating it must cover every row the
+  // table can hold, whichever SDK wrote it.
   AGENT_ERROR = 'AGENT_ERROR',
-  /**
-   * Declared so the enum matches the Python one, never written by this SDK.
-   * adk-js `BasePlugin` has no `onRunErrorCallback`, so no hook reports an
-   * invocation failure to a plugin.
-   */
   INVOCATION_ERROR = 'INVOCATION_ERROR',
-  /**
-   * Declared so the enum matches the Python one, never written by this SDK.
-   * adk-js `EventActions` has no `compaction` field, so no event carries a
-   * compaction to report.
-   */
   EVENT_COMPACTION = 'EVENT_COMPACTION',
-  /**
-   * Declared so the enum matches the Python one, never written by this SDK.
-   * Agent-to-agent interaction capture is out of scope for this port.
-   */
   A2A_INTERACTION = 'A2A_INTERACTION',
 }
 

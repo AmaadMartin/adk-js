@@ -2431,6 +2431,26 @@ describe('BigQueryAgentAnalyticsPlugin workflow nodes', () => {
     });
   });
 
+  it('takes a NODE_OUTPUT run id from the context, not from the path', async () => {
+    const plugin = makePlugin();
+    // A path whose last segment carries no `@runId`: only the context knows
+    // which run produced the output.
+    await plugin.afterNodeCallback({
+      node: new FunctionNode('summarize', () => 'done'),
+      nodeContext: new NodeContext({
+        invocationContext: makeInvocationContext(),
+        channel: new AsyncQueue<Event>(),
+        nodePath: 'summarize',
+        runId: '2',
+      }),
+      output: 'done',
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      adk: {node: {path: 'summarize', run_id: '2', parent_run_id: null}},
+    });
+  });
+
   it('writes a NODE_ERROR row for a node that failed', async () => {
     const plugin = makePlugin();
     await plugin.onEventCallback({

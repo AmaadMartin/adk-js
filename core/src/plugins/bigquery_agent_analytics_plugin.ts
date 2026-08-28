@@ -108,19 +108,16 @@ const LOGGED_GENERATION_CONFIG_KEYS: ReadonlyArray<
 const NO_CONTENT_LIMIT = -1;
 
 /**
- * The numeric options, with the smallest value each one can take. Each counts
- * whole rows or whole milliseconds, so each must be an integer.
- *
- * Below these a plugin builds but writes nothing useful: a queue of zero drops
- * every row, a batch of zero never fills, and a shutdown of zero drains
- * nothing.
+ * The options counting whole rows or whole milliseconds. Below 1 a plugin
+ * builds but writes nothing useful: a queue of zero drops every row, a batch
+ * of zero never fills, and a shutdown of zero drains nothing.
  */
-const CONFIG_MINIMUMS: ReadonlyArray<[NumericConfigKey, number]> = [
-  ['batchSize', 1],
-  ['batchFlushIntervalMs', 1],
-  ['shutdownTimeoutMs', 1],
-  ['queueMaxSize', 1],
-];
+const POSITIVE_INTEGER_KEYS = [
+  'batchSize',
+  'batchFlushIntervalMs',
+  'shutdownTimeoutMs',
+  'queueMaxSize',
+] as const satisfies ReadonlyArray<keyof BigQueryLoggerConfig>;
 
 /** Turns a payload into the value written to the `content` column. */
 export type AnalyticsContentFormatter = (
@@ -287,13 +284,6 @@ function buildLatency(data: AnalyticsEventData): Record<string, number> | null {
   return Object.keys(latency).length > 0 ? latency : null;
 }
 
-/** The {@link BigQueryLoggerConfig} fields {@link CONFIG_MINIMUMS} bounds. */
-type NumericConfigKey =
-  | 'batchSize'
-  | 'batchFlushIntervalMs'
-  | 'shutdownTimeoutMs'
-  | 'queueMaxSize';
-
 /**
  * Rejects a configuration that cannot produce a working plugin.
  *
@@ -305,12 +295,12 @@ type NumericConfigKey =
  * @throws Error when a numeric option is not an integer in range.
  */
 function validateConfig(config: BigQueryLoggerConfig): void {
-  for (const [name, minimum] of CONFIG_MINIMUMS) {
+  for (const name of POSITIVE_INTEGER_KEYS) {
     const value = config[name];
-    if (value !== undefined && (!Number.isInteger(value) || value < minimum)) {
+    if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
       throw new Error(
         `BigQueryAgentAnalyticsPlugin: ${name} must be an integer of at ` +
-          `least ${minimum}, got ${String(value)}.`,
+          `least 1, got ${String(value)}.`,
       );
     }
   }
@@ -532,10 +522,12 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         data: {
           adk: {
             node: {
-              ...parseNodeRunIds(nodeContext.nodePath),
               path: nodeContext.nodePath,
+              // The context knows this run's id; only the parent's is derived.
               run_id: nodeContext.runId,
-            },
+              parent_run_id: parseNodeRunIds(nodeContext.nodePath)
+                .parent_run_id,
+            } satisfies AnalyticsNode,
           },
         },
       });
