@@ -39,16 +39,8 @@ const SANITIZE_BUDGET_EXCEEDED = '[SANITIZE_BUDGET_EXCEEDED]';
 const REDACTED = '[REDACTED]';
 
 /**
- * Replaces a string that is shaped like JSON but cannot be verified free of
- * credentials. Such a string is dropped whole: a substring search over raw text
- * is bypassable through `\u005f`-style escapes, so text that does not parse
- * cannot be cleared.
- */
-const UNPARSEABLE_JSON_BLOB = '[UNPARSEABLE_JSON_BLOB]';
-
-/**
- * Longest string this module parses as JSON. A longer one is replaced instead,
- * which bounds the work a single adversarial payload can cause.
+ * Longest string this module parses as JSON. A longer one takes the free-text
+ * pass instead, which bounds the work a single adversarial payload can cause.
  */
 const MAX_INSPECT_CHARS = 4_000_000;
 
@@ -343,6 +335,22 @@ function sanitizeRecord(
 }
 
 /**
+ * Parses `text` as a JSON object or array, or returns undefined when it is not
+ * one. Text past {@link MAX_INSPECT_CHARS} is not parsed, so one adversarial
+ * payload cannot buy unbounded parse time.
+ */
+function parseJsonStructure(text: string): {value: unknown} | undefined {
+  if (!isJsonShaped(text) || text.length > MAX_INSPECT_CHARS) {
+    return undefined;
+  }
+  try {
+    return {value: JSON.parse(text) as unknown};
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Sanitizes a string leaf.
  *
  * A credential often arrives as an opaque JSON string — a tool result, a
@@ -352,29 +360,22 @@ function sanitizeRecord(
  * duplicate key: a blob carrying the secret under an earlier copy of the key
  * would otherwise pass through as its own raw text.
  *
- * A string that is shaped like JSON but does not parse is replaced whole. It
- * cannot be shown to be free of credentials, and searching its raw text is
- * bypassable. Everything else goes through the free-text pass.
+ * Every other string takes the free-text pass, which redacts by pattern. That
+ * includes a string that merely opens with a bracket, because model output and
+ * tool arguments are full of them: a log line, a markdown link and a dict repr
+ * all start that way and none of them parse.
  */
 function sanitizeStringLeaf(
   text: string,
   state: SanitizeState,
   depth: number,
 ): SanitizeResult {
-  if (!isJsonShaped(text)) {
+  const parsed = parseJsonStructure(text);
+  if (parsed === undefined) {
     const sanitized = sanitizeErrorText(text, state.maxLength);
     return {value: sanitized.text, truncated: sanitized.truncated};
   }
-  if (text.length > MAX_INSPECT_CHARS) {
-    return {value: UNPARSEABLE_JSON_BLOB, truncated: true};
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return {value: UNPARSEABLE_JSON_BLOB, truncated: true};
-  }
-  const walked = sanitizeValue(parsed, state, depth + 1);
+  const walked = sanitizeValue(parsed.value, state, depth + 1);
   const bounded = truncateText(JSON.stringify(walked.value), state.maxLength);
   return {
     value: bounded.text,
