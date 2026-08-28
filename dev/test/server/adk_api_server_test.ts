@@ -223,6 +223,26 @@ class RecordingToolset extends BaseToolset {
   }
 }
 
+/**
+ * An AgentLoader that always serves `agent` as the app `testApp`. The cast
+ * stands in for the loader's file-watching and disposal members, which the
+ * server never reaches on these routes.
+ */
+function createAgentLoader(agent: LlmAgent): AgentLoader {
+  return {
+    listAgents: () => Promise.resolve(['testApp']),
+    getAgentFile: () =>
+      Promise.resolve({
+        load() {
+          return Promise.resolve(agent);
+        },
+        async [Symbol.asyncDispose](): Promise<void> {
+          return;
+        },
+      }),
+  } as unknown as AgentLoader;
+}
+
 const TEST_AGENT = new TestAgent({
   name: 'testAgent',
   description: 'test agent',
@@ -245,18 +265,7 @@ describe('AdkWebServer', () => {
   let client: HttpClient;
 
   beforeEach(async () => {
-    agentLoader = {
-      listAgents: () => Promise.resolve(['testApp']),
-      getAgentFile: () =>
-        Promise.resolve({
-          load() {
-            return Promise.resolve(TEST_AGENT);
-          },
-          async [Symbol.asyncDispose](): Promise<void> {
-            return;
-          },
-        }),
-    } as unknown as AgentLoader;
+    agentLoader = createAgentLoader(TEST_AGENT);
     sessionService = new InMemorySessionService();
     memoryService = new InMemoryMemoryService();
     artifactService = new InMemoryArtifactService();
@@ -1808,18 +1817,10 @@ describe('AdkWebServer', () => {
 
     beforeEach(async () => {
       toolset = new RecordingToolset();
-      const agent = new TestAgent({name: 'testAgent', tools: [toolset]});
       teardownServer = new AdkApiServer({
-        agentLoader: {
-          listAgents: () => Promise.resolve(['testApp']),
-          getAgentFile: () =>
-            Promise.resolve({
-              load: () => Promise.resolve(agent),
-              async [Symbol.asyncDispose](): Promise<void> {
-                return;
-              },
-            }),
-        } as unknown as AgentLoader,
+        agentLoader: createAgentLoader(
+          new TestAgent({name: 'testAgent', tools: [toolset]}),
+        ),
         sessionService,
         memoryService,
         artifactService,
