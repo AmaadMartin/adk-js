@@ -6,6 +6,7 @@
 
 import {describe, expect, it} from 'vitest';
 import {
+  getArtifactUri,
   isArtifactUri,
   nextArtifactRequest,
   parseArtifactUri,
@@ -81,6 +82,72 @@ describe('parseArtifactUri', () => {
     '',
   ])('returns undefined for %s', (uri) => {
     expect(parseArtifactUri(uri)).toBeUndefined();
+  });
+});
+
+describe('getArtifactUri', () => {
+  it('names a session-scoped artifact', () => {
+    expect(
+      getArtifactUri({
+        appName: 'app1',
+        userId: 'user1',
+        sessionId: 'session1',
+        filename: 'file1',
+        version: 123,
+      }),
+    ).toBe(SESSION_SCOPED_URI);
+  });
+
+  it('omits the session segment when no session is given', () => {
+    expect(
+      getArtifactUri({
+        appName: 'app1',
+        userId: 'user1',
+        filename: 'file2',
+        version: 456,
+      }),
+    ).toBe(USER_SCOPED_URI);
+  });
+
+  it('treats an empty session id as user-scoped', () => {
+    expect(
+      getArtifactUri({
+        appName: 'app1',
+        userId: 'user1',
+        sessionId: '',
+        filename: 'file2',
+        version: 456,
+      }),
+    ).toBe(USER_SCOPED_URI);
+  });
+
+  it.each([
+    {
+      appName: 'app1',
+      userId: 'user1',
+      sessionId: 'session1',
+      filename: 'file1',
+      version: 0,
+    },
+    {
+      appName: 'app2',
+      userId: 'user2',
+      sessionId: 'session2',
+      filename: 'folder/file1',
+      version: 7,
+    },
+    {appName: 'app3', userId: 'user3', filename: 'file3', version: 42},
+    {
+      appName: 'app4',
+      userId: 'user4',
+      filename: 'folder/nested/file4',
+      version: 99,
+    },
+  ])('round-trips $filename through parseArtifactUri', (artifact) => {
+    expect(parseArtifactUri(getArtifactUri(artifact))).toEqual({
+      sessionId: undefined,
+      ...artifact,
+    });
   });
 });
 

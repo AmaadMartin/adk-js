@@ -26,6 +26,16 @@ export interface ParsedArtifactUri {
   version: number;
 }
 
+/** The scope and identity of the artifact a URI names. */
+export interface GetArtifactUriOptions {
+  appName: string;
+  userId: string;
+  filename: string;
+  version: number;
+  /** Omit, or leave empty, to name a user-scoped artifact. */
+  sessionId?: string;
+}
+
 /** The caller's scope, plus the file URI that references another artifact. */
 interface ArtifactReference {
   appName: string;
@@ -79,6 +89,30 @@ export function parseArtifactUri(uri: string): ParsedArtifactUri | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Builds the artifact URI that names one version of one artifact.
+ *
+ * This is the counterpart of {@link parseArtifactUri}: a caller that stores a
+ * reference builds the URI here, and the service that follows it parses it
+ * there.
+ *
+ * @param options The scope and identity of the artifact to name.
+ * @return A session-scoped URI when a session id is given, a user-scoped one
+ *     otherwise.
+ */
+export function getArtifactUri({
+  appName,
+  userId,
+  filename,
+  version,
+  sessionId,
+}: GetArtifactUriOptions): string {
+  const scope = sessionId
+    ? `apps/${appName}/users/${userId}/sessions/${sessionId}`
+    : `apps/${appName}/users/${userId}`;
+  return `${ARTIFACT_URI_SCHEME}${scope}/artifacts/${filename}/versions/${version}`;
 }
 
 /**
