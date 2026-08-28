@@ -36,6 +36,11 @@ export {
   loadSkillFromDir,
   validateSkillDir,
 } from './skills/loader.js';
+export {ExecuteBashTool} from './tools/bash_tool.js';
+export type {
+  BashToolPolicy,
+  ExecuteBashToolOptions,
+} from './tools/bash_tool.js';
 export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
