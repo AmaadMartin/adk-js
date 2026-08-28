@@ -34,12 +34,14 @@ const SURVIVOR_LIFETIME_MS = 10_000;
 /** Upper bound on a timed-out call: comfortably short of the command itself. */
 const TIMED_OUT_BY_MS = 5_000;
 
+/** Long enough that a timeout resolved to a near-zero delay fires first. */
+const OUTLIVES_MS = 500;
+
 function makePolicy(
   overrides: Partial<ResolvedBashToolPolicy> = {},
 ): ResolvedBashToolPolicy {
   return {
     allowedCommandPrefixes: ['*'],
-    blockedOperators: [],
     timeoutSeconds: 30,
     ...overrides,
   };
@@ -100,18 +102,6 @@ describe('validateCommand', () => {
       'Command blocked. Permitted prefixes are: ls, cat',
     );
   });
-
-  it('reports the first blocked operator in policy order', () => {
-    const policy = makePolicy({
-      blockedOperators: ['|', ';', '$(', '`', '&&', '||'],
-    });
-    expect(validateCommand('echo hello | grep h', policy)).toBe(
-      'Command contains blocked operator: |',
-    );
-    expect(validateCommand('ls ; rm -rf /', policy)).toBe(
-      'Command contains blocked operator: ;',
-    );
-  });
 });
 
 describe('ExecuteBashTool declaration', () => {
@@ -135,6 +125,17 @@ describe('ExecuteBashTool declaration', () => {
 
   it('describes the default policy as allowing any command', () => {
     expect(new ExecuteBashTool().description).toBe(
+      'Executes a bash command with the working directory set to the ' +
+        'workspace. Allowed: any command. All commands require user ' +
+        'confirmation.',
+    );
+  });
+
+  it('defaults every policy field an explicit undefined leaves open', () => {
+    const tool = new ExecuteBashTool({
+      policy: {allowedCommandPrefixes: undefined, timeoutSeconds: undefined},
+    });
+    expect(tool.description).toBe(
       'Executes a bash command with the working directory set to the ' +
         'workspace. Allowed: any command. All commands require user ' +
         'confirmation.',
@@ -359,6 +360,20 @@ describe.skipIf(process.platform === 'win32')('ExecuteBashTool', () => {
     });
     const result = await tool.runAsync({
       args: {command: 'ls'},
+      toolContext: confirmedContext(),
+    });
+    expect(result).toMatchObject({returncode: 0});
+  });
+
+  it('applies the default timeout when the policy passes undefined', async () => {
+    const tool = new ExecuteBashTool({
+      workspace,
+      policy: {timeoutSeconds: undefined},
+    });
+    // Outlives any near-zero timeout, so a default that resolves to `undefined`
+    // kills the command instead of letting it finish.
+    const result = await tool.runAsync({
+      args: {command: `${NODE} -e "setTimeout(() => {}, ${OUTLIVES_MS})"`},
       toolContext: confirmedContext(),
     });
     expect(result).toMatchObject({returncode: 0});

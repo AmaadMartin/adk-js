@@ -34,8 +34,6 @@ const NO_STDERR_CAPTURED = '<no stderr captured>';
 export interface BashToolPolicy {
   /** Allowed command prefixes. `['*']` (the default) allows any command. */
   allowedCommandPrefixes?: readonly string[];
-  /** Substrings that reject a command outright. Empty by default. */
-  blockedOperators?: readonly string[];
   /** Wall-clock budget in seconds. `null` disables the timeout. */
   timeoutSeconds?: number | null;
 }
@@ -49,22 +47,19 @@ export interface ExecuteBashToolOptions {
 }
 
 /** A {@link BashToolPolicy} with every defaulted field filled in. */
-export interface ResolvedBashToolPolicy extends BashToolPolicy {
-  allowedCommandPrefixes: readonly string[];
-  blockedOperators: readonly string[];
-  timeoutSeconds: number | null;
-}
+export type ResolvedBashToolPolicy = Required<BashToolPolicy>;
 
-const DEFAULT_BASH_TOOL_POLICY: ResolvedBashToolPolicy = {
-  allowedCommandPrefixes: [ALLOW_ANY_COMMAND],
-  blockedOperators: [],
-  timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
-};
-
-/** Fills in the defaults a caller left out. */
-function resolvePolicy(policy: BashToolPolicy): ResolvedBashToolPolicy {
-  const {timeoutSeconds = DEFAULT_TIMEOUT_SECONDS} = policy;
-  return {...DEFAULT_BASH_TOOL_POLICY, ...policy, timeoutSeconds};
+/**
+ * Fills in the defaults a caller left out.
+ *
+ * Each field defaults on its own, so an explicit `undefined` — what an
+ * optional config field spreads to — resolves the same way an absent one does.
+ */
+function resolvePolicy({
+  allowedCommandPrefixes = [ALLOW_ANY_COMMAND],
+  timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
+}: BashToolPolicy): ResolvedBashToolPolicy {
+  return {allowedCommandPrefixes, timeoutSeconds};
 }
 
 /** Renders the `Allowed:` clause of the tool description. */
@@ -88,11 +83,6 @@ export function validateCommand(
   const stripped = command.trim();
   if (!stripped) {
     return 'Command is required.';
-  }
-  for (const operator of policy.blockedOperators) {
-    if (command.includes(operator)) {
-      return `Command contains blocked operator: ${operator}`;
-    }
   }
   if (policy.allowedCommandPrefixes.includes(ALLOW_ANY_COMMAND)) {
     return undefined;
@@ -187,7 +177,7 @@ export class ExecuteBashTool extends BaseTool {
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
     const command = args['command'];
-    if (typeof command !== 'string' || !command) {
+    if (typeof command !== 'string') {
       return {error: 'Command is required.'};
     }
 
