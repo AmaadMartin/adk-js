@@ -5,29 +5,6 @@
  */
 
 /**
- * Converts a snake_case string to a lowerCamelCase string.
- *
- * A string that holds no underscore is returned unchanged, so an already
- * camelCased name keeps its capitals.
- *
- * @param snakeCaseString The input snake_case string.
- * @returns The lowerCamelCase string.
- */
-export function snakeToLowerCamel(snakeCaseString: string): string {
-  if (!snakeCaseString.includes('_')) {
-    return snakeCaseString;
-  }
-  return snakeCaseString
-    .split('_')
-    .map((word, index) =>
-      index === 0
-        ? word.toLowerCase()
-        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(),
-    )
-    .join('');
-}
-
-/**
  * Recursively converts snake_case keys of an object to camelCase.
  *
  * @param val The value to convert.

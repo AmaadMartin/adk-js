@@ -1566,6 +1566,7 @@ describe('RestApiTool adk-python parity', () => {
       parameters: [],
     };
     const incomplete: Array<[string, Record<string, unknown>]> = [
+      ['no name', {...complete, name: undefined}],
       ['no parameters', {...complete, parameters: undefined}],
       [
         'a parameters value that is not an array',
@@ -1577,13 +1578,13 @@ describe('RestApiTool adk-python parity', () => {
 
     it.each(incomplete)('should reject a document with %s', (_case, value) => {
       expect(() => createRestApiToolFromJson(JSON.stringify(value))).toThrow(
-        'A serialized ParsedOperation needs an endpoint, an operation and a ' +
-          'parameters array.',
+        'A serialized ParsedOperation needs a name, an endpoint, an ' +
+          'operation and a parameters array.',
       );
     });
   });
 
-  describe('OperationParser.load', () => {
+  describe('OperationParser', () => {
     it('should report the parameters it is given', () => {
       const parameters: ApiParameter[] = [
         {
@@ -1595,12 +1596,12 @@ describe('RestApiTool adk-python parity', () => {
         },
       ];
 
-      const parser = OperationParser.load(
+      const parser = new OperationParser(
         {
           responses: {},
           parameters: [{name: 'fromOperation', in: 'query', schema: {}}],
         },
-        parameters,
+        {parameters},
       );
 
       expect(parser.getParameters()).toEqual(parameters);
@@ -1684,7 +1685,7 @@ describe('RestApiTool request and response parity', () => {
         operation,
         undefined,
         undefined,
-        {fetchFn, operationParser: OperationParser.load(operation, parameters)},
+        {fetchFn, parameters},
       );
 
       await tool.runAsync({
@@ -1757,10 +1758,7 @@ describe('RestApiTool request and response parity', () => {
         postOperation,
         undefined,
         undefined,
-        {
-          fetchFn,
-          operationParser: OperationParser.load(postOperation, parameters),
-        },
+        {fetchFn, parameters},
       );
       tool.setDefaultHeaders({'Content-Type': 'text/plain'});
 
@@ -1919,10 +1917,7 @@ describe('RestApiTool request and response parity', () => {
         defaultedOperation,
         undefined,
         undefined,
-        {
-          fetchFn,
-          operationParser: OperationParser.load(defaultedOperation, parameters),
-        },
+        {fetchFn, parameters},
       );
     }
 
