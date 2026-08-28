@@ -5,10 +5,10 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys, toSnakeCase} from '../../src/utils/case_utils.js';
+import {camelCaseKeys, snakeCase} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
-  describe('toSnakeCase', () => {
+  describe('snakeCase', () => {
     // Every expectation is the output of `_to_snake_case` in adk-python for
     // the same input.
     it.each([
@@ -26,7 +26,7 @@ describe('case_utils', () => {
       ['', ''],
       ['___', ''],
     ])('should convert %j to %j', (input, expected) => {
-      expect(toSnakeCase(input)).toBe(expected);
+      expect(snakeCase(input)).toBe(expected);
     });
   });
 

@@ -17,7 +17,7 @@
  * @returns The snake_case form of the string, without leading or trailing
  *   underscores.
  */
-export function toSnakeCase(text: string): string {
+export function snakeCase(text: string): string {
   return text
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
