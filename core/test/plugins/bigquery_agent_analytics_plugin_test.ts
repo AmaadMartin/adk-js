@@ -2763,6 +2763,63 @@ describe('BigQueryAgentAnalyticsPlugin OpenTelemetry correlation', () => {
     expect(parseColumn(onlyRow().attributes)).not.toHaveProperty('otel');
   });
 
+  it('adopts the ambient trace id on a row written before any span opens', async () => {
+    const active = vi
+      .spyOn(trace, 'getActiveSpan')
+      .mockReturnValue(ambientSpan);
+    const plugin = makePlugin();
+    await plugin.onUserMessageCallback({
+      invocationContext: makeInvocationContext(),
+      userMessage: {role: 'user', parts: [{text: 'weather?'}]},
+    });
+    active.mockRestore();
+    await plugin.flush();
+    expect(onlyRow().trace_id).toBe('0af7651916cd43dd8448eb211c80319c');
+  });
+
+  it('falls back to the invocation id for a row written after the run ended', async () => {
+    const active = vi.spyOn(trace, 'getActiveSpan').mockReturnValue(undefined);
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext({invocationId: 'inv-late'});
+    await plugin.beforeRunCallback({invocationContext});
+    // afterRunCallback forgets the stack, so a later event has no span to read.
+    await plugin.afterRunCallback({invocationContext});
+    await plugin.onEventCallback({
+      invocationContext,
+      event: createEvent({
+        author: 'root_agent',
+        actions: createEventActions({stateDelta: {step: 'late'}}),
+      }),
+    });
+    active.mockRestore();
+    await plugin.flush();
+    const late = rowsOfType(AnalyticsEventType.STATE_DELTA);
+    expect(late).toHaveLength(1);
+    expect(late[0].trace_id).toBe('inv-late');
+  });
+
+  it('adopts the ambient trace id for a row written after the run ended', async () => {
+    const active = vi
+      .spyOn(trace, 'getActiveSpan')
+      .mockReturnValue(ambientSpan);
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext({invocationId: 'inv-amb'});
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.afterRunCallback({invocationContext});
+    await plugin.onEventCallback({
+      invocationContext,
+      event: createEvent({
+        author: 'root_agent',
+        actions: createEventActions({stateDelta: {step: 'late'}}),
+      }),
+    });
+    active.mockRestore();
+    await plugin.flush();
+    const late = rowsOfType(AnalyticsEventType.STATE_DELTA);
+    expect(late).toHaveLength(1);
+    expect(late[0].trace_id).toBe('0af7651916cd43dd8448eb211c80319c');
+  });
+
   it('writes no otel attribute when no valid span is active', async () => {
     const invalid = trace.wrapSpanContext({
       traceId: '00000000000000000000000000000000',
