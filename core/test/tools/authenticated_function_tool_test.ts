@@ -12,6 +12,7 @@ import {
   AuthenticatedFunctionTool,
   BaseCredentialService,
   Context,
+  CredentialManager,
   InvocationContext,
   PENDING_USER_AUTHORIZATION,
   PluginManager,
@@ -19,6 +20,8 @@ import {
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {z} from 'zod/v4';
+
+import {withCredential} from '../../src/tools/authenticated_function_tool.js';
 
 const CREDENTIAL_KEY = 'documents_api';
 
@@ -286,6 +289,18 @@ describe('AuthenticatedFunctionTool', () => {
         "Error in tool 'list_documents': rawAuthCredential is required for authScheme type oauth2.",
       );
       expect(executed).toBe(false);
+    });
+
+    it('rejects a call that arrives with no tool context', async () => {
+      const wrapped = withCredential(
+        'list_documents',
+        new CredentialManager(API_KEY_AUTH_CONFIG),
+        () => 'ok',
+      );
+
+      await expect(wrapped('', undefined)).rejects.toThrow(
+        "Tool 'list_documents' requires authentication but no tool context was provided.",
+      );
     });
   });
 
