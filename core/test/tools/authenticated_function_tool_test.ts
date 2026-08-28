@@ -77,21 +77,24 @@ function createToolContext(options?: {
 }
 
 /**
- * Holds every load until {@link release} is called, so two concurrent tool
- * calls can be made to overlap.
+ * Serves a different credential per user. When gated, it holds every load
+ * until {@link release}, so two tool calls can be made to overlap.
  */
-class GatedCredentialService implements BaseCredentialService {
+class PerUserCredentialService implements BaseCredentialService {
   private readonly waiting: Array<() => void> = [];
 
   constructor(
     private readonly credentialsByUser: Record<string, AuthCredential>,
+    private readonly gated = false,
   ) {}
 
   async loadCredential(
     authConfig: AuthConfig,
     toolContext: Context,
   ): Promise<AuthCredential | undefined> {
-    await new Promise<void>((resolve) => this.waiting.push(resolve));
+    if (this.gated) {
+      await new Promise<void>((resolve) => this.waiting.push(resolve));
+    }
     return this.credentialsByUser[toolContext.invocationContext.session.userId];
   }
 
@@ -379,9 +382,9 @@ describe('AuthenticatedFunctionTool', () => {
     });
   });
 
-  describe('concurrent calls', () => {
-    it('gives each call its own credential', async () => {
-      const credentialService = new GatedCredentialService({
+  describe('calls do not share state', () => {
+    it('resolves a credential per call, not once per tool', async () => {
+      const credentialService = new PerUserCredentialService({
         user_1: {
           authType: AuthCredentialTypes.OAUTH2,
           oauth2: {accessToken: 'token-for-user-1'},
@@ -391,6 +394,41 @@ describe('AuthenticatedFunctionTool', () => {
           oauth2: {accessToken: 'token-for-user-2'},
         },
       });
+      const tool = new AuthenticatedFunctionTool({
+        name: 'list_documents',
+        description: 'Lists the documents in a folder.',
+        authConfig: CONSENT_REQUIRED_AUTH_CONFIG,
+        execute: (_input, _toolContext, credential) =>
+          credential?.oauth2?.accessToken,
+      });
+
+      const first = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext({credentialService, userId: 'user_1'}),
+      });
+      const second = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext({credentialService, userId: 'user_2'}),
+      });
+
+      expect(first).toBe('token-for-user-1');
+      expect(second).toBe('token-for-user-2');
+    });
+
+    it('gives each overlapping call its own credential', async () => {
+      const credentialService = new PerUserCredentialService(
+        {
+          user_1: {
+            authType: AuthCredentialTypes.OAUTH2,
+            oauth2: {accessToken: 'token-for-user-1'},
+          },
+          user_2: {
+            authType: AuthCredentialTypes.OAUTH2,
+            oauth2: {accessToken: 'token-for-user-2'},
+          },
+        },
+        true,
+      );
       const tool = new AuthenticatedFunctionTool({
         name: 'list_documents',
         description: 'Lists the documents in a folder.',
