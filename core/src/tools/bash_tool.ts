@@ -26,10 +26,21 @@ const NO_STDERR_CAPTURED = '<no stderr captured>';
  *
  * A prefix allowlist is a coarse filter, not a sandbox: it compares the start
  * of the trimmed command string, so `cat` also admits `catalog`.
+ *
+ * adk-python's three resource limits are absent because Node has no
+ * `setrlimit` and no `preexec_fn`, so nothing here could enforce them.
  */
 export interface BashToolPolicy {
   /** Allowed command prefixes. `['*']` (the default) allows any command. */
   allowedCommandPrefixes?: readonly string[];
+  /**
+   * Substrings that refuse a command outright. Empty by default.
+   *
+   * This is the only filter that reads a command's arguments, so it is how a
+   * policy says "`git`, but never `push --force`". It matches the raw string,
+   * so the substring refuses the command even inside a quoted argument.
+   */
+  blockedOperators?: readonly string[];
   /** Wall-clock budget in seconds. `null` disables the timeout. */
   timeoutSeconds?: number | null;
 }
@@ -53,9 +64,10 @@ export type ResolvedBashToolPolicy = Required<BashToolPolicy>;
  */
 function resolvePolicy({
   allowedCommandPrefixes = [ALLOW_ANY_COMMAND],
+  blockedOperators = [],
   timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
 }: BashToolPolicy): ResolvedBashToolPolicy {
-  return {allowedCommandPrefixes, timeoutSeconds};
+  return {allowedCommandPrefixes, blockedOperators, timeoutSeconds};
 }
 
 /** Renders the `Allowed:` clause of the tool description. */
@@ -79,6 +91,12 @@ export function validateCommand(
   const stripped = command.trim();
   if (!stripped) {
     return 'Command is required.';
+  }
+  // Before the allow-any check, so a denylist still applies under the default
+  // policy. Matched against the raw command, so padding cannot hide an entry.
+  const blocked = policy.blockedOperators.find((op) => command.includes(op));
+  if (blocked !== undefined) {
+    return `Command contains blocked operator: ${blocked}`;
   }
   if (policy.allowedCommandPrefixes.includes(ALLOW_ANY_COMMAND)) {
     return undefined;
