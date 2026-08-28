@@ -352,7 +352,6 @@ export type {TaskExecutable} from './utils/task.js';
 export {GoogleLLMVariant} from './utils/variant_utils.js';
 export {version} from './version.js';
 
-export {getBigquerySkill} from './integrations/bigquery/bigquery_skill.js';
 export {GCPSkillRegistry} from './skills/gcp_skill_registry.js';
 export type {GCPSkillRegistryOptions} from './skills/gcp_skill_registry.js';
 export {
