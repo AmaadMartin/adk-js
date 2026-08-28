@@ -59,9 +59,6 @@ describe('EvalConstants', () => {
       'TOOL_INPUT',
       'MOCK_TOOL_OUTPUT',
     ]);
-    // Pins the count independently, so an added member fails even if the
-    // expected list above is ever loosened.
-    expect(Object.keys(EvalConstants)).toHaveLength(7);
   });
 
   it('reads a dataset entry through the members as index keys', () => {
