@@ -46,23 +46,6 @@ export interface ApiHubResourceNames {
   apiSpecResourceName?: string;
 }
 
-/** An API Hub API resource. Declares the fields this client reads. */
-interface ApiHubApi {
-  /** Resource names of the API's versions. */
-  versions?: string[];
-}
-
-/** An API Hub API version resource. Declares the fields this client reads. */
-interface ApiHubApiVersion {
-  /** Resource names of the version's specs. */
-  specs?: string[];
-}
-
-interface ApiHubSpecContents {
-  /** The base64-encoded spec. */
-  contents?: string;
-}
-
 function segmentAfter(segments: string[], keyword: string): string | undefined {
   const index = segments.indexOf(keyword);
   return index === -1 ? undefined : segments[index + 1];
@@ -181,7 +164,7 @@ export class APIHubClient implements BaseAPIHubClient {
 
     let apiVersionResourceName = names.apiVersionResourceName;
     if (!apiVersionResourceName) {
-      const api = await this.get<ApiHubApi>(
+      const api = await this.get<{versions?: string[]}>(
         `${APIHUB_ROOT_URL}/${names.apiResourceName}`,
       );
       const versions = api.versions ?? [];
@@ -195,7 +178,7 @@ export class APIHubClient implements BaseAPIHubClient {
 
     let apiSpecResourceName = names.apiSpecResourceName;
     if (!apiSpecResourceName) {
-      const apiVersion = await this.get<ApiHubApiVersion>(
+      const apiVersion = await this.get<{specs?: string[]}>(
         `${APIHUB_ROOT_URL}/${apiVersionResourceName}`,
       );
       const specs = apiVersion.specs ?? [];
@@ -211,7 +194,7 @@ export class APIHubClient implements BaseAPIHubClient {
   }
 
   private async fetchSpec(apiSpecResourceName: string): Promise<string> {
-    const payload = await this.get<ApiHubSpecContents>(
+    const payload = await this.get<{contents?: string}>(
       `${APIHUB_ROOT_URL}/${apiSpecResourceName}:contents`,
     );
     if (!payload.contents) {
