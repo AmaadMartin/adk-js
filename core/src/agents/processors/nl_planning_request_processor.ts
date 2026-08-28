@@ -63,7 +63,6 @@ export class NlPlanningResponseProcessor extends BaseLlmResponseProcessor {
       return;
     }
 
-    // adk-python skips BuiltInPlanner's inherited no-op here; adk-js has none.
     const context = new Context({invocationContext});
     const processedParts = await planner.processPlanningResponse({
       context,

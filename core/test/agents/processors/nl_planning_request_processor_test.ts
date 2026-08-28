@@ -102,7 +102,8 @@ function createAgentWithLookalikePlanner() {
     buildPlanningInstruction: vi.fn(() => CUSTOM_INSTRUCTION),
     processPlanningResponse: vi.fn(() => [{text: 'planned'}]),
   };
-  const agent = Object.assign(createAgent(), {planner: lookalike});
+  const agent = createAgent();
+  agent.planner = lookalike as unknown as BasePlanner;
   return {agent, lookalike};
 }
 
