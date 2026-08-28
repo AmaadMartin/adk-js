@@ -8,7 +8,10 @@ import {createEvent, createSession, Event, Session} from '@google/adk';
 import {Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
-import {convertSessionToEvalFormat} from '../../src/utils/evals.js';
+import {
+  convertSessionToEvalFormat,
+  convertSessionToEvalInvocations,
+} from '../../src/utils/evals.js';
 
 function userEvent(text: string): Event {
   return createEvent({
@@ -318,5 +321,48 @@ describe('convertSessionToEvalFormat', () => {
 
     expect(JSON.stringify(session)).toBe(before);
     expect(turns[0].expected_tool_use[0].tool_input).toBe(args);
+  });
+});
+
+function invocationEvent(
+  author: string,
+  text: string,
+  invocationId: string,
+): Event {
+  return createEvent({
+    author,
+    invocationId,
+    content: {role: author === 'user' ? 'user' : 'model', parts: [{text}]},
+  });
+}
+
+describe('convertSessionToEvalInvocations', () => {
+  it('groups the session events by invocation id', () => {
+    const session = sessionOf([
+      invocationEvent('user', 'first question', 'inv-1'),
+      invocationEvent('agent', 'first answer', 'inv-1'),
+      invocationEvent('user', 'second question', 'inv-2'),
+      invocationEvent('agent', 'second answer', 'inv-2'),
+    ]);
+
+    const invocations = convertSessionToEvalInvocations(session);
+
+    expect(invocations.map((i) => i.invocationId)).toEqual(['inv-1', 'inv-2']);
+    expect(invocations.map((i) => i.userContent.parts?.[0].text)).toEqual([
+      'first question',
+      'second question',
+    ]);
+    expect(invocations.map((i) => i.finalResponse?.parts?.[0].text)).toEqual([
+      'first answer',
+      'second answer',
+    ]);
+  });
+
+  it('returns no invocations for a session with no history', () => {
+    expect(convertSessionToEvalInvocations(sessionOf([]))).toEqual([]);
+  });
+
+  it('returns no invocations when there is no session', () => {
+    expect(convertSessionToEvalInvocations(undefined)).toEqual([]);
   });
 });

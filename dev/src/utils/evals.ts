@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Session} from '@google/adk';
+import {convertEventsToEvalInvocations, Invocation, Session} from '@google/adk';
 
 const USER_AUTHOR = 'user';
 const DEFAULT_AGENT_AUTHOR = 'agent';
@@ -99,4 +99,20 @@ export function convertSessionToEvalFormat(
   }
 
   return turns;
+}
+
+/**
+ * Converts a session into the list of invocations that the eval tooling grades.
+ *
+ * Each invocation holds the user's request, the agent's final response, and
+ * the intermediate events that led to it. Use it to turn a recorded
+ * conversation into an eval case.
+ *
+ * @param session The session to convert, or `undefined` when none was found.
+ * @returns One invocation per distinct invocation id, in session order.
+ */
+export function convertSessionToEvalInvocations(
+  session: Session | undefined,
+): Invocation[] {
+  return convertEventsToEvalInvocations(session?.events ?? []);
 }
