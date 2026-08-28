@@ -112,20 +112,6 @@ function missingRequiredArgs(
   return (schema.required ?? []).filter((name) => !Object.hasOwn(args, name));
 }
 
-/** `args` restricted to the keys the schema declares under `properties`. */
-function dropUndeclaredArgs(
-  schema: Schema,
-  args: Record<string, unknown>,
-): Record<string, unknown> {
-  const {properties} = schema;
-  if (!properties) {
-    return args;
-  }
-  return Object.fromEntries(
-    Object.entries(args).filter(([key]) => Object.hasOwn(properties, key)),
-  );
-}
-
 /**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all BaseTool instances.
@@ -166,9 +152,6 @@ export class FunctionTool<
   private readonly parameters?: TParameters;
   // Whether the tool requires user confirmation before running.
   private readonly requireConfirmation: RequireConfirmation<TParameters>;
-  // Converted lazily: `toSchema` throws on an unsupported Zod version, and
-  // converting in the constructor would move that failure to construction.
-  private parametersSchema?: Schema;
 
   /**
    * The constructor acts as the user-friendly factory.
@@ -191,11 +174,6 @@ export class FunctionTool<
     this.requireConfirmation = options.requireConfirmation ?? false;
   }
 
-  /** The declared parameter schema, converted once. */
-  private get schema(): Schema {
-    return (this.parametersSchema ??= toSchema(this.parameters));
-  }
-
   /**
    * Returns the function declaration derived from the tool's name, description,
    * and parameter schema.
@@ -208,7 +186,7 @@ export class FunctionTool<
     return {
       name: this.name,
       description: this.description,
-      parameters: cloneDeep(this.schema),
+      parameters: cloneDeep(toSchema(this.parameters)),
     };
   }
 
@@ -225,9 +203,10 @@ export class FunctionTool<
    */
   override async runAsync(req: RunAsyncToolRequest): Promise<unknown> {
     try {
-      const callArgs = this.marshalArgs(req.args);
+      const schema = toSchema(this.parameters);
+      const callArgs = this.marshalArgs(schema, req.args);
 
-      const missing = missingRequiredArgs(this.schema, callArgs);
+      const missing = missingRequiredArgs(schema, callArgs);
       if (missing.length > 0) {
         return {
           error:
@@ -280,13 +259,23 @@ export class FunctionTool<
    *
    * A Zod object applies its own unknown-key policy when {@link validateArgs}
    * parses, and a tool that declares no parameters accepts whatever it is
-   * given, so only a raw `Schema` needs filtering here.
+   * given, so only a raw `Schema` with declared properties filters here.
    */
-  private marshalArgs(args: Record<string, unknown>): Record<string, unknown> {
-    if (this.parameters === undefined || isZodObject(this.parameters)) {
+  private marshalArgs(
+    schema: Schema,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const {properties} = schema;
+    if (
+      this.parameters === undefined ||
+      isZodObject(this.parameters) ||
+      !properties
+    ) {
       return args;
     }
-    return dropUndeclaredArgs(this.schema, args);
+    return Object.fromEntries(
+      Object.entries(args).filter(([key]) => Object.hasOwn(properties, key)),
+    );
   }
 
   /** Parses `args` against the parameter schema, when one is declared. */
