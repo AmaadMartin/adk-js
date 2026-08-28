@@ -6,7 +6,6 @@
 
 import {
   App,
-  BaseAgent,
   BaseArtifactService,
   BaseSessionService,
   getFunctionCalls,
@@ -22,15 +21,12 @@ import {
 import {isDeepStrictEqual} from 'node:util';
 import {
   ActualToolUse,
+  DEFAULT_EVAL_APP_NAME,
+  DEFAULT_EVAL_USER_ID,
   EvalTurn,
   InitialSession,
-} from './evaluation_constants.js';
-
-/** The app name a case without an `initial_session.app_name` runs under. */
-export const DEFAULT_EVAL_APP_NAME = 'EvaluationGenerator';
-
-/** The user id a case without an `initial_session.user_id` runs under. */
-export const DEFAULT_EVAL_USER_ID = 'test_user_id';
+  ResetFunc,
+} from './eval_types.js';
 
 /** Undoes what {@link applyMockToolCallback} installed. */
 export type MockToolCallbackDisposer = () => void;
@@ -47,7 +43,7 @@ export interface ProcessQueryOptions {
    */
   app?: App;
   /** Clears agent-owned state before the case runs. */
-  resetFunc?: () => void | Promise<void>;
+  resetFunc?: ResetFunc;
   initialSession?: InitialSession;
   sessionId: string;
   sessionService?: BaseSessionService;
@@ -101,20 +97,26 @@ export function makeMockToolCallback(
 }
 
 /**
- * Installs `callback` on every LLM agent in the tree that owns a mocked tool.
+ * Installs `callback` on every LLM agent in the tree.
  *
  * The callback is prepended to any `beforeToolCallback` the agent already
  * carries, so a user's own callback still runs; adk-python overwrites the
  * field instead. The returned disposer restores every agent's original value,
  * which keeps callbacks from accumulating across eval cases in one run.
+ *
+ * Every LLM agent gets the callback, whether or not it owns a mocked tool: the
+ * callback returns `undefined` for a call it has no mock for, and the agent
+ * falls through to the next callback and then to the real tool. Asking each
+ * agent for its tools first would resolve its toolsets, and an `MCPToolset`
+ * opens a session to list them, so the gate cost a connection per server to
+ * decide not to install a callback that does nothing.
  */
-export async function applyMockToolCallback(
+export function applyMockToolCallback(
   agent: RunnableRoot,
   callback: SingleBeforeToolCallback,
-  mockedToolNames: ReadonlySet<string>,
-): Promise<MockToolCallbackDisposer> {
+): MockToolCallbackDisposer {
   const restores: MockToolCallbackDisposer[] = [];
-  await installMockToolCallback(agent, callback, mockedToolNames, restores);
+  installMockToolCallback(agent, callback, restores);
 
   return () => {
     for (const restore of restores) {
@@ -123,40 +125,27 @@ export async function applyMockToolCallback(
   };
 }
 
-async function installMockToolCallback(
+function installMockToolCallback(
   agent: RunnableRoot,
   callback: SingleBeforeToolCallback,
-  mockedToolNames: ReadonlySet<string>,
   restores: MockToolCallbackDisposer[],
-): Promise<void> {
+): void {
   if (isLlmAgent(agent)) {
-    const tools = await agent.canonicalTools();
-    if (tools.some((tool) => mockedToolNames.has(tool.name))) {
-      const original = agent.beforeToolCallback;
-      agent.beforeToolCallback = original
-        ? [callback, ...(Array.isArray(original) ? original : [original])]
-        : callback;
-      restores.push(() => {
-        agent.beforeToolCallback = original;
-      });
-    }
+    const original = agent.beforeToolCallback;
+    agent.beforeToolCallback = original
+      ? [callback, ...(Array.isArray(original) ? original : [original])]
+      : callback;
+    restores.push(() => {
+      agent.beforeToolCallback = original;
+    });
   }
 
   // A non-LLM agent owns no tools but can still parent one that does, so the
   // walk continues through it. adk-python stops at the first non-LLM agent and
   // leaves a workflow-shaped tree unmocked.
-  for (const subAgent of getSubAgents(agent)) {
-    await installMockToolCallback(
-      subAgent,
-      callback,
-      mockedToolNames,
-      restores,
-    );
+  for (const subAgent of isBaseAgent(agent) ? agent.subAgents : []) {
+    installMockToolCallback(subAgent, callback, restores);
   }
-}
-
-function getSubAgents(agent: RunnableRoot): BaseAgent[] {
-  return isBaseAgent(agent) ? agent.subAgents : [];
 }
 
 /**
@@ -174,10 +163,9 @@ export async function processQueryWithRootAgent(
   const appName = resolveAppName(options.app, options.initialSession);
   const userId = options.initialSession?.user_id ?? DEFAULT_EVAL_USER_ID;
 
-  const dispose = await applyMockToolCallback(
+  const dispose = applyMockToolCallback(
     options.rootAgent,
     makeMockToolCallback(turns),
-    collectMockedToolNames(turns),
   );
 
   try {
@@ -227,17 +215,4 @@ export async function processQueryWithRootAgent(
   }
 
   return turns;
-}
-
-/** The names of every tool the eval data supplies a mock output for. */
-function collectMockedToolNames(turns: EvalTurn[]): ReadonlySet<string> {
-  const names = new Set<string>();
-  for (const turn of turns) {
-    for (const expected of turn.expected_tool_use ?? []) {
-      if (expected.mock_tool_output !== undefined) {
-        names.add(expected.tool_name);
-      }
-    }
-  }
-  return names;
 }

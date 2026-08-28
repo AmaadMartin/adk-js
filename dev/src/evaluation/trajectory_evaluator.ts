@@ -5,25 +5,15 @@
  */
 
 import {isDeepStrictEqual} from 'node:util';
-import {
-  ActualToolUse,
-  EvalTurn,
-  ExpectedToolUse,
-} from './evaluation_constants.js';
+import {ActualToolUse, EvalTurn, ExpectedToolUse} from './eval_types.js';
 
 /** A tool call from either side of the comparison. */
 type ToolUse = ExpectedToolUse | ActualToolUse;
 
-/** One turn that scored 0, kept for the failure report. */
-interface TrajectoryFailure {
-  turn: number;
-  query: string;
-  actual: ActualToolUse[];
-  expected: ExpectedToolUse[];
-}
-
-/** One scored turn, kept for the detail table. */
+/** One scored turn, used by both the failure report and the detail table. */
 interface TrajectoryRow {
+  /** 1-based position within its conversation. */
+  turn: number;
   query: string;
   actual: ActualToolUse[];
   expected: ExpectedToolUse[];
@@ -84,25 +74,11 @@ export function evaluateTrajectory(
     throw new Error('The evaluation dataset is empty.');
   }
 
-  const rows: TrajectoryRow[] = [];
-  const failures: TrajectoryFailure[] = [];
+  const rows = dataset.flatMap((conversation) =>
+    conversation.map((turn, index) => scoreTurn(turn, index + 1)),
+  );
 
-  for (const conversation of dataset) {
-    conversation.forEach((turn, index) => {
-      const row = scoreTurn(turn);
-      rows.push(row);
-      if (row.score !== 1) {
-        failures.push({
-          turn: index + 1,
-          query: row.query,
-          actual: row.actual,
-          expected: row.expected,
-        });
-      }
-    });
-  }
-
-  reportFailures(failures);
+  reportFailures(rows.filter((row) => row.score !== 1));
 
   if (options.printDetailedResults) {
     printDetailedResults(rows);
@@ -111,11 +87,12 @@ export function evaluateTrajectory(
   return mean(rows.map((row) => row.score));
 }
 
-function scoreTurn(turn: EvalTurn): TrajectoryRow {
+function scoreTurn(turn: EvalTurn, turnNumber: number): TrajectoryRow {
   const expected = stripMockToolOutputs(turn.expected_tool_use ?? []);
   const actual = turn.actual_tool_use ?? [];
 
   return {
+    turn: turnNumber,
     query: turn.query,
     actual,
     expected,
@@ -134,7 +111,7 @@ function mean(scores: number[]): number {
   return scores.reduce((total, score) => total + score, 0) / scores.length;
 }
 
-function reportFailures(failures: TrajectoryFailure[]): void {
+function reportFailures(failures: TrajectoryRow[]): void {
   if (failures.length === 0) {
     return;
   }

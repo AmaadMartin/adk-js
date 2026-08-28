@@ -5,7 +5,7 @@
  */
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {EvalTurn} from '../../src/evaluation/evaluation_constants.js';
+import {EvalTurn} from '../../src/evaluation/eval_types.js';
 import {
   areToolsEqual,
   evaluateTrajectory,

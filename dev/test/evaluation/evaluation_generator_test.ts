@@ -23,13 +23,15 @@ import {
   START,
   Workflow,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {z} from 'zod/v4';
-import {EvalTurn} from '../../src/evaluation/evaluation_constants.js';
 import {
-  applyMockToolCallback,
   DEFAULT_EVAL_APP_NAME,
   DEFAULT_EVAL_USER_ID,
+  EvalTurn,
+} from '../../src/evaluation/eval_types.js';
+import {
+  applyMockToolCallback,
   makeMockToolCallback,
   processQueryWithRootAgent,
   resolveAppName,
@@ -213,31 +215,35 @@ describe('makeMockToolCallback', () => {
 describe('applyMockToolCallback', () => {
   const mockCallback: SingleBeforeToolCallback = () => ({result: 'mocked'});
 
-  it('installs the callback on an agent that owns a mocked tool', async () => {
+  it('installs the callback on an LLM agent', () => {
     const agent = new LlmAgent({
       name: 'roller',
       model: new ScriptedLlm([]),
       tools: [toolNamed('roll_die')],
     });
 
-    await applyMockToolCallback(agent, mockCallback, new Set(['roll_die']));
+    applyMockToolCallback(agent, mockCallback);
 
     expect(agent.beforeToolCallback).toBe(mockCallback);
   });
 
-  it('leaves an agent that owns no mocked tool alone', async () => {
+  it('installs on an agent that owns no mocked tool, and asks it for none', () => {
     const agent = new LlmAgent({
       name: 'greeter',
       model: new ScriptedLlm([]),
       tools: [toolNamed('say_hello')],
     });
+    // Resolving an agent's tools opens a session for an MCP toolset, so the
+    // install must not consult them.
+    const canonicalTools = vi.spyOn(agent, 'canonicalTools');
 
-    await applyMockToolCallback(agent, mockCallback, new Set(['roll_die']));
+    applyMockToolCallback(agent, mockCallback);
 
-    expect(agent.beforeToolCallback).toBeUndefined();
+    expect(agent.beforeToolCallback).toBe(mockCallback);
+    expect(canonicalTools).not.toHaveBeenCalled();
   });
 
-  it('recurses into subAgents', async () => {
+  it('recurses into subAgents', () => {
     const child = new LlmAgent({
       name: 'child',
       model: new ScriptedLlm([]),
@@ -249,13 +255,13 @@ describe('applyMockToolCallback', () => {
       subAgents: [child],
     });
 
-    await applyMockToolCallback(parent, mockCallback, new Set(['roll_die']));
+    applyMockToolCallback(parent, mockCallback);
 
     expect(child.beforeToolCallback).toBe(mockCallback);
-    expect(parent.beforeToolCallback).toBeUndefined();
+    expect(parent.beforeToolCallback).toBe(mockCallback);
   });
 
-  it('walks through a non-LLM agent to reach its LLM children', async () => {
+  it('walks through a non-LLM agent to reach its LLM children', () => {
     const child = new LlmAgent({
       name: 'child',
       model: new ScriptedLlm([]),
@@ -263,7 +269,7 @@ describe('applyMockToolCallback', () => {
     });
     const root = new PassThroughAgent({name: 'pipeline', subAgents: [child]});
 
-    await applyMockToolCallback(root, mockCallback, new Set(['roll_die']));
+    applyMockToolCallback(root, mockCallback);
 
     expect(child.beforeToolCallback).toBe(mockCallback);
   });
@@ -279,11 +285,7 @@ describe('applyMockToolCallback', () => {
       edges: [[START, child]],
     });
 
-    const dispose = await applyMockToolCallback(
-      workflow,
-      mockCallback,
-      new Set(['roll_die']),
-    );
+    const dispose = applyMockToolCallback(workflow, mockCallback);
     dispose();
 
     expect(child.beforeToolCallback).toBeUndefined();
@@ -302,7 +304,7 @@ describe('applyMockToolCallback', () => {
       beforeToolCallback: userCallback,
     });
 
-    await applyMockToolCallback(agent, mockCallback, new Set(['roll_die']));
+    applyMockToolCallback(agent, mockCallback);
 
     expect(agent.beforeToolCallback).toEqual([mockCallback, userCallback]);
     expect(agent.canonicalBeforeToolCallbacks[1]).toBe(userCallback);
@@ -318,7 +320,7 @@ describe('applyMockToolCallback', () => {
       beforeToolCallback: [first, second],
     });
 
-    await applyMockToolCallback(agent, mockCallback, new Set(['roll_die']));
+    applyMockToolCallback(agent, mockCallback);
 
     expect(agent.beforeToolCallback).toEqual([mockCallback, first, second]);
   });
@@ -330,11 +332,7 @@ describe('applyMockToolCallback', () => {
       tools: [toolNamed('roll_die')],
     });
 
-    const dispose = await applyMockToolCallback(
-      agent,
-      mockCallback,
-      new Set(['roll_die']),
-    );
+    const dispose = applyMockToolCallback(agent, mockCallback);
     dispose();
 
     expect(agent.beforeToolCallback).toBeUndefined();
@@ -350,11 +348,7 @@ describe('applyMockToolCallback', () => {
     });
 
     for (let round = 0; round < 2; round++) {
-      const dispose = await applyMockToolCallback(
-        agent,
-        mockCallback,
-        new Set(['roll_die']),
-      );
+      const dispose = applyMockToolCallback(agent, mockCallback);
       dispose();
     }
 
