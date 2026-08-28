@@ -83,36 +83,6 @@ export function splitCommand(command: string): string[] {
   return tokens;
 }
 
-/**
- * Maps Node's `(code, signal)` child exit pair onto the POSIX return code
- * Python reports: the exit status, or the negative signal number when a signal
- * killed the process.
- *
- * @param code The exit status, or `null` when a signal ended the process.
- * @param signal The terminating signal, or `null` when the process exited.
- * @return The return code.
- */
-export function toReturnCode(
-  code: number | null,
-  signal: keyof typeof os.constants.signals | null,
-): number {
-  return signal === null ? (code ?? 0) : -os.constants.signals[signal];
-}
-
-/**
- * Decodes captured child output as UTF-8.
- *
- * The chunks are joined before decoding, so a multi-byte character split
- * across two of them is not corrupted. Invalid bytes become U+FFFD, matching
- * Python's `errors='replace'`.
- *
- * @param chunks The buffers captured from the stream.
- * @return The decoded text.
- */
-export function decodeChunks(chunks: Buffer[]): string {
-  return Buffer.concat(chunks).toString('utf-8');
-}
-
 /** A spawned child whose stdout and stderr are pipes. */
 type PipedChild = ChildProcessByStdio<Writable | null, Readable, Readable>;
 
@@ -169,12 +139,20 @@ export async function collectChildOutput(
   try {
     const returncode = await new Promise<number>((resolve, reject) => {
       // 'close' rather than 'exit': the stdio streams are drained by then.
-      child.on('close', (code, signal) => resolve(toReturnCode(code, signal)));
+      // The return code follows Python: the exit status, or the negative
+      // signal number when a signal ended the process. Node sets exactly one
+      // of the pair, so `code` is a number whenever `signal` is null.
+      child.on('close', (code, signal) =>
+        resolve(signal === null ? code! : -os.constants.signals[signal]),
+      );
       child.on('error', reject);
     });
     return {
-      stdout: decodeChunks(stdoutChunks),
-      stderr: decodeChunks(stderrChunks),
+      // Joined before decoding, so a multi-byte character split across two
+      // chunks survives. An invalid byte becomes U+FFFD, as Python's
+      // errors='replace' does.
+      stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf-8'),
       returncode,
       timedOut,
     };

@@ -4,12 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {spawn} from 'node:child_process';
 import {describe, expect, it} from 'vitest';
 import {
-  decodeChunks,
+  ChildOutput,
+  collectChildOutput,
   splitCommand,
-  toReturnCode,
 } from '../../src/utils/shell_utils.js';
+
+/** Spawning a child process is slow on a loaded CI runner. */
+const SPAWN_TIMEOUT_MS = 30_000;
+
+/** How long the killed script runs if nothing ends it. */
+const SURVIVOR_LIFETIME_MS = 10_000;
+
+/** Short enough that the kill lands well before the script would exit. */
+const KILL_AFTER_SECONDS = 0.2;
 
 describe('splitCommand', () => {
   it('returns no token for an empty or blank command', () => {
@@ -89,36 +99,64 @@ describe('splitCommand', () => {
   });
 });
 
-describe('toReturnCode', () => {
-  it('reports an exit status as itself', () => {
-    expect(toReturnCode(42, null)).toBe(42);
+/** Runs `script` under the Node binary and collects what it produced. */
+function runScript(
+  script: string,
+  timeoutSeconds: number | null = null,
+): Promise<ChildOutput> {
+  const child = spawn(process.execPath, ['-e', script], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return collectChildOutput(child, timeoutSeconds, () => child.kill('SIGKILL'));
+}
+
+describe('collectChildOutput return code', () => {
+  it('reports an exit status as itself', async () => {
+    await expect(runScript('process.exit(42)')).resolves.toMatchObject({
+      returncode: 42,
+    });
   });
 
-  it('reports a terminating signal as its negative number', () => {
-    expect(toReturnCode(null, 'SIGKILL')).toBe(-9);
-  });
-
-  it('reports a missing exit status as zero', () => {
-    expect(toReturnCode(null, null)).toBe(0);
-  });
+  it(
+    'reports a terminating signal as its negative number',
+    async () => {
+      const result = await runScript(
+        `setTimeout(() => {}, ${SURVIVOR_LIFETIME_MS})`,
+        KILL_AFTER_SECONDS,
+      );
+      expect(result).toMatchObject({returncode: -9, timedOut: true});
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 });
 
-describe('decodeChunks', () => {
-  it('returns an empty string when nothing was captured', () => {
-    expect(decodeChunks([])).toBe('');
+describe('collectChildOutput decoding', () => {
+  it('returns an empty string when nothing was captured', async () => {
+    await expect(runScript('')).resolves.toMatchObject({
+      stdout: '',
+      stderr: '',
+    });
   });
 
-  it('joins the chunks before decoding', () => {
-    expect(decodeChunks([Buffer.from('he'), Buffer.from('llo')])).toBe('hello');
+  it('keeps a multi-byte character split across two writes intact', async () => {
+    // '€' is E2 82 AC. The delay puts the trailing byte in its own chunk, so
+    // decoding either chunk alone would yield replacement characters.
+    const result = await runScript(
+      'process.stdout.write(Buffer.from([0xe2, 0x82]));' +
+        'process.stderr.write(Buffer.from([0xe2, 0x82]));' +
+        'setTimeout(() => {' +
+        '  process.stdout.write(Buffer.from([0xac]));' +
+        '  process.stderr.write(Buffer.from([0xac]));' +
+        '}, 50);',
+    );
+    expect(result).toMatchObject({stdout: '€', stderr: '€'});
   });
 
-  it('keeps a multi-byte character split across two chunks intact', () => {
-    // '€' is E2 82 AC; decoding either chunk alone yields replacement chars.
-    const chunks = [Buffer.from([0xe2, 0x82]), Buffer.from([0xac])];
-    expect(decodeChunks(chunks)).toBe('€');
-  });
-
-  it('replaces an invalid byte rather than throwing', () => {
-    expect(decodeChunks([Buffer.from([0xff])])).toBe('\uFFFD');
+  it('replaces an invalid byte rather than throwing', async () => {
+    const result = await runScript(
+      'process.stdout.write(Buffer.from([0xff]));' +
+        'process.stderr.write(Buffer.from([0xff]));',
+    );
+    expect(result).toMatchObject({stdout: '\uFFFD', stderr: '\uFFFD'});
   });
 });
