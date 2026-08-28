@@ -94,33 +94,31 @@ describe('rougeOneFMeasure', () => {
 describe('evaluateResponseMatch', () => {
   it('scores a turn whose response matches its reference', () => {
     const score = evaluateResponseMatch([
-      [turn({reference: 'I rolled a 4.', response: 'I rolled a 4.'})],
+      turn({reference: 'I rolled a 4.', response: 'I rolled a 4.'}),
     ]);
 
     expect(score).toBe(1);
   });
 
-  it('averages over every scored turn of every conversation', () => {
+  it('averages over every scored turn of the case', () => {
     const score = evaluateResponseMatch([
-      [turn({reference: 'a b', response: 'a b'})],
-      [turn({reference: 'a b', response: 'c d'})],
+      turn({reference: 'a b', response: 'a b'}),
+      turn({reference: 'a b', response: 'c d'}),
     ]);
 
     expect(score).toBe(0.5);
   });
 
   it('scores a turn that produced no response 0', () => {
-    const score = evaluateResponseMatch([[turn({reference: 'a b'})]]);
+    const score = evaluateResponseMatch([turn({reference: 'a b'})]);
 
     expect(score).toBe(0);
   });
 
   it('skips a turn that records no reference', () => {
     const score = evaluateResponseMatch([
-      [
-        turn({reference: 'a b', response: 'a b'}),
-        turn({response: 'anything at all'}),
-      ],
+      turn({reference: 'a b', response: 'a b'}),
+      turn({response: 'anything at all'}),
     ]);
 
     expect(score).toBe(1);
@@ -128,10 +126,8 @@ describe('evaluateResponseMatch', () => {
 
   it('skips a turn whose reference is null', () => {
     const score = evaluateResponseMatch([
-      [
-        turn({reference: 'a b', response: 'a b'}),
-        turn({reference: null, response: 'anything at all'}),
-      ],
+      turn({reference: 'a b', response: 'a b'}),
+      turn({reference: null, response: 'anything at all'}),
     ]);
 
     expect(score).toBe(1);
@@ -139,23 +135,19 @@ describe('evaluateResponseMatch', () => {
 
   it('scores a turn whose reference is empty 0', () => {
     const score = evaluateResponseMatch([
-      [turn({reference: '', response: 'a b'})],
+      turn({reference: '', response: 'a b'}),
     ]);
 
     expect(score).toBe(0);
   });
 
   it('does not apply when no turn records a reference', () => {
-    const score = evaluateResponseMatch([[turn({response: 'a b'})]]);
+    const score = evaluateResponseMatch([turn({response: 'a b'})]);
 
     expect(score).toBeUndefined();
   });
 
-  it('does not apply to an empty dataset', () => {
+  it('does not apply to a case with no turns', () => {
     expect(evaluateResponseMatch([])).toBeUndefined();
-  });
-
-  it('does not apply to a conversation with no turns', () => {
-    expect(evaluateResponseMatch([[]])).toBeUndefined();
   });
 });

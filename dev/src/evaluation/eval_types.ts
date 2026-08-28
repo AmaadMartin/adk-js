@@ -16,7 +16,7 @@ import {z} from 'zod';
  */
 
 /** One recorded tool call, as written in the eval data. */
-export const EXPECTED_TOOL_USE_SCHEMA = z.object({
+const EXPECTED_TOOL_USE_SCHEMA = z.object({
   tool_name: z.string(),
   tool_input: z.record(z.string(), z.unknown()).optional(),
   /** When present, the tool is not really called; this value is returned. */
@@ -24,21 +24,21 @@ export const EXPECTED_TOOL_USE_SCHEMA = z.object({
 });
 
 /** One recorded user turn, before a run fills in what happened. */
-export const EVAL_TURN_SCHEMA = z.object({
+const EVAL_TURN_SCHEMA = z.object({
   query: z.string(),
   expected_tool_use: z.array(EXPECTED_TOOL_USE_SCHEMA).optional(),
   reference: z.string().nullish(),
 });
 
 /** The session an eval case starts from. */
-export const INITIAL_SESSION_SCHEMA = z.object({
+const INITIAL_SESSION_SCHEMA = z.object({
   app_name: z.string().optional(),
   user_id: z.string().optional(),
   state: z.record(z.string(), z.unknown()).optional(),
 });
 
 /** One eval case in an eval-set file. */
-export const EVAL_SET_ITEM_SCHEMA = z.object({
+const EVAL_SET_ITEM_SCHEMA = z.object({
   name: z.string(),
   data: z.array(EVAL_TURN_SCHEMA),
   initial_session: INITIAL_SESSION_SCHEMA.optional(),

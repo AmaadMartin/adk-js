@@ -65,13 +65,11 @@ function countTokens(tokens: string[]): Map<string, number> {
  * it is not scored; adk-python drops the metric for the same reason. A turn
  * that records a `reference` and produced no response scores 0.
  *
- * @param dataset One entry per conversation, each a list of scored turns.
+ * @param turns The scored turns of one eval case.
  */
-export function evaluateResponseMatch(
-  dataset: EvalTurn[][],
-): number | undefined {
+export function evaluateResponseMatch(turns: EvalTurn[]): number | undefined {
   const scores: number[] = [];
-  for (const turn of dataset.flat()) {
+  for (const turn of turns) {
     if (turn.reference != null) {
       scores.push(rougeOneFMeasure(turn.response ?? '', turn.reference));
     }
