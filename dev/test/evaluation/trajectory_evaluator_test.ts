@@ -1,0 +1,261 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {EvalTurn} from '../../src/evaluation/evaluation_constants.js';
+import {
+  areToolsEqual,
+  evaluateTrajectory,
+  stripMockToolOutputs,
+} from '../../src/evaluation/trajectory_evaluator.js';
+
+/** Builds a turn whose expected and actual trajectories are given explicitly. */
+function turn(overrides: Partial<EvalTurn> & {query: string}): EvalTurn {
+  return {actual_tool_use: [], ...overrides};
+}
+
+describe('areToolsEqual', () => {
+  it('matches identical trajectories', () => {
+    expect(
+      areToolsEqual(
+        [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+        [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects the same calls in a different order', () => {
+    expect(
+      areToolsEqual(
+        [
+          {tool_name: 'a', tool_input: {}},
+          {tool_name: 'b', tool_input: {}},
+        ],
+        [
+          {tool_name: 'b', tool_input: {}},
+          {tool_name: 'a', tool_input: {}},
+        ],
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects a different tool_input', () => {
+    expect(
+      areToolsEqual(
+        [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+        [{tool_name: 'roll_die', tool_input: {sides: 20}}],
+      ),
+    ).toBe(false);
+  });
+
+  it('ignores mock_tool_output on the expected side', () => {
+    expect(
+      areToolsEqual(
+        [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+        [{tool_name: 'roll_die', tool_input: {sides: 6}, mock_tool_output: 4}],
+      ),
+    ).toBe(true);
+  });
+
+  it('reads a missing tool_input as an empty object', () => {
+    expect(
+      areToolsEqual([{tool_name: 'now', tool_input: {}}], [{tool_name: 'now'}]),
+    ).toBe(true);
+  });
+
+  it('rejects trajectories of different lengths', () => {
+    expect(areToolsEqual([{tool_name: 'a', tool_input: {}}], [])).toBe(false);
+  });
+
+  it('matches two empty trajectories', () => {
+    expect(areToolsEqual([], [])).toBe(true);
+  });
+});
+
+describe('stripMockToolOutputs', () => {
+  it('drops mock_tool_output and keeps the rest', () => {
+    expect(
+      stripMockToolOutputs([
+        {tool_name: 'roll_die', tool_input: {sides: 6}, mock_tool_output: 4},
+      ]),
+    ).toEqual([{tool_name: 'roll_die', tool_input: {sides: 6}}]);
+  });
+});
+
+describe('evaluateTrajectory', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('throws when the dataset holds no conversation', () => {
+    expect(() => evaluateTrajectory([])).toThrow(
+      'The evaluation dataset is empty.',
+    );
+  });
+
+  it('scores 1 when every turn matches', () => {
+    const score = evaluateTrajectory([
+      [
+        turn({
+          query: 'roll',
+          expected_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+          actual_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+        }),
+      ],
+    ]);
+
+    expect(score).toBe(1);
+  });
+
+  it('scores 0 when no turn matches', () => {
+    const score = evaluateTrajectory([
+      [
+        turn({
+          query: 'roll',
+          expected_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+          actual_tool_use: [],
+        }),
+      ],
+    ]);
+
+    expect(score).toBe(0);
+  });
+
+  it('averages a matching and a non-matching turn to 0.5', () => {
+    const score = evaluateTrajectory([
+      [
+        turn({
+          query: 'first',
+          expected_tool_use: [{tool_name: 'a', tool_input: {}}],
+          actual_tool_use: [{tool_name: 'a', tool_input: {}}],
+        }),
+        turn({
+          query: 'second',
+          expected_tool_use: [{tool_name: 'b', tool_input: {}}],
+          actual_tool_use: [],
+        }),
+      ],
+    ]);
+
+    expect(score).toBe(0.5);
+  });
+
+  it('treats a missing expected_tool_use as no expected calls', () => {
+    const score = evaluateTrajectory([[turn({query: 'hello'})]]);
+
+    expect(score).toBe(1);
+  });
+
+  it('treats a missing actual_tool_use as no recorded calls', () => {
+    expect(evaluateTrajectory([[{query: 'hello'}]])).toBe(1);
+    expect(
+      evaluateTrajectory([
+        [{query: 'roll', expected_tool_use: [{tool_name: 'a'}]}],
+      ]),
+    ).toBe(0);
+  });
+
+  it('averages across turns, not across conversations', () => {
+    const matching = turn({
+      query: 'ok',
+      expected_tool_use: [{tool_name: 'a', tool_input: {}}],
+      actual_tool_use: [{tool_name: 'a', tool_input: {}}],
+    });
+    const failing = turn({
+      query: 'bad',
+      expected_tool_use: [{tool_name: 'b', tool_input: {}}],
+      actual_tool_use: [],
+    });
+
+    // Three turns, one of which fails: a per-conversation mean would give 0.25.
+    expect(evaluateTrajectory([[matching, matching], [failing]])).toBeCloseTo(
+      2 / 3,
+    );
+  });
+
+  it('scores an empty conversation as 0 rather than NaN', () => {
+    expect(evaluateTrajectory([[]])).toBe(0);
+  });
+
+  it('reports the turn number, query, actual and expected of a failure', () => {
+    evaluateTrajectory([
+      [
+        turn({
+          query: 'ok',
+          expected_tool_use: [{tool_name: 'a', tool_input: {}}],
+          actual_tool_use: [{tool_name: 'a', tool_input: {}}],
+        }),
+        turn({
+          query: 'roll a die',
+          expected_tool_use: [
+            {
+              tool_name: 'roll_die',
+              tool_input: {sides: 6},
+              mock_tool_output: 4,
+            },
+          ],
+          actual_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 20}}],
+        }),
+      ],
+    ]);
+
+    const printed = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(printed).toContain('Failures:');
+    expect(printed).toContain('"turn": 2');
+    expect(printed).toContain('"query": \'roll a die\'');
+    expect(printed).toContain(
+      '"actual": [{"tool_name":"roll_die","tool_input":{"sides":20}}]',
+    );
+    expect(printed).toContain(
+      '"expected_tool_use": [{"tool_name":"roll_die","tool_input":{"sides":6}}]',
+    );
+  });
+
+  it('prints no failure report when every turn passes', () => {
+    evaluateTrajectory([
+      [
+        turn({
+          query: 'ok',
+          expected_tool_use: [{tool_name: 'a', tool_input: {}}],
+          actual_tool_use: [{tool_name: 'a', tool_input: {}}],
+        }),
+      ],
+    ]);
+
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+
+  it('prints the detail table only when asked', () => {
+    const dataset = [
+      [
+        turn({
+          query: 'roll',
+          expected_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+          actual_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+          response: 'I rolled a 4.',
+        }),
+      ],
+    ];
+
+    evaluateTrajectory(dataset);
+    expect(logSpy).not.toHaveBeenCalled();
+
+    evaluateTrajectory(dataset, {printDetailedResults: true});
+
+    const printed = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(printed).toContain('query');
+    expect(printed).toContain('expected_tool_use');
+    expect(printed).toContain('actual_tool_use');
+    expect(printed).toContain('score');
+    expect(printed).toContain('roll_die');
+  });
+});
