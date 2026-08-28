@@ -27,6 +27,7 @@ import {
 } from '../utils/sanitize_utils.js';
 import type {BaseNode} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
+import {isNodeErrorEvent} from '../workflow/node_error_event.js';
 import {BasePlugin} from './base_plugin.js';
 import {
   formatContentSummary,
@@ -107,15 +108,17 @@ const LOGGED_GENERATION_CONFIG_KEYS: ReadonlyArray<
 const NO_CONTENT_LIMIT = -1;
 
 /**
- * The numeric options, with the smallest value each one can take.
+ * The numeric options, with the smallest value each one can take. Each counts
+ * whole rows or whole milliseconds, so each must be an integer.
  *
  * Below these a plugin builds but writes nothing useful: a queue of zero drops
- * every row, and a batch of zero never fills.
+ * every row, a batch of zero never fills, and a shutdown of zero drains
+ * nothing.
  */
 const CONFIG_MINIMUMS: ReadonlyArray<[NumericConfigKey, number]> = [
   ['batchSize', 1],
   ['batchFlushIntervalMs', 1],
-  ['shutdownTimeoutMs', 0],
+  ['shutdownTimeoutMs', 1],
   ['queueMaxSize', 1],
 ];
 
@@ -159,6 +162,12 @@ export interface BigQueryLoggerConfig {
   logSessionMetadata?: boolean;
   /** Static tags copied into `attributes.custom_tags` on every row. */
   customTags?: Record<string, unknown>;
+  /**
+   * Tools that deliver the agent's final answer. Completing one of these also
+   * writes an `AGENT_RESPONSE` row carrying the call arguments. Empty by
+   * default.
+   */
+  finalResponseToolNames?: readonly string[];
   /** Whether each run ends with a flush. Defaults to true. */
   flushOnRunEnd?: boolean;
 }
@@ -187,6 +196,7 @@ interface ResolvedConfig {
   contentFormatter?: AnalyticsContentFormatter;
   logSessionMetadata: boolean;
   customTags: Record<string, unknown>;
+  finalResponseToolNames: readonly string[];
   flushOnRunEnd: boolean;
 }
 
@@ -292,14 +302,14 @@ type NumericConfigKey =
  * dropping every row is a worse answer than refusing to start.
  *
  * @param config The configuration to check.
- * @throws Error when a numeric option is not a finite number in range.
+ * @throws Error when a numeric option is not an integer in range.
  */
 function validateConfig(config: BigQueryLoggerConfig): void {
   for (const [name, minimum] of CONFIG_MINIMUMS) {
     const value = config[name];
-    if (value !== undefined && (!Number.isFinite(value) || value < minimum)) {
+    if (value !== undefined && (!Number.isInteger(value) || value < minimum)) {
       throw new Error(
-        `BigQueryAgentAnalyticsPlugin: ${name} must be a finite number of at ` +
+        `BigQueryAgentAnalyticsPlugin: ${name} must be an integer of at ` +
           `least ${minimum}, got ${String(value)}.`,
       );
     }
@@ -308,11 +318,11 @@ function validateConfig(config: BigQueryLoggerConfig): void {
   if (
     limit !== undefined &&
     limit !== NO_CONTENT_LIMIT &&
-    (!Number.isFinite(limit) || limit < 1)
+    (!Number.isInteger(limit) || limit < 1)
   ) {
     throw new Error(
-      `BigQueryAgentAnalyticsPlugin: maxContentLength must be a finite ` +
-        `number of at least 1, or ${NO_CONTENT_LIMIT} for no limit, got ` +
+      `BigQueryAgentAnalyticsPlugin: maxContentLength must be an integer of ` +
+        `at least 1, or ${NO_CONTENT_LIMIT} for no limit, got ` +
         `${String(limit)}.`,
     );
   }
@@ -329,6 +339,7 @@ function resolveConfig(config: BigQueryLoggerConfig): ResolvedConfig {
     contentFormatter: config.contentFormatter,
     logSessionMetadata: config.logSessionMetadata ?? true,
     customTags: config.customTags ?? {},
+    finalResponseToolNames: config.finalResponseToolNames ?? [],
     flushOnRunEnd: config.flushOnRunEnd ?? true,
   };
 }
@@ -657,6 +668,16 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         rawContent: {tool: params.tool.name, result: params.result},
         data: this.afterPopData(invocationId, popped),
       });
+      // An agent that answers through a dedicated tool emits no plain-text
+      // final event, so the onEventCallback path never sees the answer.
+      if (this.config.finalResponseToolNames.includes(params.tool.name)) {
+        this.logEvent({
+          eventType: AnalyticsEventType.AGENT_RESPONSE,
+          invocationContext,
+          rawContent: {response: params.toolArgs},
+          data: {extraAttributes: {source_tool: params.tool.name}},
+        });
+      }
     });
   }
 
@@ -690,10 +711,66 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     return this.safe('onEventCallback', () => {
       const {invocationContext, event} = params;
       this.logStateDelta(invocationContext, event);
+      this.logAgentStateCheckpoint(invocationContext, event);
+      this.logNodeError(invocationContext, event);
       this.logAgentTransfer(invocationContext, event);
       this.logPausedCalls(invocationContext, event);
       this.logHitlCompletions(invocationContext, event);
       this.logAgentResponse(invocationContext, event);
+    });
+  }
+
+  /**
+   * Writes a `NODE_ERROR` row for a workflow node that failed.
+   *
+   * This is the only row a failed node produces: `afterNodeCallback` runs on
+   * the success path alone, and the error event carries no state delta, no
+   * transfer and no visible text, so every other `onEventCallback` branch
+   * skips it. adk-python filters model failures out of this type by error
+   * code; adk-js routes those to `onModelErrorCallback`, so the event type
+   * already excludes them.
+   */
+  private logNodeError(
+    invocationContext: InvocationContext,
+    event: Event,
+  ): void {
+    if (!isNodeErrorEvent(event)) {
+      return;
+    }
+    this.logEvent({
+      eventType: AnalyticsEventType.NODE_ERROR,
+      invocationContext,
+      rawContent: {error_code: event.errorCode ?? null},
+      data: {
+        sourceEvent: event,
+        status: AnalyticsStatus.ERROR,
+        errorMessage: event.errorMessage,
+      },
+    });
+  }
+
+  /**
+   * Writes an `AGENT_STATE_CHECKPOINT` row for a resumable-workflow snapshot.
+   *
+   * `endOfAgent` alone is enough, so an agent that finishes without saving
+   * state still marks where its run ended.
+   */
+  private logAgentStateCheckpoint(
+    invocationContext: InvocationContext,
+    event: Event,
+  ): void {
+    const {agentState, endOfAgent} = event.actions;
+    if (agentState === undefined && endOfAgent !== true) {
+      return;
+    }
+    this.logEvent({
+      eventType: AnalyticsEventType.AGENT_STATE_CHECKPOINT,
+      invocationContext,
+      rawContent: {
+        agent_state: agentState ?? null,
+        end_of_agent: endOfAgent === true,
+      },
+      data: {sourceEvent: event},
     });
   }
 
@@ -1010,12 +1087,18 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       attributes['finish_reason'] = data.finishReason;
     }
     if (this.config.logSessionMetadata) {
-      attributes['session_metadata'] = {
-        session_id: invocationContext.session.id,
+      const {session} = invocationContext;
+      const metadata: Record<string, unknown> = {
+        session_id: session.id,
         app_name: invocationContext.appName,
         user_id: invocationContext.userId,
-        branch: invocationContext.branch ?? null,
       };
+      // State carries user-set metadata, so it is written whole and left to
+      // the caller's truncation and redaction pass.
+      if (Object.keys(session.state).length > 0) {
+        metadata['state'] = session.state;
+      }
+      attributes['session_metadata'] = metadata;
     }
     if (Object.keys(this.config.customTags).length > 0) {
       attributes['custom_tags'] = this.config.customTags;

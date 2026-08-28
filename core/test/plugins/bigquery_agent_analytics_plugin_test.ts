@@ -13,6 +13,7 @@ import {
   Context,
   createEvent,
   createEventActions,
+  createNodeErrorEvent,
   createSession,
   Event,
   FunctionTool,
@@ -607,9 +608,56 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
         session_id: 'session-1',
         app_name: 'test-app',
         user_id: 'user-1',
-        branch: 'root.child',
       },
     });
+  });
+
+  it('keeps the branch out of session metadata, which adk-python never writes', async () => {
+    const plugin = makePlugin();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext({branch: 'root.child'}),
+    });
+    await plugin.flush();
+    const attributes = parseColumn(onlyRow().attributes);
+    expect(attributes).toBeTypeOf('object');
+    const metadata = (attributes as {session_metadata: object})
+      .session_metadata;
+    expect(metadata).not.toHaveProperty('branch');
+  });
+
+  it('carries the session state a caller set', async () => {
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext();
+    invocationContext.session.state['customer_id'] = 'c-42';
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      session_metadata: {state: {customer_id: 'c-42'}},
+    });
+  });
+
+  it('redacts a credential the session state carries', async () => {
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext();
+    invocationContext.session.state['api_key'] = 'sk-secret-value';
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      session_metadata: {state: {api_key: '[REDACTED]'}},
+    });
+  });
+
+  it('omits the state key for a session that has none', async () => {
+    const plugin = makePlugin();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await plugin.flush();
+    const attributes = parseColumn(onlyRow().attributes);
+    expect(attributes).toBeTypeOf('object');
+    const metadata = (attributes as {session_metadata: object})
+      .session_metadata;
+    expect(metadata).not.toHaveProperty('state');
   });
 
   it('omits session metadata when it is disabled', async () => {
@@ -1399,6 +1447,57 @@ describe('BigQueryAgentAnalyticsPlugin onEventCallback', () => {
     expect(rows()).toHaveLength(0);
   });
 
+  it('writes an AGENT_STATE_CHECKPOINT row for a saved agent state', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        actions: {agentState: {cursor: 7}},
+      }),
+    });
+    await plugin.flush();
+    const row = onlyRow();
+    expect(row.event_type).toBe(AnalyticsEventType.AGENT_STATE_CHECKPOINT);
+    expect(parseColumn(row.content)).toEqual({
+      agent_state: {cursor: 7},
+      end_of_agent: false,
+    });
+  });
+
+  it('writes an AGENT_STATE_CHECKPOINT row for the end of an agent that saved no state', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        actions: {endOfAgent: true},
+      }),
+    });
+    await plugin.flush();
+    const row = onlyRow();
+    expect(row.event_type).toBe(AnalyticsEventType.AGENT_STATE_CHECKPOINT);
+    expect(parseColumn(row.content)).toEqual({
+      agent_state: null,
+      end_of_agent: true,
+    });
+  });
+
+  it('writes no checkpoint row when the agent neither saved state nor ended', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        actions: {endOfAgent: false, stateDelta: {counter: 1}},
+      }),
+    });
+    await plugin.flush();
+    expect(rowsOfType(AnalyticsEventType.AGENT_STATE_CHECKPOINT)).toHaveLength(
+      0,
+    );
+  });
+
   it('writes an AGENT_RESPONSE row for a final text answer', async () => {
     const plugin = makePlugin();
     const event = createEvent({
@@ -1905,6 +2004,16 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
     expect(rowsOfType(AnalyticsEventType.INVOCATION_ERROR)).toHaveLength(0);
   });
 
+  it('declares the two types adk-js has no source for, and emits neither', async () => {
+    expect(AnalyticsEventType.EVENT_COMPACTION).toBe('EVENT_COMPACTION');
+    expect(AnalyticsEventType.A2A_INTERACTION).toBe('A2A_INTERACTION');
+    const plugin = makePlugin();
+    await runTurn(plugin, makeInvocationContext());
+    await plugin.shutdown();
+    expect(rowsOfType(AnalyticsEventType.EVENT_COMPACTION)).toHaveLength(0);
+    expect(rowsOfType(AnalyticsEventType.A2A_INTERACTION)).toHaveLength(0);
+  });
+
   it('writes an AGENT_TRANSFER row naming both agents', async () => {
     const plugin = makePlugin();
     await plugin.onEventCallback({
@@ -2097,6 +2206,33 @@ describe('BigQueryAgentAnalyticsPlugin batching and drops', () => {
     expect(plugin.getDropStats()['shutdown_timeout']).toBe(1);
     expect(rows()).toHaveLength(0);
   });
+
+  it('charges an abandoned insert once, even when it later fails', async () => {
+    vi.useFakeTimers();
+    let release = (): void => {};
+    fake.insertGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fake.insertError = new Error('quota exceeded');
+    const plugin = makePlugin({
+      batchSize: 1,
+      shutdownTimeoutMs: 50,
+      flushOnRunEnd: false,
+    });
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await vi.waitFor(() => {
+      expect(fake.insertCalls).toBe(1);
+    });
+    const shutting = plugin.shutdown();
+    await vi.advanceTimersByTimeAsync(50);
+    await shutting;
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(plugin.getDropStats()['shutdown_timeout']).toBe(1);
+    expect(plugin.getDropStats()['write_failed']).toBe(0);
+  });
 });
 
 describe('BigQueryAgentAnalyticsPlugin failure containment', () => {
@@ -2178,17 +2314,87 @@ describe('BigQueryAgentAnalyticsPlugin end to end turn', () => {
   });
 });
 
+describe('BigQueryAgentAnalyticsPlugin final response tools', () => {
+  it('writes an AGENT_RESPONSE row when a final response tool completes', async () => {
+    const plugin = makePlugin({finalResponseToolNames: ['submit_answer']});
+    const tool = makeTool('submit_answer');
+    await plugin.afterToolCallback({
+      tool,
+      toolArgs: {answer: 'sunny'},
+      toolContext: makeContext(makeInvocationContext()),
+      result: {ok: true},
+    });
+    await plugin.flush();
+    const responses = rowsOfType(AnalyticsEventType.AGENT_RESPONSE);
+    expect(responses).toHaveLength(1);
+    expect(parseColumn(responses[0].content)).toEqual({
+      response: {answer: 'sunny'},
+    });
+    expect(parseColumn(responses[0].attributes)).toMatchObject({
+      source_tool: 'submit_answer',
+    });
+  });
+
+  it('writes only TOOL_COMPLETED for a tool that is not a final response tool', async () => {
+    const plugin = makePlugin({finalResponseToolNames: ['submit_answer']});
+    await plugin.afterToolCallback({
+      tool: makeTool('lookup_weather'),
+      toolArgs: {city: 'Paris'},
+      toolContext: makeContext(makeInvocationContext()),
+      result: {ok: true},
+    });
+    await plugin.flush();
+    expect(onlyRow().event_type).toBe(AnalyticsEventType.TOOL_COMPLETED);
+  });
+
+  it('writes only TOOL_COMPLETED when no final response tool is configured', async () => {
+    const plugin = makePlugin();
+    await plugin.afterToolCallback({
+      tool: makeTool('submit_answer'),
+      toolArgs: {answer: 'sunny'},
+      toolContext: makeContext(makeInvocationContext()),
+      result: {ok: true},
+    });
+    await plugin.flush();
+    expect(onlyRow().event_type).toBe(AnalyticsEventType.TOOL_COMPLETED);
+  });
+});
+
 describe('BigQueryAgentAnalyticsPlugin configuration validation', () => {
   it('refuses a batch size below one', () => {
     expect(() => makePlugin({batchSize: 0})).toThrow(
-      'batchSize must be a finite number of at least 1, got 0.',
+      'batchSize must be an integer of at least 1, got 0.',
     );
   });
 
   it('refuses a content limit that is neither positive nor the no-limit value', () => {
     expect(() => makePlugin({maxContentLength: 0})).toThrow(
-      'maxContentLength must be a finite number of at least 1, or -1 for no ' +
+      'maxContentLength must be an integer of at least 1, or -1 for no ' +
         'limit, got 0.',
+    );
+  });
+
+  it.each<[string, BigQueryLoggerConfig]>([
+    ['batchSize', {batchSize: 1.5}],
+    ['queueMaxSize', {queueMaxSize: 2.7}],
+    ['batchFlushIntervalMs', {batchFlushIntervalMs: 10.5}],
+    ['shutdownTimeoutMs', {shutdownTimeoutMs: 10.5}],
+  ])('refuses a fractional %s', (key, config) => {
+    expect(() => makePlugin(config)).toThrow(
+      `${key} must be an integer of at least 1`,
+    );
+  });
+
+  it('refuses a fractional content limit', () => {
+    expect(() => makePlugin({maxContentLength: 1.5})).toThrow(
+      'maxContentLength must be an integer of at least 1, or -1 for no ' +
+        'limit, got 1.5.',
+    );
+  });
+
+  it('refuses a shutdown timeout of zero, which would drain nothing', () => {
+    expect(() => makePlugin({shutdownTimeoutMs: 0})).toThrow(
+      'shutdownTimeoutMs must be an integer of at least 1, got 0.',
     );
   });
 });
@@ -2223,6 +2429,73 @@ describe('BigQueryAgentAnalyticsPlugin workflow nodes', () => {
       node: 'summarize',
       output: 'done',
     });
+  });
+
+  it('writes a NODE_ERROR row for a node that failed', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createNodeErrorEvent({
+        author: 'root_agent',
+        error: Object.assign(new Error('upstream refused'), {code: 'EPERM'}),
+        nodeInfo: {path: 'wf/summarize@2'},
+      }),
+    });
+    await plugin.flush();
+    const row = onlyRow();
+    expect(row.event_type).toBe(AnalyticsEventType.NODE_ERROR);
+    expect(row.status).toBe('ERROR');
+    expect(row.error_message).toBe('upstream refused');
+    expect(parseColumn(row.content)).toEqual({error_code: 'EPERM'});
+    expect(parseColumn(row.attributes)).toMatchObject({
+      adk: {node: {path: 'wf/summarize@2', run_id: '2'}},
+    });
+  });
+
+  it('redacts a credential a failing node put in its error message', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createNodeErrorEvent({
+        author: 'root_agent',
+        error: new Error('refused: api_key=sk-secret-value'),
+        nodeInfo: {path: 'wf/summarize@2'},
+      }),
+    });
+    await plugin.flush();
+    expect(onlyRow().error_message).toBe('refused: api_key=[REDACTED]');
+  });
+
+  it('writes a null error code for a node error event that carries none', async () => {
+    const plugin = makePlugin();
+    // A node error event rehydrated from a session store can arrive without
+    // the code the factory would have set.
+    const event = createNodeErrorEvent({
+      author: 'root_agent',
+      error: new Error('upstream refused'),
+      nodeInfo: {path: 'wf/summarize@2'},
+    });
+    event.errorCode = undefined;
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event,
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().content)).toEqual({error_code: null});
+  });
+
+  it('writes no NODE_ERROR row for an ordinary node event', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        content: {role: 'model', parts: [{text: 'sunny'}]},
+        nodeInfo: {path: 'wf/summarize@2'},
+      }),
+    });
+    await plugin.flush();
+    expect(rowsOfType(AnalyticsEventType.NODE_ERROR)).toHaveLength(0);
   });
 
   it('records null run ids for a node path that carries none', async () => {

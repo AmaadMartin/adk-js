@@ -43,7 +43,9 @@ export enum AnalyticsEventType {
   TOOL_ERROR = 'TOOL_ERROR',
   TOOL_PAUSED = 'TOOL_PAUSED',
   STATE_DELTA = 'STATE_DELTA',
+  AGENT_STATE_CHECKPOINT = 'AGENT_STATE_CHECKPOINT',
   NODE_OUTPUT = 'NODE_OUTPUT',
+  NODE_ERROR = 'NODE_ERROR',
   HITL_CREDENTIAL_REQUEST = 'HITL_CREDENTIAL_REQUEST',
   HITL_CONFIRMATION_REQUEST = 'HITL_CONFIRMATION_REQUEST',
   HITL_INPUT_REQUEST = 'HITL_INPUT_REQUEST',
@@ -62,6 +64,17 @@ export enum AnalyticsEventType {
    * invocation failure to a plugin.
    */
   INVOCATION_ERROR = 'INVOCATION_ERROR',
+  /**
+   * Declared so the enum matches the Python one, never written by this SDK.
+   * adk-js `EventActions` has no `compaction` field, so no event carries a
+   * compaction to report.
+   */
+  EVENT_COMPACTION = 'EVENT_COMPACTION',
+  /**
+   * Declared so the enum matches the Python one, never written by this SDK.
+   * Agent-to-agent interaction capture is out of scope for this port.
+   */
+  A2A_INTERACTION = 'A2A_INTERACTION',
 }
 
 /** The `attributes.adk.pause_kind` value for a non-HITL long-running tool. */

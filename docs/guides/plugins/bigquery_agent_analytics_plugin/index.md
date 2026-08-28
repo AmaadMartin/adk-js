@@ -83,9 +83,11 @@ On first use the plugin looks the table up and, when it is absent, creates it wi
 - `is_truncated` says a payload was cut. Redacting a credential does not set it.
 - `error_message` is also set on some `LLM_RESPONSE` rows whose `status` is `OK`, because a model can decline without failing.
 
-The `event_type` values are the members of `AnalyticsEventType`. They cover the invocation (`INVOCATION_STARTING`, `INVOCATION_COMPLETED`), the agent (`AGENT_STARTING`, `AGENT_COMPLETED`, `AGENT_TRANSFER`, `AGENT_RESPONSE`), the model (`LLM_REQUEST`, `LLM_RESPONSE`, `LLM_ERROR`), the tool (`TOOL_STARTING`, `TOOL_COMPLETED`, `TOOL_ERROR`, `TOOL_PAUSED`), the user message (`USER_MESSAGE_RECEIVED`), session state (`STATE_DELTA`), and the three human-in-the-loop requests with their `_COMPLETED` counterparts.
+The `event_type` values are the members of `AnalyticsEventType`. They cover the invocation (`INVOCATION_STARTING`, `INVOCATION_COMPLETED`), the agent (`AGENT_STARTING`, `AGENT_COMPLETED`, `AGENT_TRANSFER`, `AGENT_RESPONSE`), the model (`LLM_REQUEST`, `LLM_RESPONSE`, `LLM_ERROR`), the tool (`TOOL_STARTING`, `TOOL_COMPLETED`, `TOOL_ERROR`, `TOOL_PAUSED`), the workflow node (`NODE_OUTPUT`, `NODE_ERROR`), the user message (`USER_MESSAGE_RECEIVED`), session state (`STATE_DELTA`, `AGENT_STATE_CHECKPOINT`), and the three human-in-the-loop requests with their `_COMPLETED` counterparts.
 
-`AGENT_ERROR` and `INVOCATION_ERROR` are declared too, so the enum matches the Python one and a query written for a shared dataset compiles. This SDK never writes them: adk-js `BasePlugin` has no `onAgentErrorCallback` and no `onRunErrorCallback`, so no hook reports those failures to a plugin. A model failure still produces `LLM_ERROR` and a tool failure still produces `TOOL_ERROR`.
+A workflow node that succeeds produces `NODE_OUTPUT`. A node that throws produces `NODE_ERROR`, with `status` of `ERROR` and the failure in `error_message`. `AGENT_STATE_CHECKPOINT` carries a resumable workflow's saved state, and an agent that ends without saving state still writes one with `end_of_agent` true.
+
+Four members are declared so the enum matches the Python one and a query written for a shared dataset compiles. This SDK writes none of them. adk-js `BasePlugin` has no `onAgentErrorCallback` and no `onRunErrorCallback`, so nothing reports `AGENT_ERROR` or `INVOCATION_ERROR`. adk-js `EventActions` has no `compaction` field, so nothing reports `EVENT_COMPACTION`. Agent-to-agent capture is out of scope, so nothing reports `A2A_INTERACTION`. A model failure still produces `LLM_ERROR`, a tool failure still produces `TOOL_ERROR`, and a node failure still produces `NODE_ERROR`.
 
 ## Pauses and human-in-the-loop turns
 
@@ -121,6 +123,17 @@ Span state is keyed by invocation id, so two invocations running at once never m
 
 - The duration options carry an `Ms` suffix and take milliseconds. adk-python's equivalents take float seconds; the rename exists so that `batchFlushIntervalMs: 1000` cannot silently mean sixteen minutes.
 - Redaction is deliberately not configurable. It is a fixed set of credential names, matched after folding case, `-`/`_` and camel humps together, plus every key beginning `temp:`.
+- Each numeric option must be a whole number of rows or milliseconds, and the constructor throws on a fractional or out-of-range value rather than dropping every row later.
+
+Some agents answer through a dedicated tool instead of a plain text event. Name those tools in `finalResponseToolNames`, and completing one writes an `AGENT_RESPONSE` row carrying the call arguments, alongside the usual `TOOL_COMPLETED`.
+
+```typescript
+const analytics = new BigQueryAgentAnalyticsPlugin({
+  projectId: 'my-project',
+  datasetId: 'agent_analytics',
+  config: {finalResponseToolNames: ['submit_answer']},
+});
+```
 
 The default `batchSize` of 1 writes each row as it is produced, which is the simplest behaviour to reason about and the slowest. Raise it, and `batchFlushIntervalMs` bounds how long a partial batch waits.
 
