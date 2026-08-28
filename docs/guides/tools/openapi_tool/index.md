@@ -88,13 +88,20 @@ Text that parses to something other than an object throws
 ## Security schemes
 
 `getAuthSchemeName()` returns the first scheme of the first security
-requirement, and `''` when the operation names none. `OpenApiSpecParser` falls
-back to the document-level scheme in that case, so an operation inherits the
-document's security unless it names its own.
+requirement. An operation can list several requirements, which OpenAPI reads as
+"any one of these", so a spec that offers a cheap scheme and an expensive one
+should list the preferred scheme first.
 
-An operation can list several requirements, which OpenAPI reads as "any one of
-these". The parser takes the first, so a spec that offers a cheap scheme and an
-expensive one should list the preferred scheme first.
+An **empty** requirement object means authentication is optional. A tool that
+carries a scheme stops and asks the caller for a credential instead of sending
+the request, so an optional requirement resolves to no scheme at all:
+`security: [{apiKey: []}, {}]` yields `''`. Pass `authScheme` and
+`authCredential` to the toolset when you do want such an operation
+authenticated.
+
+`OpenApiSpecParser` reads the document-level `security` through the same rule.
+An operation inherits it only when the operation declares no `security` of its
+own — `security: []` and `security: [{}]` opt out, and do not fall back.
 
 ## Reusing parameters you already parsed
 
@@ -144,15 +151,26 @@ still `string`. A type array drops its `'null'` entry, so
 `unknown`.
 
 `getReturnTypeHint()` applies the same map to the response schema the operation
-returns, and reports `unknown` when no 2xx response declares one.
+returns, and reports `unknown` when no 2xx response declares one. It reads
+`getReturnValue()`, which throws `Operation return value has not been parsed`
+on a parser built with `shouldParse: false` and no supplied return value.
+
+The return value comes from the smallest 2xx status code, taking the first
+media type under it that declares a schema. It is named `value` and is never
+marked required.
 
 ## Argument names
 
 `createApiParameter` derives the argument name from the parameter name, in
-snake_case. When the spec declares an empty name, or the name snake_cases away
-to nothing, the location supplies a default: `body`, `query_param`,
-`path_param`, `header_param`, `cookie_param`, and `value` for any other
-location. The description falls back to the schema's own description.
+snake_case. `toSnakeCaseName` folds runs of punctuation and spaces into one
+underscore, splits camelCase, and keeps acronyms whole, so `getHTTPResponse`
+becomes `get_http_response` and `REST API` becomes `rest_api`. Leading,
+trailing and repeated underscores are removed.
+
+When the spec declares an empty name, or the name snake_cases away to nothing,
+the location supplies a default: `body`, `query_param`, `path_param`,
+`header_param`, `cookie_param`, and `value` for any other location. The
+description falls back to the schema's own description.
 
 ```ts
 import {createApiParameter} from '@google/adk';
@@ -166,6 +184,26 @@ const param = createApiParameter({
 console.log(param.name); // 'pet_id'
 console.log(param.description); // 'The pet id'
 ```
+
+Two arguments that snake_case to the same name are numbered from zero: `q`,
+`q_0`, `q_1`.
+
+`preservePropertyNames: true` keeps the spec's argument names as they are. It
+does not change the tool name, which is always snake_case.
+
+## Request bodies
+
+An object body becomes one argument per property, required only when the
+schema's `required` list names it. An empty object body produces **no**
+argument.
+
+Any other body becomes a single argument. An array body is named `array`. A
+body with `oneOf`, `anyOf`, `allOf`, or no type at all is named `body`. A plain
+scalar body keeps an empty original name and picks up `body` from its location,
+so no empty key reaches the argument schema. None of these are required unless
+the schema says so.
+
+Only the first media type of a request body is read.
 
 ## Documenting a return value
 
@@ -188,8 +226,12 @@ first media type. It returns `''` when no 2xx response carries content.
 
 `<context>` names the site, so the message points at the parameter or the
 response that carries the bad schema. `OperationParser` reports
-`operation parameter 'petId'`, `request body property 'pet'`, and
-`response '200' body`.
+`operation parameter 'petId'`, `request body media type 'application/json'`,
+`request body property 'pet'`, and `response media type 'application/json'`.
+
+A `requestBody` or a response that is _itself_ a `$ref` throws
+`Request body contains unresolved reference '<ref>'` and
+`Response contains unresolved reference '<ref>'`.
 
 One case does not throw: an entry in `operation.parameters` that is itself a
 `$ref` is skipped. A single dangling pointer there must not take down every
