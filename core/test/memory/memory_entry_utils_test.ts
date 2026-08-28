@@ -42,7 +42,6 @@ describe('extractText', () => {
     };
 
     expect(extractText(memory)).toBe('');
-    expect(extractText(memory)).toBeFalsy();
   });
 
   it('returns an empty string when parts is undefined', () => {

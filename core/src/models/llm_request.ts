@@ -86,10 +86,6 @@ export function insertTransientUserContent(
   llmRequest: LlmRequest,
   contents: Content[],
 ): void {
-  if (!contents.length) {
-    return;
-  }
-
   const existing = llmRequest.contents;
   let insertIndex = 0;
   for (let i = existing.length - 1; i >= 0; i--) {
