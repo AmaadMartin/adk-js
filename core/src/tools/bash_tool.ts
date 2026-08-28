@@ -110,15 +110,22 @@ function decodeOutput(chunks: Buffer[], placeholder: string): string {
   return text === '' ? placeholder : text;
 }
 
-/** SIGKILLs the child's whole process group; a group already gone is fine. */
+/**
+ * SIGKILLs the child's whole process group.
+ *
+ * The cleanup path calls this once the child has closed, when the group is
+ * normally empty already and the kill throws `ESRCH`. That is the expected
+ * case rather than a fault, so nothing is reported: the caller holds the
+ * command's result and cannot act on a failed reap.
+ */
 function killProcessGroup(pid: number | undefined): void {
   if (pid === undefined) {
     return;
   }
   try {
     process.kill(-pid, 'SIGKILL');
-  } catch (e: unknown) {
-    logger.debug(`Failed to kill process group ${pid}: ${formatError(e)}`);
+  } catch {
+    // The group is gone, which is the outcome this asks for.
   }
 }
 
