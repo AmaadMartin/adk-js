@@ -358,7 +358,7 @@ export const EVENTS_TABLE_SCHEMA: TableField[] = [
     type: 'STRING',
     mode: 'NULLABLE',
     description:
-      'A unique identifier assigned before enqueue. Storage Write API retries preserve this value so duplicate rows can be identified reliably.',
+      'A unique identifier assigned before enqueue. This SDK sends it as the insert id of the row, so a retried insert of the same row is de-duplicated on a best-effort basis.',
   },
   {
     name: 'event_type',

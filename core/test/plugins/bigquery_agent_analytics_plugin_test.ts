@@ -424,6 +424,24 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     ]);
   });
 
+  it('describes event_id by the de-duplication this transport gives', async () => {
+    const plugin = makePlugin();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await plugin.flush();
+    const schema = fake.created[0].metadata.schema;
+    if (!Array.isArray(schema)) {
+      expect.fail('the created table carries no field list');
+    }
+    const eventId = schema.find((field) => field.name === 'event_id');
+    // A table holds rows from both SDKs, and whichever one creates it writes
+    // this description. It must not promise the Storage Write API guarantees
+    // that `tabledata.insertAll` does not give.
+    expect(eventId?.description).toContain('insert id');
+    expect(eventId?.description).not.toContain('Storage Write API');
+  });
+
   it('reuses an existing table without creating one', async () => {
     fake.tableExists = true;
     const plugin = makePlugin();

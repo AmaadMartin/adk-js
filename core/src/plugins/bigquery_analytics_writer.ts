@@ -146,6 +146,20 @@ function rejectedRowCount(err: unknown, batchSize: number): number {
  * caller is an agent callback and analytics must not break an agent run.
  *
  * The writer creates the dataset and the table if they are absent.
+ *
+ * Transport: adk-python appends rows through the BigQuery Storage Write API.
+ * This writer calls `table.insert()`, which is `tabledata.insertAll`. That is a
+ * deliberate departure, not an oversight. Both paths write the same columns and
+ * the same values, so one dataset answers queries from either SDK.
+ *
+ * The delivery semantics differ, and a host that reads {@link getDropStats}
+ * should know how. `insertAll` de-duplicates on the insert id of a row on a
+ * best-effort basis, where adk-python's committed streams and offsets can
+ * de-duplicate exactly. BigQuery also rejects an insert into a table it created
+ * moments earlier, until that new table propagates, so the first rows written
+ * to a fresh table can be lost. Such a row is counted under
+ * {@link AnalyticsDropReason.WRITE_FAILED} rather than retried, because a retry
+ * loop here would hold an agent run open on the error path.
  */
 export class BigQueryRowWriter {
   private readonly queue: AnalyticsRow[] = [];
