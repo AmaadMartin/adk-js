@@ -9,8 +9,6 @@ import {experimental} from '../../../utils/experimental.js';
 import {
   ApiParameter,
   createApiParameter,
-  generateParamDoc,
-  generateReturnDoc,
   normalizeSchema,
   toSnakeCaseName,
 } from '../common/common.js';
@@ -56,19 +54,11 @@ export class OperationParser {
           param.schema,
           `operation parameter '${originalName}'`,
         );
-        // The model only sees the schema, so the parameter-level description
-        // is copied onto it. The copy matters: a resolved $ref and a
-        // path-level parameter are both shared between operations.
-        const paramSchema =
-          description && !schema.description
-            ? {...schema, description}
-            : schema;
-
         this.params.push(
           createApiParameter({
             originalName,
             paramLocation: param.in || '',
-            paramSchema,
+            paramSchema: schema,
             description,
             required: param.required || false,
             name: this.getParamName(originalName),
@@ -240,21 +230,5 @@ export class OperationParser {
   @experimental
   public getDescription(): string {
     return this.operation.description || this.operation.summary || '';
-  }
-
-  /**
-   * Renders the operation as prose: a summary, one line per argument, and the
-   * return value.
-   *
-   * @returns The documentation string.
-   */
-  @experimental
-  public getDocString(): string {
-    const summary = this.operation.summary || this.operation.description || '';
-    const args = this.params
-      .map((param) => `    ${generateParamDoc(param)}`)
-      .join('\n');
-    const returnDoc = generateReturnDoc(this.operation.responses ?? {});
-    return `${summary}\n\nArgs:\n${args}\n\n${returnDoc}`;
   }
 }
