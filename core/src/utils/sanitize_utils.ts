@@ -144,29 +144,6 @@ export function truncateText(
   return {text: text.slice(0, maxLength) + TRUNCATED_SUFFIX, truncated: true};
 }
 
-/** {@link truncateText} in the shape the recursive walk returns. */
-function truncateStringValue(value: string, maxLength: number): SanitizeResult {
-  const {text, truncated} = truncateText(value, maxLength);
-  return {value: text, truncated};
-}
-
-/**
- * Sanitizes a non-object value. Numbers, booleans, `null` and `undefined` pass
- * through; everything else (`bigint`, `symbol`, `function`) is stringified so
- * that the result stays JSON-serializable.
- */
-function sanitizeScalar(value: unknown, maxLength: number): SanitizeResult {
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return {value, truncated: false};
-  }
-  return truncateStringValue(String(value), maxLength);
-}
-
 /** Sanitizes each element of `values`, stopping when the node budget runs out. */
 function sanitizeArray(
   values: readonly unknown[],
@@ -230,11 +207,19 @@ function sanitizeValue(
   if (depth >= MAX_SANITIZE_DEPTH) {
     return {value: MAX_DEPTH_EXCEEDED, truncated: true};
   }
-  if (typeof value === 'string') {
-    return truncateStringValue(value, state.maxLength);
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return {value, truncated: false};
   }
-  if (value === null || typeof value !== 'object') {
-    return sanitizeScalar(value, state.maxLength);
+  if (typeof value !== 'object') {
+    // A string passes through `String` unchanged; a bigint, symbol or function
+    // becomes text, so the result stays JSON-serializable either way.
+    const {text, truncated} = truncateText(String(value), state.maxLength);
+    return {value: text, truncated};
   }
   if (state.ancestors.has(value)) {
     return {value: CIRCULAR_REFERENCE, truncated: false};

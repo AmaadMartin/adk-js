@@ -32,6 +32,8 @@ import {
   AnalyticsEventType,
   AnalyticsRow,
   AnalyticsStatus,
+  hitlMappingFor,
+  TOOL_PAUSE_KIND,
 } from './bigquery_analytics_schema.js';
 import {
   AnalyticsDropReason,
@@ -56,6 +58,14 @@ const FORMATTER_FAILED_LOG =
   'BigQuery analytics content formatter failed; writing a sentinel instead of the content.';
 const CONTENT_PARSE_FAILED_LOG =
   'BigQuery analytics could not sanitize the content; writing a sentinel instead of it.';
+
+/**
+ * Logged when an event names a long-running call id that no function call in
+ * that event carries. The id is left out: a model supplies it, so it is
+ * untrusted like any other model output.
+ */
+const UNMATCHED_LONG_RUNNING_ID_LOG =
+  'BigQuery analytics found a long-running tool id with no matching function call; writing the pause row without the call.';
 
 /**
  * Invocations whose span stacks are kept at once. An invocation whose
@@ -395,6 +405,10 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         invocationContext: params.invocationContext,
         rawContent: params.userMessage,
       });
+      await this.logUserMessageCompletions(
+        params.invocationContext,
+        params.userMessage,
+      );
     });
   }
 
@@ -513,13 +527,9 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         ? undefined
         : this.popSpan(invocationId, SpanKind.LLM_REQUEST);
       const span = popped ?? open;
-      const summary = formatContentSummary(
-        llmResponse.content,
-        this.config.maxContentLength,
-      );
       const content: Record<string, unknown> = {};
       if (llmResponse.content !== undefined) {
-        content['response'] = summary.text;
+        content['response'] = formatContentSummary(llmResponse.content);
       }
       const usage = usageCounts(llmResponse);
       if (usage !== undefined) {
@@ -634,8 +644,133 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     return this.safe('onEventCallback', async () => {
       const {invocationContext, event} = params;
       await this.logStateDelta(invocationContext, event);
+      await this.logAgentTransfer(invocationContext, event);
+      await this.logPausedCalls(invocationContext, event);
+      await this.logHitlCompletions(invocationContext, event);
       await this.logAgentResponse(invocationContext, event);
     });
+  }
+
+  /** Writes an `AGENT_TRANSFER` row when the event handed control to a peer. */
+  private async logAgentTransfer(
+    invocationContext: InvocationContext,
+    event: Event,
+  ): Promise<void> {
+    const toAgent = event.actions.transferToAgent;
+    if (toAgent === undefined) {
+      return;
+    }
+    await this.logEvent({
+      eventType: AnalyticsEventType.AGENT_TRANSFER,
+      invocationContext,
+      rawContent: {from_agent: event.author, to_agent: toAgent},
+      data: {sourceEvent: event},
+    });
+  }
+
+  /**
+   * Writes a row for every call the event leaves pending: a `HITL_*_REQUEST`
+   * for each framework request, and a `TOOL_PAUSED` for each long-running call
+   * id. A framework request is both, so it gets both rows. `TOOL_PAUSED` is
+   * the row a completion pairs with, and its `pause_kind` says what the run is
+   * waiting for, which is why a query counting pauses sees framework requests
+   * too.
+   */
+  private async logPausedCalls(
+    invocationContext: InvocationContext,
+    event: Event,
+  ): Promise<void> {
+    const calls = getFunctionCalls(event);
+    for (const call of calls) {
+      const mapping = hitlMappingFor(call.name);
+      if (mapping === undefined) {
+        continue;
+      }
+      await this.logEvent({
+        eventType: mapping.request,
+        invocationContext,
+        rawContent: {tool: call.name ?? null, args: call.args ?? null},
+        data: {
+          sourceEvent: event,
+          extraAttributes: pauseAttributes(mapping.pauseKind, call.id),
+        },
+      });
+    }
+    for (const id of event.longRunningToolIds ?? []) {
+      const call = calls.find((candidate) => candidate.id === id);
+      if (call === undefined) {
+        logger.warn(UNMATCHED_LONG_RUNNING_ID_LOG);
+      }
+      await this.logEvent({
+        eventType: AnalyticsEventType.TOOL_PAUSED,
+        invocationContext,
+        rawContent: {tool: call?.name ?? null, args: call?.args ?? null},
+        data: {
+          sourceEvent: event,
+          extraAttributes: pauseAttributes(
+            hitlMappingFor(call?.name)?.pauseKind ?? TOOL_PAUSE_KIND,
+            id,
+          ),
+        },
+      });
+    }
+  }
+
+  /** Writes a `HITL_*_REQUEST_COMPLETED` row per answered framework request. */
+  private async logHitlCompletions(
+    invocationContext: InvocationContext,
+    event: Event,
+  ): Promise<void> {
+    for (const response of getFunctionResponses(event)) {
+      const mapping = hitlMappingFor(response.name);
+      if (mapping === undefined) {
+        continue;
+      }
+      await this.logEvent({
+        eventType: mapping.completed,
+        invocationContext,
+        rawContent: {
+          tool: response.name ?? null,
+          result: response.response ?? null,
+        },
+        data: {
+          sourceEvent: event,
+          extraAttributes: pauseAttributes(mapping.pauseKind, response.id),
+        },
+      });
+    }
+  }
+
+  /**
+   * Writes the row that closes a pause a client answered in its message: the
+   * `HITL_*_REQUEST_COMPLETED` for a framework request, otherwise the
+   * `TOOL_COMPLETED` of a long-running tool.
+   */
+  private async logUserMessageCompletions(
+    invocationContext: InvocationContext,
+    userMessage: Content,
+  ): Promise<void> {
+    for (const part of userMessage.parts ?? []) {
+      const response = part.functionResponse;
+      if (response === undefined) {
+        continue;
+      }
+      const mapping = hitlMappingFor(response.name);
+      await this.logEvent({
+        eventType: mapping?.completed ?? AnalyticsEventType.TOOL_COMPLETED,
+        invocationContext,
+        rawContent: {
+          tool: response.name ?? null,
+          result: response.response ?? null,
+        },
+        data: {
+          extraAttributes: pauseAttributes(
+            mapping?.pauseKind ?? TOOL_PAUSE_KIND,
+            response.id,
+          ),
+        },
+      });
+    }
   }
 
   /** Writes a `STATE_DELTA` row when the event changed session state. */
@@ -681,14 +816,15 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     if (visible.length === 0) {
       return;
     }
-    const summary = formatContentSummary(
-      {role: event.content?.role, parts: visible},
-      this.config.maxContentLength,
-    );
     await this.logEvent({
       eventType: AnalyticsEventType.AGENT_RESPONSE,
       invocationContext,
-      rawContent: {response: summary.text},
+      rawContent: {
+        response: formatContentSummary({
+          role: event.content?.role,
+          parts: visible,
+        }),
+      },
       data: {
         sourceEvent: event,
         extraAttributes: {
@@ -932,6 +1068,19 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       invocationId
     );
   }
+}
+
+/**
+ * The `attributes.adk` envelope a paused call and its completion share, so one
+ * query pairs them on `function_call_id`.
+ */
+function pauseAttributes(
+  pauseKind: string,
+  functionCallId: string | undefined,
+): Record<string, unknown> {
+  return {
+    adk: {pause_kind: pauseKind, function_call_id: functionCallId ?? null},
+  };
 }
 
 /** Milliseconds since `span` started, or undefined when there is no span. */

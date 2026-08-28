@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {recursiveSmartTruncate, truncateText} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {
+  recursiveSmartTruncate,
+  truncateText,
+} from '../../src/utils/sanitize_utils.js';
 
 /** Builds an object nested `depth` levels deep under the key `next`. */
 function nest(depth: number): Record<string, unknown> {

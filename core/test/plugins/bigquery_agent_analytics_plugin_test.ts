@@ -6,7 +6,6 @@
 
 import {
   AnalyticsEventType,
-  AnalyticsRow,
   BigQueryAgentAnalyticsPlugin,
   BigQueryLoggerConfig,
   Context,
@@ -26,6 +25,7 @@ import {
 import {Content, FinishReason, Language, Outcome} from '@google/genai';
 import {trace, TraceFlags} from '@opentelemetry/api';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {AnalyticsRow} from '../../src/plugins/bigquery_analytics_schema.js';
 
 /** Table metadata the fake records when the plugin creates the table. */
 interface CreatedTable {
@@ -203,6 +203,21 @@ function captureWarnings(sink: string[]): () => void {
 /** The rows written so far, in order. */
 function rows(): AnalyticsRow[] {
   return fake.inserted;
+}
+
+/** The rows written so far whose `event_type` is `eventType`, in order. */
+function rowsOfType(eventType: string): AnalyticsRow[] {
+  return fake.inserted.filter((row) => row.event_type === eventType);
+}
+
+/**
+ * The `USER_MESSAGE_RECEIVED` row; fails the test when there is not exactly
+ * one. A message that answers a paused call writes a completion row too.
+ */
+function userMessageRow(): AnalyticsRow {
+  const matching = rowsOfType(AnalyticsEventType.USER_MESSAGE_RECEIVED);
+  expect(matching).toHaveLength(1);
+  return matching[0];
 }
 
 /** The single row written so far; fails the test when there is not exactly one. */
@@ -935,7 +950,7 @@ describe('BigQueryAgentAnalyticsPlugin content parts', () => {
       invocationContext,
       userMessage: multiPart,
     });
-    const parts = onlyRow().content_parts;
+    const parts = userMessageRow().content_parts;
     expect(parts.map((part) => part.part_index)).toEqual([
       0, 1, 2, 3, 4, 5, 6, 7,
     ]);
@@ -963,7 +978,7 @@ describe('BigQueryAgentAnalyticsPlugin content parts', () => {
       invocationContext: makeInvocationContext(),
       userMessage: multiPart,
     });
-    expect(parseColumn(onlyRow().content)).toEqual({
+    expect(parseColumn(userMessageRow().content)).toEqual({
       text_summary:
         'hello | Function response: lookup_weather | ' +
         'Executable code (PYTHON): print(1) | ' +
@@ -977,7 +992,7 @@ describe('BigQueryAgentAnalyticsPlugin content parts', () => {
       invocationContext: makeInvocationContext(),
       userMessage: multiPart,
     });
-    expect(onlyRow().content_parts).toEqual([]);
+    expect(userMessageRow().content_parts).toEqual([]);
   });
 
   it('falls back to defaults for parts missing their optional fields', async () => {
@@ -1359,6 +1374,367 @@ describe('BigQueryAgentAnalyticsPlugin onEventCallback', () => {
         (row) => row.event_type === AnalyticsEventType.AGENT_RESPONSE,
       ),
     ).toHaveLength(0);
+  });
+});
+
+describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
+  it.each<[string, string, string]>([
+    [
+      'adk_request_credential',
+      AnalyticsEventType.HITL_CREDENTIAL_REQUEST,
+      'hitl_credential',
+    ],
+    [
+      'adk_request_confirmation',
+      AnalyticsEventType.HITL_CONFIRMATION_REQUEST,
+      'hitl_confirmation',
+    ],
+    ['adk_request_input', AnalyticsEventType.HITL_INPUT_REQUEST, 'hitl_input'],
+  ])('writes a %s call as %s', async (callName, eventType, pauseKind) => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        content: {
+          role: 'model',
+          parts: [
+            {functionCall: {id: 'fc-1', name: callName, args: {scope: 'a'}}},
+          ],
+        },
+      }),
+    });
+    const request = rowsOfType(eventType);
+    expect(request).toHaveLength(1);
+    expect(parseColumn(request[0].content)).toEqual({
+      tool: callName,
+      args: {scope: 'a'},
+    });
+    expect(parseColumn(request[0].attributes)).toMatchObject({
+      adk: {pause_kind: pauseKind, function_call_id: 'fc-1'},
+    });
+  });
+
+  it('takes the pause kind from the call name, not the call id', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        longRunningToolIds: ['adk_request_input'],
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                id: 'adk_request_input',
+                name: 'lookup_weather',
+                args: {},
+              },
+            },
+          ],
+        },
+      }),
+    });
+    const paused = rowsOfType(AnalyticsEventType.TOOL_PAUSED);
+    expect(paused).toHaveLength(1);
+    expect(parseColumn(paused[0].attributes)).toMatchObject({
+      adk: {pause_kind: 'tool'},
+    });
+    expect(rowsOfType(AnalyticsEventType.HITL_INPUT_REQUEST)).toHaveLength(0);
+  });
+
+  it('writes TOOL_PAUSED for an ordinary long-running call', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        longRunningToolIds: ['fc-1'],
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                id: 'fc-1',
+                name: 'lookup_weather',
+                args: {city: 'Paris'},
+              },
+            },
+          ],
+        },
+      }),
+    });
+    const paused = rowsOfType(AnalyticsEventType.TOOL_PAUSED);
+    expect(paused).toHaveLength(1);
+    expect(parseColumn(paused[0].content)).toEqual({
+      tool: 'lookup_weather',
+      args: {city: 'Paris'},
+    });
+    expect(parseColumn(paused[0].attributes)).toMatchObject({
+      adk: {pause_kind: 'tool', function_call_id: 'fc-1'},
+    });
+  });
+
+  it('writes both the request and the pause for a long-running HITL call', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        longRunningToolIds: ['fc-7'],
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                id: 'fc-7',
+                name: 'adk_request_confirmation',
+                args: {},
+              },
+            },
+          ],
+        },
+      }),
+    });
+    expect(rows().map((row) => row.event_type)).toEqual([
+      AnalyticsEventType.HITL_CONFIRMATION_REQUEST,
+      AnalyticsEventType.TOOL_PAUSED,
+    ]);
+    expect(parseColumn(rows()[1].attributes)).toMatchObject({
+      adk: {pause_kind: 'hitl_confirmation', function_call_id: 'fc-7'},
+    });
+  });
+
+  it('still writes a pairable row for a long-running id with no call, and warns', async () => {
+    const warnings: string[] = [];
+    const restore = captureWarnings(warnings);
+    try {
+      const plugin = makePlugin();
+      await plugin.onEventCallback({
+        invocationContext: makeInvocationContext(),
+        event: createEvent({
+          author: 'root_agent',
+          longRunningToolIds: ['orphan-id'],
+          content: {role: 'model', parts: [{text: 'working'}]},
+        }),
+      });
+    } finally {
+      restore();
+    }
+    const paused = rowsOfType(AnalyticsEventType.TOOL_PAUSED);
+    expect(paused).toHaveLength(1);
+    expect(parseColumn(paused[0].content)).toEqual({tool: null, args: null});
+    expect(parseColumn(paused[0].attributes)).toMatchObject({
+      adk: {pause_kind: 'tool', function_call_id: 'orphan-id'},
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('long-running tool id');
+    expect(warnings[0]).not.toContain('orphan-id');
+  });
+
+  it('writes a HITL completion, and no TOOL_COMPLETED, for an answered request event', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'fc-3',
+                name: 'adk_request_credential',
+                response: {token: 'granted'},
+              },
+            },
+          ],
+        },
+      }),
+    });
+    const completed = onlyRow();
+    expect(completed.event_type).toBe(
+      AnalyticsEventType.HITL_CREDENTIAL_REQUEST_COMPLETED,
+    );
+    expect(parseColumn(completed.content)).toEqual({
+      tool: 'adk_request_credential',
+      result: {token: '[REDACTED]'},
+    });
+    expect(parseColumn(completed.attributes)).toMatchObject({
+      adk: {pause_kind: 'hitl_credential', function_call_id: 'fc-3'},
+    });
+  });
+
+  it('leaves an ordinary tool response in an event to afterToolCallback', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'fc-4',
+                name: 'lookup_weather',
+                response: {temperature: 20},
+              },
+            },
+          ],
+        },
+      }),
+    });
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('completes a HITL request answered in the user message, with no TOOL_COMPLETED', async () => {
+    const plugin = makePlugin();
+    await plugin.onUserMessageCallback({
+      invocationContext: makeInvocationContext(),
+      userMessage: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'fc-5',
+              name: 'adk_request_confirmation',
+              response: {approved: true},
+            },
+          },
+        ],
+      },
+    });
+    expect(rows().map((row) => row.event_type)).toEqual([
+      AnalyticsEventType.USER_MESSAGE_RECEIVED,
+      AnalyticsEventType.HITL_CONFIRMATION_REQUEST_COMPLETED,
+    ]);
+    expect(parseColumn(rows()[1].attributes)).toMatchObject({
+      adk: {pause_kind: 'hitl_confirmation', function_call_id: 'fc-5'},
+    });
+  });
+
+  it('completes a paused tool answered in the user message', async () => {
+    const plugin = makePlugin();
+    await plugin.onUserMessageCallback({
+      invocationContext: makeInvocationContext(),
+      userMessage: {
+        role: 'user',
+        parts: [
+          {text: 'here it is'},
+          {
+            functionResponse: {
+              id: 'fc-6',
+              name: 'lookup_weather',
+              response: {temperature: 20},
+            },
+          },
+        ],
+      },
+    });
+    const completed = rowsOfType(AnalyticsEventType.TOOL_COMPLETED);
+    expect(completed).toHaveLength(1);
+    expect(parseColumn(completed[0].content)).toEqual({
+      tool: 'lookup_weather',
+      result: {temperature: 20},
+    });
+    expect(parseColumn(completed[0].attributes)).toMatchObject({
+      adk: {pause_kind: 'tool', function_call_id: 'fc-6'},
+    });
+  });
+
+  it('pairs a pause and its completion on one function call id', async () => {
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext();
+    await plugin.onEventCallback({
+      invocationContext,
+      event: createEvent({
+        author: 'root_agent',
+        longRunningToolIds: ['fc-8'],
+        content: {
+          role: 'model',
+          parts: [{functionCall: {id: 'fc-8', name: 'poll_job', args: {}}}],
+        },
+      }),
+    });
+    await plugin.onUserMessageCallback({
+      invocationContext,
+      userMessage: {
+        role: 'user',
+        parts: [
+          {functionResponse: {id: 'fc-8', name: 'poll_job', response: {}}},
+        ],
+      },
+    });
+    const paused = rowsOfType(AnalyticsEventType.TOOL_PAUSED)[0];
+    const completed = rowsOfType(AnalyticsEventType.TOOL_COMPLETED)[0];
+    expect(parseColumn(paused.attributes)).toMatchObject({
+      adk: {function_call_id: 'fc-8'},
+    });
+    expect(parseColumn(completed.attributes)).toMatchObject({
+      adk: {function_call_id: 'fc-8'},
+    });
+  });
+
+  it('writes a message with no function response as one row', async () => {
+    const plugin = makePlugin();
+    await plugin.onUserMessageCallback({
+      invocationContext: makeInvocationContext(),
+      userMessage: {role: 'user', parts: [{text: 'weather?'}]},
+    });
+    expect(onlyRow().event_type).toBe(AnalyticsEventType.USER_MESSAGE_RECEIVED);
+  });
+
+  it('writes an AGENT_TRANSFER row naming both agents', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        actions: {transferToAgent: 'billing_agent'},
+      }),
+    });
+    const row = onlyRow();
+    expect(row.event_type).toBe(AnalyticsEventType.AGENT_TRANSFER);
+    expect(parseColumn(row.content)).toEqual({
+      from_agent: 'root_agent',
+      to_agent: 'billing_agent',
+    });
+  });
+
+  it('writes no AGENT_TRANSFER row when the event transfers nothing', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        content: {role: 'model', parts: [{text: 'sunny'}]},
+      }),
+    });
+    expect(rowsOfType(AnalyticsEventType.AGENT_TRANSFER)).toHaveLength(0);
+  });
+
+  it('suppresses a denied pause type and keeps the rest', async () => {
+    const plugin = makePlugin({
+      eventDenylist: [AnalyticsEventType.TOOL_PAUSED],
+    });
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        longRunningToolIds: ['fc-9'],
+        content: {
+          role: 'model',
+          parts: [
+            {functionCall: {id: 'fc-9', name: 'adk_request_input', args: {}}},
+          ],
+        },
+      }),
+    });
+    expect(rows().map((row) => row.event_type)).toEqual([
+      AnalyticsEventType.HITL_INPUT_REQUEST,
+    ]);
   });
 });
 

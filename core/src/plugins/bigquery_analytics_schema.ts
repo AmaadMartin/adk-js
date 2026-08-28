@@ -5,6 +5,11 @@
  */
 
 import type {TableField} from '@google-cloud/bigquery';
+import {
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+  REQUEST_INPUT_FUNCTION_CALL_NAME,
+} from '../agents/framework_function_calls.js';
 
 /**
  * The wire contract of the agent analytics events table.
@@ -28,6 +33,7 @@ export enum AnalyticsEventType {
   INVOCATION_COMPLETED = 'INVOCATION_COMPLETED',
   AGENT_STARTING = 'AGENT_STARTING',
   AGENT_COMPLETED = 'AGENT_COMPLETED',
+  AGENT_TRANSFER = 'AGENT_TRANSFER',
   AGENT_RESPONSE = 'AGENT_RESPONSE',
   LLM_REQUEST = 'LLM_REQUEST',
   LLM_RESPONSE = 'LLM_RESPONSE',
@@ -35,7 +41,81 @@ export enum AnalyticsEventType {
   TOOL_STARTING = 'TOOL_STARTING',
   TOOL_COMPLETED = 'TOOL_COMPLETED',
   TOOL_ERROR = 'TOOL_ERROR',
+  TOOL_PAUSED = 'TOOL_PAUSED',
   STATE_DELTA = 'STATE_DELTA',
+  HITL_CREDENTIAL_REQUEST = 'HITL_CREDENTIAL_REQUEST',
+  HITL_CONFIRMATION_REQUEST = 'HITL_CONFIRMATION_REQUEST',
+  HITL_INPUT_REQUEST = 'HITL_INPUT_REQUEST',
+  HITL_CREDENTIAL_REQUEST_COMPLETED = 'HITL_CREDENTIAL_REQUEST_COMPLETED',
+  HITL_CONFIRMATION_REQUEST_COMPLETED = 'HITL_CONFIRMATION_REQUEST_COMPLETED',
+  HITL_INPUT_REQUEST_COMPLETED = 'HITL_INPUT_REQUEST_COMPLETED',
+  /**
+   * Declared so the enum matches the Python one, never written by this SDK.
+   * adk-js `BasePlugin` has no `onAgentErrorCallback`, so the plugin has no
+   * hook that reports an agent failure.
+   */
+  AGENT_ERROR = 'AGENT_ERROR',
+  /**
+   * Declared so the enum matches the Python one, never written by this SDK.
+   * adk-js `BasePlugin` has no `onRunErrorCallback`, so the plugin has no hook
+   * that reports an invocation failure.
+   */
+  INVOCATION_ERROR = 'INVOCATION_ERROR',
+}
+
+/** The `attributes.adk.pause_kind` value for a non-HITL long-running tool. */
+export const TOOL_PAUSE_KIND = 'tool';
+
+/** How one framework `adk_request_*` call appears in the taxonomy. */
+export interface HitlMapping {
+  /** Written when the agent raises the request. */
+  request: AnalyticsEventType;
+  /** Written when a client answers the request. */
+  completed: AnalyticsEventType;
+  /** The `attributes.adk.pause_kind` value for the paused call. */
+  pauseKind: string;
+}
+
+const HITL_MAPPINGS: ReadonlyMap<string, HitlMapping> = new Map([
+  [
+    REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+    {
+      request: AnalyticsEventType.HITL_CREDENTIAL_REQUEST,
+      completed: AnalyticsEventType.HITL_CREDENTIAL_REQUEST_COMPLETED,
+      pauseKind: 'hitl_credential',
+    },
+  ],
+  [
+    REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+    {
+      request: AnalyticsEventType.HITL_CONFIRMATION_REQUEST,
+      completed: AnalyticsEventType.HITL_CONFIRMATION_REQUEST_COMPLETED,
+      pauseKind: 'hitl_confirmation',
+    },
+  ],
+  [
+    REQUEST_INPUT_FUNCTION_CALL_NAME,
+    {
+      request: AnalyticsEventType.HITL_INPUT_REQUEST,
+      completed: AnalyticsEventType.HITL_INPUT_REQUEST_COMPLETED,
+      pauseKind: 'hitl_input',
+    },
+  ],
+]);
+
+/**
+ * The taxonomy entry for a function call or response name.
+ *
+ * The name decides the kind, not the call id: a client answers a request by
+ * name, and an id carries no information about what was asked.
+ *
+ * @param name The function call or response name.
+ * @return The mapping, or undefined when the name is an ordinary tool.
+ */
+export function hitlMappingFor(
+  name: string | undefined,
+): HitlMapping | undefined {
+  return name === undefined ? undefined : HITL_MAPPINGS.get(name);
 }
 
 /** The `status` column's values. */

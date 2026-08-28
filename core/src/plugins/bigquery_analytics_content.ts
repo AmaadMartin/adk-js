@@ -70,14 +70,6 @@ function isContent(value: unknown): value is Content {
   return isRecord(value) && Array.isArray(value['parts']);
 }
 
-/** Sanitizes one genai part model for embedding in `part_attributes`. */
-function sanitizePartModel(
-  value: unknown,
-  maxLength: number,
-): {value: unknown; truncated: boolean} {
-  return recursiveSmartTruncate(value, maxLength);
-}
-
 /** The record every part starts from, before its own case fills it in. */
 function baseContentPart(index: number): AnalyticsContentPart {
   return {
@@ -129,7 +121,7 @@ function buildContentPart(
 
   if (part.functionResponse) {
     const summary = `Function response: ${part.functionResponse.name}`;
-    const {value, truncated} = sanitizePartModel(
+    const {value, truncated} = recursiveSmartTruncate(
       part.functionResponse,
       maxLength,
     );
@@ -142,7 +134,7 @@ function buildContentPart(
   if (part.executableCode) {
     const code = part.executableCode.code ?? '';
     const language = part.executableCode.language ?? 'unknown';
-    const {value, truncated} = sanitizePartModel(
+    const {value, truncated} = recursiveSmartTruncate(
       part.executableCode,
       maxLength,
     );
@@ -158,7 +150,7 @@ function buildContentPart(
   if (part.codeExecutionResult) {
     const output = part.codeExecutionResult.output ?? '';
     const outcome = part.codeExecutionResult.outcome ?? 'unknown';
-    const {value, truncated} = sanitizePartModel(
+    const {value, truncated} = recursiveSmartTruncate(
       part.codeExecutionResult,
       maxLength,
     );
@@ -175,21 +167,17 @@ function buildContentPart(
 }
 
 /** Renders one part as a {@link formatContentSummary} fragment. */
-function describePart(
-  part: Part,
-  maxLength: number,
-): {summary: string; truncated: boolean} {
+function describePart(part: Part): string {
   if (part.text) {
-    const {text, truncated} = truncateText(part.text, maxLength);
-    return {summary: `text: '${text}'`, truncated};
+    return `text: '${part.text}'`;
   }
   if (part.functionCall) {
-    return {summary: `call: ${part.functionCall.name}`, truncated: false};
+    return `call: ${part.functionCall.name}`;
   }
   if (part.functionResponse) {
-    return {summary: `resp: ${part.functionResponse.name}`, truncated: false};
+    return `resp: ${part.functionResponse.name}`;
   }
-  return {summary: 'other', truncated: false};
+  return 'other';
 }
 
 /**
@@ -199,24 +187,18 @@ function describePart(
  * adk-python uses it for `LLM_RESPONSE` and `AGENT_RESPONSE`, so the `content`
  * column of those rows reads the same in both SDKs.
  *
+ * The result is unbounded. The single sanitize pass the caller runs before
+ * writing the row is what bounds it, so a long answer carries one
+ * `...[TRUNCATED]` marker rather than one per part and one for the line.
+ *
  * @param content The content to render, or undefined.
- * @param maxLength Maximum length of any single text part, or -1 for no limit.
- * @return The summary line and whether any text was cut.
+ * @return The summary line.
  */
-export function formatContentSummary(
-  content: Content | undefined,
-  maxLength: number,
-): {text: string; truncated: boolean} {
+export function formatContentSummary(content: Content | undefined): string {
   if (content === undefined || !content.parts?.length) {
-    return {text: 'None', truncated: false};
+    return 'None';
   }
-  let truncated = false;
-  const fragments = content.parts.map((part) => {
-    const described = describePart(part, maxLength);
-    truncated = truncated || described.truncated;
-    return described.summary;
-  });
-  return {text: fragments.join(SUMMARY_SEPARATOR), truncated};
+  return content.parts.map(describePart).join(SUMMARY_SEPARATOR);
 }
 
 /** Builds the summary text and the part records for one `Content`. */
