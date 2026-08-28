@@ -13,7 +13,7 @@ import {
   LlmRequest,
   RunAsyncToolRequest,
 } from '@google/adk';
-import {Tool, Type} from '@google/genai';
+import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 /** The declaration adk-python's `BaseRetrievalTool` produces, field for field. */
@@ -93,10 +93,9 @@ describe('BaseRetrievalTool', () => {
 
     await tool.processLlmRequest({llmRequest, toolContext: makeToolContext()});
 
-    const declarations = (llmRequest.config?.tools?.[0] as Tool)
-      .functionDeclarations!;
-    expect(declarations).toHaveLength(1);
-    expect(declarations[0]).toEqual(EXPECTED_DECLARATION);
+    expect(llmRequest.config?.tools).toEqual([
+      {functionDeclarations: [EXPECTED_DECLARATION]},
+    ]);
     expect(llmRequest.toolsDict['test_retrieval']).toBe(tool);
   });
 
