@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as os from 'node:os';
+
 /** Characters that separate words, matching Python `shlex`'s `whitespace`. */
 const WHITESPACE = new Set([' ', '\t', '\r', '\n']);
 
@@ -82,4 +84,20 @@ export function splitCommand(command: string): string[] {
     tokens.push(token);
   }
   return tokens;
+}
+
+/**
+ * Maps Node's `(code, signal)` child exit pair onto the POSIX return code
+ * Python reports: the exit status, or the negative signal number when a signal
+ * killed the process.
+ *
+ * @param code The exit status, or `null` when a signal ended the process.
+ * @param signal The terminating signal, or `null` when the process exited.
+ * @return The return code.
+ */
+export function toReturnCode(
+  code: number | null,
+  signal: keyof typeof os.constants.signals | null,
+): number {
+  return signal === null ? (code ?? 0) : -os.constants.signals[signal];
 }

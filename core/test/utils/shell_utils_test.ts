@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {splitCommand} from '../../src/utils/shell_utils.js';
+import {splitCommand, toReturnCode} from '../../src/utils/shell_utils.js';
 
 describe('splitCommand', () => {
   it('returns no token for an empty or blank command', () => {
@@ -82,5 +82,19 @@ describe('splitCommand', () => {
       'grep',
       'h',
     ]);
+  });
+});
+
+describe('toReturnCode', () => {
+  it('reports an exit status as itself', () => {
+    expect(toReturnCode(42, null)).toBe(42);
+  });
+
+  it('reports a terminating signal as its negative number', () => {
+    expect(toReturnCode(null, 'SIGKILL')).toBe(-9);
+  });
+
+  it('reports a missing exit status as zero', () => {
+    expect(toReturnCode(null, null)).toBe(0);
   });
 });

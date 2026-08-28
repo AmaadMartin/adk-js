@@ -6,11 +6,10 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 import {spawn} from 'node:child_process';
-import * as os from 'node:os';
 import {formatError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
-import {splitCommand} from '../utils/shell_utils.js';
+import {splitCommand, toReturnCode} from '../utils/shell_utils.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 
 /** Sentinel prefix that allows any command. Not a glob. */
@@ -161,21 +160,6 @@ function decodeOutput(chunks: Buffer[], placeholder: string): string {
   // `errors='replace'`.
   const text = Buffer.concat(chunks).toString('utf-8');
   return text === '' ? placeholder : text;
-}
-
-/**
- * Maps Node's `(code, signal)` exit pair onto Python's `Popen.returncode`: the
- * exit status, or the negative signal number when a signal killed the process.
- *
- * @param code The exit status, or `null` when a signal ended the process.
- * @param signal The terminating signal, or `null` when the process exited.
- * @return The return code to report to the model.
- */
-export function toReturnCode(
-  code: number | null,
-  signal: keyof typeof os.constants.signals | null,
-): number {
-  return signal === null ? (code ?? 0) : -os.constants.signals[signal];
 }
 
 /** SIGKILLs the child's whole process group; a group already gone is fine. */

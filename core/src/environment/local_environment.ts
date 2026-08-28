@@ -10,6 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
+import {toReturnCode} from '../utils/shell_utils.js';
 import {BaseEnvironment, ExecutionResult} from './base_environment.js';
 
 /** Prefix for the temporary workspace created when no `workingDir` is given. */
@@ -151,13 +152,9 @@ export class LocalEnvironment extends BaseEnvironment {
     try {
       const exitCode = await new Promise<number>((resolve, reject) => {
         // 'close' rather than 'exit': the stdio streams are drained by then.
-        child.on('close', (code, signal) => {
-          // Node reports either an exit code or the terminating signal; Python
-          // reports the negative signal number (`-9` for SIGKILL), so map back.
-          resolve(
-            signal === null ? (code ?? 0) : -os.constants.signals[signal],
-          );
-        });
+        child.on('close', (code, signal) =>
+          resolve(toReturnCode(code, signal)),
+        );
         child.on('error', reject);
       });
       return {

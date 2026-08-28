@@ -20,7 +20,6 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   ResolvedBashToolPolicy,
   buildSpawnArgv,
-  toReturnCode,
   validateCommand,
 } from '../../src/tools/bash_tool.js';
 
@@ -144,20 +143,6 @@ describe('buildSpawnArgv', () => {
   it('rounds a sub-KiB limit up, never down to zero', () => {
     const argv = buildSpawnArgv(['ls'], makePolicy({maxMemoryBytes: 1}));
     expect(argv[2]).toContain('ulimit -v 1');
-  });
-});
-
-describe('toReturnCode', () => {
-  it('reports an exit status as itself', () => {
-    expect(toReturnCode(42, null)).toBe(42);
-  });
-
-  it('reports a terminating signal as its negative number', () => {
-    expect(toReturnCode(null, 'SIGKILL')).toBe(-9);
-  });
-
-  it('reports a missing exit status as zero', () => {
-    expect(toReturnCode(null, null)).toBe(0);
   });
 });
 
