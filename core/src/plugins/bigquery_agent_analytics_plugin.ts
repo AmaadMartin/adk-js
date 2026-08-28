@@ -220,7 +220,7 @@ function buildLatency(data: AnalyticsEventData): Record<string, number> | null {
  * <table>`: the user message, the invocation, each agent turn, each model
  * request and response, each tool call, and each state delta. The table is
  * created on first use, partitioned by day on `timestamp` and clustered by the
- * configured fields; the **dataset must already exist**. Column names, types
+ * configured fields, and the dataset is created too if absent. Column names, types
  * and values match `google/adk-python`'s plugin of the same name, so one
  * dataset can hold rows from both SDKs.
  *
@@ -248,6 +248,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   private readonly writer: BigQueryRowWriter;
   private readonly spans = new SpanTracker();
   private shutDown = false;
+  private shutdownPromise?: Promise<void>;
 
   constructor(options: BigQueryAgentAnalyticsPluginOptions) {
     super(PLUGIN_NAME);
@@ -270,12 +271,16 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
 
   /**
    * Drains the queue, releases the flush timer and makes every later callback
-   * a no-op. Safe to call more than once.
+   * a no-op. Safe to call more than once: a second caller waits on the first
+   * call's drain instead of returning while rows are still in flight.
    */
   async shutdown(): Promise<void> {
-    if (this.shutDown) {
-      return;
-    }
+    this.shutdownPromise ??= this.drain();
+    return this.shutdownPromise;
+  }
+
+  /** Refuses further rows, then waits for the queued ones to settle. */
+  private async drain(): Promise<void> {
     this.shutDown = true;
     this.spans.clear();
     await this.writer.shutdown();
