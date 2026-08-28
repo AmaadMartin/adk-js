@@ -5,6 +5,7 @@
  */
 
 import {FunctionDeclaration, Schema, Type} from '@google/genai';
+import {cloneDeep} from 'lodash-es';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 
@@ -103,6 +104,28 @@ function toSchema<TParameters extends ToolInputParameters>(
   return parameters;
 }
 
+/** The declared-required keys absent from `args`, in declaration order. */
+function missingRequiredArgs(
+  schema: Schema,
+  args: Record<string, unknown>,
+): string[] {
+  return (schema.required ?? []).filter((name) => !Object.hasOwn(args, name));
+}
+
+/** `args` restricted to the keys the schema declares under `properties`. */
+function dropUndeclaredArgs(
+  schema: Schema,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const {properties} = schema;
+  if (!properties) {
+    return args;
+  }
+  return Object.fromEntries(
+    Object.entries(args).filter(([key]) => Object.hasOwn(properties, key)),
+  );
+}
+
 /**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all BaseTool instances.
@@ -143,6 +166,9 @@ export class FunctionTool<
   private readonly parameters?: TParameters;
   // Whether the tool requires user confirmation before running.
   private readonly requireConfirmation: RequireConfirmation<TParameters>;
+  // Converted lazily: `toSchema` throws on an unsupported Zod version, and
+  // converting in the constructor would move that failure to construction.
+  private parametersSchema?: Schema;
 
   /**
    * The constructor acts as the user-friendly factory.
@@ -165,15 +191,24 @@ export class FunctionTool<
     this.requireConfirmation = options.requireConfirmation ?? false;
   }
 
+  /** The declared parameter schema, converted once. */
+  private get schema(): Schema {
+    return (this.parametersSchema ??= toSchema(this.parameters));
+  }
+
   /**
    * Returns the function declaration derived from the tool's name, description,
    * and parameter schema.
+   *
+   * Both the returned object and its `parameters` are fresh, so a caller that
+   * prefixes the name or annotates the schema — as
+   * {@link LongRunningFunctionTool} does — never mutates the tool itself.
    */
   override _getDeclaration(): FunctionDeclaration {
     return {
       name: this.name,
       description: this.description,
-      parameters: toSchema(this.parameters),
+      parameters: cloneDeep(this.schema),
     };
   }
 
@@ -181,12 +216,28 @@ export class FunctionTool<
    * Validates the model-provided arguments against the parameter schema and
    * invokes the user-defined `execute` function.
    *
+   * A call that omits a declared-required argument resolves to an error object
+   * telling the model to retry with the missing arguments, matching adk-python.
+   * It never reaches the confirmation gate or `execute`.
+   *
    * @param req The tool request containing arguments and tool context.
    * @returns A promise resolving to the function's return value.
    */
   override async runAsync(req: RunAsyncToolRequest): Promise<unknown> {
     try {
-      const validatedArgs = this.validateArgs(req.args);
+      const callArgs = this.marshalArgs(req.args);
+
+      const missing = missingRequiredArgs(this.schema, callArgs);
+      if (missing.length > 0) {
+        return {
+          error:
+            `Invoking \`${this.name}()\` failed as the following mandatory input parameters are not present:\n` +
+            `${missing.join('\n')}\n` +
+            'You could retry calling this tool, but it is IMPORTANT for you to provide all the mandatory parameters.',
+        };
+      }
+
+      const validatedArgs = this.validateArgs(callArgs);
 
       const pending = await this.checkConfirmation(
         validatedArgs,
@@ -222,6 +273,20 @@ export class FunctionTool<
       return this.requireConfirmation;
     }
     return this.requireConfirmation(this.validateArgs(args), toolContext);
+  }
+
+  /**
+   * Drops the model-supplied arguments the declaration does not mention.
+   *
+   * A Zod object applies its own unknown-key policy when {@link validateArgs}
+   * parses, and a tool that declares no parameters accepts whatever it is
+   * given, so only a raw `Schema` needs filtering here.
+   */
+  private marshalArgs(args: Record<string, unknown>): Record<string, unknown> {
+    if (this.parameters === undefined || isZodObject(this.parameters)) {
+      return args;
+    }
+    return dropUndeclaredArgs(this.schema, args);
   }
 
   /** Parses `args` against the parameter schema, when one is declared. */
