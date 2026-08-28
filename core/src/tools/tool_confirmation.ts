@@ -108,14 +108,6 @@ export interface ToolConfirmationRejection {
 }
 
 /**
- * Whether a call is gated on human approval: a flag, or a predicate over the
- * arguments the tool would run with.
- */
-export type RequireConfirmation<TArgs> =
-  | boolean
-  | ((args: TArgs, toolContext?: Context) => boolean | Promise<boolean>);
-
-/**
  * Answers whether one call is gated, evaluating the predicate form.
  *
  * @param requireConfirmation The tool's configured gate, if it has one.
@@ -123,7 +115,10 @@ export type RequireConfirmation<TArgs> =
  * @param toolContext The context of the call, when there is one.
  */
 export async function resolveRequireConfirmation<TArgs>(
-  requireConfirmation: RequireConfirmation<TArgs> | undefined,
+  requireConfirmation:
+    | boolean
+    | ((args: TArgs, toolContext?: Context) => boolean | Promise<boolean>)
+    | undefined,
   args: TArgs,
   toolContext?: Context,
 ): Promise<boolean> {

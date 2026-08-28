@@ -35,7 +35,6 @@ import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {ToolAuthHandler} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 import {
   applyConfirmationGate,
-  RequireConfirmation,
   resolveRequireConfirmation,
   ToolConfirmationRejection,
 } from '../tool_confirmation.js';
@@ -84,9 +83,12 @@ export type McpHeaderProvider = (
 ) => Record<string, string> | Promise<Record<string, string>>;
 
 /** Whether a call is gated on human approval: a flag, or a predicate. */
-export type McpRequireConfirmation = RequireConfirmation<
-  Record<string, unknown>
->;
+export type McpRequireConfirmation =
+  | boolean
+  | ((
+      args: Record<string, unknown>,
+      toolContext?: Context,
+    ) => boolean | Promise<boolean>);
 
 /**
  * The optional behaviour an {@link MCPTool} can be built with.
