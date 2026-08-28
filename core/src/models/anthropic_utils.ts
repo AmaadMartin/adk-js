@@ -47,7 +47,7 @@ export type AnthropicEffort = NonNullable<OutputConfig['effort']>;
  */
 export interface AnthropicGenerateContentConfig extends GenerateContentConfig {
   /** How much reasoning effort Claude should spend on the turn. */
-  effort?: AnthropicEffort;
+  effort?: AnthropicEffort | null;
 }
 
 const ANTHROPIC_EFFORTS: readonly AnthropicEffort[] = [
@@ -619,7 +619,8 @@ export function buildThinkingParam(
 /**
  * Reads the Anthropic reasoning effort out of a generate-content config.
  *
- * @throws If `effort` is set to a level Anthropic does not define.
+ * A value outside the effort levels Anthropic defines counts as unset, which
+ * only an untyped caller can produce.
  */
 function readEffort(
   config?: GenerateContentConfig,
@@ -627,18 +628,7 @@ function readEffort(
   if (config === undefined || !('effort' in config)) {
     return undefined;
   }
-  const effort = config.effort;
-  if (effort === undefined || effort === null) {
-    return undefined;
-  }
-  const known = ANTHROPIC_EFFORTS.find((level) => level === effort);
-  if (known === undefined) {
-    throw new Error(
-      `Claude does not accept the reasoning effort "${String(effort)}". ` +
-        `Supported levels are ${ANTHROPIC_EFFORTS.join(', ')}.`,
-    );
-  }
-  return known;
+  return ANTHROPIC_EFFORTS.find((level) => level === config.effort);
 }
 
 /**
