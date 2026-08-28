@@ -7,8 +7,6 @@
 import {
   BaseLlm,
   BaseLlmConnection,
-  EnvironmentSimulationEngine,
-  EnvironmentSimulationFactory,
   EnvironmentSimulationPlugin,
   FunctionTool,
   InMemoryRunner,
@@ -30,7 +28,7 @@ import {
 const INJECTED_RESPONSE = {ticket_id: 'T-42', status: 'open'};
 
 function createPlugin(): EnvironmentSimulationPlugin {
-  return EnvironmentSimulationFactory.createPlugin({
+  return new EnvironmentSimulationPlugin({
     toolSimulationConfigs: [
       {
         toolName: 'create_ticket',
@@ -115,26 +113,10 @@ describe('EnvironmentSimulationPlugin', () => {
     expect(result).toBeUndefined();
   });
 
-  it('accepts an engine built directly', async () => {
-    const plugin = new EnvironmentSimulationPlugin(
-      new EnvironmentSimulationEngine({
-        toolSimulationConfigs: [
-          {
-            toolName: 'create_ticket',
-            injectionConfigs: [{injectedResponse: INJECTED_RESPONSE}],
-          },
-        ],
-        simulationModel: SCRIPTED_MODEL,
-      }),
-    );
-
-    const result = await plugin.beforeToolCallback({
-      tool: new FakeTool('create_ticket'),
-      toolArgs: {},
-      toolContext: createToolContext(),
-    });
-
-    expect(result).toEqual(INJECTED_RESPONSE);
+  it('rejects an invalid config as it is constructed', () => {
+    expect(
+      () => new EnvironmentSimulationPlugin({toolSimulationConfigs: []}),
+    ).toThrowError('toolSimulationConfigs must be provided.');
   });
 });
 

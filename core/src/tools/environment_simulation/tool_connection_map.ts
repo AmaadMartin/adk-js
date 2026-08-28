@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {isRecord} from '../../utils/object_utils.js';
+
+import {JSON_INDENT} from './model_json_request.js';
+
 /**
  * A parameter that carries state between tools, and the tools on each side of
  * it.
- *
- * @experimental
  */
 export interface StatefulParameter {
   /** The shared parameter, for example `ticket_id`. */
@@ -19,17 +21,9 @@ export interface StatefulParameter {
   consumingTools: string[];
 }
 
-/**
- * How a set of tools connect to each other through stateful parameters.
- *
- * @experimental
- */
+/** How a set of tools connect to each other through stateful parameters. */
 export interface ToolConnectionMap {
   statefulParameters: StatefulParameter[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function toStringArray(value: unknown): string[] {
@@ -89,6 +83,6 @@ export function formatToolConnectionMap(map: ToolConnectionMap): string {
       })),
     },
     null,
-    2,
+    JSON_INDENT,
   );
 }

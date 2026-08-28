@@ -6,49 +6,29 @@
 
 import {describe, expect, it} from 'vitest';
 
-import {SeededRandom} from '../../src/utils/random_utils.js';
+import {seededRandom} from '../../src/utils/random_utils.js';
 
-function draw(random: SeededRandom, count: number): number[] {
-  return Array.from({length: count}, () => random.next());
-}
-
-describe('SeededRandom', () => {
-  it('repeats the same sequence for the same seed', () => {
-    expect(draw(new SeededRandom(42), 5)).toEqual(
-      draw(new SeededRandom(42), 5),
-    );
+describe('seededRandom', () => {
+  it('gives the same value for the same seed', () => {
+    expect(seededRandom(42)).toBe(seededRandom(42));
   });
 
-  it('produces a different sequence for a different seed', () => {
-    expect(draw(new SeededRandom(42), 5)).not.toEqual(
-      draw(new SeededRandom(43), 5),
-    );
+  it('gives a different value for a different seed', () => {
+    expect(seededRandom(42)).not.toBe(seededRandom(43));
   });
 
-  it('restarts the sequence when it is re-seeded', () => {
-    const random = new SeededRandom(7);
-    const first = draw(random, 3);
-
-    random.seed(7);
-
-    expect(draw(random, 3)).toEqual(first);
-  });
-
-  it('keeps every seeded draw in the unit interval', () => {
-    for (const value of draw(new SeededRandom(1), 200)) {
+  it('keeps every value in the unit interval', () => {
+    for (let seed = 0; seed < 500; seed++) {
+      const value = seededRandom(seed);
       expect(value).toBeGreaterThanOrEqual(0);
       expect(value).toBeLessThan(1);
     }
   });
 
-  it('keeps every unseeded draw in the unit interval', () => {
-    for (const value of draw(new SeededRandom(), 200)) {
-      expect(value).toBeGreaterThanOrEqual(0);
-      expect(value).toBeLessThan(1);
-    }
-  });
+  it('spreads values across the interval', () => {
+    const values = Array.from({length: 200}, (_, seed) => seededRandom(seed));
 
-  it('draws unseeded values that vary', () => {
-    expect(new Set(draw(new SeededRandom(), 20)).size).toBeGreaterThan(1);
+    expect(Math.min(...values)).toBeLessThan(0.1);
+    expect(Math.max(...values)).toBeGreaterThan(0.9);
   });
 });

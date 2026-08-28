@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {beforeEach, describe, expect, it} from 'vitest';
+
+import {ToolConnectionMap} from '../../../src/tools/environment_simulation/tool_connection_map.js';
 import {
   StateStore,
-  ToolConnectionMap,
   ToolSpecMockStrategy,
-  TracingMockStrategy,
-} from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+} from '../../../src/tools/environment_simulation/tool_spec_mock_strategy.js';
 
 import {
   capturedRequests,
@@ -19,7 +19,7 @@ import {
   resetScriptedModel,
   SCRIPTED_MODEL,
   scriptReply,
-} from '../simulation_test_utils.js';
+} from './simulation_test_utils.js';
 
 function connectionMap(
   parameterName: string,
@@ -271,18 +271,5 @@ describe('ToolSpecMockStrategy', () => {
     expect(capturedRequests[0].config?.responseMimeType).toBe(
       'application/json',
     );
-  });
-});
-
-describe('TracingMockStrategy', () => {
-  it('reports that the strategy does not exist yet', async () => {
-    const result = await new TracingMockStrategy().mock({
-      tool: new FakeTool('create_ticket'),
-      args: {},
-      toolContext: createToolContext(),
-      stateStore: {},
-    });
-
-    expect(result).toEqual({status: 'error', error_message: 'Not implemented'});
   });
 });

@@ -9,6 +9,7 @@ import {BasePlugin} from '../../plugins/base_plugin.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool} from '../base_tool.js';
 
+import {EnvironmentSimulationConfig} from './environment_simulation_config.js';
 import {EnvironmentSimulationEngine} from './environment_simulation_engine.js';
 
 /** The plugin name every simulation plugin registers under. */
@@ -24,11 +25,15 @@ export class EnvironmentSimulationPlugin extends BasePlugin {
   private readonly engine: EnvironmentSimulationEngine;
 
   /**
-   * @param engine The engine that decides what a simulated call returns.
+   * @param config The environment to simulate.
+   * @throws If a tool has nothing to simulate with, if it names a strategy
+   *     that does not exist, if a tool name repeats, if an injection rule does
+   *     not set exactly one of `injectedError` and `injectedResponse`, or if
+   *     an injected latency exceeds the cap.
    */
-  constructor(engine: EnvironmentSimulationEngine) {
+  constructor(config: EnvironmentSimulationConfig) {
     super(PLUGIN_NAME);
-    this.engine = engine;
+    this.engine = new EnvironmentSimulationEngine(config);
   }
 
   /**

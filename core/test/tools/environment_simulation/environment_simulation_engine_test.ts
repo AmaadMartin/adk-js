@@ -5,6 +5,7 @@
  */
 
 import {
+  createEnvironmentSimulationCallback,
   EnvironmentSimulationConfig,
   EnvironmentSimulationEngine,
   getLogger,
@@ -222,18 +223,9 @@ describe('EnvironmentSimulationEngine.simulate', () => {
     warn.mockRestore();
   });
 
-  it('rejects a strategy type it does not know', async () => {
-    const config: EnvironmentSimulationConfig = JSON.parse(
-      '{"toolSimulationConfigs": [{"toolName": "test_tool",' +
-        ' "mockStrategyType": "MOCK_STRATEGY_TELEPATHY"}],' +
-        ` "simulationModel": "${SCRIPTED_MODEL}"}`,
-    );
-    const engine = new EnvironmentSimulationEngine(config);
-
-    await expect(
-      engine.simulate(new FakeTool('test_tool'), {}, createToolContext()),
-    ).rejects.toThrowError(
-      'Unknown mock strategy type: MOCK_STRATEGY_TELEPATHY',
+  it('rejects an invalid config as it is constructed', () => {
+    expect(() => createEngine({toolSimulationConfigs: []})).toThrowError(
+      'toolSimulationConfigs must be provided.',
     );
   });
 });
@@ -463,5 +455,86 @@ describe('EnvironmentSimulationEngine connection analysis', () => {
 
     expect(result).toEqual({ticket_id: 'T-1'});
     expect(capturedRequests).toHaveLength(1);
+  });
+});
+
+describe('createEnvironmentSimulationCallback', () => {
+  beforeEach(() => {
+    resetScriptedModel();
+  });
+
+  function createCallback() {
+    return createEnvironmentSimulationCallback({
+      toolSimulationConfigs: [
+        {
+          toolName: 'create_ticket',
+          mockStrategyType: MockStrategyType.MOCK_STRATEGY_TOOL_SPEC,
+        },
+      ],
+      simulationModel: SCRIPTED_MODEL,
+      simulationModelConfiguration: {},
+    });
+  }
+
+  it('returns a callback an LlmAgent accepts', () => {
+    const agent = new LlmAgent({
+      name: 'support',
+      model: SCRIPTED_MODEL,
+      beforeToolCallback: createCallback(),
+    });
+
+    expect(agent.beforeToolCallback).toBeTypeOf('function');
+  });
+
+  it('simulates the configured tool', async () => {
+    scriptReply('{"ticket_id": "T-1"}');
+
+    const result = await createCallback()({
+      tool: new FakeTool('create_ticket'),
+      args: {},
+      context: createToolContext(),
+    });
+
+    expect(result).toEqual({ticket_id: 'T-1'});
+  });
+
+  it('lets an unconfigured tool run', async () => {
+    const result = await createCallback()({
+      tool: new FakeTool('other_tool'),
+      args: {},
+      context: createToolContext(),
+    });
+
+    expect(result).toBeUndefined();
+  });
+
+  it('shares one engine, so a later call sees the earlier state', async () => {
+    scriptReply(
+      '{"stateful_parameters": [{"parameter_name": "ticket_id",' +
+        ' "creating_tools": ["create_ticket"], "consuming_tools": []}]}',
+    );
+    scriptReply('{"ticket_id": "T-1"}');
+    scriptReply('{"ticket_id": "T-2"}');
+    const callback = createCallback();
+    const context = createToolContext(
+      new LlmAgent({
+        name: 'support',
+        model: SCRIPTED_MODEL,
+        tools: [new FakeTool('create_ticket')],
+      }),
+    );
+    const call = {tool: new FakeTool('create_ticket'), args: {}, context};
+
+    await callback(call);
+    await callback(call);
+
+    const secondPrompt = capturedRequests[2].contents[0].parts?.[0].text ?? '';
+    expect(secondPrompt).toContain('"T-1"');
+  });
+
+  it('rejects an invalid config as it builds the callback', () => {
+    expect(() =>
+      createEnvironmentSimulationCallback({toolSimulationConfigs: []}),
+    ).toThrowError('toolSimulationConfigs must be provided.');
   });
 });

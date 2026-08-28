@@ -6,21 +6,51 @@
 
 import {GenerateContentConfig} from '@google/genai';
 
-import {BaseLlm} from '../../../models/base_llm.js';
-import {LLMRegistry} from '../../../models/registry.js';
-import {experimental} from '../../../utils/experimental.js';
+import {Context} from '../../agents/context.js';
+import {BaseLlm} from '../../models/base_llm.js';
+import {LLMRegistry} from '../../models/registry.js';
+import {isRecord} from '../../utils/object_utils.js';
+import {BaseTool} from '../base_tool.js';
+
 import {
+  JSON_INDENT,
   parseJsonFromModelText,
   requestJsonFromModel,
-} from '../model_json_request.js';
+} from './model_json_request.js';
 import {
   formatToolConnectionMap,
   StatefulParameter,
-} from '../tool_connection_map.js';
+  ToolConnectionMap,
+} from './tool_connection_map.js';
 
-import {MockRequest, MockStrategy, StateStore} from './base.js';
+/**
+ * The entities a creating tool has minted so far.
+ *
+ * The outer key is a stateful parameter name, the inner key is the value the
+ * model minted for it, and the value is the mock response that carried it.
+ */
+export type StateStore = Record<
+  string,
+  Record<string, Record<string, unknown>>
+>;
 
-const JSON_INDENT = 2;
+/** One tool call to mock. */
+export interface MockRequest {
+  /** The tool the agent called. */
+  tool: BaseTool;
+  /** The arguments the agent called it with. */
+  args: Record<string, unknown>;
+  /** The context of the call. */
+  toolContext: Context;
+  /** How the tools connect, when the analysis produced a map. */
+  toolConnectionMap?: ToolConnectionMap;
+  /** The entities minted so far. A creating tool adds to it. */
+  stateStore: StateStore;
+  /** Environment data, such as a small database dump, as JSON. */
+  environmentData?: string;
+  /** A prior agent run trace, as JSON. */
+  tracing?: string;
+}
 
 function buildMockPrompt(params: {
   environmentDataSnippet: string;
@@ -103,10 +133,6 @@ function buildTracingSnippet(tracing?: string): string {
       `;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function findInValues(values: unknown[], targetKey: string): unknown {
   for (const value of values) {
     const found = findValueByKey(value, targetKey);
@@ -163,11 +189,8 @@ function recordMintedEntities(params: {
  * The prompt carries the connection map and the state store, so an identifier
  * minted by a creating tool is honoured by a consuming tool later in the same
  * run.
- *
- * @experimental
  */
-@experimental
-export class ToolSpecMockStrategy extends MockStrategy {
+export class ToolSpecMockStrategy {
   private readonly llm: BaseLlm;
   private readonly llmConfig: GenerateContentConfig;
 
@@ -176,7 +199,6 @@ export class ToolSpecMockStrategy extends MockStrategy {
    * @param llmConfig The configuration of those calls.
    */
   constructor(llmName: string, llmConfig: GenerateContentConfig) {
-    super();
     this.llm = LLMRegistry.newLlm(llmName);
     this.llmConfig = llmConfig;
   }

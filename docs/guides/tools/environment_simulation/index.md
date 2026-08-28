@@ -32,11 +32,11 @@ can be registered together.
 
 ## Get started
 
-Attach the simulation to one agent with `createCallback`:
+Attach the simulation to one agent with `createEnvironmentSimulationCallback`:
 
 ```typescript
 import {
-  EnvironmentSimulationFactory,
+  createEnvironmentSimulationCallback,
   FunctionTool,
   LlmAgent,
   MockStrategyType,
@@ -60,7 +60,7 @@ const agent = new LlmAgent({
   name: 'support',
   model: 'gemini-2.5-flash',
   tools: [createTicket],
-  beforeToolCallback: EnvironmentSimulationFactory.createCallback({
+  beforeToolCallback: createEnvironmentSimulationCallback({
     toolSimulationConfigs: [
       {
         toolName: 'create_ticket',
@@ -71,21 +71,21 @@ const agent = new LlmAgent({
 });
 ```
 
-Use `createPlugin` instead to apply the same simulation to every agent a runner
-drives:
+Use `EnvironmentSimulationPlugin` instead to apply the same simulation to every
+agent a runner drives:
 
 ```typescript
-import {EnvironmentSimulationFactory, InMemoryRunner} from '@google/adk';
+import {EnvironmentSimulationPlugin, InMemoryRunner} from '@google/adk';
 
 const runner = new InMemoryRunner({
   agent,
-  plugins: [EnvironmentSimulationFactory.createPlugin(config)],
+  plugins: [new EnvironmentSimulationPlugin(config)],
 });
 ```
 
-Both factory methods build one engine and share it, so the identifiers the
-tools mint stay visible for the whole run. Build the callback or the plugin
-once and reuse it; a new factory call starts with an empty state store.
+Each owns one engine, and that engine holds the identifiers the tools mint. So
+build the callback or the plugin once and reuse it: a second one starts with an
+empty state store.
 
 ## Injecting a failure
 
@@ -118,9 +118,9 @@ const config = {
 ```
 
 `matchArgs` compares by value, so an array or an object matches on its
-contents. `randomSeed` seeds the engine's generator immediately before the
-draw, which makes the decision repeatable. The generator is shared by the
-engine, so a seed set by one rule also affects the rules that draw after it.
+contents. A rule with a `randomSeed` draws from that seed, which makes its
+decision repeatable and affects no other rule. A rule without one draws from
+`Math.random()`.
 
 ## Configuration
 

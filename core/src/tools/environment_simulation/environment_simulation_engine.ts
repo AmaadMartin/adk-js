@@ -4,15 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig} from '@google/genai';
 import {isEqual} from 'lodash-es';
 
 import {Context} from '../../agents/context.js';
-import {isLlmAgent} from '../../agents/llm_agent.js';
+import {isLlmAgent, SingleBeforeToolCallback} from '../../agents/llm_agent.js';
 import {sleep} from '../../utils/async_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {SeededRandom} from '../../utils/random_utils.js';
+import {seededRandom} from '../../utils/random_utils.js';
 import {BaseTool} from '../base_tool.js';
 
 import {
@@ -22,31 +21,17 @@ import {
   ResolvedToolSimulationConfig,
   resolveEnvironmentSimulationConfig,
 } from './environment_simulation_config.js';
-import {
-  MockStrategy,
-  StateStore,
-  TracingMockStrategy,
-} from './strategies/base.js';
-import {ToolSpecMockStrategy} from './strategies/tool_spec_mock_strategy.js';
 import {ToolConnectionAnalyzer} from './tool_connection_analyzer.js';
 import {ToolConnectionMap} from './tool_connection_map.js';
+import {StateStore, ToolSpecMockStrategy} from './tool_spec_mock_strategy.js';
 
 const MILLISECONDS_PER_SECOND = 1000;
 
-function createMockStrategy(
-  mockStrategyType: MockStrategyType,
-  llmName: string,
-  llmConfig: GenerateContentConfig,
-): MockStrategy {
-  switch (mockStrategyType) {
-    case MockStrategyType.MOCK_STRATEGY_TOOL_SPEC:
-      return new ToolSpecMockStrategy(llmName, llmConfig);
-    case MockStrategyType.MOCK_STRATEGY_TRACING:
-      return new TracingMockStrategy();
-    default:
-      throw new Error(`Unknown mock strategy type: ${mockStrategyType}`);
-  }
-}
+/** The deprecated tracing strategy is a placeholder, in adk-python too. */
+const TRACING_NOT_IMPLEMENTED = {
+  status: 'error',
+  error_message: 'Not implemented',
+};
 
 function matchesArgs(
   matchArgs: Record<string, unknown> | undefined,
@@ -78,16 +63,18 @@ export class EnvironmentSimulationEngine {
     ResolvedToolSimulationConfig
   >;
   private readonly analyzer: ToolConnectionAnalyzer;
+  private readonly mockStrategy: ToolSpecMockStrategy;
   private readonly usesMockStrategy: boolean;
   private readonly stateStore: StateStore = {};
-  private readonly random = new SeededRandom();
   private analysis?: Promise<void>;
   private toolConnectionMap?: ToolConnectionMap;
 
   /**
    * @param config The environment to simulate.
-   * @throws If the config is invalid. See
-   *     {@link resolveEnvironmentSimulationConfig}.
+   * @throws If a tool has nothing to simulate with, if it names a strategy
+   *     that does not exist, if a tool name repeats, if an injection rule does
+   *     not set exactly one of `injectedError` and `injectedResponse`, or if
+   *     an injected latency exceeds the cap.
    */
   constructor(config: EnvironmentSimulationConfig) {
     this.config = resolveEnvironmentSimulationConfig(config);
@@ -103,6 +90,10 @@ export class EnvironmentSimulationEngine {
         MockStrategyType.MOCK_STRATEGY_UNSPECIFIED,
     );
     this.analyzer = new ToolConnectionAnalyzer(
+      this.config.simulationModel,
+      this.config.simulationModelConfiguration,
+    );
+    this.mockStrategy = new ToolSpecMockStrategy(
       this.config.simulationModel,
       this.config.simulationModelConfiguration,
     );
@@ -150,12 +141,14 @@ export class EnvironmentSimulationEngine {
       return undefined;
     }
 
-    const strategy = createMockStrategy(
-      toolSimulationConfig.mockStrategyType,
-      this.config.simulationModel,
-      this.config.simulationModelConfiguration,
-    );
-    return strategy.mock({
+    if (
+      toolSimulationConfig.mockStrategyType ===
+      MockStrategyType.MOCK_STRATEGY_TRACING
+    ) {
+      return {...TRACING_NOT_IMPLEMENTED};
+    }
+
+    return this.mockStrategy.mock({
       tool,
       args,
       toolContext,
@@ -183,10 +176,11 @@ export class EnvironmentSimulationEngine {
       if (!matchesArgs(injectionConfig.matchArgs, args)) {
         continue;
       }
-      if (injectionConfig.randomSeed !== undefined) {
-        this.random.seed(injectionConfig.randomSeed);
-      }
-      if (this.random.next() >= injectionConfig.injectionProbability) {
+      const draw =
+        injectionConfig.randomSeed === undefined
+          ? Math.random()
+          : seededRandom(injectionConfig.randomSeed);
+      if (draw >= injectionConfig.injectionProbability) {
         continue;
       }
       await sleep(
@@ -202,4 +196,20 @@ export class EnvironmentSimulationEngine {
     }
     return undefined;
   }
+}
+
+/**
+ * Builds a callback for a single agent's `beforeToolCallback`.
+ *
+ * @param config The environment to simulate.
+ * @return A callback that answers the configured tools from the simulation.
+ * @throws If the config is invalid, on the same terms as the
+ *     {@link EnvironmentSimulationEngine} constructor.
+ * @experimental
+ */
+export function createEnvironmentSimulationCallback(
+  config: EnvironmentSimulationConfig,
+): SingleBeforeToolCallback {
+  const engine = new EnvironmentSimulationEngine(config);
+  return ({tool, args, context}) => engine.simulate(tool, args, context);
 }

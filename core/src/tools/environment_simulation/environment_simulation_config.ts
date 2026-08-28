@@ -154,6 +154,8 @@ function resolveInjectionConfig(
   };
 }
 
+const MOCK_STRATEGY_TYPES = new Set<string>(Object.values(MockStrategyType));
+
 function resolveToolSimulationConfig(
   config: ToolSimulationConfig,
 ): ResolvedToolSimulationConfig {
@@ -162,6 +164,9 @@ function resolveToolSimulationConfig(
   );
   const mockStrategyType =
     config.mockStrategyType ?? MockStrategyType.MOCK_STRATEGY_UNSPECIFIED;
+  if (!MOCK_STRATEGY_TYPES.has(mockStrategyType)) {
+    throw new Error(`Unknown mock strategy type: ${mockStrategyType}`);
+  }
   if (
     injectionConfigs.length === 0 &&
     mockStrategyType === MockStrategyType.MOCK_STRATEGY_UNSPECIFIED
@@ -179,9 +184,10 @@ function resolveToolSimulationConfig(
  *
  * @param config The config supplied by the caller.
  * @return The same config with every optional field resolved.
- * @throws If a tool has nothing to simulate with, if a tool name repeats, if
- *     an injection rule does not set exactly one of `injectedError` and
- *     `injectedResponse`, or if an injected latency exceeds the cap.
+ * @throws If a tool has nothing to simulate with, if it names a strategy that
+ *     does not exist, if a tool name repeats, if an injection rule does not
+ *     set exactly one of `injectedError` and `injectedResponse`, or if an
+ *     injected latency exceeds the cap.
  * @experimental
  */
 export function resolveEnvironmentSimulationConfig(

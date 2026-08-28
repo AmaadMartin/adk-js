@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {InjectedError, InjectionConfig, MockStrategyType} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+
 import {
-  InjectedError,
-  InjectionConfig,
-  MockStrategyType,
   ResolvedInjectionConfig,
   resolveEnvironmentSimulationConfig,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../../src/tools/environment_simulation/environment_simulation_config.js';
 
 const INJECTED_ERROR: InjectedError = {
   injectedHttpErrorCode: 404,
@@ -159,6 +158,19 @@ describe('resolveEnvironmentSimulationConfig tool list rules', () => {
         toolSimulationConfigs: [toolConfig, {...toolConfig}],
       }),
     ).toThrowError('Duplicate toolName found: dup_tool');
+  });
+
+  it('rejects a strategy type that does not exist', () => {
+    expect(() =>
+      resolveEnvironmentSimulationConfig({
+        toolSimulationConfigs: [
+          {
+            toolName: 'my_tool',
+            mockStrategyType: 'MOCK_STRATEGY_TELEPATHY' as MockStrategyType,
+          },
+        ],
+      }),
+    ).toThrowError('Unknown mock strategy type: MOCK_STRATEGY_TELEPATHY');
   });
 
   it('keeps distinct tool names in order with their own strategies', () => {

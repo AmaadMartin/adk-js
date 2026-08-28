@@ -9,6 +9,9 @@ import {createUserContent, GenerateContentConfig} from '@google/genai';
 import {BaseLlm} from '../../models/base_llm.js';
 import {LlmRequest} from '../../models/llm_request.js';
 
+/** The indent every prompt payload is serialized with. */
+export const JSON_INDENT = 2;
+
 /** Matches an opening markdown fence and its optional language tag. */
 const OPENING_FENCE = /^```[a-zA-Z]*\n?/;
 
