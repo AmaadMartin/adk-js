@@ -5,26 +5,28 @@
  */
 
 import type {SpeechClient} from '@google-cloud/speech';
-import type {Blob, Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
+import {isContent} from '../workflow/base_node.js';
 import type {InvocationContext} from './invocation_context.js';
 import type {TranscriptionEntry} from './transcription_entry.js';
+
+/** The role a transcript takes when its audio arrived with no role. */
+const DEFAULT_ROLE = 'user';
 
 /**
  * One unit of work produced by bundling the transcription cache: either audio
  * that needs a recognition request, or content that is already text.
  */
 type BundledSegment =
-  | {kind: 'audio'; speaker: string; audio: Buffer}
+  | {kind: 'audio'; speaker?: string; audio: Buffer}
   | {kind: 'content'; content: Content};
 
-/**
- * Tells a `Content` from a `Blob`. `Content` is the only member of the union
- * with a `parts` field.
- */
-function isContent(data: Blob | Content): data is Content {
-  return 'parts' in data;
+/** A run of consecutive audio being accumulated for one speaker. */
+interface PendingRun {
+  speaker?: string;
+  chunks: Buffer[];
 }
 
 /**
@@ -35,9 +37,9 @@ function isContent(data: Blob | Content): data is Content {
  * that precedes it and is passed through. A blob with no data is skipped
  * without ending the run.
  *
- * Audio on an entry with no role is dropped, matching adk-python's
- * `src/google/adk/flows/llm_flows/audio_transcriber.py`, where
- * `current_speaker` doubles as the pending-segment flag.
+ * A run with no role is bundled like any other. adk-python instead uses its
+ * speaker as the pending-run flag, so role-less audio never flushes and its
+ * own `speaker.lower() if speaker else 'user'` fallback cannot be reached.
  *
  * @param cache The entries to bundle, in cache order.
  * @return The segments, in cache order.
@@ -46,20 +48,18 @@ function bundleTranscriptionCache(
   cache: TranscriptionEntry[],
 ): BundledSegment[] {
   const segments: BundledSegment[] = [];
-  let currentSpeaker: string | undefined;
-  let currentChunks: Buffer[] = [];
+  let pending: PendingRun | undefined;
 
   const flush = () => {
-    if (currentSpeaker === undefined) {
+    if (pending === undefined) {
       return;
     }
     segments.push({
       kind: 'audio',
-      speaker: currentSpeaker,
-      audio: Buffer.concat(currentChunks),
+      speaker: pending.speaker,
+      audio: Buffer.concat(pending.chunks),
     });
-    currentSpeaker = undefined;
-    currentChunks = [];
+    pending = undefined;
   };
 
   for (const {role, data} of cache) {
@@ -77,12 +77,11 @@ function bundleTranscriptionCache(
     // decoded before they are joined: concatenating the encodings corrupts
     // the stream at the padding.
     const chunk = Buffer.from(data.data, 'base64');
-    if (role === currentSpeaker) {
-      currentChunks.push(chunk);
+    if (pending !== undefined && pending.speaker === role) {
+      pending.chunks.push(chunk);
     } else {
       flush();
-      currentSpeaker = role;
-      currentChunks = [chunk];
+      pending = {speaker: role, chunks: [chunk]};
     }
   }
 
@@ -155,7 +154,7 @@ export class AudioTranscriber {
           continue;
         }
         contents.push({
-          role: segment.speaker.toLowerCase(),
+          role: segment.speaker ? segment.speaker.toLowerCase() : DEFAULT_ROLE,
           parts: [{text: transcript}],
         });
       }
