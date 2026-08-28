@@ -6,6 +6,7 @@
 
 import type {TableMetadata} from '@google-cloud/bigquery';
 import {
+  AgentTool,
   AnalyticsEventType,
   BaseAgent,
   BigQueryAgentAnalyticsPlugin,
@@ -23,6 +24,7 @@ import {
   LlmResponse,
   Logger,
   PluginManager,
+  RemoteA2AAgent,
   setLogger,
 } from '@google/adk';
 import {Content, FinishReason, Language, Outcome} from '@google/genai';
@@ -33,6 +35,7 @@ import {
   AnalyticsScopeKind,
   deriveScope,
 } from '../../src/plugins/bigquery_analytics_schema.js';
+import {ToolOrigin} from '../../src/plugins/bigquery_analytics_tools.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
@@ -913,6 +916,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     expect(parseColumn(onlyRow().content)).toEqual({
       tool: 'lookup_weather',
       args: {city: 'Paris'},
+      tool_origin: ToolOrigin.LOCAL,
     });
   });
 
@@ -967,6 +971,7 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
     expect(parseColumn(row.content)).toEqual({
       tool: 'lookup_wea...[TRUNCATED]',
       args: {note: 'xxxxxxxxxx...[TRUNCATED]'},
+      tool_origin: ToolOrigin.LOCAL,
     });
   });
 
@@ -993,6 +998,7 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
     expect(parseColumn(onlyRow().content)).toEqual({
       tool: 'lookup_weather',
       args: {apiKey: '[REDACTED]', city: 'Paris'},
+      tool_origin: ToolOrigin.LOCAL,
     });
   });
 
@@ -1011,7 +1017,11 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
     await plugin.flush();
     expect(parseColumn(onlyRow().content)).toEqual({
       seen: 'TOOL_STARTING',
-      original: {tool: 'lookup_weather', args: {city: 'Paris'}},
+      original: {
+        tool: 'lookup_weather',
+        args: {city: 'Paris'},
+        tool_origin: ToolOrigin.LOCAL,
+      },
     });
   });
 
@@ -2636,5 +2646,159 @@ describe('BigQueryAgentAnalyticsPlugin insert failures', () => {
     await plugin.flush();
     expect(rows()).toHaveLength(2);
     expect(fake.created).toHaveLength(1);
+  });
+});
+
+describe('BigQueryAgentAnalyticsPlugin tool provenance', () => {
+  it('writes the origin on a TOOL_COMPLETED row', async () => {
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext();
+    await plugin.afterToolCallback({
+      tool: makeTool(),
+      toolArgs: {city: 'Paris'},
+      toolContext: makeContext(invocationContext),
+      result: {temperature: 20},
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().content)).toEqual({
+      tool: 'lookup_weather',
+      result: {temperature: 20},
+      tool_origin: ToolOrigin.LOCAL,
+    });
+  });
+
+  it('writes the origin on a TOOL_ERROR row', async () => {
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext();
+    await plugin.onToolErrorCallback({
+      tool: makeTool(),
+      toolArgs: {city: 'Paris'},
+      toolContext: makeContext(invocationContext),
+      error: new Error('upstream refused'),
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().content)).toEqual({
+      tool: 'lookup_weather',
+      args: {city: 'Paris'},
+      tool_origin: ToolOrigin.LOCAL,
+    });
+  });
+
+  it('resolves a handoff target through the calling agent tree', async () => {
+    const remote = new RemoteA2AAgent({
+      name: 'billing',
+      description: 'Billing, over the A2A protocol.',
+      agentCard: 'https://billing.example.test/.well-known/agent-card.json',
+    });
+    const root = new LlmAgent({
+      name: 'root_agent',
+      model: 'gemini-2.0-flash',
+      subAgents: [remote],
+    });
+    remote.parentAgent = root;
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext({agent: root});
+    await plugin.beforeToolCallback({
+      tool: makeTool('transfer_to_agent'),
+      toolArgs: {agentName: 'billing'},
+      toolContext: makeContext(invocationContext),
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().content)).toMatchObject({
+      tool_origin: ToolOrigin.TRANSFER_A2A,
+    });
+  });
+
+  it('writes SUB_AGENT for a local agent called as a tool', async () => {
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext();
+    await plugin.beforeToolCallback({
+      tool: new AgentTool({agent: makeAgent('summarizer')}),
+      toolArgs: {request: 'summarize'},
+      toolContext: makeContext(invocationContext),
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().content)).toMatchObject({
+      tool: 'summarizer',
+      tool_origin: ToolOrigin.SUB_AGENT,
+    });
+  });
+});
+
+describe('BigQueryAgentAnalyticsPlugin OpenTelemetry correlation', () => {
+  const ambientSpan = trace.wrapSpanContext({
+    traceId: '0af7651916cd43dd8448eb211c80319c',
+    spanId: 'b7ad6b7169203331',
+    traceFlags: TraceFlags.SAMPLED,
+  });
+
+  it('captures the ambient span into attributes when it is enabled', async () => {
+    const active = vi
+      .spyOn(trace, 'getActiveSpan')
+      .mockReturnValue(ambientSpan);
+    const plugin = makePlugin({enableOtelCorrelation: true});
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    active.mockRestore();
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      otel: {
+        span_id: 'b7ad6b7169203331',
+        trace_id: '0af7651916cd43dd8448eb211c80319c',
+      },
+    });
+  });
+
+  it('writes no otel attribute by default', async () => {
+    const active = vi
+      .spyOn(trace, 'getActiveSpan')
+      .mockReturnValue(ambientSpan);
+    const plugin = makePlugin();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    active.mockRestore();
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).not.toHaveProperty('otel');
+  });
+
+  it('writes no otel attribute when no valid span is active', async () => {
+    const invalid = trace.wrapSpanContext({
+      traceId: '00000000000000000000000000000000',
+      spanId: '0000000000000000',
+      traceFlags: TraceFlags.NONE,
+    });
+    const active = vi.spyOn(trace, 'getActiveSpan').mockReturnValue(invalid);
+    const plugin = makePlugin({enableOtelCorrelation: true});
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    active.mockRestore();
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).not.toHaveProperty('otel');
+  });
+});
+
+describe('BigQueryAgentAnalyticsPlugin run end flush', () => {
+  it('gives up the run-end flush after the shutdown timeout', async () => {
+    vi.useFakeTimers();
+    // An insert that never settles, so an unbounded flush would hold the run.
+    fake.insertGate = new Promise<void>(() => {});
+    const plugin = makePlugin({batchSize: 1, shutdownTimeoutMs: 50});
+    const invocationContext = makeInvocationContext();
+    await plugin.beforeRunCallback({invocationContext});
+    await vi.waitFor(() => {
+      expect(fake.insertCalls).toBe(1);
+    });
+    let ended = false;
+    const ending = plugin
+      .afterRunCallback({invocationContext})
+      .then(() => (ended = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ended).toBe(false);
+    await vi.advanceTimersByTimeAsync(50);
+    await ending;
+    expect(ended).toBe(true);
   });
 });
