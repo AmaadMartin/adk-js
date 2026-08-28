@@ -284,12 +284,7 @@ function collectOperations(
         preservePropertyNames,
       });
 
-      let authSchemeName: string | undefined;
-      if (operation.security && operation.security.length > 0) {
-        authSchemeName = Object.keys(operation.security[0])[0];
-      }
-      authSchemeName = authSchemeName || globalSchemeName;
-
+      const authSchemeName = parser.getAuthSchemeName() || globalSchemeName;
       const authScheme = authSchemeName
         ? authSchemes[authSchemeName]
         : undefined;

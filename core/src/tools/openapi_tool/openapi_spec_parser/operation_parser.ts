@@ -9,9 +9,26 @@ import {experimental} from '../../../utils/experimental.js';
 import {
   ApiParameter,
   createApiParameter,
+  generateParamDoc,
+  generateReturnDoc,
+  getTypeHint,
   normalizeSchema,
   toSnakeCaseName,
 } from '../common/common.js';
+
+/** Accepts the JSON form of an operation, as adk-python's parser does. */
+function readOperation(
+  operation: OpenAPIV3.OperationObject | string,
+): OpenAPIV3.OperationObject {
+  if (typeof operation !== 'string') {
+    return operation;
+  }
+  const parsed: unknown = JSON.parse(operation);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Operation must be a JSON object');
+  }
+  return parsed as OpenAPIV3.OperationObject;
+}
 
 /**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
@@ -24,16 +41,45 @@ export class OperationParser {
   private params: ApiParameter[] = [];
   private returnValue?: ApiParameter;
   private preservePropertyNames: boolean;
+  private readonly operation: OpenAPIV3.OperationObject;
 
   constructor(
-    private readonly operation: OpenAPIV3.OperationObject,
-    options: {preservePropertyNames?: boolean} = {},
+    operation: OpenAPIV3.OperationObject | string,
+    options: {preservePropertyNames?: boolean; shouldParse?: boolean} = {},
   ) {
+    this.operation = readOperation(operation);
     this.preservePropertyNames = options.preservePropertyNames ?? false;
-    this.processOperationParameters();
-    this.processRequestBody();
-    this.processReturnValue();
-    this.dedupeParamNames();
+    if (options.shouldParse ?? true) {
+      this.processOperationParameters();
+      this.processRequestBody();
+      this.processReturnValue();
+      this.dedupeParamNames();
+    }
+  }
+
+  /**
+   * Builds a parser over parameters that were parsed elsewhere.
+   *
+   * @param operation The operation the parameters came from.
+   * @param params The parameters to carry.
+   * @param returnValue The return value to carry.
+   * @param options How the parser reads names.
+   * @returns A parser that reports the supplied parameters.
+   */
+  @experimental
+  static load(
+    operation: OpenAPIV3.OperationObject | string,
+    params: ApiParameter[],
+    returnValue?: ApiParameter,
+    options: {preservePropertyNames?: boolean} = {},
+  ): OperationParser {
+    const parser = new OperationParser(operation, {
+      ...options,
+      shouldParse: false,
+    });
+    parser.params = params;
+    parser.returnValue = returnValue;
+    return parser;
   }
 
   private getParamName(originalName: string): string {
@@ -230,5 +276,49 @@ export class OperationParser {
   @experimental
   public getDescription(): string {
     return this.operation.description || this.operation.summary || '';
+  }
+
+  /**
+   * Gets the TypeScript type name of the value the operation returns.
+   *
+   * @returns A type name; `unknown` when the operation declares no schema.
+   */
+  @experimental
+  public getReturnTypeHint(): string {
+    return getTypeHint(this.returnValue?.paramSchema ?? {});
+  }
+
+  /**
+   * Gets the name of the security scheme this operation requires.
+   *
+   * The spec may list several requirements; the first one wins, as it does in
+   * adk-python. A requirement that names no scheme yields `''`, which leaves
+   * the caller free to fall back to the document-level scheme.
+   *
+   * @returns The scheme name, or `''` when the operation names none.
+   */
+  @experimental
+  public getAuthSchemeName(): string {
+    const security = this.operation.security;
+    if (!security || security.length === 0) {
+      return '';
+    }
+    return Object.keys(security[0])[0] ?? '';
+  }
+
+  /**
+   * Renders the operation as prose: a summary, one line per argument, and the
+   * return value.
+   *
+   * @returns The documentation string.
+   */
+  @experimental
+  public getDocString(): string {
+    const summary = this.operation.summary || this.operation.description || '';
+    const args = this.params
+      .map((param) => `    ${generateParamDoc(param)}`)
+      .join('\n');
+    const returnDoc = generateReturnDoc(this.operation.responses ?? {});
+    return `${summary}\n\nArgs:\n${args}\n\n${returnDoc}`;
   }
 }

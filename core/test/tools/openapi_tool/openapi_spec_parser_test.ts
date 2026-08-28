@@ -259,6 +259,32 @@ describe('OpenApiSpecParser', () => {
     expect(postOp?.authScheme?.type).toBe('oauth2');
   });
 
+  it('should fall back to the global scheme when a requirement is empty', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Security API', version: '1.0.0'},
+      security: [{ApiKeyAuth: []}],
+      paths: {
+        '/secure': {
+          get: {
+            operationId: 'secureOp',
+            security: [{}],
+            responses: {},
+          },
+        },
+      },
+      components: {
+        securitySchemes: {
+          ApiKeyAuth: {type: 'apiKey', in: 'header', name: 'X-API-KEY'},
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed[0].authScheme?.type).toBe('apiKey');
+  });
+
   describe('server URL resolution', () => {
     function parseBaseUrl(servers?: OpenAPIV3.ServerObject[]): string {
       const spec: OpenAPIV3.Document = {
