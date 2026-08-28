@@ -47,14 +47,14 @@ export interface ApiHubResourceNames {
 }
 
 /** An API Hub API resource. Declares the fields this client reads. */
-export interface ApiHubApi {
+interface ApiHubApi {
   name?: string;
   /** Resource names of the API's versions. */
   versions?: string[];
 }
 
 /** An API Hub API version resource. Declares the fields this client reads. */
-export interface ApiHubApiVersion {
+interface ApiHubApiVersion {
   name?: string;
   /** Resource names of the version's specs. */
   specs?: string[];
@@ -74,20 +74,15 @@ function splitPathAndProject(urlOrPath: string): {
   path: string;
   queryProject?: string;
 } {
-  let path: string;
-  let queryProject: string | undefined;
   try {
     const url = new URL(urlOrPath, 'http://localhost');
-    path = url.pathname;
-    queryProject = url.searchParams.get('project') ?? undefined;
+    return {
+      path: url.pathname,
+      queryProject: url.searchParams.get('project') ?? undefined,
+    };
   } catch {
     return {path: urlOrPath};
   }
-  // A path copied from the API Hub console carries a UI prefix.
-  if (path.includes('api-hub/')) {
-    path = path.split('api-hub')[1];
-  }
-  return {path, queryProject};
 }
 
 function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
@@ -177,24 +172,6 @@ export class APIHubClient implements BaseAPIHubClient {
   }
 
   /**
-   * Gets an API.
-   *
-   * @param apiResourceName `projects/p/locations/l/apis/a`.
-   */
-  async getApi(apiResourceName: string): Promise<ApiHubApi> {
-    return this.get<ApiHubApi>(`${APIHUB_ROOT_URL}/${apiResourceName}`);
-  }
-
-  /**
-   * Gets an API version.
-   *
-   * @param apiVersionName `projects/p/locations/l/apis/a/versions/v`.
-   */
-  async getApiVersion(apiVersionName: string): Promise<ApiHubApiVersion> {
-    return this.get<ApiHubApiVersion>(`${APIHUB_ROOT_URL}/${apiVersionName}`);
-  }
-
-  /**
    * Gets the first spec the given path resolves to.
    *
    * A path that names a spec returns that spec. A path that names only an API
@@ -231,6 +208,18 @@ export class APIHubClient implements BaseAPIHubClient {
     }
 
     return this.fetchSpec(apiSpecResourceName);
+  }
+
+  /** Gets `projects/p/locations/l/apis/a`. */
+  private async getApi(apiResourceName: string): Promise<ApiHubApi> {
+    return this.get<ApiHubApi>(`${APIHUB_ROOT_URL}/${apiResourceName}`);
+  }
+
+  /** Gets `projects/p/locations/l/apis/a/versions/v`. */
+  private async getApiVersion(
+    apiVersionName: string,
+  ): Promise<ApiHubApiVersion> {
+    return this.get<ApiHubApiVersion>(`${APIHUB_ROOT_URL}/${apiVersionName}`);
   }
 
   private async fetchSpec(apiSpecResourceName: string): Promise<string> {

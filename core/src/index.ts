@@ -41,8 +41,6 @@ export type {APIHubToolsetOptions} from './tools/apihub_tool/apihub_toolset.js';
 export {APIHubClient} from './tools/apihub_tool/clients/apihub_client.js';
 export type {
   APIHubClientOptions,
-  ApiHubApi,
-  ApiHubApiVersion,
   BaseAPIHubClient,
 } from './tools/apihub_tool/clients/apihub_client.js';
 export {

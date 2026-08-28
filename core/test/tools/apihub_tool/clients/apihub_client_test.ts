@@ -22,6 +22,8 @@ vi.mock('google-auth-library', () => ({
 
 const API_RESOURCE_NAME =
   'projects/test-project/locations/us-central1/apis/api1';
+const VERSION_RESOURCE_NAME = `${API_RESOURCE_NAME}/versions/v1`;
+const SPEC_RESOURCE_NAME = `${VERSION_RESOURCE_NAME}/specs/spec1`;
 const API_DETAIL = {
   name: 'projects/test-project/locations/us-central1/apis/api1',
   versions: [
@@ -72,24 +74,19 @@ describe('apihub_client', () => {
     it('rejects when the request fails', async () => {
       fetchMock.mockResolvedValueOnce(errorResponse(403, 'permission denied'));
 
-      await expect(
-        client().getApi(
-          'projects/test-project/locations/us-central1/apis/api1',
-        ),
-      ).rejects.toThrow(
+      await expect(client().getSpecContent(SPEC_RESOURCE_NAME)).rejects.toThrow(
         'API Hub request failed with status 403: permission denied',
       );
     });
 
-    it('gets an API', async () => {
-      fetchMock.mockResolvedValueOnce(okResponse(API_DETAIL));
+    it('requests the API with the auth headers and a timeout signal', async () => {
+      fetchMock
+        .mockResolvedValueOnce(okResponse(API_DETAIL))
+        .mockResolvedValueOnce(okResponse(API_VERSION))
+        .mockResolvedValueOnce(okResponse(SPEC_CONTENT));
 
-      const api = await client().getApi(
-        'projects/test-project/locations/us-central1/apis/api1',
-      );
+      await client().getSpecContent(API_RESOURCE_NAME);
 
-      expect(api).toEqual(API_DETAIL);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
       const [url, init] = fetchMock.mock.calls[0];
       expect(url).toBe(
         'https://apihub.googleapis.com/v1/projects/test-project/locations/us-central1/apis/api1',
@@ -98,14 +95,13 @@ describe('apihub_client', () => {
       expect(init?.signal).toBeInstanceOf(AbortSignal);
     });
 
-    it('gets an API version', async () => {
-      fetchMock.mockResolvedValueOnce(okResponse(API_VERSION));
+    it('requests the API version named by a version-level path', async () => {
+      fetchMock
+        .mockResolvedValueOnce(okResponse(API_VERSION))
+        .mockResolvedValueOnce(okResponse(SPEC_CONTENT));
 
-      const apiVersion = await client().getApiVersion(
-        'projects/test-project/locations/us-central1/apis/api1/versions/v1',
-      );
+      await client().getSpecContent(VERSION_RESOURCE_NAME);
 
-      expect(apiVersion).toEqual(API_VERSION);
       expect(fetchMock.mock.calls[0][0]).toBe(
         'https://apihub.googleapis.com/v1/projects/test-project/locations/us-central1/apis/api1/versions/v1',
       );
@@ -223,9 +219,9 @@ describe('apihub_client', () => {
     });
 
     it('never builds a GoogleAuth', async () => {
-      fetchMock.mockResolvedValueOnce(okResponse(API_DETAIL));
+      fetchMock.mockResolvedValueOnce(okResponse(SPEC_CONTENT));
 
-      await client().getApi(API_RESOURCE_NAME);
+      await client().getSpecContent(SPEC_RESOURCE_NAME);
 
       expect(mockGoogleAuth).not.toHaveBeenCalled();
     });
@@ -242,9 +238,9 @@ describe('apihub_client', () => {
 
     it('mints a token from Application Default Credentials', async () => {
       mockGetAccessToken.mockResolvedValue('adc_token');
-      fetchMock.mockResolvedValueOnce(okResponse(API_DETAIL));
+      fetchMock.mockResolvedValueOnce(okResponse(SPEC_CONTENT));
 
-      await new APIHubClient().getApi(API_RESOURCE_NAME);
+      await new APIHubClient().getSpecContent(SPEC_RESOURCE_NAME);
 
       expect(mockGoogleAuth).toHaveBeenCalledWith({
         scopes: ['https://www.googleapis.com/auth/cloud-platform'],
@@ -257,9 +253,11 @@ describe('apihub_client', () => {
 
     it('mints a token from the service account key', async () => {
       mockGetAccessToken.mockResolvedValue('sa_token');
-      fetchMock.mockResolvedValueOnce(okResponse(API_DETAIL));
+      fetchMock.mockResolvedValueOnce(okResponse(SPEC_CONTENT));
 
-      await new APIHubClient({serviceAccountJson}).getApi(API_RESOURCE_NAME);
+      await new APIHubClient({serviceAccountJson}).getSpecContent(
+        SPEC_RESOURCE_NAME,
+      );
 
       expect(mockGoogleAuth).toHaveBeenCalledWith({
         credentials: JSON.parse(serviceAccountJson),
@@ -273,7 +271,9 @@ describe('apihub_client', () => {
 
     it('rejects a malformed service account key', async () => {
       await expect(
-        new APIHubClient({serviceAccountJson: '{not json'}).getApi('api1'),
+        new APIHubClient({serviceAccountJson: '{not json'}).getSpecContent(
+          SPEC_RESOURCE_NAME,
+        ),
       ).rejects.toThrow(/^Invalid service account JSON: /);
       expect(mockGoogleAuth).not.toHaveBeenCalled();
     });
@@ -282,12 +282,12 @@ describe('apihub_client', () => {
       mockGetAccessToken.mockResolvedValue('adc_token');
       // A Response body reads once, so each call needs a fresh one.
       fetchMock.mockImplementation(() =>
-        Promise.resolve(okResponse(API_DETAIL)),
+        Promise.resolve(okResponse(SPEC_CONTENT)),
       );
       const client = new APIHubClient();
 
-      await client.getApi(API_RESOURCE_NAME);
-      await client.getApi(API_RESOURCE_NAME);
+      await client.getSpecContent(SPEC_RESOURCE_NAME);
+      await client.getSpecContent(SPEC_RESOURCE_NAME);
 
       expect(mockGoogleAuth).toHaveBeenCalledTimes(1);
       expect(mockGetAccessToken).toHaveBeenCalledTimes(2);
@@ -296,7 +296,9 @@ describe('apihub_client', () => {
     it('rejects when the credentials yield no token', async () => {
       mockGetAccessToken.mockResolvedValue(null);
 
-      await expect(new APIHubClient().getApi('api1')).rejects.toThrow(
+      await expect(
+        new APIHubClient().getSpecContent(SPEC_RESOURCE_NAME),
+      ).rejects.toThrow(
         'Please provide a service account or an access token to API Hub client.',
       );
     });
@@ -305,13 +307,14 @@ describe('apihub_client', () => {
       const cause = new Error('Could not load the default credentials');
       mockGetAccessToken.mockRejectedValue(cause);
 
-      await expect(new APIHubClient().getApi('api1')).rejects.toThrow(
+      await expect(
+        new APIHubClient().getSpecContent(SPEC_RESOURCE_NAME),
+      ).rejects.toThrow(
         'Please provide a service account or an access token to API Hub client.',
       );
-      await expect(new APIHubClient().getApi('api1')).rejects.toHaveProperty(
-        'cause',
-        cause,
-      );
+      await expect(
+        new APIHubClient().getSpecContent(SPEC_RESOURCE_NAME),
+      ).rejects.toHaveProperty('cause', cause);
     });
   });
 
