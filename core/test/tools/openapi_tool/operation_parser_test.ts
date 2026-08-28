@@ -273,12 +273,11 @@ describe('OperationParser.getDocString', () => {
   });
 
   it('should render an operation that declares no responses', () => {
-    const op: OpenAPIV3.OperationObject = {
-      operationId: 'ping',
-      summary: 'Ping',
-    };
+    const parser = new OperationParser(
+      '{"operationId":"ping","summary":"Ping"}',
+    );
 
-    expect(new OperationParser(op).getDocString()).toBe('Ping\n\nArgs:\n\n\n');
+    expect(parser.getDocString()).toBe('Ping\n\nArgs:\n\n\n');
   });
 });
 

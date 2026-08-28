@@ -363,13 +363,14 @@ describe('generateParamDoc', () => {
   });
 
   it('should omit the properties block for a nullable object type', () => {
+    const nullableObject: unknown = {
+      type: ['object', 'null'],
+      properties: {prop1: {type: 'string'}},
+    };
     const param = createApiParameter({
       originalName: 'test_param',
       paramLocation: 'query',
-      paramSchema: {
-        type: ['object', 'null'],
-        properties: {prop1: {type: 'string'}},
-      },
+      paramSchema: normalizeSchema(nullableObject, 'test schema'),
       description: 'The description.',
     });
 
