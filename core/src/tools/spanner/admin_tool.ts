@@ -194,8 +194,10 @@ const getInstanceTool: SpannerAdminToolDefinition<typeof instanceParams> = {
         instance_id,
         display_name: instance.displayName,
         config: instance.config,
-        node_count: instance.nodeCount,
-        processing_units: instance.processingUnits,
+        // The generated `IInstance` types both counts as nullable, while the
+        // proto3 scalar adk-python reads is 0 when the API leaves it unset.
+        node_count: instance.nodeCount ?? 0,
+        processing_units: instance.processingUnits ?? 0,
         labels: {...instance.labels},
       },
     };

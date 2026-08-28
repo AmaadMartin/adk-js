@@ -162,6 +162,28 @@ describe('Spanner admin tools', () => {
       expect(result).toMatchObject({results: {labels: {}}});
     });
 
+    it('reports absent node and processing counts as zero', async () => {
+      fakeInstanceAdmin.getInstance.mockResolvedValue([
+        {
+          name: `projects/${PROJECT}/instances/my-instance`,
+          displayName: 'My Instance',
+          config: 'regional-us-central1',
+          nodeCount: null,
+          processingUnits: null,
+          labels: {},
+        },
+      ]);
+
+      const result = await runTool('spanner_get_instance', {
+        project_id: PROJECT,
+        instance_id: 'my-instance',
+      });
+
+      expect(result).toMatchObject({
+        results: {node_count: 0, processing_units: 0},
+      });
+    });
+
     it('reports a rejected call as an error result', async () => {
       fakeInstanceAdmin.getInstance.mockRejectedValue(new Error('not found'));
 
