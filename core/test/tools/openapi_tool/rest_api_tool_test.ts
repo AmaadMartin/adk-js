@@ -11,9 +11,13 @@ import {
   Context,
   createRestApiTool,
   createRestApiToolFromJson,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
   OperationParser,
   ParsedOperation,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -1166,6 +1170,17 @@ describe('RestApiTool adk-python parity', () => {
   };
   const operation: OpenAPIV3.OperationObject = {responses: {}};
 
+  function createToolContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'invocation-1',
+        agent: new LlmAgent({name: 'test_agent'}),
+        session: createSession({id: 'session-1', appName: 'test_app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+  }
+
   function mockOkResponse(contentType: string, bodyText: string) {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -1230,7 +1245,7 @@ describe('RestApiTool adk-python parity', () => {
         endpoint,
         operation,
         undefined,
-        {apiKey: 'super-secret-key'} as unknown as AuthCredential,
+        {authType: AuthCredentialTypes.API_KEY, apiKey: 'super-secret-key'},
       );
 
       expect(tool.toString()).not.toContain('super-secret-key');
@@ -1239,7 +1254,10 @@ describe('RestApiTool adk-python parity', () => {
 
   describe('configureAuthCredential', () => {
     it('should clear the credential when it is called with nothing', async () => {
-      const credential = {apiKey: 'test-key'} as unknown as AuthCredential;
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'test-key',
+      };
       const tool = new RestApiTool(
         'test_tool',
         'description',
@@ -1249,12 +1267,10 @@ describe('RestApiTool adk-python parity', () => {
         credential,
       );
       mockOkResponse('text/plain', 'ok');
-      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
-        prepareAuthCredentials: async () => ({state: 'done'}),
-      } as unknown as ToolAuthHandler);
+      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext');
 
       tool.configureAuthCredential();
-      await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
 
       expect(spy).toHaveBeenCalledWith(
         expect.anything(),
@@ -1277,7 +1293,7 @@ describe('RestApiTool adk-python parity', () => {
 
       const result = await tool.runAsync({
         args: {},
-        toolContext: {} as unknown as Context,
+        toolContext: createToolContext(),
       });
 
       expect(result).toEqual({text: 'ok'});
@@ -1448,14 +1464,15 @@ describe('RestApiTool adk-python parity', () => {
     });
 
     it('should carry the parsed credential to the auth handler', async () => {
-      const authScheme = {
+      const authScheme: OpenAPIV3.ApiKeySecurityScheme = {
         type: 'apiKey',
         name: 'X-API-Key',
         in: 'header',
-      } as unknown as OpenAPIV3.SecuritySchemeObject;
-      const authCredential = {
+      };
+      const authCredential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
         apiKey: 'parsed-key',
-      } as unknown as AuthCredential;
+      };
       const tool = createRestApiTool({
         name: 'test_tool',
         description: 'description',
@@ -1466,11 +1483,9 @@ describe('RestApiTool adk-python parity', () => {
         authCredential,
       });
       mockOkResponse('text/plain', 'ok');
-      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
-        prepareAuthCredentials: async () => ({state: 'done'}),
-      } as unknown as ToolAuthHandler);
+      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext');
 
-      await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
 
       expect(spy).toHaveBeenCalledWith(
         expect.anything(),
@@ -1495,11 +1510,9 @@ describe('RestApiTool adk-python parity', () => {
         {headerProvider, credentialKey: 'my-key'},
       );
       mockOkResponse('text/plain', 'ok');
-      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
-        prepareAuthCredentials: async () => ({state: 'done'}),
-      } as unknown as ToolAuthHandler);
+      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext');
 
-      await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
 
       expect(spy).toHaveBeenCalledWith(
         expect.anything(),
