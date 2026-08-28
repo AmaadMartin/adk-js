@@ -159,6 +159,16 @@ describe('apihub_client', () => {
       expect(content).toBe('');
     });
 
+    it('returns an empty string when the spec omits the contents field', async () => {
+      fetchMock.mockResolvedValueOnce(okResponse({}));
+
+      const content = await client().getSpecContent(
+        'projects/test-project/locations/us-central1/apis/api1/versions/v1/specs/spec1',
+      );
+
+      expect(content).toBe('');
+    });
+
     it('rejects when the API lists no versions field', async () => {
       fetchMock.mockResolvedValueOnce(okResponse({}));
 

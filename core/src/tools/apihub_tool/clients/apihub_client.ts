@@ -190,17 +190,10 @@ export class APIHubClient implements BaseAPIHubClient {
       apiSpecResourceName = specs[0];
     }
 
-    return this.fetchSpec(apiSpecResourceName);
-  }
-
-  private async fetchSpec(apiSpecResourceName: string): Promise<string> {
     const payload = await this.get<{contents?: string}>(
       `${APIHUB_ROOT_URL}/${apiSpecResourceName}:contents`,
     );
-    if (!payload.contents) {
-      return '';
-    }
-    return Buffer.from(payload.contents, 'base64').toString('utf-8');
+    return Buffer.from(payload.contents ?? '', 'base64').toString('utf-8');
   }
 
   private async get<T>(url: string): Promise<T> {

@@ -11,7 +11,7 @@ import {
   AuthScheme,
   BaseAPIHubClient,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 const MOCK_SPEC = `
 openapi: 3.0.0
@@ -100,6 +100,10 @@ class MockAPIHubClient implements BaseAPIHubClient {
 }
 
 describe('APIHubToolset', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('derives its name and description from the spec', async () => {
     const toolset = new APIHubToolset({
       apihubResourceName: 'test_resource',
@@ -136,7 +140,11 @@ describe('APIHubToolset', () => {
     expect(apihubClient.getSpecContent).toHaveBeenCalledWith('test_resource');
   });
 
-  it('builds an APIHubClient when the caller supplies none', () => {
+  it('builds an APIHubClient when the caller supplies none', async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response('denied', {status: 403}),
+    );
+    vi.stubGlobal('fetch', fetchMock);
     const toolset = new APIHubToolset({
       apihubResourceName:
         'projects/test-project/locations/us-central1/apis/test-api',
@@ -144,7 +152,15 @@ describe('APIHubToolset', () => {
       lazyLoadSpec: true,
     });
 
-    expect(toolset.name).toBe('');
+    await expect(toolset.getTools()).rejects.toThrow(
+      'API Hub request failed with status 403: denied',
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://apihub.googleapis.com/v1/projects/test-project/locations/us-central1/apis/test-api',
+      expect.objectContaining({
+        headers: expect.objectContaining({Authorization: 'Bearer test_token'}),
+      }),
+    );
   });
 
   it('defers the fetch until getTools when lazyLoadSpec is set', async () => {
