@@ -289,6 +289,23 @@ describe('sanitizeErrorText', () => {
     LINEAR_SCAN_BUDGET_MS,
   );
 
+  // A value ends at a delimiter, and none of these joiners is one, so each
+  // input is one long run of harmless names. Re-reading a name's value would
+  // cost one scan of the tail per name.
+  it.each([
+    ['a pipe', 'k1=v1|'],
+    ['a slash', 'k1=v1/'],
+    ['base64 padding', 'QUJDRA=='],
+    ['nothing at all', 'k='],
+  ])(
+    'stays linear over 500,000 characters of pairs joined by %s',
+    (_name, unit) => {
+      const text = unit.repeat(Math.ceil(500_000 / unit.length));
+      expect(sanitizeErrorText(text, -1).text).toBe(text);
+    },
+    LINEAR_SCAN_BUDGET_MS,
+  );
+
   it('does not expand a dollar pattern the payload supplied', () => {
     const text = 'token=abc and the literal $& $1 $` survive';
     expect(sanitizeErrorText(text, -1).text).toBe(

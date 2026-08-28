@@ -171,18 +171,25 @@ const BEARER_PATTERN = /\bbearer[ \t]+[^\s,;"']+/gi;
 const QUERY_KEY_PATTERN = /([?&]key=)[^\s&#"']+/gi;
 
 /**
- * A `name: value` or `name=value` fragment. The name is classified by
+ * The `name:` or `name=` opening of a pair. The name is classified by
  * {@link isSensitiveKey}, so free text and structured payloads redact the same
- * set of names. The value must be non-empty and must not open a bracket, which
- * keeps the pass idempotent over text that already reads `token: [REDACTED]`.
+ * set of names.
  *
  * The leading lookbehind rejects a name that starts mid-word. Without it, one
  * unbroken run of name characters costs a greedy scan per character, which is
  * quadratic: 16,000 characters take 1.3 seconds, so a payload at the default
  * length limit blocks the event loop for minutes.
  */
-const KEY_VALUE_PATTERN =
-  /(?<![A-Za-z0-9_.:-])(["']?)([A-Za-z_][A-Za-z0-9_.:-]*)\1(\s*[:=]\s*)(["']?)([^\s,;&)}\]["']+)\4/g;
+const KEY_SEPARATOR_PATTERN =
+  /(?<![A-Za-z0-9_.:-])(["']?)([A-Za-z_][A-Za-z0-9_.:-]*)\1(\s*[:=]\s*)/g;
+
+/**
+ * The value that follows a separator, anchored there by the sticky flag.
+ *
+ * The value must be non-empty and must not open a bracket, which keeps the pass
+ * idempotent over text that already reads `token: [REDACTED]`.
+ */
+const VALUE_PATTERN = /(["']?)[^\s,;&)}\]["']+\1/y;
 
 /**
  * Replaces the credentials in `text`, leaving every other character in place.
@@ -210,31 +217,39 @@ function redactFreeText(text: string): string {
 /**
  * Replaces the value of every sensitive `name: value` pair in `text`.
  *
- * A value may itself contain a separator, so a pair under a harmless name can
- * span a sensitive one: `connection failed: password=hunter2` matches as the
- * name `failed` over the value `password=hunter2`. `String.replace` would
- * resume after that value and never see the password. Scanning by hand instead
- * lets a skipped name resume at the character after the name, so every pair the
- * text contains is classified. Each step moves forward by at least one
- * character, so the scan stays linear.
+ * The name is matched on its own, and the value only after the name proves
+ * sensitive. A single pattern over the whole pair cannot do this. Its value
+ * ends only at a delimiter, so under a harmless name it swallows the pairs that
+ * follow: `connection failed: password=hunter2` reads as the name `failed` over
+ * the value `password=hunter2`, and the password survives. Re-reading a
+ * swallowed value is worse still, because text that delimits nothing — joined
+ * `k=v` pairs, a base64 blob — then costs one scan of the tail per name.
+ *
+ * Matching the two halves apart reads every character a bounded number of
+ * times, so the scan is linear in the length of `text`.
  *
  * @param text The free text to redact.
  * @return The text with every sensitive value replaced.
  */
 function redactKeyValuePairs(text: string): string {
-  KEY_VALUE_PATTERN.lastIndex = 0;
+  KEY_SEPARATOR_PATTERN.lastIndex = 0;
   let result = '';
   let copiedTo = 0;
-  let match: RegExpExecArray | null;
-  while ((match = KEY_VALUE_PATTERN.exec(text)) !== null) {
-    const [whole, keyQuote, key, separator, valueQuote] = match;
-    if (!isSensitiveKey(key)) {
-      KEY_VALUE_PATTERN.lastIndex = match.index + keyQuote.length + key.length;
+  let opening: RegExpExecArray | null;
+  while ((opening = KEY_SEPARATOR_PATTERN.exec(text)) !== null) {
+    if (!isSensitiveKey(opening[2])) {
       continue;
     }
-    result += text.slice(copiedTo, match.index);
-    result += `${keyQuote}${key}${keyQuote}${separator}${valueQuote}${REDACTED}${valueQuote}`;
-    copiedTo = match.index + whole.length;
+    VALUE_PATTERN.lastIndex = KEY_SEPARATOR_PATTERN.lastIndex;
+    const value = VALUE_PATTERN.exec(text);
+    if (value === null) {
+      continue;
+    }
+    const quote = value[1];
+    result += text.slice(copiedTo, KEY_SEPARATOR_PATTERN.lastIndex);
+    result += `${quote}${REDACTED}${quote}`;
+    copiedTo = VALUE_PATTERN.lastIndex;
+    KEY_SEPARATOR_PATTERN.lastIndex = VALUE_PATTERN.lastIndex;
   }
   return result + text.slice(copiedTo);
 }
