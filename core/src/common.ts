@@ -290,6 +290,30 @@ export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
+export {
+  EnvironmentSimulationEngine,
+  EnvironmentSimulationFactory,
+  EnvironmentSimulationPlugin,
+  MockStrategy,
+  MockStrategyType,
+  ToolConnectionAnalyzer,
+  ToolSpecMockStrategy,
+  TracingMockStrategy,
+  resolveEnvironmentSimulationConfig,
+} from './tools/environment_simulation/index.js';
+export type {
+  EnvironmentSimulationConfig,
+  InjectedError,
+  InjectionConfig,
+  MockRequest,
+  ResolvedEnvironmentSimulationConfig,
+  ResolvedInjectionConfig,
+  ResolvedToolSimulationConfig,
+  StateStore,
+  StatefulParameter,
+  ToolConnectionMap,
+  ToolSimulationConfig,
+} from './tools/environment_simulation/index.js';
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
