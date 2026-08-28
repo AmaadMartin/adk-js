@@ -19,7 +19,6 @@ import {z} from 'zod';
 import {
   isBlockedAddress,
   isBlockedHostname,
-  isIpv4InCidr,
   normalizeHost,
 } from '../utils/ssrf_utils.js';
 import {FunctionTool} from './function_tool.js';
@@ -28,14 +27,17 @@ import {FunctionTool} from './function_tool.js';
 export interface LoadWebPageOptions {
   /** Request timeout in milliseconds. Defaults to 30_000 (30s). */
   timeoutMs?: number;
-}
-
-/** A vetted request destination. The URL is never rewritten to the pinned IP. */
-interface RequestTarget {
-  /** The requested URL, exactly as parsed. */
-  readonly url: URL;
-  /** The URL hostname with IPv6 brackets stripped (`[::1]` → `::1`). */
-  readonly hostname: string;
+  /**
+   * Proxy to route the request through, such as
+   * `http://proxy.example.test:8080`. Credentials in the URL are sent as
+   * `Proxy-Authorization: Basic`.
+   *
+   * A proxy resolves the target hostname itself, so a hostname target is not
+   * vetted on this path; an IP-literal target still is. The proxy is therefore
+   * never read from the environment: an ambient `https_proxy` must not be able
+   * to turn address vetting off for every caller on the machine.
+   */
+  proxy?: string;
 }
 
 /** URL schemes that are allowed to be fetched (WHATWG `URL.protocol` form). */
@@ -47,37 +49,20 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 /** Largest response body that is buffered before the request is abandoned. */
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
-/** Port used when the URL omits one. */
-const DEFAULT_PORT_BY_SCHEME: Record<string, number> = {
-  'http:': 80,
-  'https:': 443,
-};
-
 /**
  * Python's `requests` decompresses transparently; asking for identity yields
  * the same text without pulling a decompressor into the path.
  */
 const IDENTITY_ENCODING = {'accept-encoding': 'identity'};
 
-/** Message carried by the error that a deadline raises. */
-const TIMEOUT_MESSAGE = 'Request timed out';
-
 /** HTML entities that survive tag stripping, decoded by name. */
 const NAMED_ENTITIES: Record<string, string> = {
   amp: '&',
   apos: "'",
-  copy: '©',
   gt: '>',
-  hellip: '…',
-  laquo: '«',
   lt: '<',
-  mdash: '—',
   nbsp: ' ',
-  ndash: '–',
   quot: '"',
-  raquo: '»',
-  reg: '®',
-  trade: '™',
 };
 
 /** Builds the parity failure message for a URL. */
@@ -90,17 +75,36 @@ function failedToFetchMessage(url: string): string {
  * malformed URLs and disallowed schemes. An `http`/`https` URL always carries a
  * hostname: the WHATWG parser rejects the scheme without one.
  */
-function parseRequestTarget(url: string): RequestTarget {
+function parseRequestTarget(url: string): URL {
   const parsed = new URL(url);
   if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
     throw new Error(`Unsupported url scheme: ${url}`);
   }
-  return {url: parsed, hostname: normalizeHost(parsed.hostname)};
+  return parsed;
+}
+
+/** Parses the caller's proxy option. Throws for a scheme this tool cannot speak. */
+function parseProxy(proxy: string): URL {
+  const parsed = new URL(proxy);
+  if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
+    throw new Error(`Unsupported proxy scheme: ${proxy}`);
+  }
+  return parsed;
 }
 
 /** Returns the port a URL addresses, filling in the scheme default. */
 function portOf(url: URL): number {
-  return url.port ? Number(url.port) : DEFAULT_PORT_BY_SCHEME[url.protocol];
+  return Number(url.port || (url.protocol === 'https:' ? 443 : 80));
+}
+
+/**
+ * The TLS server name for `url`, absent for an IP-literal host: RFC 6066
+ * forbids an IP address there, and Node warns and drops it. The certificate is
+ * still checked against the host either way.
+ */
+function serverNameOf(url: URL): string | undefined {
+  const hostname = normalizeHost(url.hostname);
+  return isIP(hostname) === 0 ? hostname : undefined;
 }
 
 /**
@@ -117,61 +121,6 @@ async function resolveDirectAddresses(hostname: string): Promise<string[]> {
     throw new Error(`Blocked host: ${hostname}`);
   }
   return addresses;
-}
-
-/** Reads an environment variable, preferring the lowercase spelling. */
-function proxyEnv(name: string): string | undefined {
-  return process.env[name] || process.env[name.toUpperCase()] || undefined;
-}
-
-/** Returns `true` when a `no_proxy` entry covers the target host. */
-function matchesNoProxyEntry(hostname: string, entry: string): boolean {
-  if (entry.includes('/')) {
-    return isIpv4InCidr(hostname, entry);
-  }
-  const suffix = entry.replace(/^\./, '').toLowerCase();
-  return hostname === suffix || hostname.endsWith(`.${suffix}`);
-}
-
-/**
- * Returns `true` when `no_proxy` exempts the target. An empty value exempts
- * nothing; `*` exempts everything.
- */
-function bypassesProxy(target: RequestTarget): boolean {
-  const noProxy = proxyEnv('no_proxy');
-  if (!noProxy) {
-    return false;
-  }
-  if (noProxy.trim() === '*') {
-    return true;
-  }
-  const hostname = target.hostname.toLowerCase();
-  return noProxy
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .some((entry) => matchesNoProxyEntry(hostname, entry));
-}
-
-/**
- * Returns the proxy that the environment configures for `target`, or `null`.
- * Mirrors `requests.utils.get_environ_proxies` and `select_proxy`. Throws for a
- * proxy scheme this tool cannot speak.
- */
-function selectProxy(target: RequestTarget): URL | null {
-  if (bypassesProxy(target)) {
-    return null;
-  }
-  const scheme = target.url.protocol.slice(0, -1);
-  const configured = proxyEnv(`${scheme}_proxy`) ?? proxyEnv('all_proxy');
-  if (!configured) {
-    return null;
-  }
-  const proxy = new URL(configured);
-  if (!ALLOWED_SCHEMES.has(proxy.protocol)) {
-    throw new Error(`Unsupported proxy scheme: ${configured}`);
-  }
-  return proxy;
 }
 
 /** Builds the `Proxy-Authorization` header when the proxy URL carries credentials. */
@@ -238,15 +187,20 @@ function readResponse(res: IncomingMessage): Promise<string> {
   });
 }
 
-/** Runs `work` under a deadline that destroys `request` when it expires. */
+/**
+ * Runs `work` under the call's deadline, destroying `request` when it passes.
+ * `expiresAt` is an absolute time, so every attempt a call makes shares one
+ * budget instead of restarting the clock.
+ */
 async function withDeadline<T>(
   request: ClientRequest,
-  timeoutMs: number,
+  expiresAt: number,
   work: () => Promise<T>,
 ): Promise<T> {
-  const timer = setTimeout(() => {
-    request.destroy(new Error(TIMEOUT_MESSAGE));
-  }, timeoutMs);
+  const timer = setTimeout(
+    () => request.destroy(new Error('Request timed out')),
+    expiresAt - Date.now(),
+  );
   try {
     return await work();
   } finally {
@@ -257,9 +211,9 @@ async function withDeadline<T>(
 /** Sends `request` and returns its body, or `null` when the status is not 200. */
 function sendRequest(
   request: ClientRequest,
-  timeoutMs: number,
+  expiresAt: number,
 ): Promise<string | null> {
-  return withDeadline(request, timeoutMs, async () => {
+  return withDeadline(request, expiresAt, async () => {
     const res = await new Promise<IncomingMessage>((resolve, reject) => {
       request.once('response', resolve);
       request.once('error', reject);
@@ -274,34 +228,25 @@ function sendRequest(
 }
 
 /**
- * The TLS server name for `target`, absent for an IP-literal host: RFC 6066
- * forbids an IP address there, and Node warns and drops it. The certificate is
- * still checked against the host either way.
- */
-function serverNameOf(target: RequestTarget): string | undefined {
-  return isIP(target.hostname) === 0 ? target.hostname : undefined;
-}
-
-/**
- * Requests `target` over a connection pinned to `address`. `agent: false`
+ * Requests `url` over a connection pinned to `address`. `agent: false`
  * keeps every attempt on its own connection, matching the per-attempt session
  * the Python tool opens.
  */
 function requestPinnedAddress(
-  target: RequestTarget,
+  url: URL,
   address: string,
-  timeoutMs: number,
+  expiresAt: number,
 ): Promise<string | null> {
   const options: RequestOptions = {
     agent: false,
     headers: {...IDENTITY_ENCODING},
     lookup: pinnedLookup(address),
   };
-  if (target.url.protocol === 'https:') {
-    options.servername = serverNameOf(target);
-    return sendRequest(httpsRequest(target.url, options), timeoutMs);
+  if (url.protocol === 'https:') {
+    options.servername = serverNameOf(url);
+    return sendRequest(httpsRequest(url, options), expiresAt);
   }
-  return sendRequest(httpRequest(target.url, options), timeoutMs);
+  return sendRequest(httpRequest(url, options), expiresAt);
 }
 
 /**
@@ -309,14 +254,14 @@ function requestPinnedAddress(
  * status; only a transport error moves on to the next address.
  */
 async function requestPinned(
-  target: RequestTarget,
+  url: URL,
   addresses: string[],
-  timeoutMs: number,
+  expiresAt: number,
 ): Promise<string | null> {
-  let lastError: unknown = new Error(`Unable to fetch url: ${target.url.href}`);
+  let lastError: unknown;
   for (const address of addresses) {
     try {
-      return await requestPinnedAddress(target, address, timeoutMs);
+      return await requestPinnedAddress(url, address, expiresAt);
     } catch (error: unknown) {
       lastError = error;
     }
@@ -324,22 +269,22 @@ async function requestPinned(
   throw lastError;
 }
 
-/** Opens a TLS tunnel to `target` through `proxy` with an HTTP `CONNECT`. */
+/** Opens a TLS tunnel to `url` through `proxy` with an HTTP `CONNECT`. */
 function connectProxyTunnel(
-  target: RequestTarget,
+  url: URL,
   proxy: URL,
-  timeoutMs: number,
+  expiresAt: number,
 ): Promise<Socket> {
   const request = httpRequest({
     headers: proxyAuthHeaders(proxy),
     host: normalizeHost(proxy.hostname),
     method: 'CONNECT',
-    path: `${target.url.hostname}:${portOf(target.url)}`,
+    path: `${url.hostname}:${portOf(url)}`,
     port: portOf(proxy),
   });
   return withDeadline(
     request,
-    timeoutMs,
+    expiresAt,
     () =>
       new Promise<Socket>((resolve, reject) => {
         request.once('connect', (res: IncomingMessage, socket: Socket) => {
@@ -348,7 +293,7 @@ function connectProxyTunnel(
             reject(new Error(`Proxy refused CONNECT: ${res.statusCode}`));
             return;
           }
-          resolve(tlsConnect({servername: serverNameOf(target), socket}));
+          resolve(tlsConnect({servername: serverNameOf(url), socket}));
         });
         request.once('error', reject);
         request.end();
@@ -357,7 +302,7 @@ function connectProxyTunnel(
 }
 
 /**
- * Runs the request for `target` over an established tunnel.
+ * Runs the request for `url` over an established tunnel.
  *
  * No `agent` option is passed, because Node consults `createConnection` only
  * for a request that has no agent, and `agent: false` builds a fresh agent
@@ -365,14 +310,14 @@ function connectProxyTunnel(
  * connected directly, and this path vets no address, so it fails instead.
  */
 async function requestThroughTunnel(
-  target: RequestTarget,
+  url: URL,
   socket: Socket,
-  timeoutMs: number,
+  expiresAt: number,
 ): Promise<string | null> {
-  const request = httpsRequest(target.url, {
+  const request = httpsRequest(url, {
     createConnection: () => socket,
     headers: {...IDENTITY_ENCODING},
-    servername: serverNameOf(target),
+    servername: serverNameOf(url),
   });
   request.once('socket', (used: Socket) => {
     if (used !== socket) {
@@ -380,68 +325,38 @@ async function requestThroughTunnel(
     }
   });
   try {
-    return await sendRequest(request, timeoutMs);
+    return await sendRequest(request, expiresAt);
   } finally {
     socket.destroy();
   }
 }
 
 /**
- * Requests `target` through `proxy`. The proxy resolves the hostname itself, so
+ * Requests `url` through `proxy`. The proxy resolves the hostname itself, so
  * this path issues no local DNS query.
  */
 async function requestViaProxy(
-  target: RequestTarget,
+  url: URL,
   proxy: URL,
-  timeoutMs: number,
+  expiresAt: number,
 ): Promise<string | null> {
-  if (target.url.protocol === 'http:') {
+  if (url.protocol === 'http:') {
     const request = httpRequest({
       agent: false,
       headers: {
         ...IDENTITY_ENCODING,
         ...proxyAuthHeaders(proxy),
-        host: target.url.host,
+        host: url.host,
       },
       host: normalizeHost(proxy.hostname),
       // Absolute-form request target, as an HTTP proxy expects.
-      path: target.url.href,
+      path: url.href,
       port: portOf(proxy),
     });
-    return sendRequest(request, timeoutMs);
+    return sendRequest(request, expiresAt);
   }
-  // The tunnel and the request it carries share one deadline.
-  const expiresAt = Date.now() + timeoutMs;
-  const socket = await connectProxyTunnel(target, proxy, timeoutMs);
-  return requestThroughTunnel(target, socket, expiresAt - Date.now());
-}
-
-/**
- * Vets `target` and returns its body, or `null` when the status is not 200.
- * Mirrors the Python `_fetch_response` decision tree: a proxy short-circuits
- * local resolution, an IP literal is vetted in place, and a hostname is
- * resolved and vetted before any connection is made.
- */
-async function fetchBody(
-  target: RequestTarget,
-  timeoutMs: number,
-): Promise<string | null> {
-  if (isBlockedHostname(target.hostname)) {
-    throw new Error(`Blocked host: ${target.hostname}`);
-  }
-  const literal = isIP(target.hostname) === 0 ? null : target.hostname;
-  if (literal !== null && isBlockedAddress(literal)) {
-    throw new Error(`Blocked host: ${target.hostname}`);
-  }
-  const proxy = selectProxy(target);
-  if (proxy !== null) {
-    return requestViaProxy(target, proxy, timeoutMs);
-  }
-  const addresses =
-    literal === null
-      ? await resolveDirectAddresses(target.hostname)
-      : [literal];
-  return requestPinned(target, addresses, timeoutMs);
+  const socket = await connectProxyTunnel(url, proxy, expiresAt);
+  return requestThroughTunnel(url, socket, expiresAt);
 }
 
 /** Decodes HTML entities: the named set above plus decimal and hex forms. */
@@ -480,27 +395,58 @@ function htmlToText(html: string): string {
 }
 
 /**
+ * Vets `url` and returns its body, or `null` when the status is not 200.
+ * Mirrors the Python `_fetch_response` decision tree: a proxy short-circuits
+ * local resolution, an IP literal is vetted in place, and a hostname is
+ * resolved and vetted before any connection is made.
+ */
+async function fetchBody(
+  url: URL,
+  proxy: URL | null,
+  expiresAt: number,
+): Promise<string | null> {
+  const hostname = normalizeHost(url.hostname);
+  if (isBlockedHostname(hostname)) {
+    throw new Error(`Blocked host: ${hostname}`);
+  }
+  const literal = isIP(hostname) === 0 ? null : hostname;
+  if (literal !== null && isBlockedAddress(literal)) {
+    throw new Error(`Blocked host: ${hostname}`);
+  }
+  if (proxy !== null) {
+    return requestViaProxy(url, proxy, expiresAt);
+  }
+  const addresses =
+    literal === null ? await resolveDirectAddresses(hostname) : [literal];
+  return requestPinned(url, addresses, expiresAt);
+}
+
+/**
  * Fetches the content at `url` and returns its extracted, readable text.
  *
  * Hardened against SSRF: only `http`/`https` URLs are fetched, the host is
  * rejected up front if it is `localhost`-style or resolves to a private /
  * loopback / link-local / shared / reserved / multicast address, and redirects
- * are never followed. Never throws for expected failures (bad scheme, blocked
- * host, non-200, timeout, network error); returns `Failed to fetch url: <url>`
- * instead.
+ * are never followed. The connection is pinned to the address that passed
+ * vetting, so a name cannot be re-resolved to a different address after the
+ * check. The body is read up to 10 MiB; a larger response fails.
  *
- * The connection is pinned to the address that passed vetting, so a name cannot
- * be re-resolved to a different address after the check. When an environment
- * proxy applies, the proxy resolves the name remotely and only an IP-literal
- * host can be vetted locally — the same caveat the Python tool carries.
+ * Never throws for expected failures (bad scheme, blocked host, non-200,
+ * timeout, network error); returns `Failed to fetch url: <url>` instead.
+ *
+ * Passing {@link LoadWebPageOptions.proxy} routes the request through a proxy,
+ * which resolves the hostname itself. A hostname target is not vetted on that
+ * path, so it is opt-in per call and is never read from the environment.
  */
 export async function loadWebPage(
   url: string,
   options?: LoadWebPageOptions,
 ): Promise<string> {
-  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const expiresAt = Date.now() + (options?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
-    const body = await fetchBody(parseRequestTarget(url), timeoutMs);
+    const proxy =
+      options?.proxy === undefined ? null : parseProxy(options.proxy);
+    const body = await fetchBody(parseRequestTarget(url), proxy, expiresAt);
     return body === null ? failedToFetchMessage(url) : htmlToText(body);
   } catch {
     return failedToFetchMessage(url);

@@ -96,28 +96,6 @@ export function isBlockedAddress(address: string): boolean {
   return true;
 }
 
-/**
- * Returns `true` when `address` is an IPv4 literal that falls inside the IPv4
- * CIDR block `cidr` (for example `10.0.0.0/8`). A non-IPv4 address or a
- * malformed block returns `false`.
- */
-export function isIpv4InCidr(address: string, cidr: string): boolean {
-  const octets = parseIpv4(address);
-  const match = /^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/.exec(cidr);
-  if (!octets || !match) {
-    return false;
-  }
-  const networkOctets = parseIpv4(match[1]);
-  const prefix = Number(match[2]);
-  if (!networkOctets || prefix > 32) {
-    return false;
-  }
-  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-  return (
-    (ipv4ToInt(octets) & mask) >>> 0 === (ipv4ToInt(networkOctets) & mask) >>> 0
-  );
-}
-
 /** Parses a dotted-quad IPv4 string into its four octets, or `null`. */
 function parseIpv4(address: string): number[] | null {
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(address);

@@ -11,27 +11,21 @@ therefore lets a prompt reach anything the agent's host can reach: the cloud
 metadata endpoint, a database admin port on `localhost`, an internal service on
 a private address. This class of bug is Server-Side Request Forgery (SSRF).
 
-`loadWebPage` closes that path. It rejects any scheme other than `http` and
-`https`, rejects `localhost` and `*.localhost`, and rejects an address that is
-not globally routable — private, loopback, link-local, shared (CGNAT),
-documentation, benchmarking, multicast, and reserved ranges. An IPv6 address
-that wraps an IPv4 target is vetted by the IPv4 address inside it, because
-`64:ff9b::169.254.169.254` reaches the metadata endpoint on a network with
-NAT64. The whole 6to4 range `2002::/16` is rejected.
+`loadWebPage` closes that path in three steps. It rejects any scheme other than
+`http` and `https`, and rejects `localhost` and `*.localhost`. It rejects an
+address that is not globally routable, including an IPv6 address that wraps a
+non-global IPv4 target — `64:ff9b::169.254.169.254` reaches the metadata
+endpoint on a network with NAT64. It then pins the connection to an address that
+passed vetting, so the name cannot resolve to something else between the check
+and the connection.
 
-Vetting a name and then fetching it is not enough on its own: the name can
-resolve again, to a different address, between the check and the connection.
-`loadWebPage` resolves the name once and then pins the connection to an address
-that passed vetting. The URL is never rewritten, so the `Host` header and the
-TLS certificate check still use the hostname the caller wrote. When a name
-resolves to several addresses, each is tried in turn until one answers.
+Two properties follow from pinning at the socket layer rather than rewriting the
+URL to the IP: the `Host` header and the TLS certificate check still use the
+hostname the caller wrote. Redirects are never followed, because a redirect is a
+second URL that the first one chose.
 
-Redirects are never followed, because a redirect is a second URL that the first
-one chose. The tool never throws: every failure returns the string
-`Failed to fetch url: <url>`, so a model always receives a value it can act on.
-
-`LOAD_WEB_PAGE` is the same behaviour packaged as a `FunctionTool`. Give it to
-an agent when you want the model to decide what to read.
+The tool never throws. Every failure returns `Failed to fetch url: <url>`, so a
+model always receives a value it can act on.
 
 ## Get started
 
@@ -50,50 +44,40 @@ const agent = new LlmAgent({
 });
 ```
 
-A blocked target returns the failure string rather than raising:
+## Choosing between the two vetting paths
+
+Address vetting needs a local DNS resolution, and a proxy resolves the name
+remotely instead. The two cannot both hold, so the choice is explicit:
+
+|                   | Direct (default)    | With `proxy`                      |
+| ----------------- | ------------------- | --------------------------------- |
+| Hostname target   | resolved and vetted | not vetted; the proxy resolves it |
+| IP-literal target | vetted              | vetted                            |
+| `localhost` names | rejected            | rejected                          |
+
+`loadWebPage` never reads `http_proxy`, `https_proxy` or `no_proxy`. An
+environment variable is machine-wide, and a machine-wide setting must not be
+able to switch vetting off for every caller on the host. Pass the proxy per
+call, and only for a call whose URL you trust:
 
 ```ts
-await loadWebPage('http://[64:ff9b::169.254.169.254]/computeMetadata/v1/');
-// 'Failed to fetch url: http://[64:ff9b::169.254.169.254]/computeMetadata/v1/'
+await loadWebPage('https://internal.example/', {
+  proxy: process.env['HTTPS_PROXY'],
+});
 ```
-
-## Timeout
-
-Each attempt has a deadline. It defaults to 30 seconds and the request is
-destroyed when it expires.
-
-```ts
-await loadWebPage('https://example.com/', {timeoutMs: 5000});
-```
-
-## Proxies
-
-`loadWebPage` reads the usual proxy environment variables: `http_proxy`,
-`https_proxy` and `all_proxy`, in the lowercase spelling first, then the
-uppercase one. `no_proxy` exempts a host. An empty `no_proxy` exempts nothing, a
-`*` exempts everything, and an entry matches a host that equals it or ends with
-a dot and the entry. An entry written as an IPv4 block, such as `10.0.0.0/8`,
-matches an IP-literal host inside that block.
 
 An `http` target goes to the proxy in absolute form. An `https` target opens a
-`CONNECT` tunnel and runs TLS inside it, with the certificate checked against
-the target hostname. Credentials in the proxy URL are sent as
-`Proxy-Authorization: Basic`.
+`CONNECT` tunnel and runs TLS inside it. A `socks5://` proxy is not supported.
 
-One guarantee weakens when a proxy applies: the proxy resolves the name, so
-there is no local address to vet. `loadWebPage` still rejects a blocked IP
-literal, and still rejects `localhost` names, but it cannot vet a hostname that
-only the proxy can resolve. A `socks5://` proxy is not supported and returns the
-failure string.
+`LOAD_WEB_PAGE`, the tool the model calls, takes no options, so a model-chosen
+URL always follows the vetted direct path.
 
 ## Limits
 
 The body is read into memory and is capped at 10 MiB; a larger response returns
-the failure string rather than a truncated page. The request asks for
-`accept-encoding: identity`, so the response arrives uncompressed. Text
-extraction strips `<script>`, `<style>` and comments, decodes HTML entities, and
-keeps only lines of more than three words — short navigation fragments are
-dropped.
+the failure string rather than a truncated page. Entity decoding covers `&amp;`,
+`&apos;`, `&gt;`, `&lt;`, `&nbsp;`, `&quot;` and the numeric forms (`&#8212;`,
+`&#x2014;`); other named entities are left as written.
 
 The tool needs Node built-ins (`node:http`, `node:https`, `node:dns`), so it
 does not run in a browser bundle.

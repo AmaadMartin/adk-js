@@ -8,7 +8,6 @@ import {describe, expect, it} from 'vitest';
 import {
   isBlockedAddress,
   isBlockedHostname,
-  isIpv4InCidr,
   normalizeHost,
 } from '../../src/utils/ssrf_utils.js';
 
@@ -118,35 +117,5 @@ describe('normalizeHost', () => {
 
   it('leaves a plain hostname unchanged', () => {
     expect(normalizeHost('example.com')).toBe('example.com');
-  });
-});
-
-describe('isIpv4InCidr', () => {
-  it.each([
-    ['10.1.2.3', '10.0.0.0/8'],
-    ['192.168.4.4', '192.168.0.0/16'],
-    ['93.184.216.34', '0.0.0.0/0'],
-    ['127.0.0.1', '127.0.0.1/32'],
-  ])('matches %s against %s', (address, cidr) => {
-    expect(isIpv4InCidr(address, cidr)).toBe(true);
-  });
-
-  it.each([
-    ['11.1.2.3', '10.0.0.0/8'],
-    ['127.0.0.2', '127.0.0.1/32'],
-  ])('does not match %s against %s', (address, cidr) => {
-    expect(isIpv4InCidr(address, cidr)).toBe(false);
-  });
-
-  it('rejects a non-IPv4 address', () => {
-    expect(isIpv4InCidr('example.com', '10.0.0.0/8')).toBe(false);
-    expect(isIpv4InCidr('::1', '10.0.0.0/8')).toBe(false);
-  });
-
-  it('rejects a malformed block', () => {
-    expect(isIpv4InCidr('10.1.2.3', '10.0.0.0')).toBe(false);
-    expect(isIpv4InCidr('10.1.2.3', 'example.com/8')).toBe(false);
-    expect(isIpv4InCidr('10.1.2.3', '10.0.0.0/64')).toBe(false);
-    expect(isIpv4InCidr('10.1.2.3', '10.0.0.999/8')).toBe(false);
   });
 });
