@@ -24,9 +24,11 @@ import {
   EvalStatus,
   EvalTurn,
   ResetFunc,
+  RESPONSE_MATCH_SCORE_KEY,
   TOOL_TRAJECTORY_SCORE_KEY,
 } from './eval_types.js';
 import {processQueryWithRootAgent} from './evaluation_generator.js';
+import {evaluateResponseMatch} from './response_evaluator.js';
 import {evaluateTrajectory} from './trajectory_evaluator.js';
 
 const logger = new AdkLogger({label: 'ADK Eval', colorize: {all: true}});
@@ -144,19 +146,38 @@ function evaluateMetric(
   turns: EvalTurn[],
   options: EvaluateMetricOptions,
 ): EvalMetricResult {
-  if (evalMetric.metricName !== TOOL_TRAJECTORY_SCORE_KEY) {
-    warnUnsupportedMetric(evalMetric.metricName, options.warnedMetrics);
+  const score = scoreMetric(evalMetric.metricName, turns, options);
+  if (score === undefined) {
     return {evalStatus: EvalStatus.NOT_EVALUATED};
   }
 
-  const score = evaluateTrajectory([turns], {
-    printDetailedResults: options.printDetailedResults,
-  });
   return {
     score,
     evalStatus:
       score >= evalMetric.threshold ? EvalStatus.PASSED : EvalStatus.FAILED,
   };
+}
+
+/**
+ * Returns the metric's score, or `undefined` when the metric does not apply to
+ * these turns. A metric name this command cannot score warns as well.
+ */
+function scoreMetric(
+  metricName: string,
+  turns: EvalTurn[],
+  options: EvaluateMetricOptions,
+): number | undefined {
+  switch (metricName) {
+    case TOOL_TRAJECTORY_SCORE_KEY:
+      return evaluateTrajectory([turns], {
+        printDetailedResults: options.printDetailedResults,
+      });
+    case RESPONSE_MATCH_SCORE_KEY:
+      return evaluateResponseMatch([turns]);
+    default:
+      warnUnsupportedMetric(metricName, options.warnedMetrics);
+      return undefined;
+  }
 }
 
 function warnUnsupportedMetric(
