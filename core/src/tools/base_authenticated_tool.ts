@@ -48,6 +48,26 @@ export interface RunAsyncAuthenticatedToolRequest extends RunAsyncToolRequest {
  *
  * {@link AuthenticatedFunctionTool} is the equivalent for a plain function.
  * Reach for this class when the tool needs its own declaration or state.
+ *
+ * @example
+ * ```ts
+ * class ListDocumentsTool extends BaseAuthenticatedTool {
+ *   constructor() {
+ *     super({
+ *       name: 'list_documents',
+ *       description: 'Lists the documents in a folder.',
+ *       authConfig,
+ *     });
+ *   }
+ *
+ *   protected override async runAsyncImpl({
+ *     args,
+ *     credential,
+ *   }: RunAsyncAuthenticatedToolRequest): Promise<unknown> {
+ *     return fetchDocuments(args['folder'], credential?.oauth2?.accessToken);
+ *   }
+ * }
+ * ```
  */
 @experimental
 export abstract class BaseAuthenticatedTool extends BaseTool {
