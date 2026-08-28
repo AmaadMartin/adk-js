@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {getLogger} from '@google/adk';
 import dotenv from 'dotenv';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-
-import {AdkLogger} from './logger.js';
-
-const logger = new AdkLogger({label: 'Envs'});
 
 const ADK_DISABLE_LOAD_DOTENV_ENV_VAR = 'ADK_DISABLE_LOAD_DOTENV';
 
@@ -84,7 +81,7 @@ export function loadDotenvForAgent(
   filename = '.env',
 ): void {
   if (isEnvEnabled(ADK_DISABLE_LOAD_DOTENV_ENV_VAR)) {
-    logger.debug(
+    getLogger().debug(
       `Skipping ${filename} loading because ${ADK_DISABLE_LOAD_DOTENV_ENV_VAR} is enabled.`,
     );
     return;
@@ -93,7 +90,7 @@ export function loadDotenvForAgent(
   const startFolder = path.resolve(agentParentFolder, agentName);
   const dotenvPath = findFileUpwards(startFolder, filename);
   if (!dotenvPath) {
-    logger.debug(`No ${filename} file found for ${agentName}`);
+    getLogger().debug(`No ${filename} file found for ${agentName}`);
     return;
   }
 
@@ -111,5 +108,7 @@ export function loadDotenvForAgent(
     process.env[key] = value;
   }
 
-  logger.debug(`Loaded ${filename} file for ${agentName} at ${dotenvPath}`);
+  getLogger().debug(
+    `Loaded ${filename} file for ${agentName} at ${dotenvPath}`,
+  );
 }
