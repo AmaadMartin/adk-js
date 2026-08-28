@@ -103,6 +103,7 @@ import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './processors/request_input_ll
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
+import {resolveTransferTarget} from './transfer_utils.js';
 
 /**
  * Delay before closing the parent connection on agent transfer. Gives the
@@ -1177,19 +1178,19 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       // opens its own connection, so the parent's resumption handle is put
       // aside for the duration of the sub-agent's run.
       if (transferToAgent) {
-        const subAgent =
-          requireAgent(invocationContext).rootAgent.findAgent(transferToAgent);
-        if (subAgent) {
-          const previousAgent = invocationContext.agent;
-          const previousHandle = invocationContext.liveSessionResumptionHandle;
-          invocationContext.agent = subAgent;
-          invocationContext.liveSessionResumptionHandle = undefined;
-          try {
-            yield* subAgent.runLive(invocationContext);
-          } finally {
-            invocationContext.agent = previousAgent;
-            invocationContext.liveSessionResumptionHandle = previousHandle;
-          }
+        const subAgent = resolveTransferTarget(
+          invocationContext,
+          transferToAgent,
+        );
+        const previousAgent = invocationContext.agent;
+        const previousHandle = invocationContext.liveSessionResumptionHandle;
+        invocationContext.agent = subAgent;
+        invocationContext.liveSessionResumptionHandle = undefined;
+        try {
+          yield* subAgent.runLive(invocationContext);
+        } finally {
+          invocationContext.agent = previousAgent;
+          invocationContext.liveSessionResumptionHandle = previousHandle;
         }
         return;
       }
@@ -1694,7 +1695,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // If model instruct to transfer to an agent, run the transferred agent.
     const nextAgentName = functionResponseEvent.actions.transferToAgent;
     if (nextAgentName) {
-      const nextAgent = this.getAgentByName(invocationContext, nextAgentName);
+      const nextAgent = resolveTransferTarget(invocationContext, nextAgentName);
       for await (const event of nextAgent.runAsync(invocationContext)) {
         if (invocationContext.abortSignal?.aborted) {
           return;
@@ -1703,30 +1704,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         yield event;
       }
     }
-  }
-
-  /**
-   * Retrieves an agent from the agent tree by its name.
-   *
-   * Performing a depth-first search to locate the agent with the given name.
-   * - Starts searching from the root agent of the current invocation context.
-   * - Traverses down the agent tree to find the specified agent.
-   *
-   * @param invocationContext The current invocation context.
-   * @param agentName The name of the agent to retrieve.
-   * @returns The agent with the given name.
-   * @throws Error if the agent is not found.
-   */
-  private getAgentByName(
-    invocationContext: InvocationContext,
-    agentName: string,
-  ): BaseAgent {
-    const rootAgent = requireAgent(invocationContext).rootAgent;
-    const agentToRun = rootAgent.findAgent(agentName);
-    if (!agentToRun) {
-      throw new Error(`Agent ${agentName} not found in the agent tree.`);
-    }
-    return agentToRun;
   }
 
   protected async *callLlmAsync(
