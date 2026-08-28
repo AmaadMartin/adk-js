@@ -1,0 +1,290 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import type {TableField} from '@google-cloud/bigquery';
+
+/**
+ * The wire contract of the agent analytics events table.
+ *
+ * Column names, types, modes and descriptions match
+ * `google/adk-python`'s `bigquery_agent_analytics_plugin._get_events_schema()`
+ * exactly, so one dataset can hold rows written by either SDK and a query
+ * written against Python-produced rows works unchanged against JavaScript ones.
+ */
+
+/** Table schema version, written as a table label for governance. */
+export const SCHEMA_VERSION = '2';
+
+/** Label key carrying {@link SCHEMA_VERSION} on the events table. */
+export const SCHEMA_VERSION_LABEL_KEY = 'adk_schema_version';
+
+/** The `event_type` column's values. */
+export enum AnalyticsEventType {
+  USER_MESSAGE_RECEIVED = 'USER_MESSAGE_RECEIVED',
+  INVOCATION_STARTING = 'INVOCATION_STARTING',
+  INVOCATION_COMPLETED = 'INVOCATION_COMPLETED',
+  AGENT_STARTING = 'AGENT_STARTING',
+  AGENT_COMPLETED = 'AGENT_COMPLETED',
+  AGENT_RESPONSE = 'AGENT_RESPONSE',
+  LLM_REQUEST = 'LLM_REQUEST',
+  LLM_RESPONSE = 'LLM_RESPONSE',
+  LLM_ERROR = 'LLM_ERROR',
+  TOOL_STARTING = 'TOOL_STARTING',
+  TOOL_COMPLETED = 'TOOL_COMPLETED',
+  TOOL_ERROR = 'TOOL_ERROR',
+  STATE_DELTA = 'STATE_DELTA',
+}
+
+/** The `status` column's values. */
+export enum AnalyticsStatus {
+  OK = 'OK',
+  ERROR = 'ERROR',
+}
+
+/** The `content_parts.storage_mode` column's values. */
+export enum AnalyticsStorageMode {
+  INLINE = 'INLINE',
+  EXTERNAL_URI = 'EXTERNAL_URI',
+}
+
+/** One entry of the repeated `content_parts` column. */
+export interface AnalyticsContentPart {
+  mime_type: string;
+  uri: string | null;
+  /**
+   * Always null. The column exists so the table matches a Python-written one;
+   * populating it needs the Cloud Storage offload path, which this plugin does
+   * not implement.
+   */
+  object_ref: null;
+  text: string | null;
+  part_index: number;
+  part_attributes: string;
+  storage_mode: AnalyticsStorageMode;
+}
+
+/** One row of the events table, in the column order the schema declares. */
+export interface AnalyticsRow {
+  timestamp: string;
+  event_id: string;
+  event_type: AnalyticsEventType;
+  agent: string | null;
+  session_id: string;
+  invocation_id: string;
+  user_id: string;
+  trace_id: string;
+  span_id: string | null;
+  parent_span_id: string | null;
+  /** JSON-encoded, because BigQuery `JSON` columns are supplied as strings. */
+  content: string | null;
+  content_parts: AnalyticsContentPart[];
+  /** JSON-encoded. */
+  attributes: string;
+  /** JSON-encoded. */
+  latency_ms: string | null;
+  status: AnalyticsStatus;
+  error_message: string | null;
+  is_truncated: boolean;
+}
+
+/** Sub-fields of the repeated `content_parts` column. */
+const CONTENT_PART_FIELDS: TableField[] = [
+  {
+    name: 'mime_type',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      "The MIME type of the content part (e.g., 'text/plain', 'image/png').",
+  },
+  {
+    name: 'uri',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      'The URI of the content part if stored externally (e.g., GCS bucket path).',
+  },
+  {
+    name: 'object_ref',
+    type: 'RECORD',
+    mode: 'NULLABLE',
+    description: 'The ObjectRef of the content part if stored externally.',
+    fields: [
+      {
+        name: 'uri',
+        type: 'STRING',
+        mode: 'NULLABLE',
+        description: 'The URI of the object.',
+      },
+      {
+        name: 'version',
+        type: 'STRING',
+        mode: 'NULLABLE',
+        description: 'The version of the object.',
+      },
+      {
+        name: 'authorizer',
+        type: 'STRING',
+        mode: 'NULLABLE',
+        description: 'The authorizer for the object.',
+      },
+      {
+        name: 'details',
+        type: 'JSON',
+        mode: 'NULLABLE',
+        description: 'Additional details about the object.',
+      },
+    ],
+  },
+  {
+    name: 'text',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description: 'The raw text content if the part is text-based.',
+  },
+  {
+    name: 'part_index',
+    type: 'INTEGER',
+    mode: 'NULLABLE',
+    description: 'The zero-based index of this part within the content.',
+  },
+  {
+    name: 'part_attributes',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      'Additional metadata for this content part as a JSON object (serialized to string).',
+  },
+  {
+    name: 'storage_mode',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      "Indicates how the content part is stored (e.g., 'INLINE', 'GCS_REFERENCE', 'EXTERNAL_URI').",
+  },
+];
+
+/** The 17 columns of the events table. */
+export const EVENTS_TABLE_SCHEMA: TableField[] = [
+  {
+    name: 'timestamp',
+    type: 'TIMESTAMP',
+    mode: 'REQUIRED',
+    description:
+      'The UTC timestamp when the event occurred. Used for ordering events within a session.',
+  },
+  {
+    name: 'event_id',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      'A unique identifier assigned before enqueue. Storage Write API retries preserve this value so duplicate rows can be identified reliably.',
+  },
+  {
+    name: 'event_type',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      "The category of the event (e.g., 'LLM_REQUEST', 'TOOL_CALL', 'AGENT_RESPONSE'). Helps in filtering specific types of interactions.",
+  },
+  {
+    name: 'agent',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      'The name of the agent that generated this event. Useful for multi-agent systems.',
+  },
+  {
+    name: 'session_id',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      'A unique identifier for the entire conversation session. Used to group all events belonging to a single user interaction.',
+  },
+  {
+    name: 'invocation_id',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      'A unique identifier for a single turn or execution within a session. Groups related events like LLM request and response.',
+  },
+  {
+    name: 'user_id',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      'The identifier of the end-user participating in the session, if available.',
+  },
+  {
+    name: 'trace_id',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      'OpenTelemetry trace ID for distributed tracing across services.',
+  },
+  {
+    name: 'span_id',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      "BQAA-internal execution-tree span id for this operation. This is the plugin's own correlation id used with parent_span_id to reconstruct the agent/LLM/tool tree -- NOT the OpenTelemetry span id, except on the root/invocation row where it may reuse the ambient OTel span id. For span-level Cloud Trace correlation use attributes.otel.span_id (best-effort).",
+  },
+  {
+    name: 'parent_span_id',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      'BQAA-internal parent execution-tree span id, used to reconstruct the operation hierarchy. Points at another BQAA row, not an OpenTelemetry parent span.',
+  },
+  {
+    name: 'content',
+    type: 'JSON',
+    mode: 'NULLABLE',
+    description:
+      'The primary payload of the event, stored as a JSON string. The structure depends on the event_type (e.g., prompt text for LLM_REQUEST, tool output for TOOL_RESPONSE).',
+  },
+  {
+    name: 'content_parts',
+    type: 'RECORD',
+    mode: 'REPEATED',
+    description:
+      'For multi-modal events, contains a list of content parts (text, images, etc.).',
+    fields: CONTENT_PART_FIELDS,
+  },
+  {
+    name: 'attributes',
+    type: 'JSON',
+    mode: 'NULLABLE',
+    description:
+      "A JSON object containing arbitrary key-value pairs for additional event metadata. Includes enrichment fields like 'root_agent_name' (turn orchestration), 'model' (request model), 'model_version' (response version), and 'usage_metadata' (detailed token counts). May also carry 'otel' (best-effort ambient Cloud Trace span/trace ids) and 'custom_metadata' (allowlisted event.custom_metadata keys).",
+  },
+  {
+    name: 'latency_ms',
+    type: 'JSON',
+    mode: 'NULLABLE',
+    description:
+      "A JSON object containing latency measurements, such as 'total_ms' and 'time_to_first_token_ms'.",
+  },
+  {
+    name: 'status',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description: "The outcome of the event, typically 'OK' or 'ERROR'.",
+  },
+  {
+    name: 'error_message',
+    type: 'STRING',
+    mode: 'NULLABLE',
+    description:
+      "Diagnostic message for errors and model termination details; may be populated on LLM_RESPONSE rows whose status is 'OK'.",
+  },
+  {
+    name: 'is_truncated',
+    type: 'BOOLEAN',
+    mode: 'NULLABLE',
+    description:
+      "Boolean flag indicating if the content or metadata payload was truncated because it exceeded the maximum allowed size. Set when 'content', captured 'custom_metadata', or A2A metadata is truncated; redaction of sensitive keys does not set this flag.",
+  },
+];

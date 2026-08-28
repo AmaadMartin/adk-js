@@ -24,6 +24,25 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {BigQueryAgentAnalyticsPlugin} from './plugins/bigquery_agent_analytics_plugin.js';
+export type {
+  AnalyticsContentFormatter,
+  BigQueryAgentAnalyticsPluginOptions,
+  BigQueryLoggerConfig,
+} from './plugins/bigquery_agent_analytics_plugin.js';
+export {
+  AnalyticsEventType,
+  AnalyticsStatus,
+  AnalyticsStorageMode,
+  EVENTS_TABLE_SCHEMA,
+  SCHEMA_VERSION,
+  SCHEMA_VERSION_LABEL_KEY,
+} from './plugins/bigquery_analytics_schema.js';
+export type {
+  AnalyticsContentPart,
+  AnalyticsRow,
+} from './plugins/bigquery_analytics_schema.js';
+export {AnalyticsDropReason} from './plugins/bigquery_analytics_writer.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
@@ -41,6 +60,8 @@ export {
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
+export {recursiveSmartTruncate, truncateText} from './utils/sanitize_utils.js';
+export type {SanitizeResult} from './utils/sanitize_utils.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/google_cloud.js';
