@@ -22,14 +22,11 @@ const ALLOW_ANY_COMMAND = '*';
 /** Wall-clock budget applied when the policy does not set one. */
 const DEFAULT_TIMEOUT_SECONDS = 30;
 
-/** `ulimit -v` and `ulimit -f` count 1024-byte units under bash. */
-const BYTES_PER_KIB = 1024;
-
 const NO_STDOUT_CAPTURED = '<no stdout captured>';
 const NO_STDERR_CAPTURED = '<no stderr captured>';
 
 /**
- * Allowed commands and resource limits for {@link ExecuteBashTool}.
+ * Allowed commands and the time budget for {@link ExecuteBashTool}.
  *
  * A prefix allowlist is a coarse filter, not a sandbox: it compares the start
  * of the trimmed command string, so `cat` also admits `catalog`.
@@ -41,12 +38,6 @@ export interface BashToolPolicy {
   blockedOperators?: readonly string[];
   /** Wall-clock budget in seconds. `null` disables the timeout. */
   timeoutSeconds?: number | null;
-  /** Address-space limit for the child, in bytes. */
-  maxMemoryBytes?: number;
-  /** Maximum file size the child may write, in bytes. */
-  maxFileSizeBytes?: number;
-  /** Maximum number of processes the child's user may have. */
-  maxChildProcesses?: number;
 }
 
 /** Options for {@link ExecuteBashTool}. */
@@ -113,50 +104,6 @@ export function validateCommand(
   return `Command blocked. Permitted prefixes are: ${allowed}`;
 }
 
-/**
- * Converts bytes to the KiB unit bash's `ulimit` uses, rounding up so that a
- * small positive limit never becomes `0`, which means "nothing at all".
- */
-function toKib(bytes: number): number {
-  return Math.ceil(bytes / BYTES_PER_KIB);
-}
-
-/**
- * Builds the argv to spawn, wrapping `argv` in a `ulimit` prologue when the
- * policy sets at least one resource limit.
- *
- * Node cannot call `setrlimit` on a child, so the limits are applied by a bash
- * prologue instead. The prologue ends with `exec "$@"`, so the command itself
- * is still passed as argv and is never re-parsed by the shell. Each `ulimit`
- * discards its own stderr: a limit the kernel refuses must not pollute the
- * command's output.
- *
- * @param argv The tokenized command.
- * @param policy The policy whose limits to apply.
- * @return The argv to spawn, unchanged when no limit is set.
- */
-export function buildSpawnArgv(
-  argv: readonly string[],
-  policy: ResolvedBashToolPolicy,
-): string[] {
-  const {maxMemoryBytes, maxFileSizeBytes, maxChildProcesses} = policy;
-  if (!maxMemoryBytes && !maxFileSizeBytes && !maxChildProcesses) {
-    return [...argv];
-  }
-  const limits = ['ulimit -c 0'];
-  if (maxMemoryBytes) {
-    limits.push(`ulimit -v ${toKib(maxMemoryBytes)}`);
-  }
-  if (maxFileSizeBytes) {
-    limits.push(`ulimit -f ${toKib(maxFileSizeBytes)}`);
-  }
-  if (maxChildProcesses) {
-    limits.push(`ulimit -u ${maxChildProcesses}`);
-  }
-  const prologue = limits.map((l) => `${l} 2>/dev/null; `).join('');
-  return ['bash', '-c', `${prologue}exec "$@"`, 'bash', ...argv];
-}
-
 /** Decodes captured output, reporting an empty capture as `placeholder`. */
 function decodeOutput(chunks: Buffer[], placeholder: string): string {
   const text = decodeChunks(chunks);
@@ -185,8 +132,8 @@ function killProcessGroup(pid: number | undefined): void {
  * turns the gate off.
  *
  * WARNING: an approved command runs on the host with the agent process's own
- * privileges and environment. The policy filters and the resource limits
- * reduce the blast radius, they do not sandbox the command.
+ * privileges and environment. The policy filters reduce the blast radius,
+ * they do not sandbox the command.
  */
 @experimental
 export class ExecuteBashTool extends BaseTool {
@@ -277,10 +224,7 @@ export class ExecuteBashTool extends BaseTool {
     const stderrChunks: Buffer[] = [];
     const {timeoutSeconds} = this.policy;
     try {
-      const [file, ...rest] = buildSpawnArgv(
-        splitCommand(command),
-        this.policy,
-      );
+      const [file, ...rest] = splitCommand(command);
       const child = spawn(file, rest, {
         cwd: this.workspace,
         env: process.env,

@@ -19,7 +19,6 @@ import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   ResolvedBashToolPolicy,
-  buildSpawnArgv,
   validateCommand,
 } from '../../src/tools/bash_tool.js';
 
@@ -112,37 +111,6 @@ describe('validateCommand', () => {
     expect(validateCommand('ls ; rm -rf /', policy)).toBe(
       'Command contains blocked operator: ;',
     );
-  });
-});
-
-describe('buildSpawnArgv', () => {
-  it('returns the argv unchanged when the policy sets no limit', () => {
-    expect(buildSpawnArgv(['ls', '-la'], makePolicy())).toEqual(['ls', '-la']);
-  });
-
-  it('wraps the argv in a ulimit prologue when a limit is set', () => {
-    const argv = buildSpawnArgv(
-      ['ls'],
-      makePolicy({
-        maxMemoryBytes: 100 * 1024 * 1024,
-        maxFileSizeBytes: 50 * 1024 * 1024,
-        maxChildProcesses: 10,
-      }),
-    );
-
-    expect(argv).toEqual([
-      'bash',
-      '-c',
-      'ulimit -c 0 2>/dev/null; ulimit -v 102400 2>/dev/null; ' +
-        'ulimit -f 51200 2>/dev/null; ulimit -u 10 2>/dev/null; exec "$@"',
-      'bash',
-      'ls',
-    ]);
-  });
-
-  it('rounds a sub-KiB limit up, never down to zero', () => {
-    const argv = buildSpawnArgv(['ls'], makePolicy({maxMemoryBytes: 1}));
-    expect(argv[2]).toContain('ulimit -v 1');
   });
 });
 
@@ -462,21 +430,4 @@ describe.skipIf(process.platform === 'win32')('ExecuteBashTool', () => {
       stderr: '<no stderr captured>',
     });
   });
-
-  // macOS bash ignores `ulimit -v`, so only Linux can observe the limit.
-  it.skipIf(process.platform !== 'linux')(
-    'applies the memory limit to the child',
-    async () => {
-      const tool = new ExecuteBashTool({
-        workspace,
-        policy: {maxMemoryBytes: 100 * 1024 * 1024},
-      });
-      const result = await tool.runAsync({
-        args: {command: 'bash -c "ulimit -v"'},
-        toolContext: confirmedContext(),
-      });
-      expect(result).toMatchObject({stdout: '102400\n', returncode: 0});
-    },
-    SPAWN_TIMEOUT_MS,
-  );
 });
