@@ -6,7 +6,6 @@
 
 import {Session} from '../sessions/session.js';
 import {
-  EvalMetric,
   EvalMetricResult,
   EvalMetricResultPerInvocation,
   EvalStatus,
@@ -16,11 +15,6 @@ import {
  * Case-level evaluation results.
  */
 export interface EvalCaseResult {
-  /**
-   * @deprecated Use `evalSetId` instead.
-   */
-  evalSetFile?: string;
-
   /** The eval set id. Defaults to an empty string. */
   evalSetId?: string;
 
@@ -29,11 +23,6 @@ export interface EvalCaseResult {
 
   /** Final eval status for this eval case. */
   finalEvalStatus: EvalStatus;
-
-  /**
-   * @deprecated Use `overallEvalMetricResults` instead.
-   */
-  evalMetricResults?: Array<[EvalMetric, EvalMetricResult]>;
 
   /** The overall result of each metric for the whole eval case. */
   overallEvalMetricResults: EvalMetricResult[];

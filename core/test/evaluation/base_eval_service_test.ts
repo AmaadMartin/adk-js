@@ -8,7 +8,6 @@ import {
   BaseEvalService,
   createEvaluateConfig,
   createInferenceConfig,
-  createInferenceResult,
   EvalCaseResult,
   EvalStatus,
   EvaluateRequest,
@@ -64,12 +63,13 @@ function inferenceResult(
   evalCaseId: string,
   overrides: Partial<InferenceResult> = {},
 ): InferenceResult {
-  return createInferenceResult({
+  return {
     appName: APP_NAME,
     evalSetId: EVAL_SET_ID,
     evalCaseId,
+    status: InferenceStatus.SUCCESS,
     ...overrides,
-  });
+  };
 }
 
 describe('createInferenceConfig', () => {
@@ -117,26 +117,6 @@ describe('createEvaluateConfig', () => {
   });
 });
 
-describe('createInferenceResult', () => {
-  it('defaults the status to UNKNOWN and always states the session', () => {
-    const result = inferenceResult('case-1');
-
-    expect(result.status).toBe(InferenceStatus.UNKNOWN);
-    expect('sessionId' in result).toBe(true);
-    expect(result.sessionId).toBeUndefined();
-  });
-
-  it('keeps a supplied status and session id', () => {
-    const result = inferenceResult('case-1', {
-      status: InferenceStatus.SUCCESS,
-      sessionId: 'session-1',
-    });
-
-    expect(result.status).toBe(InferenceStatus.SUCCESS);
-    expect(result.sessionId).toBe('session-1');
-  });
-});
-
 describe('InferenceStatus', () => {
   // Pinned against adk-python `base_eval_service.py`: the numeric values are
   // serialized, so they are part of the wire contract.
@@ -150,8 +130,8 @@ describe('InferenceStatus', () => {
 describe('BaseEvalService', () => {
   it('delivers each inference result before the next one is produced', async () => {
     const service = new ScriptedEvalService([
-      inferenceResult('case-1', {status: InferenceStatus.SUCCESS}),
-      inferenceResult('case-2', {status: InferenceStatus.SUCCESS}),
+      inferenceResult('case-1'),
+      inferenceResult('case-2'),
     ]);
 
     const results = service.performInference({
@@ -177,7 +157,7 @@ describe('BaseEvalService', () => {
         status: InferenceStatus.FAILURE,
         errorMessage: 'model call timed out',
       }),
-      inferenceResult('case-2', {status: InferenceStatus.SUCCESS}),
+      inferenceResult('case-2'),
     ]);
 
     const collected: InferenceResult[] = [];
@@ -214,7 +194,9 @@ describe('BaseEvalService', () => {
     for await (const result of service.evaluate({
       inferenceResults: [inferenceResult('case-1')],
       evaluateConfig: createEvaluateConfig({
-        evalMetrics: [{metricName: 'response_match_score', threshold: 0.8}],
+        evalMetrics: [
+          {metricName: 'response_match_score', criterion: {threshold: 0.8}},
+        ],
       }),
     })) {
       collected.push(result);
@@ -224,7 +206,7 @@ describe('BaseEvalService', () => {
     expect(collected[0].overallEvalMetricResults).toEqual([
       {
         metricName: 'response_match_score',
-        threshold: 0.8,
+        criterion: {threshold: 0.8},
         evalStatus: EvalStatus.PASSED,
       },
     ]);
@@ -234,8 +216,8 @@ describe('BaseEvalService', () => {
 describe('InferenceResult serialization', () => {
   it('round-trips through JSON with the adk-python key set', () => {
     const result = inferenceResult('case-1', {
-      status: InferenceStatus.SUCCESS,
       errorMessage: 'partial failure on turn 2',
+      sessionId: 'session-1',
       inferences: [
         {
           invocationId: 'invocation-1',
@@ -259,8 +241,33 @@ describe('InferenceResult serialization', () => {
       'evalCaseId',
       'evalSetId',
       'inferences',
+      'sessionId',
       'status',
     ]);
+    expect(roundTripped).toEqual(result);
+  });
+
+  it('carries invocation events as the other intermediate data shape', () => {
+    const result = inferenceResult('case-1', {
+      inferences: [
+        {
+          userContent: {role: 'user', parts: [{text: 'turn on the light'}]},
+          intermediateData: {
+            invocationEvents: [
+              {author: 'light_agent', content: {parts: [{text: 'working'}]}},
+            ],
+          },
+        },
+      ],
+    });
+
+    const roundTripped: InferenceResult = JSON.parse(JSON.stringify(result));
+    const intermediateData = roundTripped.inferences?.[0].intermediateData;
+
+    expect(intermediateData).toBeDefined();
+    expect(intermediateData && 'invocationEvents' in intermediateData).toBe(
+      true,
+    );
     expect(roundTripped).toEqual(result);
   });
 });

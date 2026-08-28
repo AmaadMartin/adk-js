@@ -34,7 +34,6 @@ import {
   BaseEvalService,
   createEvaluateConfig,
   createInferenceConfig,
-  createInferenceResult,
   EvalCaseResult,
   EvaluateRequest,
   EvalStatus,
@@ -48,7 +47,7 @@ class EchoEvalService implements BaseEvalService {
     request: InferenceRequest,
   ): AsyncGenerator<InferenceResult, void, void> {
     for (const evalCaseId of request.evalCaseIds ?? ['case-1']) {
-      yield createInferenceResult({
+      yield {
         appName: request.appName,
         evalSetId: request.evalSetId,
         evalCaseId,
@@ -60,7 +59,7 @@ class EchoEvalService implements BaseEvalService {
             finalResponse: {role: 'model', parts: [{text: 'done'}]},
           },
         ],
-      });
+      };
     }
   }
 
@@ -100,7 +99,9 @@ let allPassed = true;
 for await (const caseResult of service.evaluate({
   inferenceResults,
   evaluateConfig: createEvaluateConfig({
-    evalMetrics: [{metricName: 'response_match_score', threshold: 0.8}],
+    evalMetrics: [
+      {metricName: 'response_match_score', criterion: {threshold: 0.8}},
+    ],
   }),
 })) {
   allPassed &&= caseResult.finalEvalStatus === EvalStatus.PASSED;
@@ -167,16 +168,14 @@ const restored: InferenceResult[] = JSON.parse(saved);
 for await (const caseResult of service.evaluate({
   inferenceResults: restored,
   evaluateConfig: createEvaluateConfig({
-    evalMetrics: [{metricName: 'response_match_score', threshold: 0.95}],
+    evalMetrics: [
+      {metricName: 'response_match_score', criterion: {threshold: 0.95}},
+    ],
   }),
 })) {
   // Same inference, stricter threshold.
 }
 ```
-
-`sessionId` is a required key whose value may be `undefined`: an implementation
-states the session it used even when it ran without one. `JSON.stringify` drops
-the key when the value is `undefined`, which matches what adk-python emits.
 
 ## Parity with adk-python
 

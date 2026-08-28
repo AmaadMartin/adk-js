@@ -160,7 +160,6 @@ export {
   InferenceStatus,
   createEvaluateConfig,
   createInferenceConfig,
-  createInferenceResult,
 } from './evaluation/base_eval_service.js';
 export type {
   BaseEvalService,
@@ -170,11 +169,6 @@ export type {
   InferenceRequest,
   InferenceResult,
 } from './evaluation/base_eval_service.js';
-export {
-  DEFAULT_EVALUATE_PARALLELISM,
-  DEFAULT_INFERENCE_PARALLELISM,
-  DEFAULT_LIVE_TIMEOUT_SECONDS,
-} from './evaluation/constants.js';
 export type {
   IntermediateData,
   IntermediateDataType,

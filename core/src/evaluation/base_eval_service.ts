@@ -4,14 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  DEFAULT_EVALUATE_PARALLELISM,
-  DEFAULT_INFERENCE_PARALLELISM,
-  DEFAULT_LIVE_TIMEOUT_SECONDS,
-} from './constants.js';
 import {Invocation} from './eval_case.js';
 import {EvalMetric} from './eval_metrics.js';
 import {EvalCaseResult} from './eval_result.js';
+
+/** Seconds to wait for a model turn to complete in live mode. */
+const DEFAULT_LIVE_TIMEOUT_SECONDS = 300;
+
+/** Inferences an eval runs at the same time. */
+const DEFAULT_INFERENCE_PARALLELISM = 4;
+
+/** Metric evaluations an eval runs at the same time. */
+const DEFAULT_EVALUATE_PARALLELISM = 4;
 
 /**
  * Configuration for the evaluation phase.
@@ -109,13 +113,8 @@ export interface InferenceResult {
   /** The invocations obtained from the agent for the eval case. */
   inferences?: Invocation[];
 
-  /**
-   * Id of the inference session.
-   *
-   * The key is required and the value may be undefined: a service states the
-   * session it used even when it ran without one.
-   */
-  sessionId: string | undefined;
+  /** Id of the inference session, absent when the run used no session. */
+  sessionId?: string;
 
   /** Status of the inference. */
   status: InferenceStatus;
@@ -206,25 +205,5 @@ export function createEvaluateConfig(
   return {
     ...params,
     parallelism: params.parallelism ?? DEFAULT_EVALUATE_PARALLELISM,
-  };
-}
-
-/**
- * Creates an inference result, filling in the adk-python defaults.
- *
- * @param params The eval case this result covers, and the values to override.
- * @returns The inference result.
- */
-export function createInferenceResult(
-  params: Partial<InferenceResult> & {
-    appName: string;
-    evalSetId: string;
-    evalCaseId: string;
-  },
-): InferenceResult {
-  return {
-    ...params,
-    sessionId: params.sessionId,
-    status: params.status ?? InferenceStatus.UNKNOWN,
   };
 }

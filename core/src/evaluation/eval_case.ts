@@ -44,16 +44,14 @@ export interface InvocationEvent {
  * The events that occur during an invocation.
  */
 export interface InvocationEvents {
-  /** The events of the invocation. Defaults to an empty list. */
-  invocationEvents?: InvocationEvent[];
+  /** The events of the invocation. */
+  invocationEvents: InvocationEvent[];
 }
 
 /**
  * The intermediate steps of an invocation, in either supported shape.
  *
- * The two arms overlap structurally, so a runtime check must test for a
- * property rather than rely on the compiler, for example
- * `'invocationEvents' in value`.
+ * Narrow it with `'invocationEvents' in value`.
  */
 export type IntermediateDataType = IntermediateData | InvocationEvents;
 

@@ -11,11 +11,8 @@ export interface RubricContent {
   /**
    * The property being evaluated, e.g. "The agent's response is grammatically
    * correct.".
-   *
-   * The key is always present because a rubric without a property states
-   * nothing; the value may be undefined while a rubric is being assembled.
    */
-  textProperty: string | undefined;
+  textProperty?: string;
 }
 
 /**

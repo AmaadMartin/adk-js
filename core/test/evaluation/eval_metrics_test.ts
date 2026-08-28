@@ -63,11 +63,9 @@ describe('EvalCaseResult serialization', () => {
       evalMetricResults: [metricResult],
     };
     const caseResult: EvalCaseResult = {
-      evalSetFile: 'legacy.evalset.json',
       evalSetId: 'smoke',
       evalId: 'case-1',
       finalEvalStatus: EvalStatus.FAILED,
-      evalMetricResults: [[metric, metricResult]],
       overallEvalMetricResults: [metricResult],
       evalMetricResultPerInvocation: [perInvocation],
       sessionId: 'session-1',
@@ -79,8 +77,6 @@ describe('EvalCaseResult serialization', () => {
     expect(Object.keys(roundTripped).sort()).toEqual([
       'evalId',
       'evalMetricResultPerInvocation',
-      'evalMetricResults',
-      'evalSetFile',
       'evalSetId',
       'finalEvalStatus',
       'overallEvalMetricResults',

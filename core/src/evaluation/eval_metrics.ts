@@ -48,6 +48,9 @@ export interface EvalMetric {
   /**
    * A threshold value. Each metric decides how to interpret it.
    *
+   * adk-python reads this field when `criterion` is absent, so a metric that
+   * adk-python wrote can still carry it.
+   *
    * @deprecated Use `criterion` instead.
    */
   threshold?: number;
