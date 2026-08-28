@@ -22,8 +22,8 @@ another — so an optimizer that trades accuracy against cost can return both
 agents instead of picking for you.
 
 Both are plain TypeScript interfaces. They add no runtime code, so importing
-them costs nothing. adk-js ships no concrete optimizer today; this release
-lands the contract that optimizers and evaluation services implement.
+them costs nothing. `SimplePromptOptimizer` is the one optimizer adk-js ships
+against this contract; see its TSDoc for how it uses them.
 
 ## Get started
 
