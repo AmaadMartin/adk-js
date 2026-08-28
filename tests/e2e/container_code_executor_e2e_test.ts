@@ -71,6 +71,18 @@ describe.skipIf(!shouldRun)('ContainerCodeExecutor (real Docker)', () => {
     expect(result.stdout).not.toContain('CONNECTED');
   }, 120_000);
 
+  it('kills a run that exceeds the timeout and keeps the container usable', async () => {
+    executor = new ContainerCodeExecutor({image: IMAGE, timeoutSeconds: 2});
+
+    const timedOut = await executor.executeCode(makeParams('while True: pass'));
+    const after = await executor.executeCode(makeParams('print("still here")'));
+
+    expect(timedOut.stderr).toContain(
+      'Code execution timed out after 2 seconds.',
+    );
+    expect(after.stdout).toBe('still here\n');
+  }, 120_000);
+
   it('allows outbound network access when explicitly enabled', async () => {
     executor = new ContainerCodeExecutor({image: IMAGE, networkEnabled: true});
 
