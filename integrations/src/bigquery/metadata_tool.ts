@@ -4,32 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BigQuery, BigQueryOptions} from '@google-cloud/bigquery';
+import {BigQuery} from '@google-cloud/bigquery';
 import {BaseTool, FunctionTool, ToolExecuteArgument} from '@google/adk';
 import {z} from 'zod';
 
-import {version} from '../version.js';
-import {BigQueryToolConfig} from './config.js';
+import {getBigQueryClient} from './client.js';
+import {BigQueryToolDependencies, toolName} from './tool_dependencies.js';
 import {toBigQueryToolError} from './tool_error.js';
-
-/** The user-agent prefix every BigQuery API call from ADK carries. */
-const BQ_USER_AGENT = `adk-bigquery-tool google-adk/${version}`;
-
-/** What every BigQuery metadata tool needs to reach the API. */
-export interface BigQueryToolDependencies {
-  /**
-   * The auth client every tool call uses. When it is undefined the BigQuery
-   * client resolves Application Default Credentials.
-   */
-  credentials?: BigQueryOptions['authClient'];
-  /** The settings the toolset was built with. */
-  settings: BigQueryToolConfig;
-  /**
-   * Prepended to each tool name the model sees. BigQuery still receives the
-   * plain tool name in the user agent, which adk-python pins.
-   */
-  prefix?: string;
-}
 
 /** How one metadata tool differs from the others. */
 interface MetadataToolSpec<TParameters extends z.ZodObject<z.ZodRawShape>> {
@@ -82,18 +63,16 @@ function createMetadataTool<TParameters extends z.ZodObject<z.ZodRawShape>>(
   spec: MetadataToolSpec<TParameters>,
 ): FunctionTool<TParameters> {
   return new FunctionTool({
-    name: deps.prefix ? `${deps.prefix}_${spec.name}` : spec.name,
+    name: toolName(deps, spec.name),
     description: spec.description,
     parameters: spec.parameters,
     execute: async (input) => {
       try {
-        const client = new BigQuery({
-          projectId: PROJECT_PARAMETERS.parse(input).project_id,
+        const client = getBigQueryClient({
+          project: PROJECT_PARAMETERS.parse(input).project_id,
           authClient: deps.credentials,
           location: deps.settings.location,
-          userAgent: [BQ_USER_AGENT, deps.settings.applicationName, spec.name]
-            .filter(Boolean)
-            .join(' '),
+          userAgent: [deps.settings.applicationName, spec.name],
         });
         return await spec.read(client, input);
       } catch (error: unknown) {

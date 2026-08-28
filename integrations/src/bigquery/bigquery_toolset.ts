@@ -12,8 +12,10 @@ import {
   ToolPredicate,
 } from '@google/adk';
 
-import {BigQueryToolConfig} from './config.js';
+import {BigQueryToolConfig, resolveBigQueryToolConfig} from './config.js';
 import {createBigQueryMetadataTools} from './metadata_tool.js';
+import {createExecuteSqlTool} from './query_tool.js';
+import {BigQueryToolDependencies} from './tool_dependencies.js';
 
 /** How to build a {@link BigQueryToolset}. */
 export interface BigQueryToolsetOptions {
@@ -40,16 +42,17 @@ export interface BigQueryToolsetOptions {
 }
 
 /**
- * Read-only BigQuery metadata tools for an agent (experimental).
+ * BigQuery tools for an agent (experimental).
  *
- * The set covers dataset, table and job metadata. No tool writes data or runs
- * SQL.
+ * The set covers dataset, table and job metadata, and runs SQL through
+ * `execute_sql`. That tool admits a SELECT statement and nothing else until
+ * `toolConfig.writeMode` says otherwise.
  *
  * ```ts
  * const agent = new LlmAgent({
- *   name: 'bq_explorer',
+ *   name: 'data_analyst',
  *   model: 'gemini-2.5-flash',
- *   instruction: 'Help the user understand the data available in BigQuery.',
+ *   instruction: 'Answer questions about our BigQuery data.',
  *   tools: [new BigQueryToolset({toolConfig: {location: 'US'}})],
  * });
  * ```
@@ -61,15 +64,15 @@ export class BigQueryToolset extends BaseToolset {
 
   constructor(options: BigQueryToolsetOptions = {}) {
     super(options.toolFilter ?? [], options.prefix);
-    const settings = options.toolConfig ?? {};
-    if (settings.applicationName?.includes(' ')) {
-      throw new Error('Application name should not contain spaces.');
-    }
-    this.tools = createBigQueryMetadataTools({
+    const deps: BigQueryToolDependencies = {
       credentials: options.credentials,
-      settings,
+      settings: resolveBigQueryToolConfig(options.toolConfig),
       prefix: options.prefix,
-    });
+    };
+    this.tools = [
+      ...createBigQueryMetadataTools(deps),
+      createExecuteSqlTool(deps),
+    ];
   }
 
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
