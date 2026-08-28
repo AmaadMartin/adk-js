@@ -85,7 +85,7 @@ On first use the plugin looks the table up and, when it is absent, creates it wi
 
 The `event_type` values are the members of `AnalyticsEventType`. They cover the invocation (`INVOCATION_STARTING`, `INVOCATION_COMPLETED`), the agent (`AGENT_STARTING`, `AGENT_COMPLETED`, `AGENT_TRANSFER`, `AGENT_RESPONSE`), the model (`LLM_REQUEST`, `LLM_RESPONSE`, `LLM_ERROR`), the tool (`TOOL_STARTING`, `TOOL_COMPLETED`, `TOOL_ERROR`, `TOOL_PAUSED`), the user message (`USER_MESSAGE_RECEIVED`), session state (`STATE_DELTA`), and the three human-in-the-loop requests with their `_COMPLETED` counterparts.
 
-adk-python also writes `AGENT_ERROR` and `INVOCATION_ERROR`. This SDK cannot: adk-js `BasePlugin` has no `onAgentErrorCallback` and no `onRunErrorCallback`, so nothing reports those failures to a plugin. A model failure still produces `LLM_ERROR` and a tool failure still produces `TOOL_ERROR`.
+`AGENT_ERROR` and `INVOCATION_ERROR` are declared too, so the enum matches the Python one and a query written for a shared dataset compiles. This SDK never writes them: adk-js `BasePlugin` has no `onAgentErrorCallback` and no `onRunErrorCallback`, so no hook reports those failures to a plugin. A model failure still produces `LLM_ERROR` and a tool failure still produces `TOOL_ERROR`.
 
 ## Pauses and human-in-the-loop turns
 

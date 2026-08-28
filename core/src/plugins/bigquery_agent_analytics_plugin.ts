@@ -689,7 +689,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       await this.logEvent({
         eventType: mapping.request,
         invocationContext,
-        rawContent: {tool: call.name ?? null, args: call.args ?? null},
+        rawContent: {tool: mapping.name, args: call.args ?? null},
         data: {
           sourceEvent: event,
           extraAttributes: pauseAttributes(mapping.pauseKind, call.id),
@@ -730,7 +730,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         eventType: mapping.completed,
         invocationContext,
         rawContent: {
-          tool: response.name ?? null,
+          tool: mapping.name,
           result: response.response ?? null,
         },
         data: {

@@ -49,6 +49,18 @@ export enum AnalyticsEventType {
   HITL_CREDENTIAL_REQUEST_COMPLETED = 'HITL_CREDENTIAL_REQUEST_COMPLETED',
   HITL_CONFIRMATION_REQUEST_COMPLETED = 'HITL_CONFIRMATION_REQUEST_COMPLETED',
   HITL_INPUT_REQUEST_COMPLETED = 'HITL_INPUT_REQUEST_COMPLETED',
+  /**
+   * Declared so the enum matches the Python one, never written by this SDK.
+   * adk-js `BasePlugin` has no `onAgentErrorCallback`, so no hook reports an
+   * agent failure to a plugin.
+   */
+  AGENT_ERROR = 'AGENT_ERROR',
+  /**
+   * Declared so the enum matches the Python one, never written by this SDK.
+   * adk-js `BasePlugin` has no `onRunErrorCallback`, so no hook reports an
+   * invocation failure to a plugin.
+   */
+  INVOCATION_ERROR = 'INVOCATION_ERROR',
 }
 
 /** The `attributes.adk.pause_kind` value for a non-HITL long-running tool. */
@@ -56,6 +68,8 @@ export const TOOL_PAUSE_KIND = 'tool';
 
 /** How one framework `adk_request_*` call appears in the taxonomy. */
 export interface HitlMapping {
+  /** The framework function call name this entry matches. */
+  name: string;
   /** Written when the agent raises the request. */
   request: AnalyticsEventType;
   /** Written when a client answers the request. */
@@ -64,32 +78,30 @@ export interface HitlMapping {
   pauseKind: string;
 }
 
-const HITL_MAPPINGS: ReadonlyMap<string, HitlMapping> = new Map([
-  [
-    REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-    {
-      request: AnalyticsEventType.HITL_CREDENTIAL_REQUEST,
-      completed: AnalyticsEventType.HITL_CREDENTIAL_REQUEST_COMPLETED,
-      pauseKind: 'hitl_credential',
-    },
-  ],
-  [
-    REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
-    {
-      request: AnalyticsEventType.HITL_CONFIRMATION_REQUEST,
-      completed: AnalyticsEventType.HITL_CONFIRMATION_REQUEST_COMPLETED,
-      pauseKind: 'hitl_confirmation',
-    },
-  ],
-  [
-    REQUEST_INPUT_FUNCTION_CALL_NAME,
-    {
-      request: AnalyticsEventType.HITL_INPUT_REQUEST,
-      completed: AnalyticsEventType.HITL_INPUT_REQUEST_COMPLETED,
-      pauseKind: 'hitl_input',
-    },
-  ],
-]);
+const HITL_MAPPINGS: ReadonlyMap<string, HitlMapping> = new Map(
+  (
+    [
+      {
+        name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+        request: AnalyticsEventType.HITL_CREDENTIAL_REQUEST,
+        completed: AnalyticsEventType.HITL_CREDENTIAL_REQUEST_COMPLETED,
+        pauseKind: 'hitl_credential',
+      },
+      {
+        name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+        request: AnalyticsEventType.HITL_CONFIRMATION_REQUEST,
+        completed: AnalyticsEventType.HITL_CONFIRMATION_REQUEST_COMPLETED,
+        pauseKind: 'hitl_confirmation',
+      },
+      {
+        name: REQUEST_INPUT_FUNCTION_CALL_NAME,
+        request: AnalyticsEventType.HITL_INPUT_REQUEST,
+        completed: AnalyticsEventType.HITL_INPUT_REQUEST_COMPLETED,
+        pauseKind: 'hitl_input',
+      },
+    ] as const
+  ).map((mapping) => [mapping.name, mapping]),
+);
 
 /**
  * The taxonomy entry for a function call or response name.

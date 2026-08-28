@@ -1686,6 +1686,75 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
     expect(onlyRow().event_type).toBe(AnalyticsEventType.USER_MESSAGE_RECEIVED);
   });
 
+  it('writes null for a framework call that carries no arguments', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'root_agent',
+        content: {
+          role: 'model',
+          parts: [{functionCall: {id: 'fc-10', name: 'adk_request_input'}}],
+        },
+      }),
+    });
+    expect(parseColumn(onlyRow().content)).toEqual({
+      tool: 'adk_request_input',
+      args: null,
+    });
+  });
+
+  it('writes null for an answered request that carries no payload', async () => {
+    const plugin = makePlugin();
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event: createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [{functionResponse: {id: 'fc-11', name: 'adk_request_input'}}],
+        },
+      }),
+    });
+    expect(parseColumn(onlyRow().content)).toEqual({
+      tool: 'adk_request_input',
+      result: null,
+    });
+  });
+
+  it('writes null for a nameless tool response in the user message', async () => {
+    const plugin = makePlugin();
+    await plugin.onUserMessageCallback({
+      invocationContext: makeInvocationContext(),
+      userMessage: {role: 'user', parts: [{functionResponse: {id: 'fc-12'}}]},
+    });
+    const completed = rowsOfType(AnalyticsEventType.TOOL_COMPLETED);
+    expect(completed).toHaveLength(1);
+    expect(parseColumn(completed[0].content)).toEqual({
+      tool: null,
+      result: null,
+    });
+  });
+
+  it('writes one row for a user message that carries no parts', async () => {
+    const plugin = makePlugin();
+    await plugin.onUserMessageCallback({
+      invocationContext: makeInvocationContext(),
+      userMessage: {role: 'user'},
+    });
+    expect(onlyRow().event_type).toBe(AnalyticsEventType.USER_MESSAGE_RECEIVED);
+  });
+
+  it('declares the two error types adk-js cannot emit, and emits neither', async () => {
+    expect(AnalyticsEventType.AGENT_ERROR).toBe('AGENT_ERROR');
+    expect(AnalyticsEventType.INVOCATION_ERROR).toBe('INVOCATION_ERROR');
+    const plugin = makePlugin();
+    await runTurn(plugin, makeInvocationContext());
+    await plugin.shutdown();
+    expect(rowsOfType(AnalyticsEventType.AGENT_ERROR)).toHaveLength(0);
+    expect(rowsOfType(AnalyticsEventType.INVOCATION_ERROR)).toHaveLength(0);
+  });
+
   it('writes an AGENT_TRANSFER row naming both agents', async () => {
     const plugin = makePlugin();
     await plugin.onEventCallback({
