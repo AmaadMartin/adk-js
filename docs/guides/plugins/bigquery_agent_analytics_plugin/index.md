@@ -60,6 +60,8 @@ await analytics.shutdown();
 
 `shutdown()` drains the queue, releases the flush timer and makes every later callback a no-op. It is safe to call twice.
 
+Each run ends with a flush, which `shutdownTimeoutMs` bounds, so a BigQuery call that hangs delays the run by a known amount instead of holding it open. Nothing is dropped: the next flush waits for that insert again. Set `flushOnRunEnd` to false to take the write off the run entirely and leave it to the timer.
+
 Query the result:
 
 ```sql
@@ -84,6 +86,16 @@ On first use the plugin looks the table up and, when it is absent, creates it wi
 - `error_message` is also set on some `LLM_RESPONSE` rows whose `status` is `OK`, because a model can decline without failing.
 
 The `event_type` values are the members of `AnalyticsEventType`. They cover the invocation (`INVOCATION_STARTING`, `INVOCATION_COMPLETED`), the agent (`AGENT_STARTING`, `AGENT_COMPLETED`, `AGENT_TRANSFER`, `AGENT_RESPONSE`), the model (`LLM_REQUEST`, `LLM_RESPONSE`, `LLM_ERROR`), the tool (`TOOL_STARTING`, `TOOL_COMPLETED`, `TOOL_ERROR`, `TOOL_PAUSED`), the workflow node (`NODE_OUTPUT`, `NODE_ERROR`), the user message (`USER_MESSAGE_RECEIVED`), session state (`STATE_DELTA`, `AGENT_STATE_CHECKPOINT`), and the three human-in-the-loop requests with their `_COMPLETED` counterparts.
+
+Every tool row — `TOOL_STARTING`, `TOOL_COMPLETED`, `TOOL_ERROR` — carries `tool_origin` in its `content`, saying where the call runs: `LOCAL`, `MCP`, `SUB_AGENT`, `A2A`, `TRANSFER_AGENT`, `TRANSFER_A2A` or `UNKNOWN`. adk-python writes the same key with the same values.
+
+```sql
+SELECT JSON_VALUE(content, '$.tool_origin') AS origin,
+       COUNTIF(status = 'ERROR') / COUNT(*) AS error_rate
+FROM `my-project.agent_analytics.agent_events`
+WHERE event_type IN ('TOOL_COMPLETED', 'TOOL_ERROR')
+GROUP BY origin;
+```
 
 A workflow node that succeeds produces `NODE_OUTPUT`. A node that throws produces `NODE_ERROR`, with `status` of `ERROR` and the failure in `error_message`. `AGENT_STATE_CHECKPOINT` carries a resumable workflow's saved state, and an agent that ends without saving state still writes one with `end_of_agent` true.
 
@@ -124,6 +136,8 @@ Span state is keyed by invocation id, so two invocations running at once never m
 - The duration options carry an `Ms` suffix and take milliseconds. adk-python's equivalents take float seconds; the rename exists so that `batchFlushIntervalMs: 1000` cannot silently mean sixteen minutes.
 - Redaction is deliberately not configurable. It is a fixed set of credential names, matched after folding case, `-`/`_` and camel humps together, plus every key beginning `temp:`.
 - Each numeric option must be a whole number of rows or milliseconds, and the constructor throws on a fractional or out-of-range value rather than dropping every row later.
+
+Set `enableOtelCorrelation` to capture the ambient OpenTelemetry span into `attributes.otel.span_id` and `attributes.otel.trace_id`, which joins a row to a Cloud Trace export. It is off by default, and the plugin opens no span of its own. An unsampled span is absent from the export, so treat the join as best effort.
 
 Some agents answer through a dedicated tool instead of a plain text event. Name those tools in `finalResponseToolNames`, and completing one writes an `AGENT_RESPONSE` row carrying the call arguments, alongside the usual `TOOL_COMPLETED`.
 
