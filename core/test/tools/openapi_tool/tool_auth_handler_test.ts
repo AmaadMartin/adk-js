@@ -768,6 +768,29 @@ describe('ToolAuthHandler stored OAuth2 credential', () => {
     expect(persisted.oauth2?.refreshToken).toBe('rotated-refresh-token');
   });
 
+  it('leaves an expired credential it cannot refresh alone', async () => {
+    const fetchStub = stubTokenEndpoint();
+    const sessionState: Record<string, unknown> = {};
+    const noRefreshToken = oauth2Credential(Date.now() - 1000);
+    delete noRefreshToken.oauth2?.refreshToken;
+    await cacheCredential(sessionState, noRefreshToken);
+    const context = createContext(sessionState);
+
+    const result = await new ToolAuthHandler(
+      context,
+      SCHEME,
+      CONFIGURED_CREDENTIAL,
+    ).prepareAuthCredentials();
+
+    // The tool still gets the credential. The session is not asked to persist
+    // the identical value on every call that cannot refresh it.
+    expect(result.authCredential?.oauth2?.accessToken).toBe(
+      'stale-access-token',
+    );
+    expect(fetchStub).not.toHaveBeenCalled();
+    expect(context.state.hasDelta()).toBe(false);
+  });
+
   it('leaves a credential that has not expired alone', async () => {
     const fetchStub = stubTokenEndpoint();
     const sessionState: Record<string, unknown> = {};

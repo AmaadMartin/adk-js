@@ -76,10 +76,7 @@ class ToolContextCredentialStore {
     private readonly credentialKeyOverride?: string,
   ) {}
 
-  async getCredentialKey(
-    authScheme: OpenAPIV3.SecuritySchemeObject,
-    authCredential?: AuthCredential,
-  ): Promise<string> {
+  getCredentialKey(identity: string): string {
     // A key the developer named wins over the derived one: it is how they
     // point several tools at one credential, or keep two apart. It cannot
     // collide with the auth request slot, which lives under `temp:`.
@@ -89,15 +86,10 @@ class ToolContextCredentialStore {
     // The digest identifies the scheme and the credential, so two tools that
     // declare the same scheme type against different APIs get their own slot
     // instead of serving each other the first exchanged token.
-    const identity = await credentialIdentity(authScheme, authCredential);
     return `${identity}_existing_exchanged_credential`;
   }
 
-  async getCredential(
-    authScheme: OpenAPIV3.SecuritySchemeObject,
-    authCredential?: AuthCredential,
-  ): Promise<AuthCredential | undefined> {
-    const key = await this.getCredentialKey(authScheme, authCredential);
+  getCredential(key: string): AuthCredential | undefined {
     // Read through the State API so we see values persisted from previous
     // tool calls. `context.state` is a `State` instance, not a plain object;
     // bracket access would bypass its value/delta store and always miss.
@@ -120,14 +112,17 @@ class ToolContextCredentialStore {
  * The write-back is what makes the next invocation work against a provider
  * that rotates the refresh token on every refresh: without it the tool keeps
  * presenting a refresh token the provider has already invalidated.
- * `OAuth2CredentialRefresher` returns `stored` unchanged when it cannot
- * refresh, so a failure costs a redundant write and never a lost credential.
- * It also reports no refresh for a credential that holds no OAuth2 tokens.
+ * `OAuth2CredentialRefresher` hands back the credential it was given, by
+ * reference, on every path that cannot refresh: no OAuth2 tokens, no refresh
+ * token, no token endpoint on the scheme, no client id and secret, or a token
+ * request that failed. Re-writing that credential would put it in the state
+ * delta of every tool call, so the write-back is skipped when the reference
+ * has not changed.
  */
 async function refreshIfExpired(
   store: ToolContextCredentialStore,
+  cacheKey: string,
   authScheme: OpenAPIV3.SecuritySchemeObject,
-  authCredential: AuthCredential | undefined,
   stored: AuthCredential,
 ): Promise<AuthCredential> {
   const refresher = new OAuth2CredentialRefresher();
@@ -136,10 +131,11 @@ async function refreshIfExpired(
   }
 
   const refreshed = await refresher.refresh(stored, authScheme);
-  store.storeCredential(
-    await store.getCredentialKey(authScheme, authCredential),
-    refreshed,
-  );
+  if (refreshed === stored) {
+    return stored;
+  }
+
+  store.storeCredential(cacheKey, refreshed);
   return refreshed;
 }
 
@@ -173,22 +169,24 @@ export class ToolAuthHandler {
       return {state: 'done'};
     }
 
+    const identity = await credentialIdentity(
+      this.authScheme,
+      this.authCredential,
+    );
     const store = new ToolContextCredentialStore(
       this.context,
       this.credentialKey,
     );
-    const storedCredential = await store.getCredential(
-      this.authScheme,
-      this.authCredential,
-    );
+    const cacheKey = store.getCredentialKey(identity);
+    const storedCredential = store.getCredential(cacheKey);
 
     if (storedCredential) {
       return {
         state: 'done',
         authCredential: await refreshIfExpired(
           store,
+          cacheKey,
           this.authScheme,
-          this.authCredential,
           storedCredential,
         ),
       };
@@ -199,9 +197,7 @@ export class ToolAuthHandler {
       rawAuthCredential: this.authCredential,
       // The auth response lands in `temp:<credentialKey>`, so a key shared by
       // every OpenAPI tool lets one tool consume another tool's response.
-      credentialKey:
-        this.credentialKey ||
-        `adk_${await credentialIdentity(this.authScheme, this.authCredential)}`,
+      credentialKey: this.credentialKey || `adk_${identity}`,
     };
 
     // A credential returned by an auth response was supplied interactively by
@@ -231,11 +227,7 @@ export class ToolAuthHandler {
     // every invocation, so persisting it to session state would only copy a
     // secret into the session store for nothing.
     if (authResponseCredential || result.wasExchanged) {
-      const key = await store.getCredentialKey(
-        this.authScheme,
-        this.authCredential,
-      );
-      store.storeCredential(key, result.credential);
+      store.storeCredential(cacheKey, result.credential);
     }
 
     return {state: 'done', authCredential: result.credential};
