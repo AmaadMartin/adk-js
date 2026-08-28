@@ -5,8 +5,13 @@
  */
 
 import {
+  Context,
+  createSession,
   getBigquerySkill,
+  InvocationContext,
   loadSkillFromDir,
+  LoadSkillResourceTool,
+  PluginManager,
   SkillToolset,
   validateSkillDir,
 } from '@google/adk';
@@ -98,6 +103,28 @@ describe('getBigquerySkill', () => {
       'load_skill_resource',
       'run_skill_script',
     ]);
+  });
+
+  it('serves a reference through load_skill_resource', async () => {
+    const toolset = new SkillToolset([getBigquerySkill()]);
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'bq-invocation',
+        session: createSession({id: 'bq-session', appName: 'bq-app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+
+    const result = await new LoadSkillResourceTool(toolset).runAsync({
+      args: {skill_name: SKILL_NAME, path: 'references/bigquery_ai_if.md'},
+      toolContext,
+    });
+
+    expect(result).toMatchObject({
+      skill_name: SKILL_NAME,
+      path: 'references/bigquery_ai_if.md',
+      content: expect.stringContaining('AI.IF'),
+    });
   });
 
   it('matches a skill loaded from a real directory', async () => {
