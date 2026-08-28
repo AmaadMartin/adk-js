@@ -20,6 +20,8 @@ TypeScript implementation. For the official ADK documentation, visit
 
 - [BaseEvalService](evaluation/eval_service/index.md) - The two-phase eval
   contract: run the agent over an eval set, then score the results.
+- [Session to eval format](evaluation/session_to_eval_format/index.md) - Turning
+  a recorded session into eval-set turn records.
 
 ### Models
 
