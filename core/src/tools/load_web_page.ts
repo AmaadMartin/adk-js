@@ -274,6 +274,15 @@ function sendRequest(
 }
 
 /**
+ * The TLS server name for `target`, absent for an IP-literal host: RFC 6066
+ * forbids an IP address there, and Node warns and drops it. The certificate is
+ * still checked against the host either way.
+ */
+function serverNameOf(target: RequestTarget): string | undefined {
+  return isIP(target.hostname) === 0 ? target.hostname : undefined;
+}
+
+/**
  * Requests `target` over a connection pinned to `address`. `agent: false`
  * keeps every attempt on its own connection, matching the per-attempt session
  * the Python tool opens.
@@ -289,7 +298,7 @@ function requestPinnedAddress(
     lookup: pinnedLookup(address),
   };
   if (target.url.protocol === 'https:') {
-    options.servername = target.hostname;
+    options.servername = serverNameOf(target);
     return sendRequest(httpsRequest(target.url, options), timeoutMs);
   }
   return sendRequest(httpRequest(target.url, options), timeoutMs);
@@ -339,12 +348,42 @@ function connectProxyTunnel(
             reject(new Error(`Proxy refused CONNECT: ${res.statusCode}`));
             return;
           }
-          resolve(tlsConnect({servername: target.hostname, socket}));
+          resolve(tlsConnect({servername: serverNameOf(target), socket}));
         });
         request.once('error', reject);
         request.end();
       }),
   );
+}
+
+/**
+ * Runs the request for `target` over an established tunnel.
+ *
+ * No `agent` option is passed, because Node consults `createConnection` only
+ * for a request that has no agent, and `agent: false` builds a fresh agent
+ * rather than skipping it. A request that lands on any other socket has
+ * connected directly, and this path vets no address, so it fails instead.
+ */
+async function requestThroughTunnel(
+  target: RequestTarget,
+  socket: Socket,
+  timeoutMs: number,
+): Promise<string | null> {
+  const request = httpsRequest(target.url, {
+    createConnection: () => socket,
+    headers: {...IDENTITY_ENCODING},
+    servername: serverNameOf(target),
+  });
+  request.once('socket', (used: Socket) => {
+    if (used !== socket) {
+      request.destroy(new Error('Proxy tunnel was bypassed'));
+    }
+  });
+  try {
+    return await sendRequest(request, timeoutMs);
+  } finally {
+    socket.destroy();
+  }
 }
 
 /**
@@ -371,14 +410,10 @@ async function requestViaProxy(
     });
     return sendRequest(request, timeoutMs);
   }
+  // The tunnel and the request it carries share one deadline.
+  const expiresAt = Date.now() + timeoutMs;
   const socket = await connectProxyTunnel(target, proxy, timeoutMs);
-  const request = httpsRequest(target.url, {
-    agent: false,
-    createConnection: () => socket,
-    headers: {...IDENTITY_ENCODING},
-    servername: target.hostname,
-  });
-  return sendRequest(request, timeoutMs);
+  return requestThroughTunnel(target, socket, expiresAt - Date.now());
 }
 
 /**

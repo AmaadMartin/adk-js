@@ -484,6 +484,15 @@ describe('loadWebPage', () => {
       });
     });
 
+    it('omits the TLS server name when the host is an IP literal', async () => {
+      respondWith('<p>This page has enough words to keep.</p>');
+
+      const result = await loadWebPage('https://93.184.216.34/');
+
+      expect(result).toBe('This page has enough words to keep.');
+      expect(sentRequests[0].options.servername).toBeUndefined();
+    });
+
     it('asks for an identity encoding so the body needs no decompression', async () => {
       resolveTo('93.184.216.34');
       respondWith('<p>This page has enough words to keep.</p>');
@@ -558,6 +567,62 @@ describe('loadWebPage', () => {
       expect(sentRequests[1].options.createConnection?.({}, () => {})).toBe(
         tlsConnectMock.mock.results[0].value,
       );
+    });
+
+    it('gives the tunnelled request no agent, so Node uses the tunnel socket', async () => {
+      vi.stubEnv('https_proxy', 'http://proxy.example.test:8080');
+      respondThroughTunnel('<p>This page has enough words to keep.</p>');
+
+      await loadWebPage('https://does-not-resolve.invalid/');
+
+      // Node consults `createConnection` only when the request has no agent,
+      // and `agent: false` builds a fresh one. Setting it here would send the
+      // request down a direct, unvetted connection.
+      expect(sentRequests[1].options).not.toHaveProperty('agent');
+      expect(sentRequests[1].options.createConnection).toBeInstanceOf(Function);
+    });
+
+    it('fails when the tunnelled request lands on another socket', async () => {
+      vi.stubEnv('https_proxy', 'http://proxy.example.test:8080');
+      onRequestEnd = (request) => {
+        if (request.options.method === 'CONNECT') {
+          request.emit('connect', {statusCode: 200}, new FakeSocket());
+          return;
+        }
+        request.emit('socket', new FakeSocket());
+        emitResponse(request, '<p>This body must never be returned.</p>');
+      };
+
+      const result = await loadWebPage('https://does-not-resolve.invalid/');
+
+      expect(result).toBe(
+        'Failed to fetch url: https://does-not-resolve.invalid/',
+      );
+    });
+
+    it('accepts the tunnelled request that lands on the tunnel socket', async () => {
+      vi.stubEnv('https_proxy', 'http://proxy.example.test:8080');
+      onRequestEnd = (request) => {
+        if (request.options.method === 'CONNECT') {
+          request.emit('connect', {statusCode: 200}, new FakeSocket());
+          return;
+        }
+        request.emit('socket', tlsConnectMock.mock.results[0].value);
+        emitResponse(request, '<p>This page has enough words to keep.</p>');
+      };
+
+      const result = await loadWebPage('https://does-not-resolve.invalid/');
+
+      expect(result).toBe('This page has enough words to keep.');
+    });
+
+    it('destroys the tunnel socket once the request is done', async () => {
+      vi.stubEnv('https_proxy', 'http://proxy.example.test:8080');
+      respondThroughTunnel('<p>This page has enough words to keep.</p>');
+
+      await loadWebPage('https://does-not-resolve.invalid/');
+
+      expect(tlsConnectMock.mock.results[0].value.destroy).toHaveBeenCalled();
     });
 
     it('sends an http target in absolute form instead of opening a tunnel', async () => {
@@ -868,6 +933,31 @@ describe('loadWebPage', () => {
 
       expect(sentRequests[0].options.method).toBe('CONNECT');
       expect(sentRequests[0].destroyed).toBe(true);
+      expect(await pending).toBe(
+        'Failed to fetch url: https://does-not-resolve.invalid/',
+      );
+    });
+
+    it('shares one deadline between the tunnel and the request it carries', async () => {
+      vi.useFakeTimers();
+      vi.stubEnv('https_proxy', 'http://proxy.example.test:8080');
+      onRequestEnd = (request) => {
+        if (request.options.method !== 'CONNECT') {
+          return;
+        }
+        setTimeout(() => {
+          request.emit('connect', {statusCode: 200}, new FakeSocket());
+        }, 20_000);
+      };
+
+      const pending = loadWebPage('https://does-not-resolve.invalid/');
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(sentRequests).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(sentRequests[1].destroyed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(sentRequests[1].destroyed).toBe(true);
       expect(await pending).toBe(
         'Failed to fetch url: https://does-not-resolve.invalid/',
       );
