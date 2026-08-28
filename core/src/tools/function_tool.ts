@@ -12,6 +12,10 @@ import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 
 import {Context} from '../agents/context.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import {
+  applyConfirmationGate,
+  resolveRequireConfirmation,
+} from './tool_confirmation.js';
 
 /**
  * Input parameters of the function tool.
@@ -221,7 +225,11 @@ export class FunctionTool<
     if (typeof this.requireConfirmation !== 'function') {
       return this.requireConfirmation;
     }
-    return this.requireConfirmation(this.validateArgs(args), toolContext);
+    return resolveRequireConfirmation(
+      this.requireConfirmation,
+      this.validateArgs(args),
+      toolContext,
+    );
   }
 
   /** Parses `args` against the parameter schema, when one is declared. */
@@ -234,16 +242,6 @@ export class FunctionTool<
     return args as ToolExecuteArgument<TParameters>;
   }
 
-  /** Resolves `requireConfirmation`, which may be a flag or a predicate. */
-  private async evaluateRequireConfirmation(
-    input: ToolExecuteArgument<TParameters>,
-    toolContext?: Context,
-  ): Promise<boolean> {
-    return typeof this.requireConfirmation === 'function'
-      ? this.requireConfirmation(input, toolContext)
-      : this.requireConfirmation;
-  }
-
   /**
    * Evaluates the confirmation gate. Returns `undefined` if the tool may
    * proceed; otherwise returns the function response payload to surface instead
@@ -254,7 +252,8 @@ export class FunctionTool<
     input: ToolExecuteArgument<TParameters>,
     toolContext?: Context,
   ): Promise<{error: string} | undefined> {
-    const requireConfirmation = await this.evaluateRequireConfirmation(
+    const requireConfirmation = await resolveRequireConfirmation(
+      this.requireConfirmation,
       input,
       toolContext,
     );
@@ -266,22 +265,8 @@ export class FunctionTool<
         `Tool '${this.name}' requires confirmation but no tool context was provided.`,
       );
     }
-    if (!toolContext.toolConfirmation) {
-      toolContext.requestConfirmation({
-        hint:
-          `Please approve or reject the tool call ${this.name}() by ` +
-          'responding with a FunctionResponse with an expected ' +
-          'ToolConfirmation payload.',
-      });
-      toolContext.actions.skipSummarization = true;
-      return {
-        error:
-          'This tool call requires confirmation, please approve or reject.',
-      };
-    }
-    if (!toolContext.toolConfirmation.confirmed) {
-      return {error: 'This tool call is rejected.'};
-    }
-    return undefined;
+    return applyConfirmationGate(this.name, toolContext, {
+      skipSummarization: true,
+    });
   }
 }

@@ -33,6 +33,12 @@ import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {ToolAuthHandler} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
+import {
+  applyConfirmationGate,
+  RequireConfirmation,
+  resolveRequireConfirmation,
+  ToolConfirmationRejection,
+} from '../tool_confirmation.js';
 
 import {credentialToHeaders} from './auth_headers.js';
 import {MCPSessionManager} from './mcp_session_manager.js';
@@ -60,14 +66,17 @@ export const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([
 /** What `runAsync` returns when the client still has to supply a credential. */
 const PENDING_AUTHORIZATION = 'Pending User Authorization.';
 
-/** Receives progress notifications from the server during a tool call. */
-export type McpProgressCallback = (progress: Progress) => void;
-
-/** Builds a progress callback per invocation, from the tool name and context. */
-export type McpProgressCallbackFactory = (
-  toolName: string,
-  options: {callbackContext?: Context},
-) => McpProgressCallback | undefined;
+/**
+ * Receives progress notifications from the server during a tool call.
+ *
+ * The second argument names the tool and carries the context of the invocation
+ * reporting progress, so one callback can serve every tool of a toolset and
+ * still tell the calls apart.
+ */
+export type McpProgressCallback = (
+  progress: Progress,
+  invocation: {toolName: string; callbackContext: Context},
+) => void;
 
 /** Supplies extra request headers per invocation. */
 export type McpHeaderProvider = (
@@ -75,34 +84,58 @@ export type McpHeaderProvider = (
 ) => Record<string, string> | Promise<Record<string, string>>;
 
 /** Whether a call is gated on human approval: a flag, or a predicate. */
-export type McpRequireConfirmation =
-  | boolean
-  | ((
-      args: Record<string, unknown>,
-      toolContext?: Context,
-    ) => boolean | Promise<boolean>);
+export type McpRequireConfirmation = RequireConfirmation<
+  Record<string, unknown>
+>;
 
-/** The optional behaviour an {@link MCPTool} can be built with. */
+/**
+ * The optional behaviour an {@link MCPTool} can be built with.
+ *
+ * `MCPToolset` takes the same object and forwards it to every tool it builds,
+ * because the toolset is the normal entry point: a tool nobody constructs by
+ * hand still has to be able to authenticate.
+ */
 export interface McpToolOptions {
-  /** The scheme the MCP server authenticates with. */
+  /**
+   * The scheme the MCP server authenticates with.
+   *
+   * An API key needs an `apiKey` scheme to name the header it goes in, and
+   * that scheme must read `in: 'header'`: MCP has no query string and no
+   * cookie jar to carry a key in, so any other location is refused.
+   */
   authScheme?: AuthScheme;
-  /** The credential to authenticate with, when the client does not supply one. */
+  /**
+   * The credential to authenticate with, when the client supplies none.
+   *
+   * It is resolved through `ToolAuthHandler` and turned into request headers.
+   * OAuth2 and HTTP bearer become `Authorization: Bearer <token>`, HTTP basic
+   * becomes a base64 pair, any other HTTP scheme becomes `<scheme> <token>`,
+   * and an API key goes in the header its scheme names. A service account must
+   * be exchanged for an access token first, and contributes no headers.
+   *
+   * When the client still has to supply the credential, the call returns
+   * `'Pending User Authorization.'` and opens no session.
+   */
   authCredential?: AuthCredential;
   /** The session-state key the resolved credential is stored under. */
   credentialKey?: string;
-  /** Whether a call waits for human approval. */
+  /**
+   * Whether a call waits for human approval.
+   *
+   * The first gated call records a pending confirmation and returns
+   * `{error: 'This tool call requires confirmation, please approve or
+   * reject.'}`. A declined call returns `{error: 'This tool call is
+   * rejected.'}` and never reaches the server.
+   */
   requireConfirmation?: McpRequireConfirmation;
-  /** Extra headers, resolved per invocation and merged over the auth headers. */
+  /**
+   * Extra headers, resolved per invocation and merged over the auth headers,
+   * so the provider wins a key collision. Use it for what changes per turn: a
+   * tenant, a request id, a short-lived token.
+   */
   headerProvider?: McpHeaderProvider;
-  /** A progress callback used for every invocation. */
+  /** Reports the progress the server sends during a call. */
   progressCallback?: McpProgressCallback;
-  /** Builds a progress callback per invocation. */
-  progressCallbackFactory?: McpProgressCallbackFactory;
-}
-
-/** What the error boundary hands to the model in place of a thrown error. */
-interface McpToolErrorResult {
-  error: string;
 }
 
 /** Narrows a value read out of an untyped `_meta` block to a record. */
@@ -145,7 +178,7 @@ function injectedTraceContext(): Record<string, string> | undefined {
 }
 
 /** Describes a failed tool call for the model, and logs the same message. */
-function toErrorResult(e: unknown): McpToolErrorResult {
+function toErrorResult(e: unknown): {error: string} {
   const error = isMcpError(e)
     ? `MCP tool execution failed: ${e.message}`
     : `Unexpected error during MCP tool execution: ${formatError(e)}`;
@@ -192,11 +225,6 @@ export class MCPTool extends BaseTool {
     if (RESERVED_TOOL_NAMES.has(mcpTool.name)) {
       throw new Error(
         `MCP tool name '${mcpTool.name}' collides with a reserved ADK tool name.`,
-      );
-    }
-    if (options.progressCallback && options.progressCallbackFactory) {
-      throw new Error(
-        'Supply either progressCallback or progressCallbackFactory, not both.',
       );
     }
     this.mcpTool = mcpTool;
@@ -265,10 +293,11 @@ export class MCPTool extends BaseTool {
     args: Record<string, unknown>,
     toolContext?: Context,
   ): Promise<boolean> {
-    const {requireConfirmation} = this.options;
-    return typeof requireConfirmation === 'function'
-      ? requireConfirmation(args, toolContext)
-      : (requireConfirmation ?? false);
+    return resolveRequireConfirmation(
+      this.options.requireConfirmation,
+      args,
+      toolContext,
+    );
   }
 
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
@@ -291,13 +320,16 @@ export class MCPTool extends BaseTool {
   /**
    * Evaluates the confirmation gate.
    *
+   * Unlike `FunctionTool`, this does not suppress the model's summary of the
+   * approval request: `McpTool` does not, and parity governs the behaviour a
+   * caller can see.
+   *
    * @return Undefined when the call may proceed, otherwise the payload to
-   *     return in its place: a request for approval on the first pass, or a
-   *     rejection once the user declined.
+   *     return in its place.
    */
   private async checkConfirmation(
     request: RunAsyncToolRequest,
-  ): Promise<McpToolErrorResult | undefined> {
+  ): Promise<ToolConfirmationRejection | undefined> {
     const {toolContext} = request;
     const required = await this.checkRequireConfirmation(
       request.args,
@@ -306,22 +338,9 @@ export class MCPTool extends BaseTool {
     if (!required) {
       return undefined;
     }
-    if (!toolContext.toolConfirmation) {
-      toolContext.requestConfirmation({
-        hint:
-          `Please approve or reject the tool call ${this.name}() by ` +
-          'responding with a FunctionResponse with an expected ' +
-          'ToolConfirmation payload.',
-      });
-      return {
-        error:
-          'This tool call requires confirmation, please approve or reject.',
-      };
-    }
-    if (!toolContext.toolConfirmation.confirmed) {
-      return {error: 'This tool call is rejected.'};
-    }
-    return undefined;
+    return applyConfirmationGate(this.name, toolContext, {
+      skipSummarization: false,
+    });
   }
 
   private async callMcpTool(
@@ -389,13 +408,18 @@ export class MCPTool extends BaseTool {
     return Object.keys(headers).length > 0 ? headers : undefined;
   }
 
-  /** Resolves the progress callback for this invocation, if there is one. */
+  /** Binds the progress callback to this invocation, if there is one. */
   private resolveProgressCallback(
     toolContext: Context,
-  ): McpProgressCallback | undefined {
-    const {progressCallback, progressCallbackFactory} = this.options;
-    return progressCallbackFactory
-      ? progressCallbackFactory(this.name, {callbackContext: toolContext})
-      : progressCallback;
+  ): ((progress: Progress) => void) | undefined {
+    const {progressCallback} = this.options;
+    if (!progressCallback) {
+      return undefined;
+    }
+    return (progress) =>
+      progressCallback(progress, {
+        toolName: this.name,
+        callbackContext: toolContext,
+      });
   }
 }

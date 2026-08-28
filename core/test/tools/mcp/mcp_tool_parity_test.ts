@@ -158,21 +158,6 @@ describe('MCPTool construction', () => {
 
     expect(tool.description).toBe('');
   });
-
-  it('refuses both a progress callback and a progress factory', () => {
-    const sessionManager = new MCPSessionManager({
-      type: 'StdioConnectionParams',
-      serverParams: {command: 'unused'},
-    });
-
-    expect(
-      () =>
-        new MCPTool(MCP_TOOL, sessionManager, undefined, {
-          progressCallback: () => {},
-          progressCallbackFactory: () => undefined,
-        }),
-    ).toThrow('Supply either progressCallback or progressCallbackFactory');
-  });
 });
 
 describe('MCPTool invocation', () => {
@@ -442,10 +427,15 @@ describe('MCPTool progress notifications', () => {
     vi.restoreAllMocks();
   });
 
-  it('passes a static callback as onprogress and reports what the server sends', async () => {
-    const reported: Progress[] = [];
+  it('reports what the server sends, and which tool sent it', async () => {
+    const reported: Array<[Progress, string, Context]> = [];
     const harness = buildHarness({
-      progressCallback: (progress) => reported.push(progress),
+      progressCallback: (progress, invocation) =>
+        reported.push([
+          progress,
+          invocation.toolName,
+          invocation.callbackContext,
+        ]),
     });
     harness.callTool.mockImplementation(async (_params, _schema, options) => {
       options?.onprogress?.({progress: 1, total: 2});
@@ -454,33 +444,13 @@ describe('MCPTool progress notifications', () => {
 
     await harness.tool.runAsync({args: {}, toolContext: harness.toolContext});
 
-    expect(reported).toEqual([{progress: 1, total: 2}]);
-  });
-
-  it('builds a callback per invocation from the tool name and context', async () => {
-    const factoryCalls: Array<[string, {callbackContext?: Context}]> = [];
-    const reported: Progress[] = [];
-    const harness = buildHarness({
-      progressCallbackFactory: (toolName, options) => {
-        factoryCalls.push([toolName, options]);
-        return (progress) => reported.push(progress);
-      },
-    });
-    harness.callTool.mockImplementation(async (_params, _schema, options) => {
-      options?.onprogress?.({progress: 3});
-      return {content: []};
-    });
-
-    await harness.tool.runAsync({args: {}, toolContext: harness.toolContext});
-
-    expect(factoryCalls).toEqual([
-      ['test-tool', {callbackContext: harness.toolContext}],
+    expect(reported).toEqual([
+      [{progress: 1, total: 2}, 'test-tool', harness.toolContext],
     ]);
-    expect(reported).toEqual([{progress: 3}]);
   });
 
-  it('sends no onprogress at all when the factory declines', async () => {
-    const harness = buildHarness({progressCallbackFactory: () => undefined});
+  it('sends no onprogress at all when no callback is configured', async () => {
+    const harness = buildHarness();
 
     await harness.tool.runAsync({args: {}, toolContext: harness.toolContext});
 

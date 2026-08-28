@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Context} from '../agents/context.js';
+
 /**
  * Represents a tool confirmation configuration.
  * @experimental  (Experimental, subject to change)
@@ -98,4 +100,70 @@ export class IntentMismatchError extends Error {
  */
 export function isIntentMismatchError(e: unknown): e is IntentMismatchError {
   return e instanceof Error && e.name === 'IntentMismatchError';
+}
+
+/** What a tool returns instead of running, when the gate holds it back. */
+export interface ToolConfirmationRejection {
+  error: string;
+}
+
+/**
+ * Whether a call is gated on human approval: a flag, or a predicate over the
+ * arguments the tool would run with.
+ */
+export type RequireConfirmation<TArgs> =
+  | boolean
+  | ((args: TArgs, toolContext?: Context) => boolean | Promise<boolean>);
+
+/**
+ * Answers whether one call is gated, evaluating the predicate form.
+ *
+ * @param requireConfirmation The tool's configured gate, if it has one.
+ * @param args The arguments the tool would run with.
+ * @param toolContext The context of the call, when there is one.
+ */
+export async function resolveRequireConfirmation<TArgs>(
+  requireConfirmation: RequireConfirmation<TArgs> | undefined,
+  args: TArgs,
+  toolContext?: Context,
+): Promise<boolean> {
+  return typeof requireConfirmation === 'function'
+    ? requireConfirmation(args, toolContext)
+    : (requireConfirmation ?? false);
+}
+
+/**
+ * Applies the human-approval gate to a call already known to be gated.
+ *
+ * @param toolName The tool the user is asked to approve.
+ * @param toolContext The context of the call.
+ * @param options.skipSummarization Whether to suppress the model's summary of
+ *     the approval request. `FunctionTool` does; `MCPTool` does not, matching
+ *     adk-python.
+ * @return Undefined when the call may proceed, otherwise the payload to return
+ *     in its place.
+ */
+export function applyConfirmationGate(
+  toolName: string,
+  toolContext: Context,
+  options: {skipSummarization: boolean},
+): ToolConfirmationRejection | undefined {
+  if (!toolContext.toolConfirmation) {
+    toolContext.requestConfirmation({
+      hint:
+        `Please approve or reject the tool call ${toolName}() by ` +
+        'responding with a FunctionResponse with an expected ' +
+        'ToolConfirmation payload.',
+    });
+    if (options.skipSummarization) {
+      toolContext.actions.skipSummarization = true;
+    }
+    return {
+      error: 'This tool call requires confirmation, please approve or reject.',
+    };
+  }
+  if (!toolContext.toolConfirmation.confirmed) {
+    return {error: 'This tool call is rejected.'};
+  }
+  return undefined;
 }

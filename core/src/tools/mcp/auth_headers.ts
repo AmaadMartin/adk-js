@@ -23,12 +23,6 @@ import {logger} from '../../utils/logger.js';
 /** The header every scheme here authenticates with, bar a named API key. */
 const AUTHORIZATION_HEADER = 'Authorization';
 
-/** Error codes this module raises, so no throw site carries a bare string. */
-export enum McpAuthErrorCode {
-  MISSING_API_KEY_SCHEME = 'Cannot find corresponding auth scheme for API key credential.',
-  UNSUPPORTED_API_KEY_LOCATION = 'MCPTool only supports header-based API key authentication. Configured location: ',
-}
-
 /** Builds the bearer header for an OAuth2 credential that carries a token. */
 function oauth2Headers(oauth2: OAuth2Auth): Record<string, string> | undefined {
   return oauth2.accessToken
@@ -61,10 +55,9 @@ function httpAuthorizationHeaders(
 /** Builds the HTTP headers, including any the credential adds verbatim. */
 function httpHeaders(http: HttpAuth): Record<string, string> | undefined {
   const authorization = httpAuthorizationHeaders(http);
-  if (!http.additionalHeaders) {
-    return authorization;
-  }
-  return {...authorization, ...http.additionalHeaders};
+  return http.additionalHeaders
+    ? {...authorization, ...http.additionalHeaders}
+    : authorization;
 }
 
 /**
@@ -78,11 +71,15 @@ function apiKeyHeaders(
   authScheme: AuthScheme | undefined,
 ): Record<string, string> {
   if (authScheme?.type !== 'apiKey') {
-    logger.error(McpAuthErrorCode.MISSING_API_KEY_SCHEME);
-    throw new Error(McpAuthErrorCode.MISSING_API_KEY_SCHEME);
+    const message =
+      'Cannot find corresponding auth scheme for API key credential.';
+    logger.error(message);
+    throw new Error(message);
   }
   if (authScheme.in !== 'header') {
-    const message = `${McpAuthErrorCode.UNSUPPORTED_API_KEY_LOCATION}${authScheme.in}`;
+    const message =
+      'MCPTool only supports header-based API key authentication. ' +
+      `Configured location: ${authScheme.in}`;
     logger.error(message);
     throw new Error(message);
   }
