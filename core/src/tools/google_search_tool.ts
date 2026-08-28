@@ -5,7 +5,11 @@
  */
 import {GenerateContentConfig} from '@google/genai';
 
-import {isGemini1Model, isGeminiModel} from '../utils/model_name.js';
+import {
+  isGemini1Model,
+  isGeminiModel,
+  isGeminiModelIdCheckDisabled,
+} from '../utils/model_name.js';
 
 import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
 
@@ -34,6 +38,7 @@ export class GoogleSearchTool extends BaseTool {
       return;
     }
 
+    const modelCheckDisabled = isGeminiModelIdCheckDisabled();
     llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
     llmRequest.config.tools = llmRequest.config.tools || [];
 
@@ -51,7 +56,7 @@ export class GoogleSearchTool extends BaseTool {
       return;
     }
 
-    if (isGeminiModel(llmRequest.model)) {
+    if (isGeminiModel(llmRequest.model) || modelCheckDisabled) {
       llmRequest.config.tools.push({
         googleSearch: {},
       });
