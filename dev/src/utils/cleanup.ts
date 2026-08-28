@@ -43,11 +43,8 @@ export async function closeRunners(runners: Runner[]): Promise<void> {
   const deadline = new Promise<void>((resolve) => {
     timer = setTimeout(resolve, RUNNER_CLOSE_TIMEOUT_MS);
   });
-  try {
-    await Promise.race([Promise.all(closing), deadline]);
-  } finally {
-    clearTimeout(timer);
-  }
+  await Promise.race([Promise.all(closing), deadline]);
+  clearTimeout(timer);
 
   if (outstanding > 0) {
     logger.warn(`${outstanding} runner close tasks didn't complete in time`);

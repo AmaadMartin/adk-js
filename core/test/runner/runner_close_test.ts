@@ -5,7 +5,9 @@
  */
 
 import {describe, expect, it} from 'vitest';
+import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {LlmAgent} from '../../src/agents/llm_agent.js';
+import {createEvent, Event} from '../../src/events/event.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
 import {BaseTool} from '../../src/tools/base_tool.js';
@@ -31,6 +33,20 @@ class RecordingToolset extends BaseToolset {
     if (this.failure) {
       throw this.failure;
     }
+  }
+}
+
+/** An agent that emits one event without needing a model. */
+class OneEventAgent extends LlmAgent {
+  async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      branch: context.branch,
+      content: {parts: [{text: 'done'}], role: 'model'},
+    });
   }
 }
 
@@ -103,5 +119,31 @@ describe('Runner.close', () => {
     );
 
     await expect(runner.close()).resolves.toBeUndefined();
+  });
+
+  it('should still close the toolsets at the end of a run', async () => {
+    const toolset = new RecordingToolset();
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'u1',
+    });
+    const runner = new Runner({
+      appName: 'test_app',
+      agent: new OneEventAgent({name: 'root_agent', tools: [toolset]}),
+      sessionService,
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: 'u1',
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'go'}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(events.length).toBeGreaterThan(0);
+    expect(toolset.closeCount).toBe(1);
   });
 });

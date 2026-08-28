@@ -477,14 +477,15 @@ export class Runner {
       );
     } finally {
       span.end();
-      await closeToolsets(this.agent);
+      await this.close();
     }
   }
 
   /**
    * Releases what this runner holds open: every toolset reachable from its
    * agent tree, so a tool server and its subprocess do not outlive the runner
-   * that started them.
+   * that started them. A root that is not an agent — a bare workflow node —
+   * owns no toolsets.
    *
    * Best-effort and safe to call more than once. It never rejects, so it is
    * safe in a `finally` beside a run that failed. adk-python's `Runner.close`
@@ -492,7 +493,8 @@ export class Runner {
    * neither hook, so the toolsets are the whole of it.
    */
   async close(): Promise<void> {
-    return closeToolsets(this.agent);
+    const toolsets = isBaseAgent(this.agent) ? getAllToolsets(this.agent) : [];
+    await Promise.allSettled(toolsets.map((t) => t.close()));
   }
 
   /**
@@ -938,16 +940,6 @@ export function findEventByLastFunctionResponseId(
   events: Event[],
 ): Event | null {
   return findMatchingFunctionCall(events) ?? null;
-}
-
-/**
- * Closes every toolset reachable from a runnable root, and absorbs the
- * failures so one broken toolset cannot strand the others. A root that is not
- * an agent — a bare workflow node — owns no toolsets.
- */
-async function closeToolsets(root: RunnableRoot): Promise<void> {
-  const toolsets = isBaseAgent(root) ? getAllToolsets(root) : [];
-  await Promise.allSettled(toolsets.map((t) => t.close()));
 }
 
 function getAllToolsets(agent: BaseAgent): BaseToolset[] {
