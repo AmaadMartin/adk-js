@@ -150,8 +150,6 @@ export function geminiToJsonSchema(schema: Schema): Record<string, unknown> {
       copyDefined(out, schema, ['required']);
       copyNumeric(out, schema, ['minProperties', 'maxProperties']);
       break;
-    default:
-      break;
   }
 
   if (schema.anyOf !== undefined) {
@@ -177,10 +175,11 @@ function toInputSchema(
       ? {...document, type: 'object'}
       : document;
   if (!isObjectSchemaDocument(filled)) {
+    const reported = isJsonObject(document) ? document['type'] : document;
     throw new TypeError(
       `Tool "${toolName}" declares parameters of type ` +
-        `${JSON.stringify(isJsonObject(document) ? document['type'] : document)}; ` +
-        `an MCP tool must declare an object schema.`,
+        `${JSON.stringify(reported)}; an MCP tool must declare an object ` +
+        `schema.`,
     );
   }
   return filled;
