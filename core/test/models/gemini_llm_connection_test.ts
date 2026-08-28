@@ -77,6 +77,73 @@ describe('GeminiLlmConnection', () => {
       await connection.sendHistory([]);
       expect(mockSession.sendClientContent).not.toHaveBeenCalled();
     });
+
+    it('should strip an audio part that trails a text part', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const history: Content[] = [
+        {
+          role: 'user',
+          parts: [
+            {text: 'hi'},
+            {inlineData: {mimeType: 'audio/pcm', data: 'AAE='}},
+          ],
+        },
+      ];
+
+      await connection.sendHistory(history);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [{role: 'user', parts: [{text: 'hi'}]}],
+        turnComplete: true,
+      });
+    });
+
+    it('should drop a content whose every part is audio', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const history: Content[] = [
+        {role: 'user', parts: [{text: 'hello'}]},
+        {
+          role: 'user',
+          parts: [{inlineData: {mimeType: 'audio/pcm', data: 'AAE='}}],
+        },
+      ];
+
+      await connection.sendHistory(history);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [{role: 'user', parts: [{text: 'hello'}]}],
+        turnComplete: true,
+      });
+    });
+
+    it('should keep a content whose first part is a functionResponse', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const history: Content[] = [
+        {
+          role: 'user',
+          parts: [
+            {functionResponse: {name: 'tool_a', response: {result: 'ok'}}},
+            {text: 'and here is the answer'},
+          ],
+        },
+      ];
+
+      await connection.sendHistory(history);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: history,
+        turnComplete: true,
+      });
+    });
   });
 
   describe('sendContent', () => {
