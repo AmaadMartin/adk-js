@@ -30,7 +30,7 @@ function isBlob(data: Blob | Content): data is Blob {
  * that needs a recognition request, or content that is already text.
  */
 type BundledSegment =
-  | {kind: 'audio'; speaker?: string; audio: Buffer}
+  | {kind: 'audio'; speaker: string; audio: Buffer}
   | {kind: 'content'; content: Content};
 
 /**
@@ -41,9 +41,9 @@ type BundledSegment =
  * that precedes it and is passed through. A blob with no data is skipped
  * without ending the run.
  *
- * A run with no role is bundled like any other. adk-python instead uses its
- * speaker as the pending-run flag, so role-less audio never flushes and its
- * own `speaker.lower() if speaker else 'user'` fallback cannot be reached.
+ * A run carries its role lowercased, falling back to `user` when the entries
+ * have none. adk-python instead uses the speaker as its pending-run flag, so
+ * role-less audio never flushes and that fallback cannot be reached.
  *
  * @param cache The entries to bundle, in cache order.
  * @return The segments, in cache order.
@@ -60,7 +60,7 @@ function bundleTranscriptionCache(
     }
     segments.push({
       kind: 'audio',
-      speaker: pending.speaker,
+      speaker: pending.speaker?.toLowerCase() || 'user',
       audio: Buffer.concat(pending.chunks),
     });
     pending = undefined;
@@ -110,8 +110,7 @@ export class AudioTranscriber {
 
   /**
    * Resolves the Speech client, loading the `@google-cloud/speech` optional
-   * peer on first use. Nothing calls this when the cache holds no audio, so an
-   * application that only caches text never needs the package.
+   * peer on first use.
    */
   private getClient(): Promise<SpeechClient> {
     this.clientPromise ??= loadOptionalPeer(
@@ -152,8 +151,6 @@ export class AudioTranscriber {
           `${segment.speaker}.`,
       );
       const client = await this.getClient();
-      // The cached blobs are required to be 16 kHz mono LINEAR16 PCM, so the
-      // recognition config is fixed rather than configurable.
       const [response] = await client.recognize({
         config: {
           encoding: 'LINEAR16',
@@ -167,10 +164,7 @@ export class AudioTranscriber {
         if (transcript == null) {
           continue;
         }
-        contents.push({
-          role: segment.speaker?.toLowerCase() || 'user',
-          parts: [{text: transcript}],
-        });
+        contents.push({role: segment.speaker, parts: [{text: transcript}]});
       }
     }
     return contents;
