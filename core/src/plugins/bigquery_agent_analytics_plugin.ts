@@ -234,11 +234,11 @@ function buildLatency(data: AnalyticsEventData): Record<string, number> | null {
  * run continues.
  *
  * Two departures from adk-python are deliberate. Rows go through
- * `tabledata.insertAll` rather than the Storage Write API, which changes the
- * delivery semantics; {@link BigQueryRowWriter} says how. And the `AGENT_ERROR`
- * and `INVOCATION_ERROR` event types are declared but never written, because
- * adk-js `BasePlugin` has no `onAgentErrorCallback` or `onRunErrorCallback` to
- * write them from.
+ * `tabledata.insertAll` rather than the Storage Write API, so BigQuery
+ * de-duplicates a row on its insert id on a best-effort basis rather than
+ * exactly. And the `AGENT_ERROR` and `INVOCATION_ERROR` event types are
+ * declared but never written, because adk-js `BasePlugin` has no
+ * `onAgentErrorCallback` or `onRunErrorCallback` to write them from.
  *
  * Example:
  * ```typescript
