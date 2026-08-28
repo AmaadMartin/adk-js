@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {TableMetadata} from '@google-cloud/bigquery';
 import {
   AnalyticsEventType,
+  BaseAgent,
   BigQueryAgentAnalyticsPlugin,
   BigQueryLoggerConfig,
   Context,
@@ -30,7 +32,7 @@ import type {AnalyticsRow} from '../../src/plugins/bigquery_analytics_schema.js'
 /** Table metadata the fake records when the plugin creates the table. */
 interface CreatedTable {
   tableId: string;
-  metadata: Record<string, unknown>;
+  metadata: TableMetadata;
 }
 
 const {BigQueryMock, fake} = vi.hoisted(() => {
@@ -93,7 +95,7 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
 
     async createTable(
       id: string,
-      metadata: Record<string, unknown>,
+      metadata: TableMetadata,
     ): Promise<[FakeTable]> {
       fake.created.push({tableId: id, metadata});
       if (fake.createError !== undefined) {
@@ -127,6 +129,24 @@ const DATASET_ID = 'agent_analytics';
 /** An error carrying the HTTP status BigQuery uses for "already exists". */
 function conflictError(): Error {
   return Object.assign(new Error('Already Exists: Table'), {code: 409});
+}
+
+/**
+ * A non-`LlmAgent` that happens to carry an `instruction` field, which is what
+ * separates the branded `isLlmAgent` guard from a structural shape check.
+ */
+class InstructedPlainAgent extends BaseAgent {
+  readonly instruction = 'Be helpful.';
+
+  // eslint-disable-next-line require-yield -- BaseAgent mandates the generator signature; this fixture emits nothing.
+  protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {
+    return;
+  }
+
+  // eslint-disable-next-line require-yield -- BaseAgent mandates the generator signature; this fixture emits nothing.
+  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
+    return;
+  }
 }
 
 function makeAgent(name = 'root_agent', instruction = 'Be helpful.'): LlmAgent {
@@ -329,9 +349,11 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
-    const schema = fake.created[0].metadata['schema'];
-    expect(Array.isArray(schema)).toBe(true);
-    const columns = (schema as Array<{name: string}>).map((f) => f.name);
+    const schema = fake.created[0].metadata.schema;
+    if (!Array.isArray(schema)) {
+      expect.fail('the created table carries no field list');
+    }
+    const columns = schema.map((field) => field.name);
     expect(columns).toEqual([
       'timestamp',
       'event_id',
@@ -684,6 +706,17 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       callbackContext: makeContext(invocationContext),
     });
     expect(parseColumn(onlyRow().content)).toBe('Answer weather questions.');
+  });
+
+  it('writes an empty instruction for a non-LlmAgent that has one', async () => {
+    const plugin = makePlugin();
+    const agent = new InstructedPlainAgent({name: 'plain_agent'});
+    const invocationContext = makeInvocationContext();
+    await plugin.beforeAgentCallback({
+      agent,
+      callbackContext: makeContext(invocationContext),
+    });
+    expect(parseColumn(onlyRow().content)).toBe('');
   });
 
   it('writes an empty instruction when the agent builds one dynamically', async () => {

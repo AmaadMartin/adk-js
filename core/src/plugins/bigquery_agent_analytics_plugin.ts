@@ -5,10 +5,10 @@
  */
 
 import type {Content, GenerateContentConfig} from '@google/genai';
-import {isSpanContextValid, trace} from '@opentelemetry/api';
 import type {BaseAgent} from '../agents/base_agent.js';
 import type {Context} from '../agents/context.js';
 import type {InvocationContext} from '../agents/invocation_context.js';
+import {isLlmAgent} from '../agents/llm_agent.js';
 import {
   Event,
   getFunctionCalls,
@@ -18,7 +18,7 @@ import {
 import type {LlmRequest} from '../models/llm_request.js';
 import type {LlmResponse} from '../models/llm_response.js';
 import type {BaseTool} from '../tools/base_tool.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
+import {toSnakeCaseName} from '../utils/case_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {recursiveSmartTruncate} from '../utils/sanitize_utils.js';
@@ -35,6 +35,14 @@ import {
   hitlMappingFor,
   TOOL_PAUSE_KIND,
 } from './bigquery_analytics_schema.js';
+import {
+  elapsedSince,
+  newTraceId,
+  SpanKind,
+  SpanRecord,
+  SpanTracker,
+  timeToFirstToken,
+} from './bigquery_analytics_spans.js';
 import {
   AnalyticsDropReason,
   BigQueryRowWriter,
@@ -67,13 +75,6 @@ const CONTENT_PARSE_FAILED_LOG =
 const UNMATCHED_LONG_RUNNING_ID_LOG =
   'BigQuery analytics found a long-running tool id with no matching function call; writing the pause row without the call.';
 
-/**
- * Invocations whose span stacks are kept at once. An invocation whose
- * `afterRunCallback` never fires would otherwise leak a stack forever, so the
- * oldest entries are evicted past this cap.
- */
-const MAX_TRACKED_INVOCATIONS = 1024;
-
 /** Default configuration values, matching adk-python's `BigQueryLoggerConfig`. */
 const DEFAULT_TABLE_ID = 'agent_events';
 const DEFAULT_LOCATION = 'US';
@@ -85,44 +86,30 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10000;
 const DEFAULT_QUEUE_MAX_SIZE = 10000;
 
 /**
- * Generation-config fields captured into `attributes.llm_config`, paired with
- * the column name adk-python writes. The names are snake_case on the wire in
- * both SDKs even though the TypeScript field is camelCase.
+ * Generation-config fields captured into `attributes.llm_config`.
+ *
+ * Which fields are captured is the wire contract with adk-python, so the list
+ * stays explicit. The column name is not: every one is the snake_case of the
+ * field, so `toSnakeCaseName` derives it. Pair a field with a literal column
+ * name here the day one of them stops being mechanical.
  */
 const LOGGED_GENERATION_CONFIG_KEYS: ReadonlyArray<
-  readonly [keyof GenerateContentConfig, string]
+  keyof GenerateContentConfig
 > = [
-  ['temperature', 'temperature'],
-  ['topP', 'top_p'],
-  ['topK', 'top_k'],
-  ['candidateCount', 'candidate_count'],
-  ['maxOutputTokens', 'max_output_tokens'],
-  ['stopSequences', 'stop_sequences'],
-  ['presencePenalty', 'presence_penalty'],
-  ['frequencyPenalty', 'frequency_penalty'],
-  ['responseMimeType', 'response_mime_type'],
-  ['responseSchema', 'response_schema'],
-  ['seed', 'seed'],
-  ['responseLogprobs', 'response_logprobs'],
-  ['logprobs', 'logprobs'],
+  'temperature',
+  'topP',
+  'topK',
+  'candidateCount',
+  'maxOutputTokens',
+  'stopSequences',
+  'presencePenalty',
+  'frequencyPenalty',
+  'responseMimeType',
+  'responseSchema',
+  'seed',
+  'responseLogprobs',
+  'logprobs',
 ];
-
-/** What pushed a span, so an error callback only pops a span it owns. */
-enum SpanKind {
-  INVOCATION = 'invocation',
-  AGENT = 'agent',
-  LLM_REQUEST = 'llm_request',
-  TOOL = 'tool',
-}
-
-/** One entry of an invocation's span stack. */
-interface SpanRecord {
-  spanId: string;
-  traceId: string;
-  startTimeMs: number;
-  kind: SpanKind;
-  firstTokenTimeMs?: number;
-}
 
 /** Turns a payload into the value written to the `content` column. */
 export type AnalyticsContentFormatter = (
@@ -220,28 +207,11 @@ interface LogEventParams {
   data?: AnalyticsEventData;
 }
 
-/** A 32-hex-character identifier, the shape OpenTelemetry uses for a trace id. */
-function newTraceId(): string {
-  return randomUUID().replaceAll('-', '');
-}
-
-/** A 16-hex-character identifier, the shape OpenTelemetry uses for a span id. */
-function newSpanId(): string {
-  return newTraceId().slice(0, 16);
-}
-
-/** The ambient OpenTelemetry trace id, when a valid span is active. */
-function ambientTraceId(): string | undefined {
-  const context = trace.getActiveSpan()?.spanContext();
-  return context !== undefined && isSpanContextValid(context)
-    ? context.traceId
-    : undefined;
-}
-
 /** The agent's instruction, when it is a plain string. */
 function agentInstruction(agent: BaseAgent): string {
-  const instruction = (agent as {instruction?: unknown}).instruction;
-  return typeof instruction === 'string' ? instruction : '';
+  return isLlmAgent(agent) && typeof agent.instruction === 'string'
+    ? agent.instruction
+    : '';
 }
 
 /** Captures the generation config and request labels into row attributes. */
@@ -250,10 +220,10 @@ function requestAttributes(llmRequest: LlmRequest): Record<string, unknown> {
   const config = llmRequest.config;
   if (config !== undefined) {
     const llmConfig: Record<string, unknown> = {};
-    for (const [field, column] of LOGGED_GENERATION_CONFIG_KEYS) {
+    for (const field of LOGGED_GENERATION_CONFIG_KEYS) {
       const value = config[field];
       if (value !== undefined) {
-        llmConfig[column] = value;
+        llmConfig[toSnakeCaseName(field)] = value;
       }
     }
     if (Object.keys(llmConfig).length > 0) {
@@ -346,7 +316,7 @@ function resolveConfig(config: BigQueryLoggerConfig): ResolvedConfig {
 export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   private readonly config: ResolvedConfig;
   private readonly writer: BigQueryRowWriter;
-  private readonly spanStacks = new Map<string, SpanRecord[]>();
+  private readonly spans = new SpanTracker();
   private shutDown = false;
 
   constructor(options: BigQueryAgentAnalyticsPluginOptions) {
@@ -390,7 +360,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       return;
     }
     this.shutDown = true;
-    this.spanStacks.clear();
+    this.spans.clear();
     await this.writer.shutdown();
   }
 
@@ -399,7 +369,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     userMessage: Content;
   }): Promise<undefined> {
     return this.safe('onUserMessageCallback', async () => {
-      this.ensureInvocationSpan(params.invocationContext.invocationId);
+      this.spans.ensureInvocation(params.invocationContext.invocationId);
       await this.logEvent({
         eventType: AnalyticsEventType.USER_MESSAGE_RECEIVED,
         invocationContext: params.invocationContext,
@@ -416,7 +386,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     invocationContext: InvocationContext;
   }): Promise<undefined> {
     return this.safe('beforeRunCallback', async () => {
-      this.ensureInvocationSpan(params.invocationContext.invocationId);
+      this.spans.ensureInvocation(params.invocationContext.invocationId);
       await this.logEvent({
         eventType: AnalyticsEventType.INVOCATION_STARTING,
         invocationContext: params.invocationContext,
@@ -432,10 +402,10 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       const invocationId = invocationContext.invocationId;
       // The trace id is read before the pop, so INVOCATION_COMPLETED shares
       // the trace of every earlier row in this invocation.
-      const traceIdOverride = this.traceIdFor(invocationId);
-      const popped = this.popSpan(invocationId);
-      const parentSpanIdOverride = this.currentSpan(invocationId)?.spanId;
-      this.spanStacks.delete(invocationId);
+      const traceIdOverride = this.spans.traceId(invocationId);
+      const popped = this.spans.pop(invocationId);
+      const parentSpanIdOverride = this.spans.current(invocationId)?.spanId;
+      this.spans.forget(invocationId);
       await this.logEvent({
         eventType: AnalyticsEventType.INVOCATION_COMPLETED,
         invocationContext,
@@ -458,7 +428,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   }): Promise<undefined> {
     return this.safe('beforeAgentCallback', async () => {
       const invocationContext = params.callbackContext.invocationContext;
-      this.pushSpan(invocationContext.invocationId, SpanKind.AGENT);
+      this.spans.push(invocationContext.invocationId, SpanKind.AGENT);
       await this.logEvent({
         eventType: AnalyticsEventType.AGENT_STARTING,
         invocationContext,
@@ -473,7 +443,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   }): Promise<undefined> {
     return this.safe('afterAgentCallback', async () => {
       const invocationContext = params.callbackContext.invocationContext;
-      const popped = this.popSpan(
+      const popped = this.spans.pop(
         invocationContext.invocationId,
         SpanKind.AGENT,
       );
@@ -494,8 +464,8 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       const invocationId = invocationContext.invocationId;
       // A request short-circuited by another plugin never reaches
       // afterModelCallback, so its span would otherwise stay on the stack.
-      this.popSpan(invocationId, SpanKind.LLM_REQUEST);
-      this.pushSpan(invocationId, SpanKind.LLM_REQUEST);
+      this.spans.pop(invocationId, SpanKind.LLM_REQUEST);
+      this.spans.push(invocationId, SpanKind.LLM_REQUEST);
       await this.logEvent({
         eventType: AnalyticsEventType.LLM_REQUEST,
         invocationContext,
@@ -517,7 +487,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       const invocationContext = params.callbackContext.invocationContext;
       const invocationId = invocationContext.invocationId;
       const isPartial = llmResponse.partial === true;
-      const open = this.currentSpan(invocationId);
+      const open = this.spans.current(invocationId);
       if (open !== undefined && open.firstTokenTimeMs === undefined) {
         open.firstTokenTimeMs = Date.now();
       }
@@ -525,7 +495,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       // every chunk shares the request's span id.
       const popped = isPartial
         ? undefined
-        : this.popSpan(invocationId, SpanKind.LLM_REQUEST);
+        : this.spans.pop(invocationId, SpanKind.LLM_REQUEST);
       const span = popped ?? open;
       const content: Record<string, unknown> = {};
       if (llmResponse.content !== undefined) {
@@ -544,7 +514,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
           parentSpanIdOverride:
             popped === undefined
               ? undefined
-              : this.currentSpan(invocationId)?.spanId,
+              : this.spans.current(invocationId)?.spanId,
           latencyMs: elapsedSince(span),
           timeToFirstTokenMs: timeToFirstToken(span),
           modelVersion: llmResponse.modelVersion,
@@ -566,7 +536,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     return this.safe('onModelErrorCallback', async () => {
       const invocationContext = params.callbackContext.invocationContext;
       const invocationId = invocationContext.invocationId;
-      const popped = this.popSpan(invocationId, SpanKind.LLM_REQUEST);
+      const popped = this.spans.pop(invocationId, SpanKind.LLM_REQUEST);
       await this.logEvent({
         eventType: AnalyticsEventType.LLM_ERROR,
         invocationContext,
@@ -586,7 +556,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   }): Promise<undefined> {
     return this.safe('beforeToolCallback', async () => {
       const invocationContext = params.toolContext.invocationContext;
-      this.pushSpan(invocationContext.invocationId, SpanKind.TOOL);
+      this.spans.push(invocationContext.invocationId, SpanKind.TOOL);
       await this.logEvent({
         eventType: AnalyticsEventType.TOOL_STARTING,
         invocationContext,
@@ -604,7 +574,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     return this.safe('afterToolCallback', async () => {
       const invocationContext = params.toolContext.invocationContext;
       const invocationId = invocationContext.invocationId;
-      const popped = this.popSpan(invocationId, SpanKind.TOOL);
+      const popped = this.spans.pop(invocationId, SpanKind.TOOL);
       await this.logEvent({
         eventType: AnalyticsEventType.TOOL_COMPLETED,
         invocationContext,
@@ -623,7 +593,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     return this.safe('onToolErrorCallback', async () => {
       const invocationContext = params.toolContext.invocationContext;
       const invocationId = invocationContext.invocationId;
-      const popped = this.popSpan(invocationId, SpanKind.TOOL);
+      const popped = this.spans.pop(invocationId, SpanKind.TOOL);
       await this.logEvent({
         eventType: AnalyticsEventType.TOOL_ERROR,
         invocationContext,
@@ -883,11 +853,13 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       session_id: invocationContext.session.id,
       invocation_id: invocationId,
       user_id: invocationContext.userId,
-      trace_id: data.traceIdOverride ?? this.traceIdFor(invocationId),
+      trace_id: data.traceIdOverride ?? this.spans.traceId(invocationId),
       span_id:
-        data.spanIdOverride ?? this.currentSpan(invocationId)?.spanId ?? null,
+        data.spanIdOverride ?? this.spans.current(invocationId)?.spanId ?? null,
       parent_span_id:
-        data.parentSpanIdOverride ?? this.parentSpanIdFor(invocationId) ?? null,
+        data.parentSpanIdOverride ??
+        this.spans.parentSpanId(invocationId) ??
+        null,
       content: parsed.payload === null ? null : JSON.stringify(parsed.payload),
       content_parts: this.config.logMultiModalContent ? parsed.parts : [],
       attributes: JSON.stringify(attributes.value),
@@ -979,94 +951,9 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   ): AnalyticsEventData {
     return {
       spanIdOverride: popped?.spanId,
-      parentSpanIdOverride: this.currentSpan(invocationId)?.spanId,
+      parentSpanIdOverride: this.spans.current(invocationId)?.spanId,
       latencyMs: elapsedSince(popped),
     };
-  }
-
-  /** Seeds the invocation's root span, unless one already exists. */
-  private ensureInvocationSpan(invocationId: string): void {
-    if (this.stackFor(invocationId).length > 0) {
-      return;
-    }
-    this.pushSpan(invocationId, SpanKind.INVOCATION);
-  }
-
-  /**
-   * Returns the invocation's span stack, creating it and evicting the oldest
-   * tracked invocations once the cap is reached.
-   */
-  private stackFor(invocationId: string): SpanRecord[] {
-    const existing = this.spanStacks.get(invocationId);
-    if (existing !== undefined) {
-      return existing;
-    }
-    for (const oldest of this.spanStacks.keys()) {
-      if (this.spanStacks.size < MAX_TRACKED_INVOCATIONS) {
-        break;
-      }
-      this.spanStacks.delete(oldest);
-    }
-    const stack: SpanRecord[] = [];
-    this.spanStacks.set(invocationId, stack);
-    return stack;
-  }
-
-  /**
-   * Pushes a span. Its trace id comes from the span below it, then from the
-   * ambient OpenTelemetry span, then from a fresh value — so every row of one
-   * invocation shares one trace id.
-   */
-  private pushSpan(invocationId: string, kind: SpanKind): SpanRecord {
-    const stack = this.stackFor(invocationId);
-    const record: SpanRecord = {
-      spanId: newSpanId(),
-      traceId: stack.at(-1)?.traceId ?? ambientTraceId() ?? newTraceId(),
-      startTimeMs: Date.now(),
-      kind,
-    };
-    stack.push(record);
-    return record;
-  }
-
-  /**
-   * Pops the top span, leaving the stack untouched when `expectedKind` does
-   * not match. Error callbacks pass a kind so they never pop a span that
-   * belongs to an enclosing agent or invocation.
-   */
-  private popSpan(
-    invocationId: string,
-    expectedKind?: SpanKind,
-  ): SpanRecord | undefined {
-    const stack = this.spanStacks.get(invocationId) ?? [];
-    const top = stack.at(-1);
-    if (top === undefined) {
-      return undefined;
-    }
-    if (expectedKind !== undefined && top.kind !== expectedKind) {
-      return undefined;
-    }
-    stack.pop();
-    return top;
-  }
-
-  /** The invocation's innermost open span. */
-  private currentSpan(invocationId: string): SpanRecord | undefined {
-    return this.spanStacks.get(invocationId)?.at(-1);
-  }
-
-  /** The span enclosing the invocation's innermost open span. */
-  private parentSpanIdFor(invocationId: string): string | undefined {
-    return this.spanStacks.get(invocationId)?.at(-2)?.spanId;
-  }
-
-  /** The invocation's trace id, falling back to the ambient span then its id. */
-  private traceIdFor(invocationId: string): string {
-    return (
-      this.currentSpan(invocationId)?.traceId ??
-      ambientTraceId() ??
-      invocationId
-    );
   }
 }
 
@@ -1081,16 +968,4 @@ function pauseAttributes(
   return {
     adk: {pause_kind: pauseKind, function_call_id: functionCallId ?? null},
   };
-}
-
-/** Milliseconds since `span` started, or undefined when there is no span. */
-function elapsedSince(span: SpanRecord | undefined): number | undefined {
-  return span === undefined ? undefined : Date.now() - span.startTimeMs;
-}
-
-/** Milliseconds from a span's start to its first token, when one was seen. */
-function timeToFirstToken(span: SpanRecord | undefined): number | undefined {
-  return span?.firstTokenTimeMs === undefined
-    ? undefined
-    : span.firstTokenTimeMs - span.startTimeMs;
 }
