@@ -279,6 +279,16 @@ describe('client options', () => {
 
     expect(onlyClient().location).toBeUndefined();
   });
+
+  it('keeps the toolset prefix out of the user agent', async () => {
+    bq.getDatasets.mockResolvedValue([[]]);
+
+    await runTool({prefix: 'warehouse'}, 'warehouse_list_dataset_ids', {
+      project_id: 'my_project_id',
+    });
+
+    expect(onlyClient().userAgent).toBe(`${USER_AGENT_BASE} list_dataset_ids`);
+  });
 });
 
 describe('error handling', () => {

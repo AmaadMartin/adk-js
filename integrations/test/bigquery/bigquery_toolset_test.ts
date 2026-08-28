@@ -170,4 +170,36 @@ describe('BigQueryToolset', () => {
 
     expect(names(tools).sort()).toEqual([...ALL_TOOL_NAMES].sort());
   });
+
+  it('prepends the prefix to every tool name', async () => {
+    const toolset = new BigQueryToolset({prefix: 'warehouse'});
+
+    const tools = await toolset.getTools();
+
+    expect(names(tools).sort()).toEqual(
+      ALL_TOOL_NAMES.map((name) => `warehouse_${name}`).sort(),
+    );
+  });
+
+  it('matches the filter against the prefixed tool name', async () => {
+    const toolset = new BigQueryToolset({
+      prefix: 'warehouse',
+      toolFilter: ['warehouse_list_dataset_ids'],
+    });
+
+    const tools = await toolset.getTools();
+
+    expect(names(tools)).toEqual(['warehouse_list_dataset_ids']);
+  });
+
+  it('exposes no tool when the filter names the unprefixed name', async () => {
+    const toolset = new BigQueryToolset({
+      prefix: 'warehouse',
+      toolFilter: ['list_dataset_ids'],
+    });
+
+    const tools = await toolset.getTools();
+
+    expect(tools).toEqual([]);
+  });
 });

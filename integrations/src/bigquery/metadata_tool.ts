@@ -24,6 +24,11 @@ export interface BigQueryToolDependencies {
   credentials?: BigQueryOptions['authClient'];
   /** The settings the toolset was built with. */
   settings: BigQueryToolConfig;
+  /**
+   * Prepended to each tool name the model sees. BigQuery still receives the
+   * plain tool name in the user agent, which adk-python pins.
+   */
+  prefix?: string;
 }
 
 /** How one metadata tool differs from the others. */
@@ -75,7 +80,7 @@ function createMetadataTool<TParameters extends z.ZodObject<z.ZodRawShape>>(
   spec: MetadataToolSpec<TParameters>,
 ): FunctionTool<TParameters> {
   return new FunctionTool({
-    name: spec.name,
+    name: deps.prefix ? `${deps.prefix}_${spec.name}` : spec.name,
     description: spec.description,
     parameters: spec.parameters,
     execute: async (input) => {

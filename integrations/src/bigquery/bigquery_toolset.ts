@@ -23,6 +23,13 @@ export interface BigQueryToolsetOptions {
    */
   toolFilter?: ToolPredicate | string[];
   /**
+   * Prepended to each tool name, as `myPrefix_get_dataset_info`. A
+   * `toolFilter` list then matches the prefixed name, as it does for every
+   * other adk-js toolset. The prefix never reaches BigQuery: the user agent
+   * keeps the plain tool name.
+   */
+  prefix?: string;
+  /**
    * A pre-built Google auth client for every call, as
    * `@google-cloud/bigquery` accepts it. When it is omitted the tools resolve
    * Application Default Credentials.
@@ -53,12 +60,13 @@ export class BigQueryToolset extends BaseToolset {
   private readonly tools: BaseTool[];
 
   constructor(options: BigQueryToolsetOptions = {}) {
-    super(options.toolFilter ?? []);
+    super(options.toolFilter ?? [], options.prefix);
     const settings = options.toolConfig ?? {};
     validateBigQueryToolConfig(settings);
     this.tools = createBigQueryMetadataTools({
       credentials: options.credentials,
       settings,
+      prefix: options.prefix,
     });
   }
 
