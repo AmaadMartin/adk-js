@@ -6,20 +6,60 @@
 
 import {
   Context,
+  createSession,
   FeatureName,
   getLogger,
+  InMemoryArtifactService,
+  InvocationContext,
   LlmRequest,
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
+  PluginManager,
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {Blob, Part, Type} from '@google/genai';
 import AdmZip from 'adm-zip';
 import {describe, expect, it, vi} from 'vitest';
+import {ScopedArtifactService} from '../../src/artifacts/scoped_artifact_service.js';
 
-/** Builds a tool context serving `artifactsByName`, as the tool sees it. */
-function stubContext(artifactsByName: Record<string, Part>): Context {
-  return new StubToolContext(artifactsByName) as unknown as Context;
+const APP_NAME = 'load_artifacts_test';
+const USER_ID = 'test_user';
+
+/**
+ * Builds a real tool context holding `artifactsByName`, so the tool reaches
+ * the artifacts through the same artifact service it uses in production.
+ */
+async function artifactContext(
+  artifactsByName: Record<string, Part>,
+): Promise<Context> {
+  const artifactService = new InMemoryArtifactService();
+  const session = createSession({
+    id: 'test_session',
+    appName: APP_NAME,
+    userId: USER_ID,
+  });
+  for (const [filename, artifact] of Object.entries(artifactsByName)) {
+    await artifactService.saveArtifact({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: session.id,
+      filename,
+      artifact,
+    });
+  }
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test_invocation',
+      session,
+      pluginManager: new PluginManager(),
+      artifactService: new ScopedArtifactService(
+        artifactService,
+        APP_NAME,
+        USER_ID,
+        session.id,
+      ),
+    }),
+  });
 }
 
 /** Builds a request whose last turn asks the tool to load `artifactNames`. */
@@ -742,7 +782,7 @@ describe('LoadArtifactsTool', () => {
   });
 
   it('appends nothing when the request carries no contents', async () => {
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       'test.txt': {text: 'hello'},
     });
     const llmRequest: LlmRequest = {
@@ -760,7 +800,7 @@ describe('LoadArtifactsTool', () => {
   it('passes non-base64 inline data through as text', async () => {
     const artifactName = 'notes.txt';
     const plainText = 'col1,col2\n1,2\n';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {data: plainText, mimeType: 'text/plain'},
       },
@@ -777,7 +817,7 @@ describe('LoadArtifactsTool', () => {
   it('converts csv bytes served as octet-stream using the filename', async () => {
     const artifactName = 'test.csv';
     const csvString = 'col1,col2\nval1,val2\n';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: Buffer.from(csvString, 'utf8').toString('base64'),
@@ -796,7 +836,7 @@ describe('LoadArtifactsTool', () => {
 
   it('extracts the text of a docx artifact', async () => {
     const artifactName = 'report.docx';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildDocx('Quarterly report').toString('base64'),
@@ -816,7 +856,7 @@ describe('LoadArtifactsTool', () => {
 
   it('extracts the text of a docx artifact whose mime type is wrong', async () => {
     const artifactName = 'minutes.DOCX';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildDocx('Mislabelled docx').toString('base64'),
@@ -833,7 +873,7 @@ describe('LoadArtifactsTool', () => {
 
   it('extracts the text of a docx artifact served as octet-stream', async () => {
     const artifactName = 'document.docx';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildDocx('Octet stream docx').toString('base64'),
@@ -850,7 +890,7 @@ describe('LoadArtifactsTool', () => {
 
   it('extracts the text of a docx artifact that has no filename extension', async () => {
     const artifactName = 'inline-file';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildDocx('Extensionless docx').toString('base64'),
@@ -867,7 +907,7 @@ describe('LoadArtifactsTool', () => {
 
   it('falls back to the binary placeholder when octet-stream bytes are not a docx', async () => {
     const artifactName = 'inline-file';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: Buffer.from([0, 1, 2, 3]).toString('base64'),
@@ -892,7 +932,7 @@ describe('LoadArtifactsTool', () => {
     async (mimeType) => {
       const artifactName = 'logo.svg';
       const svgMarkup = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
-      const toolContext = stubContext({
+      const toolContext = await artifactContext({
         [artifactName]: {
           inlineData: {
             data: Buffer.from(svgMarkup, 'utf8').toString('base64'),
@@ -914,7 +954,7 @@ describe('LoadArtifactsTool', () => {
   );
   it('renders a spreadsheet artifact as markdown when parsing is enabled', async () => {
     const artifactName = 'test.xlsx';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildXlsx([
@@ -940,7 +980,7 @@ describe('LoadArtifactsTool', () => {
 
   it('renders a spreadsheet named .xlsx whose mime type is wrong', async () => {
     const artifactName = 'quarter.XLSX';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildXlsx([
@@ -964,7 +1004,7 @@ describe('LoadArtifactsTool', () => {
 
   it('reports an invalid workbook when parsing is enabled', async () => {
     const artifactName = 'broken.xlsx';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: Buffer.from('not a workbook at all', 'utf8').toString('base64'),
@@ -986,7 +1026,7 @@ describe('LoadArtifactsTool', () => {
 
   it('reports an invalid workbook for a legacy .xls artifact', async () => {
     const artifactName = 'legacy.xls';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: Buffer.from('legacy biff bytes').toString('base64'),
@@ -1007,7 +1047,7 @@ describe('LoadArtifactsTool', () => {
 
   it('leaves a spreadsheet artifact as a placeholder by default', async () => {
     const artifactName = 'test.xlsx';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildXlsx([
@@ -1032,7 +1072,7 @@ describe('LoadArtifactsTool', () => {
     const artifactName = 'test.txt';
     const artifact: Part = {inlineData: {data: 'AAAA', mimeType: 'text/plain'}};
     const calls: Array<[Part, string]> = [];
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: artifact,
     });
     const llmRequest = requestLoading([artifactName]);
@@ -1050,7 +1090,7 @@ describe('LoadArtifactsTool', () => {
 
   it('awaits an asynchronous processArtifact', async () => {
     const artifactName = 'test.txt';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {inlineData: {data: 'AAAA', mimeType: 'text/plain'}},
     });
     const llmRequest = requestLoading([artifactName]);
@@ -1063,7 +1103,7 @@ describe('LoadArtifactsTool', () => {
   });
 
   it('omits the artifact when processArtifact returns undefined', async () => {
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       'skip.txt': {text: 'skip me'},
       'keep.txt': {text: 'keep me'},
     });
@@ -1078,7 +1118,7 @@ describe('LoadArtifactsTool', () => {
   });
 
   it('logs and skips the artifact when processArtifact throws', async () => {
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       'boom.txt': {text: 'boom'},
       'keep.txt': {text: 'keep me'},
     });
@@ -1104,7 +1144,7 @@ describe('LoadArtifactsTool', () => {
 
   it('gives processArtifact the unprefixed name of a user artifact', async () => {
     const artifactName = 'shared.txt';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [`user:${artifactName}`]: {text: 'shared content'},
     });
     const llmRequest = requestLoading([artifactName]);
@@ -1123,7 +1163,7 @@ describe('LoadArtifactsTool', () => {
   it('bypasses the safety conversion when processArtifact is supplied', async () => {
     const artifactName = 'document.docx';
     const base64 = buildDocx('Untouched docx').toString('base64');
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: base64,

@@ -10,10 +10,7 @@ import {Context} from '../agents/context.js';
 import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {appendInstructions, LlmRequest} from '../models/llm_request.js';
 import {maybeBase64ToBytes} from '../utils/base64_utils.js';
-import {
-  extractDocxText,
-  spreadsheetToMarkdown,
-} from '../utils/document_text_utils.js';
+import {extractDocxText} from '../utils/document_text_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {getLogger} from '../utils/logger.js';
 import {
@@ -22,6 +19,7 @@ import {
   isTextLikeMimeType,
   normalizeMimeType,
 } from '../utils/mime_utils.js';
+import {spreadsheetToMarkdown} from '../utils/spreadsheet_utils.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
