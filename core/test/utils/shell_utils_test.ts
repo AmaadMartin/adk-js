@@ -5,7 +5,11 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {splitCommand, toReturnCode} from '../../src/utils/shell_utils.js';
+import {
+  decodeChunks,
+  splitCommand,
+  toReturnCode,
+} from '../../src/utils/shell_utils.js';
 
 describe('splitCommand', () => {
   it('returns no token for an empty or blank command', () => {
@@ -96,5 +100,25 @@ describe('toReturnCode', () => {
 
   it('reports a missing exit status as zero', () => {
     expect(toReturnCode(null, null)).toBe(0);
+  });
+});
+
+describe('decodeChunks', () => {
+  it('returns an empty string when nothing was captured', () => {
+    expect(decodeChunks([])).toBe('');
+  });
+
+  it('joins the chunks before decoding', () => {
+    expect(decodeChunks([Buffer.from('he'), Buffer.from('llo')])).toBe('hello');
+  });
+
+  it('keeps a multi-byte character split across two chunks intact', () => {
+    // '€' is E2 82 AC; decoding either chunk alone yields replacement chars.
+    const chunks = [Buffer.from([0xe2, 0x82]), Buffer.from([0xac])];
+    expect(decodeChunks(chunks)).toBe('€');
+  });
+
+  it('replaces an invalid byte rather than throwing', () => {
+    expect(decodeChunks([Buffer.from([0xff])])).toBe('\uFFFD');
   });
 });

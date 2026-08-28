@@ -101,3 +101,17 @@ export function toReturnCode(
 ): number {
   return signal === null ? (code ?? 0) : -os.constants.signals[signal];
 }
+
+/**
+ * Decodes captured child output as UTF-8.
+ *
+ * The chunks are joined before decoding, so a multi-byte character split
+ * across two of them is not corrupted. Invalid bytes become U+FFFD, matching
+ * Python's `errors='replace'`.
+ *
+ * @param chunks The buffers captured from the stream.
+ * @return The decoded text.
+ */
+export function decodeChunks(chunks: Buffer[]): string {
+  return Buffer.concat(chunks).toString('utf-8');
+}

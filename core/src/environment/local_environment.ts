@@ -10,7 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
-import {toReturnCode} from '../utils/shell_utils.js';
+import {decodeChunks, toReturnCode} from '../utils/shell_utils.js';
 import {BaseEnvironment, ExecutionResult} from './base_environment.js';
 
 /** Prefix for the temporary workspace created when no `workingDir` is given. */
@@ -159,11 +159,8 @@ export class LocalEnvironment extends BaseEnvironment {
       });
       return {
         exitCode,
-        // Decode once, so a multi-byte character split across two chunks is
-        // not corrupted. Invalid bytes become U+FFFD, matching Python's
-        // `errors='replace'`.
-        stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
-        stderr: Buffer.concat(stderrChunks).toString('utf-8'),
+        stdout: decodeChunks(stdoutChunks),
+        stderr: decodeChunks(stderrChunks),
         timedOut,
       };
     } finally {

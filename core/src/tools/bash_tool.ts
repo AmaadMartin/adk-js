@@ -9,7 +9,11 @@ import {spawn} from 'node:child_process';
 import {formatError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
-import {splitCommand, toReturnCode} from '../utils/shell_utils.js';
+import {
+  decodeChunks,
+  splitCommand,
+  toReturnCode,
+} from '../utils/shell_utils.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 
 /** Sentinel prefix that allows any command. Not a glob. */
@@ -155,10 +159,7 @@ export function buildSpawnArgv(
 
 /** Decodes captured output, reporting an empty capture as `placeholder`. */
 function decodeOutput(chunks: Buffer[], placeholder: string): string {
-  // Decode once, so a multi-byte character split across two chunks is not
-  // corrupted. Invalid bytes become U+FFFD, matching Python's
-  // `errors='replace'`.
-  const text = Buffer.concat(chunks).toString('utf-8');
+  const text = decodeChunks(chunks);
   return text === '' ? placeholder : text;
 }
 
