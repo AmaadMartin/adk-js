@@ -18,9 +18,6 @@ import {retrieveRagContexts} from './vertex_rag_retrieval_client.js';
 const DEFAULT_TOOL_NAME = 'vertex_rag_retrieval';
 const DEFAULT_TOOL_DESCRIPTION = 'Vertex AI RAG Retrieval Tool';
 
-const MISSING_QUERY_ERROR =
-  "Vertex AI RAG retrieval requires a string 'query'.";
-
 /** Configuration for {@link VertexRagRetrievalTool}. */
 export interface VertexRagRetrievalToolParams extends VertexRagStore {
   /** Tool name a model sees when it calls the tool as a function. */
@@ -88,7 +85,7 @@ export class VertexRagRetrievalTool extends BaseRetrievalTool {
   override async runAsync({args}: RunAsyncToolRequest): Promise<unknown> {
     const query = args['query'];
     if (typeof query !== 'string') {
-      throw new Error(MISSING_QUERY_ERROR);
+      throw new Error("Vertex AI RAG retrieval requires a string 'query'.");
     }
 
     const contexts = await retrieveRagContexts({

@@ -20,26 +20,12 @@ const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const RAG_CORPUS_PATTERN =
   /^projects\/([^/]+)\/locations\/([^/]+)\/ragCorpora\//;
 
-const MISSING_RAG_SOURCE_ERROR =
-  'Vertex AI RAG retrieval requires ragResources or ragCorpora.';
-
-const UNRESOLVED_LOCATION_ERROR =
-  'Vertex AI RAG retrieval could not resolve the project and location. ' +
-  'Provide a fully qualified ragCorpus resource name, or set ' +
-  'GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION.';
-
 /** One retrieved chunk, mirroring the REST `Context` message. */
 export interface RagContext {
   sourceUri?: string;
   sourceDisplayName?: string;
   text?: string;
   score?: number;
-}
-
-/** The Vertex AI project and location a retrieval call targets. */
-export interface RagLocation {
-  project: string;
-  location: string;
 }
 
 /** The parameters for {@link retrieveRagContexts}. */
@@ -77,9 +63,10 @@ export function toRagResources(
  *
  * @throws Error when neither source resolves a project and a location.
  */
-export function resolveRagLocation(
-  resources: VertexRagStoreRagResource[],
-): RagLocation {
+export function resolveRagLocation(resources: VertexRagStoreRagResource[]): {
+  project: string;
+  location: string;
+} {
   for (const {ragCorpus} of resources) {
     const match = ragCorpus?.match(RAG_CORPUS_PATTERN);
     if (match) {
@@ -90,7 +77,11 @@ export function resolveRagLocation(
   const project = process.env.GOOGLE_CLOUD_PROJECT;
   const location = process.env.GOOGLE_CLOUD_LOCATION;
   if (!project || !location) {
-    throw new Error(UNRESOLVED_LOCATION_ERROR);
+    throw new Error(
+      'Vertex AI RAG retrieval could not resolve the project and location. ' +
+        'Provide a fully qualified ragCorpus resource name, or set ' +
+        'GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION.',
+    );
   }
   return {project, location};
 }
@@ -139,7 +130,9 @@ export async function retrieveRagContexts({
 }: RetrieveRagContextsParams): Promise<RagContext[]> {
   const ragResources = toRagResources(vertexRagStore);
   if (ragResources.length === 0) {
-    throw new Error(MISSING_RAG_SOURCE_ERROR);
+    throw new Error(
+      'Vertex AI RAG retrieval requires ragResources or ragCorpora.',
+    );
   }
 
   const {project, location} = resolveRagLocation(ragResources);
