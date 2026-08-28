@@ -12,8 +12,9 @@ import {
   ToolPredicate,
 } from '@google/adk';
 
-import {BigQueryToolConfig} from './config.js';
+import {BigQueryToolConfig, resolveBigQueryToolConfig} from './config.js';
 import {createBigQueryMetadataTools} from './metadata_tool.js';
+import {BigQueryToolDependencies} from './tool_dependencies.js';
 
 /** How to build a {@link BigQueryToolset}. */
 export interface BigQueryToolsetOptions {
@@ -61,15 +62,12 @@ export class BigQueryToolset extends BaseToolset {
 
   constructor(options: BigQueryToolsetOptions = {}) {
     super(options.toolFilter ?? [], options.prefix);
-    const settings = options.toolConfig ?? {};
-    if (settings.applicationName?.includes(' ')) {
-      throw new Error('Application name should not contain spaces.');
-    }
-    this.tools = createBigQueryMetadataTools({
+    const deps: BigQueryToolDependencies = {
       credentials: options.credentials,
-      settings,
+      settings: resolveBigQueryToolConfig(options.toolConfig),
       prefix: options.prefix,
-    });
+    };
+    this.tools = createBigQueryMetadataTools(deps);
   }
 
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
