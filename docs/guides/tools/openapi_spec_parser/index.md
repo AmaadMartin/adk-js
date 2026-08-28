@@ -69,6 +69,22 @@ console.log(operations[0].returnValue.paramSchema.type); // 'string'
 `returnValue` is always present. Its `paramSchema` is `{}` when the operation
 declares no 2xx response that carries a schema.
 
+## Operation names
+
+`name` comes from `operationId`, converted to snake_case. An operation that
+declares no `operationId` gets one built from its path and method:
+
+| Path and method       | Generated name      |
+| --------------------- | ------------------- |
+| `/test` + `get`       | `test_get`          |
+| `/users/{id}` + `get` | `users_id_get`      |
+| `/v1/getUsers` + post | `v1_get_users_post` |
+
+adk-python names the same operations the same way, so one spec produces one
+set of tool names in both SDKs.
+
+## Order and immutability
+
 The order is stable. Paths keep the order of the document. Methods follow a
 fixed order: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`,
 `trace`.

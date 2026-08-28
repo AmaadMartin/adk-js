@@ -416,6 +416,53 @@ describe('OpenApiSpecParser', () => {
       expect(parsed.map((op) => op.name)).toEqual(['test_get', 'test_post']);
     });
 
+    it('should synthesize a missing operationId the way adk-python does', () => {
+      const spec: OpenAPIV3.Document = {
+        openapi: '3.0.0',
+        info: {title: 'Synthesis API', version: '1.0.0'},
+        paths: {
+          '/test': {get: {responses: {}}},
+          '/users/{id}': {get: {responses: {}}},
+          '/v1/getUsers': {post: {responses: {}}},
+          '/a-b/c.d': {delete: {responses: {}}},
+        },
+      };
+
+      const parsed = new OpenApiSpecParser().parse(spec);
+
+      expect(parsed.map((op) => op.operation.operationId)).toEqual([
+        'test_get',
+        'users_id_get',
+        'v1_get_users_post',
+        'a_b_c_d_delete',
+      ]);
+      expect(parsed.map((op) => op.name)).toEqual([
+        'test_get',
+        'users_id_get',
+        'v1_get_users_post',
+        'a_b_c_d_delete',
+      ]);
+    });
+
+    it('should keep an operationId the spec declares', () => {
+      const parsed = new OpenApiSpecParser().parse(createMinimalOpenApiSpec());
+
+      expect(parsed[0].operation.operationId).toBe('testGet');
+      expect(parsed[0].name).toBe('test_get');
+    });
+
+    it('should synthesize a distinct id for each method on one path', () => {
+      const spec: OpenAPIV3.Document = {
+        openapi: '3.0.0',
+        info: {title: 'Methods API', version: '1.0.0'},
+        paths: {'/test': {get: {responses: {}}, post: {responses: {}}}},
+      };
+
+      const parsed = new OpenApiSpecParser().parse(spec);
+
+      expect(parsed.map((op) => op.name)).toEqual(['test_get', 'test_post']);
+    });
+
     it('should return an empty schema when the operation declares no responses', () => {
       // A spec file may omit `responses` even though the OpenAPI typings
       // require it, so the parser has to survive the omission.
