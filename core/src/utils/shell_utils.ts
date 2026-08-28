@@ -140,10 +140,11 @@ export async function collectChildOutput(
     const returncode = await new Promise<number>((resolve, reject) => {
       // 'close' rather than 'exit': the stdio streams are drained by then.
       // The return code follows Python: the exit status, or the negative
-      // signal number when a signal ended the process. Node sets exactly one
-      // of the pair, so `code` is a number whenever `signal` is null.
+      // signal number when a signal ended the process. Node types `code` as
+      // nullable and promises nothing more, so a missing status reports 0
+      // rather than a null typed as a number.
       child.on('close', (code, signal) =>
-        resolve(signal === null ? code! : -os.constants.signals[signal]),
+        resolve(signal === null ? (code ?? 0) : -os.constants.signals[signal]),
       );
       child.on('error', reject);
     });
