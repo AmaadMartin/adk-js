@@ -9,6 +9,7 @@ import {FunctionDeclaration, Part, Type} from '@google/genai';
 import {Context} from '../agents/context.js';
 import {appendInstructions, LlmRequest} from '../models/llm_request.js';
 import {getLogger} from '../utils/logger.js';
+import {baseMimeType} from '../utils/mime_utils.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
@@ -26,10 +27,7 @@ const TEXT_LIKE_MIME_TYPES = new Set([
 ]);
 
 function normalizeMimeType(mimeType?: string): string | undefined {
-  if (!mimeType) {
-    return undefined;
-  }
-  return mimeType.split(';')[0].trim();
+  return mimeType ? baseMimeType(mimeType) : undefined;
 }
 
 function isInlineMimeTypeSupported(mimeType?: string): boolean {
