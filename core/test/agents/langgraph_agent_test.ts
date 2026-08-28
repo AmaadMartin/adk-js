@@ -14,6 +14,7 @@ import {
   PluginManager,
   createEvent,
   createSession,
+  getThreadId,
   isLangGraphAgent,
 } from '@google/adk';
 import {AIMessage, BaseMessage} from '@langchain/core/messages';
@@ -25,12 +26,14 @@ import {
 import {describe, expect, it, vi} from 'vitest';
 
 const SESSION_ID = 'test-session';
+const APP_NAME = 'test-app';
+const USER_ID = 'test-user';
 const INSTRUCTION = 'test system prompt';
 const AGENT_NAME = 'weather_agent';
 const BRANCH = 'parent_agent';
 const INVOCATION_ID = 'test_invocation_id';
 const THREAD_CONFIG: LangGraphThreadConfig = {
-  configurable: {thread_id: SESSION_ID},
+  configurable: {thread_id: getThreadId(APP_NAME, USER_ID, SESSION_ID)},
 };
 
 /** The `{messages}` payload the agent passes to `graph.invoke`. */
@@ -85,17 +88,20 @@ function agentEvent(author: string, text: string): Event {
   });
 }
 
-function createContext(agent: LangGraphAgent, events: Event[]) {
+function createContext(
+  agent: LangGraphAgent,
+  events: Event[],
+  session: {appName: string; userId: string; id: string} = {
+    appName: APP_NAME,
+    userId: USER_ID,
+    id: SESSION_ID,
+  },
+) {
   return new InvocationContext({
     invocationId: INVOCATION_ID,
     branch: BRANCH,
     agent,
-    session: createSession({
-      id: SESSION_ID,
-      appName: 'test-app',
-      userId: 'test-user',
-      events,
-    }),
+    session: createSession({...session, events}),
     pluginManager: new PluginManager(),
   });
 }
@@ -123,6 +129,33 @@ async function runAgent(
     yielded.push(event);
   }
   return yielded;
+}
+
+/**
+ * Runs the agent once for the given session triple and returns the thread id
+ * it addressed, after checking that the read and the write used the same one.
+ */
+async function runAndGetThreadId(
+  appName: string,
+  userId: string,
+  sessionId: string,
+): Promise<string> {
+  const graph = createStubGraph({checkpointer: {}});
+  const agent = createAgent(graph, INSTRUCTION);
+  const context = createContext(agent, [userEvent('test prompt')], {
+    appName,
+    userId,
+    id: sessionId,
+  });
+
+  for await (const _event of agent.runAsync(context)) {
+    // Draining the generator is what runs the graph.
+  }
+
+  const readConfig = graph.getState.mock.calls[0][0];
+  const writeConfig = graph.invoke.mock.calls[0][1];
+  expect(readConfig).toEqual(writeConfig);
+  return writeConfig.configurable.thread_id;
 }
 
 const FOUR_TURN_CONVERSATION: Event[] = [
@@ -410,5 +443,70 @@ describe('LangGraphAgent', () => {
       ['AIMessage', 'reply 1'],
       ['HumanMessage', 'second prompt'],
     ]);
+  });
+});
+
+describe('getThreadId', () => {
+  // The two literal digests below are the values adk-python produces for the
+  // same triples, so they also pin cross-language agreement.
+  it('is stable across processes', () => {
+    expect(getThreadId('app', 'alice', 'session-id')).toBe(
+      '8c95b75b65efd3d1ddd363cfdcb7d1d4bdd9a747aa8f505a887b1dc217fca0e2',
+    );
+  });
+
+  it('counts code points, not UTF-16 code units, in the length prefix', () => {
+    expect(getThreadId('app', 'ali\u{1F44D}ce', 'session-id')).toBe(
+      'ac15e78f366ffb3002e300aa1f0987de7d704d02b5c4e64ee1123f2fbce4c7da',
+    );
+  });
+
+  it('separates users and apps that share a session id', () => {
+    expect(getThreadId('app', 'alice', 'shared-id')).not.toBe(
+      getThreadId('app', 'bob', 'shared-id'),
+    );
+    expect(getThreadId('app_one', 'alice', 'shared-id')).not.toBe(
+      getThreadId('app_two', 'alice', 'shared-id'),
+    );
+  });
+
+  it('cannot be forged by moving the separator between components', () => {
+    expect(getThreadId('app', 'alice', 'bob|s1')).not.toBe(
+      getThreadId('app', 'alice|bob', 's1'),
+    );
+    expect(getThreadId('app|alice', 'bob', 's1')).not.toBe(
+      getThreadId('app', 'alice|bob', 's1'),
+    );
+    expect(getThreadId('app', 'alice', '1:x')).not.toBe(
+      getThreadId('app', 'alice|1:x', ''),
+    );
+  });
+});
+
+describe('LangGraphAgent thread addressing', () => {
+  it('does not share a thread between users with the same session id', async () => {
+    const aliceThreadId = await runAndGetThreadId('app', 'alice', 'shared-id');
+    const bobThreadId = await runAndGetThreadId('app', 'bob', 'shared-id');
+
+    expect(aliceThreadId).not.toBe(bobThreadId);
+  });
+
+  it('does not share a thread between apps with the same session id', async () => {
+    const firstThreadId = await runAndGetThreadId('app_one', 'a', 'shared-id');
+    const secondThreadId = await runAndGetThreadId('app_two', 'a', 'shared-id');
+
+    expect(firstThreadId).not.toBe(secondThreadId);
+  });
+
+  it('resolves the same session to the same thread', async () => {
+    const firstThreadId = await runAndGetThreadId('app', 'alice', 'session-id');
+    const secondThreadId = await runAndGetThreadId(
+      'app',
+      'alice',
+      'session-id',
+    );
+
+    expect(firstThreadId).toBe(secondThreadId);
+    expect(firstThreadId).toBe(getThreadId('app', 'alice', 'session-id'));
   });
 });

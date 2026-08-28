@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {createHash} from 'node:crypto';
+
 import type {
   AIMessage,
   BaseMessage,
@@ -23,6 +25,37 @@ import {InvocationContext} from './invocation_context.js';
  */
 export interface LangGraphThreadConfig {
   configurable: {thread_id: string};
+}
+
+/**
+ * Derives the LangGraph checkpointer thread id for a session.
+ *
+ * Session ids are caller-chosen and are only unique within an
+ * (app name, user id) pair, so all three components take part in the thread
+ * id. Each component is length-prefixed before hashing, so a component that
+ * contains the separator cannot stand in for a different triple. The
+ * composite is hashed rather than used verbatim, so the thread id is a
+ * fixed-length token that no checkpointer backend has to escape, and the user
+ * id is not written into checkpointer storage. The cost is that a stored row
+ * can only be tied back to a session by recomputing the digest.
+ *
+ * The length prefix counts code points, not UTF-16 code units, so adk-js and
+ * adk-python derive the same thread id for the same session.
+ *
+ * @param appName The app the session belongs to.
+ * @param userId The user the session belongs to.
+ * @param sessionId The session id.
+ * @returns A deterministic thread id for the session.
+ */
+export function getThreadId(
+  appName: string,
+  userId: string,
+  sessionId: string,
+): string {
+  const key = [appName, userId, sessionId]
+    .map((component) => `${[...component].length}:${component}`)
+    .join('|');
+  return createHash('sha256').update(key, 'utf8').digest('hex');
 }
 
 /**
@@ -201,7 +234,13 @@ export class LangGraphAgent extends BaseAgent<LangGraphAgentConfig> {
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
     const config: LangGraphThreadConfig = {
-      configurable: {thread_id: context.session.id},
+      configurable: {
+        thread_id: getThreadId(
+          context.session.appName,
+          context.session.userId,
+          context.session.id,
+        ),
+      },
     };
 
     const hasCheckpointer = Boolean(this.graph.checkpointer);
