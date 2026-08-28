@@ -14,6 +14,7 @@ import {
   BaseTool,
   CONTENT_REQUEST_PROCESSOR,
   Context,
+  CONTEXT_CACHE_REQUEST_PROCESSOR,
   ContextCompactorRequestProcessor,
   createEvent,
   createSession,
@@ -1026,6 +1027,17 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+
+  it('includes CONTEXT_CACHE_REQUEST_PROCESSOR after CONTENT_REQUEST_PROCESSOR', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+    const contentIndex = agent.requestProcessors.indexOf(
+      CONTENT_REQUEST_PROCESSOR,
+    );
+    const cacheIndex = agent.requestProcessors.indexOf(
+      CONTEXT_CACHE_REQUEST_PROCESSOR,
+    );
+    expect(cacheIndex).toBeGreaterThan(contentIndex);
   });
 });
 

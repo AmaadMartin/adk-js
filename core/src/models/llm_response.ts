@@ -16,6 +16,8 @@ import {
   Transcription,
 } from '@google/genai';
 
+import {CacheMetadata} from './cache_metadata.js';
+
 /**
  * LLM response class that provides the first candidate response from the
  * model if available. Otherwise, returns error code and message.
@@ -112,6 +114,13 @@ export interface LlmResponse {
 
   /** The session ID of the Live session. */
   liveSessionId?: string;
+
+  /**
+   * The context cache in play when the model produced this response. `Event`
+   * extends this interface, so a later turn reads the cache state back out of
+   * the session history.
+   */
+  cacheMetadata?: CacheMetadata;
 }
 
 /**

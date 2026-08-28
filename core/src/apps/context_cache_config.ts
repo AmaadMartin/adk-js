@@ -21,6 +21,11 @@ const DEFAULT_MIN_TOKENS = 0;
  * context caching is enabled for every LLM agent in that app. When it is
  * absent, context caching is disabled.
  *
+ * Caching begins on the second turn of a session at the earliest, and the
+ * cacheable prefix must reach the model's own minimum: 2048 tokens for Gemini
+ * 2.5, 4096 tokens for Gemini 3. A short or single-turn session is therefore
+ * never cached.
+ *
  * WARNING: This feature is **experimental** and its API or behavior may
  * change in future releases.
  */
@@ -35,11 +40,13 @@ export interface ContextCacheConfig {
   ttlSeconds: number;
 
   /**
-   * Minimum estimated request tokens required to enable caching. This compares
-   * against the estimated total tokens of the request (system instruction +
-   * tools + contents). Context cache storage may have cost. Set higher to
-   * avoid caching small requests where overhead may exceed benefits. Must be a
-   * non-negative integer.
+   * Minimum prior-request tokens required to enable caching. This gates on the
+   * previous request's measured prompt token count, not on an estimate of the
+   * current request, so no cache is created on the first request of a session.
+   * Gemini's own minimum always applies on top: 2048 tokens for Gemini 2.5,
+   * 4096 tokens for Gemini 3. Set this higher to avoid caching small requests,
+   * where the storage cost may exceed the benefit. Must be a non-negative
+   * integer.
    */
   minTokens: number;
 }
