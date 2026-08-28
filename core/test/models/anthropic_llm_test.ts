@@ -22,6 +22,10 @@ import {
 import {FinishReason} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
+import {
+  partToMessageBlock,
+  ToolUseIdSanitizer,
+} from '../../src/models/anthropic_utils.js';
 import {logger} from '../../src/utils/logger.js';
 
 import {
@@ -1236,5 +1240,150 @@ describe('Anthropic API credentials', () => {
     await collect(llm.generateContentAsync(makeRequest(), false));
 
     expect(anthropicOptions).toHaveBeenCalledOnce();
+  });
+});
+
+describe('streamed thinking signature', () => {
+  /** Builds the event sequence Claude really sends for a signed thinking block. */
+  function signedThinkingStream(...signatures: string[]) {
+    return asStream([
+      messageStartEvent(5),
+      blockStartEvent(0, {type: 'thinking', thinking: '', signature: ''}),
+      blockDeltaEvent(0, {type: 'thinking_delta', thinking: 'Weighing it.'}),
+      ...signatures.map((signature) =>
+        blockDeltaEvent(0, {type: 'signature_delta', signature}),
+      ),
+      blockStopEvent(0),
+      messageDeltaEvent(4),
+      messageStopEvent(),
+    ]);
+  }
+
+  it('keeps a signature that arrives as a delta, not in the block start', async () => {
+    create.mockResolvedValue(signedThinkingStream('sig_from_delta'));
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses.at(-1)?.content?.parts).toEqual([
+      {
+        text: 'Weighing it.',
+        thought: true,
+        thoughtSignature: 'sig_from_delta',
+      },
+    ]);
+  });
+
+  it('joins a signature split across several deltas', async () => {
+    create.mockResolvedValue(signedThinkingStream('sig_', 'from_', 'three'));
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses.at(-1)?.content?.parts?.[0].thoughtSignature).toBe(
+      'sig_from_three',
+    );
+  });
+
+  it('emits no partial for the signature delta', async () => {
+    create.mockResolvedValue(signedThinkingStream('sig_from_delta'));
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    const partials = responses.filter((response) => response.partial);
+    expect(partials).toHaveLength(1);
+    expect(partials[0].content?.parts).toEqual([
+      {text: 'Weighing it.', thought: true},
+    ]);
+  });
+
+  it('round-trips the streamed thinking block back to Claude', async () => {
+    create.mockResolvedValue(signedThinkingStream('sig_from_delta'));
+    const llm = new AnthropicLlm();
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+    const thought = responses.at(-1)?.content?.parts?.[0];
+    if (thought === undefined) {
+      return expect.fail('the stream produced no thinking part.');
+    }
+
+    expect(partToMessageBlock(thought, new ToolUseIdSanitizer())).toEqual({
+      type: 'thinking',
+      thinking: 'Weighing it.',
+      signature: 'sig_from_delta',
+    });
+  });
+});
+
+describe('streamed stop reason', () => {
+  it('keeps the reported reason when a later delta omits it', async () => {
+    create.mockResolvedValue(
+      asStream([
+        messageStartEvent(5),
+        messageDeltaEvent(3, 'max_tokens'),
+        messageDeltaEvent(4, null),
+        messageStopEvent(),
+      ]),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses.at(-1)?.finishReason).toBe(FinishReason.MAX_TOKENS);
+  });
+});
+
+describe('system instruction', () => {
+  it('omits system when the instruction flattens to nothing', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({
+      config: {systemInstruction: {role: 'user', parts: []}},
+    });
+
+    await collect(llm.generateContentAsync(request, false));
+
+    expect(createdParams()).not.toHaveProperty('system');
+  });
+});
+
+describe('streamed citations', () => {
+  it('ignores a citations delta', async () => {
+    create.mockResolvedValue(
+      asStream([
+        messageStartEvent(1),
+        blockStartEvent(0, {type: 'text', text: 'x', citations: null}),
+        blockDeltaEvent(0, {
+          type: 'citations_delta',
+          citation: {
+            type: 'char_location',
+            cited_text: 'quoted',
+            document_index: 0,
+            document_title: null,
+            file_id: null,
+            start_char_index: 0,
+            end_char_index: 6,
+          },
+        }),
+        messageStopEvent(),
+      ]),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses).toHaveLength(1);
+    expect(responses[0].content?.parts).toEqual([{text: 'x'}]);
   });
 });

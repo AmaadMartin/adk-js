@@ -159,8 +159,11 @@ class StreamedMessage {
     };
   }
 
+  /** Records a stop reason, keeping an earlier one a later event omits. */
   setStopReason(stopReason: StopReason | null): void {
-    this.stopReason = stopReason;
+    if (stopReason) {
+      this.stopReason = stopReason;
+    }
   }
 
   startBlock(event: RawContentBlockStartEvent): void {
@@ -208,6 +211,17 @@ class StreamedMessage {
           content: {role: 'model', parts: [{text: delta.text}]},
           partial: true,
         };
+      case 'signature_delta': {
+        // Claude sends the signature here, never in content_block_start.
+        // Without it the thinking block cannot be echoed back on the next
+        // turn, which extended thinking with tool use requires. It is opaque,
+        // so no partial is emitted for it.
+        const block = this.blocks.get(event.index);
+        if (block?.type === 'thinking') {
+          block.signature += delta.signature;
+        }
+        return undefined;
+      }
       case 'input_json_delta': {
         const block = this.blocks.get(event.index);
         if (block?.type === 'tool_use') {
@@ -352,7 +366,7 @@ function buildMessageCreateParams(
   };
 
   const system = systemInstructionToText(config?.systemInstruction);
-  if (system !== undefined) {
+  if (system) {
     params.system = system;
   }
 

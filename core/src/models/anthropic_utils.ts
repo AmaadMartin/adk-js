@@ -26,6 +26,8 @@ import type {
   Content,
   ContentUnion,
   FunctionDeclaration,
+  FunctionResponse,
+  FunctionResponsePart,
   GenerateContentConfig,
   GenerateContentResponseUsageMetadata,
   Part,
@@ -122,9 +124,16 @@ const MEDIA_KIND_LABELS: Record<InlineMediaKind, string> = {
 /** An Anthropic tool_use id must match this, or the API rejects the request. */
 const VALID_TOOL_USE_ID = /^[a-zA-Z0-9_-]+$/;
 
-/** JSON Schema keys whose value is itself a map of schemas. */
+/**
+ * JSON Schema keys whose value is itself a map of schemas.
+ *
+ * `defs` is the pre-2019 spelling of `$defs`. It is not a keyword any more,
+ * but adk-python still walks it, and a schema that uses it would otherwise
+ * reach Claude with upper-case genai type names in its sub-schemas.
+ */
 const SCHEMA_MAP_KEYS = [
   '$defs',
+  'defs',
   'dependentSchemas',
   'patternProperties',
   'properties',
@@ -172,7 +181,7 @@ export function inlineMediaKind(part: Part): InlineMediaKind | undefined {
   if (mimeType === undefined) {
     return undefined;
   }
-  if (mimeType.startsWith('image')) {
+  if (mimeType.startsWith('image/')) {
     return 'image';
   }
   return baseMimeType(mimeType) === PDF_MIME_TYPE ? 'pdf' : undefined;
@@ -241,43 +250,113 @@ function toolResultContent(response?: Record<string, unknown>): string {
   return '';
 }
 
-function toImageMediaType(mimeType: string): AnthropicImageMediaType {
+/**
+ * Converts base64 media to the block Claude carries it in.
+ *
+ * `Blob.data` is already a base64 string in genai, so it is passed through
+ * unchanged; encoding it again would produce media Claude cannot read.
+ *
+ * @return The block, or `undefined` when Claude accepts no block for the
+ *   media type. The caller decides whether that is an error.
+ */
+function toMediaBlock(
+  mimeType: string,
+  data: string,
+): ImageBlockParam | DocumentBlockParam | undefined {
   const baseType = baseMimeType(mimeType);
-  const supported = ANTHROPIC_IMAGE_MEDIA_TYPES.find((it) => it === baseType);
-  if (supported === undefined) {
+  if (baseType === PDF_MIME_TYPE) {
+    return {
+      type: 'document',
+      source: {type: 'base64', media_type: PDF_MIME_TYPE, data},
+    };
+  }
+  const mediaType = ANTHROPIC_IMAGE_MEDIA_TYPES.find((it) => it === baseType);
+  return mediaType === undefined
+    ? undefined
+    : {type: 'image', source: {type: 'base64', media_type: mediaType, data}};
+}
+
+/**
+ * Converts the inline media of a conversation part.
+ *
+ * @return The block, or `undefined` when the part carries no inline media, so
+ *   that the caller can go on to the other part shapes.
+ * @throws If the part carries an image Claude cannot read. Dropping media the
+ *   user put in the conversation would change what the model is answering.
+ */
+function partToMediaBlock(
+  part: Part,
+): ImageBlockParam | DocumentBlockParam | undefined {
+  const mimeType = part.inlineData?.mimeType;
+  const data = part.inlineData?.data;
+  if (mimeType === undefined || data === undefined) {
+    return undefined;
+  }
+  const block = toMediaBlock(mimeType, data);
+  if (block === undefined && inlineMediaKind(part) === 'image') {
     throw new Error(
       `Claude does not accept the image media type "${mimeType}". ` +
         `Supported types are ${ANTHROPIC_IMAGE_MEDIA_TYPES.join(', ')}.`,
     );
   }
-  return supported;
+  return block;
 }
 
 /**
- * Converts an inline-data part to an image or document block.
+ * Converts the media a tool attached to its result.
  *
- * `Blob.data` is already a base64 string in genai, so it is passed through
- * unchanged; encoding it again would produce media Claude cannot read.
+ * Media Claude cannot carry is dropped with a warning rather than throwing:
+ * the tool that produced it is usually third-party code the caller cannot
+ * change, and losing one attachment beats losing the conversation.
  */
-function toMediaBlock(
-  part: Part,
-): ImageBlockParam | DocumentBlockParam | undefined {
-  const kind = inlineMediaKind(part);
-  const mimeType = part.inlineData?.mimeType;
-  const data = part.inlineData?.data;
-  if (kind === undefined || mimeType === undefined || data === undefined) {
-    return undefined;
+function toolResultMediaBlocks(
+  parts?: FunctionResponsePart[],
+): Array<ImageBlockParam | DocumentBlockParam> {
+  const blocks: Array<ImageBlockParam | DocumentBlockParam> = [];
+  for (const part of parts ?? []) {
+    const mimeType = part.inlineData?.mimeType;
+    const data = part.inlineData?.data;
+    if (mimeType === undefined || data === undefined) {
+      continue;
+    }
+    const block = toMediaBlock(mimeType, data);
+    if (block === undefined) {
+      logger.warn(
+        `Claude cannot carry the media type "${mimeType}" in a tool result, ` +
+          `so the attachment is dropped.`,
+      );
+      continue;
+    }
+    blocks.push(block);
   }
-  if (kind === 'image') {
-    return {
-      type: 'image',
-      source: {type: 'base64', media_type: toImageMediaType(mimeType), data},
-    };
-  }
-  return {
-    type: 'document',
-    source: {type: 'base64', media_type: PDF_MIME_TYPE, data},
+  return blocks;
+}
+
+/**
+ * Converts a genai function response to an Anthropic `tool_result` block.
+ *
+ * The result text stays a plain string unless the tool attached media, in
+ * which case it becomes the leading text block of a block list.
+ */
+function toolResultBlock(
+  functionResponse: FunctionResponse,
+  sanitizer: ToolUseIdSanitizer,
+): ToolResultBlockParam {
+  const text = toolResultContent(functionResponse.response);
+  const media = toolResultMediaBlocks(functionResponse.parts);
+  const block: ToolResultBlockParam = {
+    type: 'tool_result',
+    tool_use_id: sanitizer.sanitize(functionResponse.id),
+    content: text,
+    is_error: false,
   };
+  if (media.length > 0) {
+    const blocks: Array<TextBlockParam | ImageBlockParam | DocumentBlockParam> =
+      text ? [{type: 'text', text}] : [];
+    blocks.push(...media);
+    block.content = blocks;
+  }
+  return block;
 }
 
 /**
@@ -317,14 +396,9 @@ export function partToMessageBlock(
     };
   }
   if (part.functionResponse) {
-    return {
-      type: 'tool_result',
-      tool_use_id: sanitizer.sanitize(part.functionResponse.id),
-      content: toolResultContent(part.functionResponse.response),
-      is_error: false,
-    };
+    return toolResultBlock(part.functionResponse, sanitizer);
   }
-  const media = toMediaBlock(part);
+  const media = partToMediaBlock(part);
   if (media) {
     return media;
   }

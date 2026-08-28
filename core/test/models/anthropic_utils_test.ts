@@ -5,7 +5,12 @@
  */
 
 import type {StopReason, Tool} from '@anthropic-ai/sdk/resources/messages';
-import type {Content, FunctionDeclaration, Part} from '@google/genai';
+import type {
+  Content,
+  FunctionDeclaration,
+  FunctionResponsePart,
+  Part,
+} from '@google/genai';
 import {FinishReason, ThinkingLevel, Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
@@ -1193,5 +1198,132 @@ describe('buildEffortParam', () => {
       undefined,
     );
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('tool result media', () => {
+  const png = 'aW1hZ2VieXRlcw==';
+
+  function toolResult(
+    response: Record<string, unknown>,
+    parts: FunctionResponsePart[],
+  ) {
+    return block({
+      functionResponse: {id: 'toolu_1', name: 'shot', response, parts},
+    });
+  }
+
+  it('puts the result text before the image the tool attached', () => {
+    expect(
+      toolResult({result: 'captured'}, [
+        {inlineData: {mimeType: 'image/png', data: png}},
+      ]),
+    ).toEqual({
+      type: 'tool_result',
+      tool_use_id: 'toolu_1',
+      is_error: false,
+      content: [
+        {type: 'text', text: 'captured'},
+        {
+          type: 'image',
+          source: {type: 'base64', media_type: 'image/png', data: png},
+        },
+      ],
+    });
+  });
+
+  it('emits no empty text block when the result is only media', () => {
+    const converted = toolResult({}, [
+      {inlineData: {mimeType: 'image/png', data: png}},
+    ]);
+
+    expect(converted).toMatchObject({
+      content: [
+        {
+          type: 'image',
+          source: {type: 'base64', media_type: 'image/png', data: png},
+        },
+      ],
+    });
+  });
+
+  it('carries an attached PDF as a document block', () => {
+    expect(
+      toolResult({}, [{inlineData: {mimeType: 'application/pdf', data: png}}]),
+    ).toMatchObject({
+      content: [
+        {
+          type: 'document',
+          source: {type: 'base64', media_type: 'application/pdf', data: png},
+        },
+      ],
+    });
+  });
+
+  it('drops media Claude cannot carry and keeps the result text', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const converted = toolResult({result: 'recorded'}, [
+      {inlineData: {mimeType: 'audio/wav', data: 'YXVkaW8='}},
+    ]);
+
+    expect(converted).toMatchObject({content: 'recorded'});
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('audio/wav'));
+  });
+
+  it('keeps the plain string when the tool attached no media', () => {
+    expect(toolResult({result: 'plain'}, [])).toMatchObject({
+      content: 'plain',
+    });
+  });
+
+  it('ignores an attached part that carries no inline data', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    expect(
+      toolResult({result: 'plain'}, [
+        {fileData: {fileUri: 'gs://bucket/x', mimeType: 'image/png'}},
+        {inlineData: {mimeType: 'image/png'}},
+      ]),
+    ).toMatchObject({content: 'plain'});
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('keeps the plain string when the response has no parts', () => {
+    expect(
+      block({functionResponse: {id: 'toolu_1', response: {result: 'plain'}}}),
+    ).toMatchObject({content: 'plain'});
+  });
+});
+
+describe('inlineMediaKind media type prefix', () => {
+  it('does not treat an imagemap type as an image', () => {
+    expect(inlineMediaKind({inlineData: {mimeType: 'imagemap/x'}})).toBe(
+      undefined,
+    );
+  });
+
+  it('rejects an imagemap part as an unconvertible part', () => {
+    expect(() =>
+      block({inlineData: {mimeType: 'imagemap/x', data: 'eA=='}}),
+    ).toThrow(/does not support this part/);
+  });
+});
+
+describe('functionDeclarationToToolParam defs', () => {
+  it('lowercases the types under the pre-2019 defs key', () => {
+    const tool = functionDeclarationToToolParam({
+      name: 'lookup',
+      description: 'Looks something up.',
+      parametersJsonSchema: {
+        type: 'object',
+        defs: {Entry: {type: 'OBJECT', properties: {id: {type: 'STRING'}}}},
+        properties: {entry: {$ref: '#/defs/Entry'}},
+      },
+    });
+
+    expect(tool.input_schema).toMatchObject({
+      defs: {Entry: {type: 'object', properties: {id: {type: 'string'}}}},
+    });
   });
 });
