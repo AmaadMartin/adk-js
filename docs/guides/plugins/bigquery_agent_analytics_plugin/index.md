@@ -93,7 +93,7 @@ A run that waits on a person or on a long-running tool produces a pause row and,
 
 - A long-running tool call produces `TOOL_PAUSED` with `attributes.adk.pause_kind` of `tool`. The client answers with a function response in its next message, which produces `TOOL_COMPLETED`.
 - The framework's own requests — `adk_request_credential`, `adk_request_confirmation`, `adk_request_input` — produce `HITL_CREDENTIAL_REQUEST`, `HITL_CONFIRMATION_REQUEST` and `HITL_INPUT_REQUEST`, with `pause_kind` of `hitl_credential`, `hitl_confirmation` or `hitl_input`. Each answer produces the matching `HITL_*_REQUEST_COMPLETED`, never a `TOOL_COMPLETED`.
-- A framework request is long-running too, so both pause paths match it. It still produces exactly one row: the `HITL_*_REQUEST` row already carries the `function_call_id` a second `TOOL_PAUSED` row would have paired on.
+- A framework request is long-running too, so it produces two rows, not one: the `HITL_*_REQUEST` above and a `TOOL_PAUSED` carrying the same `function_call_id`. Its `pause_kind` comes from the call name, so it is `hitl_credential`, `hitl_confirmation` or `hitl_input` rather than `tool`. That is what lets one query count every pause uniformly on `TOOL_PAUSED` and still tell a human approval apart from a slow tool.
 
 ```sql
 SELECT JSON_VALUE(attributes, '$.adk.pause_kind') AS pause_kind,
