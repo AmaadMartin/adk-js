@@ -14,6 +14,23 @@ import {
 import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
 
 /**
+ * Parameters for the {@link GoogleSearchTool} constructor.
+ */
+export interface GoogleSearchToolParams {
+  /**
+   * Whether to bypass the multi-tools limitation, so that the tool can be used
+   * with other tools in the same agent.
+   */
+  bypassMultiToolsLimit?: boolean;
+
+  /**
+   * Optional model name to use for processing the LLM request. When set, this
+   * model replaces the model on the incoming request.
+   */
+  model?: string;
+}
+
+/**
  * A built-in tool that is automatically invoked by Gemini 2 models to retrieve
  * search results from Google Search.
  *
@@ -21,8 +38,17 @@ import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
  * perform local code execution.
  */
 export class GoogleSearchTool extends BaseTool {
-  constructor() {
+  readonly bypassMultiToolsLimit: boolean;
+  readonly model?: string;
+
+  constructor({
+    bypassMultiToolsLimit = false,
+    model,
+  }: GoogleSearchToolParams = {}) {
     super({name: 'google_search', description: 'Google Search Tool'});
+
+    this.bypassMultiToolsLimit = bypassMultiToolsLimit;
+    this.model = model;
   }
 
   runAsync(): Promise<unknown> {
@@ -34,16 +60,18 @@ export class GoogleSearchTool extends BaseTool {
   override async processLlmRequest({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    if (!llmRequest.model) {
-      return;
+    if (this.model !== undefined) {
+      llmRequest.model = this.model;
     }
 
     const modelCheckDisabled = isGeminiModelIdCheckDisabled();
+    const model = llmRequest.model ?? '';
+
     llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
     llmRequest.config.tools = llmRequest.config.tools || [];
 
-    if (isGemini1Model(llmRequest.model)) {
-      if (llmRequest.config.tools.length > 0) {
+    if (isGemini1Model(model)) {
+      if (llmRequest.config.tools.length > 0 && !this.bypassMultiToolsLimit) {
         throw new Error(
           'Google search tool can not be used with other tools in Gemini 1.x.',
         );
@@ -56,7 +84,7 @@ export class GoogleSearchTool extends BaseTool {
       return;
     }
 
-    if (isGeminiModel(llmRequest.model) || modelCheckDisabled) {
+    if (isGeminiModel(model) || modelCheckDisabled) {
       llmRequest.config.tools.push({
         googleSearch: {},
       });
