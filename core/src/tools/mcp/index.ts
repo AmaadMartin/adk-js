@@ -11,6 +11,7 @@
 
 export {toMcpServer} from './agent_to_mcp.js';
 export type {ToMcpServerOptions} from './agent_to_mcp.js';
+export * from './conversion_utils.js';
 export * from './load_mcp_resource_tool.js';
 export * from './mcp_session_manager.js';
 export * from './mcp_tool.js';

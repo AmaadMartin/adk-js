@@ -28,6 +28,12 @@ TypeScript implementation. For the official ADK documentation, visit
 - [Anthropic Claude models](models/anthropic/index.md) - Driving an agent with
   Claude, through the Anthropic API or Vertex AI.
 
+### Tools
+
+- [adkToMcpToolType and geminiToJsonSchema](tools/mcp_conversion_utils/index.md) -
+  Convert an ADK tool into an MCP tool descriptor so an MCP server can
+  advertise it.
+
 ### Utils
 
 - [content_utils](utils/content_utils/index.md) - Reading and reshaping a genai
