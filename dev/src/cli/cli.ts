@@ -22,6 +22,7 @@ import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
+import {evalAgent} from './cli_eval.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
@@ -416,6 +417,54 @@ export function createProgram(): Command {
         process.exit(1);
       }
     });
+
+  program
+    .command('eval')
+    .description('Evaluates an agent against one or more eval sets')
+    .argument('<agent>', 'Agent file path (.js or .ts)')
+    .argument(
+      '<eval_set_file_path...>',
+      'One or more eval set file paths. All cases in a file run by default. ' +
+        'To run only some, append a colon and a comma-separated list of case ' +
+        'names, for example my_eval_set.evalset.json:case_1,case_2',
+    )
+    .option('--config_file_path <string>', 'Optional. The path to config file.')
+    .option(
+      '--print_detailed_results [boolean]',
+      'Optional. Whether to print detailed results on console or not.',
+      false,
+    )
+    .addOption(VERBOSE_OPTION)
+    .addOption(LOG_LEVEL_OPTION)
+    .addOption(SESSION_SERVICE_URI_OPTION)
+    .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(COMPILE_AGENT_FILE)
+    .addOption(BUNDLE_AGENT_FILE)
+    .addOption(AGENT_FILE_MODULE_TYPE)
+    .action(
+      async (
+        agentPath: string,
+        evalSetFilePaths: string[],
+        options: Record<string, string>,
+      ) => {
+        setAdkCoreLogLevel(getLogLevelFromOptions(options));
+
+        try {
+          await evalAgent({
+            agentPath,
+            evalSetFilePaths,
+            configFilePath: options['config_file_path'],
+            printDetailedResults: getBoolean(options['print_detailed_results']),
+            sessionService: getSessionServiceFromOptions(options),
+            artifactService: getArtifactServiceFromOptions(options),
+            agentFileLoadOptions: getAgentFileOptions(options),
+          });
+        } catch (error) {
+          logger.error('Error evaluating agent:', (error as Error).message);
+          process.exit(1);
+        }
+      },
+    );
 
   const DEPLOY_COMMAND = program
     .command('deploy')

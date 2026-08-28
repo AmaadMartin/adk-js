@@ -8,6 +8,7 @@ import {LogLevel, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
+import {evalAgent} from '../../src/cli/cli_eval.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
@@ -35,6 +36,10 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
+}));
+
+vi.mock('../../src/cli/cli_eval', () => ({
+  evalAgent: vi.fn(),
 }));
 
 vi.mock('../../src/version', () => ({
@@ -298,6 +303,76 @@ describe('CLI Entrypoint', () => {
           otelToCloud: true,
         }),
       );
+    });
+  });
+
+  describe('command: eval', () => {
+    it('exits non-zero when the eval run fails', async () => {
+      (evalAgent as Mock).mockRejectedValueOnce(
+        new Error('Agent file /nope/agent.ts does not exists'),
+      );
+      // A stub that always throws types as `never`-returning, so it stands in
+      // for `process.exit` without a cast.
+      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('process.exit');
+      });
+
+      await expect(
+        parse(['eval', '/nope/agent.ts', 'set.evalset.json']),
+      ).rejects.toThrow('process.exit');
+      expect(exit).toHaveBeenCalledWith(1);
+    });
+
+    it('should call evalAgent with required args', async () => {
+      await parse(['eval', 'agent.ts', 'set.evalset.json']);
+
+      expect(evalAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          evalSetFilePaths: ['set.evalset.json'],
+          configFilePath: undefined,
+          printDetailedResults: false,
+        }),
+      );
+    });
+
+    it('should collect every eval set path', async () => {
+      await parse(['eval', 'agent.ts', 'a.evalset.json', 'b.evalset.json:c1']);
+
+      expect(evalAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          evalSetFilePaths: ['a.evalset.json', 'b.evalset.json:c1'],
+        }),
+      );
+    });
+
+    it('should pass all options to evalAgent', async () => {
+      await parse([
+        'eval',
+        'agent.ts',
+        'set.evalset.json',
+        '--config_file_path',
+        'test_config.json',
+        '--print_detailed_results',
+      ]);
+
+      expect(evalAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          evalSetFilePaths: ['set.evalset.json'],
+          configFilePath: 'test_config.json',
+          printDetailedResults: true,
+        }),
+      );
+    });
+
+    it('takes --verbose', async () => {
+      await parse(['eval', 'agent.ts', 'set.evalset.json', '--verbose']);
+
+      expect(evalAgent).toHaveBeenCalledWith(
+        expect.objectContaining({agentPath: 'agent.ts'}),
+      );
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
     });
   });
 

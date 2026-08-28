@@ -150,11 +150,21 @@ export class AgentFile {
   private disposed = false;
   private agent?: RunnableRoot;
   private app?: App;
+  private exports?: Readonly<Record<string, unknown>>;
 
   constructor(
     private readonly filePath: string,
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
   ) {}
+
+  /**
+   * The raw module namespace of the loaded agent file, for callers that need
+   * an export other than the agent itself (the eval flow's `resetData` hook,
+   * for example). Undefined until {@link load} has run.
+   */
+  get moduleExports(): Readonly<Record<string, unknown>> | undefined {
+    return this.exports;
+  }
 
   async load(): Promise<RunnableRoot | App> {
     if (this.app) {
@@ -245,6 +255,8 @@ export class AgentFile {
     const jsModule = await import(importUrl);
 
     if (jsModule) {
+      this.exports = jsModule;
+
       if (isApp(jsModule.app)) {
         this.app = jsModule.app;
         this.agent = jsModule.app.rootAgent;
