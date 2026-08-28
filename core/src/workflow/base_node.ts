@@ -8,6 +8,7 @@ import type {Content, PartListUnion} from '@google/genai';
 import {createModelContent} from '@google/genai';
 import type {Event} from '../events/event.js';
 import {createEvent, isEvent} from '../events/event.js';
+import {isContent} from '../utils/content_utils.js';
 import type {SchemaLike} from '../utils/schema.js';
 import {parseWithSchema} from '../utils/schema.js';
 import {NodeSchemaValidationError} from './errors.js';
@@ -248,16 +249,6 @@ export function isBaseNode(value: unknown): value is BaseNode {
     value !== null &&
     BASE_NODE_SIGNATURE_SYMBOL in value &&
     value[BASE_NODE_SIGNATURE_SYMBOL] === true
-  );
-}
-
-/** Returns whether a value looks like a genai `Content` object. */
-export function isContent(value: unknown): value is Content {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'parts' in value &&
-    Array.isArray((value as {parts?: unknown}).parts)
   );
 }
 

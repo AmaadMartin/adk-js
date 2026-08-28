@@ -18,3 +18,8 @@ TypeScript implementation. For the official ADK documentation, visit
 
 - [BaseEvalService](evaluation/eval_service/index.md) - The two-phase eval
   contract: run the agent over an eval set, then score the results.
+
+### Utils
+
+- [content_utils](utils/content_utils/index.md) - Reading and reshaping a genai
+  `Content`: its text, its audio parts, and coercing a value into a user turn.
