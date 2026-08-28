@@ -141,6 +141,44 @@ describe('AudioTranscriber', () => {
     expect(contents).toEqual([first, second, third]);
   });
 
+  it('passes a Content with no parts through', async () => {
+    const partLess: Content = {role: 'model'};
+    const invocationContext = contextWithCache([
+      {role: 'model', data: partLess},
+    ]);
+
+    const contents = await new AudioTranscriber().transcribeFile(
+      invocationContext,
+    );
+
+    expect(contents).toEqual([partLess]);
+    expect(speech.calls).toEqual([]);
+  });
+
+  it('ends a run at a Content with no parts', async () => {
+    const partLess: Content = {role: 'model'};
+    speech.responses = [scriptedResponse('before'), scriptedResponse('after')];
+    const invocationContext = contextWithCache([
+      audioEntry('user', 'aa'),
+      {role: 'model', data: partLess},
+      audioEntry('user', 'bb'),
+    ]);
+
+    const contents = await new AudioTranscriber().transcribeFile(
+      invocationContext,
+    );
+
+    expect(speech.calls.map((call) => call.audio)).toEqual([
+      Buffer.from('aa'),
+      Buffer.from('bb'),
+    ]);
+    expect(contents).toEqual([
+      textContent('user', 'before'),
+      partLess,
+      textContent('user', 'after'),
+    ]);
+  });
+
   it('skips a blob with no audio data without splitting the run', async () => {
     const text = textContent('model', 'hello');
     const invocationContext = contextWithCache([

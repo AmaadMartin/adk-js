@@ -5,15 +5,28 @@
  */
 
 import type {SpeechClient} from '@google-cloud/speech';
-import type {Content} from '@google/genai';
+import type {Blob, Content} from '@google/genai';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
-import {isContent} from '../workflow/base_node.js';
 import type {InvocationContext} from './invocation_context.js';
 import type {TranscriptionEntry} from './transcription_entry.js';
 
 /** The role a transcript takes when its audio arrived with no role. */
 const DEFAULT_ROLE = 'user';
+
+/**
+ * Discriminates the `Blob | Content` union a cache entry carries.
+ *
+ * `Content` declares only `parts?` and `role?`, so testing for a `Blob` field
+ * is total over the union. Testing for `parts` instead misreads a part-less
+ * `{role: 'model'}` as audio, which drops it and merges the runs around it.
+ *
+ * @param data The entry payload to classify.
+ * @return Whether the payload is a `Blob`.
+ */
+function isBlob(data: Blob | Content): data is Blob {
+  return 'mimeType' in data || 'data' in data;
+}
 
 /**
  * One unit of work produced by bundling the transcription cache: either audio
@@ -57,7 +70,7 @@ function bundleTranscriptionCache(
   };
 
   for (const {role, data} of cache) {
-    if (isContent(data)) {
+    if (!isBlob(data)) {
       flush();
       segments.push({kind: 'content', content: data});
       continue;
