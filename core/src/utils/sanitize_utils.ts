@@ -19,33 +19,33 @@
  */
 
 /** Appended to a string that was cut down to the caller's length limit. */
-export const TRUNCATED_SUFFIX = '...[TRUNCATED]';
+const TRUNCATED_SUFFIX = '...[TRUNCATED]';
 
 /** Replaces a value that points back to one of its own ancestors. */
-export const CIRCULAR_REFERENCE = '[CIRCULAR_REFERENCE]';
+const CIRCULAR_REFERENCE = '[CIRCULAR_REFERENCE]';
 
-/** Replaces a value nested deeper than {@link MAX_SANITIZE_DEPTH}. */
-export const MAX_DEPTH_EXCEEDED = '[MAX_DEPTH_EXCEEDED]';
+/** Replaces a value nested deeper than `MAX_SANITIZE_DEPTH`. */
+const MAX_DEPTH_EXCEEDED = '[MAX_DEPTH_EXCEEDED]';
 
 /** Replaces the remainder of a value once the node budget runs out. */
-export const SANITIZE_BUDGET_EXCEEDED = '[SANITIZE_BUDGET_EXCEEDED]';
+const SANITIZE_BUDGET_EXCEEDED = '[SANITIZE_BUDGET_EXCEEDED]';
 
 /** Replaces the value of a credential-bearing key. */
-export const REDACTED = '[REDACTED]';
+const REDACTED = '[REDACTED]';
 
 /**
  * Recursion bound. A value nested deeper than this is replaced, which turns an
  * adversarially nested payload into a redacted leaf instead of a stack
  * overflow.
  */
-export const MAX_SANITIZE_DEPTH = 50;
+const MAX_SANITIZE_DEPTH = 50;
 
 /**
  * Total values one {@link recursiveSmartTruncate} call may visit. Depth and
  * per-string length are bounded on their own, but width is not: a
  * million-element array otherwise burns unbounded synchronous time.
  */
-export const MAX_SANITIZE_NODES = 100_000;
+const MAX_SANITIZE_NODES = 100_000;
 
 /**
  * Keys whose values are credentials, written in snake_case.
@@ -120,7 +120,7 @@ function normalizeKey(key: string): string {
  * @param key The property name to classify.
  * @return True when the value under `key` must be redacted.
  */
-export function isSensitiveKey(key: string): boolean {
+function isSensitiveKey(key: string): boolean {
   const normalized = normalizeKey(key);
   return (
     SENSITIVE_KEYS.has(normalized) || normalized.startsWith(TEMP_KEY_PREFIX)
@@ -275,7 +275,7 @@ function sanitizeObject(
  * The walk truncates every string to `maxLength`, replaces the value of every
  * credential-bearing key with `[REDACTED]`, replaces a reference back to an
  * ancestor with `[CIRCULAR_REFERENCE]`, and stops with a sentinel once it
- * passes {@link MAX_SANITIZE_DEPTH} or {@link MAX_SANITIZE_NODES}.
+ * passes the depth cap of 50 levels or the budget of 100,000 values.
  *
  * A getter on `value` that throws propagates to the caller: the caller decides
  * whether an unreadable payload is fatal or is replaced by its own sentinel.
