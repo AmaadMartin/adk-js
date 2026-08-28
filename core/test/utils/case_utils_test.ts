@@ -4,10 +4,37 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {snakeToLowerCamel} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {camelCaseKeys} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
+  describe('snakeToLowerCamel', () => {
+    it('should leave a single word unchanged', () => {
+      expect(snakeToLowerCamel('single')).toBe('single');
+    });
+
+    it('should join two words', () => {
+      expect(snakeToLowerCamel('two_words')).toBe('twoWords');
+    });
+
+    it('should join three words', () => {
+      expect(snakeToLowerCamel('three_word_example')).toBe('threeWordExample');
+    });
+
+    it('should return an empty string unchanged', () => {
+      expect(snakeToLowerCamel('')).toBe('');
+    });
+
+    it('should leave an already camelCased string unchanged', () => {
+      expect(snakeToLowerCamel('alreadyCamelCase')).toBe('alreadyCamelCase');
+    });
+
+    it('should lowercase the rest of each word it joins', () => {
+      expect(snakeToLowerCamel('HTTP_Proxy_URL')).toBe('httpProxyUrl');
+    });
+  });
+
   describe('camelCaseKeys', () => {
     it('should convert simple object keys', () => {
       const input = {

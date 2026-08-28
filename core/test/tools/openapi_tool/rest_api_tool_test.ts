@@ -10,7 +10,10 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createRestApiToolFromJson,
   OpenApiSpecParser,
+  OperationParser,
+  ParsedOperation,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -1151,6 +1154,417 @@ describe('RestApiTool Utilities', () => {
       expect(headers).toEqual({
         'Content-Type': 'application/json',
       });
+    });
+  });
+});
+
+describe('RestApiTool adk-python parity', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/test',
+    method: 'GET',
+  };
+  const operation: OpenAPIV3.OperationObject = {responses: {}};
+
+  function mockOkResponse(contentType: string, bodyText: string) {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => contentType},
+      text: async () => bodyText,
+    });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('tool name', () => {
+    it('should truncate a name longer than 60 characters', () => {
+      const longName = 'a'.repeat(75);
+
+      const tool = new RestApiTool(
+        longName,
+        'description',
+        endpoint,
+        operation,
+      );
+
+      expect(tool.name).toHaveLength(60);
+      expect(tool.name).toBe('a'.repeat(60));
+    });
+
+    it('should keep a name of 60 characters', () => {
+      const exactName = 'b'.repeat(60);
+
+      const tool = new RestApiTool(
+        exactName,
+        'description',
+        endpoint,
+        operation,
+      );
+
+      expect(tool.name).toBe(exactName);
+    });
+  });
+
+  describe('toString', () => {
+    it('should render the name, description and endpoint', () => {
+      const tool = new RestApiTool(
+        'test_tool',
+        'a description',
+        endpoint,
+        operation,
+      );
+
+      const rendered = tool.toString();
+
+      expect(rendered).toContain('name="test_tool"');
+      expect(rendered).toContain('description="a description"');
+      expect(rendered).toContain('api.example.com');
+    });
+
+    it('should not render the configured credential', () => {
+      const tool = new RestApiTool(
+        'test_tool',
+        'a description',
+        endpoint,
+        operation,
+        undefined,
+        {apiKey: 'super-secret-key'} as unknown as AuthCredential,
+      );
+
+      expect(tool.toString()).not.toContain('super-secret-key');
+    });
+  });
+
+  describe('configureAuthCredential', () => {
+    it('should clear the credential when it is called with nothing', async () => {
+      const credential = {apiKey: 'test-key'} as unknown as AuthCredential;
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        credential,
+      );
+      mockOkResponse('text/plain', 'ok');
+      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
+        prepareAuthCredentials: async () => ({state: 'done'}),
+      } as unknown as ToolAuthHandler);
+
+      tool.configureAuthCredential();
+      await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined,
+        undefined,
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('response handling', () => {
+    it('should wrap a non-JSON body in a text field', async () => {
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+      );
+      mockOkResponse('text/plain', 'ok');
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: {} as unknown as Context,
+      });
+
+      expect(result).toEqual({text: 'ok'});
+    });
+  });
+
+  describe('prepareRequestParams embedded query and fragment', () => {
+    const searchParam: ApiParameter = {
+      name: 'key',
+      originalName: 'key',
+      paramLocation: 'query',
+      paramSchema: {},
+      required: false,
+    };
+
+    it('should let a declared parameter win over the same key in the path', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api?key=embedded', method: 'GET'},
+        [searchParam],
+        {key: 'explicit'},
+      );
+
+      expect(result.url).toBe('/api?key=explicit');
+    });
+
+    it('should keep an embedded key alongside a declared key', () => {
+      const other: ApiParameter = {
+        name: 'other',
+        originalName: 'other',
+        paramLocation: 'query',
+        paramSchema: {},
+        required: false,
+      };
+
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api?embedded=1', method: 'GET'},
+        [other],
+        {other: '2'},
+      );
+
+      const query = new URL(result.url, 'http://api.example.com').searchParams;
+      expect(query.get('other')).toBe('2');
+      expect(query.get('embedded')).toBe('1');
+    });
+
+    it('should keep both embedded values of one undeclared key', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api?tag=a&tag=b', method: 'GET'},
+        [],
+        {},
+      );
+
+      const query = new URL(result.url, 'http://api.example.com').searchParams;
+      expect(query.getAll('tag')).toEqual(['a', 'b']);
+    });
+
+    it('should strip a fragment that follows a query string', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api?key=embedded#section', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('/api?key=embedded');
+    });
+
+    it('should strip a fragment when there is no query string', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api#section', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('/api');
+    });
+
+    it('should read no query string out of a fragment', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api#section?key=fragment', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('/api');
+    });
+
+    it('should leave a plain path untouched', () => {
+      const result = prepareRequestParams(
+        {baseUrl: 'http://api.example.com', path: '/api/items', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('http://api.example.com/api/items');
+    });
+  });
+
+  describe('prepareRequestBody content type', () => {
+    it('should set the content type for a form-urlencoded body', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/x-www-form-urlencoded': {schema: {type: 'object'}},
+        },
+      };
+      const headers: Record<string, string> = {};
+
+      prepareRequestBody(requestBody, undefined, {foo: 'bar'}, headers);
+
+      expect(headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    });
+
+    it('should leave the content type unset for a multipart body', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {'multipart/form-data': {schema: {type: 'object'}}},
+      };
+      const headers: Record<string, string> = {};
+
+      prepareRequestBody(requestBody, undefined, {foo: 'bar'}, headers);
+
+      expect(headers['Content-Type']).toBeUndefined();
+    });
+  });
+
+  describe('createRestApiTool', () => {
+    const parsedParameters: ApiParameter[] = [
+      {
+        name: 'parsed_name',
+        originalName: 'parsedName',
+        paramLocation: 'query',
+        paramSchema: {type: 'string'},
+        required: false,
+      },
+    ];
+    const operationWithOtherParams: OpenAPIV3.OperationObject = {
+      responses: {},
+      operationId: 'listThings',
+      parameters: [
+        {name: 'fromOperation', in: 'query', schema: {type: 'string'}},
+      ],
+    };
+
+    it('should report the parsed parameters, not the operation ones', () => {
+      const tool = createRestApiTool({
+        name: 'list_things',
+        description: 'description',
+        endpoint,
+        operation: operationWithOtherParams,
+        parameters: parsedParameters,
+      });
+
+      const declaration = tool._getDeclaration();
+
+      expect(Object.keys(declaration.parameters?.properties ?? {})).toEqual([
+        'parsed_name',
+      ]);
+    });
+
+    it('should truncate a parsed name longer than 60 characters', () => {
+      const tool = createRestApiTool({
+        name: 'c'.repeat(75),
+        description: 'description',
+        endpoint,
+        operation,
+        parameters: [],
+      });
+
+      expect(tool.name).toHaveLength(60);
+    });
+
+    it('should carry the parsed credential to the auth handler', async () => {
+      const authScheme = {
+        type: 'apiKey',
+        name: 'X-API-Key',
+        in: 'header',
+      } as unknown as OpenAPIV3.SecuritySchemeObject;
+      const authCredential = {
+        apiKey: 'parsed-key',
+      } as unknown as AuthCredential;
+      const tool = createRestApiTool({
+        name: 'test_tool',
+        description: 'description',
+        endpoint,
+        operation,
+        parameters: [],
+        authScheme,
+        authCredential,
+      });
+      mockOkResponse('text/plain', 'ok');
+      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
+        prepareAuthCredentials: async () => ({state: 'done'}),
+      } as unknown as ToolAuthHandler);
+
+      await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.anything(),
+        authScheme,
+        authCredential,
+        expect.anything(),
+      );
+    });
+
+    it('should forward the transport options to the tool', async () => {
+      const headerProvider = vi
+        .fn()
+        .mockReturnValue({'X-Correlation-Id': 'abc'});
+      const tool = createRestApiTool(
+        {
+          name: 'test_tool',
+          description: 'description',
+          endpoint,
+          operation,
+          parameters: [],
+        },
+        {headerProvider, credentialKey: 'my-key'},
+      );
+      mockOkResponse('text/plain', 'ok');
+      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
+        prepareAuthCredentials: async () => ({state: 'done'}),
+      } as unknown as ToolAuthHandler);
+
+      await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined,
+        undefined,
+        {credentialKey: 'my-key'},
+      );
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          headers: expect.objectContaining({'X-Correlation-Id': 'abc'}),
+        }),
+      );
+    });
+  });
+
+  describe('createRestApiToolFromJson', () => {
+    it('should build the same tool a serialized parsed operation describes', () => {
+      const parsed: ParsedOperation = {
+        name: 'serialized_tool',
+        description: 'a serialized description',
+        endpoint,
+        operation: {responses: {}, operationId: 'serializedTool'},
+        parameters: [
+          {
+            name: 'query_arg',
+            originalName: 'queryArg',
+            paramLocation: 'query',
+            paramSchema: {type: 'string'},
+            required: true,
+          },
+        ],
+      };
+
+      const tool = createRestApiToolFromJson(JSON.stringify(parsed));
+
+      expect(tool.name).toBe('serialized_tool');
+      expect(tool.description).toBe('a serialized description');
+      expect(
+        Object.keys(tool._getDeclaration().parameters?.properties ?? {}),
+      ).toEqual(['query_arg']);
+    });
+  });
+
+  describe('OperationParser.load', () => {
+    it('should report the parameters it is given', () => {
+      const parameters: ApiParameter[] = [
+        {
+          name: 'seeded',
+          originalName: 'seeded',
+          paramLocation: 'query',
+          paramSchema: {},
+          required: false,
+        },
+      ];
+
+      const parser = OperationParser.load(
+        {
+          responses: {},
+          parameters: [{name: 'fromOperation', in: 'query', schema: {}}],
+        },
+        parameters,
+      );
+
+      expect(parser.getParameters()).toEqual(parameters);
     });
   });
 });
