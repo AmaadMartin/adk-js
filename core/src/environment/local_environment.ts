@@ -132,15 +132,9 @@ export class LocalEnvironment extends BaseEnvironment {
     const {stdout, stderr, returncode, timedOut} = await collectChildOutput(
       child,
       timeoutSeconds ?? null,
-      () => {
-        child.kill('SIGKILL');
-        // Killing the shell does not kill a command it forked rather than
-        // exec'd, and that survivor keeps the pipes open, which would hold
-        // 'close' back until it exits on its own. Release the read ends so
-        // the timeout is actually enforced.
-        child.stdout.destroy();
-        child.stderr.destroy();
-      },
+      // Killing the shell leaves a command it forked rather than exec'd
+      // running; collectChildOutput releases the pipes that survivor holds.
+      () => child.kill('SIGKILL'),
     );
     return {exitCode: returncode, stdout, stderr, timedOut};
   }

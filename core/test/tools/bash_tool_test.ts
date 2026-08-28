@@ -42,6 +42,7 @@ function makePolicy(
 ): ResolvedBashToolPolicy {
   return {
     allowedCommandPrefixes: ['*'],
+    blockedOperators: [],
     timeoutSeconds: 30,
     ...overrides,
   };
@@ -102,6 +103,31 @@ describe('validateCommand', () => {
       'Command blocked. Permitted prefixes are: ls, cat',
     );
   });
+
+  it('reports a blocked operator even under the allow-any policy', () => {
+    const policy = makePolicy({
+      blockedOperators: ['|', ';', '$(', '`', '&&', '||'],
+    });
+    expect(validateCommand('echo hello | grep h', policy)).toBe(
+      'Command contains blocked operator: |',
+    );
+    expect(validateCommand('ls ; rm -rf /', policy)).toBe(
+      'Command contains blocked operator: ;',
+    );
+  });
+
+  it('refuses an argument a prefix allowlist cannot exclude', () => {
+    // A prefix matches the start of the command, so 'git' alone cannot say
+    // "but never push --force". The denylist is what reads the arguments.
+    const policy = makePolicy({
+      allowedCommandPrefixes: ['git'],
+      blockedOperators: ['--force'],
+    });
+    expect(validateCommand('git status', policy)).toBeUndefined();
+    expect(validateCommand('git push --force', policy)).toBe(
+      'Command contains blocked operator: --force',
+    );
+  });
 });
 
 describe('ExecuteBashTool declaration', () => {
@@ -133,7 +159,11 @@ describe('ExecuteBashTool declaration', () => {
 
   it('defaults every policy field an explicit undefined leaves open', () => {
     const tool = new ExecuteBashTool({
-      policy: {allowedCommandPrefixes: undefined, timeoutSeconds: undefined},
+      policy: {
+        allowedCommandPrefixes: undefined,
+        blockedOperators: undefined,
+        timeoutSeconds: undefined,
+      },
     });
     expect(tool.description).toBe(
       'Executes a bash command with the working directory set to the ' +
@@ -213,6 +243,15 @@ describe.skipIf(process.platform === 'win32')('ExecuteBashTool', () => {
         `['-e', 'setTimeout(() => {}, ${SURVIVOR_LIFETIME_MS})'], ` +
         "{stdio: 'inherit'});\n" +
         `setTimeout(() => {}, ${SURVIVOR_LIFETIME_MS});\n`,
+    );
+    // Same idea, but `detached` puts the grandchild in its own process group,
+    // where the tool's group kill cannot reach it. `unref` lets this script
+    // exit at once, leaving only the escapee holding the pipes.
+    await fs.writeFile(
+      path.join(workspace, 'escaper.cjs'),
+      "require('node:child_process').spawn(process.execPath, " +
+        `['-e', 'setTimeout(() => {}, ${SURVIVOR_LIFETIME_MS})'], ` +
+        "{stdio: 'inherit', detached: true}).unref();\n",
     );
   });
 
@@ -347,6 +386,32 @@ describe.skipIf(process.platform === 'win32')('ExecuteBashTool', () => {
       expect(result).toMatchObject({
         error: 'Command timed out after 1 seconds.',
         returncode: -9,
+      });
+      expect(Date.now() - started).toBeLessThan(TIMED_OUT_BY_MS);
+    },
+    SPAWN_TIMEOUT_MS,
+  );
+
+  it(
+    'times out even when a command leaves the process group holding the pipes',
+    async () => {
+      const tool = new ExecuteBashTool({
+        workspace,
+        policy: {timeoutSeconds: 1},
+      });
+      const started = Date.now();
+
+      // `escaper.cjs` puts its grandchild in a new process group, so the group
+      // kill cannot reach it, and the grandchild holds stdout open. Only
+      // releasing the read ends bounds the call; awaiting 'close' alone would
+      // last SURVIVOR_LIFETIME_MS.
+      const result = await tool.runAsync({
+        args: {command: `${NODE} escaper.cjs`},
+        toolContext: confirmedContext(),
+      });
+
+      expect(result).toMatchObject({
+        error: 'Command timed out after 1 seconds.',
       });
       expect(Date.now() - started).toBeLessThan(TIMED_OUT_BY_MS);
     },

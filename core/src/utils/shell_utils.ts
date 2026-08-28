@@ -131,6 +131,12 @@ export interface ChildOutput {
 /**
  * Buffers a running child's output and applies an optional timeout.
  *
+ * On timeout the read ends of both pipes are released as well as the kill,
+ * because `'close'` waits for the write ends to reach EOF. A process the kill
+ * did not reach still holds one — a command the child forked, or one that put
+ * itself in a new session — and without the release the call would last as
+ * long as that survivor, not as long as the budget.
+ *
  * @param child A spawned child with piped stdout and stderr.
  * @param timeoutSeconds The wall-clock budget, or `null` for none.
  * @param killOnTimeout Ends the child once the budget expires. The caller
@@ -155,6 +161,8 @@ export async function collectChildOutput(
     timer = setTimeout(() => {
       timedOut = true;
       killOnTimeout();
+      child.stdout.destroy();
+      child.stderr.destroy();
     }, timeoutSeconds * 1000);
   }
 
