@@ -29,29 +29,8 @@ const DEFAULT_SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
  */
 const QUOTA_PROJECT_HEADER = 'x-goog-user-project';
 
-const INVALID_TYPE_MESSAGE =
-  'Invalid credential type for ServiceAccountCredentialExchanger';
-
-const SERVICE_ACCOUNT_REQUIRED_MESSAGE =
-  'Service account credentials are missing. Please provide them, or set ' +
-  '`useDefaultCredential = true` to use application default credential in a ' +
-  'hosted service like Cloud Run.';
-
-const CREDENTIAL_REQUIRED_MESSAGE =
-  'Service account credentials are missing. serviceAccountCredential is ' +
-  'required when useDefaultCredential is false.';
-
-const SCOPES_REQUIRED_MESSAGE =
-  'scopes are required when using explicit service account credentials for ' +
-  'access token exchange.';
-
-const AUDIENCE_REQUIRED_MESSAGE =
-  'audience is required when useIdToken is true. Set it to the URL of the ' +
-  'target service (e.g. https://my-service.run.app).';
-
+/** Shared by the two access-token paths; the ID-token path has its own. */
 const ACCESS_TOKEN_FAILURE = 'Failed to exchange service account token';
-
-const ID_TOKEN_FAILURE = 'Failed to exchange service account for ID token';
 
 /**
  * Builds the HTTP bearer credential the exchange returns.
@@ -80,7 +59,10 @@ function requireExplicitCredential(
   saConfig: ServiceAccount,
 ): ServiceAccountCredential {
   if (!saConfig.serviceAccountCredential) {
-    throw new CredentialExchangeError(CREDENTIAL_REQUIRED_MESSAGE);
+    throw new CredentialExchangeError(
+      'Service account credentials are missing. serviceAccountCredential is ' +
+        'required when useDefaultCredential is false.',
+    );
   }
   return saConfig.serviceAccountCredential;
 }
@@ -158,7 +140,10 @@ async function exchangeForAccessToken(
 
   const creds = requireExplicitCredential(saConfig);
   if (!saConfig.scopes?.length) {
-    throw new CredentialExchangeError(SCOPES_REQUIRED_MESSAGE);
+    throw new CredentialExchangeError(
+      'scopes are required when using explicit service account credentials ' +
+        'for access token exchange.',
+    );
   }
 
   return exchangeExplicitAccessToken(creds, saConfig.scopes);
@@ -174,7 +159,10 @@ async function exchangeForIdToken(
 ): Promise<ExchangeResult> {
   const {audience} = saConfig;
   if (!audience) {
-    throw new CredentialExchangeError(AUDIENCE_REQUIRED_MESSAGE);
+    throw new CredentialExchangeError(
+      'audience is required when useIdToken is true. Set it to the URL of ' +
+        'the target service (e.g. https://my-service.run.app).',
+    );
   }
 
   const creds = saConfig.useDefaultCredential
@@ -192,7 +180,7 @@ async function exchangeForIdToken(
     return bearerResult(token);
   } catch (error: unknown) {
     throw new CredentialExchangeError(
-      `${ID_TOKEN_FAILURE}: ${formatError(error)}`,
+      `Failed to exchange service account for ID token: ${formatError(error)}`,
     );
   }
 }
@@ -218,10 +206,16 @@ export class ServiceAccountCredentialExchanger implements BaseCredentialExchange
     const {authCredential} = params;
 
     if (authCredential.authType !== AuthCredentialTypes.SERVICE_ACCOUNT) {
-      throw new CredentialExchangeError(INVALID_TYPE_MESSAGE);
+      throw new CredentialExchangeError(
+        'Invalid credential type for ServiceAccountCredentialExchanger',
+      );
     }
     if (!authCredential.serviceAccount) {
-      throw new CredentialExchangeError(SERVICE_ACCOUNT_REQUIRED_MESSAGE);
+      throw new CredentialExchangeError(
+        'Service account credentials are missing. Please provide them, or set ' +
+          '`useDefaultCredential = true` to use application default credential ' +
+          'in a hosted service like Cloud Run.',
+      );
     }
 
     const saConfig = authCredential.serviceAccount;
