@@ -36,6 +36,20 @@ const SANITIZE_BUDGET_EXCEEDED = '[SANITIZE_BUDGET_EXCEEDED]';
 const REDACTED = '[REDACTED]';
 
 /**
+ * Replaces a string that is shaped like JSON but cannot be verified free of
+ * credentials. Such a string is dropped whole: a substring search over raw text
+ * is bypassable through `\u005f`-style escapes, so text that does not parse
+ * cannot be cleared.
+ */
+const UNPARSEABLE_JSON_BLOB = '[UNPARSEABLE_JSON_BLOB]';
+
+/**
+ * Longest string this module parses as JSON. A longer one is replaced instead,
+ * which bounds the work a single adversarial payload can cause.
+ */
+const MAX_INSPECT_CHARS = 4_000_000;
+
+/**
  * Recursion bound. A value nested deeper than this is replaced, which turns an
  * adversarially nested payload into a redacted leaf instead of a stack
  * overflow.
@@ -137,6 +151,103 @@ export function truncateText(
   return {text: text.slice(0, maxLength) + TRUNCATED_SUFFIX, truncated: true};
 }
 
+/** A whole HTTP header line that carries a credential. */
+const CREDENTIAL_HEADER_PATTERN =
+  /^([ \t]*(?:authorization|proxy-authorization|x-api-key|api-key)[ \t]*:)[^\r\n]*/gim;
+
+/** An `Authorization` value, wherever it appears without its header name. */
+const BEARER_PATTERN = /\bbearer[ \t]+[^\s,;"']+/gi;
+
+/**
+ * A URL query parameter named `key`. `key` is too common a word to redact by
+ * name everywhere, but in this position it is how Google APIs carry an API key,
+ * and a failing request echoes its own URL.
+ */
+const QUERY_KEY_PATTERN = /([?&]key=)[^\s&#"']+/gi;
+
+/**
+ * A `name: value` or `name=value` fragment. The name is classified by
+ * {@link isSensitiveKey}, so free text and structured payloads redact the same
+ * set of names. The value must be non-empty and must not open a bracket, which
+ * keeps the pass idempotent over text that already reads `token: [REDACTED]`.
+ */
+const KEY_VALUE_PATTERN =
+  /(["']?)([A-Za-z_][A-Za-z0-9_.:-]*)\1(\s*[:=]\s*)(["']?)([^\s,;&)}\]["']+)\4/g;
+
+/**
+ * Replaces the credentials in `text`, leaving every other character in place.
+ *
+ * Each pass uses a replacement function rather than a replacement string: `$&`
+ * and `$1` are expanded inside a replacement string, so text the model or a
+ * tool supplied would otherwise be rewritten.
+ *
+ * @param text The free text to redact.
+ * @return The text with every recognized credential replaced.
+ */
+function redactFreeText(text: string): string {
+  return text
+    .replace(CREDENTIAL_HEADER_PATTERN, (_match, header: string) => {
+      return `${header} ${REDACTED}`;
+    })
+    .replace(BEARER_PATTERN, () => `Bearer ${REDACTED}`)
+    .replace(QUERY_KEY_PATTERN, (_match, prefix: string) => {
+      return `${prefix}${REDACTED}`;
+    })
+    .replace(
+      KEY_VALUE_PATTERN,
+      (
+        match: string,
+        keyQuote: string,
+        key: string,
+        separator: string,
+        valueQuote: string,
+      ) => {
+        if (!isSensitiveKey(key)) {
+          return match;
+        }
+        return `${keyQuote}${key}${keyQuote}${separator}${valueQuote}${REDACTED}${valueQuote}`;
+      },
+    );
+}
+
+/**
+ * Returns `text` with its credentials replaced and its length bounded.
+ *
+ * This is the pass for text that has no structure the caller can walk: an
+ * error message, a stack trace, a log line. Redaction is pattern-based, so it
+ * catches an `Authorization` header, a bearer token, an API key in a URL, and a
+ * `name=value` pair whose name is a credential. Ordinary prose comes back
+ * unchanged.
+ *
+ * Truncation runs first, so the work is bounded by `maxLength` rather than by
+ * the length of the input. A credential cut in half is still redacted, because
+ * every pattern is anchored on the name that precedes the secret.
+ *
+ * @param text The free text to sanitize.
+ * @param maxLength Maximum length of the result, or -1 for no limit.
+ * @return The sanitized text and whether anything was cut.
+ */
+export function sanitizeErrorText(
+  text: string,
+  maxLength: number,
+): {text: string; truncated: boolean} {
+  const bounded = truncateText(text, boundedInspectLength(maxLength));
+  return {text: redactFreeText(bounded.text), truncated: bounded.truncated};
+}
+
+/** Caps a caller's length limit at what this module is willing to inspect. */
+function boundedInspectLength(maxLength: number): number {
+  return maxLength === -1
+    ? MAX_INSPECT_CHARS
+    : Math.min(maxLength, MAX_INSPECT_CHARS);
+}
+
+/** Whether `text` is shaped like a JSON object or array. */
+function isJsonShaped(text: string): boolean {
+  const start = text.trimStart();
+  return start.startsWith('{') || start.startsWith('[');
+}
+
 /** Sanitizes each element of `values`, stopping when the node budget runs out. */
 function sanitizeArray(
   values: readonly unknown[],
@@ -187,6 +298,46 @@ function sanitizeRecord(
   return {value: result, truncated};
 }
 
+/**
+ * Sanitizes a string leaf.
+ *
+ * A credential often arrives as an opaque JSON string — a tool result, a
+ * serialized request body — where walking the enclosing object cannot see it.
+ * Such a string is parsed, walked like any other structure, and re-serialized.
+ * Re-serialization is unconditional because `JSON.parse` keeps the last of a
+ * duplicate key: a blob carrying the secret under an earlier copy of the key
+ * would otherwise pass through as its own raw text.
+ *
+ * A string that is shaped like JSON but does not parse is replaced whole. It
+ * cannot be shown to be free of credentials, and searching its raw text is
+ * bypassable. Everything else goes through the free-text pass.
+ */
+function sanitizeStringLeaf(
+  text: string,
+  state: SanitizeState,
+  depth: number,
+): SanitizeResult {
+  if (!isJsonShaped(text)) {
+    const sanitized = sanitizeErrorText(text, state.maxLength);
+    return {value: sanitized.text, truncated: sanitized.truncated};
+  }
+  if (text.length > MAX_INSPECT_CHARS) {
+    return {value: UNPARSEABLE_JSON_BLOB, truncated: true};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return {value: UNPARSEABLE_JSON_BLOB, truncated: true};
+  }
+  const walked = sanitizeValue(parsed, state, depth + 1);
+  const bounded = truncateText(JSON.stringify(walked.value), state.maxLength);
+  return {
+    value: bounded.text,
+    truncated: bounded.truncated || walked.truncated,
+  };
+}
+
 /** Sanitizes one value, dispatching on its shape. */
 function sanitizeValue(
   value: unknown,
@@ -211,8 +362,7 @@ function sanitizeValue(
   if (typeof value !== 'object') {
     // A string passes through `String` unchanged; a bigint, symbol or function
     // becomes text, so the result stays JSON-serializable either way.
-    const {text, truncated} = truncateText(String(value), state.maxLength);
-    return {value: text, truncated};
+    return sanitizeStringLeaf(String(value), state, depth);
   }
   if (state.ancestors.has(value)) {
     return {value: CIRCULAR_REFERENCE, truncated: false};

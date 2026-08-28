@@ -7,7 +7,11 @@
 import type {Content, Part} from '@google/genai';
 import type {LlmRequest} from '../models/llm_request.js';
 import {redactUriPassword} from '../utils/redact_uri.js';
-import {recursiveSmartTruncate, truncateText} from '../utils/sanitize_utils.js';
+import {
+  recursiveSmartTruncate,
+  sanitizeErrorText,
+  truncateText,
+} from '../utils/sanitize_utils.js';
 import {
   AnalyticsContentPart,
   AnalyticsStorageMode,
@@ -105,7 +109,7 @@ function buildContentPart(
   }
 
   if (part.text) {
-    const {text, truncated} = truncateText(part.text, maxLength);
+    const {text, truncated} = sanitizeErrorText(part.text, maxLength);
     record.text = text;
     return {part: record, summary: text, truncated};
   }
@@ -132,7 +136,10 @@ function buildContentPart(
   }
 
   if (part.executableCode) {
-    const code = part.executableCode.code ?? '';
+    const code = sanitizeErrorText(
+      part.executableCode.code ?? '',
+      maxLength,
+    ).text;
     const language = part.executableCode.language ?? 'unknown';
     const {value, truncated} = recursiveSmartTruncate(
       part.executableCode,
@@ -148,7 +155,10 @@ function buildContentPart(
   }
 
   if (part.codeExecutionResult) {
-    const output = part.codeExecutionResult.output ?? '';
+    const output = sanitizeErrorText(
+      part.codeExecutionResult.output ?? '',
+      maxLength,
+    ).text;
     const outcome = part.codeExecutionResult.outcome ?? 'unknown';
     const {value, truncated} = recursiveSmartTruncate(
       part.codeExecutionResult,
@@ -245,7 +255,7 @@ function parseLlmRequest(
   }
   const systemInstruction = request.config?.systemInstruction;
   if (typeof systemInstruction === 'string') {
-    const cut = truncateText(systemInstruction, maxLength);
+    const cut = sanitizeErrorText(systemInstruction, maxLength);
     payload['system_prompt'] = cut.text;
     truncated = truncated || cut.truncated;
   }
@@ -278,7 +288,7 @@ export function parseAnalyticsContent(
     };
   }
   if (typeof raw === 'string') {
-    const cut = truncateText(raw, maxLength);
+    const cut = sanitizeErrorText(raw, maxLength);
     return {payload: cut.text, parts: [], truncated: cut.truncated};
   }
   const sanitized = recursiveSmartTruncate(raw, maxLength);

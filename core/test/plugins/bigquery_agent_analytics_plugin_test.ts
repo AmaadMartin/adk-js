@@ -40,6 +40,7 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     clientOptions: unknown[];
     inserted: AnalyticsRow[];
     insertIds: string[];
+    insertCalls: number;
     created: CreatedTable[];
     getCalls: number;
     tableExists: boolean;
@@ -53,6 +54,7 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     clientOptions: [],
     inserted: [],
     insertIds: [],
+    insertCalls: 0,
     created: [],
     getCalls: 0,
     tableExists: false,
@@ -73,6 +75,7 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     async insert(
       rows: Array<{insertId: string; json: AnalyticsRow}>,
     ): Promise<void> {
+      fake.insertCalls += 1;
       if (fake.insertGate !== undefined) {
         await fake.insertGate;
       }
@@ -126,6 +129,9 @@ vi.mock('@google-cloud/bigquery', () => ({BigQuery: BigQueryMock}));
 const PROJECT_ID = 'test-project';
 const DATASET_ID = 'agent_analytics';
 
+/** The plugin's delay before it retries a setup that failed once. */
+const SETUP_BACKOFF_MS = 1000;
+
 /** An error carrying the HTTP status BigQuery uses for "already exists". */
 function conflictError(): Error {
   return Object.assign(new Error('Already Exists: Table'), {code: 409});
@@ -173,17 +179,25 @@ function makeContext(invocationContext: InvocationContext): Context {
   return new Context({invocationContext});
 }
 
+/**
+ * Plugins the running test built. Writes leave the callback, so a test that
+ * never drains its plugin would otherwise land its rows in the next test.
+ */
+const openPlugins: BigQueryAgentAnalyticsPlugin[] = [];
+
 function makePlugin(
   config: BigQueryLoggerConfig = {},
   options: {tableId?: string; location?: string} = {},
 ): BigQueryAgentAnalyticsPlugin {
-  return new BigQueryAgentAnalyticsPlugin({
+  const plugin = new BigQueryAgentAnalyticsPlugin({
     projectId: PROJECT_ID,
     datasetId: DATASET_ID,
     tableId: options.tableId,
     location: options.location,
     config,
   });
+  openPlugins.push(plugin);
+  return plugin;
 }
 
 function makeLlmRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
@@ -289,9 +303,11 @@ async function runTurn(
 }
 
 beforeEach(() => {
+  openPlugins.length = 0;
   fake.clientOptions = [];
   fake.inserted = [];
   fake.insertIds = [];
+  fake.insertCalls = 0;
   fake.created = [];
   fake.getCalls = 0;
   fake.tableExists = false;
@@ -301,8 +317,9 @@ beforeEach(() => {
   fake.insertGate = undefined;
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
+  await Promise.all(openPlugins.map((plugin) => plugin.shutdown()));
 });
 
 describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
@@ -330,6 +347,7 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
+    await plugin.flush();
     expect(fake.created).toHaveLength(1);
     expect(fake.created[0].tableId).toBe('my_events');
     expect(fake.created[0].metadata).toMatchObject({
@@ -349,6 +367,7 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
+    await plugin.flush();
     const schema = fake.created[0].metadata.schema;
     if (!Array.isArray(schema)) {
       expect.fail('the created table carries no field list');
@@ -381,6 +400,7 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
+    await plugin.flush();
     expect(fake.created).toHaveLength(0);
     expect(rows()).toHaveLength(1);
   });
@@ -391,6 +411,7 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
+    await plugin.flush();
     expect(fake.getCalls).toBe(1);
     expect(rows()).toHaveLength(1);
   });
@@ -401,19 +422,40 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     await expect(
       plugin.beforeRunCallback({invocationContext: makeInvocationContext()}),
     ).resolves.toBeUndefined();
+    await plugin.flush();
     expect(rows()).toHaveLength(0);
     expect(plugin.getDropStats()['setup_unavailable']).toBe(1);
   });
 
   it('retries the setup on a later event', async () => {
+    vi.useFakeTimers();
     fake.clientError = new Error('no credentials');
     const plugin = makePlugin();
     const invocationContext = makeInvocationContext();
     await plugin.beforeRunCallback({invocationContext});
+    await plugin.flush();
     fake.clientError = undefined;
+    await vi.advanceTimersByTimeAsync(SETUP_BACKOFF_MS);
     await plugin.afterRunCallback({invocationContext});
+    await plugin.flush();
     expect(rows()).toHaveLength(1);
     expect(rows()[0].event_type).toBe(AnalyticsEventType.INVOCATION_COMPLETED);
+  });
+
+  it('waits out the backoff before it retries a failed setup', async () => {
+    vi.useFakeTimers();
+    fake.clientError = new Error('no credentials');
+    const plugin = makePlugin();
+    const invocationContext = makeInvocationContext();
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.flush();
+    fake.clientError = undefined;
+    await vi.advanceTimersByTimeAsync(SETUP_BACKOFF_MS - 1);
+    await plugin.afterRunCallback({invocationContext});
+    await plugin.flush();
+    expect(rows()).toHaveLength(0);
+    expect(fake.clientOptions).toHaveLength(1);
+    expect(plugin.getDropStats()['setup_unavailable']).toBe(2);
   });
 
   it('propagates a non-conflict create failure as a counted drop', async () => {
@@ -422,6 +464,7 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
+    await plugin.flush();
     expect(fake.getCalls).toBe(0);
     expect(plugin.getDropStats()['setup_unavailable']).toBe(1);
   });
@@ -496,6 +539,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
+    await plugin.flush();
     const row = onlyRow();
     expect(row).toMatchObject({
       event_type: AnalyticsEventType.INVOCATION_STARTING,
@@ -516,6 +560,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
+    await plugin.flush();
     expect(fake.insertIds).toEqual([onlyRow().event_id]);
   });
 
@@ -538,6 +583,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext({agent: child}),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().attributes)).toMatchObject({
       root_agent_name: 'parent_agent',
     });
@@ -548,6 +594,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext({branch: 'root.child'}),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().attributes)).toMatchObject({
       session_metadata: {
         session_id: 'session-1',
@@ -563,6 +610,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().attributes)).not.toHaveProperty(
       'session_metadata',
     );
@@ -573,6 +621,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().attributes)).toMatchObject({
       custom_tags: {agentRole: 'sales'},
     });
@@ -588,6 +637,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
         toolsDict: {lookup_weather: makeTool()},
       }),
     });
+    await plugin.flush();
     const attributes = parseColumn(onlyRow().attributes);
     expect(attributes).toMatchObject({
       model: 'gemini-2.0-flash',
@@ -602,6 +652,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       callbackContext: makeContext(makeInvocationContext()),
       llmRequest: makeLlmRequest({config: {labels: {team: 'search'}}}),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().attributes)).toMatchObject({
       labels: {team: 'search'},
     });
@@ -622,6 +673,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
         },
       },
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toEqual({
       response: 'call: lookup_weather | resp: lookup_weather | other',
     });
@@ -633,6 +685,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       callbackContext: makeContext(makeInvocationContext()),
       llmResponse: {content: {role: 'model', parts: []}},
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toEqual({response: 'None'});
   });
 
@@ -645,6 +698,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
         config: {systemInstruction: 'Be terse.'},
       }),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toEqual({
       prompt: [{role: 'user', content: 'hi'}],
       system_prompt: 'Be terse.',
@@ -668,6 +722,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       callbackContext: makeContext(invocationContext),
       llmResponse,
     });
+    await plugin.flush();
     const row = onlyRow();
     expect(parseColumn(row.content)).toEqual({
       response: "text: 'sunny'",
@@ -686,6 +741,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       callbackContext: makeContext(makeInvocationContext()),
       llmResponse: {errorCode: 'SAFETY', errorMessage: 'blocked'},
     });
+    await plugin.flush();
     expect(onlyRow()).toMatchObject({status: 'OK', error_message: 'blocked'});
   });
 
@@ -695,6 +751,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       callbackContext: makeContext(makeInvocationContext()),
       llmResponse: {errorCode: 'SAFETY'},
     });
+    await plugin.flush();
     expect(onlyRow().error_message).toBe('SAFETY');
   });
 
@@ -705,6 +762,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       agent: makeAgent('root_agent', 'Answer weather questions.'),
       callbackContext: makeContext(invocationContext),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toBe('Answer weather questions.');
   });
 
@@ -716,6 +774,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       agent,
       callbackContext: makeContext(invocationContext),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toBe('');
   });
 
@@ -730,6 +789,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       agent,
       callbackContext: makeContext(makeInvocationContext()),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toBe('');
   });
 
@@ -742,6 +802,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       callbackContext: makeContext(makeInvocationContext()),
       llmResponse: {usageMetadata: usage},
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toEqual({usage: expected});
   });
 
@@ -763,6 +824,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
         actions: {stateDelta: {done: true}},
       }),
     });
+    await plugin.flush();
     const row = onlyRow();
     expect(row.agent).toBe('summarize_node');
     expect(parseColumn(row.attributes)).toMatchObject({root_agent_name: null});
@@ -780,6 +842,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       pluginManager: new PluginManager([]),
     });
     await plugin.beforeRunCallback({invocationContext});
+    await plugin.flush();
     expect(onlyRow().agent).toBeNull();
   });
 
@@ -791,6 +854,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       toolArgs: {city: 'Paris'},
       toolContext: makeContext(invocationContext),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toEqual({
       tool: 'lookup_weather',
       args: {city: 'Paris'},
@@ -806,6 +870,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       callbackContext: makeContext(invocationContext),
     });
     await plugin.afterRunCallback({invocationContext});
+    await plugin.flush();
     const [starting, agentStarting, completed] = rows();
     expect(completed.event_type).toBe(AnalyticsEventType.INVOCATION_COMPLETED);
     expect(completed.span_id).toBe(agentStarting.span_id);
@@ -817,6 +882,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     const invocationContext = makeInvocationContext();
     await plugin.beforeRunCallback({invocationContext});
     await plugin.afterRunCallback({invocationContext});
+    await plugin.flush();
     const completed = rows()[1];
     expect(completed.event_type).toBe(AnalyticsEventType.INVOCATION_COMPLETED);
     expect(parseColumn(completed.latency_ms)).toHaveProperty('total_ms');
@@ -827,6 +893,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
+    await plugin.flush();
     expect(onlyRow().latency_ms).toBeNull();
   });
 });
@@ -839,6 +906,7 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
       toolArgs: {note: 'x'.repeat(200)},
       toolContext: makeContext(makeInvocationContext()),
     });
+    await plugin.flush();
     const row = onlyRow();
     expect(row.is_truncated).toBe(true);
     expect(parseColumn(row.content)).toEqual({
@@ -854,6 +922,7 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
       toolArgs: {note: 'short'},
       toolContext: makeContext(makeInvocationContext()),
     });
+    await plugin.flush();
     expect(onlyRow().is_truncated).toBe(false);
   });
 
@@ -864,6 +933,7 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
       toolArgs: {apiKey: 'AIza-super-secret', city: 'Paris'},
       toolContext: makeContext(makeInvocationContext()),
     });
+    await plugin.flush();
     expect(JSON.stringify(onlyRow())).not.toContain('AIza-super-secret');
     expect(parseColumn(onlyRow().content)).toEqual({
       tool: 'lookup_weather',
@@ -883,6 +953,7 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
       toolArgs: {city: 'Paris'},
       toolContext: makeContext(makeInvocationContext()),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toEqual({
       seen: 'TOOL_STARTING',
       original: {tool: 'lookup_weather', args: {city: 'Paris'}},
@@ -903,6 +974,7 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
       toolContext: makeContext(makeInvocationContext()),
     });
     restore();
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toBe('[FORMATTER_FAILED]');
     expect(plugin.getDropStats()['formatter_failed']).toBe(1);
     expect(warnings.join(' ')).not.toContain('AIza-super-secret');
@@ -924,6 +996,7 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
       toolContext: makeContext(makeInvocationContext()),
     });
     restore();
+    await plugin.flush();
     const row = onlyRow();
     expect(parseColumn(row.content)).toBe('[CONTENT_PARSE_FAILED]');
     expect(row.is_truncated).toBe(true);
@@ -939,6 +1012,7 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
       toolContext: makeContext(makeInvocationContext()),
       error: new Error('a very long failure message'),
     });
+    await plugin.flush();
     expect(onlyRow()).toMatchObject({
       status: 'ERROR',
       error_message: 'a ver...[TRUNCATED]',
@@ -953,6 +1027,7 @@ describe('BigQueryAgentAnalyticsPlugin content safety', () => {
       llmRequest: makeLlmRequest(),
       error: new Error('model unavailable'),
     });
+    await plugin.flush();
     expect(onlyRow()).toMatchObject({
       event_type: AnalyticsEventType.LLM_ERROR,
       status: 'ERROR',
@@ -983,6 +1058,7 @@ describe('BigQueryAgentAnalyticsPlugin content parts', () => {
       invocationContext,
       userMessage: multiPart,
     });
+    await plugin.flush();
     const parts = userMessageRow().content_parts;
     expect(parts.map((part) => part.part_index)).toEqual([
       0, 1, 2, 3, 4, 5, 6, 7,
@@ -1011,6 +1087,7 @@ describe('BigQueryAgentAnalyticsPlugin content parts', () => {
       invocationContext: makeInvocationContext(),
       userMessage: multiPart,
     });
+    await plugin.flush();
     expect(parseColumn(userMessageRow().content)).toEqual({
       text_summary:
         'hello | Function response: lookup_weather | ' +
@@ -1025,6 +1102,7 @@ describe('BigQueryAgentAnalyticsPlugin content parts', () => {
       invocationContext: makeInvocationContext(),
       userMessage: multiPart,
     });
+    await plugin.flush();
     expect(userMessageRow().content_parts).toEqual([]);
   });
 
@@ -1041,6 +1119,7 @@ describe('BigQueryAgentAnalyticsPlugin content parts', () => {
         ],
       },
     });
+    await plugin.flush();
     const parts = onlyRow().content_parts;
     expect(parts[0]).toMatchObject({uri: null, mime_type: 'text/plain'});
     expect(parts[1]).toMatchObject({text: ''});
@@ -1057,6 +1136,7 @@ describe('BigQueryAgentAnalyticsPlugin content parts', () => {
       callbackContext: makeContext(makeInvocationContext()),
       llmRequest: makeLlmRequest({contents: [{}]}),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toEqual({
       prompt: [{role: 'unknown', content: ''}],
     });
@@ -1078,6 +1158,7 @@ describe('BigQueryAgentAnalyticsPlugin content parts', () => {
         ],
       },
     });
+    await plugin.flush();
     expect(onlyRow().content_parts[0].uri).not.toContain('AIza-secret');
   });
 });
@@ -1095,6 +1176,7 @@ describe('BigQueryAgentAnalyticsPlugin spans and traces', () => {
       callbackContext,
       llmResponse: {content: {role: 'model', parts: [{text: 'ok'}]}},
     });
+    await plugin.flush();
     expect(rows()[0].span_id).toBe(rows()[1].span_id);
     expect(rows()[0].span_id).toMatch(/^[0-9a-f]{16}$/);
   });
@@ -1115,6 +1197,7 @@ describe('BigQueryAgentAnalyticsPlugin spans and traces', () => {
       toolContext: callbackContext,
       result: {},
     });
+    await plugin.flush();
     expect(rows()[0].span_id).toBe(rows()[1].span_id);
   });
 
@@ -1145,6 +1228,7 @@ describe('BigQueryAgentAnalyticsPlugin spans and traces', () => {
     });
     await plugin.afterAgentCallback({agent: makeAgent(), callbackContext});
 
+    await plugin.flush();
     const modelRows = rows().slice(1, 5);
     const spanIds = new Set(modelRows.map((row) => row.span_id));
     expect(spanIds.size).toBe(1);
@@ -1167,6 +1251,7 @@ describe('BigQueryAgentAnalyticsPlugin spans and traces', () => {
         content: {role: 'model', parts: [{text: 'su'}]},
       },
     });
+    await plugin.flush();
     expect(parseColumn(rows()[1].latency_ms)).toHaveProperty(
       'time_to_first_token_ms',
     );
@@ -1184,6 +1269,7 @@ describe('BigQueryAgentAnalyticsPlugin spans and traces', () => {
       callbackContext,
       llmRequest: makeLlmRequest(),
     });
+    await plugin.flush();
     const [agentStarting, first, second] = rows();
     expect(first.parent_span_id).toBe(agentStarting.span_id);
     expect(second.parent_span_id).toBe(agentStarting.span_id);
@@ -1211,6 +1297,7 @@ describe('BigQueryAgentAnalyticsPlugin spans and traces', () => {
       invocationContext: makeInvocationContext(),
     });
     active.mockRestore();
+    await plugin.flush();
     expect(onlyRow().trace_id).toBe('0af7651916cd43dd8448eb211c80319c');
   });
 
@@ -1226,6 +1313,7 @@ describe('BigQueryAgentAnalyticsPlugin spans and traces', () => {
       invocationContext: makeInvocationContext(),
     });
     active.mockRestore();
+    await plugin.flush();
     expect(onlyRow().trace_id).toMatch(/^[0-9a-f]{32}$/);
     expect(onlyRow().trace_id).not.toBe('00000000000000000000000000000000');
   });
@@ -1240,6 +1328,7 @@ describe('BigQueryAgentAnalyticsPlugin spans and traces', () => {
       agent: makeAgent(),
       callbackContext: makeContext(first),
     });
+    await plugin.flush();
     const [startedA, startedB, agentA] = rows();
     expect(startedA.trace_id).not.toBe(startedB.trace_id);
     expect(agentA.parent_span_id).toBe(startedA.span_id);
@@ -1251,6 +1340,7 @@ describe('BigQueryAgentAnalyticsPlugin spans and traces', () => {
     const invocationContext = makeInvocationContext();
     await plugin.beforeRunCallback({invocationContext});
     await plugin.beforeRunCallback({invocationContext});
+    await plugin.flush();
     expect(rows()[1].span_id).toBe(rows()[0].span_id);
   });
 
@@ -1268,6 +1358,7 @@ describe('BigQueryAgentAnalyticsPlugin spans and traces', () => {
     await plugin.beforeRunCallback({invocationContext: first});
     // inv-0 was evicted, so it is seeded with a fresh root span instead of
     // reusing the one it had before the cap was reached.
+    await plugin.flush();
     expect(rows().at(-1)?.span_id).not.toBe(rows()[0].span_id);
   });
 });
@@ -1283,6 +1374,7 @@ describe('BigQueryAgentAnalyticsPlugin onEventCallback', () => {
         actions: {stateDelta: {counter: 3}},
       }),
     });
+    await plugin.flush();
     const row = onlyRow();
     expect(row.event_type).toBe(AnalyticsEventType.STATE_DELTA);
     expect(parseColumn(row.attributes)).toMatchObject({
@@ -1296,6 +1388,7 @@ describe('BigQueryAgentAnalyticsPlugin onEventCallback', () => {
       invocationContext: makeInvocationContext(),
       event: createEvent({author: 'root_agent'}),
     });
+    await plugin.flush();
     expect(rows()).toHaveLength(0);
   });
 
@@ -1310,14 +1403,14 @@ describe('BigQueryAgentAnalyticsPlugin onEventCallback', () => {
       invocationContext: makeInvocationContext(),
       event,
     });
+    await plugin.flush();
     const row = onlyRow();
     expect(row.event_type).toBe(AnalyticsEventType.AGENT_RESPONSE);
     expect(parseColumn(row.content)).toEqual({response: "text: 'sunny'"});
     expect(parseColumn(row.attributes)).toMatchObject({
-      source_event_id: event.id,
-      source_event_author: 'root_agent',
-      source_event_branch: 'root',
+      adk: {source_event_id: event.id, branch: 'root'},
     });
+    expect(row.agent).toBe('root_agent');
   });
 
   it('writes an AGENT_RESPONSE row for an event rehydrated without tool ids', async () => {
@@ -1334,6 +1427,7 @@ describe('BigQueryAgentAnalyticsPlugin onEventCallback', () => {
       invocationContext: makeInvocationContext(),
       event: rehydrated,
     });
+    await plugin.flush();
     expect(onlyRow().event_type).toBe(AnalyticsEventType.AGENT_RESPONSE);
   });
 
@@ -1402,6 +1496,7 @@ describe('BigQueryAgentAnalyticsPlugin onEventCallback', () => {
       invocationContext: makeInvocationContext(),
       event,
     });
+    await plugin.flush();
     expect(
       rows().filter(
         (row) => row.event_type === AnalyticsEventType.AGENT_RESPONSE,
@@ -1437,6 +1532,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         },
       }),
     });
+    await plugin.flush();
     const request = rowsOfType(eventType);
     expect(request).toHaveLength(1);
     expect(parseColumn(request[0].content)).toEqual({
@@ -1469,6 +1565,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         },
       }),
     });
+    await plugin.flush();
     const paused = rowsOfType(AnalyticsEventType.TOOL_PAUSED);
     expect(paused).toHaveLength(1);
     expect(parseColumn(paused[0].attributes)).toMatchObject({
@@ -1498,6 +1595,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         },
       }),
     });
+    await plugin.flush();
     const paused = rowsOfType(AnalyticsEventType.TOOL_PAUSED);
     expect(paused).toHaveLength(1);
     expect(parseColumn(paused[0].content)).toEqual({
@@ -1530,6 +1628,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         },
       }),
     });
+    await plugin.flush();
     expect(rows().map((row) => row.event_type)).toEqual([
       AnalyticsEventType.HITL_CONFIRMATION_REQUEST,
       AnalyticsEventType.TOOL_PAUSED,
@@ -1542,8 +1641,8 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
   it('still writes a pairable row for a long-running id with no call, and warns', async () => {
     const warnings: string[] = [];
     const restore = captureWarnings(warnings);
+    const plugin = makePlugin();
     try {
-      const plugin = makePlugin();
       await plugin.onEventCallback({
         invocationContext: makeInvocationContext(),
         event: createEvent({
@@ -1555,6 +1654,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
     } finally {
       restore();
     }
+    await plugin.flush();
     const paused = rowsOfType(AnalyticsEventType.TOOL_PAUSED);
     expect(paused).toHaveLength(1);
     expect(parseColumn(paused[0].content)).toEqual({tool: null, args: null});
@@ -1586,6 +1686,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         },
       }),
     });
+    await plugin.flush();
     const completed = onlyRow();
     expect(completed.event_type).toBe(
       AnalyticsEventType.HITL_CREDENTIAL_REQUEST_COMPLETED,
@@ -1619,6 +1720,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         },
       }),
     });
+    await plugin.flush();
     expect(rows()).toHaveLength(0);
   });
 
@@ -1639,6 +1741,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         ],
       },
     });
+    await plugin.flush();
     expect(rows().map((row) => row.event_type)).toEqual([
       AnalyticsEventType.USER_MESSAGE_RECEIVED,
       AnalyticsEventType.HITL_CONFIRMATION_REQUEST_COMPLETED,
@@ -1666,6 +1769,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         ],
       },
     });
+    await plugin.flush();
     const completed = rowsOfType(AnalyticsEventType.TOOL_COMPLETED);
     expect(completed).toHaveLength(1);
     expect(parseColumn(completed[0].content)).toEqual({
@@ -1700,6 +1804,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         ],
       },
     });
+    await plugin.flush();
     const paused = rowsOfType(AnalyticsEventType.TOOL_PAUSED)[0];
     const completed = rowsOfType(AnalyticsEventType.TOOL_COMPLETED)[0];
     expect(parseColumn(paused.attributes)).toMatchObject({
@@ -1716,6 +1821,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
       invocationContext: makeInvocationContext(),
       userMessage: {role: 'user', parts: [{text: 'weather?'}]},
     });
+    await plugin.flush();
     expect(onlyRow().event_type).toBe(AnalyticsEventType.USER_MESSAGE_RECEIVED);
   });
 
@@ -1731,6 +1837,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         },
       }),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toEqual({
       tool: 'adk_request_input',
       args: null,
@@ -1749,6 +1856,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         },
       }),
     });
+    await plugin.flush();
     expect(parseColumn(onlyRow().content)).toEqual({
       tool: 'adk_request_input',
       result: null,
@@ -1761,6 +1869,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
       invocationContext: makeInvocationContext(),
       userMessage: {role: 'user', parts: [{functionResponse: {id: 'fc-12'}}]},
     });
+    await plugin.flush();
     const completed = rowsOfType(AnalyticsEventType.TOOL_COMPLETED);
     expect(completed).toHaveLength(1);
     expect(parseColumn(completed[0].content)).toEqual({
@@ -1775,6 +1884,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
       invocationContext: makeInvocationContext(),
       userMessage: {role: 'user'},
     });
+    await plugin.flush();
     expect(onlyRow().event_type).toBe(AnalyticsEventType.USER_MESSAGE_RECEIVED);
   });
 
@@ -1797,6 +1907,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         actions: {transferToAgent: 'billing_agent'},
       }),
     });
+    await plugin.flush();
     const row = onlyRow();
     expect(row.event_type).toBe(AnalyticsEventType.AGENT_TRANSFER);
     expect(parseColumn(row.content)).toEqual({
@@ -1814,6 +1925,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         content: {role: 'model', parts: [{text: 'sunny'}]},
       }),
     });
+    await plugin.flush();
     expect(rowsOfType(AnalyticsEventType.AGENT_TRANSFER)).toHaveLength(0);
   });
 
@@ -1834,6 +1946,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         },
       }),
     });
+    await plugin.flush();
     expect(rows().map((row) => row.event_type)).toEqual([
       AnalyticsEventType.HITL_INPUT_REQUEST,
     ]);
@@ -1860,6 +1973,7 @@ describe('BigQueryAgentAnalyticsPlugin batching and drops', () => {
       callbackContext,
       llmResponse: {content: {role: 'model', parts: [{text: 'ok'}]}},
     });
+    await plugin.flush();
     expect(rows()).toHaveLength(5);
   });
 
@@ -1875,7 +1989,11 @@ describe('BigQueryAgentAnalyticsPlugin batching and drops', () => {
     });
     expect(rows()).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(250);
-    expect(rows()).toHaveLength(1);
+    // Nothing else can write this row: the batch is not full, the run does not
+    // flush, and the test never calls flush.
+    await vi.waitFor(() => {
+      expect(rows()).toHaveLength(1);
+    });
   });
 
   it('leaves rows queued when flushing on run end is off', async () => {
@@ -1924,6 +2042,7 @@ describe('BigQueryAgentAnalyticsPlugin batching and drops', () => {
       toolArgs: {},
       toolContext: callbackContext,
     });
+    await plugin.flush();
     expect(plugin.getDropStats()['queue_full']).toBe(1);
     await plugin.flush();
     expect(rows()).toHaveLength(2);
@@ -1935,6 +2054,7 @@ describe('BigQueryAgentAnalyticsPlugin batching and drops', () => {
     await expect(
       plugin.beforeRunCallback({invocationContext: makeInvocationContext()}),
     ).resolves.toBeUndefined();
+    await plugin.flush();
     expect(plugin.getDropStats()['write_failed']).toBe(1);
     expect(rows()).toHaveLength(0);
   });
@@ -1954,12 +2074,15 @@ describe('BigQueryAgentAnalyticsPlugin batching and drops', () => {
     // An insert that never settles: the row leaves the queue but never lands.
     fake.insertGate = new Promise<void>(() => {});
     const plugin = makePlugin({
-      batchSize: 10,
+      batchSize: 1,
       shutdownTimeoutMs: 50,
       flushOnRunEnd: false,
     });
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
+    });
+    await vi.waitFor(() => {
+      expect(fake.insertCalls).toBe(1);
     });
     const shutting = plugin.shutdown();
     await vi.advanceTimersByTimeAsync(50);
@@ -1988,9 +2111,11 @@ describe('BigQueryAgentAnalyticsPlugin failure containment', () => {
         toolContext: makeContext(invocationContext),
       }),
     ).resolves.toBeUndefined();
+    await plugin.flush();
     expect(rows()).toHaveLength(0);
 
     await plugin.beforeRunCallback({invocationContext});
+    await plugin.flush();
     expect(rows()).toHaveLength(1);
   });
 });

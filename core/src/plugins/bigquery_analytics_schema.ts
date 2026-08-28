@@ -43,6 +43,7 @@ export enum AnalyticsEventType {
   TOOL_ERROR = 'TOOL_ERROR',
   TOOL_PAUSED = 'TOOL_PAUSED',
   STATE_DELTA = 'STATE_DELTA',
+  NODE_OUTPUT = 'NODE_OUTPUT',
   HITL_CREDENTIAL_REQUEST = 'HITL_CREDENTIAL_REQUEST',
   HITL_CONFIRMATION_REQUEST = 'HITL_CONFIRMATION_REQUEST',
   HITL_INPUT_REQUEST = 'HITL_INPUT_REQUEST',
@@ -122,6 +123,108 @@ export function hitlMappingFor(
 export enum AnalyticsStatus {
   OK = 'OK',
   ERROR = 'ERROR',
+}
+
+/**
+ * Version of the `attributes.adk` envelope every row carries.
+ *
+ * Separate from {@link SCHEMA_VERSION}: the table's columns and the envelope
+ * inside the `attributes` column change independently, and a consumer gates on
+ * whichever one it reads.
+ */
+export const ADK_ENVELOPE_SCHEMA_VERSION = '1';
+
+/** The `attributes.adk.scope.kind` values, in the order they are tested. */
+export enum AnalyticsScopeKind {
+  /** The scope names one run of a workflow node. */
+  NODE_RUN = 'node_run',
+  /** The scope names one function call. */
+  FUNCTION_CALL = 'function_call',
+  /** The scope is present but is not a name this SDK recognizes. */
+  UNKNOWN = 'unknown',
+}
+
+/** The `attributes.adk.scope` object. */
+export interface AnalyticsScope {
+  id: string;
+  kind: AnalyticsScopeKind;
+}
+
+/** The `attributes.adk.node` object. */
+export interface AnalyticsNode {
+  path: string | null;
+  run_id: string | null;
+  parent_run_id: string | null;
+}
+
+/** Separator between the segments of a workflow node path. */
+const NODE_PATH_SEPARATOR = '/';
+
+/** Separator between a node name and the id of one run of it. */
+const NODE_RUN_SEPARATOR = '@';
+
+/** The run id a path segment carries, or null when it names no run. */
+function runIdOf(segment: string | undefined): string | null {
+  if (segment === undefined) {
+    return null;
+  }
+  const at = segment.indexOf(NODE_RUN_SEPARATOR);
+  return at === -1 ? null : segment.slice(at + 1);
+}
+
+/**
+ * Reads the run id and the parent run id out of a workflow node path.
+ *
+ * A path is `/`-separated and each segment may carry `@<runId>`, so
+ * `wf/a@1/b@2` ran node `b` as run `2` inside run `1`. adk-js `NodeInfo` stores
+ * only the path where adk-python stores the two ids as well, so the emitted
+ * JSON keeps Python's shape by deriving them here.
+ *
+ * @param path The node path, possibly empty.
+ * @return The run id of the last segment and of the one before it.
+ */
+export function parseNodeRunIds(path: string): {
+  run_id: string | null;
+  parent_run_id: string | null;
+} {
+  const segments = path.split(NODE_PATH_SEPARATOR);
+  return {
+    run_id: runIdOf(segments.at(-1)),
+    parent_run_id: runIdOf(segments.length > 1 ? segments.at(-2) : undefined),
+  };
+}
+
+/**
+ * Classifies an event's isolation scope for `attributes.adk.scope`.
+ *
+ * The order is load-bearing: a scope whose last path segment carries `@` names
+ * a node run, and testing that first stops a bare `name@runId` from reading as
+ * a function call.
+ *
+ * @param value The isolation scope, of whatever type the event carried. A
+ *     rehydrated event supplies it from storage, so it is not always a string.
+ * @param onUnknown Called with the offending value when it is not a name this
+ *     SDK recognizes.
+ * @return The scope object, or null when the event carries no scope.
+ */
+export function deriveScope(
+  value: unknown,
+  onUnknown: (value: unknown) => void,
+): AnalyticsScope | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== 'string' || value === '') {
+    onUnknown(value);
+    return {id: String(value), kind: AnalyticsScopeKind.UNKNOWN};
+  }
+  const last = value.split(NODE_PATH_SEPARATOR).at(-1) ?? '';
+  return {
+    id: value,
+    kind: last.includes(NODE_RUN_SEPARATOR)
+      ? AnalyticsScopeKind.NODE_RUN
+      : AnalyticsScopeKind.FUNCTION_CALL,
+  };
 }
 
 /** The `content_parts.storage_mode` column's values. */

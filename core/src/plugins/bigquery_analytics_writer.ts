@@ -22,6 +22,18 @@ import {
 /** HTTP status BigQuery returns when a table already exists. */
 const ALREADY_EXISTS_STATUS = 409;
 
+/**
+ * The error name the BigQuery client uses when an insert accepted some rows
+ * and rejected others.
+ */
+const PARTIAL_FAILURE_ERROR_NAME = 'PartialFailureError';
+
+/** Delay before the first retry of a failed setup. */
+const SETUP_RETRY_BASE_MS = 1000;
+
+/** Longest delay between setup retries. */
+const SETUP_RETRY_MAX_MS = 60_000;
+
 /** Why a row never reached the events table, or lost its payload on the way. */
 export enum AnalyticsDropReason {
   /** The in-memory queue was full when the row arrived. */
@@ -61,8 +73,8 @@ function isAlreadyExists(err: unknown): boolean {
 }
 
 /**
- * Awaits `work`, giving up after `timeoutMs`. The timer is always cleared, so
- * a fast `work` never holds the Node process open.
+ * Awaits `work`, giving up after `timeoutMs`. The timer is cleared on every
+ * exit path, so a fast or failing `work` never holds the Node process open.
  */
 async function awaitWithTimeout(
   work: Promise<void>,
@@ -72,8 +84,33 @@ async function awaitWithTimeout(
   const expiry = new Promise<void>((resolve) => {
     timer = setTimeout(resolve, timeoutMs);
   });
-  await Promise.race([work, expiry]);
-  clearTimeout(timer);
+  try {
+    await Promise.race([work, expiry]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * How many rows of a batch of `batchSize` an insert failure lost.
+ *
+ * `tabledata.insertAll` can accept part of a batch and reject the rest, which
+ * the client reports as a `PartialFailureError` carrying one entry per rejected
+ * row. Charging the whole batch there would report rows that landed as lost.
+ *
+ * @param err The error the insert threw.
+ * @param batchSize How many rows the insert carried.
+ * @return The number of rows that did not land.
+ */
+function rejectedRowCount(err: unknown, batchSize: number): number {
+  if (typeof err !== 'object' || err === null) {
+    return batchSize;
+  }
+  const {name, errors} = err as {name?: unknown; errors?: unknown};
+  if (name !== PARTIAL_FAILURE_ERROR_NAME || !Array.isArray(errors)) {
+    return batchSize;
+  }
+  return Math.min(errors.length, batchSize);
 }
 
 /**
@@ -101,7 +138,9 @@ export class BigQueryRowWriter {
   private table?: Table;
   private tablePromise?: Promise<Table>;
   private timer?: ReturnType<typeof setTimeout>;
-  private inFlightRows = 0;
+  private pendingRows = 0;
+  private setupFailures = 0;
+  private nextSetupAttemptMs = 0;
 
   constructor(private readonly options: BigQueryRowWriterOptions) {}
 
@@ -125,16 +164,16 @@ export class BigQueryRowWriter {
   }
 
   /**
-   * Queues `row` for the next batch write.
+   * Queues `row` for the next batch write and returns at once.
+   *
+   * The caller is an agent callback, so nothing here waits on the network: a
+   * full batch starts a write that {@link flush} and {@link shutdown} join
+   * later. Opening the client and the table happens on that write too, not
+   * here.
    *
    * @param row The row to write.
    */
-  async enqueue(row: AnalyticsRow): Promise<void> {
-    const table = await this.openTableOnce();
-    if (table === undefined) {
-      this.countDrop(AnalyticsDropReason.SETUP_UNAVAILABLE);
-      return;
-    }
+  enqueue(row: AnalyticsRow): void {
     if (this.queue.length >= this.options.queueMaxSize) {
       this.countDrop(AnalyticsDropReason.QUEUE_FULL);
       logger.warn(
@@ -145,14 +184,15 @@ export class BigQueryRowWriter {
     }
     this.queue.push(row);
     if (this.queue.length >= this.options.batchSize) {
-      return this.writeBatch();
+      this.startWrite();
+      return;
     }
     this.startTimer();
   }
 
   /** Writes everything queued and waits for every in-flight insert to settle. */
   async flush(): Promise<void> {
-    await this.writeBatch();
+    this.startWrite();
     await Promise.all([...this.inFlight]);
   }
 
@@ -164,7 +204,7 @@ export class BigQueryRowWriter {
   async shutdown(): Promise<void> {
     this.clearTimer();
     await awaitWithTimeout(this.flush(), this.options.shutdownTimeoutMs);
-    const lost = this.queue.length + this.inFlightRows;
+    const lost = this.queue.length + this.pendingRows;
     if (lost > 0) {
       this.queue.length = 0;
       this.countDrop(AnalyticsDropReason.SHUTDOWN_TIMEOUT, lost);
@@ -186,6 +226,9 @@ export class BigQueryRowWriter {
     if (this.table !== undefined) {
       return this.table;
     }
+    if (Date.now() < this.nextSetupAttemptMs) {
+      return undefined;
+    }
     const pending = (this.tablePromise ??= this.openTable());
     try {
       this.table = await pending;
@@ -193,12 +236,26 @@ export class BigQueryRowWriter {
     } catch (err: unknown) {
       if (this.tablePromise === pending) {
         this.tablePromise = undefined;
+        this.setupFailures += 1;
+        this.nextSetupAttemptMs = Date.now() + this.setupRetryDelayMs();
         logger.error(
           `BigQuery analytics could not open ${this.tableName}: ${formatError(err)}`,
         );
       }
       return undefined;
     }
+  }
+
+  /**
+   * How long to wait before attempting setup again. The delay doubles with
+   * each failure up to a cap, so an unreachable BigQuery is retried without
+   * one failing round-trip per batch for the life of the process.
+   */
+  private setupRetryDelayMs(): number {
+    return Math.min(
+      SETUP_RETRY_BASE_MS * 2 ** (this.setupFailures - 1),
+      SETUP_RETRY_MAX_MS,
+    );
   }
 
   /** Loads the optional peer, then finds or creates the events table. */
@@ -239,21 +296,36 @@ export class BigQueryRowWriter {
     }
   }
 
-  /** Hands every queued row to BigQuery as one insert. */
-  private async writeBatch(): Promise<void> {
-    const table = this.table;
-    if (table === undefined || this.queue.length === 0) {
+  /**
+   * Starts a batch write and tracks it, without waiting for it. Nothing inside
+   * {@link writeBatch} throws, so the untracked rejection this would otherwise
+   * risk cannot happen.
+   */
+  private startWrite(): void {
+    if (this.queue.length === 0) {
       return;
     }
-    const rows = this.queue.splice(0, this.queue.length);
-    this.clearTimer();
-    this.inFlightRows += rows.length;
-    const write = this.insert(table, rows).finally(() => {
-      this.inFlightRows -= rows.length;
+    const write = this.writeBatch().finally(() => {
       this.inFlight.delete(write);
     });
     this.inFlight.add(write);
-    await write;
+  }
+
+  /** Opens the table if needed, then hands every queued row to it as one insert. */
+  private async writeBatch(): Promise<void> {
+    const rows = this.queue.splice(0, this.queue.length);
+    this.clearTimer();
+    this.pendingRows += rows.length;
+    try {
+      const table = await this.openTableOnce();
+      if (table === undefined) {
+        this.countDrop(AnalyticsDropReason.SETUP_UNAVAILABLE, rows.length);
+        return;
+      }
+      await this.insert(table, rows);
+    } finally {
+      this.pendingRows -= rows.length;
+    }
   }
 
   /**
@@ -267,9 +339,10 @@ export class BigQueryRowWriter {
         {raw: true},
       );
     } catch (err: unknown) {
-      this.countDrop(AnalyticsDropReason.WRITE_FAILED, rows.length);
+      const lost = rejectedRowCount(err, rows.length);
+      this.countDrop(AnalyticsDropReason.WRITE_FAILED, lost);
       logger.warn(
-        `BigQuery analytics dropped ${rows.length} row(s) for ` +
+        `BigQuery analytics dropped ${lost} of ${rows.length} row(s) for ` +
           `${this.tableName}: ${formatError(err)}`,
       );
     }
@@ -282,7 +355,7 @@ export class BigQueryRowWriter {
     }
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      void this.writeBatch();
+      this.startWrite();
     }, this.options.flushIntervalMs);
     // A pending flush must never be the reason a process stays alive.
     this.timer.unref();
