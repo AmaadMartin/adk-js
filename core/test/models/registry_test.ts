@@ -5,7 +5,7 @@
  */
 
 import type {BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
-import {BaseLlm, LlmAgent, LLMRegistry} from '@google/adk';
+import {BaseLlm, Claude, LlmAgent, LLMRegistry} from '@google/adk';
 import {beforeAll, describe, expect, it} from 'vitest';
 
 import type {Blob, Content} from '@google/genai';
@@ -78,5 +78,19 @@ describe('LLMRegistry', () => {
     });
 
     expect(agent.canonicalModel).toBeInstanceOf(TestLlmModel);
+  });
+
+  it.each(['claude-3-5-sonnet-v2@20241022', 'claude-sonnet-4-20250514'])(
+    'resolves %s to Claude',
+    (model) => {
+      expect(LLMRegistry.resolve(model)).toBe(Claude);
+    },
+  );
+
+  it('constructs a Claude model without any Vertex configuration', () => {
+    const llm = LLMRegistry.newLlm('claude-3-5-sonnet-v2@20241022');
+
+    expect(llm).toBeInstanceOf(Claude);
+    expect(llm.model).toBe('claude-3-5-sonnet-v2@20241022');
   });
 });

@@ -21,6 +21,11 @@ TypeScript implementation. For the official ADK documentation, visit
 - [BaseEvalService](evaluation/eval_service/index.md) - The two-phase eval
   contract: run the agent over an eval set, then score the results.
 
+### Models
+
+- [Anthropic Claude models](models/anthropic/index.md) - Driving an agent with
+  Claude, through the Anthropic API or Vertex AI.
+
 ### Utils
 
 - [content_utils](utils/content_utils/index.md) - Reading and reshaping a genai

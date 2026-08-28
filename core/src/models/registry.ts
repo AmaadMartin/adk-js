@@ -6,6 +6,7 @@
 
 import {logger} from '../utils/logger.js';
 
+import {Claude} from './anthropic_llm.js';
 import {ApigeeLlm} from './apigee_llm.js';
 import type {BaseLlm} from './base_llm.js';
 import {Gemini} from './google_llm.js';
@@ -133,3 +134,4 @@ export class LLMRegistry {
 LLMRegistry.register(Gemini);
 LLMRegistry.register(ApigeeLlm);
 LLMRegistry.register(OciGenAiLlm);
+LLMRegistry.register(Claude);

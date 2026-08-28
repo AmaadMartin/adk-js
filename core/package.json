@@ -103,6 +103,8 @@
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
+    "@anthropic-ai/vertex-sdk": "^0.19.6",
     "@daytona/sdk": "^0.204.0",
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
@@ -121,6 +123,8 @@
     "openapi-types": "^12.1.3"
   },
   "peerDependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
+    "@anthropic-ai/vertex-sdk": "^0.19.6",
     "@daytona/sdk": "^0.204.0",
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
@@ -138,6 +142,12 @@
     "oci-generativeaiinference": "^2.139.1"
   },
   "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@anthropic-ai/vertex-sdk": {
+      "optional": true
+    },
     "@daytona/sdk": {
       "optional": true
     },
