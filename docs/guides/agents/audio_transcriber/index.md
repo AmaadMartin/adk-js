@@ -69,7 +69,7 @@ async function transcribeTurn(
   retry loop here, because the `google-gax` client already retries with
   backoff. The cache is already empty at that point, so the audio of the failed
   request is lost rather than retried on the next call.
-- An audio entry with no `role` is dropped. `TranscriptionEntry.role` is
-  documented as undefined only for function calls, which carry `Content`, so a
-  role-less audio blob is not a case the framework produces. This matches
-  adk-python.
+- An audio entry with no `role` transcribes as `role: 'user'`. An empty-string
+  role does the same. adk-python drops that audio instead, because it uses the
+  speaker as its pending-run flag, which makes its own `'user'` fallback
+  unreachable. This port emits the transcript rather than losing the audio.
