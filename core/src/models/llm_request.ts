@@ -73,6 +73,40 @@ export function appendInstructions(
 }
 
 /**
+ * Inserts request-scoped user content at the current-turn boundary.
+ *
+ * The boundary sits before the trailing batch of ordinary user contents, but
+ * after a user content that carries a function response. Content placed there
+ * stays out of the stable prefix that providers key context caching on, and it
+ * never separates a function call from the response that answers it.
+ *
+ * @param contents The contents to insert.
+ */
+export function insertTransientUserContent(
+  llmRequest: LlmRequest,
+  contents: Content[],
+): void {
+  if (!contents.length) {
+    return;
+  }
+
+  const existing = llmRequest.contents;
+  let insertIndex = 0;
+  for (let i = existing.length - 1; i >= 0; i--) {
+    const content = existing[i];
+    if (
+      content.role !== 'user' ||
+      content.parts?.some((part) => part.functionResponse)
+    ) {
+      insertIndex = i + 1;
+      break;
+    }
+  }
+
+  existing.splice(insertIndex, 0, ...contents);
+}
+
+/**
  * Appends tools to the request.
  * @param tools The tools to append.
  */
