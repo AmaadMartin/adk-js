@@ -36,6 +36,12 @@ const TEXT_LIKE_MIME_TYPES = new Set([
   'image/xml',
 ]);
 
+/** MIME types carrying a spreadsheet workbook. */
+const SPREADSHEET_MIME_TYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+]);
+
 /**
  * Strips parameters such as `charset` from a MIME type and trims it.
  *
@@ -78,4 +84,14 @@ export function isGeminiInlineMimeTypeSupported(mimeType?: string): boolean {
  */
 export function isTextLikeMimeType(mimeType: string): boolean {
   return mimeType.startsWith('text/') || TEXT_LIKE_MIME_TYPES.has(mimeType);
+}
+
+/**
+ * Returns whether this MIME type carries a spreadsheet workbook.
+ *
+ * @param mimeType The normalized MIME type to test.
+ * @return True for a spreadsheet workbook type.
+ */
+export function isSpreadsheetMimeType(mimeType: string): boolean {
+  return SPREADSHEET_MIME_TYPES.has(mimeType);
 }

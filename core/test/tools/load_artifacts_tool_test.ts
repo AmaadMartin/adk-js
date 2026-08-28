@@ -6,13 +6,16 @@
 
 import {
   Context,
-  LOAD_ARTIFACTS,
+  FeatureName,
+  getLogger,
   LlmRequest,
+  LOAD_ARTIFACTS,
   LoadArtifactsTool,
+  withTemporaryFeatureOverride,
 } from '@google/adk';
 import {Blob, Part, Type} from '@google/genai';
 import AdmZip from 'adm-zip';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 /** Builds a tool context serving `artifactsByName`, as the tool sees it. */
 function stubContext(artifactsByName: Record<string, Part>): Context {
@@ -48,6 +51,44 @@ function buildDocx(text: string): Buffer {
     Buffer.from(
       '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
         `<w:body><w:p><w:t>${text}</w:t></w:p></w:body></w:document>`,
+      'utf8',
+    ),
+  );
+  return zip.toBuffer();
+}
+
+/** Builds an XLSX buffer with one sheet of literal numeric rows. */
+function buildXlsx(rows: number[][], sheetName = 'Sheet1'): Buffer {
+  const zip = new AdmZip();
+  zip.addFile(
+    'xl/workbook.xml',
+    Buffer.from(
+      `<workbook><sheets><sheet name="${sheetName}" r:id="rId1"/></sheets></workbook>`,
+      'utf8',
+    ),
+  );
+  zip.addFile(
+    'xl/_rels/workbook.xml.rels',
+    Buffer.from(
+      '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+      'utf8',
+    ),
+  );
+  const rowsXml = rows
+    .map((cells, rowIndex) => {
+      const cellsXml = cells
+        .map(
+          (value, columnIndex) =>
+            `<c r="${String.fromCharCode(65 + columnIndex)}${rowIndex + 1}"><v>${value}</v></c>`,
+        )
+        .join('');
+      return `<row r="${rowIndex + 1}">${cellsXml}</row>`;
+    })
+    .join('');
+  zip.addFile(
+    'xl/worksheets/sheet1.xml',
+    Buffer.from(
+      `<worksheet><sheetData>${rowsXml}</sheetData></worksheet>`,
       'utf8',
     ),
   );
@@ -871,4 +912,268 @@ describe('LoadArtifactsTool', () => {
       expect(artifactPart.text).toEqual(svgMarkup);
     },
   );
+  it('renders a spreadsheet artifact as markdown when parsing is enabled', async () => {
+    const artifactName = 'test.xlsx';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: buildXlsx([
+            [1, 2],
+            [3, 4],
+          ]).toString('base64'),
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      enableSpreadsheetParsing: true,
+    }).processLlmRequest({toolContext, llmRequest});
+
+    const artifactPart = appendedArtifactPart(llmRequest);
+    expect(artifactPart.inlineData).toBeUndefined();
+    expect(artifactPart.text).toContain('### Sheet: Sheet1');
+    expect(artifactPart.text).toContain('| 3 | 4 |');
+  });
+
+  it('renders a spreadsheet named .xlsx whose mime type is wrong', async () => {
+    const artifactName = 'quarter.XLSX';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: buildXlsx([
+            [1, 2],
+            [3, 4],
+          ]).toString('base64'),
+          mimeType: 'application/zip',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      enableSpreadsheetParsing: true,
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toContain(
+      '### Sheet: Sheet1',
+    );
+  });
+
+  it('reports an invalid workbook when parsing is enabled', async () => {
+    const artifactName = 'broken.xlsx';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: Buffer.from('not a workbook at all', 'utf8').toString('base64'),
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      enableSpreadsheetParsing: true,
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toContain(
+      '[Invalid spreadsheet format',
+    );
+  });
+
+  it('reports an invalid workbook for a legacy .xls artifact', async () => {
+    const artifactName = 'legacy.xls';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: Buffer.from('legacy biff bytes').toString('base64'),
+          mimeType: 'application/vnd.ms-excel',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      enableSpreadsheetParsing: true,
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toContain(
+      '[Invalid spreadsheet format',
+    );
+  });
+
+  it('leaves a spreadsheet artifact as a placeholder by default', async () => {
+    const artifactName = 'test.xlsx';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: buildXlsx([
+            [1, 2],
+            [3, 4],
+          ]).toString('base64'),
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toContain(
+      '[Binary artifact: test.xlsx',
+    );
+  });
+
+  it('appends the part a synchronous processArtifact returns', async () => {
+    const artifactName = 'test.txt';
+    const artifact: Part = {inlineData: {data: 'AAAA', mimeType: 'text/plain'}};
+    const calls: Array<[Part, string]> = [];
+    const toolContext = stubContext({
+      [artifactName]: artifact,
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => {
+        calls.push([part, name]);
+        return {text: 'redacted'};
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(calls).toEqual([[artifact, artifactName]]);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('redacted');
+  });
+
+  it('awaits an asynchronous processArtifact', async () => {
+    const artifactName = 'test.txt';
+    const toolContext = stubContext({
+      [artifactName]: {inlineData: {data: 'AAAA', mimeType: 'text/plain'}},
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      processArtifact: async () => ({text: 'async redacted'}),
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toEqual('async redacted');
+  });
+
+  it('omits the artifact when processArtifact returns undefined', async () => {
+    const toolContext = stubContext({
+      'skip.txt': {text: 'skip me'},
+      'keep.txt': {text: 'keep me'},
+    });
+    const llmRequest = requestLoading(['skip.txt', 'keep.txt']);
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => (name === 'skip.txt' ? undefined : part),
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('keep me');
+  });
+
+  it('logs and skips the artifact when processArtifact throws', async () => {
+    const toolContext = stubContext({
+      'boom.txt': {text: 'boom'},
+      'keep.txt': {text: 'keep me'},
+    });
+    const llmRequest = requestLoading(['boom.txt', 'keep.txt']);
+    const errors = vi.spyOn(getLogger(), 'error').mockImplementation(() => {});
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => {
+        if (name === 'boom.txt') {
+          throw new Error('callback failed');
+        }
+        return part;
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(errors).toHaveBeenCalledOnce();
+    expect(errors.mock.calls[0][0]).toContain('boom.txt');
+    expect(errors.mock.calls[0][0]).toContain('callback failed');
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('keep me');
+    errors.mockRestore();
+  });
+
+  it('gives processArtifact the unprefixed name of a user artifact', async () => {
+    const artifactName = 'shared.txt';
+    const toolContext = stubContext({
+      [`user:${artifactName}`]: {text: 'shared content'},
+    });
+    const llmRequest = requestLoading([artifactName]);
+    const names: string[] = [];
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => {
+        names.push(name);
+        return part;
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(names).toEqual([artifactName]);
+  });
+
+  it('bypasses the safety conversion when processArtifact is supplied', async () => {
+    const artifactName = 'document.docx';
+    const base64 = buildDocx('Untouched docx').toString('base64');
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: base64,
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      processArtifact: (part) => part,
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).inlineData?.data).toEqual(base64);
+  });
+
+  it('declares json schema parameters when the feature is enabled', async () => {
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      true,
+      () => new LoadArtifactsTool()._getDeclaration(),
+    );
+
+    expect(declaration?.parametersJsonSchema).toEqual({
+      type: 'object',
+      properties: {
+        artifact_names: {type: 'array', items: {type: 'string'}},
+      },
+    });
+    expect(declaration?.parameters).toBeUndefined();
+  });
+
+  it('declares json schema parameters when the environment enables the feature', () => {
+    vi.stubEnv('ADK_ENABLE_JSON_SCHEMA_FOR_FUNC_DECL', 'true');
+
+    const declaration = new LoadArtifactsTool()._getDeclaration();
+
+    expect(declaration?.parametersJsonSchema).toBeDefined();
+    vi.unstubAllEnvs();
+  });
+
+  it('keeps the schema declaration when the feature is disabled', async () => {
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      false,
+      () => new LoadArtifactsTool()._getDeclaration(),
+    );
+
+    expect(declaration?.parametersJsonSchema).toBeUndefined();
+    expect(declaration?.parameters?.type).toEqual(Type.OBJECT);
+  });
 });
