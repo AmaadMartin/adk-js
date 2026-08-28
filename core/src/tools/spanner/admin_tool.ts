@@ -9,10 +9,8 @@ import {z} from 'zod';
 import {formatError} from '../../utils/error_utils.js';
 import {BaseTool} from '../base_tool.js';
 import {FunctionTool, ToolExecuteArgument} from '../function_tool.js';
-import type {
-  SpannerAdminClientProvider,
-  SpannerAdminClients,
-} from './client.js';
+import {SpannerAdminClients, withSpannerAdminClients} from './client.js';
+import {SpannerCredentialsManager} from './spanner_credentials.js';
 
 /** Prefix prepended to every tool name in the Spanner admin toolset. */
 export const SPANNER_TOOL_NAME_PREFIX = 'spanner';
@@ -153,12 +151,6 @@ interface SpannerAdminToolDefinition<TParams extends z.ZodObject> {
   name: string;
   description: string;
   parameters: TParams;
-  /**
-   * Set on an operation that provisions a billable resource, so the user must
-   * approve the call before it runs. There is no option to turn this off: a
-   * caller who does not want the tool at all can drop it with `toolFilter`.
-   */
-  requireConfirmation?: boolean;
   run(
     clients: SpannerAdminClients,
     args: ToolExecuteArgument<TParams>,
@@ -254,7 +246,6 @@ const createInstanceTool: SpannerAdminToolDefinition<
   description:
     'Create a Spanner instance. This creates a billable Google Cloud resource.',
   parameters: createInstanceParams,
-  requireConfirmation: true,
   async run(
     {instanceAdmin},
     {project_id, instance_id, config_id, display_name, nodes},
@@ -301,7 +292,6 @@ const createDatabaseTool: SpannerAdminToolDefinition<
   description:
     'Create a Spanner database. This creates a billable Google Cloud resource.',
   parameters: createDatabaseParams,
-  requireConfirmation: true,
   async run({databaseAdmin}, {project_id, instance_id, database_id}) {
     assertQuotableDatabaseId(database_id);
     const [operation] = await databaseAdmin.createDatabase(
@@ -319,21 +309,34 @@ const createDatabaseTool: SpannerAdminToolDefinition<
 /**
  * Wraps one operation as a prefixed tool. adk-python wraps every admin
  * function body in `try/except Exception`; the single `catch` here also covers
- * resolving the clients, so a missing peer dependency or missing credentials
- * reach the model as an error rather than as a thrown exception.
+ * resolving the credentials and the clients, so a missing peer dependency or a
+ * rejected token reaches the model as an error rather than as an exception.
  */
 function createSpannerTool<TParams extends z.ZodObject>(
-  provider: SpannerAdminClientProvider,
+  credentials: SpannerCredentialsManager,
   definition: SpannerAdminToolDefinition<TParams>,
 ): FunctionTool<TParams> {
+  const name = `${SPANNER_TOOL_NAME_PREFIX}_${definition.name}`;
   return new FunctionTool({
-    name: `${SPANNER_TOOL_NAME_PREFIX}_${definition.name}`,
+    name,
     description: definition.description,
     parameters: definition.parameters,
-    requireConfirmation: definition.requireConfirmation,
-    async execute(args) {
+    async execute(args, toolContext) {
       try {
-        return await definition.run(await provider.getClients(), args);
+        const authClient = await credentials.getAuthClient(toolContext);
+        if (!authClient) {
+          // adk-python's GoogleTool answers the pending OAuth flow with this
+          // sentence. The envelope is ours: every result keeps one shape.
+          return {
+            status: 'ERROR',
+            error_details:
+              'User authorization is required to access Google services for' +
+              ` ${name}. Please complete the authorization flow.`,
+          };
+        }
+        return await withSpannerAdminClients(authClient, (clients) =>
+          definition.run(clients, args),
+        );
       } catch (err: unknown) {
         return {status: 'ERROR', error_details: formatError(err)};
       }
@@ -342,19 +345,19 @@ function createSpannerTool<TParams extends z.ZodObject>(
 }
 
 /**
- * Builds the seven Spanner admin tools, each bound to `provider` and named
- * with the `spanner_` prefix.
+ * Builds the seven Spanner admin tools, each resolving its credentials through
+ * `credentials` and named with the `spanner_` prefix.
  */
 export function createSpannerAdminTools(
-  provider: SpannerAdminClientProvider,
+  credentials: SpannerCredentialsManager,
 ): BaseTool[] {
   return [
-    createSpannerTool(provider, listInstancesTool),
-    createSpannerTool(provider, getInstanceTool),
-    createSpannerTool(provider, listInstanceConfigsTool),
-    createSpannerTool(provider, getInstanceConfigTool),
-    createSpannerTool(provider, createInstanceTool),
-    createSpannerTool(provider, listDatabasesTool),
-    createSpannerTool(provider, createDatabaseTool),
+    createSpannerTool(credentials, listInstancesTool),
+    createSpannerTool(credentials, getInstanceTool),
+    createSpannerTool(credentials, listInstanceConfigsTool),
+    createSpannerTool(credentials, getInstanceConfigTool),
+    createSpannerTool(credentials, createInstanceTool),
+    createSpannerTool(credentials, listDatabasesTool),
+    createSpannerTool(credentials, createDatabaseTool),
   ];
 }

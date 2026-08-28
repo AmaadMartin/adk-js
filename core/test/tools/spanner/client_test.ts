@@ -6,13 +6,17 @@
 
 import {version} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {SpannerAdminClientProvider} from '../../../src/tools/spanner/client.js';
+import {
+  createTokenAuthClient,
+  withSpannerAdminClients,
+} from '../../../src/tools/spanner/client.js';
 import {
   DatabaseAdminClientMock,
   fakeDatabaseAdmin,
   fakeInstanceAdmin,
   InstanceAdminClientMock,
   resetSpannerFakes,
+  testAuthClient,
 } from './spanner_test_utils.js';
 
 vi.mock('@google-cloud/spanner-api', async () => {
@@ -20,90 +24,81 @@ vi.mock('@google-cloud/spanner-api', async () => {
   return fakeSpannerModule;
 });
 
-const ADMIN_SCOPE = 'https://www.googleapis.com/auth/spanner.admin';
 const LIB_NAME = 'adk-spanner-tool google-adk';
 
-describe('SpannerAdminClientProvider', () => {
+describe('withSpannerAdminClients', () => {
   beforeEach(() => {
     resetSpannerFakes();
   });
 
-  it('scopes both clients to the Spanner admin scope', async () => {
-    const clients = await new SpannerAdminClientProvider().getClients();
+  it('builds both clients with the auth client and the ADK attribution', async () => {
+    const authClient = testAuthClient();
 
-    const expected = {
-      scopes: [ADMIN_SCOPE],
-      libName: LIB_NAME,
-      libVersion: version,
-    };
+    const clients = await withSpannerAdminClients(
+      authClient,
+      async (built) => built,
+    );
+
+    const expected = {authClient, libName: LIB_NAME, libVersion: version};
     expect(InstanceAdminClientMock).toHaveBeenCalledWith(expected);
     expect(DatabaseAdminClientMock).toHaveBeenCalledWith(expected);
     expect(clients.instanceAdmin).toBe(fakeInstanceAdmin);
     expect(clients.databaseAdmin).toBe(fakeDatabaseAdmin);
   });
 
-  it('lets the caller override the defaults', async () => {
-    await new SpannerAdminClientProvider({
-      projectId: 'my-project',
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    }).getClients();
-
-    expect(InstanceAdminClientMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        projectId: 'my-project',
-        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-      }),
+  it('returns what the callback returns', async () => {
+    const result = await withSpannerAdminClients(
+      testAuthClient(),
+      async () => 'done',
     );
+
+    expect(result).toBe('done');
   });
 
-  it('builds the clients once and reuses them', async () => {
-    const provider = new SpannerAdminClientProvider();
+  it('closes both clients when the callback resolves', async () => {
+    await withSpannerAdminClients(testAuthClient(), async () => undefined);
 
-    const first = await provider.getClients();
-    const second = await provider.getClients();
-
-    expect(second).toBe(first);
-    expect(InstanceAdminClientMock).toHaveBeenCalledTimes(1);
-    expect(DatabaseAdminClientMock).toHaveBeenCalledTimes(1);
+    expect(fakeInstanceAdmin.close).toHaveBeenCalledTimes(1);
+    expect(fakeDatabaseAdmin.close).toHaveBeenCalledTimes(1);
   });
 
-  describe('close', () => {
-    it('closes both clients', async () => {
-      const provider = new SpannerAdminClientProvider();
-      await provider.getClients();
-
-      await provider.close();
-
-      expect(fakeInstanceAdmin.close).toHaveBeenCalledTimes(1);
-      expect(fakeDatabaseAdmin.close).toHaveBeenCalledTimes(1);
+  it('closes both clients when the callback throws', async () => {
+    const promise = withSpannerAdminClients(testAuthClient(), async () => {
+      throw new Error('call failed');
     });
 
-    it('builds a fresh pair for the call after it', async () => {
-      const provider = new SpannerAdminClientProvider();
-      await provider.getClients();
+    await expect(promise).rejects.toThrow('call failed');
+    expect(fakeInstanceAdmin.close).toHaveBeenCalledTimes(1);
+    expect(fakeDatabaseAdmin.close).toHaveBeenCalledTimes(1);
+  });
+});
 
-      await provider.close();
-      await provider.getClients();
+describe('createTokenAuthClient', () => {
+  it('carries the access token', async () => {
+    const client = await createTokenAuthClient({accessToken: 'test-token'});
 
-      expect(InstanceAdminClientMock).toHaveBeenCalledTimes(2);
-      expect(DatabaseAdminClientMock).toHaveBeenCalledTimes(2);
+    expect(client.credentials.access_token).toBe('test-token');
+  });
+
+  it('carries the refresh token and the expiry', async () => {
+    const client = await createTokenAuthClient({
+      accessToken: 'test-token',
+      refreshToken: 'refresh',
+      expiresAt: 1_700_000_000_000,
     });
 
-    it('does nothing when the clients were never built', async () => {
-      await new SpannerAdminClientProvider().close();
+    expect(client.credentials.refresh_token).toBe('refresh');
+    expect(client.credentials.expiry_date).toBe(1_700_000_000_000);
+  });
 
-      expect(InstanceAdminClientMock).not.toHaveBeenCalled();
-      expect(fakeInstanceAdmin.close).not.toHaveBeenCalled();
-    });
+  it('renews against the OAuth client it is given', async () => {
+    const client = await createTokenAuthClient(
+      {accessToken: 'test-token'},
+      {clientId: 'client-id', clientSecret: 'client-secret'},
+    );
 
-    it('does not rethrow a failure from building the clients', async () => {
-      InstanceAdminClientMock.mockImplementation(() => {
-        throw new Error('no credentials');
-      });
-      const provider = new SpannerAdminClientProvider();
-      await expect(provider.getClients()).rejects.toThrow('no credentials');
-
-      await expect(provider.close()).resolves.toBeUndefined();
-    });
+    expect(client.generateAuthUrl({scope: 'https://example.test/s'})).toContain(
+      'client_id=client-id',
+    );
   });
 });

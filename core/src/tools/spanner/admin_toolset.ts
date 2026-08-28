@@ -13,23 +13,37 @@ import {
   SPANNER_TOOL_NAME_PREFIX,
 } from './admin_tool.js';
 import {
-  SpannerAdminClientOptions,
-  SpannerAdminClientProvider,
-} from './client.js';
+  SpannerCredentialsConfig,
+  SpannerCredentialsManager,
+  validateSpannerCredentialsConfig,
+} from './spanner_credentials.js';
+
+/**
+ * Whether a `toolFilter` entry names this tool. adk-python filters on the bare
+ * name and prefixes afterwards, so both spellings are accepted here; matching
+ * only the prefixed name would silently yield no tools for a filter ported
+ * from Python.
+ */
+function matchesToolName(filterName: string, toolName: string): boolean {
+  return (
+    filterName === toolName ||
+    `${SPANNER_TOOL_NAME_PREFIX}_${filterName}` === toolName
+  );
+}
 
 /** Options for {@link SpannerAdminToolset}. */
 export interface SpannerAdminToolsetOptions {
   /**
-   * Names of the tools to expose, or a predicate over them. Names include the
-   * `spanner_` prefix.
+   * How the tools authenticate. Required: the Spanner Admin API rejects an
+   * unauthenticated call, so there is no working default.
+   */
+  credentialsConfig: SpannerCredentialsConfig;
+  /**
+   * Names of the tools to expose, or a predicate over them. A name matches
+   * with or without the `spanner_` prefix, so a filter ported from adk-python
+   * works unchanged. A predicate receives the tool under its prefixed name.
    */
   toolFilter?: ToolPredicate | string[];
-  /**
-   * Options for the Spanner Admin API clients: `credentials`, `keyFilename`,
-   * `authClient`, `projectId`. Both clients use Application Default
-   * Credentials scoped to the Spanner admin scope unless this overrides it.
-   */
-  clientOptions?: SpannerAdminClientOptions;
 }
 
 /**
@@ -45,28 +59,31 @@ export interface SpannerAdminToolsetOptions {
  *   - `spanner_create_database`
  *
  * Every tool answers with a {@link SpannerToolResult} and never throws.
- *
  * `spanner_create_instance` and `spanner_create_database` create billable
- * Google Cloud resources. Both wait for the long-running operation, bounded at
- * 300 seconds. Both also require the user to confirm
- * the call: through an `LlmAgent` turn they raise an `adk_request_confirmation`
- * interrupt and run only once the user approves. There is no option to turn
- * that off. A caller who does not want them at all can drop them with
- * `toolFilter`. A workflow `ToolNode` does not route through the confirmation
- * path, so such a node reports the "requires confirmation" error as its output
- * instead of pausing.
+ * Google Cloud resources, and both wait for the long-running operation,
+ * bounded at 300 seconds.
  *
  * Requires the optional peer dependency `@google-cloud/spanner-api`, which is
  * loaded on the first tool call. Install it with
  * `npm install @google-cloud/spanner-api`.
  *
- * Credentials default to Application Default Credentials scoped to the Spanner
- * admin scope. `clientOptions` reaches both Admin API clients, so anything they
- * accept works:
+ * One identity for every end user, from Application Default Credentials:
+ *
+ * ```ts
+ * const authClient = await new GoogleAuth({
+ *   scopes: [...SPANNER_DEFAULT_SCOPES],
+ * }).getClient();
+ * const toolset = new SpannerAdminToolset({credentialsConfig: {authClient}});
+ * ```
+ *
+ * Each end user acting as themselves, through the OAuth flow:
  *
  * ```ts
  * const toolset = new SpannerAdminToolset({
- *   clientOptions: {keyFilename: process.env.SPANNER_KEY_FILE},
+ *   credentialsConfig: {
+ *     clientId: process.env.SPANNER_OAUTH_CLIENT_ID,
+ *     clientSecret: process.env.SPANNER_OAUTH_CLIENT_SECRET,
+ *   },
  * });
  * ```
  *
@@ -76,25 +93,31 @@ export interface SpannerAdminToolsetOptions {
  *
  * ```ts
  * const toolset = new SpannerAdminToolset({
+ *   credentialsConfig,
  *   toolFilter: ['spanner_list_instances', 'spanner_list_databases'],
  * });
  * ```
  */
 @experimental
 export class SpannerAdminToolset extends BaseToolset {
-  private readonly provider: SpannerAdminClientProvider;
   private readonly tools: BaseTool[];
 
-  constructor(options: SpannerAdminToolsetOptions = {}) {
+  /**
+   * @throws Error if `credentialsConfig` names no credential source, or more
+   *   than one. See {@link validateSpannerCredentialsConfig}.
+   */
+  constructor(options: SpannerAdminToolsetOptions) {
     super(options.toolFilter ?? [], SPANNER_TOOL_NAME_PREFIX);
-    this.provider = new SpannerAdminClientProvider(options.clientOptions);
-    this.tools = createSpannerAdminTools(this.provider);
+    validateSpannerCredentialsConfig(options.credentialsConfig);
+    this.tools = createSpannerAdminTools(
+      new SpannerCredentialsManager(options.credentialsConfig),
+    );
   }
 
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     return this.tools.filter((tool) => {
       if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
-        return this.toolFilter.includes(tool.name);
+        return this.toolFilter.some((name) => matchesToolName(name, tool.name));
       }
       if (context) {
         return this.isToolSelected(tool, context);
@@ -103,8 +126,10 @@ export class SpannerAdminToolset extends BaseToolset {
     });
   }
 
-  /** Releases the Admin API clients, if any tool ever created them. */
-  override async close(): Promise<void> {
-    return this.provider.close();
-  }
+  /**
+   * A no-op, matching adk-python. Each tool call owns its Admin API clients
+   * for the length of that call and closes them before it resolves, so the
+   * toolset holds no resource to release.
+   */
+  override async close(): Promise<void> {}
 }

@@ -14,6 +14,9 @@
  *   return fakeSpannerModule;
  * });
  * ```
+ *
+ * `google-gax` is deliberately NOT mocked: the tools only use it to build an
+ * `OAuth2Client`, which opens no connection until a request is made.
  */
 
 import {
@@ -22,18 +25,16 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
-  ToolConfirmation,
+  SpannerCredentialsConfig,
 } from '@google/adk';
+import {googleAuthLibrary} from 'google-gax';
 import {vi} from 'vitest';
 
 /** Id of the function call every tool context below answers for. */
 export const FUNCTION_CALL_ID = 'fc-1';
 
-/**
- * A tool context. Pass `toolConfirmation` to answer the confirmation gate that
- * the two create tools raise; omit it to leave the gate unanswered.
- */
-export function makeToolContext(toolConfirmation?: ToolConfirmation): Context {
+/** A tool context backed by an empty session. */
+export function makeToolContext(): Context {
   const invocationContext = new InvocationContext({
     invocationId: 'inv-1',
     agent: new LlmAgent({name: 'a', model: 'gemini-2.5-flash'}),
@@ -43,13 +44,20 @@ export function makeToolContext(toolConfirmation?: ToolConfirmation): Context {
   return new Context({
     invocationContext,
     functionCallId: FUNCTION_CALL_ID,
-    toolConfirmation,
   });
 }
 
-/** A confirmation the user has already approved or rejected. */
-export function answered(confirmed: boolean): ToolConfirmation {
-  return {hint: 'approve or reject', confirmed};
+/**
+ * An auth client the Admin API clients accept. Built from `google-gax`'s own
+ * `google-auth-library`, which is the copy those clients are typed against.
+ */
+export function testAuthClient(): googleAuthLibrary.OAuth2Client {
+  return new googleAuthLibrary.OAuth2Client();
+}
+
+/** The simplest valid credentials config: one identity for every user. */
+export function testCredentialsConfig(): SpannerCredentialsConfig {
+  return {authClient: testAuthClient()};
 }
 
 /** A long-running operation double. */
@@ -84,7 +92,7 @@ export const fakeDatabaseAdmin = {
 export const InstanceAdminClientMock = vi.fn();
 export const DatabaseAdminClientMock = vi.fn();
 
-/** The `@google-cloud/spanner-api` module shape the provider destructures. */
+/** The `@google-cloud/spanner-api` module shape the client module reads. */
 export const fakeSpannerModule = {
   v1: {
     InstanceAdminClient: InstanceAdminClientMock,

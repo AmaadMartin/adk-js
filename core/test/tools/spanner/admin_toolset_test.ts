@@ -4,18 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseTool, isFunctionTool, SpannerAdminToolset} from '@google/adk';
+import {
+  BaseTool,
+  isFunctionTool,
+  SpannerAdminToolset,
+  SpannerCredentialsConfig,
+} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
-  answered,
-  completedOperation,
   DatabaseAdminClientMock,
-  fakeDatabaseAdmin,
   fakeInstanceAdmin,
-  FUNCTION_CALL_ID,
   InstanceAdminClientMock,
   makeToolContext,
   resetSpannerFakes,
+  testAuthClient,
+  testCredentialsConfig,
 } from './spanner_test_utils.js';
 
 vi.mock('@google-cloud/spanner-api', async () => {
@@ -50,23 +53,21 @@ const EXPECTED_PARAMETERS: Record<string, string[]> = {
   spanner_create_database: ['project_id', 'instance_id', 'database_id'],
 };
 
-/** The two tools that provision a billable resource. */
-const CREATE_TOOL_NAMES = [
-  'spanner_create_instance',
-  'spanner_create_database',
-];
-
 function toolNames(tools: BaseTool[]): string[] {
   return tools.map((tool) => tool.name);
 }
 
-async function getTool(name: string): Promise<BaseTool> {
-  const tools = await new SpannerAdminToolset().getTools();
-  const tool = tools.find((candidate) => candidate.name === name);
-  if (!tool) {
-    expect.fail(`toolset does not expose ${name}`);
-  }
-  return tool;
+/** A toolset wired to the simplest valid credentials config. */
+function makeToolset(
+  options: {
+    toolFilter?: SpannerAdminToolset['toolFilter'];
+    credentialsConfig?: SpannerCredentialsConfig;
+  } = {},
+): SpannerAdminToolset {
+  return new SpannerAdminToolset({
+    credentialsConfig: options.credentialsConfig ?? testCredentialsConfig(),
+    toolFilter: options.toolFilter,
+  });
 }
 
 describe('SpannerAdminToolset', () => {
@@ -75,24 +76,39 @@ describe('SpannerAdminToolset', () => {
   });
 
   it('exposes the seven prefixed admin tools by default', async () => {
-    const tools = await new SpannerAdminToolset().getTools();
+    const tools = await makeToolset().getTools();
 
     expect(toolNames(tools).sort()).toEqual([...ALL_TOOL_NAMES].sort());
     expect(tools.every((tool) => isFunctionTool(tool))).toBe(true);
   });
 
   it('returns only the tools named in a string filter', async () => {
-    const toolset = new SpannerAdminToolset({
-      toolFilter: ['spanner_list_instances'],
-    });
+    const toolset = makeToolset({toolFilter: ['spanner_list_instances']});
 
     expect(toolNames(await toolset.getTools())).toEqual([
       'spanner_list_instances',
     ]);
   });
 
+  it('accepts a filter written without the prefix, as adk-python does', async () => {
+    const toolset = makeToolset({
+      toolFilter: ['list_instances', 'get_instance'],
+    });
+
+    expect(toolNames(await toolset.getTools()).sort()).toEqual([
+      'spanner_get_instance',
+      'spanner_list_instances',
+    ]);
+  });
+
+  it('returns no tool for a name that matches neither spelling', async () => {
+    const toolset = makeToolset({toolFilter: ['spanner_list']});
+
+    expect(await toolset.getTools()).toEqual([]);
+  });
+
   it('narrows the tools with a predicate filter', async () => {
-    const toolset = new SpannerAdminToolset({
+    const toolset = makeToolset({
       toolFilter: (tool) => tool.name.startsWith('spanner_list_'),
     });
 
@@ -106,15 +122,13 @@ describe('SpannerAdminToolset', () => {
   });
 
   it('cannot apply a predicate filter without a context', async () => {
-    const toolset = new SpannerAdminToolset({
-      toolFilter: () => false,
-    });
+    const toolset = makeToolset({toolFilter: () => false});
 
     expect(await toolset.getTools()).toHaveLength(ALL_TOOL_NAMES.length);
   });
 
   it('treats an empty filter as no filter', async () => {
-    const toolset = new SpannerAdminToolset({toolFilter: []});
+    const toolset = makeToolset({toolFilter: []});
 
     expect(await toolset.getTools(makeToolContext())).toHaveLength(
       ALL_TOOL_NAMES.length,
@@ -122,7 +136,7 @@ describe('SpannerAdminToolset', () => {
   });
 
   it('declares only the model-facing parameters of each tool', async () => {
-    const tools = await new SpannerAdminToolset().getTools();
+    const tools = await makeToolset().getTools();
 
     for (const tool of tools) {
       const parameters = tool._getDeclaration()?.parameters;
@@ -135,7 +149,7 @@ describe('SpannerAdminToolset', () => {
   it.each(['spanner_create_instance', 'spanner_create_database'])(
     '%s tells the model that it costs money',
     async (name) => {
-      const tools = await new SpannerAdminToolset().getTools();
+      const tools = await makeToolset().getTools();
       const tool = tools.find((candidate) => candidate.name === name);
       if (!tool) {
         expect.fail(`toolset does not expose ${name}`);
@@ -147,105 +161,77 @@ describe('SpannerAdminToolset', () => {
     },
   );
 
-  describe('confirmation gate', () => {
-    it.each(CREATE_TOOL_NAMES)('%s asks the user to confirm', async (name) => {
-      const tool = await getTool(name);
+  it.each(ALL_TOOL_NAMES)(
+    '%s runs without a confirmation gate, as adk-python does',
+    async (name) => {
+      const tools = await makeToolset().getTools();
+      const tool = tools.find((candidate) => candidate.name === name);
+      if (!tool) {
+        expect.fail(`toolset does not expose ${name}`);
+      }
 
       expect(await tool.checkRequireConfirmation({}, makeToolContext())).toBe(
-        true,
+        false,
+      );
+    },
+  );
+
+  describe('credentials config validation', () => {
+    it('rejects an auth client combined with another source', () => {
+      expect(
+        () =>
+          new SpannerAdminToolset({
+            credentialsConfig: {
+              authClient: testAuthClient(),
+              clientId: 'client-id',
+            },
+          }),
+      ).toThrow(
+        'If credentials are provided, external_access_token_key, client_id,' +
+          ' client_secret, and scopes must not be provided.',
       );
     });
 
-    it.each(ALL_TOOL_NAMES.filter((name) => !CREATE_TOOL_NAMES.includes(name)))(
-      '%s runs without confirmation',
-      async (name) => {
-        const tool = await getTool(name);
-
-        expect(await tool.checkRequireConfirmation({}, makeToolContext())).toBe(
-          false,
-        );
-      },
-    );
-
-    it('does not reach the client until the user confirms', async () => {
-      const tool = await getTool('spanner_create_database');
-      const context = makeToolContext();
-
-      const result = await tool.runAsync({
-        args: {
-          project_id: 'my-project',
-          instance_id: 'my-instance',
-          database_id: 'my-db',
-        },
-        toolContext: context,
-      });
-
-      expect(result).toEqual({
-        error:
-          'This tool call requires confirmation, please approve or reject.',
-      });
-      expect(fakeDatabaseAdmin.createDatabase).not.toHaveBeenCalled();
+    it('rejects an external token key combined with OAuth fields', () => {
       expect(
-        context.actions.requestedToolConfirmations[FUNCTION_CALL_ID],
-      ).toBeDefined();
+        () =>
+          new SpannerAdminToolset({
+            credentialsConfig: {
+              externalAccessTokenKey: 'spanner_token',
+              clientSecret: 'client-secret',
+            },
+          }),
+      ).toThrow(
+        'If external_access_token_key is provided, client_id,' +
+          ' client_secret, and scopes must not be provided.',
+      );
     });
 
-    it('creates the database once the user confirms', async () => {
-      fakeDatabaseAdmin.createDatabase.mockResolvedValue([
-        completedOperation(),
-      ]);
-      const tool = await getTool('spanner_create_database');
-
-      const result = await tool.runAsync({
-        args: {
-          project_id: 'my-project',
-          instance_id: 'my-instance',
-          database_id: 'my-db',
-        },
-        toolContext: makeToolContext(answered(true)),
-      });
-
-      expect(result).toEqual({status: 'SUCCESS'});
-      expect(fakeDatabaseAdmin.createDatabase).toHaveBeenCalledTimes(1);
+    it('rejects a config that names no credential source', () => {
+      expect(() => new SpannerAdminToolset({credentialsConfig: {}})).toThrow(
+        'Must provide one of credentials, external_access_token_key, or' +
+          ' client_id and client_secret pair.',
+      );
     });
 
-    it('does not create the database when the user rejects', async () => {
-      const tool = await getTool('spanner_create_database');
-
-      const result = await tool.runAsync({
-        args: {
-          project_id: 'my-project',
-          instance_id: 'my-instance',
-          database_id: 'my-db',
-        },
-        toolContext: makeToolContext(answered(false)),
-      });
-
-      expect(result).toEqual({error: 'This tool call is rejected.'});
-      expect(fakeDatabaseAdmin.createDatabase).not.toHaveBeenCalled();
+    it('accepts an OAuth client id and secret', () => {
+      expect(
+        () =>
+          new SpannerAdminToolset({
+            credentialsConfig: {
+              clientId: 'client-id',
+              clientSecret: 'client-secret',
+            },
+          }),
+      ).not.toThrow();
     });
   });
 
   describe('close', () => {
-    it('releases both admin clients once a tool has run', async () => {
-      fakeInstanceAdmin.listInstances.mockResolvedValue([[]]);
-      const toolset = new SpannerAdminToolset();
-      const [listInstances] = await toolset.getTools();
-      await listInstances.runAsync({
-        args: {project_id: 'my-project'},
-        toolContext: makeToolContext(),
-      });
-
-      await toolset.close();
-
-      expect(fakeInstanceAdmin.close).toHaveBeenCalledTimes(1);
-      expect(fakeDatabaseAdmin.close).toHaveBeenCalledTimes(1);
-    });
-
     it('serves the turn after the one the runner closed', async () => {
       // Constructing a gax client gives a live one, and closing it makes every
       // later call reject. `Runner` closes every toolset at the end of a turn,
-      // so the second turn only works if the toolset built a new client.
+      // so the second turn only works if the tool built a new client.
       InstanceAdminClientMock.mockImplementation(() => {
         fakeInstanceAdmin.listInstances.mockResolvedValue([[]]);
         return fakeInstanceAdmin;
@@ -255,7 +241,7 @@ describe('SpannerAdminToolset', () => {
           new Error('The client has already been closed.'),
         );
       });
-      const toolset = new SpannerAdminToolset();
+      const toolset = makeToolset();
       const [listInstances] = await toolset.getTools();
       const runTurn = async () => {
         const result = await listInstances.runAsync({
@@ -271,15 +257,15 @@ describe('SpannerAdminToolset', () => {
       expect(InstanceAdminClientMock).toHaveBeenCalledTimes(2);
     });
 
-    it('does not build a client when no tool ever ran', async () => {
-      await new SpannerAdminToolset().close();
+    it('builds no client of its own', async () => {
+      await makeToolset().close();
 
       expect(InstanceAdminClientMock).not.toHaveBeenCalled();
       expect(DatabaseAdminClientMock).not.toHaveBeenCalled();
     });
 
     it('can be called twice', async () => {
-      const toolset = new SpannerAdminToolset();
+      const toolset = makeToolset();
 
       await toolset.close();
       await expect(toolset.close()).resolves.toBeUndefined();

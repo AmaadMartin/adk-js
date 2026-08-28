@@ -4,16 +4,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseTool, SpannerAdminToolset} from '@google/adk';
+import {
+  BaseTool,
+  Context,
+  SpannerAdminToolset,
+  SpannerCredentialsConfig,
+  version,
+} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {CREATE_OPERATION_TIMEOUT_MS} from '../../../src/tools/spanner/admin_tool.js';
 import {
-  answered,
   completedOperation,
+  DatabaseAdminClientMock,
   fakeDatabaseAdmin,
   fakeInstanceAdmin,
+  FUNCTION_CALL_ID,
+  InstanceAdminClientMock,
   makeToolContext,
   resetSpannerFakes,
+  testCredentialsConfig,
 } from './spanner_test_utils.js';
 
 vi.mock('@google-cloud/spanner-api', async () => {
@@ -23,26 +32,21 @@ vi.mock('@google-cloud/spanner-api', async () => {
 
 const PROJECT = 'my-project';
 
-/**
- * These cases exercise what each tool asks the Admin API, so the two create
- * tools run with the confirmation already approved. The gate itself is covered
- * in `admin_toolset_test.ts`.
- */
-const approvedContext = makeToolContext(answered(true));
-
 /** Runs one tool of a freshly built toolset and returns its result. */
 async function runTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const toolset = new SpannerAdminToolset();
+  const toolset = new SpannerAdminToolset({
+    credentialsConfig: testCredentialsConfig(),
+  });
   const tool = (await toolset.getTools()).find(
     (candidate: BaseTool) => candidate.name === name,
   );
   if (!tool) {
     expect.fail(`toolset does not expose ${name}`);
   }
-  return tool.runAsync({args, toolContext: approvedContext});
+  return tool.runAsync({args, toolContext: makeToolContext()});
 }
 
 describe('Spanner admin tools', () => {
@@ -523,6 +527,111 @@ describe('Spanner admin tools', () => {
           database_id: 'my-database',
         }),
       ).toEqual({status: 'ERROR', error_details: 'database exists'});
+    });
+  });
+  describe('admin client lifecycle', () => {
+    it('closes both clients after a call succeeds', async () => {
+      fakeInstanceAdmin.listInstances.mockResolvedValue([[]]);
+
+      await runTool('spanner_list_instances', {project_id: PROJECT});
+
+      expect(fakeInstanceAdmin.close).toHaveBeenCalledTimes(1);
+      expect(fakeDatabaseAdmin.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes both clients after a call is rejected', async () => {
+      fakeInstanceAdmin.listInstances.mockRejectedValue(new Error('nope'));
+
+      await runTool('spanner_list_instances', {project_id: PROJECT});
+
+      expect(fakeInstanceAdmin.close).toHaveBeenCalledTimes(1);
+      expect(fakeDatabaseAdmin.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('builds fresh clients for every call', async () => {
+      fakeInstanceAdmin.listInstances.mockResolvedValue([[]]);
+
+      await runTool('spanner_list_instances', {project_id: PROJECT});
+      await runTool('spanner_list_instances', {project_id: PROJECT});
+
+      expect(InstanceAdminClientMock).toHaveBeenCalledTimes(2);
+      expect(DatabaseAdminClientMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('sends the ADK attribution to the Admin API', async () => {
+      fakeInstanceAdmin.listInstances.mockResolvedValue([[]]);
+
+      await runTool('spanner_list_instances', {project_id: PROJECT});
+
+      expect(InstanceAdminClientMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          libName: 'adk-spanner-tool google-adk',
+          libVersion: version,
+        }),
+      );
+    });
+  });
+
+  describe('credential resolution', () => {
+    async function runWith(
+      credentialsConfig: SpannerCredentialsConfig,
+      toolContext: Context,
+    ): Promise<unknown> {
+      const [listInstances] = await new SpannerAdminToolset({
+        credentialsConfig,
+        toolFilter: ['spanner_list_instances'],
+      }).getTools();
+      return listInstances.runAsync({args: {project_id: PROJECT}, toolContext});
+    }
+
+    it('asks the user to authorize before the OAuth flow completes', async () => {
+      const context = makeToolContext();
+
+      const result = await runWith(
+        {clientId: 'client-id', clientSecret: 'client-secret'},
+        context,
+      );
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details:
+          'User authorization is required to access Google services for' +
+          ' spanner_list_instances. Please complete the authorization flow.',
+      });
+      expect(
+        context.actions.requestedAuthConfigs[FUNCTION_CALL_ID],
+      ).toBeDefined();
+      expect(InstanceAdminClientMock).not.toHaveBeenCalled();
+    });
+
+    it('reports a missing external access token as an error result', async () => {
+      const result = await runWith(
+        {externalAccessTokenKey: 'spanner_token'},
+        makeToolContext(),
+      );
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details:
+          'external_access_token_key is provided but no access token found in' +
+          ' tool_context.state with key spanner_token.',
+      });
+      expect(InstanceAdminClientMock).not.toHaveBeenCalled();
+    });
+
+    it('calls the API with the external access token', async () => {
+      fakeInstanceAdmin.listInstances.mockResolvedValue([[]]);
+      const context = makeToolContext();
+      context.state.set('spanner_token', 'test-token');
+
+      const result = await runWith(
+        {externalAccessTokenKey: 'spanner_token'},
+        context,
+      );
+
+      expect(result).toEqual({status: 'SUCCESS', results: []});
+      const authClient = InstanceAdminClientMock.mock.calls[0][0].authClient;
+      expect(authClient.credentials.access_token).toBe('test-token');
     });
   });
 });

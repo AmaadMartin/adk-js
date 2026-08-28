@@ -10,7 +10,14 @@
  */
 
 export * from './admin_toolset.js';
-// Only the types the toolset's public signatures name. The seven operations,
-// the client provider and the name prefix stay internal to this module.
+export {
+  SPANNER_DEFAULT_SCOPES,
+  SPANNER_TOKEN_CACHE_KEY,
+  SpannerCredentialsManager,
+  validateSpannerCredentialsConfig,
+} from './spanner_credentials.js';
+export type {SpannerCredentialsConfig} from './spanner_credentials.js';
+// Only the types the public signatures name. The seven operations and the name
+// prefix stay internal to this module.
 export type {SpannerToolResult} from './admin_tool.js';
-export type {SpannerAdminClientOptions} from './client.js';
+export type {SpannerAuthClient} from './client.js';

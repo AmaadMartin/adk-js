@@ -14,8 +14,12 @@
  * it stays separate from the other Spanner tests.
  */
 
+import {googleAuthLibrary} from 'google-gax';
 import {describe, expect, it, vi} from 'vitest';
-import {SpannerAdminClientProvider} from '../../../src/tools/spanner/client.js';
+import {
+  createTokenAuthClient,
+  withSpannerAdminClients,
+} from '../../../src/tools/spanner/client.js';
 
 vi.mock('../../../src/utils/optional_peer.js', async (importOriginal) => {
   const actual =
@@ -31,13 +35,24 @@ vi.mock('../../../src/utils/optional_peer.js', async (importOriginal) => {
   return {...actual, loadOptionalPeer};
 });
 
-describe('SpannerAdminClientProvider without @google-cloud/spanner-api', () => {
-  it('names the package and the install command', async () => {
-    const promise = new SpannerAdminClientProvider().getClients();
+describe('the Spanner client module without its peer dependencies', () => {
+  it('names @google-cloud/spanner-api and the install command', async () => {
+    const promise = withSpannerAdminClients(
+      // Never read: the peer fails to load before the clients are built.
+      new googleAuthLibrary.OAuth2Client(),
+      async () => undefined,
+    );
 
     await expect(promise).rejects.toThrow(/SpannerAdminToolset requires/);
     await expect(promise).rejects.toThrow(
       /npm install @google-cloud\/spanner-api/,
     );
+  });
+
+  it('names google-gax and the install command', async () => {
+    const promise = createTokenAuthClient({accessToken: 'test-token'});
+
+    await expect(promise).rejects.toThrow(/SpannerAdminToolset requires/);
+    await expect(promise).rejects.toThrow(/npm install google-gax/);
   });
 });

@@ -12,9 +12,16 @@ import {
   LlmRequest,
   LlmResponse,
   SpannerAdminToolset,
+  SpannerCredentialsConfig,
 } from '@google/adk';
+import {googleAuthLibrary} from 'google-gax';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {createRunner} from '../test_case_utils.js';
+
+/** One identity for every end user, the simplest valid configuration. */
+function credentialsConfig(): SpannerCredentialsConfig {
+  return {authClient: new googleAuthLibrary.OAuth2Client()};
+}
 
 /**
  * Doubles for the two Admin API clients. Only the surface
@@ -23,7 +30,7 @@ import {createRunner} from '../test_case_utils.js';
  *
  * A closed instance rejects every later call, exactly as the generated client
  * does (`if (this._terminated) return Promise.reject(...)`). Without that, a
- * provider handing out a closed client would look healthy here.
+ * tool reusing a closed client would look healthy here.
  */
 const spanner = vi.hoisted(() => {
   const newInstanceAdmin = () => {
@@ -104,9 +111,11 @@ async function captureRequest(toolset: SpannerAdminToolset) {
 
 describe('SpannerAdminToolset in an LlmAgent', () => {
   it('offers the seven prefixed admin tools to the model', async () => {
-    // No credentials and no `@google-cloud/spanner-api` client are needed to
-    // advertise the tools: both are resolved on the first tool call.
-    const request = await captureRequest(new SpannerAdminToolset());
+    // No `@google-cloud/spanner-api` client is needed to advertise the tools:
+    // it is loaded on the first tool call.
+    const request = await captureRequest(
+      new SpannerAdminToolset({credentialsConfig: credentialsConfig()}),
+    );
 
     const declared = request.config?.tools
       ?.flatMap((tool) => ('functionDeclarations' in tool ? tool : []))
@@ -127,6 +136,7 @@ describe('SpannerAdminToolset in an LlmAgent', () => {
   it('offers only the filtered tools to the model', async () => {
     const request = await captureRequest(
       new SpannerAdminToolset({
+        credentialsConfig: credentialsConfig(),
         toolFilter: ['spanner_list_instances', 'spanner_list_databases'],
       }),
     );
@@ -207,7 +217,9 @@ describe('SpannerAdminToolset across turns', () => {
       name: 'spanner_admin_agent',
       description: 'Agent with the Spanner admin toolset',
       instruction: 'Administer Spanner.',
-      tools: [new SpannerAdminToolset()],
+      tools: [
+        new SpannerAdminToolset({credentialsConfig: credentialsConfig()}),
+      ],
     });
     const {run} = await createRunner(agent);
 
@@ -217,8 +229,8 @@ describe('SpannerAdminToolset across turns', () => {
     const expected = {status: 'SUCCESS', results: ['orders']};
     expect(first).toEqual(expected);
     expect(second).toEqual(expected);
-    // The runner closes every toolset after each turn, so the second turn only
-    // works if `close()` dropped the memoized clients and they were rebuilt.
+    // Each call builds its own clients and closes them, so the second turn
+    // never meets the first turn's closed client.
     expect(spanner.instances).toHaveLength(2);
     for (const client of spanner.instances) {
       expect(client.close).toHaveBeenCalledTimes(1);

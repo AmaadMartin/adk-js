@@ -5,30 +5,71 @@
  */
 
 import type {v1} from '@google-cloud/spanner-api';
+import type {googleAuthLibrary} from 'google-gax';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {version} from '../../version.js';
 
-/** OAuth scope required by the Spanner Admin API. */
-const SPANNER_ADMIN_SCOPE = 'https://www.googleapis.com/auth/spanner.admin';
-
 /** The feature named in the error raised when the peer is not installed. */
 const FEATURE_NAME = 'SpannerAdminToolset';
+
+/**
+ * An auth client the Spanner Admin API clients accept.
+ *
+ * Read off the client rather than imported from `google-auth-library`, because
+ * `google-gax` pins its own copy of that package. The two copies declare
+ * structurally different `AuthClient` types, so naming ours here would not
+ * typecheck against the client that actually receives it.
+ */
+export type SpannerAuthClient = NonNullable<
+  NonNullable<
+    ConstructorParameters<typeof v1.InstanceAdminClient>[0]
+  >['authClient']
+>;
+
+/** An OAuth access token, as cached in session state. */
+export interface SpannerAccessToken {
+  accessToken: string;
+  refreshToken?: string;
+  /** Epoch milliseconds at which `accessToken` expires, if known. */
+  expiresAt?: number;
+}
+
+/** The OAuth client a refresh token is renewed against. */
+export interface SpannerOAuthClientCredentials {
+  clientId?: string;
+  clientSecret?: string;
+}
+
+/**
+ * Builds an auth client that presents `token` to the Spanner Admin API.
+ *
+ * The client comes from `google-gax`'s own copy of `google-auth-library`, not
+ * from the copy this package depends on, so that its type is the one the admin
+ * clients accept. `google-gax` is a required dependency of
+ * `@google-cloud/spanner-api`, so it is present whenever that peer is.
+ */
+export async function createTokenAuthClient(
+  token: SpannerAccessToken,
+  oauthClient: SpannerOAuthClientCredentials = {},
+): Promise<googleAuthLibrary.OAuth2Client> {
+  const {googleAuthLibrary: authLibrary} = await loadOptionalPeer(
+    {packageName: 'google-gax', feature: FEATURE_NAME},
+    () => import('google-gax'),
+  );
+  const client = new authLibrary.OAuth2Client(oauthClient);
+  client.setCredentials({
+    access_token: token.accessToken,
+    refresh_token: token.refreshToken,
+    expiry_date: token.expiresAt,
+  });
+  return client;
+}
 
 /**
  * Attribution sent to the Spanner Admin API, matching adk-python's
  * `USER_AGENT = f"adk-spanner-tool google-adk/{version.__version__}"`.
  */
 const CLIENT_LIB_NAME = 'adk-spanner-tool google-adk';
-
-/**
- * Options the Spanner Admin API clients accept: `credentials`, `keyFilename`,
- * `authClient`, `projectId`, `apiEndpoint` and the rest of google-gax's
- * `ClientOptions`. Read off the client itself, so the credential types are the
- * ones the client expects.
- */
-export type SpannerAdminClientOptions = NonNullable<
-  ConstructorParameters<typeof v1.InstanceAdminClient>[0]
->;
 
 /** The two Spanner Admin API clients the admin tools call. */
 export interface SpannerAdminClients {
@@ -37,67 +78,41 @@ export interface SpannerAdminClients {
 }
 
 /**
- * Builds and owns the Spanner Admin API clients.
+ * Builds the Spanner Admin API clients for one tool call, runs `use` against
+ * them, and closes them again.
  *
- * The clients hold gRPC channels, so they have a lifecycle: they are created
- * on first tool call, shared by every later call, and released by
- * {@link close}. `@google-cloud/spanner-api` is an optional peer dependency
- * and is imported only here, inside {@link getClients}, so that importing
- * `@google/adk` never resolves it.
+ * The clients hold gRPC channels, so `use` receives them for the length of one
+ * call only and the channels are released on every exit path. They are not
+ * shared between calls because `authClient` belongs to one end user: a client
+ * kept across calls would serve the next user under the previous user's
+ * identity.
+ *
+ * `@google-cloud/spanner-api` is an optional peer dependency and is imported
+ * only here, so that importing `@google/adk` never resolves it.
  */
-export class SpannerAdminClientProvider {
-  private clientsPromise?: Promise<SpannerAdminClients>;
-
-  /**
-   * @param options Client options. Both clients use Application Default
-   *   Credentials scoped to the Spanner admin scope; anything given here
-   *   overrides that.
-   */
-  constructor(private readonly options?: SpannerAdminClientOptions) {}
-
-  /** Returns the admin clients, creating them on first use. */
-  getClients(): Promise<SpannerAdminClients> {
-    this.clientsPromise ??= this.createClients();
-    return this.clientsPromise;
-  }
-
-  /**
-   * Closes both admin clients and drops them, so the next tool call builds a
-   * fresh pair. `Runner` closes every toolset in the agent tree at the end of
-   * each turn, and a closed gax client rejects every later call, so a provider
-   * that kept the closed clients would serve one turn and fail on the next.
-   *
-   * Safe to call twice, and safe to call when no tool ever ran, in which case
-   * no client was created and there is nothing to release.
-   */
-  async close(): Promise<void> {
-    const closing = this.clientsPromise;
-    this.clientsPromise = undefined;
-    // A provider whose clients failed to build has nothing to release either.
-    const clients = await closing?.catch(() => undefined);
-    if (!clients) {
-      return;
-    }
+export async function withSpannerAdminClients<T>(
+  authClient: SpannerAuthClient,
+  use: (clients: SpannerAdminClients) => Promise<T>,
+): Promise<T> {
+  const {v1: spannerV1} = await loadOptionalPeer(
+    {packageName: '@google-cloud/spanner-api', feature: FEATURE_NAME},
+    () => import('@google-cloud/spanner-api'),
+  );
+  const options = {
+    authClient,
+    libName: CLIENT_LIB_NAME,
+    libVersion: version,
+  };
+  const clients: SpannerAdminClients = {
+    instanceAdmin: new spannerV1.InstanceAdminClient(options),
+    databaseAdmin: new spannerV1.DatabaseAdminClient(options),
+  };
+  try {
+    return await use(clients);
+  } finally {
     await Promise.all([
       clients.instanceAdmin.close(),
       clients.databaseAdmin.close(),
     ]);
-  }
-
-  private async createClients(): Promise<SpannerAdminClients> {
-    const {v1: spannerV1} = await loadOptionalPeer(
-      {packageName: '@google-cloud/spanner-api', feature: FEATURE_NAME},
-      () => import('@google-cloud/spanner-api'),
-    );
-    const options = {
-      scopes: [SPANNER_ADMIN_SCOPE],
-      libName: CLIENT_LIB_NAME,
-      libVersion: version,
-      ...this.options,
-    };
-    return {
-      instanceAdmin: new spannerV1.InstanceAdminClient(options),
-      databaseAdmin: new spannerV1.DatabaseAdminClient(options),
-    };
   }
 }
