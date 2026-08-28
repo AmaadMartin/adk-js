@@ -115,25 +115,12 @@ const PDF_MIME_TYPE = 'application/pdf';
 /** The kinds of inline media Claude accepts, on a user turn only. */
 export type InlineMediaKind = 'image' | 'pdf';
 
-/** How each media kind is named in the warning Claude users see. */
-const MEDIA_KIND_LABELS: Record<InlineMediaKind, string> = {
-  image: 'Image',
-  pdf: 'PDF',
-};
-
 /** An Anthropic tool_use id must match this, or the API rejects the request. */
 const VALID_TOOL_USE_ID = /^[a-zA-Z0-9_-]+$/;
 
-/**
- * JSON Schema keys whose value is itself a map of schemas.
- *
- * `defs` is the pre-2019 spelling of `$defs`. It is not a keyword any more,
- * but adk-python still walks it, and a schema that uses it would otherwise
- * reach Claude with upper-case genai type names in its sub-schemas.
- */
+/** JSON Schema keys whose value is itself a map of schemas. */
 const SCHEMA_MAP_KEYS = [
   '$defs',
-  'defs',
   'dependentSchemas',
   'patternProperties',
   'properties',
@@ -438,8 +425,8 @@ export function contentToMessageParam(
     const kind = content.role === 'user' ? undefined : inlineMediaKind(part);
     if (kind !== undefined) {
       logger.warn(
-        `${MEDIA_KIND_LABELS[kind]} data is not supported in Claude for ` +
-          `assistant turns.`,
+        `${kind === 'pdf' ? 'PDF' : 'Image'} data is not supported in Claude ` +
+          `for assistant turns.`,
       );
       continue;
     }
@@ -605,7 +592,7 @@ function lowercaseSchemaTypes(value: unknown): void {
 }
 
 /** Deep-copies a value to plain JSON, dropping `undefined` properties. */
-function toPlainJson(value: unknown): unknown {
+function toPlainJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
 }
 
@@ -633,12 +620,7 @@ export function functionDeclarationToToolParam(
     lowercaseSchemaTypes(schema);
     inputSchema = toInputSchema(schema, name);
   } else {
-    const properties: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(
-      declaration.parameters?.properties ?? {},
-    )) {
-      properties[key] = toPlainJson(value);
-    }
+    const properties = toPlainJson(declaration.parameters?.properties ?? {});
     inputSchema = {type: 'object', properties};
     const required = declaration.parameters?.required;
     if (required && required.length > 0) {
@@ -691,26 +673,12 @@ export function buildThinkingParam(
 }
 
 /**
- * Reads the Anthropic reasoning effort out of a generate-content config.
- *
- * A value outside the effort levels Anthropic defines counts as unset, which
- * only an untyped caller can produce.
- */
-function readEffort(
-  config?: GenerateContentConfig,
-): AnthropicEffort | undefined {
-  if (config === undefined || !('effort' in config)) {
-    return undefined;
-  }
-  return ANTHROPIC_EFFORTS.find((level) => level === config.effort);
-}
-
-/**
  * Reads Anthropic's reasoning effort from the config.
  *
  * genai's own `thinkingConfig.thinkingLevel` has no Anthropic equivalent, so
  * it is ignored with a warning, and combining the two is an error rather than
- * a silent choice between them.
+ * a silent choice between them. A level outside the ones Anthropic defines
+ * counts as unset, which only an untyped caller can produce.
  *
  * @param config The generate-content config, if any.
  * @return The effort level, or `undefined` to leave `output_config` unset.
@@ -719,7 +687,10 @@ function readEffort(
 export function buildEffortParam(
   config?: GenerateContentConfig,
 ): AnthropicEffort | undefined {
-  const effort = readEffort(config);
+  const effort =
+    config !== undefined && 'effort' in config
+      ? ANTHROPIC_EFFORTS.find((level) => level === config.effort)
+      : undefined;
   const thinkingLevel = config?.thinkingConfig?.thinkingLevel;
   if (effort !== undefined) {
     if (thinkingLevel) {
@@ -745,25 +716,21 @@ export function buildEffortParam(
  * Flattens a genai system instruction into the plain text Anthropic accepts.
  *
  * @param instruction The system instruction, if any.
- * @return The instruction text, or `undefined` to leave `system` unset.
+ * @return The instruction text, empty when there is nothing to say. The
+ *   caller omits Anthropic's `system` field for an empty string.
  */
-export function systemInstructionToText(
-  instruction?: ContentUnion,
-): string | undefined {
-  return instruction === undefined
-    ? undefined
-    : flattenContentUnion(instruction);
-}
-
-function flattenContentUnion(instruction: ContentUnion): string {
+export function systemInstructionToText(instruction?: ContentUnion): string {
+  if (instruction === undefined) {
+    return '';
+  }
   if (typeof instruction === 'string') {
     return instruction;
   }
   if (Array.isArray(instruction)) {
-    return instruction.map(flattenContentUnion).join('\n');
+    return instruction.map(systemInstructionToText).join('\n');
   }
   if ('parts' in instruction) {
-    return (instruction.parts ?? []).map(flattenContentUnion).join('\n');
+    return (instruction.parts ?? []).map(systemInstructionToText).join('\n');
   }
   return 'text' in instruction ? (instruction.text ?? '') : '';
 }

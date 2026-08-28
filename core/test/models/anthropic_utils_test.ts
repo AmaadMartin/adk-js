@@ -1000,8 +1000,8 @@ describe('buildThinkingParam', () => {
 });
 
 describe('systemInstructionToText', () => {
-  it('returns undefined when no instruction is set', () => {
-    expect(systemInstructionToText()).toBeUndefined();
+  it('returns an empty string when no instruction is set', () => {
+    expect(systemInstructionToText()).toBe('');
   });
 
   it('passes a string through', () => {
@@ -1310,20 +1310,39 @@ describe('inlineMediaKind media type prefix', () => {
   });
 });
 
-describe('functionDeclarationToToolParam defs', () => {
-  it('lowercases the types under the pre-2019 defs key', () => {
-    const tool = functionDeclarationToToolParam({
+describe('functionDeclarationToToolParam input safety', () => {
+  it('leaves the declared JSON Schema unmodified', () => {
+    const declaration: FunctionDeclaration = {
       name: 'lookup',
       description: 'Looks something up.',
       parametersJsonSchema: {
-        type: 'object',
-        defs: {Entry: {type: 'OBJECT', properties: {id: {type: 'STRING'}}}},
-        properties: {entry: {$ref: '#/defs/Entry'}},
+        type: 'OBJECT',
+        properties: {id: {type: 'STRING'}},
       },
-    });
+    };
 
-    expect(tool.input_schema).toMatchObject({
-      defs: {Entry: {type: 'object', properties: {id: {type: 'string'}}}},
+    functionDeclarationToToolParam(declaration);
+
+    expect(declaration.parametersJsonSchema).toEqual({
+      type: 'OBJECT',
+      properties: {id: {type: 'STRING'}},
+    });
+  });
+
+  it('leaves the declared parameters unmodified', () => {
+    const declaration: FunctionDeclaration = {
+      name: 'lookup',
+      description: 'Looks something up.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {id: {type: Type.STRING}},
+      },
+    };
+
+    functionDeclarationToToolParam(declaration);
+
+    expect(declaration.parameters?.properties).toEqual({
+      id: {type: Type.STRING},
     });
   });
 });

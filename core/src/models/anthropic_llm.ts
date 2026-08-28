@@ -190,6 +190,11 @@ class StreamedMessage {
   /**
    * Applies one delta event.
    *
+   * A delta that carries the block's own payload seeds the block when no
+   * start event arrived; one that only annotates a block already there is
+   * skipped instead, because seeding from it would replace whichever block
+   * the annotation belongs to.
+   *
    * @return The partial response to emit, or `undefined` when the delta only
    *   accumulates state.
    */
@@ -400,35 +405,25 @@ function buildMessageCreateParams(
   return params;
 }
 
-/** True when the SDK error reports HTTP 429. */
-function isRateLimitError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'status' in error &&
-    error.status === 429
-  );
-}
-
-function errorMessageOf(error: unknown): string {
-  return typeof error === 'object' && error !== null && 'message' in error
-    ? String(error.message)
-    : String(error);
-}
-
 /**
  * Adds the documented mitigation to an Anthropic rate-limit error.
+ *
+ * The status is read structurally rather than with `instanceof
+ * RateLimitError`, which would need a value import of the optional SDK.
  *
  * @return The error to throw, unchanged unless it reports HTTP 429.
  */
 function withRateLimitHelp(error: unknown): unknown {
-  if (!isRateLimitError(error)) {
+  if (typeof error !== 'object' || error === null) {
     return error;
   }
-  return new Error(
-    `${RATE_LIMIT_POSSIBLE_FIX_MESSAGE}\n\n${errorMessageOf(error)}`,
-    {cause: error},
-  );
+  if (!('status' in error) || error.status !== 429) {
+    return error;
+  }
+  const message = 'message' in error ? String(error.message) : String(error);
+  return new Error(`${RATE_LIMIT_POSSIBLE_FIX_MESSAGE}\n\n${message}`, {
+    cause: error,
+  });
 }
 
 async function* streamResponses(
