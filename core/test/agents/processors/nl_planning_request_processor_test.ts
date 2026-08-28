@@ -235,6 +235,18 @@ describe('NlPlanningRequestProcessor', () => {
     expect(readonlyContext.agentName).toBe(AGENT_NAME);
     expect(passedRequest).toBe(llmRequest);
   });
+
+  it('lets an exception from the planner propagate', async () => {
+    const planner = createSpyPlanner(() => {
+      throw new Error('planner failed');
+    });
+    const llmRequest = createLlmRequest(contentsWithThought());
+
+    await expect(
+      runRequestProcessor(createAgent(planner), llmRequest),
+    ).rejects.toThrow('planner failed');
+    expect(llmRequest.contents[1].parts?.[0].thought).toBe(true);
+  });
 });
 
 describe('NlPlanningResponseProcessor', () => {
@@ -335,5 +347,18 @@ describe('NlPlanningResponseProcessor', () => {
     const events = await runResponseProcessor(createAgent(), llmResponse);
 
     expect(events).toHaveLength(0);
+  });
+
+  it('lets an exception from the planner propagate', async () => {
+    const parts: Part[] = [{text: 'raw'}];
+    const planner = createSpyPlanner(undefined, () => {
+      throw new Error('planner failed');
+    });
+    const llmResponse: LlmResponse = {content: {role: 'model', parts}};
+
+    await expect(
+      runResponseProcessor(createAgent(planner), llmResponse),
+    ).rejects.toThrow('planner failed');
+    expect(llmResponse.content?.parts).toBe(parts);
   });
 });

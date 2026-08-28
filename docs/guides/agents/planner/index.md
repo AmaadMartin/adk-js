@@ -10,31 +10,14 @@ the agent rather than to one prompt.
 `instruction` on an `LlmAgent` is static text. It cannot see the request the
 flow assembled, and it cannot touch the reply. A planner sits on both sides of
 the model call, so it can decide what to ask for and then classify what came
-back.
-
-The contract has two methods:
-
-- `buildPlanningInstruction` runs before the model call. Its return value is
-  appended to `llmRequest.config.systemInstruction`. Returning `undefined`
-  appends nothing.
-- `processPlanningResponse` runs after the model call. It receives the parts
-  the model returned and may return replacement parts. Returning `undefined`
-  keeps the model's own parts.
-
-Both methods are synchronous.
+back. A `beforeModelCallback` also mutates the request, but it cannot classify
+the reply; reach for a planner when you need both halves.
 
 A planner is the tool for reasoning that should not reach the user. ADK treats
 a `Part` whose `thought` is `true` as internal reasoning and keeps it out of
 user-facing text. A planner marks such parts in `processPlanningResponse`. The
 parts still reach event consumers, so a user interface can show the plan if it
 chooses to.
-
-Compare with the neighbouring pieces:
-
-- A **`beforeModelCallback`** also mutates the request, but it cannot classify
-  the reply. Use a planner when you need both halves.
-- An **output schema** constrains the shape of the final answer. A planner
-  shapes the reasoning that precedes it.
 
 ## Get started
 
@@ -84,46 +67,26 @@ const agent = new LlmAgent({
 The safety check now appears on the event as a thought part. It does not appear
 in the agent's user-facing text.
 
-## What the flow guarantees
+## Behaviour you can rely on
 
-`LlmAgent` wires two processors into its default pipeline: one before the model
-call and one after it. They give the following guarantees.
-
-- **An agent with no planner is unaffected.** Both processors return before they
+- An agent with no planner is unaffected. Both processors return before they
   touch the request or the response.
-- **The instruction is appended, not replaced.** An existing system instruction
-  is kept, and the planner's instruction follows it after a blank line.
-- **Thought markers from earlier turns are cleared.** The request processor
-  clears `thought` on every part of the request contents, so the model does not
-  see its own reasoning from a previous turn. This only runs when the agent has
-  a planner.
-- **Ordering is fixed.** The planning processor runs after the contents
-  processor, so the contents it clears are the assembled ones. It runs before
-  the code execution processor, which rewrites contents for data files.
-- **Parts are mutated in place.** A planner may set `thought` on the array it
-  was handed and return that same array.
+- The instruction is appended, not replaced. An existing system instruction is
+  kept, and the planner's instruction follows it after a blank line.
+- Thought markers from earlier turns are cleared, so the model does not see its
+  own reasoning from a previous turn. This runs only when the agent has a
+  planner.
+- Parts are mutated in place. A planner may set `thought` on the array it was
+  handed and return that same array.
 
-## Writing session state
-
-`processPlanningResponse` receives a `Context`. Writing to `callbackContext.state`
-makes the flow emit one extra event carrying the state delta. The event is
-emitted only when the planner wrote something.
-
-```ts
-processPlanningResponse(
-  callbackContext: Context,
-  responseParts: Part[],
-): Part[] | undefined {
-  callbackContext.state.set('last_plan', responseParts[0]?.text ?? '');
-  return responseParts;
-}
-```
+Writing to `callbackContext.state` in `processPlanningResponse` makes the flow
+emit one extra event carrying the state delta, and only when the planner wrote
+something.
 
 ## Failure modes
 
-A planner is your code, called synchronously by the flow. ADK does not wrap it.
-An exception thrown from either method propagates out of the processor and is
-handled by the flow's error path, so a broken planner fails the model call
+ADK does not wrap the planner. An exception thrown from either method
+propagates out of the processor, so a broken planner fails the model call
 rather than degrading silently.
 
 Supplying your own `responseProcessors` to `LlmAgent` replaces the default list.

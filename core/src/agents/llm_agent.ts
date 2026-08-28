@@ -561,10 +561,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       REQUEST_INPUT_LLM_REQUEST_PROCESSOR,
       CONTENT_REQUEST_PROCESSOR,
       INTERACTIONS_REQUEST_PROCESSOR,
-      // NL planning runs after contents so that it can clear the thought
-      // markers a planner left on the assembled contents, and before code
-      // execution, which rewrites those contents for data files. Inserting
-      // here keeps the relative order the reference flow defines.
+      // After CONTENT (clears thought on its contents), before CODE_EXECUTION.
       NL_PLANNING_REQUEST_PROCESSOR,
       CODE_EXECUTION_REQUEST_PROCESSOR,
       TOOL_FILTER_REQUEST_PROCESSOR,
