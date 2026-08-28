@@ -285,6 +285,11 @@ export type {
 } from './tools/base_tool.js';
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 export type {ToolPredicate} from './tools/base_toolset.js';
+export {
+  BIGTABLE_DEFAULT_SCOPE,
+  BIGTABLE_TOKEN_CACHE_KEY,
+  BigtableCredentialsConfig,
+} from './tools/bigtable/bigtable_credentials.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
   ENTERPRISE_WEB_SEARCH,
@@ -306,6 +311,8 @@ export type {
   ToolOptions,
 } from './tools/function_tool.js';
 export {getUserChoiceTool} from './tools/get_user_choice_tool.js';
+export {BaseGoogleCredentialsConfig} from './tools/google_credentials.js';
+export type {BaseGoogleCredentialsConfigOptions} from './tools/google_credentials.js';
 export {
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,
