@@ -34,7 +34,9 @@ import type {
 } from '@google/genai';
 import {FinishReason} from '@google/genai';
 
+import {genaiSchemaToJsonSchema} from '../utils/genai_schema_to_json.js';
 import {logger} from '../utils/logger.js';
+import {baseMimeType} from '../utils/mime_utils.js';
 
 import {LlmResponse} from './llm_response.js';
 
@@ -118,38 +120,8 @@ export type InlineMediaKind = 'image' | 'pdf';
 /** An Anthropic tool_use id must match this, or the API rejects the request. */
 const VALID_TOOL_USE_ID = /^[a-zA-Z0-9_-]+$/;
 
-/** JSON Schema keys whose value is itself a map of schemas. */
-const SCHEMA_MAP_KEYS = [
-  '$defs',
-  'dependentSchemas',
-  'patternProperties',
-  'properties',
-];
-
-/** JSON Schema keys whose value is a schema, or a list of schemas. */
-const SCHEMA_CHILD_KEYS = [
-  'additionalProperties',
-  'allOf',
-  'anyOf',
-  'contains',
-  'else',
-  'if',
-  'items',
-  'not',
-  'oneOf',
-  'prefixItems',
-  'propertyNames',
-  'then',
-  'unevaluatedProperties',
-];
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Strips the parameters from a MIME type, e.g. `text/csv; charset=utf-8`. */
-function baseMimeType(mimeType: string): string {
-  return mimeType.split(';')[0].trim();
 }
 
 /** Maps a genai content role onto the two roles Anthropic accepts. */
@@ -558,44 +530,6 @@ export function messageToLlmResponse(message: Message): LlmResponse {
   return response;
 }
 
-/**
- * Lowercases every string `type` in a JSON Schema, in place.
- *
- * genai spells schema types in upper case (`OBJECT`, `STRING`); Anthropic
- * accepts only the lower-case JSON Schema spelling.
- */
-function lowercaseSchemaTypes(value: unknown): void {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      lowercaseSchemaTypes(item);
-    }
-    return;
-  }
-  if (!isRecord(value)) {
-    return;
-  }
-  const schemaType = value['type'];
-  if (typeof schemaType === 'string') {
-    value['type'] = schemaType.toLowerCase();
-  }
-  for (const key of SCHEMA_MAP_KEYS) {
-    const child = value[key];
-    if (isRecord(child)) {
-      for (const grandChild of Object.values(child)) {
-        lowercaseSchemaTypes(grandChild);
-      }
-    }
-  }
-  for (const key of SCHEMA_CHILD_KEYS) {
-    lowercaseSchemaTypes(value[key]);
-  }
-}
-
-/** Deep-copies a value to plain JSON, dropping `undefined` properties. */
-function toPlainJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value));
-}
-
 function toInputSchema(value: unknown, toolName: string): Tool.InputSchema {
   if (!isRecord(value) || value['type'] !== 'object') {
     throw new Error(
@@ -614,25 +548,22 @@ export function functionDeclarationToToolParam(
     throw new Error('A function declaration sent to Claude must have a name.');
   }
 
-  let inputSchema: Tool.InputSchema;
+  // `parametersJsonSchema` is standard JSON Schema by definition, so it passes
+  // through; `parameters` is the genai/OpenAPI dialect, which spells types in
+  // upper case and stringifies bounds, so the shared converter translates it.
+  let schema: unknown;
   if (declaration.parametersJsonSchema) {
-    const schema = toPlainJson(declaration.parametersJsonSchema);
-    lowercaseSchemaTypes(schema);
-    inputSchema = toInputSchema(schema, name);
+    schema = declaration.parametersJsonSchema;
+  } else if (declaration.parameters) {
+    schema = genaiSchemaToJsonSchema(declaration.parameters);
   } else {
-    const properties = toPlainJson(declaration.parameters?.properties ?? {});
-    inputSchema = {type: 'object', properties};
-    const required = declaration.parameters?.required;
-    if (required && required.length > 0) {
-      inputSchema.required = [...required];
-    }
-    lowercaseSchemaTypes(inputSchema);
+    schema = {type: 'object', properties: {}};
   }
 
   return {
     name,
     description: declaration.description ?? '',
-    input_schema: inputSchema,
+    input_schema: toInputSchema(schema, name),
   };
 }
 

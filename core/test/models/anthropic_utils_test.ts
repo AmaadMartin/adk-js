@@ -785,17 +785,57 @@ describe('functionDeclarationToToolParam', () => {
       },
     ],
     [
+      'a genai Schema using nullable, stringified bounds and genai-only keys',
+      {
+        name: 'filter_rows',
+        description: 'Filters rows by label.',
+        parameters: {
+          type: Type.OBJECT,
+          propertyOrdering: ['label', 'tags', 'code'],
+          properties: {
+            label: {type: Type.STRING, nullable: true, example: 'north'},
+            tags: {
+              type: Type.ARRAY,
+              minItems: '1',
+              maxItems: '5',
+              items: {type: Type.STRING},
+            },
+            code: {type: Type.INTEGER, format: 'enum', enum: ['101', '201']},
+          },
+          required: ['tags'],
+        },
+      },
+      {
+        name: 'filter_rows',
+        description: 'Filters rows by label.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            label: {type: ['string', 'null']},
+            tags: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 5,
+              items: {type: 'string'},
+            },
+            code: {type: 'integer', enum: [101, 201]},
+          },
+          required: ['tags'],
+        },
+      },
+    ],
+    [
       'a JSON Schema with additionalProperties',
       {
         name: 'store_metadata',
         description: 'Stores arbitrary key-value metadata.',
         parametersJsonSchema: {
-          type: 'OBJECT',
+          type: 'object',
           properties: {
             metadata: {
-              type: 'OBJECT',
+              type: 'object',
               description: 'Arbitrary metadata',
-              additionalProperties: {type: 'STRING'},
+              additionalProperties: {type: 'string'},
             },
           },
           required: ['metadata'],
@@ -823,26 +863,26 @@ describe('functionDeclarationToToolParam', () => {
         name: 'validate_payload',
         description: 'Validates a payload with schema combinators.',
         parametersJsonSchema: {
-          type: 'OBJECT',
+          type: 'object',
           properties: {
-            choice: {oneOf: [{type: 'STRING'}, {type: 'INTEGER'}]},
+            choice: {oneOf: [{type: 'string'}, {type: 'integer'}]},
             config: {
               allOf: [
-                {type: 'OBJECT', properties: {enabled: {type: 'BOOLEAN'}}},
+                {type: 'object', properties: {enabled: {type: 'boolean'}}},
               ],
             },
-            blocked: {not: {type: 'NULL'}},
+            blocked: {not: {type: 'null'}},
             tuple_value: {
-              type: 'ARRAY',
-              items: [{type: 'STRING'}, {type: 'INTEGER'}],
+              type: 'array',
+              items: [{type: 'string'}, {type: 'integer'}],
             },
-            named: {$defs: {inner: {type: 'STRING'}}},
+            named: {$defs: {inner: {type: 'string'}}},
             conditional: {
-              if: {type: 'STRING'},
-              then: {type: 'STRING'},
-              else: {type: 'INTEGER'},
+              if: {type: 'string'},
+              then: {type: 'string'},
+              else: {type: 'integer'},
             },
-            listed: {type: 'ARRAY', prefixItems: [{type: 'BOOLEAN'}]},
+            listed: {type: 'array', prefixItems: [{type: 'boolean'}]},
           },
           required: ['choice'],
         },
@@ -882,13 +922,13 @@ describe('functionDeclarationToToolParam', () => {
         name: 'validate_shape',
         description: 'Validates a shape.',
         parametersJsonSchema: {
-          type: 'OBJECT',
-          dependentSchemas: {a: {type: 'STRING'}},
-          patternProperties: {'^x-': {type: 'INTEGER'}},
-          propertyNames: {type: 'STRING'},
-          unevaluatedProperties: {type: 'BOOLEAN'},
+          type: 'object',
+          dependentSchemas: {a: {type: 'string'}},
+          patternProperties: {'^x-': {type: 'integer'}},
+          propertyNames: {type: 'string'},
+          unevaluatedProperties: {type: 'boolean'},
           properties: {
-            tags: {type: 'ARRAY', contains: {type: 'STRING'}},
+            tags: {type: 'array', contains: {type: 'string'}},
           },
         },
       },
@@ -940,12 +980,16 @@ describe('functionDeclarationToToolParam', () => {
     expect(functionDeclarationToToolParam(declaration)).toEqual(expected);
   });
 
-  it('omits required when the parameter list is empty', () => {
+  it('passes an empty required list through and defaults the description', () => {
     const tool = functionDeclarationToToolParam({
       name: 'noop',
       parameters: {type: Type.OBJECT, properties: {}, required: []},
     });
-    expect(tool.input_schema).toEqual({type: 'object', properties: {}});
+    expect(tool.input_schema).toEqual({
+      type: 'object',
+      properties: {},
+      required: [],
+    });
     expect(tool.description).toBe('');
   });
 
@@ -959,7 +1003,18 @@ describe('functionDeclarationToToolParam', () => {
     expect(() =>
       functionDeclarationToToolParam({
         name: 'bad',
-        parametersJsonSchema: {type: 'STRING'},
+        parametersJsonSchema: {type: 'string'},
+      }),
+    ).toThrow(/must describe an object/);
+  });
+
+  // `parametersJsonSchema` is standard JSON Schema, whose type names are lower
+  // case. A genai-dialect schema belongs in `parameters`, which is converted.
+  it('rejects a parametersJsonSchema written in the genai dialect', () => {
+    expect(() =>
+      functionDeclarationToToolParam({
+        name: 'bad',
+        parametersJsonSchema: {type: 'OBJECT', properties: {}},
       }),
     ).toThrow(/must describe an object/);
   });
@@ -1316,16 +1371,16 @@ describe('functionDeclarationToToolParam input safety', () => {
       name: 'lookup',
       description: 'Looks something up.',
       parametersJsonSchema: {
-        type: 'OBJECT',
-        properties: {id: {type: 'STRING'}},
+        type: 'object',
+        properties: {id: {type: 'string'}},
       },
     };
 
     functionDeclarationToToolParam(declaration);
 
     expect(declaration.parametersJsonSchema).toEqual({
-      type: 'OBJECT',
-      properties: {id: {type: 'STRING'}},
+      type: 'object',
+      properties: {id: {type: 'string'}},
     });
   });
 
