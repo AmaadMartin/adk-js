@@ -286,6 +286,11 @@ export type {
   AuthenticatedFunctionToolOptions,
   AuthenticatedToolExecuteFunction,
 } from './tools/authenticated_function_tool.js';
+export {BaseAuthenticatedTool} from './tools/base_authenticated_tool.js';
+export type {
+  BaseAuthenticatedToolParams,
+  RunAsyncAuthenticatedToolRequest,
+} from './tools/base_authenticated_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
 export type {
   BaseToolParams,
