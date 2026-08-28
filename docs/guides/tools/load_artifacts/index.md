@@ -110,8 +110,11 @@ const tools = [new LoadArtifactsTool({enableSpreadsheetParsing: true})];
 
 Each sheet renders as a markdown table under a `### Sheet: <name>` heading. The
 first row is the header, and a sheet with no rows below its header is left out.
-A sheet is capped at 100 data rows, followed by `[Output is limited to the first
-100 rows. Total rows: <n>]`.
+
+A workbook is an untrusted upload, so every dimension of the output is capped
+and the renderer says when a cap applied: 100 data rows per sheet, 100 columns
+per sheet, and 100 sheets per workbook. Exceeding one appends a notice such as
+`[Output is limited to the first 100 rows. Total rows: <n>]`.
 
 Two limitations are worth knowing. The legacy binary `.xls` format is not a zip
 container, so it yields `[Invalid spreadsheet format: ...]`. Cells render from

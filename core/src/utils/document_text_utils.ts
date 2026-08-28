@@ -88,6 +88,20 @@ export function extractDocxText(data: Buffer): string | undefined {
 /** Largest number of data rows rendered from one sheet. */
 export const MAX_SPREADSHEET_ROWS = 100;
 
+/**
+ * Largest number of columns rendered from one sheet. A cell names its own
+ * column, so without this cap one crafted reference such as `ZZZZZ2` widens
+ * every rendered row to millions of cells.
+ */
+export const MAX_SPREADSHEET_COLUMNS = 100;
+
+/**
+ * Largest number of sheets rendered from one workbook. Several `<sheet>`
+ * elements may name the same worksheet member, so without this cap a small
+ * workbook can ask for that member to be rendered any number of times.
+ */
+export const MAX_SPREADSHEET_SHEETS = 100;
+
 /** Zip member listing a workbook's sheets, in display order. */
 const WORKBOOK_ENTRY = 'xl/workbook.xml';
 
@@ -146,16 +160,30 @@ function joinTextRuns(xml: string): string {
   return decodeXmlEntities(runs.join(''));
 }
 
-/** Converts the column letters of a cell reference to a zero-based index. */
+/**
+ * Converts the column letters of a cell reference to a zero-based index.
+ *
+ * A reference beyond {@link MAX_SPREADSHEET_COLUMNS} returns that cap, which is
+ * out of range for a rendered column, and the letters after it are not read.
+ * Both matter: the reference comes from an untrusted upload, and an unbounded
+ * run of letters overflows the index.
+ *
+ * @param cellReference A cell reference such as `B3`.
+ * @return The zero-based column index, or {@link MAX_SPREADSHEET_COLUMNS} when
+ *     the reference is past the cap or names no column.
+ */
 function columnIndex(cellReference: string): number {
-  let index = 0;
+  let oneBased = 0;
   for (const letter of cellReference.toUpperCase()) {
     if (letter < 'A' || letter > 'Z') {
       break;
     }
-    index = index * 26 + (letter.charCodeAt(0) - 64);
+    oneBased = oneBased * 26 + (letter.charCodeAt(0) - 64);
+    if (oneBased > MAX_SPREADSHEET_COLUMNS) {
+      return MAX_SPREADSHEET_COLUMNS;
+    }
   }
-  return index - 1;
+  return oneBased - 1;
 }
 
 /** Reads the shared string table, indexed as cells of type `s` refer to it. */
@@ -209,26 +237,37 @@ function readCell(
   return decodeXmlEntities(value);
 }
 
+/** A worksheet read into rows of cell text. */
+interface SheetData {
+  /** Rows of cell text, each at most {@link MAX_SPREADSHEET_COLUMNS} wide. */
+  rows: string[][];
+  /** True when the sheet named a column the cap does not reach. */
+  hasClippedColumns: boolean;
+}
+
 /**
  * Reads a worksheet into rows of cell text, placing each cell at the column
  * its reference names so that a sparse row does not shift its neighbours.
+ * A cell past {@link MAX_SPREADSHEET_COLUMNS} is dropped.
  */
-function readRows(xml: string, sharedStrings: string[]): string[][] {
+function readRows(xml: string, sharedStrings: string[]): SheetData {
   const rows: string[][] = [];
+  let hasClippedColumns = false;
   for (const [, rowXml] of xml.matchAll(ROW_TAG)) {
     const cells: string[] = [];
     for (const [, attributes, body] of rowXml.matchAll(CELL_TAG)) {
       const reference = attribute(attributes, 'r');
-      const index = reference ? columnIndex(reference) : cells.length;
-      cells[index < 0 ? cells.length : index] = readCell(
-        attributes,
-        body,
-        sharedStrings,
-      );
+      const named = reference ? columnIndex(reference) : -1;
+      const index = named < 0 ? cells.length : named;
+      if (index >= MAX_SPREADSHEET_COLUMNS) {
+        hasClippedColumns = true;
+        continue;
+      }
+      cells[index] = readCell(attributes, body, sharedStrings);
     }
     rows.push([...cells].map((cell) => cell ?? ''));
   }
-  return rows;
+  return {rows, hasClippedColumns};
 }
 
 /** Renders one cell for a markdown table. */
@@ -245,9 +284,12 @@ function markdownRow(cells: string[], width: number): string {
 }
 
 /** Renders one sheet as a markdown table under a heading. */
-function renderSheet(name: string, rows: string[][]): string {
-  const [header, ...dataRows] = rows;
-  const width = rows.reduce((widest, row) => Math.max(widest, row.length), 0);
+function renderSheet(name: string, sheet: SheetData): string {
+  const [header, ...dataRows] = sheet.rows;
+  const width = sheet.rows.reduce(
+    (widest, row) => Math.max(widest, row.length),
+    0,
+  );
   const shown = dataRows.slice(0, MAX_SPREADSHEET_ROWS);
 
   const lines = [
@@ -255,19 +297,29 @@ function renderSheet(name: string, rows: string[][]): string {
     `| ${Array.from({length: width}, () => ':---').join(' | ')} |`,
     ...shown.map((row) => markdownRow(row, width)),
   ];
-  const truncation =
-    dataRows.length > MAX_SPREADSHEET_ROWS
-      ? `\n\n[Output is limited to the first ${MAX_SPREADSHEET_ROWS} rows. Total rows: ${dataRows.length}]`
-      : '';
-  return `### Sheet: ${name}\n\n${lines.join('\n')}${truncation}`;
+  const notices: string[] = [];
+  if (dataRows.length > MAX_SPREADSHEET_ROWS) {
+    notices.push(
+      `[Output is limited to the first ${MAX_SPREADSHEET_ROWS} rows. Total rows: ${dataRows.length}]`,
+    );
+  }
+  if (sheet.hasClippedColumns) {
+    notices.push(
+      `[Output is limited to the first ${MAX_SPREADSHEET_COLUMNS} columns.]`,
+    );
+  }
+  const trailer = notices.length > 0 ? `\n\n${notices.join('\n\n')}` : '';
+  return `### Sheet: ${name}\n\n${lines.join('\n')}${trailer}`;
 }
 
 /**
  * Renders the sheets of an XLSX workbook as markdown tables.
  *
  * The first row of each sheet is its header, and a sheet with no rows below
- * the header is left out. Each sheet is capped at {@link MAX_SPREADSHEET_ROWS}
- * data rows, with a notice naming the true row count.
+ * the header is left out. A workbook is an untrusted upload, so every
+ * dimension of the output is capped and says so: {@link MAX_SPREADSHEET_ROWS}
+ * data rows per sheet, {@link MAX_SPREADSHEET_COLUMNS} columns per sheet, and
+ * {@link MAX_SPREADSHEET_SHEETS} sheets per workbook.
  *
  * Cells are rendered from their stored values, so a date held as a serial
  * number renders as that number. The legacy binary `.xls` format is not a zip
@@ -293,9 +345,19 @@ export function spreadsheetToMarkdown(data: Buffer): string {
   try {
     const sharedStrings = readSharedStrings(zip);
     const members = readSheetMembers(zip);
-    const sections: string[] = [];
 
-    [...workbook.matchAll(SHEET_TAG)].forEach(([, attributes], position) => {
+    const declared: string[] = [];
+    let hasClippedSheets = false;
+    for (const [, attributes] of workbook.matchAll(SHEET_TAG)) {
+      if (declared.length >= MAX_SPREADSHEET_SHEETS) {
+        hasClippedSheets = true;
+        break;
+      }
+      declared.push(attributes);
+    }
+
+    const sections: string[] = [];
+    declared.forEach((attributes, position) => {
       const relationshipId = attribute(attributes, 'r:id');
       const member =
         (relationshipId && members.get(relationshipId)) ||
@@ -304,19 +366,27 @@ export function spreadsheetToMarkdown(data: Buffer): string {
       if (sheetXml === undefined) {
         return;
       }
-      const rows = readRows(sheetXml, sharedStrings);
-      if (rows.length < 2) {
+      const sheet = readRows(sheetXml, sharedStrings);
+      if (sheet.rows.length < 2) {
         return;
       }
       sections.push(
         renderSheet(
           attribute(attributes, 'name') ?? `Sheet${position + 1}`,
-          rows,
+          sheet,
         ),
       );
     });
 
-    return sections.length > 0 ? sections.join('\n\n') : '[Empty Spreadsheet]';
+    if (sections.length === 0) {
+      return '[Empty Spreadsheet]';
+    }
+    if (hasClippedSheets) {
+      sections.push(
+        `[Output is limited to the first ${MAX_SPREADSHEET_SHEETS} sheets.]`,
+      );
+    }
+    return sections.join('\n\n');
   } catch (err: unknown) {
     return `[Error parsing spreadsheet: ${formatError(err)}]`;
   }

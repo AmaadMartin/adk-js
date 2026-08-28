@@ -8,7 +8,9 @@ import AdmZip from 'adm-zip';
 import {describe, expect, it} from 'vitest';
 import {
   extractDocxText,
+  MAX_SPREADSHEET_COLUMNS,
   MAX_SPREADSHEET_ROWS,
+  MAX_SPREADSHEET_SHEETS,
   MAX_XML_BYTES,
   spreadsheetToMarkdown,
 } from '../../src/utils/document_text_utils.js';
@@ -404,5 +406,84 @@ describe('spreadsheetToMarkdown', () => {
     expect(spreadsheetToMarkdown(zip.toBuffer())).toContain(
       '### Sheet: Sheet1',
     );
+  });
+  it('caps the columns and the sheets a workbook can render', () => {
+    expect(MAX_SPREADSHEET_COLUMNS).toEqual(100);
+    expect(MAX_SPREADSHEET_SHEETS).toEqual(100);
+  });
+
+  it('drops a cell whose column reference is past the cap and says so', () => {
+    // A cell names its own column, so 'ZZZZZ2' alone asks for ~12.3 million
+    // columns on every rendered row.
+    const xlsx = buildXlsx([
+      {
+        name: 'Wide',
+        rowsXml:
+          '<row r="1"><c r="A1"><v>1</v></c></row>' +
+          '<row r="2"><c r="A2"><v>2</v></c><c r="ZZZZZ2"><v>9</v></c></row>',
+      },
+    ]);
+
+    const markdown = spreadsheetToMarkdown(xlsx);
+    expect(markdown).toContain('[Output is limited to the first 100 columns.]');
+    expect(markdown).not.toContain('9');
+    expect(markdown.length).toBeLessThan(1000);
+  });
+
+  it('stops reading a column reference that would overflow the index', () => {
+    const xlsx = buildXlsx([
+      {
+        name: 'Overflow',
+        rowsXml:
+          '<row r="1"><c r="A1"><v>1</v></c></row>' +
+          `<row r="2"><c r="${'A'.repeat(2000)}2"><v>9</v></c></row>`,
+      },
+    ]);
+
+    expect(spreadsheetToMarkdown(xlsx).length).toBeLessThan(1000);
+  });
+
+  it('caps how many sheets one workbook renders and says so', () => {
+    // Every sheet element names the same worksheet member, so the workbook
+    // asks for that member to be rendered 200 times.
+    const zip = new AdmZip();
+    const sheetTags = Array.from(
+      {length: 200},
+      () => '<sheet name="Repeat" r:id="rId1"/>',
+    ).join('');
+    zip.addFile(
+      'xl/workbook.xml',
+      Buffer.from(`<workbook><sheets>${sheetTags}</sheets></workbook>`, 'utf8'),
+    );
+    zip.addFile(
+      'xl/_rels/workbook.xml.rels',
+      Buffer.from(
+        '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+        'utf8',
+      ),
+    );
+    zip.addFile(
+      'xl/worksheets/sheet1.xml',
+      Buffer.from(
+        '<worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row>' +
+          '<row r="2"><c r="A2"><v>2</v></c></row></sheetData></worksheet>',
+        'utf8',
+      ),
+    );
+
+    const markdown = spreadsheetToMarkdown(zip.toBuffer());
+    expect(markdown.split('### Sheet: Repeat')).toHaveLength(101);
+    expect(markdown).toContain('[Output is limited to the first 100 sheets.]');
+  });
+
+  it('bounds the rendered size of a small crafted workbook', () => {
+    const rows = ['<row r="1"><c r="A1"><v>1</v></c></row>'];
+    for (let i = 2; i <= 32; i++) {
+      rows.push(`<row r="${i}"><c r="ZZZZZ${i}"><v>${i}</v></c></row>`);
+    }
+    const xlsx = buildXlsx([{name: 'Bomb', rowsXml: rows.join('')}]);
+
+    expect(xlsx.length).toBeLessThan(1024);
+    expect(spreadsheetToMarkdown(xlsx).length).toBeLessThan(4 * xlsx.length);
   });
 });
