@@ -18,15 +18,12 @@ import {AuthCredential} from '../../auth/auth_credential.js';
 import {buildAuthHeaders} from '../../auth/auth_headers.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
+import {mergeHeaders} from '../../utils/header_utils.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
-import {
-  MCPConnectionParams,
-  MCPSessionManager,
-  mergeHeaders,
-} from './mcp_session_manager.js';
+import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
 
 /**
@@ -104,23 +101,13 @@ function normalizeToolsetOptions(
   optionsOrConnectionParams: MCPToolsetOptions | MCPConnectionParams,
   toolFilter: ToolPredicate | string[],
   prefix?: string,
-  headerProvider?: MCPHeaderProvider,
 ): MCPToolsetOptions {
-  if (!optionsOrConnectionParams) {
-    throw new Error('Missing connection params in MCPToolset.');
-  }
-
   const options =
-    'type' in optionsOrConnectionParams
-      ? {
-          connectionParams: optionsOrConnectionParams,
-          toolFilter,
-          prefix,
-          headerProvider,
-        }
+    optionsOrConnectionParams && 'type' in optionsOrConnectionParams
+      ? {connectionParams: optionsOrConnectionParams, toolFilter, prefix}
       : optionsOrConnectionParams;
 
-  if (!options.connectionParams) {
+  if (!options?.connectionParams) {
     throw new Error('Missing connection params in MCPToolset.');
   }
   return options;
@@ -171,19 +158,16 @@ export class MCPToolset extends BaseToolset {
     connectionParams: MCPConnectionParams,
     toolFilter?: ToolPredicate | string[],
     prefix?: string,
-    headerProvider?: MCPHeaderProvider,
   );
   constructor(
     optionsOrConnectionParams: MCPToolsetOptions | MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
-    headerProvider?: MCPHeaderProvider,
   ) {
     const options = normalizeToolsetOptions(
       optionsOrConnectionParams,
       toolFilter,
       prefix,
-      headerProvider,
     );
     super(options.toolFilter ?? [], options.prefix);
     this.mcpSessionManager = new MCPSessionManager(options.connectionParams);
@@ -223,8 +207,11 @@ export class MCPToolset extends BaseToolset {
     const providerHeaders = this.headerProvider
       ? await this.headerProvider(context)
       : undefined;
+    // An `apiKey` or `http` scheme needs no exchange, so the configured
+    // credential is used until ADK stores an exchanged one.
     const authHeaders = buildAuthHeaders(
-      this.credential(),
+      this.authConfig?.exchangedAuthCredential ??
+        this.authConfig?.rawAuthCredential,
       this.authConfig?.authScheme,
     );
 
@@ -232,20 +219,6 @@ export class MCPToolset extends BaseToolset {
       return providerHeaders;
     }
     return mergeHeaders(providerHeaders ?? {}, authHeaders);
-  }
-
-  /**
-   * The credential to authenticate with.
-   *
-   * A scheme such as `apiKey` or `http` needs no exchange, so the credential
-   * the caller configured is used until ADK stores an exchanged one, following
-   * `ToolAuthHandler`.
-   */
-  private credential(): AuthCredential | undefined {
-    return (
-      this.authConfig?.exchangedAuthCredential ??
-      this.authConfig?.rawAuthCredential
-    );
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
@@ -306,13 +279,10 @@ export class MCPToolset extends BaseToolset {
   /**
    * Lists the names of the resources advertised by the MCP server.
    *
-   * @param context Context passed to the header provider.
    * @return The resource names available on the server.
    */
-  async listResources(context?: ReadonlyContext): Promise<string[]> {
-    const resources = await this.listServerResources(
-      await this.buildHeaders(context),
-    );
+  async listResources(): Promise<string[]> {
+    const resources = await this.listServerResources(await this.buildHeaders());
     return resources.map((resource) => resource.name);
   }
 
@@ -333,17 +303,11 @@ export class MCPToolset extends BaseToolset {
    * Returns metadata for the resource whose name matches `name`.
    *
    * @param name The advertised name of the resource.
-   * @param context Context passed to the header provider.
    * @return The matching MCP `Resource`.
    * @throws If no resource with the given name is advertised by the server.
    */
-  async getResourceInfo(
-    name: string,
-    context?: ReadonlyContext,
-  ): Promise<Resource> {
-    const resources = await this.listServerResources(
-      await this.buildHeaders(context),
-    );
+  async getResourceInfo(name: string): Promise<Resource> {
+    const resources = await this.listServerResources(await this.buildHeaders());
     return findResource(resources, name);
   }
 
@@ -355,17 +319,15 @@ export class MCPToolset extends BaseToolset {
    * by the server (never decoded and re-encoded).
    *
    * @param name The advertised name of the resource to read.
-   * @param context Context passed to the header provider.
    * @return The resource contents (text and/or base64-encoded binary).
    * @throws If the resource is unknown or has no URI.
    */
   async readResource(
     name: string,
-    context?: ReadonlyContext,
   ): Promise<Array<TextResourceContents | BlobResourceContents>> {
     // Headers are resolved once: a provider that mints a one-shot token must
     // not be called twice for one read.
-    const headers = await this.buildHeaders(context);
+    const headers = await this.buildHeaders();
     const resourceInfo = findResource(
       await this.listServerResources(headers),
       name,

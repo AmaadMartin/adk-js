@@ -64,33 +64,10 @@ const tools = await toolset.getTools();
 
 Every request the toolset makes now carries `X-API-Key`.
 
-## Supplying a token that only exists at runtime
-
-An OAuth2 access token is not known when the toolset is built. Write it onto
-the auth config once you have it.
+An OAuth2 access token is not known when the toolset is built, so write it onto
+the auth config once you have it:
 
 ```ts
-import {AuthCredentialTypes, MCPToolset, type AuthScheme} from '@google/adk';
-
-const oauth2Scheme: AuthScheme = {
-  type: 'oauth2',
-  flows: {
-    authorizationCode: {
-      authorizationUrl: 'https://example.com/auth',
-      tokenUrl: 'https://example.com/token',
-      scopes: {read: 'Read access'},
-    },
-  },
-};
-
-const toolset = new MCPToolset({
-  connectionParams: {
-    type: 'StreamableHTTPConnectionParams',
-    url: 'https://mcp.example.com/mcp',
-  },
-  authScheme: oauth2Scheme,
-});
-
 const authConfig = toolset.getAuthConfig();
 if (authConfig) {
   authConfig.exchangedAuthCredential = {
@@ -98,8 +75,6 @@ if (authConfig) {
     oauth2: {accessToken: await mintAccessToken()},
   };
 }
-
-const tools = await toolset.getTools();
 ```
 
 ## What each credential sends
@@ -117,21 +92,15 @@ because the credential does not carry a header name.
 | `apiKey` with an `apiKey` scheme in `header`          | `<scheme.name>: <apiKey>`             |
 
 A credential that carries nothing usable sends no header. An OAuth2 credential
-that has a client id but no access token yet is the normal case before the
-exchange runs, and the toolset sends the request unauthenticated rather than
-sending `Bearer undefined`. An API key whose scheme puts it in the query string
-or a cookie sends nothing and logs a warning: only the header location is
-supported.
+with a client id but no access token yet is the normal case before the exchange
+runs, and the toolset sends the request unauthenticated rather than sending
+`Bearer undefined`. An API key whose scheme puts it in the query string or a
+cookie sends nothing and logs a warning: only the header location is supported.
 
-## Naming the credential slot
-
-`credentialKey` names the slot the exchanged credential is stored under. It
+`credentialKey` names the slot the exchanged credential is stored under, and
 defaults to `default_mcp_key`. Give each toolset its own key when one agent
-talks to several MCP servers, so their credentials do not share a slot.
-
-## What the tools carry
+talks to several MCP servers.
 
 `getTools()` resolves the headers once and hands them to every `MCPTool` it
-returns. A tool called later in the turn reaches the server with the same
-credential, and does not re-read the auth config. Call `getTools()` again after
-the credential changes.
+returns, so a tool called later in the turn reaches the server with the same
+credential. Call `getTools()` again after the credential changes.

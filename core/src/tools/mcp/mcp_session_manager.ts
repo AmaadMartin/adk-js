@@ -9,6 +9,7 @@ import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio
 import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import {formatError} from '../../utils/error_utils.js';
+import {mergeHeaders, toHeaderRecord} from '../../utils/header_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
@@ -27,60 +28,6 @@ const MCP_SDK: OptionalPeer = {
 /** Surfaces a background transport error that would otherwise be dropped. */
 function logTransportError(err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
-}
-
-/** Every shape the transport accepts for `requestInit.headers`. */
-type TransportHeaders = NonNullable<
-  NonNullable<StreamableHTTPClientTransportOptions['requestInit']>['headers']
->;
-
-/**
- * Normalizes any headers shape into a plain record so that static headers
- * supplied as a `Headers` instance or an array of pairs are not silently
- * dropped when extra headers are merged over them.
- */
-function toHeaderRecord(init?: TransportHeaders): Record<string, string> {
-  if (!init) return {};
-
-  const record: Record<string, string> = {};
-  if (init instanceof Headers) {
-    // `Headers` is iterable only under the DOM.Iterable lib, which this
-    // package does not enable; `forEach` is on the base DOM lib.
-    init.forEach((value, name) => {
-      record[name] = value;
-    });
-  } else if (Array.isArray(init)) {
-    for (const [name, value] of init) {
-      record[name] = value;
-    }
-  } else {
-    Object.assign(record, init);
-  }
-  return record;
-}
-
-/**
- * Merges `overrides` over `base`, matching header names case-insensitively.
- *
- * HTTP header names are case-insensitive, so a plain spread would keep both
- * `authorization` and `Authorization` and the transport would send the two
- * values joined by a comma. An override replaces the entry it matches, under
- * the override's own spelling.
- */
-export function mergeHeaders(
-  base: Record<string, string>,
-  overrides: Record<string, string>,
-): Record<string, string> {
-  const overriddenNames = new Set(
-    Object.keys(overrides).map((name) => name.toLowerCase()),
-  );
-  const merged: Record<string, string> = {};
-  for (const [name, value] of Object.entries(base)) {
-    if (!overriddenNames.has(name.toLowerCase())) {
-      merged[name] = value;
-    }
-  }
-  return {...merged, ...overrides};
 }
 
 /**

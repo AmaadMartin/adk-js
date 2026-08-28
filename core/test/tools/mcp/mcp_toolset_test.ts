@@ -186,7 +186,10 @@ describe('MCPToolset', () => {
         .fn<MCPHeaderProvider>()
         .mockImplementationOnce(async () => ({Authorization: 'Bearer t1'}))
         .mockImplementationOnce(async () => ({Authorization: 'Bearer t2'}));
-      const toolset = new MCPToolset(httpParams, [], undefined, provider);
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: provider,
+      });
 
       await toolset.getTools();
       const firstOptions = lastTransportOptions();
@@ -211,9 +214,10 @@ describe('MCPToolset', () => {
           },
         },
       };
-      const toolset = new MCPToolset(params, [], undefined, async () => ({
-        Authorization: 'Bearer new',
-      }));
+      const toolset = new MCPToolset({
+        connectionParams: params,
+        headerProvider: async () => ({Authorization: 'Bearer new'}),
+      });
 
       await toolset.getTools();
 
@@ -229,7 +233,10 @@ describe('MCPToolset', () => {
         .fn<MCPHeaderProvider>()
         .mockImplementation(async () => ({}));
       const context = {} as ReadonlyContext;
-      const toolset = new MCPToolset(httpParams, [], undefined, provider);
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: provider,
+      });
 
       await toolset.getTools(context);
 
@@ -240,7 +247,10 @@ describe('MCPToolset', () => {
       const provider = vi
         .fn<MCPHeaderProvider>()
         .mockImplementation(async () => ({}));
-      const toolset = new MCPToolset(httpParams, [], undefined, provider);
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: provider,
+      });
 
       await toolset.getTools();
 
@@ -248,9 +258,10 @@ describe('MCPToolset', () => {
     });
 
     it('supports a synchronous provider', async () => {
-      const toolset = new MCPToolset(httpParams, [], undefined, () => ({
-        Authorization: 'Bearer sync',
-      }));
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: () => ({Authorization: 'Bearer sync'}),
+      });
 
       await toolset.getTools();
 
@@ -262,7 +273,10 @@ describe('MCPToolset', () => {
     });
 
     it('an empty provider result leaves transport options unchanged', async () => {
-      const toolset = new MCPToolset(httpParams, [], undefined, () => ({}));
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: () => ({}),
+      });
 
       await toolset.getTools();
 
@@ -272,8 +286,11 @@ describe('MCPToolset', () => {
     });
 
     it('propagates a provider rejection and creates no session', async () => {
-      const toolset = new MCPToolset(httpParams, [], undefined, async () => {
-        throw new Error('token fetch failed');
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: async () => {
+          throw new Error('token fetch failed');
+        },
       });
 
       await expect(toolset.getTools()).rejects.toThrow('token fetch failed');
@@ -282,9 +299,10 @@ describe('MCPToolset', () => {
     });
 
     it('resolved headers are handed to the returned MCPTools', async () => {
-      const toolset = new MCPToolset(httpParams, [], undefined, () => ({
-        Authorization: 'Bearer call',
-      }));
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: () => ({Authorization: 'Bearer call'}),
+      });
 
       const tools = await toolset.getTools();
       const toolContext = new Context({
@@ -308,9 +326,10 @@ describe('MCPToolset', () => {
     });
 
     it('works with a stdio transport', async () => {
-      const toolset = new MCPToolset(stdioParams, [], undefined, () => ({
-        Authorization: 'Bearer ignored',
-      }));
+      const toolset = new MCPToolset({
+        connectionParams: stdioParams,
+        headerProvider: () => ({Authorization: 'Bearer ignored'}),
+      });
 
       const tools = await toolset.getTools();
 
