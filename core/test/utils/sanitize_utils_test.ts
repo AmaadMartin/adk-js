@@ -263,6 +263,32 @@ describe('sanitizeErrorText', () => {
     ).toBe('model=gemini-2.0-flash, retries=3');
   });
 
+  it.each([
+    [
+      'connection failed: password=hunter2',
+      'connection failed: password=[REDACTED]',
+    ],
+    ['refused: api_key=sk-live', 'refused: api_key=[REDACTED]'],
+    ['a: b: c: token=abc', 'a: b: c: token=[REDACTED]'],
+    [
+      'connect failed: user=bob password=hunter2',
+      'connect failed: user=bob password=[REDACTED]',
+    ],
+  ])('redacts a credential a harmless name would hide in %s', (text, want) => {
+    expect(sanitizeErrorText(text, -1).text).toBe(want);
+  });
+
+  it(
+    'stays linear when a harmless name precedes a long value',
+    () => {
+      const value = 'x'.repeat(500_000);
+      expect(sanitizeErrorText(`note: ${value} token=abc`, -1).text).toBe(
+        `note: ${value} token=[REDACTED]`,
+      );
+    },
+    LINEAR_SCAN_BUDGET_MS,
+  );
+
   it('does not expand a dollar pattern the payload supplied', () => {
     const text = 'token=abc and the literal $& $1 $` survive';
     expect(sanitizeErrorText(text, -1).text).toBe(

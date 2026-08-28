@@ -195,29 +195,48 @@ const KEY_VALUE_PATTERN =
  * @return The text with every recognized credential replaced.
  */
 function redactFreeText(text: string): string {
-  return text
-    .replace(CREDENTIAL_HEADER_PATTERN, (_match, header: string) => {
-      return `${header} ${REDACTED}`;
-    })
-    .replace(BEARER_PATTERN, () => REDACTED)
-    .replace(QUERY_KEY_PATTERN, (_match, prefix: string) => {
-      return `${prefix}${REDACTED}`;
-    })
-    .replace(
-      KEY_VALUE_PATTERN,
-      (
-        match: string,
-        keyQuote: string,
-        key: string,
-        separator: string,
-        valueQuote: string,
-      ) => {
-        if (!isSensitiveKey(key)) {
-          return match;
-        }
-        return `${keyQuote}${key}${keyQuote}${separator}${valueQuote}${REDACTED}${valueQuote}`;
-      },
-    );
+  return redactKeyValuePairs(
+    text
+      .replace(CREDENTIAL_HEADER_PATTERN, (_match, header: string) => {
+        return `${header} ${REDACTED}`;
+      })
+      .replace(BEARER_PATTERN, () => REDACTED)
+      .replace(QUERY_KEY_PATTERN, (_match, prefix: string) => {
+        return `${prefix}${REDACTED}`;
+      }),
+  );
+}
+
+/**
+ * Replaces the value of every sensitive `name: value` pair in `text`.
+ *
+ * A value may itself contain a separator, so a pair under a harmless name can
+ * span a sensitive one: `connection failed: password=hunter2` matches as the
+ * name `failed` over the value `password=hunter2`. `String.replace` would
+ * resume after that value and never see the password. Scanning by hand instead
+ * lets a skipped name resume at the character after the name, so every pair the
+ * text contains is classified. Each step moves forward by at least one
+ * character, so the scan stays linear.
+ *
+ * @param text The free text to redact.
+ * @return The text with every sensitive value replaced.
+ */
+function redactKeyValuePairs(text: string): string {
+  KEY_VALUE_PATTERN.lastIndex = 0;
+  let result = '';
+  let copiedTo = 0;
+  let match: RegExpExecArray | null;
+  while ((match = KEY_VALUE_PATTERN.exec(text)) !== null) {
+    const [whole, keyQuote, key, separator, valueQuote] = match;
+    if (!isSensitiveKey(key)) {
+      KEY_VALUE_PATTERN.lastIndex = match.index + keyQuote.length + key.length;
+      continue;
+    }
+    result += text.slice(copiedTo, match.index);
+    result += `${keyQuote}${key}${keyQuote}${separator}${valueQuote}${REDACTED}${valueQuote}`;
+    copiedTo = match.index + whole.length;
+  }
+  return result + text.slice(copiedTo);
 }
 
 /**
