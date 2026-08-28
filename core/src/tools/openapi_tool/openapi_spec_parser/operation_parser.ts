@@ -6,15 +6,14 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../../utils/experimental.js';
-
-export interface ApiParameter {
-  originalName: string;
-  paramLocation: string;
-  paramSchema: OpenAPIV3.SchemaObject;
-  description?: string;
-  name: string; // The name used in the generated tool schema (may be snake_cased)
-  required: boolean;
-}
+import {
+  ApiParameter,
+  createApiParameter,
+  generateParamDoc,
+  generateReturnDoc,
+  normalizeSchema,
+  toSnakeCaseName,
+} from '../common/common.js';
 
 /**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
@@ -43,10 +42,7 @@ export class OperationParser {
     if (this.preservePropertyNames) {
       return originalName;
     }
-    // Simple snake_case conversion
-    return originalName
-      .replace(/[A-Z]/g, (g) => '_' + g.toLowerCase())
-      .replace(/^_/, '');
+    return toSnakeCaseName(originalName);
   }
 
   private processOperationParameters() {
@@ -56,17 +52,28 @@ export class OperationParser {
       if ('name' in param) {
         const originalName = param.name;
         const description = param.description || '';
-        const location = param.in || '';
-        const schema = (param.schema as OpenAPIV3.SchemaObject) || {};
+        const schema = normalizeSchema(
+          param.schema,
+          `operation parameter '${originalName}'`,
+        );
+        // The model only sees the schema, so the parameter-level description
+        // is copied onto it. The copy matters: a resolved $ref and a
+        // path-level parameter are both shared between operations.
+        const paramSchema =
+          description && !schema.description
+            ? {...schema, description}
+            : schema;
 
-        this.params.push({
-          originalName,
-          paramLocation: location,
-          paramSchema: schema,
-          description,
-          required: param.required || false,
-          name: this.getParamName(originalName),
-        });
+        this.params.push(
+          createApiParameter({
+            originalName,
+            paramLocation: param.in || '',
+            paramSchema,
+            description,
+            required: param.required || false,
+            name: this.getParamName(originalName),
+          }),
+        );
       }
     }
   }
@@ -93,45 +100,42 @@ export class OperationParser {
         const properties = schema.properties || {};
         if (Object.keys(properties).length > 0) {
           for (const [propName, propDetails] of Object.entries(properties)) {
-            if (!('$ref' in propDetails)) {
-              this.params.push({
+            this.params.push(
+              createApiParameter({
                 originalName: propName,
                 paramLocation: 'body',
-                paramSchema: propDetails,
-                description: propDetails.description,
+                paramSchema: normalizeSchema(
+                  propDetails,
+                  `request body property '${propName}'`,
+                ),
                 required: (schema.required || []).includes(propName),
                 name: this.getParamName(propName),
-              });
-            }
+              }),
+            );
           }
         } else {
-          this.params.push({
-            originalName: '',
+          this.params.push(
+            createApiParameter({
+              originalName: '',
+              paramLocation: 'body',
+              paramSchema: schema,
+              description,
+              required: true,
+              name: 'body',
+            }),
+          );
+        }
+      } else {
+        this.params.push(
+          createApiParameter({
+            originalName: schema.type === 'array' ? 'array' : 'body',
             paramLocation: 'body',
             paramSchema: schema,
             description,
             required: true,
             name: 'body',
-          });
-        }
-      } else if (schema.type === 'array') {
-        this.params.push({
-          originalName: 'array',
-          paramLocation: 'body',
-          paramSchema: schema,
-          description,
-          required: true,
-          name: 'body',
-        });
-      } else {
-        this.params.push({
-          originalName: 'body',
-          paramLocation: 'body',
-          paramSchema: schema,
-          description,
-          required: true,
-          name: 'body',
-        });
+          }),
+        );
       }
     }
   }
@@ -149,21 +153,21 @@ export class OperationParser {
       if (!('$ref' in response) && response.content) {
         const firstMimeType = Object.keys(response.content)[0];
         if (firstMimeType) {
-          const schema = response.content[firstMimeType].schema;
-          if (schema && !('$ref' in schema)) {
-            returnSchema = schema;
-          }
+          returnSchema = normalizeSchema(
+            response.content[firstMimeType].schema,
+            `response '${min20x}' body`,
+          );
         }
       }
     }
 
-    this.returnValue = {
+    this.returnValue = createApiParameter({
       originalName: '',
       paramLocation: '',
       paramSchema: returnSchema,
       required: true,
       name: 'return',
-    };
+    });
   }
 
   private dedupeParamNames() {
@@ -236,5 +240,21 @@ export class OperationParser {
   @experimental
   public getDescription(): string {
     return this.operation.description || this.operation.summary || '';
+  }
+
+  /**
+   * Renders the operation as prose: a summary, one line per argument, and the
+   * return value.
+   *
+   * @returns The documentation string.
+   */
+  @experimental
+  public getDocString(): string {
+    const summary = this.operation.summary || this.operation.description || '';
+    const args = this.params
+      .map((param) => `    ${generateParamDoc(param)}`)
+      .join('\n');
+    const returnDoc = generateReturnDoc(this.operation.responses ?? {});
+    return `${summary}\n\nArgs:\n${args}\n\n${returnDoc}`;
   }
 }
