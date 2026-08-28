@@ -18,10 +18,6 @@ import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
  * Applies Google Maps grounding to the LLM request if supported.
  */
 export function applyGoogleMapsGrounding(llmRequest: LlmRequest): void {
-  if (!llmRequest.model) {
-    return;
-  }
-
   const modelCheckDisabled = isGeminiModelIdCheckDisabled();
   llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
   llmRequest.config.tools = llmRequest.config.tools || [];

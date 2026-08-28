@@ -124,10 +124,6 @@ export class VertexAiSearchTool extends BaseTool {
     toolContext,
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    if (!llmRequest.model) {
-      return;
-    }
-
     const modelCheckDisabled = isGeminiModelIdCheckDisabled();
     llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
     llmRequest.config.tools = llmRequest.config.tools || [];

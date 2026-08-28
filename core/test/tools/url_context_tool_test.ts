@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
+import {Context, LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 function makeRequest(model?: string, tools = []): LlmRequest {
@@ -19,13 +19,30 @@ function makeRequest(model?: string, tools = []): LlmRequest {
 
 describe('UrlContextTool', () => {
   describe('processLlmRequest', () => {
-    it('returns early when model is not set', async () => {
+    it('throws when the model is not set', async () => {
       const tool = new UrlContextTool();
       const req = makeRequest(undefined);
-      await tool.processLlmRequest({
-        llmRequest: req,
-        toolContext: {} as never,
-      });
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as Context,
+        }),
+      ).rejects.toThrow(
+        'URL context tool is not supported for model undefined',
+      );
+
+      expect(req.config?.tools).toEqual([]);
+    });
+
+    it('throws when the model is an empty string', async () => {
+      const tool = new UrlContextTool();
+      const req = makeRequest('');
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as Context,
+        }),
+      ).rejects.toThrow(/^URL context tool is not supported for model $/);
 
       expect(req.config?.tools).toEqual([]);
     });

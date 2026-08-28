@@ -5,6 +5,7 @@
  */
 
 import {
+  Context,
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,
   LlmRequest,
@@ -23,13 +24,17 @@ function makeRequest(model?: string, tools = []): LlmRequest {
 
 describe('GoogleMapsGroundingTool', () => {
   describe('processLlmRequest', () => {
-    it('returns early when model is not set', async () => {
+    it('throws when the model is not set', async () => {
       const tool = new GoogleMapsGroundingTool();
       const req = makeRequest(undefined);
-      await tool.processLlmRequest({
-        llmRequest: req,
-        toolContext: {} as never,
-      });
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as Context,
+        }),
+      ).rejects.toThrow(
+        'Google maps tool is not supported for model undefined',
+      );
 
       expect(req.config?.tools).toEqual([]);
     });
@@ -98,6 +103,28 @@ describe('GoogleMapsGroundingTool', () => {
           toolContext: {} as never,
         });
         expect(req.config!.tools).toEqual([{googleMaps: {}}]);
+      } finally {
+        if (originalValue === undefined) {
+          delete process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+        } else {
+          process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = originalValue;
+        }
+      }
+    });
+
+    it('adds googleMaps when the model is not set and the check is disabled', async () => {
+      const tool = new GoogleMapsGroundingTool();
+      const req = makeRequest(undefined);
+
+      const originalValue = process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+      process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+
+      try {
+        await tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as Context,
+        });
+        expect(req.config?.tools).toEqual([{googleMaps: {}}]);
       } finally {
         if (originalValue === undefined) {
           delete process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;

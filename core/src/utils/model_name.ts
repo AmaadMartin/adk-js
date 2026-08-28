@@ -32,7 +32,11 @@ export function extractModelName(modelString: string): string {
  * @param modelString Either a simple model name or path - based model name
  * @return true if it's a Gemini model, false otherwise.
  */
-export function isGeminiModel(modelString: string): boolean {
+export function isGeminiModel(modelString: string | undefined): boolean {
+  if (!modelString) {
+    return false;
+  }
+
   const modelName = extractModelName(modelString);
 
   return modelName.startsWith('gemini-');
@@ -65,7 +69,11 @@ function parseVersion(versionString: string): ParsedVersion {
  * @param modelString Either a simple model name or path - based model name
  * @return true if it's a Gemini 1.x model, false otherwise.
  */
-export function isGemini1Model(modelString: string): boolean {
+export function isGemini1Model(modelString: string | undefined): boolean {
+  if (!modelString) {
+    return false;
+  }
+
   const modelName = extractModelName(modelString);
 
   return modelName.startsWith('gemini-1');
@@ -77,7 +85,7 @@ export function isGemini1Model(modelString: string): boolean {
  * @param modelString Either a simple model name or path - based model name
  * @return true if it's a Gemini 2.x model, false otherwise.
  */
-export function isGemini2OrAbove(modelString: string): boolean {
+export function isGemini2OrAbove(modelString: string | undefined): boolean {
   if (!modelString) {
     return false;
   }

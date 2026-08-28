@@ -22,10 +22,6 @@ import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
  * https://cloud.google.com/vertex-ai/generative-ai/docs/grounding/web-grounding-enterprise
  */
 export function applyEnterpriseWebSearch(llmRequest: LlmRequest): void {
-  if (!llmRequest.model) {
-    return;
-  }
-
   const modelCheckDisabled = isGeminiModelIdCheckDisabled();
   llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
   llmRequest.config.tools = llmRequest.config.tools || [];
