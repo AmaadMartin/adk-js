@@ -19,14 +19,14 @@ const CLIENT_SECRET = 'test_client_secret';
 const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 const MISSING_PAIR_MESSAGE =
-  'Must provide one of credentials, external_access_token_key, or ' +
-  'client_id and client_secret pair.';
+  'Must provide one of credentials, externalAccessTokenKey, or clientId ' +
+  'and clientSecret pair.';
 const CREDENTIALS_EXCLUSIVE_MESSAGE =
-  'If credentials are provided, external_access_token_key, client_id, ' +
-  'client_secret, and scopes must not be provided.';
+  'If credentials are provided, externalAccessTokenKey, clientId, ' +
+  'clientSecret, and scopes must not be provided.';
 const EXTERNAL_TOKEN_EXCLUSIVE_MESSAGE =
-  'If external_access_token_key is provided, client_id, client_secret, ' +
-  'and scopes must not be provided.';
+  'If externalAccessTokenKey is provided, clientId, clientSecret, and ' +
+  'scopes must not be provided.';
 
 /**
  * An authorized-user client that carries its own OAuth identity, as
@@ -163,22 +163,6 @@ describe('BigQueryCredentialsConfig', () => {
 
     expect(config.externalAccessTokenKey).toBe('my_access_token');
     expect(config.scopes).toEqual(BIGQUERY_SCOPES);
-    expect(config.tokenCacheKey).toBe('bigquery_token_cache');
-  });
-
-  it('stamps the BigQuery token cache key on every valid configuration', () => {
-    const configs = [
-      new BigQueryCredentialsConfig({credentials: new PassThroughClient()}),
-      new BigQueryCredentialsConfig({
-        clientId: CLIENT_ID,
-        clientSecret: CLIENT_SECRET,
-      }),
-      new BigQueryCredentialsConfig({externalAccessTokenKey: 'k'}),
-    ];
-
-    for (const config of configs) {
-      expect(config.tokenCacheKey).toBe('bigquery_token_cache');
-    }
   });
 
   it('never hands two configurations the same scopes array', () => {

@@ -76,11 +76,6 @@ export class BigQueryCredentialsConfig {
   readonly clientId?: string;
   readonly clientSecret?: string;
   readonly scopes: string[];
-  /**
-   * Session-state key the BigQuery tools cache their token under. Fixed, so
-   * that every BigQuery tool reads the token every other one wrote.
-   */
-  readonly tokenCacheKey = 'bigquery_token_cache';
 
   constructor(options: BigQueryCredentialsConfigOptions) {
     validateCredentialSource(options);
@@ -114,15 +109,14 @@ export class BigQueryCredentialsConfig {
 export function isOAuth2Client(
   credentials: AuthClient,
 ): credentials is OAuth2Client {
-  return typeof (credentials as OAuth2Client).generateAuthUrl === 'function';
+  return 'generateAuthUrl' in credentials;
 }
 
 /**
  * Rejects any combination of options that is not one of the three valid ones.
  *
- * The messages name adk-python's snake_case configuration keys, so that a user
- * comparing the two SDKs reads the same string. They name fields only, never
- * values, because `clientSecret` must not reach a log line.
+ * The messages name fields only, never values, because `clientSecret` must not
+ * reach a log line.
  */
 function validateCredentialSource(
   options: BigQueryCredentialsConfigOptions,
@@ -135,8 +129,8 @@ function validateCredentialSource(
   if (options.credentials) {
     if (options.externalAccessTokenKey || hasOAuthOptions) {
       throw new InputValidationError(
-        'If credentials are provided, external_access_token_key, client_id, ' +
-          'client_secret, and scopes must not be provided.',
+        'If credentials are provided, externalAccessTokenKey, clientId, ' +
+          'clientSecret, and scopes must not be provided.',
       );
     }
     return;
@@ -144,16 +138,16 @@ function validateCredentialSource(
   if (options.externalAccessTokenKey) {
     if (hasOAuthOptions) {
       throw new InputValidationError(
-        'If external_access_token_key is provided, client_id, client_secret, ' +
-          'and scopes must not be provided.',
+        'If externalAccessTokenKey is provided, clientId, clientSecret, and ' +
+          'scopes must not be provided.',
       );
     }
     return;
   }
   if (!options.clientId || !options.clientSecret) {
     throw new InputValidationError(
-      'Must provide one of credentials, external_access_token_key, or ' +
-        'client_id and client_secret pair.',
+      'Must provide one of credentials, externalAccessTokenKey, or clientId ' +
+        'and clientSecret pair.',
     );
   }
 }
