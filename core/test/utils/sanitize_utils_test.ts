@@ -225,6 +225,19 @@ describe('sanitizeErrorText', () => {
     );
   });
 
+  it('redacts a bare Basic credential that has lost its header name', () => {
+    expect(sanitizeErrorText('retry with Basic dXNlcjpwYXNz', -1).text).toBe(
+      'retry with [REDACTED]',
+    );
+  });
+
+  it.each(['Basic authentication is required', 'Basic auth failed'])(
+    'keeps prose whose token does not decode to a pair: %s',
+    (prose) => {
+      expect(sanitizeErrorText(prose, -1).text).toBe(prose);
+    },
+  );
+
   it.each(['Proxy-Authorization', 'X-Api-Key', 'Api-Key'])(
     'redacts the %s header line',
     (header) => {

@@ -159,6 +159,24 @@ const CREDENTIAL_HEADER_PATTERN =
 const BEARER_PATTERN = /\bbearer[ \t]+[^\s,;"']+/gi;
 
 /**
+ * A `Basic` credential, wherever it appears without its header name. The token
+ * has to decode to the `user:password` pair the scheme carries, so the English
+ * word after `Basic` in ordinary prose survives.
+ */
+const BASIC_PATTERN = /\bbasic[ \t]+([A-Za-z0-9+/]+={0,2})(?![^\s,;"'])/gi;
+
+/**
+ * Whether `token` decodes to the `user:password` pair a Basic header carries.
+ *
+ * `token` comes from {@link BASIC_PATTERN}, so it holds base64 characters and
+ * at most two trailing `=`. Those and the length are every condition `atob`
+ * rejects, so it cannot throw here.
+ */
+function isBasicCredential(token: string): boolean {
+  return token.length % 4 === 0 && atob(token).includes(':');
+}
+
+/**
  * A URL query parameter named `key`. `key` is too common a word to redact by
  * name everywhere, but in this position it is how Google APIs carry an API key,
  * and a failing request echoes its own URL.
@@ -203,6 +221,9 @@ function redactFreeText(text: string): string {
         return `${header} ${REDACTED}`;
       })
       .replace(BEARER_PATTERN, () => REDACTED)
+      .replace(BASIC_PATTERN, (match: string, token: string) => {
+        return isBasicCredential(token) ? REDACTED : match;
+      })
       .replace(QUERY_KEY_PATTERN, (_match, prefix: string) => {
         return `${prefix}${REDACTED}`;
       }),
