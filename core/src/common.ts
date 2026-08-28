@@ -211,6 +211,10 @@ export type {
   AnthropicLlmParams,
   AnthropicMessagesClient,
 } from './models/anthropic_llm.js';
+export type {
+  AnthropicEffort,
+  AnthropicGenerateContentConfig,
+} from './models/anthropic_utils.js';
 export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';

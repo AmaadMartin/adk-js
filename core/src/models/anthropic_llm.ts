@@ -11,15 +11,23 @@ import type {
   RawContentBlockStartEvent,
   RawMessageStreamEvent,
   RedactedThinkingBlock,
+  StopReason,
   TextBlock,
   ThinkingBlock,
 } from '@anthropic-ai/sdk/resources/messages';
-import type {Part} from '@google/genai';
+import type {
+  FunctionDeclaration,
+  GenerateContentConfig,
+  Part,
+} from '@google/genai';
 
 import {isBrowser} from '../utils/env_aware_utils.js';
+import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
+import type {AnthropicUsageCounts} from './anthropic_utils.js';
 import {
+  buildEffortParam,
   buildThinkingParam,
   contentBlockToPart,
   contentToMessageParam,
@@ -27,7 +35,9 @@ import {
   messageToLlmResponse,
   parseToolUseArgs,
   systemInstructionToText,
+  toGenaiFinishReason,
   ToolUseIdSanitizer,
+  toUsageMetadata,
 } from './anthropic_utils.js';
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
@@ -53,6 +63,25 @@ const VERTEX_PROJECT_AND_LOCATION = /^projects\/([^/]+)\/locations\/([^/]+)\//;
 const PROJECT_ENV_VARIABLE_NAME = 'GOOGLE_CLOUD_PROJECT';
 const LOCATION_ENV_VARIABLE_NAME = 'GOOGLE_CLOUD_LOCATION';
 
+const MISSING_ANTHROPIC_CREDENTIAL_MESSAGE =
+  'No Anthropic credential was found for calling Claude through the ' +
+  'Anthropic API. Set ANTHROPIC_API_KEY to a key from the Anthropic Console, ' +
+  'e.g. `export ANTHROPIC_API_KEY=<your-key>`, or configure any other ' +
+  'credential the Anthropic SDK can discover.';
+
+const RATE_LIMIT_POSSIBLE_FIX_MESSAGE =
+  'On how to mitigate this issue, please refer to:\n\n' +
+  'https://docs.anthropic.com/en/api/errors#http-errors';
+
+/** The token counters a stream reports before it has seen any of them. */
+const EMPTY_USAGE_COUNTS: AnthropicUsageCounts = {
+  input_tokens: null,
+  cache_creation_input_tokens: null,
+  cache_read_input_tokens: null,
+  output_tokens: 0,
+  output_tokens_details: null,
+};
+
 /**
  * The part of the Anthropic client this provider drives.
  *
@@ -69,6 +98,12 @@ export interface AnthropicLlmParams {
   model?: string;
   /** The maximum number of tokens to generate. Defaults to 8192. */
   maxTokens?: number;
+  /**
+   * A ready client, for a custom base URL, a proxy, or a test double.
+   *
+   * Supplying one skips loading the SDK and resolving a credential.
+   */
+  client?: AnthropicMessagesClient;
 }
 
 /**
@@ -101,15 +136,31 @@ type StreamedBlock =
  */
 class StreamedMessage {
   private readonly blocks = new Map<number, StreamedBlock>();
-  private inputTokens = 0;
-  private outputTokens = 0;
+  private usage: AnthropicUsageCounts = EMPTY_USAGE_COUNTS;
+  private stopReason: StopReason | null = null;
 
-  setPromptTokens(count: number): void {
-    this.inputTokens = count;
+  /**
+   * Merges the token counters a stream event reported.
+   *
+   * Every counter is cumulative, but a `message_delta` leaves the ones it has
+   * nothing new to say about `null`, so those keep their earlier value.
+   */
+  setUsage(usage: AnthropicUsageCounts): void {
+    this.usage = {
+      input_tokens: usage.input_tokens ?? this.usage.input_tokens,
+      cache_creation_input_tokens:
+        usage.cache_creation_input_tokens ??
+        this.usage.cache_creation_input_tokens,
+      cache_read_input_tokens:
+        usage.cache_read_input_tokens ?? this.usage.cache_read_input_tokens,
+      output_tokens: usage.output_tokens,
+      output_tokens_details:
+        usage.output_tokens_details ?? this.usage.output_tokens_details,
+    };
   }
 
-  setOutputTokens(count: number): void {
-    this.outputTokens = count;
+  setStopReason(stopReason: StopReason | null): void {
+    this.stopReason = stopReason;
   }
 
   startBlock(event: RawContentBlockStartEvent): void {
@@ -178,15 +229,16 @@ class StreamedMessage {
           ? toolUsePart(block)
           : contentBlockToPart(block),
       );
-    return {
+    const response: LlmResponse = {
       content: {role: 'model', parts},
-      usageMetadata: {
-        promptTokenCount: this.inputTokens,
-        candidatesTokenCount: this.outputTokens,
-        totalTokenCount: this.inputTokens + this.outputTokens,
-      },
+      usageMetadata: toUsageMetadata(this.usage),
       partial: false,
     };
+    const finishReason = toGenaiFinishReason(this.stopReason);
+    if (finishReason !== undefined) {
+      response.finishReason = finishReason;
+    }
+    return response;
   }
 
   /**
@@ -229,6 +281,55 @@ function toolUsePart(block: StreamedToolUse): Part {
   };
 }
 
+/** Collects the function declarations of every tool on the request. */
+function collectFunctionDeclarations(
+  config?: GenerateContentConfig,
+): FunctionDeclaration[] {
+  const declarations: FunctionDeclaration[] = [];
+  for (const tool of config?.tools ?? []) {
+    if ('functionDeclarations' in tool && tool.functionDeclarations) {
+      declarations.push(...tool.functionDeclarations);
+    }
+  }
+  return declarations;
+}
+
+/**
+ * Copies the sampling parameters onto the request.
+ *
+ * Claude rejects `temperature`, `top_p` and `top_k` alongside extended
+ * thinking or a reasoning effort, so they are dropped with a warning whenever
+ * either is in force.
+ *
+ * @param excluded Whether thinking or a reasoning effort is in force.
+ */
+function applySamplingParams(
+  params: MessageCreateParamsNonStreaming,
+  config: GenerateContentConfig | undefined,
+  excluded: boolean,
+): void {
+  const {temperature, topP, topK} = config ?? {};
+  if (temperature === undefined && topP === undefined && topK === undefined) {
+    return;
+  }
+  if (excluded) {
+    logger.warn(
+      'Sampling parameters (temperature, top_p, top_k) are ignored because ' +
+        'thinking or a reasoning effort is enabled.',
+    );
+    return;
+  }
+  if (temperature !== undefined) {
+    params.temperature = temperature;
+  }
+  if (topP !== undefined) {
+    params.top_p = topP;
+  }
+  if (topK !== undefined) {
+    params.top_k = Math.trunc(topK);
+  }
+}
+
 /**
  * Builds the Anthropic request body for one ADK request.
  *
@@ -240,26 +341,23 @@ function buildMessageCreateParams(
   model: string,
   maxTokens: number,
 ): MessageCreateParamsNonStreaming {
+  const config = llmRequest.config;
   const sanitizer = new ToolUseIdSanitizer();
   const params: MessageCreateParamsNonStreaming = {
     model,
-    max_tokens: maxTokens,
+    max_tokens: config?.maxOutputTokens ?? maxTokens,
     messages: llmRequest.contents.map((content) =>
       contentToMessageParam(content, sanitizer),
     ),
   };
 
-  const system = systemInstructionToText(llmRequest.config?.systemInstruction);
+  const system = systemInstructionToText(config?.systemInstruction);
   if (system !== undefined) {
     params.system = system;
   }
 
-  const firstTool = llmRequest.config?.tools?.[0];
-  const declarations =
-    firstTool && 'functionDeclarations' in firstTool
-      ? firstTool.functionDeclarations
-      : undefined;
-  if (declarations && declarations.length > 0) {
+  const declarations = collectFunctionDeclarations(config);
+  if (declarations.length > 0) {
     params.tools = declarations.map(functionDeclarationToToolParam);
   }
 
@@ -267,12 +365,56 @@ function buildMessageCreateParams(
     params.tool_choice = {type: 'auto'};
   }
 
-  const thinking = buildThinkingParam(llmRequest.config);
+  if (config?.stopSequences && config.stopSequences.length > 0) {
+    params.stop_sequences = [...config.stopSequences];
+  }
+
+  const thinking = buildThinkingParam(config);
   if (thinking) {
     params.thinking = thinking;
   }
 
+  const effort = buildEffortParam(config);
+  if (effort !== undefined) {
+    params.output_config = {effort};
+  }
+
+  const thinkingEnabled =
+    thinking?.type === 'enabled' || thinking?.type === 'adaptive';
+  applySamplingParams(params, config, thinkingEnabled || effort !== undefined);
+
   return params;
+}
+
+/** True when the SDK error reports HTTP 429. */
+function isRateLimitError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    error.status === 429
+  );
+}
+
+function errorMessageOf(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'message' in error
+    ? String(error.message)
+    : String(error);
+}
+
+/**
+ * Adds the documented mitigation to an Anthropic rate-limit error.
+ *
+ * @return The error to throw, unchanged unless it reports HTTP 429.
+ */
+function withRateLimitHelp(error: unknown): unknown {
+  if (!isRateLimitError(error)) {
+    return error;
+  }
+  return new Error(
+    `${RATE_LIMIT_POSSIBLE_FIX_MESSAGE}\n\n${errorMessageOf(error)}`,
+    {cause: error},
+  );
 }
 
 async function* streamResponses(
@@ -282,8 +424,7 @@ async function* streamResponses(
   for await (const event of events) {
     switch (event.type) {
       case 'message_start':
-        message.setPromptTokens(event.message.usage.input_tokens);
-        message.setOutputTokens(event.message.usage.output_tokens);
+        message.setUsage(event.message.usage);
         break;
       case 'content_block_start':
         message.startBlock(event);
@@ -296,7 +437,8 @@ async function* streamResponses(
         break;
       }
       case 'message_delta':
-        message.setOutputTokens(event.usage.output_tokens);
+        message.setUsage(event.usage);
+        message.setStopReason(event.delta.stop_reason);
         break;
       default:
         break;
@@ -313,17 +455,19 @@ async function* streamResponses(
  */
 export class AnthropicLlm extends BaseLlm {
   static override readonly supportedModels: Array<string | RegExp> = [
-    /claude-3-.*/,
-    /claude-.*-4.*/,
+    /claude-.*/,
   ];
 
   protected readonly maxTokens: number;
 
   private clientPromise?: Promise<AnthropicMessagesClient>;
 
-  constructor({model, maxTokens}: AnthropicLlmParams = {}) {
+  constructor({model, maxTokens, client}: AnthropicLlmParams = {}) {
     super({model: model ?? DEFAULT_ANTHROPIC_MODEL});
     this.maxTokens = maxTokens ?? DEFAULT_MAX_TOKENS;
+    if (client) {
+      this.clientPromise = Promise.resolve(client);
+    }
   }
 
   override async *generateContentAsync(
@@ -336,21 +480,24 @@ export class AnthropicLlm extends BaseLlm {
       this.resolveModelName(llmRequest.model),
       this.maxTokens,
     );
-    const client = await this.getClient();
+    try {
+      const client = await this.getClient();
+      if (!stream) {
+        const message = await client.messages.create(params, {
+          signal: abortSignal,
+        });
+        yield messageToLlmResponse(message);
+        return;
+      }
 
-    if (!stream) {
-      const message = await client.messages.create(params, {
-        signal: abortSignal,
-      });
-      yield messageToLlmResponse(message);
-      return;
+      const events = await client.messages.create(
+        {...params, stream: true},
+        {signal: abortSignal},
+      );
+      yield* streamResponses(events);
+    } catch (error: unknown) {
+      throw withRateLimitHelp(error);
     }
-
-    const events = await client.messages.create(
-      {...params, stream: true},
-      {signal: abortSignal},
-    );
-    yield* streamResponses(events);
   }
 
   override async connect(): Promise<BaseLlmConnection> {
@@ -365,11 +512,25 @@ export class AnthropicLlm extends BaseLlm {
     return this.clientPromise;
   }
 
+  /**
+   * Builds the client, letting the SDK resolve its own credential.
+   *
+   * The SDK reads more credential sources than the environment variable, so
+   * the constructed client is asked what it found rather than the sources
+   * being enumerated here. Only the presence of a credential is read, never
+   * its value.
+   */
   protected createClient(): Promise<AnthropicMessagesClient> {
     return loadOptionalPeer(
       {packageName: '@anthropic-ai/sdk', feature: 'AnthropicLlm'},
       () => import('@anthropic-ai/sdk'),
-    ).then(({Anthropic}) => new Anthropic());
+    ).then(({Anthropic}) => {
+      const client = new Anthropic();
+      if (!client.apiKey && !client.authToken && !client.credentials) {
+        throw new Error(MISSING_ANTHROPIC_CREDENTIAL_MESSAGE);
+      }
+      return client;
+    });
   }
 
   /**
@@ -396,8 +557,8 @@ export class AnthropicLlm extends BaseLlm {
  * constructing the model in an unconfigured environment does not throw.
  */
 export class Claude extends AnthropicLlm {
-  constructor({model, maxTokens}: AnthropicLlmParams = {}) {
-    super({model: model ?? DEFAULT_CLAUDE_VERTEX_MODEL, maxTokens});
+  constructor({model, maxTokens, client}: AnthropicLlmParams = {}) {
+    super({model: model ?? DEFAULT_CLAUDE_VERTEX_MODEL, maxTokens, client});
   }
 
   protected override createClient(): Promise<AnthropicMessagesClient> {
@@ -430,8 +591,11 @@ export class Claude extends AnthropicLlm {
 
     if (!projectId || !region) {
       throw new Error(
-        `${PROJECT_ENV_VARIABLE_NAME} and ${LOCATION_ENV_VARIABLE_NAME} must ` +
-          `be set for using Anthropic on Vertex.`,
+        `The model "${this.model}" resolves to Claude served from Vertex AI, ` +
+          `which needs ${PROJECT_ENV_VARIABLE_NAME} and ` +
+          `${LOCATION_ENV_VARIABLE_NAME} to be set. To call the Anthropic ` +
+          `API directly instead, set ANTHROPIC_API_KEY and give the agent an ` +
+          `AnthropicLlm instance as its model.`,
       );
     }
     return {projectId, region};

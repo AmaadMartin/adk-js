@@ -11,25 +11,82 @@ import type {
   ImageBlockParam,
   Message,
   MessageParam,
+  OutputConfig,
   RedactedThinkingBlockParam,
+  StopReason,
   TextBlockParam,
   ThinkingBlockParam,
   ThinkingConfigParam,
   Tool,
   ToolResultBlockParam,
   ToolUseBlockParam,
+  Usage,
 } from '@anthropic-ai/sdk/resources/messages';
 import type {
   Content,
   ContentUnion,
   FunctionDeclaration,
   GenerateContentConfig,
+  GenerateContentResponseUsageMetadata,
   Part,
 } from '@google/genai';
+import {FinishReason} from '@google/genai';
 
 import {logger} from '../utils/logger.js';
 
 import {LlmResponse} from './llm_response.js';
+
+/** A reasoning effort level Anthropic accepts. */
+export type AnthropicEffort = NonNullable<OutputConfig['effort']>;
+
+/**
+ * A generate-content config extended with Anthropic's reasoning effort.
+ *
+ * `effort` replaces `thinkingConfig.thinkingLevel`, which Claude does not
+ * accept. Setting both is an error.
+ */
+export interface AnthropicGenerateContentConfig extends GenerateContentConfig {
+  /** How much reasoning effort Claude should spend on the turn. */
+  effort?: AnthropicEffort;
+}
+
+const ANTHROPIC_EFFORTS: readonly AnthropicEffort[] = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+/**
+ * Maps every Anthropic stop reason onto its genai counterpart.
+ *
+ * The map is exhaustive on purpose: when the SDK adds a stop reason, this
+ * fails to compile rather than silently reporting the wrong finish reason.
+ */
+const GENAI_FINISH_REASONS: Record<StopReason, FinishReason> = {
+  end_turn: FinishReason.STOP,
+  stop_sequence: FinishReason.STOP,
+  tool_use: FinishReason.STOP,
+  pause_turn: FinishReason.STOP,
+  max_tokens: FinishReason.MAX_TOKENS,
+  refusal: FinishReason.SAFETY,
+  model_context_window_exceeded: FinishReason.FINISH_REASON_UNSPECIFIED,
+};
+
+/**
+ * The Anthropic token counters ADK reads.
+ *
+ * A complete message and a streamed `message_delta` both report them, so both
+ * paths share one mapping. A stream leaves a counter `null` until it knows it.
+ */
+export type AnthropicUsageCounts = Pick<
+  Usage,
+  | 'cache_creation_input_tokens'
+  | 'cache_read_input_tokens'
+  | 'output_tokens'
+  | 'output_tokens_details'
+> & {input_tokens: number | null};
 
 /** The Anthropic request blocks a genai `Part` can convert to. */
 export type AnthropicMessageBlock =
@@ -373,19 +430,71 @@ export function parseToolUseArgs(argsJson: string): Record<string, unknown> {
   return parsed;
 }
 
+/**
+ * Maps an Anthropic stop reason onto the genai finish reason.
+ *
+ * @param stopReason The stop reason Claude reported, if any.
+ * @return The finish reason, or `undefined` when Claude reported none.
+ */
+export function toGenaiFinishReason(
+  stopReason?: StopReason | null,
+): FinishReason | undefined {
+  return stopReason ? GENAI_FINISH_REASONS[stopReason] : undefined;
+}
+
+/**
+ * Maps Anthropic's token counters onto genai usage metadata.
+ *
+ * Anthropic reports cached input tokens in fields disjoint from
+ * `input_tokens`, while genai expects one prompt count with the cached portion
+ * folded in, so the three are summed. It counts thinking tokens inside
+ * `output_tokens`, while genai keeps thought and candidate counts disjoint, so
+ * the thinking tokens are subtracted back out.
+ *
+ * @param usage The counters the message or the stream reported.
+ */
+export function toUsageMetadata(
+  usage: AnthropicUsageCounts,
+): GenerateContentResponseUsageMetadata {
+  const promptTokenCount =
+    (usage.input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0);
+  const outputTokens = usage.output_tokens;
+  const thinkingTokens = usage.output_tokens_details?.thinking_tokens;
+  // Clamped so a re-tokenized thinking count above output_tokens cannot drive
+  // the candidate count negative.
+  const thoughtsTokenCount =
+    thinkingTokens === undefined
+      ? undefined
+      : Math.min(thinkingTokens, outputTokens);
+
+  const metadata: GenerateContentResponseUsageMetadata = {
+    promptTokenCount,
+    candidatesTokenCount: outputTokens - (thoughtsTokenCount ?? 0),
+    totalTokenCount: promptTokenCount + outputTokens,
+  };
+  if (usage.cache_read_input_tokens !== null) {
+    metadata.cachedContentTokenCount = usage.cache_read_input_tokens;
+  }
+  if (thoughtsTokenCount !== undefined) {
+    metadata.thoughtsTokenCount = thoughtsTokenCount;
+  }
+  return metadata;
+}
+
 /** Converts a complete Anthropic message to an ADK response. */
 export function messageToLlmResponse(message: Message): LlmResponse {
   logger.debug('Received response from Claude.');
-  const inputTokens = message.usage.input_tokens;
-  const outputTokens = message.usage.output_tokens;
-  return {
+  const response: LlmResponse = {
     content: {role: 'model', parts: message.content.map(contentBlockToPart)},
-    usageMetadata: {
-      promptTokenCount: inputTokens,
-      candidatesTokenCount: outputTokens,
-      totalTokenCount: inputTokens + outputTokens,
-    },
+    usageMetadata: toUsageMetadata(message.usage),
   };
+  const finishReason = toGenaiFinishReason(message.stop_reason);
+  if (finishReason !== undefined) {
+    response.finishReason = finishReason;
+  }
+  return response;
 }
 
 /**
@@ -505,6 +614,67 @@ export function buildThinkingParam(
     return {type: 'adaptive'};
   }
   return {type: 'enabled', budget_tokens: thinkingBudget};
+}
+
+/**
+ * Reads the Anthropic reasoning effort out of a generate-content config.
+ *
+ * @throws If `effort` is set to a level Anthropic does not define.
+ */
+function readEffort(
+  config?: GenerateContentConfig,
+): AnthropicEffort | undefined {
+  if (config === undefined || !('effort' in config)) {
+    return undefined;
+  }
+  const effort = config.effort;
+  if (effort === undefined || effort === null) {
+    return undefined;
+  }
+  const known = ANTHROPIC_EFFORTS.find((level) => level === effort);
+  if (known === undefined) {
+    throw new Error(
+      `Claude does not accept the reasoning effort "${String(effort)}". ` +
+        `Supported levels are ${ANTHROPIC_EFFORTS.join(', ')}.`,
+    );
+  }
+  return known;
+}
+
+/**
+ * Reads Anthropic's reasoning effort from the config.
+ *
+ * genai's own `thinkingConfig.thinkingLevel` has no Anthropic equivalent, so
+ * it is ignored with a warning, and combining the two is an error rather than
+ * a silent choice between them.
+ *
+ * @param config The generate-content config, if any.
+ * @return The effort level, or `undefined` to leave `output_config` unset.
+ * @throws If both `effort` and `thinkingConfig.thinkingLevel` are set.
+ */
+export function buildEffortParam(
+  config?: GenerateContentConfig,
+): AnthropicEffort | undefined {
+  const effort = readEffort(config);
+  const thinkingLevel = config?.thinkingConfig?.thinkingLevel;
+  if (effort !== undefined) {
+    if (thinkingLevel) {
+      throw new Error(
+        'thinking_level is not supported in AnthropicGenerateContentConfig. ' +
+          'Use the `effort` field directly to configure reasoning effort.',
+      );
+    }
+    return effort;
+  }
+  if (thinkingLevel) {
+    logger.warn(
+      'Standard thinking_config.thinking_level is not supported for ' +
+        'Anthropic models and will be ignored. Use ' +
+        'AnthropicGenerateContentConfig and set the `effort` field directly ' +
+        'to configure reasoning effort.',
+    );
+  }
+  return undefined;
 }
 
 /**
