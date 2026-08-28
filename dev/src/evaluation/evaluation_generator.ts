@@ -5,6 +5,7 @@
  */
 
 import {
+  App,
   BaseAgent,
   BaseArtifactService,
   BaseSessionService,
@@ -39,12 +40,32 @@ export interface ProcessQueryOptions {
   /** The recorded turns of one eval case. Not mutated. */
   data: EvalTurn[];
   rootAgent: RunnableRoot;
+  /**
+   * The app the agent file exported, when it exported one. `Runner` takes its
+   * plugins and resumability config from here, so a case that omits it scores
+   * a different composition than `adk run` executes.
+   */
+  app?: App;
   /** Clears agent-owned state before the case runs. */
   resetFunc?: () => void | Promise<void>;
   initialSession?: InitialSession;
   sessionId: string;
   sessionService?: BaseSessionService;
   artifactService?: BaseArtifactService;
+}
+
+/**
+ * The app name a case runs under.
+ *
+ * An app names itself, and `Runner` prefers `app.name` over any `appName`
+ * passed beside it. The session has to be created under the same name, or the
+ * runner cannot find the session it is told to resume.
+ */
+export function resolveAppName(
+  app: App | undefined,
+  initialSession: InitialSession | undefined,
+): string {
+  return app?.name ?? initialSession?.app_name ?? DEFAULT_EVAL_APP_NAME;
 }
 
 /**
@@ -150,7 +171,7 @@ export async function processQueryWithRootAgent(
   const sessionService = options.sessionService ?? new InMemorySessionService();
   const artifactService =
     options.artifactService ?? new InMemoryArtifactService();
-  const appName = options.initialSession?.app_name ?? DEFAULT_EVAL_APP_NAME;
+  const appName = resolveAppName(options.app, options.initialSession);
   const userId = options.initialSession?.user_id ?? DEFAULT_EVAL_USER_ID;
 
   const dispose = await applyMockToolCallback(
@@ -168,6 +189,7 @@ export async function processQueryWithRootAgent(
     });
 
     const runner = new Runner({
+      app: options.app,
       appName,
       agent: options.rootAgent,
       artifactService,

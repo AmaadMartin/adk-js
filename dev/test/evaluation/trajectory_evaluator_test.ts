@@ -258,4 +258,31 @@ describe('evaluateTrajectory', () => {
     expect(printed).toContain('score');
     expect(printed).toContain('roll_die');
   });
+
+  it('keeps the columns aligned when a trajectory is long', () => {
+    const longName = 'a_tool_with_a_rather_long_name_that_exceeds_the_header';
+    evaluateTrajectory(
+      [
+        [
+          turn({
+            query: 'roll',
+            expected_tool_use: [{tool_name: longName, tool_input: {}}],
+            actual_tool_use: [{tool_name: longName, tool_input: {}}],
+          }),
+        ],
+      ],
+      {printDetailedResults: true},
+    );
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0]));
+    const separatorIndex = lines.findIndex((line) => /^-+$/.test(line));
+    expect(separatorIndex).toBeGreaterThan(0);
+    const dividerOffsets = (line: string) =>
+      [...line.matchAll(/\|/g)].map((match) => match.index);
+
+    // Every column divider sits at the same offset on the header and the row.
+    expect(dividerOffsets(lines[separatorIndex + 1])).toEqual(
+      dividerOffsets(lines[separatorIndex - 1]),
+    );
+  });
 });

@@ -14,10 +14,6 @@ import {
 /** A tool call from either side of the comparison. */
 type ToolUse = ExpectedToolUse | ActualToolUse;
 
-/** Column widths of the `--print_detailed_results` table. */
-const DETAIL_COLUMN_WIDTH = 32;
-const SCORE_COLUMN_WIDTH = 6;
-
 /** One turn that scored 0, kept for the failure report. */
 interface TrajectoryFailure {
   turn: number;
@@ -161,24 +157,29 @@ function reportFailures(failures: TrajectoryFailure[]): void {
  * the install.
  */
 function printDetailedResults(rows: TrajectoryRow[]): void {
-  const header = [
-    'query'.padEnd(DETAIL_COLUMN_WIDTH),
-    'expected_tool_use'.padEnd(DETAIL_COLUMN_WIDTH),
-    'actual_tool_use'.padEnd(DETAIL_COLUMN_WIDTH),
-    'score'.padEnd(SCORE_COLUMN_WIDTH),
-  ].join(' | ');
+  const table = [
+    ['query', 'expected_tool_use', 'actual_tool_use', 'score'],
+    ...rows.map((row) => [
+      row.query,
+      JSON.stringify(row.expected),
+      JSON.stringify(row.actual),
+      String(row.score),
+    ]),
+  ];
+
+  // Widths come from the content, so a trajectory longer than the header does
+  // not push the later columns out of line.
+  const widths = table[0].map((_, column) =>
+    Math.max(...table.map((cells) => cells[column].length)),
+  );
+
+  const [header, ...body] = table.map((cells) =>
+    cells.map((cell, column) => cell.padEnd(widths[column])).join(' | '),
+  );
 
   console.log(header);
   console.log('-'.repeat(header.length));
-
-  for (const row of rows) {
-    console.log(
-      [
-        row.query.padEnd(DETAIL_COLUMN_WIDTH),
-        JSON.stringify(row.expected).padEnd(DETAIL_COLUMN_WIDTH),
-        JSON.stringify(row.actual).padEnd(DETAIL_COLUMN_WIDTH),
-        String(row.score).padEnd(SCORE_COLUMN_WIDTH),
-      ].join(' | '),
-    );
+  for (const line of body) {
+    console.log(line);
   }
 }

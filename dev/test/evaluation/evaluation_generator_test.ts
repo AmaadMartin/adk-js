@@ -5,9 +5,11 @@
  */
 
 import {
+  App,
   BaseAgent,
   BaseLlm,
   BaseLlmConnection,
+  BasePlugin,
   BaseTool,
   Context,
   Event,
@@ -30,6 +32,7 @@ import {
   DEFAULT_EVAL_USER_ID,
   makeMockToolCallback,
   processQueryWithRootAgent,
+  resolveAppName,
 } from '../../src/evaluation/evaluation_generator.js';
 
 /**
@@ -584,5 +587,113 @@ describe('processQueryWithRootAgent', () => {
     ).rejects.toThrow('resetData exploded');
 
     expect(rootAgent.beforeToolCallback).toBeUndefined();
+  });
+});
+
+/** Records every tool call the runner routed through the app's plugins. */
+class RecordingPlugin extends BasePlugin {
+  readonly seenTools: string[] = [];
+
+  constructor() {
+    super('recording');
+  }
+
+  override async beforeToolCallback(params: {
+    tool: BaseTool;
+  }): Promise<Record<string, unknown> | undefined> {
+    this.seenTools.push(params.tool.name);
+    return undefined;
+  }
+}
+
+describe('processQueryWithRootAgent with an App', () => {
+  function makeApp(plugin: BasePlugin, name = 'my_app'): App {
+    return new App({
+      name,
+      rootAgent: new LlmAgent({
+        name: 'roller',
+        model: new ScriptedLlm([
+          [functionCallResponse('roll_die', {sides: 6})],
+          [textResponse('I rolled a 4.')],
+        ]),
+        tools: [makeRollDieTool([])],
+      }),
+      plugins: [plugin],
+    });
+  }
+
+  const mockedTurn: EvalTurn = {
+    query: 'roll a 6 sided die',
+    expected_tool_use: [
+      {tool_name: 'roll_die', tool_input: {sides: 6}, mock_tool_output: 4},
+    ],
+  };
+
+  it('runs the plugins the app declares', async () => {
+    const plugin = new RecordingPlugin();
+    const app = makeApp(plugin);
+
+    await processQueryWithRootAgent({
+      data: [mockedTurn],
+      rootAgent: app.rootAgent,
+      app,
+      sessionId: 'session-app-1',
+    });
+
+    expect(plugin.seenTools).toEqual(['roll_die']);
+  });
+
+  it('runs no plugin when the caller passes no app', async () => {
+    const plugin = new RecordingPlugin();
+    const app = makeApp(plugin);
+
+    await processQueryWithRootAgent({
+      data: [mockedTurn],
+      rootAgent: app.rootAgent,
+      sessionId: 'session-app-2',
+    });
+
+    expect(plugin.seenTools).toEqual([]);
+  });
+
+  it('creates the session under the app name the runner resolves', async () => {
+    const app = makeApp(new RecordingPlugin(), 'named_app');
+    const sessionService = new InMemorySessionService();
+
+    await processQueryWithRootAgent({
+      data: [mockedTurn],
+      rootAgent: app.rootAgent,
+      app,
+      sessionId: 'session-app-3',
+      sessionService,
+    });
+
+    const session = await sessionService.getSession({
+      appName: 'named_app',
+      userId: DEFAULT_EVAL_USER_ID,
+      sessionId: 'session-app-3',
+    });
+    expect(session).toBeDefined();
+  });
+});
+
+describe('resolveAppName', () => {
+  const app = new App({
+    name: 'named_app',
+    rootAgent: new LlmAgent({name: 'roller', model: new ScriptedLlm([])}),
+  });
+
+  it('prefers the app name, which the runner also prefers', () => {
+    expect(resolveAppName(app, {app_name: 'from_eval_data'})).toBe('named_app');
+  });
+
+  it('falls back to the eval data app name without an app', () => {
+    expect(resolveAppName(undefined, {app_name: 'from_eval_data'})).toBe(
+      'from_eval_data',
+    );
+  });
+
+  it('falls back to the default with neither', () => {
+    expect(resolveAppName(undefined, undefined)).toBe(DEFAULT_EVAL_APP_NAME);
   });
 });
