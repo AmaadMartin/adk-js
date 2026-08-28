@@ -224,17 +224,18 @@ class RecordingToolset extends BaseToolset {
 }
 
 /**
- * An AgentLoader that always serves `agent` as the app `testApp`. The cast
+ * An AgentLoader that serves the app `testApp`, asking `agent` for the agent
+ * to load on every request, as a real loader re-reads the agent file. The cast
  * stands in for the loader's file-watching and disposal members, which the
  * server never reaches on these routes.
  */
-function createAgentLoader(agent: LlmAgent): AgentLoader {
+function createAgentLoader(agent: () => LlmAgent): AgentLoader {
   return {
     listAgents: () => Promise.resolve(['testApp']),
     getAgentFile: () =>
       Promise.resolve({
         load() {
-          return Promise.resolve(agent);
+          return Promise.resolve(agent());
         },
         async [Symbol.asyncDispose](): Promise<void> {
           return;
@@ -265,7 +266,7 @@ describe('AdkWebServer', () => {
   let client: HttpClient;
 
   beforeEach(async () => {
-    agentLoader = createAgentLoader(TEST_AGENT);
+    agentLoader = createAgentLoader(() => TEST_AGENT);
     sessionService = new InMemorySessionService();
     memoryService = new InMemoryMemoryService();
     artifactService = new InMemoryArtifactService();
@@ -1812,15 +1813,15 @@ describe('AdkWebServer', () => {
 
   describe('Teardown', () => {
     let toolset: RecordingToolset;
+    let servedAgent: LlmAgent;
     let teardownServer: AdkApiServer;
     let teardownClient: HttpClient;
 
     beforeEach(async () => {
       toolset = new RecordingToolset();
+      servedAgent = new TestAgent({name: 'testAgent', tools: [toolset]});
       teardownServer = new AdkApiServer({
-        agentLoader: createAgentLoader(
-          new TestAgent({name: 'testAgent', tools: [toolset]}),
-        ),
+        agentLoader: createAgentLoader(() => servedAgent),
         sessionService,
         memoryService,
         artifactService,
@@ -1835,7 +1836,7 @@ describe('AdkWebServer', () => {
       await teardownServer.stop().catch(() => {});
     });
 
-    async function runOnce(sessionId: string): Promise<void> {
+    async function runOnce(sessionId: string): Promise<string | undefined> {
       await sessionService.createSession({
         appName: 'testApp',
         userId: 'testUser',
@@ -1848,6 +1849,7 @@ describe('AdkWebServer', () => {
         newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
       });
       expect(response.status).toBe(200);
+      return response.data?.[0].author;
     }
 
     it('should close the cached runners when the server stops', async () => {
@@ -1859,20 +1861,16 @@ describe('AdkWebServer', () => {
       expect(toolset.closeCount).toBeGreaterThan(afterRun);
     });
 
-    it('should build a fresh runner after a restart', async () => {
-      await runOnce('firstSession');
+    it('should build a fresh runner for the agent served after a restart', async () => {
+      expect(await runOnce('firstSession')).toBe('testAgent');
       await teardownServer.stop();
 
+      // A runner cached across the stop would keep driving the old agent.
+      servedAgent = new TestAgent({name: 'reloadedAgent'});
       await teardownServer.start();
       teardownClient = new HttpClient(teardownServer.url);
-      await runOnce('secondSession');
-      const afterSecondRun = toolset.closeCount;
-      await teardownServer.stop();
 
-      // A closed runner treats a second close() as a no-op, so the toolset
-      // only closes again if stop() emptied the cache and the second run
-      // built a fresh runner.
-      expect(toolset.closeCount).toBeGreaterThan(afterSecondRun);
+      expect(await runOnce('secondSession')).toBe('reloadedAgent');
     });
   });
 });

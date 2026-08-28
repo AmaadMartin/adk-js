@@ -1178,10 +1178,13 @@ export class AdkApiServer {
         });
       }
     } finally {
-      await closeRunners(Object.values(this.runnerCache));
-      for (const appName of Object.keys(this.runnerCache)) {
+      // Evict before awaiting, so a request arriving during teardown builds a
+      // fresh runner instead of having its own dropped unclosed afterwards.
+      const cached = Object.entries(this.runnerCache);
+      for (const [appName] of cached) {
         delete this.runnerCache[appName];
       }
+      await closeRunners(cached.map(([, runner]) => runner));
     }
   }
 
