@@ -38,15 +38,11 @@ export {
 } from './skills/loader.js';
 export {APIHubToolset} from './tools/apihub_tool/apihub_toolset.js';
 export type {APIHubToolsetOptions} from './tools/apihub_tool/apihub_toolset.js';
-export {
-  APIHubClient,
-  extractResourceName,
-} from './tools/apihub_tool/clients/apihub_client.js';
+export {APIHubClient} from './tools/apihub_tool/clients/apihub_client.js';
 export type {
   APIHubClientOptions,
   ApiHubApi,
   ApiHubApiVersion,
-  ApiHubResourceNames,
   BaseAPIHubClient,
 } from './tools/apihub_tool/clients/apihub_client.js';
 export {

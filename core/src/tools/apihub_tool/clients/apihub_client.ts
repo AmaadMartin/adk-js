@@ -60,10 +60,6 @@ export interface ApiHubApiVersion {
   specs?: string[];
 }
 
-interface ApiHubApiList {
-  apis?: ApiHubApi[];
-}
-
 interface ApiHubSpecContents {
   /** The base64-encoded spec. */
   contents?: string;
@@ -178,19 +174,6 @@ export class APIHubClient implements BaseAPIHubClient {
   constructor(options: APIHubClientOptions = {}) {
     this.accessToken = options.accessToken;
     this.serviceAccountJson = options.serviceAccountJson;
-  }
-
-  /**
-   * Lists the APIs of a project and location.
-   *
-   * @param project The Google Cloud project id.
-   * @param location The API Hub location, for example `us-central1`.
-   */
-  async listApis(project: string, location: string): Promise<ApiHubApi[]> {
-    const payload = await this.get<ApiHubApiList>(
-      `${APIHUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
-    );
-    return payload.apis ?? [];
   }
 
   /**

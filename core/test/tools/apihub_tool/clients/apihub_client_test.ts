@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {APIHubClient, extractResourceName} from '@google/adk';
+import {APIHubClient} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+// Not part of the package's public surface, so it is imported by path.
+import {extractResourceName} from '../../../../src/tools/apihub_tool/clients/apihub_client.js';
 
 const {mockGetAccessToken, mockGoogleAuth} = vi.hoisted(() => ({
   mockGetAccessToken: vi.fn<() => Promise<string | null>>(),
@@ -18,12 +20,8 @@ vi.mock('google-auth-library', () => ({
   })),
 }));
 
-const API_LIST = {
-  apis: [
-    {name: 'projects/test-project/locations/us-central1/apis/api1'},
-    {name: 'projects/test-project/locations/us-central1/apis/api2'},
-  ],
-};
+const API_RESOURCE_NAME =
+  'projects/test-project/locations/us-central1/apis/api1';
 const API_DETAIL = {
   name: 'projects/test-project/locations/us-central1/apis/api1',
   versions: [
@@ -45,21 +43,11 @@ const EXPECTED_HEADERS = {
 };
 
 function okResponse(payload: unknown): Response {
-  return {
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve(payload),
-    text: () => Promise.resolve(JSON.stringify(payload)),
-  } as Response;
+  return new Response(JSON.stringify(payload), {status: 200});
 }
 
 function errorResponse(status: number, body: string): Response {
-  return {
-    ok: false,
-    status,
-    json: () => Promise.resolve({}),
-    text: () => Promise.resolve(body),
-  } as Response;
+  return new Response(body, {status});
 }
 
 describe('apihub_client', () => {
@@ -81,34 +69,13 @@ describe('apihub_client', () => {
       return new APIHubClient({accessToken: 'mocked_token'});
     }
 
-    it('lists the APIs of a project and location', async () => {
-      fetchMock.mockResolvedValueOnce(okResponse(API_LIST));
-
-      const apis = await client().listApis('test-project', 'us-central1');
-
-      expect(apis).toEqual(API_LIST.apis);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe(
-        'https://apihub.googleapis.com/v1/projects/test-project/locations/us-central1/apis',
-      );
-      expect(init?.headers).toEqual(EXPECTED_HEADERS);
-      expect(init?.signal).toBeInstanceOf(AbortSignal);
-    });
-
-    it('returns an empty list when the project has no APIs', async () => {
-      fetchMock.mockResolvedValueOnce(okResponse({}));
-
-      expect(await client().listApis('test-project', 'us-central1')).toEqual(
-        [],
-      );
-    });
-
     it('rejects when the request fails', async () => {
       fetchMock.mockResolvedValueOnce(errorResponse(403, 'permission denied'));
 
       await expect(
-        client().listApis('test-project', 'us-central1'),
+        client().getApi(
+          'projects/test-project/locations/us-central1/apis/api1',
+        ),
       ).rejects.toThrow(
         'API Hub request failed with status 403: permission denied',
       );
@@ -122,10 +89,13 @@ describe('apihub_client', () => {
       );
 
       expect(api).toEqual(API_DETAIL);
-      expect(fetchMock.mock.calls[0][0]).toBe(
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe(
         'https://apihub.googleapis.com/v1/projects/test-project/locations/us-central1/apis/api1',
       );
-      expect(fetchMock.mock.calls[0][1]?.headers).toEqual(EXPECTED_HEADERS);
+      expect(init?.headers).toEqual(EXPECTED_HEADERS);
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
     });
 
     it('gets an API version', async () => {
@@ -253,9 +223,9 @@ describe('apihub_client', () => {
     });
 
     it('never builds a GoogleAuth', async () => {
-      fetchMock.mockResolvedValueOnce(okResponse(API_LIST));
+      fetchMock.mockResolvedValueOnce(okResponse(API_DETAIL));
 
-      await client().listApis('test-project', 'us-central1');
+      await client().getApi(API_RESOURCE_NAME);
 
       expect(mockGoogleAuth).not.toHaveBeenCalled();
     });
@@ -272,9 +242,9 @@ describe('apihub_client', () => {
 
     it('mints a token from Application Default Credentials', async () => {
       mockGetAccessToken.mockResolvedValue('adc_token');
-      fetchMock.mockResolvedValueOnce(okResponse(API_LIST));
+      fetchMock.mockResolvedValueOnce(okResponse(API_DETAIL));
 
-      await new APIHubClient().listApis('test-project', 'us-central1');
+      await new APIHubClient().getApi(API_RESOURCE_NAME);
 
       expect(mockGoogleAuth).toHaveBeenCalledWith({
         scopes: ['https://www.googleapis.com/auth/cloud-platform'],
@@ -287,12 +257,9 @@ describe('apihub_client', () => {
 
     it('mints a token from the service account key', async () => {
       mockGetAccessToken.mockResolvedValue('sa_token');
-      fetchMock.mockResolvedValueOnce(okResponse(API_LIST));
+      fetchMock.mockResolvedValueOnce(okResponse(API_DETAIL));
 
-      await new APIHubClient({serviceAccountJson}).listApis(
-        'test-project',
-        'us-central1',
-      );
+      await new APIHubClient({serviceAccountJson}).getApi(API_RESOURCE_NAME);
 
       expect(mockGoogleAuth).toHaveBeenCalledWith({
         credentials: JSON.parse(serviceAccountJson),
@@ -313,11 +280,14 @@ describe('apihub_client', () => {
 
     it('reuses one GoogleAuth across calls', async () => {
       mockGetAccessToken.mockResolvedValue('adc_token');
-      fetchMock.mockResolvedValue(okResponse(API_LIST));
+      // A Response body reads once, so each call needs a fresh one.
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(okResponse(API_DETAIL)),
+      );
       const client = new APIHubClient();
 
-      await client.listApis('test-project', 'us-central1');
-      await client.listApis('test-project', 'us-central1');
+      await client.getApi(API_RESOURCE_NAME);
+      await client.getApi(API_RESOURCE_NAME);
 
       expect(mockGoogleAuth).toHaveBeenCalledTimes(1);
       expect(mockGetAccessToken).toHaveBeenCalledTimes(2);
