@@ -222,6 +222,8 @@ export type {
   SampleAndScoreParams,
   Sampler,
 } from './optimization/sampler.js';
+export {SimplePromptOptimizer} from './optimization/simple_prompt_optimizer.js';
+export type {SimplePromptOptimizerConfig} from './optimization/simple_prompt_optimizer.js';
 export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
