@@ -40,26 +40,6 @@ export function isBaseRetrievalTool(obj: unknown): obj is BaseRetrievalTool {
  *
  * A retrieval that matches nothing is a normal outcome. Return a message that
  * says so, so the model can act on it and continue the turn. Do not throw.
- *
- * The model populates `args['query']`, so it is untrusted. It is typed
- * `unknown`, so a subclass must narrow it before use, and must not interpolate
- * it into a shell command, a path, or a raw query without checking it.
- *
- * @example
- * ```ts
- * import {BaseRetrievalTool, RunAsyncToolRequest} from '@google/adk';
- *
- * class DocsRetrieval extends BaseRetrievalTool {
- *   constructor(private readonly docs: Map<string, string>) {
- *     super({name: 'docs_retrieval', description: 'Searches the product docs.'});
- *   }
- *
- *   override async runAsync({args}: RunAsyncToolRequest): Promise<unknown> {
- *     const query = String(args['query'] ?? '');
- *     return this.docs.get(query) ?? `No matching result found for the query: ${query}`;
- *   }
- * }
- * ```
  */
 export abstract class BaseRetrievalTool extends BaseTool {
   /** A unique symbol to identify ADK retrieval tool class. */
