@@ -303,32 +303,93 @@ describe('AudioTranscriber', () => {
     expect(speech.calls).toHaveLength(1);
   });
 
-  it('drops audio on an entry with no role', async () => {
-    // Faithful to adk-python's
-    // src/google/adk/flows/llm_flows/audio_transcriber.py, where
-    // `current_speaker` doubles as the pending-segment flag.
+  it("defaults a role-less run to 'user'", async () => {
     const invocationContext = contextWithCache([audioEntry(undefined, 'aa')]);
+    speech.responses = [scriptedResponse('hello')];
 
     const contents = await new AudioTranscriber().transcribeFile(
       invocationContext,
     );
 
-    expect(contents).toEqual([]);
-    expect(speech.calls).toEqual([]);
+    expect(speech.calls.map((call) => call.audio)).toEqual([Buffer.from('aa')]);
+    expect(contents).toEqual([textContent('user', 'hello')]);
   });
 
-  it('does not merge role-less audio into the next speaker run', async () => {
-    // The role-less blob accumulates under `currentSpeaker === undefined`, and
-    // the next entry's role ends that run without emitting it.
+  it("merges consecutive role-less audio into one 'user' run", async () => {
     const invocationContext = contextWithCache([
       audioEntry(undefined, 'aa'),
-      audioEntry('user', 'bb'),
+      audioEntry(undefined, 'bb'),
     ]);
     speech.responses = [scriptedResponse('hello')];
 
-    await new AudioTranscriber().transcribeFile(invocationContext);
+    const contents = await new AudioTranscriber().transcribeFile(
+      invocationContext,
+    );
 
-    expect(speech.calls.map((call) => call.audio)).toEqual([Buffer.from('bb')]);
+    expect(speech.calls.map((call) => call.audio)).toEqual([
+      Buffer.from('aabb'),
+    ]);
+    expect(contents).toEqual([textContent('user', 'hello')]);
+  });
+
+  it("keeps a role-less run separate from the next speaker's run", async () => {
+    const invocationContext = contextWithCache([
+      audioEntry(undefined, 'aa'),
+      audioEntry('model', 'bb'),
+    ]);
+    speech.responses = [scriptedResponse('asked'), scriptedResponse('replied')];
+
+    const contents = await new AudioTranscriber().transcribeFile(
+      invocationContext,
+    );
+
+    expect(speech.calls.map((call) => call.audio)).toEqual([
+      Buffer.from('aa'),
+      Buffer.from('bb'),
+    ]);
+    expect(contents).toEqual([
+      textContent('user', 'asked'),
+      textContent('model', 'replied'),
+    ]);
+  });
+
+  it("defaults an empty-string role to 'user'", async () => {
+    // adk-python's fallback is truthiness-based, so '' takes it too.
+    const invocationContext = contextWithCache([audioEntry('', 'aa')]);
+    speech.responses = [scriptedResponse('hello')];
+
+    const contents = await new AudioTranscriber().transcribeFile(
+      invocationContext,
+    );
+
+    expect(contents).toEqual([textContent('user', 'hello')]);
+  });
+
+  it('ends a role-less run at an interleaved Content', async () => {
+    const interleavedText = textContent('model', 'go on');
+    const invocationContext = contextWithCache([
+      audioEntry(undefined, 'aa'),
+      {role: 'model', data: interleavedText},
+      audioEntry(undefined, 'bb'),
+    ]);
+    speech.responses = [
+      scriptedResponse('first half'),
+      scriptedResponse('second half'),
+    ];
+
+    const contents = await new AudioTranscriber().transcribeFile(
+      invocationContext,
+    );
+
+    expect(speech.calls.map((call) => call.audio)).toEqual([
+      Buffer.from('aa'),
+      Buffer.from('bb'),
+    ]);
+    expect(contents).toEqual([
+      textContent('user', 'first half'),
+      interleavedText,
+      textContent('user', 'second half'),
+    ]);
   });
 
   it('reuses one client across calls', async () => {
