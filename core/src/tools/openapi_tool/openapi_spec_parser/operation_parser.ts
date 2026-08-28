@@ -16,6 +16,18 @@ export interface ApiParameter {
   required: boolean;
 }
 
+/** Options accepted by `OperationParser`. */
+export interface OperationParserOptions {
+  preservePropertyNames?: boolean;
+  /**
+   * Parameters that are already parsed. When they are set the operation is
+   * not read; `OperationParser.load` is the entry point that sets them.
+   */
+  parameters?: ApiParameter[];
+  /** The return value that goes with `parameters`. */
+  returnValue?: ApiParameter;
+}
+
 /**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
  *
@@ -30,9 +42,14 @@ export class OperationParser {
 
   constructor(
     private readonly operation: OpenAPIV3.OperationObject,
-    options: {preservePropertyNames?: boolean} = {},
+    options: OperationParserOptions = {},
   ) {
     this.preservePropertyNames = options.preservePropertyNames ?? false;
+    if (options.parameters) {
+      this.params = options.parameters;
+      this.returnValue = options.returnValue;
+      return;
+    }
     this.processOperationParameters();
     this.processRequestBody();
     this.processReturnValue();
@@ -47,6 +64,7 @@ export class OperationParser {
    *
    * @param operation The OpenAPI operation the parameters came from.
    * @param parameters The parameters this parser reports.
+   * @param returnValue The return value this parser reports.
    * @param options Options forwarded to the constructor.
    * @returns A parser seeded with the supplied parameters.
    */
@@ -54,11 +72,14 @@ export class OperationParser {
   static load(
     operation: OpenAPIV3.OperationObject,
     parameters: ApiParameter[],
+    returnValue?: ApiParameter,
     options: {preservePropertyNames?: boolean} = {},
   ): OperationParser {
-    const parser = new OperationParser(operation, options);
-    parser.params = parameters;
-    return parser;
+    return new OperationParser(operation, {
+      ...options,
+      parameters,
+      returnValue,
+    });
   }
 
   private getParamName(originalName: string): string {

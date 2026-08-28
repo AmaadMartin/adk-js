@@ -12,6 +12,7 @@ import {
   createRestApiTool,
   createRestApiToolFromJson,
   createSession,
+  FetchFn,
   InvocationContext,
   LlmAgent,
   OpenApiSpecParser,
@@ -20,6 +21,7 @@ import {
   PluginManager,
   RestApiTool,
   ToolAuthHandler,
+  version,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -1555,6 +1557,30 @@ describe('RestApiTool adk-python parity', () => {
         Object.keys(tool._getDeclaration().parameters?.properties ?? {}),
       ).toEqual(['query_arg']);
     });
+
+    const complete = {
+      name: 'serialized_tool',
+      description: 'a serialized description',
+      endpoint,
+      operation: {responses: {}},
+      parameters: [],
+    };
+    const incomplete: Array<[string, Record<string, unknown>]> = [
+      ['no parameters', {...complete, parameters: undefined}],
+      [
+        'a parameters value that is not an array',
+        {...complete, parameters: {}},
+      ],
+      ['no endpoint', {...complete, endpoint: undefined}],
+      ['no operation', {...complete, operation: undefined}],
+    ];
+
+    it.each(incomplete)('should reject a document with %s', (_case, value) => {
+      expect(() => createRestApiToolFromJson(JSON.stringify(value))).toThrow(
+        'A serialized ParsedOperation needs an endpoint, an operation and a ' +
+          'parameters array.',
+      );
+    });
   });
 
   describe('OperationParser.load', () => {
@@ -1578,6 +1604,447 @@ describe('RestApiTool adk-python parity', () => {
       );
 
       expect(parser.getParameters()).toEqual(parameters);
+    });
+  });
+});
+
+describe('RestApiTool request and response parity', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/test',
+    method: 'GET',
+  };
+  const operation: OpenAPIV3.OperationObject = {responses: {}};
+
+  function createToolContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'invocation-1',
+        agent: new LlmAgent({name: 'test_agent'}),
+        session: createSession({id: 'session-1', appName: 'test_app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+  }
+
+  /** Records the request a tool issues and answers it. */
+  function recordingFetch(
+    response: {status?: number; contentType?: string; body?: string} = {},
+  ) {
+    const calls: Array<{url: string; headers: Headers}> = [];
+    const fetchFn: FetchFn = vi.fn(async (input, init) => {
+      calls.push({url: String(input), headers: new Headers(init?.headers)});
+      return new Response(response.body ?? 'ok', {
+        status: response.status ?? 200,
+        headers: {'content-type': response.contentType ?? 'text/plain'},
+      });
+    });
+    return {calls, fetchFn};
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('headers', () => {
+    it('should send the ADK user agent', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(calls[0].headers.get('user-agent')).toBe(
+        `google-adk/${version} (tool: test_tool)`,
+      );
+    });
+
+    it('should let a header parameter override the user agent', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const parameters: ApiParameter[] = [
+        {
+          name: 'user_agent',
+          originalName: 'User-Agent',
+          paramLocation: 'header',
+          paramSchema: {type: 'string'},
+          required: false,
+        },
+      ];
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn, operationParser: OperationParser.load(operation, parameters)},
+      );
+
+      await tool.runAsync({
+        args: {user_agent: 'custom-agent'},
+        toolContext: createToolContext(),
+      });
+
+      expect(calls[0].headers.get('user-agent')).toBe('custom-agent');
+    });
+
+    it('should not let a default header override the user agent', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+      tool.setDefaultHeaders({'user-agent': 'default-agent'});
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(calls[0].headers.get('user-agent')).toBe(
+        `google-adk/${version} (tool: test_tool)`,
+      );
+    });
+
+    it('should send a default header the request does not carry', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+      tool.setDefaultHeaders({'X-Tenant': 'acme'});
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(calls[0].headers.get('x-tenant')).toBe('acme');
+    });
+
+    it('should not let a default header override the body content type', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const postOperation: OpenAPIV3.OperationObject = {
+        responses: {},
+        requestBody: {
+          content: {'application/json': {schema: {type: 'object'}}},
+        },
+      };
+      const parameters: ApiParameter[] = [
+        {
+          name: 'body',
+          originalName: 'body',
+          paramLocation: 'body',
+          paramSchema: {type: 'object'},
+          required: true,
+        },
+      ];
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        {...endpoint, method: 'POST'},
+        postOperation,
+        undefined,
+        undefined,
+        {
+          fetchFn,
+          operationParser: OperationParser.load(postOperation, parameters),
+        },
+      );
+      tool.setDefaultHeaders({'Content-Type': 'text/plain'});
+
+      await tool.runAsync({
+        args: {body: {foo: 'bar'}},
+        toolContext: createToolContext(),
+      });
+
+      expect(calls[0].headers.get('content-type')).toBe('application/json');
+    });
+
+    it('should send the additional headers of an HTTP credential', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.HTTP,
+        http: {
+          scheme: 'bearer',
+          credentials: {token: 'token'},
+          additionalHeaders: {'X-Goog-User-Project': 'a-project'},
+        },
+      };
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        credential,
+        {fetchFn},
+      );
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(calls[0].headers.get('x-goog-user-project')).toBe('a-project');
+    });
+  });
+
+  describe('query parameters', () => {
+    const queryParameters: ApiParameter[] = [
+      'flag',
+      'offset',
+      'cursor',
+      'missing',
+      'empty',
+    ].map((name) => ({
+      name,
+      originalName: name,
+      paramLocation: 'query',
+      paramSchema: {},
+      required: false,
+    }));
+
+    it('should drop a null or undefined value and keep a falsy one', () => {
+      const result = prepareRequestParams(endpoint, queryParameters, {
+        flag: false,
+        offset: 0,
+        cursor: null,
+        missing: undefined,
+        empty: '',
+      });
+
+      expect(result.url).toBe(
+        'http://api.example.com/test?flag=false&offset=0&empty=',
+      );
+    });
+  });
+
+  describe('cookie parameters', () => {
+    it('should send the cookie parameters in one Cookie header', () => {
+      const parameters: ApiParameter[] = ['sid', 'theme'].map((name) => ({
+        name,
+        originalName: name,
+        paramLocation: 'cookie',
+        paramSchema: {},
+        required: false,
+      }));
+
+      const result = prepareRequestParams(endpoint, parameters, {
+        sid: 'abc',
+        theme: 'dark',
+      });
+
+      expect(result.headers).toEqual({Cookie: 'sid=abc; theme=dark'});
+      expect(result.url).toBe('http://api.example.com/test');
+    });
+  });
+
+  describe('base URL', () => {
+    it('should remove one trailing slash from the base URL', () => {
+      const result = prepareRequestParams(
+        {baseUrl: 'http://api.example.com/', path: '/trailing', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('http://api.example.com/trailing');
+    });
+
+    it('should remove only one trailing slash', () => {
+      const result = prepareRequestParams(
+        {baseUrl: 'http://api.example.com//', path: '/trailing', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('http://api.example.com//trailing');
+    });
+
+    it('should return the path alone for an empty base URL', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/no_base', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('/no_base');
+    });
+  });
+
+  describe('octet-stream body', () => {
+    it('should send the raw value and set the content type', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {'application/octet-stream': {schema: {type: 'string'}}},
+      };
+      const headers: Record<string, string> = {};
+      const raw = new Uint8Array([1, 2, 3]);
+
+      const result = prepareRequestBody(requestBody, raw, {}, headers);
+
+      expect(result).toBe(raw);
+      expect(headers['Content-Type']).toBe('application/octet-stream');
+    });
+  });
+
+  describe('schema defaults', () => {
+    const defaultedOperation: OpenAPIV3.OperationObject = {responses: {}};
+    const parameters: ApiParameter[] = [
+      {
+        name: 'user_id',
+        originalName: 'userId',
+        paramLocation: 'path',
+        paramSchema: {type: 'string', default: 'me'},
+        required: true,
+      },
+    ];
+
+    function createDefaultingTool(fetchFn: FetchFn) {
+      return new RestApiTool(
+        'test_tool',
+        'description',
+        {
+          baseUrl: 'http://api.example.com',
+          path: '/users/{userId}/messages',
+          method: 'GET',
+        },
+        defaultedOperation,
+        undefined,
+        undefined,
+        {
+          fetchFn,
+          operationParser: OperationParser.load(defaultedOperation, parameters),
+        },
+      );
+    }
+
+    it('should fill in the default of an omitted required parameter', async () => {
+      const {calls, fetchFn} = recordingFetch();
+
+      await createDefaultingTool(fetchFn).runAsync({
+        args: {},
+        toolContext: createToolContext(),
+      });
+
+      expect(calls[0].url).toBe('http://api.example.com/users/me/messages');
+    });
+
+    it('should not override a value the model supplied', async () => {
+      const {calls, fetchFn} = recordingFetch();
+
+      await createDefaultingTool(fetchFn).runAsync({
+        args: {user_id: 'u-1'},
+        toolContext: createToolContext(),
+      });
+
+      expect(calls[0].url).toBe('http://api.example.com/users/u-1/messages');
+    });
+  });
+
+  describe('response status', () => {
+    it('should return the retry-advising error object for a non-2xx', async () => {
+      const {fetchFn} = recordingFetch({
+        status: 500,
+        body: 'Internal Server Error',
+      });
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext(),
+      });
+
+      expect(result).toEqual({
+        error:
+          'Tool test_tool execution failed. Analyze this execution error and ' +
+          'your inputs. Retry with adjustments if applicable. But make sure ' +
+          "don't retry more than 3 times. Execution Error: Status Code: 500, " +
+          'Internal Server Error',
+      });
+    });
+
+    it('should not return the parsed body of a JSON error response', async () => {
+      const {fetchFn} = recordingFetch({
+        status: 404,
+        contentType: 'application/json',
+        body: '{"message":"not found"}',
+      });
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext(),
+      });
+
+      expect(result).toEqual({
+        error: expect.stringContaining(
+          'Status Code: 404, {"message":"not found"}',
+        ),
+      });
+    });
+  });
+
+  describe('fetchFn', () => {
+    it('should use the supplied fetch instead of the global one', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      globalThis.fetch = vi.fn();
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(calls).toHaveLength(1);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('should use the global fetch when none is supplied', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: {get: () => 'text/plain'},
+        text: async () => 'ok',
+      });
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+      );
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     });
   });
 });
