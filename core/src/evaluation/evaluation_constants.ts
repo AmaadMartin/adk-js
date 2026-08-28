@@ -9,11 +9,8 @@
  *
  * These values appear verbatim in the `*.test.json` files that users author and
  * keep on disk, so they are observable outside the process. They stay
- * snake_case and identical to adk-python's `EvalConstants`.
- *
- * Index a dataset entry through these members rather than through a string
- * literal. A typo in `'expected_tool_use'` does not fail to compile; it reads
- * `undefined` at runtime from a file that is perfectly valid.
+ * snake_case and identical to adk-python's `EvalConstants`: renaming a value
+ * orphans every dataset already written against it, in both SDKs.
  */
 export enum EvalConstants {
   QUERY = 'query',
