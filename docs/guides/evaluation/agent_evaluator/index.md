@@ -137,7 +137,7 @@ A criterion is either a bare threshold or an object. Use the object form to pick
 
 `match_type` is `0` for an exact match, `1` for the expected calls in order with extras allowed, and `2` for the expected calls in any order. The integers match adk-python, so a config written there loads here.
 
-An eval set file may use any metric in the registry, not only these four. The four-metric restriction applies to legacy-format files, matching adk-python.
+An eval set file may use any metric in the registry, not only these two. The two-metric restriction applies to legacy-format files, matching adk-python.
 
 ## Differences from adk-python
 
