@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {ChildProcessByStdio} from 'node:child_process';
 import * as os from 'node:os';
+import type {Readable, Writable} from 'node:stream';
 
 /** Characters that separate words, matching Python `shlex`'s `whitespace`. */
 const WHITESPACE = new Set([' ', '\t', '\r', '\n']);
@@ -12,12 +14,6 @@ const WHITESPACE = new Set([' ', '\t', '\r', '\n']);
 const SINGLE_QUOTE = "'";
 const DOUBLE_QUOTE = '"';
 const ESCAPE = '\\';
-
-/** Message Python's `shlex.split` raises for an unterminated quote. */
-const NO_CLOSING_QUOTATION = 'No closing quotation';
-
-/** Message Python's `shlex.split` raises for a trailing backslash. */
-const NO_ESCAPED_CHARACTER = 'No escaped character';
 
 /**
  * Splits a command line into argv the way POSIX `shlex.split` does.
@@ -30,7 +26,8 @@ const NO_ESCAPED_CHARACTER = 'No escaped character';
  *
  * @param command The command line to tokenize.
  * @return The tokens, or an empty array when `command` holds no word.
- * @throws If a quote is never closed, or the line ends with a backslash.
+ * @throws `No closing quotation` if a quote is never closed, or `No escaped
+ *   character` if the line ends with a backslash, as `shlex.split` does.
  */
 export function splitCommand(command: string): string[] {
   const tokens: string[] = [];
@@ -44,7 +41,7 @@ export function splitCommand(command: string): string[] {
     if (char === ESCAPE && quote !== SINGLE_QUOTE) {
       const escaped = command[i + 1];
       if (escaped === undefined) {
-        throw new Error(NO_ESCAPED_CHARACTER);
+        throw new Error('No escaped character');
       }
       if (
         quote === DOUBLE_QUOTE &&
@@ -78,7 +75,7 @@ export function splitCommand(command: string): string[] {
   }
 
   if (quote !== undefined) {
-    throw new Error(NO_CLOSING_QUOTATION);
+    throw new Error('No closing quotation');
   }
   if (started) {
     tokens.push(token);
@@ -114,4 +111,66 @@ export function toReturnCode(
  */
 export function decodeChunks(chunks: Buffer[]): string {
   return Buffer.concat(chunks).toString('utf-8');
+}
+
+/** A spawned child whose stdout and stderr are pipes. */
+type PipedChild = ChildProcessByStdio<Writable | null, Readable, Readable>;
+
+/** What a child process produced, once it closed. */
+export interface ChildOutput {
+  /** The decoded standard output. `''` when the child wrote nothing. */
+  stdout: string;
+  /** The decoded standard error. `''` when the child wrote nothing. */
+  stderr: string;
+  /** The exit status, or the negative signal number. */
+  returncode: number;
+  /** Whether the timeout expired before the child closed. */
+  timedOut: boolean;
+}
+
+/**
+ * Buffers a running child's output and applies an optional timeout.
+ *
+ * @param child A spawned child with piped stdout and stderr.
+ * @param timeoutSeconds The wall-clock budget, or `null` for none.
+ * @param killOnTimeout Ends the child once the budget expires. The caller
+ *   supplies it because the mechanism differs: killing a process group is
+ *   POSIX-only, so a cross-platform caller kills the child alone.
+ * @return The output the child produced before it closed.
+ * @throws Whatever the child's `error` event reports, such as a failed spawn.
+ */
+export async function collectChildOutput(
+  child: PipedChild,
+  timeoutSeconds: number | null,
+  killOnTimeout: () => void,
+): Promise<ChildOutput> {
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+  child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (timeoutSeconds !== null) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      killOnTimeout();
+    }, timeoutSeconds * 1000);
+  }
+
+  try {
+    const returncode = await new Promise<number>((resolve, reject) => {
+      // 'close' rather than 'exit': the stdio streams are drained by then.
+      child.on('close', (code, signal) => resolve(toReturnCode(code, signal)));
+      child.on('error', reject);
+    });
+    return {
+      stdout: decodeChunks(stdoutChunks),
+      stderr: decodeChunks(stderrChunks),
+      returncode,
+      timedOut,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }

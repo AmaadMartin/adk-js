@@ -10,7 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
-import {decodeChunks, toReturnCode} from '../utils/shell_utils.js';
+import {collectChildOutput} from '../utils/shell_utils.js';
 import {BaseEnvironment, ExecutionResult} from './base_environment.js';
 
 /** Prefix for the temporary workspace created when no `workingDir` is given. */
@@ -129,16 +129,10 @@ export class LocalEnvironment extends BaseEnvironment {
       env: {...process.env, ...this.envVars},
     });
 
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
-
-    let timedOut = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    if (timeoutSeconds !== undefined) {
-      timer = setTimeout(() => {
-        timedOut = true;
+    const {stdout, stderr, returncode, timedOut} = await collectChildOutput(
+      child,
+      timeoutSeconds ?? null,
+      () => {
         child.kill('SIGKILL');
         // Killing the shell does not kill a command it forked rather than
         // exec'd, and that survivor keeps the pipes open, which would hold
@@ -146,26 +140,9 @@ export class LocalEnvironment extends BaseEnvironment {
         // the timeout is actually enforced.
         child.stdout.destroy();
         child.stderr.destroy();
-      }, timeoutSeconds * 1000);
-    }
-
-    try {
-      const exitCode = await new Promise<number>((resolve, reject) => {
-        // 'close' rather than 'exit': the stdio streams are drained by then.
-        child.on('close', (code, signal) =>
-          resolve(toReturnCode(code, signal)),
-        );
-        child.on('error', reject);
-      });
-      return {
-        exitCode,
-        stdout: decodeChunks(stdoutChunks),
-        stderr: decodeChunks(stderrChunks),
-        timedOut,
-      };
-    } finally {
-      clearTimeout(timer);
-    }
+      },
+    );
+    return {exitCode: returncode, stdout, stderr, timedOut};
   }
 
   /**

@@ -9,11 +9,7 @@ import {spawn} from 'node:child_process';
 import {formatError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
-import {
-  decodeChunks,
-  splitCommand,
-  toReturnCode,
-} from '../utils/shell_utils.js';
+import {collectChildOutput, splitCommand} from '../utils/shell_utils.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 
 /** Sentinel prefix that allows any command. Not a glob. */
@@ -92,12 +88,6 @@ export function validateCommand(
   }
   const allowed = policy.allowedCommandPrefixes.join(', ');
   return `Command blocked. Permitted prefixes are: ${allowed}`;
-}
-
-/** Decodes captured output, reporting an empty capture as `placeholder`. */
-function decodeOutput(chunks: Buffer[], placeholder: string): string {
-  const text = decodeChunks(chunks);
-  return text === '' ? placeholder : text;
 }
 
 /**
@@ -217,8 +207,6 @@ export class ExecuteBashTool extends BaseTool {
    * `SIGKILL` is out of the tool's control.
    */
   private async execute(command: string): Promise<unknown> {
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
     const {timeoutSeconds} = this.policy;
     try {
       const [file, ...rest] = splitCommand(command);
@@ -230,29 +218,15 @@ export class ExecuteBashTool extends BaseTool {
         // command that waits on it hangs the whole process.
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-      child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
-
-      let timedOut = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      if (timeoutSeconds !== null) {
-        timer = setTimeout(() => {
-          timedOut = true;
-          killProcessGroup(child.pid);
-        }, timeoutSeconds * 1000);
-      }
-
       try {
-        const returncode = await new Promise<number>((resolve, reject) => {
-          // 'close' rather than 'exit': the stdio streams are drained by then.
-          child.on('close', (code, signal) =>
-            resolve(toReturnCode(code, signal)),
-          );
-          child.on('error', reject);
-        });
+        const {stdout, stderr, returncode, timedOut} = await collectChildOutput(
+          child,
+          timeoutSeconds,
+          () => killProcessGroup(child.pid),
+        );
         const output = {
-          stdout: decodeOutput(stdoutChunks, NO_STDOUT_CAPTURED),
-          stderr: decodeOutput(stderrChunks, NO_STDERR_CAPTURED),
+          stdout: stdout || NO_STDOUT_CAPTURED,
+          stderr: stderr || NO_STDERR_CAPTURED,
           returncode,
         };
         return timedOut
@@ -262,15 +236,14 @@ export class ExecuteBashTool extends BaseTool {
             }
           : output;
       } finally {
-        clearTimeout(timer);
         killProcessGroup(child.pid);
       }
     } catch (e: unknown) {
       logger.error(`ExecuteBashTool execution failed: ${formatError(e)}`);
       return {
         error: `Execution failed: ${formatError(e)}`,
-        stdout: decodeOutput(stdoutChunks, NO_STDOUT_CAPTURED),
-        stderr: decodeOutput(stderrChunks, NO_STDERR_CAPTURED),
+        stdout: NO_STDOUT_CAPTURED,
+        stderr: NO_STDERR_CAPTURED,
       };
     }
   }
