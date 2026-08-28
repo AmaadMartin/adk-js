@@ -13,11 +13,8 @@ import {
   LlmRequest,
   RunAsyncToolRequest,
 } from '@google/adk';
-import {GenerateContentConfig, Tool, Type} from '@google/genai';
+import {Tool, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-
-/** An `LlmRequest` whose `config` is guaranteed present, so tests can index it. */
-type LlmRequestWithConfig = LlmRequest & {config: GenerateContentConfig};
 
 /** The declaration adk-python's `BaseRetrievalTool` produces, field for field. */
 const EXPECTED_DECLARATION = {
@@ -44,7 +41,7 @@ class TestRetrievalTool extends BaseRetrievalTool {
   }
 }
 
-function makeLlmRequest(): LlmRequestWithConfig {
+function makeLlmRequest(): LlmRequest {
   return {
     model: 'gemini-2.0-flash',
     config: {},
@@ -96,7 +93,7 @@ describe('BaseRetrievalTool', () => {
 
     await tool.processLlmRequest({llmRequest, toolContext: makeToolContext()});
 
-    const declarations = (llmRequest.config.tools![0] as Tool)
+    const declarations = (llmRequest.config?.tools?.[0] as Tool)
       .functionDeclarations!;
     expect(declarations).toHaveLength(1);
     expect(declarations[0]).toEqual(EXPECTED_DECLARATION);
