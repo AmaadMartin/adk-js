@@ -18,7 +18,28 @@ import {
 } from './openapi_spec_parser/operation_parser.js';
 import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
-import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
+import {
+  OperationEndpoint,
+  ParsedOperation,
+} from './openapi_spec_parser/openapi_spec_parser.js';
+
+/**
+ * Gemini rejects a function name of 64 characters or more, so a longer tool
+ * name is cut to this length.
+ */
+const MAX_TOOL_NAME_LENGTH = 60;
+
+/** Options accepted by `RestApiTool` and `createRestApiTool`. */
+export interface RestApiToolOptions {
+  preservePropertyNames?: boolean;
+  headerProvider?: (context: ReadonlyContext) => Record<string, string>;
+  credentialKey?: string;
+  /**
+   * Reports the operation's parameters instead of a parser built from
+   * `operation`. Use it to carry over parameters that are already parsed.
+   */
+  operationParser?: OperationParser;
+}
 
 @experimental
 export class RestApiTool extends BaseTool {
@@ -34,18 +55,15 @@ export class RestApiTool extends BaseTool {
     private readonly operation: OpenAPIV3.OperationObject,
     private authScheme?: OpenAPIV3.SecuritySchemeObject,
     private authCredential?: AuthCredential,
-    options: {
-      preservePropertyNames?: boolean;
-      headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-      credentialKey?: string;
-    } = {},
+    options: RestApiToolOptions = {},
   ) {
-    super({name, description});
+    super({name: name.slice(0, MAX_TOOL_NAME_LENGTH), description});
     this.authScheme = authScheme;
     this.authCredential = authCredential;
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
-    this.operationParser = new OperationParser(operation, options);
+    this.operationParser =
+      options.operationParser ?? new OperationParser(operation, options);
   }
 
   @experimental
@@ -53,8 +71,12 @@ export class RestApiTool extends BaseTool {
     this.authScheme = authScheme;
   }
 
+  /**
+   * Sets the credential this tool authenticates with. Passing nothing clears
+   * the credential the tool holds.
+   */
   @experimental
-  public configureAuthCredential(authCredential: AuthCredential) {
+  public configureAuthCredential(authCredential?: AuthCredential) {
     this.authCredential = authCredential;
   }
 
@@ -141,14 +163,25 @@ export class RestApiTool extends BaseTool {
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
         return await response.json();
-      } else {
-        return await response.text();
       }
+      return {text: await response.text()};
     } catch (error) {
       return {
         error: `Failed to execute API call: ${(error as Error).message}`,
       };
     }
+  }
+
+  /**
+   * Renders the tool for a log line or an error message. The credential is
+   * left out, so a secret never reaches a log.
+   */
+  @experimental
+  override toString(): string {
+    return (
+      `RestApiTool(name="${this.name}", description="${this.description}", ` +
+      `endpoint="${JSON.stringify(this.endpoint)}")`
+    );
   }
 }
 
@@ -233,14 +266,22 @@ export function prepareRequestParams(
   );
   let url = `${endpoint.baseUrl}${resolvedPath}`;
 
-  // Extract query parameters from path if any
-  const urlParts = url.split('?');
-  if (urlParts.length > 1) {
-    const pathQueryParams = new URLSearchParams(urlParts[1]);
-    for (const [key, value] of pathQueryParams.entries()) {
-      queryParams.append(key, value);
+  // A fragment is never sent to the server, and it may itself contain a `?`,
+  // so it goes before the query string is read.
+  url = url.split('#')[0];
+
+  const queryStart = url.indexOf('?');
+  if (queryStart !== -1) {
+    // A parameter the operation declares wins over the one the path template
+    // spells out. The declared keys are read up front, so two embedded values
+    // for one undeclared key both survive.
+    const declaredKeys = new Set(queryParams.keys());
+    for (const [key, value] of new URLSearchParams(url.slice(queryStart + 1))) {
+      if (!declaredKeys.has(key)) {
+        queryParams.append(key, value);
+      }
     }
-    url = urlParts[0];
+    url = url.slice(0, queryStart);
   }
 
   // Append query parameters
@@ -278,6 +319,7 @@ export function prepareRequestBody(
             ? finalData
             : JSON.stringify(finalData);
         } else if (mimeType === 'application/x-www-form-urlencoded') {
+          headers['Content-Type'] = mimeType;
           return new URLSearchParams(finalData as Record<string, string>);
         } else if (mimeType === 'multipart/form-data') {
           const formData = new FormData();
@@ -304,19 +346,19 @@ export function prepareRequestBody(
   return undefined;
 }
 
+/**
+ * Builds a tool from an operation the spec parser already read.
+ *
+ * The tool reports the parameters the parser produced, so a renamed or
+ * de-duplicated argument name reaches the model unchanged.
+ *
+ * @param parsed The parsed operation.
+ * @param options Options forwarded to the tool.
+ * @returns The tool for that operation.
+ */
 export function createRestApiTool(
-  parsed: {
-    name: string;
-    description: string;
-    endpoint: OperationEndpoint;
-    operation: OpenAPIV3.OperationObject;
-    authScheme?: OpenAPIV3.SecuritySchemeObject;
-  },
-  options: {
-    preservePropertyNames?: boolean;
-    headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-    credentialKey?: string;
-  } = {},
+  parsed: ParsedOperation,
+  options: RestApiToolOptions = {},
 ): RestApiTool {
   return new RestApiTool(
     parsed.name,
@@ -324,7 +366,28 @@ export function createRestApiTool(
     parsed.endpoint,
     parsed.operation,
     parsed.authScheme,
-    undefined,
-    options,
+    parsed.authCredential,
+    {
+      ...options,
+      operationParser: OperationParser.load(
+        parsed.operation,
+        parsed.parameters,
+        {
+          preservePropertyNames: options.preservePropertyNames,
+        },
+      ),
+    },
   );
+}
+
+/**
+ * Builds a tool from a serialized `ParsedOperation`.
+ *
+ * @param parsedOperationJson A JSON document holding one `ParsedOperation`.
+ * @returns The tool for that operation.
+ */
+export function createRestApiToolFromJson(
+  parsedOperationJson: string,
+): RestApiTool {
+  return createRestApiTool(JSON.parse(parsedOperationJson) as ParsedOperation);
 }

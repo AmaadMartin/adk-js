@@ -39,6 +39,28 @@ export class OperationParser {
     this.dedupeParamNames();
   }
 
+  /**
+   * Builds a parser that reports parameters somebody else already parsed.
+   *
+   * The caller owns the parameter list, so a name it renamed or de-duplicated
+   * survives instead of being derived from `operation` a second time.
+   *
+   * @param operation The OpenAPI operation the parameters came from.
+   * @param parameters The parameters this parser reports.
+   * @param options Options forwarded to the constructor.
+   * @returns A parser seeded with the supplied parameters.
+   */
+  @experimental
+  static load(
+    operation: OpenAPIV3.OperationObject,
+    parameters: ApiParameter[],
+    options: {preservePropertyNames?: boolean} = {},
+  ): OperationParser {
+    const parser = new OperationParser(operation, options);
+    parser.params = parameters;
+    return parser;
+  }
+
   private getParamName(originalName: string): string {
     if (this.preservePropertyNames) {
       return originalName;

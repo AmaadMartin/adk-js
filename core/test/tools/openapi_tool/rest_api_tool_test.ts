@@ -671,6 +671,7 @@ describe('RestApiTool Utilities', () => {
         description: 'description',
         endpoint,
         operation,
+        parameters: [],
       };
 
       const tool = createRestApiTool(parsed);
