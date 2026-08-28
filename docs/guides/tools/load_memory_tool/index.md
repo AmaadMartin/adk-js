@@ -129,19 +129,3 @@ call the memory service on this path.
 An agent that lists `LOAD_MEMORY` without a memory service throws
 `Memory service is not initialized.` when the model calls the tool. Configure a
 memory service on the `Runner`, or drop the tool from the agent.
-
-## The declaration shape
-
-By default the tool declares its parameters as a `Schema`. Enable the
-experimental `JSON_SCHEMA_FOR_FUNC_DECL` feature to emit `parametersJsonSchema`
-instead:
-
-```ts
-import {FeatureName, overrideFeatureEnabled} from '@google/adk';
-
-overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, true);
-```
-
-You can also set the `ADK_ENABLE_JSON_SCHEMA_FOR_FUNC_DECL` environment
-variable. Both declarations describe the same one required string parameter, so
-the choice only affects the wire format.

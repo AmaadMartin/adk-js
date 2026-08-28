@@ -6,7 +6,6 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 
-import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {MemoryEntry} from '../memory/memory_entry.js';
 import {appendInstructions} from '../models/llm_request.js';
 import {
@@ -16,8 +15,6 @@ import {
 } from './base_tool.js';
 
 const TOOL_NAME = 'load_memory';
-
-const QUERY_DESCRIPTION = 'The query to load the memory for.';
 
 /**
  * Returned to the model when it calls the tool without a usable `query`.
@@ -52,23 +49,6 @@ export class LoadMemoryTool extends BaseTool {
   }
 
   override _getDeclaration(): FunctionDeclaration | undefined {
-    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
-      return {
-        name: this.name,
-        description: this.description,
-        parametersJsonSchema: {
-          type: 'object',
-          properties: {
-            query: {
-              type: 'string',
-              description: QUERY_DESCRIPTION,
-            },
-          },
-          required: ['query'],
-        },
-      };
-    }
-
     return {
       name: this.name,
       description: this.description,
@@ -77,7 +57,7 @@ export class LoadMemoryTool extends BaseTool {
         properties: {
           query: {
             type: Type.STRING,
-            description: QUERY_DESCRIPTION,
+            description: 'The query to load the memory for.',
           },
         },
         required: ['query'],

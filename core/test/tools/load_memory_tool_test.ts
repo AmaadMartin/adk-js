@@ -11,7 +11,6 @@ import {
   BaseMemoryService,
   Context,
   createSession,
-  FeatureName,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -22,7 +21,6 @@ import {
   SearchMemoryRequest,
   SearchMemoryResponse,
   Session,
-  withTemporaryFeatureOverride,
 } from '@google/adk';
 
 const MISSING_QUERY_ERROR =
@@ -143,52 +141,6 @@ describe('LoadMemoryTool', () => {
     await tool.processLlmRequest({toolContext, llmRequest});
     // Instructions should be appended
     expect(llmRequest.config?.systemInstruction).toContain('You have memory.');
-  });
-
-  it('declares a Schema when JSON_SCHEMA_FOR_FUNC_DECL is disabled', async () => {
-    const tool = new LoadMemoryTool();
-
-    const declaration = await withTemporaryFeatureOverride(
-      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
-      false,
-      () => tool._getDeclaration(),
-    );
-
-    expect(declaration?.name).toEqual('load_memory');
-    expect(declaration?.parametersJsonSchema).toBeUndefined();
-    expect(declaration?.parameters).toEqual({
-      type: Type.OBJECT,
-      properties: {
-        query: {
-          type: Type.STRING,
-          description: 'The query to load the memory for.',
-        },
-      },
-      required: ['query'],
-    });
-  });
-
-  it('declares a JSON Schema when JSON_SCHEMA_FOR_FUNC_DECL is enabled', async () => {
-    const tool = new LoadMemoryTool();
-
-    const declaration = await withTemporaryFeatureOverride(
-      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
-      true,
-      () => tool._getDeclaration(),
-    );
-
-    expect(declaration?.name).toEqual('load_memory');
-    expect(declaration?.parameters).toBeUndefined();
-    expect(declaration?.parametersJsonSchema).toEqual({
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'The query to load the memory for.',
-        },
-      },
-      required: ['query'],
-    });
   });
 
   it('registers itself in the request tools so the model can call it', async () => {
