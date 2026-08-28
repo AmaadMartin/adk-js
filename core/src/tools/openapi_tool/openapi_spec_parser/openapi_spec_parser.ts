@@ -6,7 +6,7 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../../utils/experimental.js';
-import {ApiParameter} from '../common/common.js';
+import {ApiParameter, requiredSchemeName} from '../common/common.js';
 import {OperationParser} from './operation_parser.js';
 
 const VALID_SCHEMA_TYPES = new Set([
@@ -240,11 +240,7 @@ function collectOperations(
   const server = spec.servers?.[0];
   const baseUrl = server ? resolveServerUrl(server) : '';
 
-  const globalSecurity = spec.security || [];
-  let globalSchemeName: string | undefined;
-  if (globalSecurity.length > 0) {
-    globalSchemeName = Object.keys(globalSecurity[0])[0];
-  }
+  const globalSchemeName = requiredSchemeName(spec.security);
 
   const authSchemes =
     (spec.components?.securitySchemes as Record<
@@ -284,11 +280,12 @@ function collectOperations(
         preservePropertyNames,
       });
 
-      let authSchemeName: string | undefined;
-      if (operation.security && operation.security.length > 0) {
-        authSchemeName = Object.keys(operation.security[0])[0];
+      // An operation that declares security of its own overrides the global
+      // requirement, including when that security opts out of authentication.
+      let authSchemeName = parser.getAuthSchemeName();
+      if (!authSchemeName && operation.security === undefined) {
+        authSchemeName = globalSchemeName;
       }
-      authSchemeName = authSchemeName || globalSchemeName;
 
       const authScheme = authSchemeName
         ? authSchemes[authSchemeName]
@@ -300,6 +297,7 @@ function collectOperations(
         endpoint: {baseUrl, path, method},
         operation: operation,
         parameters: parser.getParameters(),
+        returnValue: parser.getReturnValue(),
         authScheme: authScheme,
       });
     }

@@ -36,6 +36,12 @@ const DEFAULT_NAME_BY_LOCATION = new Map<string, string>([
 /** Fallback when the location is unknown. */
 const DEFAULT_NAME = 'value';
 
+/** Indent of a property line under a parameter's documentation. */
+const PARAM_PROPERTY_INDENT = '       ';
+
+/** Indent of a property line under the return documentation. */
+const RETURN_PROPERTY_INDENT = '        ';
+
 /** A single argument of a tool generated from an OpenAPI operation. */
 export interface ApiParameter {
   originalName: string;
@@ -50,12 +56,8 @@ export interface ApiParameter {
 export interface ApiParameterInit {
   originalName: string;
   paramLocation: string;
-  /** The schema as the spec declares it; normalized via `normalizeSchema`. */
-  paramSchema:
-    | OpenAPIV3.SchemaObject
-    | OpenAPIV3.ReferenceObject
-    | boolean
-    | undefined;
+  /** The schema, already normalized via {@link normalizeSchema}. */
+  paramSchema: OpenAPIV3.SchemaObject;
   description?: string;
   /** Derived from `originalName`/`paramLocation` when absent or empty. */
   name?: string;
@@ -150,6 +152,10 @@ export function getTypeHint(schema: OpenAPIV3.SchemaObject): string {
 /**
  * Converts an OpenAPI parameter name to the snake_case argument name.
  *
+ * Handles lowerCamelCase, UpperCamelCase, space-separated text and acronyms:
+ * `getHTTPResponse` becomes `get_http_response` and `REST API` becomes
+ * `rest_api`.
+ *
  * This is the OpenAPI parameter-naming rule, not the recursive object-key
  * conversion that `utils/object_notation_utils.ts` exports as `toSnakeCase`.
  *
@@ -158,22 +164,22 @@ export function getTypeHint(schema: OpenAPIV3.SchemaObject): string {
  */
 export function toSnakeCaseName(originalName: string): string {
   return originalName
-    .replace(/[A-Z]/g, (g) => '_' + g.toLowerCase())
-    .replace(/^_/, '');
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 /**
  * Derives a complete {@link ApiParameter} from an OpenAPI parameter.
  *
  * @param init The parameter as the spec declares it.
- * @throws {Error} If `paramSchema` cannot be a usable schema.
- * @returns The parameter, with a non-empty name and a concrete schema.
+ * @returns The parameter, with a non-empty name.
  */
 export function createApiParameter(init: ApiParameterInit): ApiParameter {
-  const paramSchema = normalizeSchema(
-    init.paramSchema,
-    `parameter '${init.originalName}'`,
-  );
+  const paramSchema = init.paramSchema;
   const derivedName = init.name || toSnakeCaseName(init.originalName);
   return {
     originalName: init.originalName,
@@ -186,4 +192,152 @@ export function createApiParameter(init: ApiParameterInit): ApiParameter {
       DEFAULT_NAME,
     required: init.required ?? false,
   };
+}
+
+/**
+ * Returns the scheme name a security list requires, or `''` when it requires
+ * none.
+ *
+ * An empty requirement object is the OpenAPI idiom for optional
+ * authentication. A tool that carries an auth scheme stops and asks the caller
+ * for a credential instead of sending the request, so an optional requirement
+ * resolves to no scheme; a caller that does want to authenticate passes the
+ * scheme and the credential to the toolset.
+ *
+ * @param security The security requirements to read.
+ * @returns The scheme name, or `''`.
+ */
+export function requiredSchemeName(
+  security: OpenAPIV3.SecurityRequirementObject[] | undefined,
+): string {
+  if (!security || security.length === 0) {
+    return '';
+  }
+  if (security.some((requirement) => Object.keys(requirement).length === 0)) {
+    return '';
+  }
+  return Object.keys(security[0])[0];
+}
+
+/** Renders the `Object properties:` block of a schema, or `''`. */
+function propertiesDoc(schema: OpenAPIV3.SchemaObject, indent: string): string {
+  if (schema.type !== 'object' || !schema.properties) {
+    return '';
+  }
+  const entries = Object.entries(schema.properties);
+  if (entries.length === 0) {
+    return '';
+  }
+
+  let doc = ' Object properties:\n';
+  for (const [propName, propDetails] of entries) {
+    if ('$ref' in propDetails) {
+      doc += `${indent}${propName} (${UNKNOWN_TYPE}): \n`;
+      continue;
+    }
+    const propDoc = propDetails.description || '';
+    doc += `${indent}${propName} (${getTypeHint(propDetails)}): ${propDoc}\n`;
+  }
+  return doc;
+}
+
+/**
+ * Renders the documentation line for one argument.
+ *
+ * @param param The parameter to document.
+ * @returns The documentation string.
+ */
+export function generateParamDoc(param: ApiParameter): string {
+  const description = param.description?.trim() ?? '';
+  const typeHint = getTypeHint(param.paramSchema);
+  const properties = propertiesDoc(param.paramSchema, PARAM_PROPERTY_INDENT);
+  return `${param.name} (${typeHint}): ${description}${properties}`;
+}
+
+/** The 2xx response that the tool returns. */
+interface SuccessResponse {
+  key: string;
+  content: {[media: string]: OpenAPIV3.MediaTypeObject};
+  description: string;
+}
+
+/**
+ * Picks the 2xx response with content that the tool returns.
+ *
+ * @param responses The operation's responses.
+ * @throws {Error} If a 2xx response is an unresolved `$ref`.
+ * @returns The response, or `undefined` when none has content.
+ */
+function selectSuccessResponse(
+  responses: OpenAPIV3.ResponsesObject,
+): SuccessResponse | undefined {
+  let best: SuccessResponse | undefined;
+  for (const [key, response] of Object.entries(responses)) {
+    if (!key.startsWith('2')) {
+      continue;
+    }
+    if ('$ref' in response) {
+      throw new Error(
+        `Response contains unresolved reference '${response.$ref}'`,
+      );
+    }
+    const content = response.content;
+    // `{}` is truthy in JavaScript, so an empty content map must be counted.
+    if (!content || Object.keys(content).length === 0) {
+      continue;
+    }
+    // Status keys are three characters, so text order is numeric order.
+    if (!best || key < best.key) {
+      best = {key, content, description: response.description};
+    }
+  }
+  return best;
+}
+
+/** Reads the schema of the media type a response returns. */
+function schemaOf(response: SuccessResponse): OpenAPIV3.SchemaObject {
+  const {content} = response;
+  const mimeType =
+    'application/json' in content
+      ? 'application/json'
+      : Object.keys(content)[0];
+  return normalizeSchema(
+    content[mimeType].schema,
+    `response media type '${mimeType}'`,
+  );
+}
+
+/**
+ * Reads the schema of the value an operation returns.
+ *
+ * @param responses The operation's responses.
+ * @throws {Error} If the selected response schema is an unresolved `$ref`.
+ * @returns The schema, or an empty schema when no 2xx response has content.
+ */
+export function returnSchema(
+  responses: OpenAPIV3.ResponsesObject,
+): OpenAPIV3.SchemaObject {
+  const response = selectSuccessResponse(responses);
+  return response ? schemaOf(response) : {};
+}
+
+/**
+ * Renders the `Returns (...)` documentation of an operation.
+ *
+ * @param responses The operation's responses.
+ * @throws {Error} If the selected response schema is an unresolved `$ref`.
+ * @returns The documentation string, or `''` when no 2xx response has content.
+ */
+export function generateReturnDoc(
+  responses: OpenAPIV3.ResponsesObject,
+): string {
+  const response = selectSuccessResponse(responses);
+  if (!response) {
+    return '';
+  }
+
+  const schema = schemaOf(response);
+  const description = (response.description || '').trim();
+  const properties = propertiesDoc(schema, RETURN_PROPERTY_INDENT);
+  return `Returns (${getTypeHint(schema)}): ${description}${properties}`;
 }
