@@ -11,3 +11,5 @@ TypeScript implementation. For the official ADK documentation, visit
 - [Agent info](agents/agent_info/index.md) - Flattening an agent tree into
   per-agent metadata, with resolved tool declarations, so a host can describe an
   app without running it.
+- [BasePlanner](agents/planner/index.md) - Making an agent plan before it
+  answers, and marking its reasoning as thought parts.
