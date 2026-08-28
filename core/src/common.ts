@@ -285,6 +285,29 @@ export type {
 } from './tools/base_tool.js';
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 export type {ToolPredicate} from './tools/base_toolset.js';
+export {
+  BaseComputer,
+  ComputerEnvironment,
+  isComputerState,
+} from './tools/computer_use/base_computer.js';
+export type {
+  ComputerActionName,
+  ComputerState,
+  ScrollDirection,
+} from './tools/computer_use/base_computer.js';
+export {
+  ComputerUseTool,
+  isComputerUseTool,
+} from './tools/computer_use/computer_use_tool.js';
+export type {ComputerUseToolOptions} from './tools/computer_use/computer_use_tool.js';
+export {
+  ComputerUseToolset,
+  URL_REFUSED_ERROR,
+} from './tools/computer_use/computer_use_toolset.js';
+export type {
+  AdaptComputerUseToolOptions,
+  ComputerUseToolsetOptions,
+} from './tools/computer_use/computer_use_toolset.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
   ENTERPRISE_WEB_SEARCH,

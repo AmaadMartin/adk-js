@@ -39,7 +39,7 @@ import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
 
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
-import {BaseToolset} from '../tools/base_toolset.js';
+import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
 
 import {logger} from '../utils/logger.js';
 import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
@@ -1147,6 +1147,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           !llmRequest.allowedTools ||
           llmRequest.allowedTools.includes(tool.name),
       );
+      if (isBaseToolset(toolUnion)) {
+        await toolUnion.processLlmRequest(toolContext, llmRequest);
+      }
       for (const tool of tools) {
         await tool.processLlmRequest({toolContext, llmRequest});
         if (invocationContext.abortSignal?.aborted) {
@@ -1529,6 +1532,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           tool.name === 'set_model_response'
         );
       });
+
+      // A toolset processes the request before its own tools do, so it can
+      // declare configuration the tools then rely on.
+      if (isBaseToolset(toolUnion)) {
+        await toolUnion.processLlmRequest(toolContext, llmRequest);
+      }
 
       for (const tool of tools) {
         await tool.processLlmRequest({toolContext, llmRequest});
