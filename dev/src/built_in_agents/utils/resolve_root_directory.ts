@@ -12,7 +12,7 @@
  * adk-python.
  */
 
-import {ReadonlyContext} from '@google/adk';
+import {ReadonlyContext, resolveWithinDir} from '@google/adk';
 import * as path from 'node:path';
 
 import {sanitizeGeneratedFilePath} from './path_normalizer.js';
@@ -26,32 +26,37 @@ const DEFAULT_ROOT_DIRECTORY = './';
 /**
  * Reads the project root from the session state.
  *
- * The reference implementation indexes the state dictionary and fails on a
- * missing or non-string value. Falling back to the default is the defensive
- * equivalent: the value reaches us from a session an untrusted turn can write.
+ * A session that never set the key falls back to `./`, which the reference
+ * also does. A session that set it to something other than a non-empty string
+ * is an error: the reference raises there, and degrading to the working
+ * directory would silently point a write or a delete at wherever the process
+ * happens to be running.
  *
  * @param context The invocation context, absent when a tool is called
  *     directly. A tool context and an instruction provider's readonly context
  *     both satisfy it.
- * @return The configured root, or `./` when none is usable.
+ * @return The configured root, or `./` when the session declares none.
+ * @throws If the session state holds an unusable `root_directory`.
  */
 export function rootDirectoryFromContext(context?: ReadonlyContext): string {
   const rootDirectory = context?.state.get<unknown>(ROOT_DIRECTORY_STATE_KEY);
-  return typeof rootDirectory === 'string' && rootDirectory.length > 0
-    ? rootDirectory
-    : DEFAULT_ROOT_DIRECTORY;
+  if (rootDirectory === undefined) {
+    return DEFAULT_ROOT_DIRECTORY;
+  }
+  if (typeof rootDirectory !== 'string' || rootDirectory.length === 0) {
+    throw new Error(
+      `Session state '${ROOT_DIRECTORY_STATE_KEY}' must be a non-empty string.`,
+    );
+  }
+  return rootDirectory;
 }
 
 /**
  * Resolves `filePath` against `rootDirectory` and rejects anything outside it.
  *
- * Containment is a **lexical** check on the two resolved path strings, in the
- * shape used by `resolvePathInWorkingDir` in core's `local_environment.ts`: a
- * bare `startsWith` would accept a sibling whose name merely shares the prefix,
- * so the relative path is inspected for `..` and for the absolute result that
- * `path.relative` returns across Windows drives. It guards against traversal;
- * it is not a sandbox, and it does not survive symlinks, hardlinks, bind mounts
- * or TOCTOU races.
+ * Containment is core's {@link resolveWithinDir} check: lexical, a guard
+ * against traversal rather than a sandbox, and no defence against symlinks,
+ * hardlinks, bind mounts or TOCTOU races.
  *
  * This diverges from the reference in one way: Python's `Path.resolve()`
  * resolves symlinks, `path.resolve()` does not. A symlink inside the root that
@@ -70,20 +75,13 @@ export function resolveFilePath(
   filePath: string,
   rootDirectory: string,
 ): string {
-  const normalizedPath = sanitizeGeneratedFilePath(filePath);
-  // `path.resolve` walks right to left until it has an absolute path, so an
-  // absolute root or an absolute file path already wins over what precedes it.
-  const resolvedRoot = path.resolve(rootDirectory);
-  const candidate = path.resolve(resolvedRoot, normalizedPath);
-
-  const relative = path.relative(resolvedRoot, candidate);
-  if (
-    relative === '..' ||
-    relative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relative)
-  ) {
+  const candidate = resolveWithinDir(
+    rootDirectory,
+    sanitizeGeneratedFilePath(filePath),
+  );
+  if (candidate === undefined) {
     throw new Error(
-      `File path '${filePath}' resolves outside the root directory ${resolvedRoot}.`,
+      `File path '${filePath}' resolves outside the root directory ${path.resolve(rootDirectory)}.`,
     );
   }
   return candidate;

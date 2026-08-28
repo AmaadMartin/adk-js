@@ -51,13 +51,6 @@ const deleteFilesParameters = z.object({
       'Copy each file to a timestamped backup before deleting it. Defaults ' +
         'to false.',
     ),
-  confirm_deletion: z
-    .boolean()
-    .optional()
-    .describe(
-      'Whether the user confirmed the deletion. Nothing is deleted when this ' +
-        'is false. Defaults to true.',
-    ),
 });
 
 /** Arguments accepted by {@link deleteFiles}. */
@@ -72,7 +65,7 @@ export type DeleteFilesInput = z.infer<typeof deleteFilesParameters>;
  * escapes the root fails the whole batch, so nothing outside the project is
  * removed.
  *
- * @param input The paths to delete and the backup and confirmation options.
+ * @param input The paths to delete and the backup option.
  * @param context The tool context carrying the project root.
  * @return The per-file outcome of every deletion.
  */
@@ -80,11 +73,8 @@ export async function deleteFiles(
   input: DeleteFilesInput,
   context?: Context,
 ): Promise<DeleteFilesResult> {
-  const {
-    file_paths: requestedPaths,
-    create_backup: shouldBackUp = false,
-    confirm_deletion: confirmDeletion = true,
-  } = input;
+  const {file_paths: requestedPaths, create_backup: shouldBackUp = false} =
+    input;
 
   try {
     const resolvedPaths = resolveFilePaths(
@@ -99,12 +89,6 @@ export async function deleteFiles(
       total_files: requestedPaths.length,
       errors: [],
     };
-
-    if (!confirmDeletion) {
-      result.success = false;
-      result.errors.push('Deletion not confirmed by user');
-      return result;
-    }
 
     for (const resolvedPath of resolvedPaths) {
       const fileInfo: DeleteFileInfo = {
@@ -165,9 +149,9 @@ export async function deleteFiles(
 /**
  * The `delete_files` tool as the model sees it.
  *
- * The wrapper requires an explicit user confirmation before it runs. The
- * ported `confirm_deletion` argument is supplied by the model and is therefore
- * not a gate; this one is enforced by the framework.
+ * The framework holds the call until the user confirms it. The reference
+ * instead takes a `confirm_deletion` argument, which the model fills in
+ * itself, so it gates nothing; it is dropped here rather than ported.
  */
 export const deleteFilesTool = new FunctionTool({
   name: 'delete_files',

@@ -126,5 +126,9 @@ carries tools for project exploration, ADK source search, and web research.
 adk-js has no YAML agent runtime and no `AgentConfig` JSON Schema, so this
 assistant writes TypeScript and carries only the three file tools.
 
-The agent name, the tool names, the tool arguments, the result fields and the
-8192-token cap all match adk-python, because the model sees them.
+The agent name, the tool names, the result fields and the 8192-token cap match
+adk-python, because the model sees them.
+
+One argument differs. adk-python's `delete_files` takes `confirm_deletion`,
+which the model fills in itself, so it gates nothing. adk-js drops it and makes
+the framework hold the call until the user confirms it.

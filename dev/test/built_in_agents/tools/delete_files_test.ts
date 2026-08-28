@@ -65,26 +65,6 @@ describe('deleteFiles', () => {
     });
   });
 
-  it('deletes nothing when confirm_deletion is false', async () => {
-    const root = await tempDir();
-    const target = path.join(root, 'orphan.ts');
-    await fs.writeFile(target, 'export {};');
-
-    const result = await deleteFiles(
-      {file_paths: ['orphan.ts'], confirm_deletion: false},
-      createTestContext({root_directory: root}),
-    );
-
-    expect(result).toEqual({
-      success: false,
-      files: {},
-      successful_deletions: 0,
-      total_files: 1,
-      errors: ['Deletion not confirmed by user'],
-    });
-    expect(await fs.readFile(target, 'utf-8')).toBe('export {};');
-  });
-
   it('backs the file up before deleting it', async () => {
     vi.useFakeTimers({toFake: ['Date']});
     vi.setSystemTime(new Date(2026, 7, 14, 12, 0, 0));
@@ -148,7 +128,7 @@ describe('deleteFiles', () => {
     await fs.writeFile(victim, 'bye');
 
     const result = await deleteFiles(
-      {file_paths: [path.relative(root, victim)], confirm_deletion: true},
+      {file_paths: [path.relative(root, victim)]},
       createTestContext({root_directory: root}),
     );
 

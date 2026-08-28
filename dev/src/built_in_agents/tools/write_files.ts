@@ -89,6 +89,14 @@ export async function writeFiles(
 
   try {
     const rootDirectory = rootDirectoryFromContext(context);
+    // Every path is resolved before anything is written, so one entry that
+    // escapes the root rejects the batch instead of leaving earlier entries on
+    // disk under a result that reports no writes at all.
+    const resolvedEntries = entries.map(
+      ([filePath, content]) =>
+        [resolveFilePath(filePath, rootDirectory), content] as const,
+    );
+
     const result: WriteFilesResult = {
       success: true,
       files: {},
@@ -97,8 +105,7 @@ export async function writeFiles(
       errors: [],
     };
 
-    for (const [filePath, content] of entries) {
-      const resolvedPath = resolveFilePath(filePath, rootDirectory);
+    for (const [resolvedPath, content] of resolvedEntries) {
       const fileInfo: WriteFileInfo = {
         file_size: 0,
         existed_before: false,
@@ -129,14 +136,10 @@ export async function writeFiles(
 
         await fs.writeFile(resolvedPath, content, 'utf-8');
 
-        const stats = await fs.stat(resolvedPath).catch(() => undefined);
-        if (stats === undefined) {
-          fileInfo.error = 'File was not created successfully';
-          result.success = false;
-        } else {
-          fileInfo.file_size = stats.size;
-          result.successful_writes++;
-        }
+        // `writeFile` resolving means the bytes landed, so the size is known
+        // without asking the filesystem for it again.
+        fileInfo.file_size = Buffer.byteLength(content, 'utf-8');
+        result.successful_writes++;
       } catch (error: unknown) {
         fileInfo.error = `Write failed: ${errorMessage(error)}`;
         result.success = false;

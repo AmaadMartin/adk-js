@@ -24,10 +24,7 @@ import {agentBuilderInstruction} from './instruction.js';
 import {deleteFilesTool} from './tools/delete_files.js';
 import {readFilesTool} from './tools/read_files.js';
 import {writeFilesTool} from './tools/write_files.js';
-import {
-  resolveFilePath,
-  rootDirectoryFromContext,
-} from './utils/resolve_root_directory.js';
+import {rootDirectoryFromContext} from './utils/resolve_root_directory.js';
 
 /** Model the assistant uses when the caller names none. */
 const DEFAULT_MODEL = 'gemini-2.5-pro';
@@ -51,9 +48,8 @@ export interface AgentBuilderAssistantOptions {
  * @return The project folder name, or `project` when the root has none.
  */
 function projectFolderName(context: ReadonlyContext): string {
-  const rootDirectory = rootDirectoryFromContext(context);
   return (
-    path.basename(resolveFilePath('.', rootDirectory)) ||
+    path.basename(path.resolve(rootDirectoryFromContext(context))) ||
     FALLBACK_PROJECT_FOLDER_NAME
   );
 }

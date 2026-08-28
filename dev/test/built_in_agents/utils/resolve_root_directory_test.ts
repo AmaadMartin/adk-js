@@ -161,11 +161,13 @@ describe('rootDirectoryFromContext', () => {
   });
 
   it.each([[42], [''], [null], [{}]])(
-    'returns "./" when the stored root is %j',
+    'refuses a stored root of %j instead of degrading to the cwd',
     (stored) => {
       const context = createTestContext({root_directory: stored});
 
-      expect(rootDirectoryFromContext(context)).toBe('./');
+      expect(() => rootDirectoryFromContext(context)).toThrow(
+        "Session state 'root_directory' must be a non-empty string.",
+      );
     },
   );
 });

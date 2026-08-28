@@ -10,6 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
+import {resolveWithinDir} from '../utils/path_utils.js';
 import {BaseEnvironment, ExecutionResult} from './base_environment.js';
 
 /** Prefix for the temporary workspace created when no `workingDir` is given. */
@@ -31,22 +32,13 @@ export interface LocalEnvironmentOptions {
 /**
  * Resolves `filePath` against `workingDir` and rejects anything outside it.
  *
- * This is a **lexical** containment check on the resolved path strings, not a
- * sandbox: it does not survive symlinks, hardlinks, bind mounts, or TOCTOU
- * races. It is a guard against accidental traversal, not a security boundary.
+ * See {@link resolveWithinDir} for the limits of the containment check.
  *
  * @throws If the resolved path is not inside `workingDir`.
  */
 function resolvePathInWorkingDir(workingDir: string, filePath: string): string {
-  const base = path.resolve(workingDir);
-  const resolved = path.resolve(base, filePath);
-  const relative = path.relative(base, resolved);
-  if (
-    relative === '..' ||
-    relative.startsWith(`..${path.sep}`) ||
-    // `path.relative` returns an absolute path across Windows drives.
-    path.isAbsolute(relative)
-  ) {
+  const resolved = resolveWithinDir(workingDir, filePath);
+  if (resolved === undefined) {
     throw new Error(`Path escapes working directory: ${filePath}`);
   }
   return resolved;
