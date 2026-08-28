@@ -18,19 +18,6 @@ import {
   validateSpannerCredentialsConfig,
 } from './spanner_credentials.js';
 
-/**
- * Whether a `toolFilter` entry names this tool. adk-python filters on the bare
- * name and prefixes afterwards, so both spellings are accepted here; matching
- * only the prefixed name would silently yield no tools for a filter ported
- * from Python.
- */
-function matchesToolName(filterName: string, toolName: string): boolean {
-  return (
-    filterName === toolName ||
-    `${SPANNER_TOOL_NAME_PREFIX}_${filterName}` === toolName
-  );
-}
-
 /** Options for {@link SpannerAdminToolset}. */
 export interface SpannerAdminToolsetOptions {
   /**
@@ -39,9 +26,8 @@ export interface SpannerAdminToolsetOptions {
    */
   credentialsConfig: SpannerCredentialsConfig;
   /**
-   * Names of the tools to expose, or a predicate over them. A name matches
-   * with or without the `spanner_` prefix, so a filter ported from adk-python
-   * works unchanged. A predicate receives the tool under its prefixed name.
+   * Names of the tools to expose, or a predicate over them. Both see the tool
+   * under its prefixed name.
    */
   toolFilter?: ToolPredicate | string[];
 }
@@ -115,15 +101,14 @@ export class SpannerAdminToolset extends BaseToolset {
   }
 
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    return this.tools.filter((tool) => {
-      if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
-        return this.toolFilter.some((name) => matchesToolName(name, tool.name));
-      }
-      if (context) {
-        return this.isToolSelected(tool, context);
-      }
-      return true;
-    });
+    if (context) {
+      return this.tools.filter((tool) => this.isToolSelected(tool, context));
+    }
+    // A predicate needs a context, so without one only a name filter applies.
+    const names = this.toolFilter;
+    return Array.isArray(names) && names.length > 0
+      ? this.tools.filter((tool) => names.includes(tool.name))
+      : this.tools;
   }
 
   /**

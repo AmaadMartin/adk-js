@@ -90,18 +90,15 @@ describe('SpannerAdminToolset', () => {
     ]);
   });
 
-  it('accepts a filter written without the prefix, as adk-python does', async () => {
+  it('returns no tool for a filter written without the prefix', async () => {
     const toolset = makeToolset({
       toolFilter: ['list_instances', 'get_instance'],
     });
 
-    expect(toolNames(await toolset.getTools()).sort()).toEqual([
-      'spanner_get_instance',
-      'spanner_list_instances',
-    ]);
+    expect(await toolset.getTools()).toEqual([]);
   });
 
-  it('returns no tool for a name that matches neither spelling', async () => {
+  it('returns no tool for a name that is only a prefix of real names', async () => {
     const toolset = makeToolset({toolFilter: ['spanner_list']});
 
     expect(await toolset.getTools()).toEqual([]);

@@ -53,6 +53,7 @@ const OPTIONAL_SUBSYSTEM_PEERS = [
   '@mikro-orm/sqlite',
   '@modelcontextprotocol/sdk',
   'express',
+  'google-gax',
 ];
 
 describe('core/package.json install weight', () => {
