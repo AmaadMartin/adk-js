@@ -28,6 +28,10 @@ import {
   vi,
 } from 'vitest';
 
+// The batch-size clamp reports itself through logger.warn, which the barrel
+// does not re-export, so the spy needs the module.
+import {logger} from '../../src/utils/logger.js';
+
 const FAKE_MODEL = 'fake-optimizer-model';
 const DEFAULT_OPTIMIZER_MODEL = 'gemini-2.5-flash';
 const TRAIN_IDS = ['t1', 't2', 't3', 't4', 't5'];
@@ -249,6 +253,7 @@ describe('SimplePromptOptimizer', () => {
   });
 
   it('caps the batch at the number of training examples', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     const config: SimplePromptOptimizerConfig = {
       optimizerModel: FAKE_MODEL,
       numIterations: 1,
@@ -265,11 +270,31 @@ describe('SimplePromptOptimizer', () => {
       sampler,
     );
 
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'Batch size (10) is larger than the number of training examples (3). ' +
+        'Using all training examples for each evaluation.',
+    );
     expect(sampler.trainCalls()).toHaveLength(2);
     for (const call of sampler.trainCalls()) {
       expect(call.batch).toHaveLength(3);
     }
     expect(config.batchSize).toBe(10);
+  });
+
+  it('does not warn when the batch fits the training examples', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const sampler = new RecordingSampler(scoreImprovedHigher);
+
+    await newOptimizer({numIterations: 1, batchSize: 5}).optimize(
+      newInitialAgent(),
+      sampler,
+    );
+
+    expect(warn).not.toHaveBeenCalled();
+    for (const call of sampler.trainCalls()) {
+      expect(call.batch).toHaveLength(5);
+    }
   });
 
   it('concatenates the text parts and skips the thought parts', async () => {

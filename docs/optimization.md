@@ -22,8 +22,8 @@ another — so an optimizer that trades accuracy against cost can return both
 agents instead of picking for you.
 
 Both are plain TypeScript interfaces. They add no runtime code, so importing
-them costs nothing. adk-js ships no concrete optimizer today; this release
-lands the contract that optimizers and evaluation services implement.
+them costs nothing. `SimplePromptOptimizer` is the one optimizer adk-js ships
+against this contract; it has its own section at the end of this guide.
 
 ## Get started
 
@@ -126,3 +126,73 @@ interface ScoredAgentWithLatency extends AgentWithScores {
 declare const result: OptimizerResult<ScoredAgentWithLatency>;
 const slowest = result.optimizedAgents.at(-1)?.latencyMs;
 ```
+
+## SimplePromptOptimizer
+
+`SimplePromptOptimizer` hill-climbs an agent's instruction. It asks a model for
+a rewrite, scores the rewrite on a random batch of training examples, and keeps
+it only when it scores strictly higher than the incumbent. Reach for it when you
+already have an eval set and want a better instruction to paste back into your
+source.
+
+```ts
+import {LlmAgent, SimplePromptOptimizer} from '@google/adk';
+
+const agent = new LlmAgent({
+  name: 'support_agent',
+  instruction: 'Help the user with their order.',
+});
+
+const optimizer = new SimplePromptOptimizer({numIterations: 5, batchSize: 3});
+const result = await optimizer.optimize(agent, new MyEvalSampler());
+
+const best = result.optimizedAgents[0];
+const betterInstruction = best.optimizedAgent.instruction;
+```
+
+`optimize` never mutates the agent you pass in. Every candidate is a
+`clone({instruction})`, so `agent.instruction` still reads
+`'Help the user with their order.'` after the run.
+
+### Configuration
+
+Every field is optional.
+
+| Field                | Default                  | Meaning                                  |
+| -------------------- | ------------------------ | ---------------------------------------- |
+| `optimizerModel`     | `'gemini-2.5-flash'`     | The model that rewrites the instruction. |
+| `modelConfiguration` | thinking, budget `10240` | Generation config for that model.        |
+| `numIterations`      | `10`                     | Rewrites to try.                         |
+| `batchSize`          | `5`                      | Training examples scored per candidate.  |
+
+The constructor resolves `optimizerModel` through `LLMRegistry`, so an unknown
+model name throws as soon as you build the optimizer, not when you run it.
+
+`batchSize` is capped at the number of training examples your sampler reports.
+The optimizer logs a warning and uses them all. It does not write the cap back
+into the object you passed, so your config still reads the number you set.
+
+### What a run costs
+
+A run with `numIterations = n` makes `n` calls to the optimizer model and
+`n + 2` calls to your sampler: one baseline, `n` candidates and one final
+validation. Each sampler call runs an agent over a batch of examples, so a run
+costs real model traffic and nothing in the class bounds it. Start with a small
+`numIterations`.
+
+### Selection and validation are separate
+
+Selection reads training scores only. Every comparison draws a fresh random
+batch, so a candidate can win on batch noise. Validation runs once at the end,
+over the whole validation set, and it never decides which instruction wins.
+
+A run can therefore return a rewritten instruction whose validation score is
+below the initial agent's. `overallScore` reports that number honestly. Read it
+before you adopt the result.
+
+### The instruction must be a string
+
+`optimize` rejects an agent whose `instruction` is a provider function. A
+provider only resolves inside a live invocation. Interpolating the function
+would send its source text to the optimizer model, so the optimizer refuses
+instead.
