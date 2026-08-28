@@ -54,12 +54,8 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     await fs.rm(tmpDir, {recursive: true, force: true});
   });
 
-  async function writeEnvFile(
-    folder: string,
-    contents: string,
-    filename = '.env',
-  ): Promise<void> {
-    await fs.writeFile(path.join(folder, filename), contents);
+  async function writeEnvFile(folder: string, contents: string): Promise<void> {
+    await fs.writeFile(path.join(folder, '.env'), contents);
   }
 
   it('preserves an explicitly set variable', async () => {
@@ -70,7 +66,7 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     );
     const {loadDotenvForAgent} = await importEnvs();
 
-    loadDotenvForAgent('agent1', agentsDir);
+    loadDotenvForAgent(agentDir);
 
     expect(process.env[EXPLICIT_KEY]).toBe('explicit');
     expect(process.env[DOTENV_KEY]).toBe('from_dotenv');
@@ -83,10 +79,10 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     await writeEnvFile(agent2Dir, `${DOTENV_KEY}=two\n`);
     const {loadDotenvForAgent} = await importEnvs();
 
-    loadDotenvForAgent('agent1', agentsDir);
+    loadDotenvForAgent(agentDir);
     expect(process.env[DOTENV_KEY]).toBe('one');
 
-    loadDotenvForAgent('agent2', agentsDir);
+    loadDotenvForAgent(agent2Dir);
     expect(process.env[DOTENV_KEY]).toBe('two');
   });
 
@@ -98,12 +94,27 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     await writeEnvFile(agent2Dir, `${DOTENV_KEY}=two\n`);
     const {loadDotenvForAgent} = await importEnvs();
 
-    loadDotenvForAgent('agent1', agentsDir);
+    loadDotenvForAgent(agentDir);
     delete process.env[EXPLICIT_KEY];
-    loadDotenvForAgent('agent2', agentsDir);
+    loadDotenvForAgent(agent2Dir);
 
     expect(process.env[EXPLICIT_KEY]).toBeUndefined();
     expect(process.env[DOTENV_KEY]).toBe('two');
+  });
+
+  it('lets a .env supply an explicit variable the caller deleted', async () => {
+    const agent2Dir = path.join(agentsDir, 'agent2');
+    await fs.mkdir(agent2Dir);
+    process.env[EXPLICIT_KEY] = 'explicit';
+    await writeEnvFile(agentDir, `${DOTENV_KEY}=one\n`);
+    await writeEnvFile(agent2Dir, `${EXPLICIT_KEY}=from_dotenv\n`);
+    const {loadDotenvForAgent} = await importEnvs();
+
+    loadDotenvForAgent(agentDir);
+    delete process.env[EXPLICIT_KEY];
+    loadDotenvForAgent(agent2Dir);
+
+    expect(process.env[EXPLICIT_KEY]).toBe('from_dotenv');
   });
 
   it('skips the load when the disable flag is 1', async () => {
@@ -111,7 +122,7 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     await writeEnvFile(agentDir, `${DOTENV_KEY}=from_dotenv\n`);
     const {loadDotenvForAgent} = await importEnvs();
 
-    loadDotenvForAgent('agent1', agentsDir);
+    loadDotenvForAgent(agentDir);
 
     expect(process.env[DOTENV_KEY]).toBeUndefined();
   });
@@ -121,7 +132,7 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     await writeEnvFile(agentDir, `${DOTENV_KEY}=from_dotenv\n`);
     const {loadDotenvForAgent} = await importEnvs();
 
-    loadDotenvForAgent('agent1', agentsDir);
+    loadDotenvForAgent(agentDir);
 
     expect(process.env[DOTENV_KEY]).toBeUndefined();
   });
@@ -133,7 +144,7 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
       await writeEnvFile(agentDir, `${DOTENV_KEY}=from_dotenv\n`);
       const {loadDotenvForAgent} = await importEnvs();
 
-      loadDotenvForAgent('agent1', agentsDir);
+      loadDotenvForAgent(agentDir);
 
       expect(process.env[DOTENV_KEY]).toBe('from_dotenv');
     },
@@ -143,7 +154,7 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     await writeEnvFile(agentsDir, `${DOTENV_KEY}=from_parent\n`);
     const {loadDotenvForAgent} = await importEnvs();
 
-    loadDotenvForAgent('agent1', agentsDir);
+    loadDotenvForAgent(agentDir);
 
     expect(process.env[DOTENV_KEY]).toBe('from_parent');
   });
@@ -153,7 +164,7 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     await writeEnvFile(agentDir, `${DOTENV_KEY}=from_agent\n`);
     const {loadDotenvForAgent} = await importEnvs();
 
-    loadDotenvForAgent('agent1', agentsDir);
+    loadDotenvForAgent(agentDir);
 
     expect(process.env[DOTENV_KEY]).toBe('from_agent');
   });
@@ -161,7 +172,7 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
   it('returns quietly when no .env exists above the agent', async () => {
     const {loadDotenvForAgent} = await importEnvs();
 
-    expect(() => loadDotenvForAgent('agent1', agentsDir)).not.toThrow();
+    expect(() => loadDotenvForAgent(agentDir)).not.toThrow();
     expect(process.env[DOTENV_KEY]).toBeUndefined();
   });
 
@@ -169,28 +180,9 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     await writeEnvFile(agentsDir, `${DOTENV_KEY}=from_parent\n`);
     const {loadDotenvForAgent} = await importEnvs();
 
-    loadDotenvForAgent('does-not-exist', agentsDir);
+    loadDotenvForAgent(path.join(agentsDir, 'does-not-exist'));
 
     expect(process.env[DOTENV_KEY]).toBe('from_parent');
-  });
-
-  it('starts at the parent folder when the agent name is empty', async () => {
-    await writeEnvFile(agentsDir, `${DOTENV_KEY}=from_parent\n`);
-    const {loadDotenvForAgent} = await importEnvs();
-
-    loadDotenvForAgent('', agentsDir);
-
-    expect(process.env[DOTENV_KEY]).toBe('from_parent');
-  });
-
-  it('loads the file named by the filename argument', async () => {
-    await writeEnvFile(agentDir, `${DOTENV_KEY}=from_dotenv\n`);
-    await writeEnvFile(agentDir, `${DOTENV_KEY}=from_test_env\n`, '.env.test');
-    const {loadDotenvForAgent} = await importEnvs();
-
-    loadDotenvForAgent('agent1', agentsDir, '.env.test');
-
-    expect(process.env[DOTENV_KEY]).toBe('from_test_env');
   });
 
   it('ignores a folder named .env and keeps walking up', async () => {
@@ -198,7 +190,7 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     await writeEnvFile(agentsDir, `${DOTENV_KEY}=from_parent\n`);
     const {loadDotenvForAgent} = await importEnvs();
 
-    loadDotenvForAgent('agent1', agentsDir);
+    loadDotenvForAgent(agentDir);
 
     expect(process.env[DOTENV_KEY]).toBe('from_parent');
   });

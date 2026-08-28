@@ -572,9 +572,7 @@ export class AgentLoader {
   private async loadAgentFromFile(file: FileMetadata): Promise<void> {
     try {
       const agentFile = new AgentFile(file.path, this.options);
-      await withAgentDotenv(file.name, path.dirname(file.path), () =>
-        agentFile.load(),
-      );
+      await withAgentDotenv(file.path, () => agentFile.load());
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(file.name, file.path, e);
@@ -593,9 +591,7 @@ export class AgentLoader {
 
     try {
       const agentFile = new AgentFile(possibleEntryFile.path, this.options);
-      await withAgentDotenv(dir.name, path.dirname(dir.path), () =>
-        agentFile.load(),
-      );
+      await withAgentDotenv(dir.path, () => agentFile.load());
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(dir.name, possibleEntryFile.path, e);

@@ -339,7 +339,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   const agentAbsPath = getAbsolutePath(options.agentPath);
   // The agent module reads `process.env` while it is imported, so the `.env`
   // has to be in place before `load()` runs.
-  loadDotenvForAgent(path.basename(agentAbsPath), path.dirname(agentAbsPath));
+  loadDotenvForAgent(agentAbsPath);
   await using agentFile = new AgentFile(
     agentAbsPath,
     options.agentFileLoadOptions,
