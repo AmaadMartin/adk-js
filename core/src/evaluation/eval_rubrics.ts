@@ -1,0 +1,59 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * The content of a rubric.
+ */
+export interface RubricContent {
+  /**
+   * The property being evaluated, e.g. "The agent's response is grammatically
+   * correct.".
+   *
+   * The key is always present because a rubric without a property states
+   * nothing; the value may be undefined while a rubric is being assembled.
+   */
+  textProperty: string | undefined;
+}
+
+/**
+ * A single rubric.
+ */
+export interface Rubric {
+  /** Unique identifier for the rubric. */
+  rubricId: string;
+
+  /** The testable criterion for the rubric. */
+  rubricContent: RubricContent;
+
+  /**
+   * How to interpret the result of this rubric's assessment.
+   */
+  description?: string;
+
+  /**
+   * A type designator, which tells a system or a user how to evaluate the
+   * rubric. Use consistent upper snake_case strings, e.g. "TOOL_USE_QUALITY",
+   * "FINAL_RESPONSE_QUALITY", "INSTRUCTION_ADHERENCE".
+   */
+  type?: string;
+}
+
+/**
+ * The score obtained after applying a rubric to the agent's response.
+ */
+export interface RubricScore {
+  /** The id of the rubric that was assessed. */
+  rubricId: string;
+
+  /** Reasoning for the score. */
+  rationale?: string;
+
+  /**
+   * Score obtained after assessing the rubric. Absent when the assessment did
+   * not happen.
+   */
+  score?: number;
+}
