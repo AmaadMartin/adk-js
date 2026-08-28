@@ -7,6 +7,7 @@
 import {Schema, Type} from '@google/genai';
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
 
+import {NUMERIC_STRING_KEYS} from '../../utils/genai_schema_to_json.js';
 import {BaseTool} from '../base_tool.js';
 
 /**
@@ -21,18 +22,8 @@ const DIRECT_KEYS = [
   'example',
 ] as const;
 
-/**
- * Keys the genai (OpenAPI) dialect stringifies but JSON Schema requires as
- * numbers, so they are converted with `Number` on the way out. The same policy
- * `genaiSchemaToJsonSchema` applies in `core/src/utils/genai_schema_to_json.ts`.
- */
-type NumericStringKey =
-  | 'minItems'
-  | 'maxItems'
-  | 'minLength'
-  | 'maxLength'
-  | 'minProperties'
-  | 'maxProperties';
+/** A genai key that carries a stringified bound, converted with `Number`. */
+type NumericStringKey = (typeof NUMERIC_STRING_KEYS)[number];
 
 /** Reports whether `value` is a non-null, non-array object. */
 function isJsonObject(value: unknown): value is Record<string, unknown> {
