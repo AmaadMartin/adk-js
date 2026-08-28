@@ -17,30 +17,29 @@ AI.GENERATE_BOOL(
 
 ### Input Arguments
 
-| Argument     | Requirement  | Type   | Description        |
-| :----------- | :----------- | :----- | :----------------- |
-| **`prompt`** | **Required** | String | The prompt text or |
-
-: : : : instruction. :
-| **`connection_id`** | Optional | String | The connection ID to |
-: : : : use for the LLM. :
-| **`endpoint`** | Optional | String | The model endpoint |
-: : : : (e.g. :
-: : : : `'gemini-2.5-flash'`). :
-| **`model_params`** | Optional | JSON | JSON object for model |
-: : : : parameters (e.g., :
-: : : : `temperature`, :
-: : : : `max_output_tokens`). :
-| **`request_type`** | Optional | String | `'DEDICATED'` or |
-: : : : `'SHARED'`. :
+| Argument            | Requirement  | Type   | Description            |
+| :------------------ | :----------- | :----- | :--------------------- |
+| **`prompt`**        | **Required** | String | The prompt text or     |
+:                     :              :        : instruction.           :
+| **`connection_id`** | Optional     | String | The connection ID to   |
+:                     :              :        : use for the LLM.       :
+| **`endpoint`**      | Optional     | String | The model endpoint     |
+:                     :              :        : (e.g.                  :
+:                     :              :        : `'gemini-2.5-flash'`). :
+| **`model_params`**  | Optional     | JSON   | JSON object for model  |
+:                     :              :        : parameters (e.g.,      :
+:                     :              :        : `temperature`,         :
+:                     :              :        : `max_output_tokens`).  :
+| **`request_type`**  | Optional     | String | `'DEDICATED'` or       |
+:                     :              :        : `'SHARED'`.            :
 
 ### Output Schema
 
-| Column Name         | Type     | Description                             |
-| :------------------ | :------- | :-------------------------------------- |
-| **`result`**        | `BOOL`   | The generated boolean value.            |
-| **`status`**        | `STRING` | API response status (empty on success). |
-| **`full_response`** | `JSON`   | The complete raw JSON response.         |
+Column Name         | Type     | Description
+:------------------ | :------- | :--------------------------------------
+**`result`**        | `BOOL`   | The generated boolean value.
+**`status`**        | `STRING` | API response status (empty on success).
+**`full_response`** | `JSON`   | The complete raw JSON response.
 
 ## Examples
 

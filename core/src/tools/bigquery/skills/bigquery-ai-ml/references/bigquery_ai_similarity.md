@@ -16,28 +16,26 @@ AI.SIMILARITY(
 
 ### Input Arguments
 
-| Argument       | Requirement  | Type   | Description                |
-| :------------- | :----------- | :----- | :------------------------- |
-| **`content1`** | **Required** | String | The first text content.    |
-| **`content2`** | **Required** | String | The second text content to |
-
-: : : : compare against. :
-| **`connection_id`** | Optional | String | The connection ID to use for |
-: : : : the LLM. :
-| **`endpoint`** | Optional | String | The model endpoint (e.g. |
-: : : : `'multimodalembedding@001'`). :
-| **`model_params`** | Optional | JSON | JSON object for model |
-: : : : parameters (e.g., :
-: : : : `temperature`, :
-: : : : `max_output_tokens`). :
+| Argument            | Requirement  | Type   | Description                   |
+| :------------------ | :----------- | :----- | :---------------------------- |
+| **`content1`**      | **Required** | String | The first text content.       |
+| **`content2`**      | **Required** | String | The second text content to    |
+:                     :              :        : compare against.              :
+| **`connection_id`** | Optional     | String | The connection ID to use for  |
+:                     :              :        : the LLM.                      :
+| **`endpoint`**      | Optional     | String | The model endpoint (e.g.      |
+:                     :              :        : `'multimodalembedding@001'`). :
+| **`model_params`**  | Optional     | JSON   | JSON object for model         |
+:                     :              :        : parameters (e.g.,             :
+:                     :              :        : `temperature`,                :
+:                     :              :        : `max_output_tokens`).         :
 
 ### Output Schema
 
-| Column Name         | Type      | Description                      |
-| :------------------ | :-------- | :------------------------------- |
-| **(Scalar Result)** | `FLOAT64` | A similarity score (e.g., cosine |
-
-: : : similarity). Returns null if error. :
+| Column Name         | Type      | Description                         |
+| :------------------ | :-------- | :---------------------------------- |
+| **(Scalar Result)** | `FLOAT64` | A similarity score (e.g., cosine    |
+:                     :           : similarity). Returns null if error. :
 
 ## Examples
 
