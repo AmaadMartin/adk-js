@@ -13,3 +13,8 @@ TypeScript implementation. For the official ADK documentation, visit
   app without running it.
 - [BasePlanner](agents/planner/index.md) - Making an agent plan before it
   answers, and marking its reasoning as thought parts.
+
+### Evaluation
+
+- [BaseEvalService](evaluation/eval_service/index.md) - The two-phase eval
+  contract: run the agent over an eval set, then score the results.
