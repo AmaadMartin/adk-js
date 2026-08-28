@@ -12,7 +12,9 @@ import {
   SchemaUnion,
 } from '@google/genai';
 
+import {ContextCacheConfig} from '../apps/context_cache_config.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {CacheMetadata} from './cache_metadata.js';
 
 /**
  * LLM request class that allows passing in tools, output schema and system
@@ -51,6 +53,23 @@ export interface LlmRequest {
    * The interaction ID from the previous turn, if any.
    */
   previousInteractionId?: string;
+
+  /**
+   * The context caching policy for this request. Absent when the invocation
+   * does not enable context caching.
+   */
+  cacheConfig?: ContextCacheConfig;
+
+  /**
+   * The cache state carried over from an earlier turn of this session.
+   */
+  cacheMetadata?: CacheMetadata;
+
+  /**
+   * The prompt token count measured on the previous request of this session.
+   * A caching layer compares it against `cacheConfig.minTokens`.
+   */
+  cacheableContentsTokenCount?: number;
 }
 
 /**
