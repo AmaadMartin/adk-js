@@ -12,7 +12,7 @@
  * adk-python.
  */
 
-import {Context} from '@google/adk';
+import {ReadonlyContext} from '@google/adk';
 import * as path from 'node:path';
 
 import {sanitizeGeneratedFilePath} from './path_normalizer.js';
@@ -30,10 +30,12 @@ const DEFAULT_ROOT_DIRECTORY = './';
  * missing or non-string value. Falling back to the default is the defensive
  * equivalent: the value reaches us from a session an untrusted turn can write.
  *
- * @param context The tool context, absent when a tool is called directly.
+ * @param context The invocation context, absent when a tool is called
+ *     directly. A tool context and an instruction provider's readonly context
+ *     both satisfy it.
  * @return The configured root, or `./` when none is usable.
  */
-export function rootDirectoryFromContext(context?: Context): string {
+export function rootDirectoryFromContext(context?: ReadonlyContext): string {
   const rootDirectory = context?.state.get<unknown>(ROOT_DIRECTORY_STATE_KEY);
   return typeof rootDirectory === 'string' && rootDirectory.length > 0
     ? rootDirectory
