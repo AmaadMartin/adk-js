@@ -98,6 +98,13 @@ describe('LLMRegistry', () => {
     },
   );
 
+  it.each(['claude-2.1', 'claude-opus-5-20261101'])(
+    'resolves %s to Claude, matching the adk-python claude-.* pattern',
+    (model) => {
+      expect(LLMRegistry.resolve(model)).toBe(Claude);
+    },
+  );
+
   it('constructs a Claude model without any Vertex configuration', () => {
     const llm = LLMRegistry.newLlm('claude-3-5-sonnet-v2@20241022');
 

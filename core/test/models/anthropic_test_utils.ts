@@ -7,16 +7,23 @@
 import type {
   ContentBlock,
   Message,
+  MessageDeltaUsage,
   RawContentBlockDelta,
   RawContentBlockStartEvent,
   RawMessageStreamEvent,
+  StopReason,
   Usage,
 } from '@anthropic-ai/sdk/resources/messages';
 
-/** Builds an Anthropic `Usage` with the two counts ADK reads. */
+/**
+ * Builds an Anthropic `Usage`.
+ *
+ * @param extra The cache and thinking counters, which default to unreported.
+ */
 export function anthropicUsage(
   inputTokens: number,
   outputTokens: number,
+  extra: Partial<Usage> = {},
 ): Usage {
   return {
     input_tokens: inputTokens,
@@ -28,6 +35,7 @@ export function anthropicUsage(
     output_tokens_details: null,
     server_tool_use: null,
     service_tier: null,
+    ...extra,
   };
 }
 
@@ -35,6 +43,7 @@ export function anthropicUsage(
 export function anthropicMessage(
   content: ContentBlock[],
   usage: Usage = anthropicUsage(0, 0),
+  stopReason: StopReason | null = 'end_turn',
 ): Message {
   return {
     id: 'msg_test',
@@ -43,7 +52,7 @@ export function anthropicMessage(
     model: 'claude-sonnet-4-20250514',
     role: 'assistant',
     stop_details: null,
-    stop_reason: 'end_turn',
+    stop_reason: stopReason,
     stop_sequence: null,
     type: 'message',
     usage,
@@ -82,14 +91,22 @@ export function blockStopEvent(index: number): RawMessageStreamEvent {
   return {type: 'content_block_stop', index};
 }
 
-/** Builds the `message_delta` event carrying the final output token count. */
-export function messageDeltaEvent(outputTokens: number): RawMessageStreamEvent {
+/**
+ * Builds the `message_delta` event carrying the final counts.
+ *
+ * @param extra The cumulative counters the delta refreshes, if any.
+ */
+export function messageDeltaEvent(
+  outputTokens: number,
+  stopReason: StopReason | null = 'end_turn',
+  extra: Partial<MessageDeltaUsage> = {},
+): RawMessageStreamEvent {
   return {
     type: 'message_delta',
     delta: {
       container: null,
       stop_details: null,
-      stop_reason: 'end_turn',
+      stop_reason: stopReason,
       stop_sequence: null,
     },
     usage: {
@@ -99,6 +116,7 @@ export function messageDeltaEvent(outputTokens: number): RawMessageStreamEvent {
       output_tokens: outputTokens,
       output_tokens_details: null,
       server_tool_use: null,
+      ...extra,
     },
   };
 }

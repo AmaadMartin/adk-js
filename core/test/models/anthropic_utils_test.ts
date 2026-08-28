@@ -4,12 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Tool} from '@anthropic-ai/sdk/resources/messages';
+import type {StopReason, Tool} from '@anthropic-ai/sdk/resources/messages';
 import type {Content, FunctionDeclaration, Part} from '@google/genai';
-import {Type} from '@google/genai';
+import {FinishReason, ThinkingLevel, Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
+import type {
+  AnthropicEffort,
+  AnthropicGenerateContentConfig,
+} from '../../src/models/anthropic_utils.js';
 import {
+  buildEffortParam,
   buildThinkingParam,
   contentBlockToPart,
   contentToMessageParam,
@@ -20,7 +25,9 @@ import {
   partToMessageBlock,
   systemInstructionToText,
   toClaudeRole,
+  toGenaiFinishReason,
   ToolUseIdSanitizer,
+  toUsageMetadata,
 } from '../../src/models/anthropic_utils.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -1024,5 +1031,167 @@ describe('systemInstructionToText', () => {
     expect(
       systemInstructionToText({inlineData: {mimeType: 'image/png', data: 'x'}}),
     ).toBe('');
+  });
+});
+
+describe('toGenaiFinishReason', () => {
+  it.each([
+    ['end_turn', FinishReason.STOP],
+    ['stop_sequence', FinishReason.STOP],
+    ['tool_use', FinishReason.STOP],
+    ['pause_turn', FinishReason.STOP],
+    ['max_tokens', FinishReason.MAX_TOKENS],
+    ['refusal', FinishReason.SAFETY],
+    ['model_context_window_exceeded', FinishReason.FINISH_REASON_UNSPECIFIED],
+  ] as Array<[StopReason, FinishReason]>)(
+    'maps %s to %s',
+    (stopReason, expected) => {
+      expect(toGenaiFinishReason(stopReason)).toBe(expected);
+    },
+  );
+
+  it.each([undefined, null])('maps %s to undefined', (stopReason) => {
+    expect(toGenaiFinishReason(stopReason)).toBeUndefined();
+  });
+});
+
+describe('toUsageMetadata', () => {
+  it('folds the cache read tokens into the prompt count', () => {
+    expect(
+      toUsageMetadata(anthropicUsage(10, 20, {cache_read_input_tokens: 7})),
+    ).toEqual({
+      promptTokenCount: 17,
+      candidatesTokenCount: 20,
+      totalTokenCount: 37,
+      cachedContentTokenCount: 7,
+    });
+  });
+
+  it('folds the cache creation tokens into the prompt count', () => {
+    expect(
+      toUsageMetadata(anthropicUsage(10, 20, {cache_creation_input_tokens: 5})),
+    ).toEqual({
+      promptTokenCount: 15,
+      candidatesTokenCount: 20,
+      totalTokenCount: 35,
+    });
+  });
+
+  it('omits the cached count when Claude reports no cache read', () => {
+    expect(toUsageMetadata(anthropicUsage(10, 20))).toEqual({
+      promptTokenCount: 10,
+      candidatesTokenCount: 20,
+      totalTokenCount: 30,
+    });
+  });
+
+  it('splits the thinking tokens out of the candidate count', () => {
+    expect(
+      toUsageMetadata(
+        anthropicUsage(10, 20, {output_tokens_details: {thinking_tokens: 8}}),
+      ),
+    ).toEqual({
+      promptTokenCount: 10,
+      candidatesTokenCount: 12,
+      totalTokenCount: 30,
+      thoughtsTokenCount: 8,
+    });
+  });
+
+  it('clamps a thinking count above the output count', () => {
+    const metadata = toUsageMetadata(
+      anthropicUsage(10, 20, {output_tokens_details: {thinking_tokens: 25}}),
+    );
+
+    expect(metadata.candidatesTokenCount).toBe(0);
+    expect(metadata.thoughtsTokenCount).toBe(20);
+  });
+
+  it('treats an unreported input count as zero', () => {
+    expect(
+      toUsageMetadata({
+        input_tokens: null,
+        cache_creation_input_tokens: null,
+        cache_read_input_tokens: null,
+        output_tokens: 4,
+        output_tokens_details: null,
+      }),
+    ).toEqual({
+      promptTokenCount: 0,
+      candidatesTokenCount: 4,
+      totalTokenCount: 4,
+    });
+  });
+});
+
+describe('messageToLlmResponse finish reason', () => {
+  it('maps the stop reason onto the finish reason', () => {
+    const response = messageToLlmResponse(
+      anthropicMessage([], anthropicUsage(1, 1), 'max_tokens'),
+    );
+
+    expect(response.finishReason).toBe(FinishReason.MAX_TOKENS);
+  });
+
+  it('omits the finish reason when Claude reports no stop reason', () => {
+    const response = messageToLlmResponse(
+      anthropicMessage([], anthropicUsage(1, 1), null),
+    );
+
+    expect(response.finishReason).toBeUndefined();
+  });
+});
+
+describe('buildEffortParam', () => {
+  it('returns undefined without a config', () => {
+    expect(buildEffortParam()).toBeUndefined();
+  });
+
+  it('returns undefined for a config that states no effort', () => {
+    expect(buildEffortParam({systemInstruction: 'test'})).toBeUndefined();
+  });
+
+  it.each(['low', 'medium', 'high', 'xhigh', 'max'] as AnthropicEffort[])(
+    'returns the effort %s',
+    (effort) => {
+      const config: AnthropicGenerateContentConfig = {effort};
+      expect(buildEffortParam(config)).toBe(effort);
+    },
+  );
+
+  it.each([undefined, null])('treats an effort of %s as unset', (effort) => {
+    const config: AnthropicGenerateContentConfig = {effort};
+    expect(buildEffortParam(config)).toBeUndefined();
+  });
+
+  it('rejects an effort combined with a thinking level', () => {
+    const config: AnthropicGenerateContentConfig = {
+      effort: 'high',
+      thinkingConfig: {thinkingLevel: ThinkingLevel.HIGH},
+    };
+
+    expect(() => buildEffortParam(config)).toThrow(
+      /thinking_level is not supported/,
+    );
+  });
+
+  it('warns and ignores a thinking level set on its own', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    expect(
+      buildEffortParam({thinkingConfig: {thinkingLevel: ThinkingLevel.HIGH}}),
+    ).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('thinking_level is not supported'),
+    );
+  });
+
+  it('does not warn for a thinking budget without a thinking level', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    expect(buildEffortParam({thinkingConfig: {thinkingBudget: 1024}})).toBe(
+      undefined,
+    );
+    expect(warn).not.toHaveBeenCalled();
   });
 });
