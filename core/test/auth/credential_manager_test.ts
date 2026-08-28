@@ -9,21 +9,19 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   AuthScheme,
-  BaseCredentialExchanger,
-  BaseCredentialRefresher,
   BaseCredentialService,
   Context,
+  createSession,
   CredentialExchangeError,
   CredentialManager,
-  ExchangeResult,
   InvocationContext,
   PluginManager,
-  createSession,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, Mock, vi} from 'vitest';
 
 const CREDENTIAL_KEY = 'documents_api';
+const TOKEN_URL = 'https://provider.example.com/token';
 
 /** `OAuth2Auth.expiresAt` is a millisecond timestamp in adk-js. */
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -50,7 +48,7 @@ function authorizationCodeScheme(): AuthScheme {
     flows: {
       authorizationCode: {
         authorizationUrl: 'https://provider.example.com/authorize',
-        tokenUrl: 'https://provider.example.com/token',
+        tokenUrl: TOKEN_URL,
         scopes: {'documents.read': 'Read your documents'},
       },
     },
@@ -62,11 +60,23 @@ function clientCredentialsScheme(): AuthScheme {
     type: 'oauth2',
     flows: {
       clientCredentials: {
-        tokenUrl: 'https://provider.example.com/token',
+        tokenUrl: TOKEN_URL,
         scopes: {'documents.read': 'Read your documents'},
       },
     },
   };
+}
+
+/**
+ * Answers the OAuth2 token endpoint with `accessToken`, so the real exchanger
+ * and refresher run without a provider.
+ */
+function stubTokenEndpoint(accessToken: string): Mock {
+  const fetchStub = vi.fn(async () =>
+    Response.json({access_token: accessToken, expires_in: 3600}),
+  );
+  vi.stubGlobal('fetch', fetchStub);
+  return fetchStub;
 }
 
 /** Records what the manager loads and saves, without a real backend. */
@@ -83,39 +93,6 @@ class RecordingCredentialService implements BaseCredentialService {
 
   async saveCredential(authConfig: AuthConfig): Promise<void> {
     this.saved.push(authConfig);
-  }
-}
-
-/** Returns a fixed exchange result and counts the calls. */
-class StubExchanger implements BaseCredentialExchanger {
-  calls = 0;
-
-  constructor(private readonly result: ExchangeResult) {}
-
-  async exchange(): Promise<ExchangeResult> {
-    this.calls++;
-    return this.result;
-  }
-}
-
-/** Reports a fixed refresh decision and counts the calls. */
-class StubRefresher implements BaseCredentialRefresher {
-  isRefreshNeededCalls = 0;
-  refreshCalls = 0;
-
-  constructor(
-    private readonly needed: boolean,
-    private readonly refreshed: AuthCredential,
-  ) {}
-
-  async isRefreshNeeded(): Promise<boolean> {
-    this.isRefreshNeededCalls++;
-    return this.needed;
-  }
-
-  async refresh(): Promise<AuthCredential> {
-    this.refreshCalls++;
-    return this.refreshed;
   }
 }
 
@@ -142,6 +119,10 @@ function createContext(options?: {
 }
 
 describe('CredentialManager', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   describe('credentials that are ready to use', () => {
     it('returns a raw API key credential without consulting the service', async () => {
       const credentialService = new RecordingCredentialService();
@@ -171,8 +152,11 @@ describe('CredentialManager', () => {
         authConfig,
       ).getAuthCredential(createContext());
 
+      if (!credential) {
+        expect.fail('no credential was resolved');
+      }
       expect(credential).not.toBe(authConfig.rawAuthCredential);
-      credential!.apiKey = 'tampered';
+      credential.apiKey = 'tampered';
       expect(authConfig.rawAuthCredential?.apiKey).toBe('raw-api-key');
     });
 
@@ -357,15 +341,7 @@ describe('CredentialManager', () => {
 
   describe('exchange and refresh', () => {
     it('exchanges a client credentials flow without mutating the raw credential', async () => {
-      const exchanged: AuthCredential = {
-        authType: AuthCredentialTypes.OAUTH2,
-        oauth2: {accessToken: 'exchanged-access-token'},
-      };
-      const exchanger = new StubExchanger({
-        credential: exchanged,
-        wasExchanged: true,
-      });
-      const refresher = new StubRefresher(true, exchanged);
+      const fetchStub = stubTokenEndpoint('exchanged-access-token');
       const credentialService = new RecordingCredentialService();
       const authConfig: AuthConfig = {
         authScheme: clientCredentialsScheme(),
@@ -375,35 +351,30 @@ describe('CredentialManager', () => {
         },
         credentialKey: CREDENTIAL_KEY,
       };
-      const manager = new CredentialManager(authConfig);
-      manager.registerCredentialExchanger(
-        AuthCredentialTypes.OAUTH2,
-        exchanger,
-      );
-      manager.registerCredentialRefresher(
-        AuthCredentialTypes.OAUTH2,
-        refresher,
-      );
 
-      const credential = await manager.getAuthCredential(
-        createContext({credentialService}),
-      );
+      const credential = await new CredentialManager(
+        authConfig,
+      ).getAuthCredential(createContext({credentialService}));
 
-      expect(credential).toEqual(exchanged);
-      expect(exchanger.calls).toBe(1);
-      expect(refresher.isRefreshNeededCalls).toBe(0);
+      expect(credential?.oauth2?.accessToken).toBe('exchanged-access-token');
+      // One call: the exchange. A refresh would be a second one.
+      expect(fetchStub).toHaveBeenCalledOnce();
+      expect(fetchStub.mock.calls[0][0]).toBe(TOKEN_URL);
       expect(credentialService.saved).toHaveLength(1);
       expect(authConfig.rawAuthCredential?.oauth2?.accessToken).toBeUndefined();
     });
 
-    it('refreshes when the exchanger reports no exchange', async () => {
+    it('refreshes a stored credential that has expired', async () => {
+      const fetchStub = stubTokenEndpoint('refreshed-access-token');
       const stored: AuthCredential = {
         authType: AuthCredentialTypes.OAUTH2,
-        oauth2: {accessToken: 'expired-access-token'},
-      };
-      const refreshed: AuthCredential = {
-        authType: AuthCredentialTypes.OAUTH2,
-        oauth2: {accessToken: 'refreshed-access-token'},
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          accessToken: 'expired-access-token',
+          refreshToken: 'refresh-token',
+          expiresAt: Date.now() - ONE_HOUR_MS,
+        },
       };
       const credentialService = new RecordingCredentialService(stored);
       const manager = new CredentialManager({
@@ -411,32 +382,55 @@ describe('CredentialManager', () => {
         rawAuthCredential: OAUTH2_CREDENTIAL,
         credentialKey: CREDENTIAL_KEY,
       });
-      const refresher = new StubRefresher(true, refreshed);
-      manager.registerCredentialExchanger(
-        AuthCredentialTypes.OAUTH2,
-        new StubExchanger({credential: stored, wasExchanged: false}),
-      );
-      manager.registerCredentialRefresher(
-        AuthCredentialTypes.OAUTH2,
-        refresher,
-      );
 
       const credential = await manager.getAuthCredential(
         createContext({credentialService}),
       );
 
-      expect(credential).toEqual(refreshed);
-      expect(refresher.refreshCalls).toBe(1);
+      expect(credential?.oauth2?.accessToken).toBe('refreshed-access-token');
+      expect(fetchStub).toHaveBeenCalledOnce();
       expect(credentialService.saved).toHaveLength(1);
-      expect(credentialService.saved[0].exchangedAuthCredential).toEqual(
-        refreshed,
+      expect(
+        credentialService.saved[0].exchangedAuthCredential?.oauth2?.accessToken,
+      ).toBe('refreshed-access-token');
+    });
+
+    it('does not save a client credential the exchanger left alone', async () => {
+      const fetchStub = stubTokenEndpoint('unexpected-access-token');
+      const credentialService = new RecordingCredentialService();
+      // The exchanger returns early on a credential that already has a token,
+      // so nothing here was obtained on the user's behalf. Saving would put the
+      // configured client id and secret into the credential store.
+      const manager = new CredentialManager({
+        authScheme: clientCredentialsScheme(),
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {
+            clientId: 'client-id',
+            clientSecret: 'client-secret',
+            accessToken: 'configured-access-token',
+          },
+        },
+        credentialKey: CREDENTIAL_KEY,
+      });
+
+      const credential = await manager.getAuthCredential(
+        createContext({credentialService}),
       );
+
+      expect(credential?.oauth2?.accessToken).toBe('configured-access-token');
+      expect(fetchStub).not.toHaveBeenCalled();
+      expect(credentialService.saved).toHaveLength(0);
     });
 
     it('saves nothing when the credential needs no refresh', async () => {
+      const fetchStub = stubTokenEndpoint('unexpected-access-token');
       const stored: AuthCredential = {
         authType: AuthCredentialTypes.OAUTH2,
-        oauth2: {accessToken: 'stored-access-token'},
+        oauth2: {
+          accessToken: 'stored-access-token',
+          expiresAt: Date.now() + ONE_HOUR_MS,
+        },
       };
       const credentialService = new RecordingCredentialService(stored);
       const manager = new CredentialManager({
@@ -444,22 +438,13 @@ describe('CredentialManager', () => {
         rawAuthCredential: OAUTH2_CREDENTIAL,
         credentialKey: CREDENTIAL_KEY,
       });
-      const refresher = new StubRefresher(false, stored);
-      manager.registerCredentialExchanger(
-        AuthCredentialTypes.OAUTH2,
-        new StubExchanger({credential: stored, wasExchanged: false}),
-      );
-      manager.registerCredentialRefresher(
-        AuthCredentialTypes.OAUTH2,
-        refresher,
-      );
 
       const credential = await manager.getAuthCredential(
         createContext({credentialService}),
       );
 
       expect(credential).toEqual(stored);
-      expect(refresher.refreshCalls).toBe(0);
+      expect(fetchStub).not.toHaveBeenCalled();
       expect(credentialService.saved).toHaveLength(0);
     });
 
@@ -556,29 +541,23 @@ describe('CredentialManager', () => {
         openIdConnectUrl:
           'https://provider.example.com/.well-known/openid-configuration',
         authorizationEndpoint: 'https://provider.example.com/authorize',
-        tokenEndpoint: 'https://provider.example.com/token',
+        tokenEndpoint: TOKEN_URL,
         grantTypesSupported,
       };
     }
 
     it('exchanges the raw credential when client_credentials is supported', async () => {
-      const exchanged: AuthCredential = {
-        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
-        oauth2: {accessToken: 'exchanged-access-token'},
-      };
+      const fetchStub = stubTokenEndpoint('exchanged-access-token');
       const manager = new CredentialManager({
         authScheme: oidcScheme(['authorization_code', 'client_credentials']),
         rawAuthCredential: OIDC_CREDENTIAL,
         credentialKey: CREDENTIAL_KEY,
       });
-      manager.registerCredentialExchanger(
-        AuthCredentialTypes.OPEN_ID_CONNECT,
-        new StubExchanger({credential: exchanged, wasExchanged: true}),
-      );
 
       const credential = await manager.getAuthCredential(createContext());
 
-      expect(credential).toEqual(exchanged);
+      expect(credential?.oauth2?.accessToken).toBe('exchanged-access-token');
+      expect(fetchStub.mock.calls[0][0]).toBe(TOKEN_URL);
     });
 
     it('waits for consent when client_credentials is not supported', async () => {

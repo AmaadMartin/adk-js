@@ -11,13 +11,14 @@ import {ServiceAccountCredentialExchanger} from '../tools/openapi_tool/auth/cred
 import {experimental} from '../utils/experimental.js';
 
 import {AuthCredential, AuthCredentialTypes} from './auth_credential.js';
-import {AuthScheme} from './auth_schemes.js';
+import {AuthScheme, OAuthGrantType} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
-import {BaseCredentialExchanger} from './exchanger/base_credential_exchanger.js';
 import {CredentialExchangerRegistry} from './exchanger/credential_exchanger_registry.js';
-import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js';
+import {
+  determineGrantType,
+  OAuth2CredentialExchanger,
+} from './oauth2/oauth2_credential_exchanger.js';
 import {OAuth2CredentialRefresher} from './oauth2/oauth2_credential_refresher.js';
-import {BaseCredentialRefresher} from './refresher/base_credential_refresher.js';
 import {CredentialRefresherRegistry} from './refresher/credential_refresher_registry.js';
 
 /** Scheme types that cannot authenticate without a configured credential. */
@@ -66,25 +67,6 @@ function missingOAuthUrl(authScheme: AuthScheme): string | undefined {
     return 'authorizationCode.tokenUrl';
   }
   return undefined;
-}
-
-/**
- * Whether the scheme authenticates the client itself, so no end user has to
- * grant consent. Covers both OAuth2 and OpenID Connect schemes.
- */
-function isClientCredentialsFlow(authScheme: AuthScheme): boolean {
-  if (authScheme.type === 'oauth2') {
-    return authScheme.flows.clientCredentials !== undefined;
-  }
-  if (
-    authScheme.type === 'openIdConnect' &&
-    'grantTypesSupported' in authScheme
-  ) {
-    return (
-      authScheme.grantTypesSupported?.includes('client_credentials') ?? false
-    );
-  }
-  return false;
 }
 
 /**
@@ -140,34 +122,6 @@ export class CredentialManager {
   }
 
   /**
-   * Registers an exchanger for a credential type on this manager, replacing
-   * the default for that type.
-   *
-   * @param credentialType The credential type the exchanger handles.
-   * @param exchanger The exchanger to use for that type.
-   */
-  registerCredentialExchanger(
-    credentialType: AuthCredentialTypes,
-    exchanger: BaseCredentialExchanger,
-  ): void {
-    this.exchangerRegistry.register(credentialType, exchanger);
-  }
-
-  /**
-   * Registers a refresher for a credential type on this manager, replacing the
-   * default for that type.
-   *
-   * @param credentialType The credential type the refresher handles.
-   * @param refresher The refresher to use for that type.
-   */
-  registerCredentialRefresher(
-    credentialType: AuthCredentialTypes,
-    refresher: BaseCredentialRefresher,
-  ): void {
-    this.refresherRegistry.register(credentialType, refresher);
-  }
-
-  /**
    * Asks the client for a credential. The invocation pauses as a result: the
    * flow emits an `adk_request_credential` call and ends the turn.
    *
@@ -200,17 +154,17 @@ export class CredentialManager {
     let wasFromAuthResponse = false;
     if (!credential) {
       credential = context.getAuthResponse(this.authConfig);
-      wasFromAuthResponse = true;
+      wasFromAuthResponse = credential !== undefined;
     }
 
     if (!credential) {
       // Validation guarantees a raw credential for the OAuth2 and OIDC schemes
       // a client-credentials flow can be declared on.
-      const clientCredential = isClientCredentialsFlow(
-        this.authConfig.authScheme,
-      )
-        ? this.authConfig.rawAuthCredential
-        : undefined;
+      const clientCredential =
+        determineGrantType(this.authConfig.authScheme) ===
+        OAuthGrantType.CLIENT_CREDENTIALS
+          ? this.authConfig.rawAuthCredential
+          : undefined;
       if (!clientCredential) {
         return undefined;
       }

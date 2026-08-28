@@ -15,25 +15,16 @@ invocation ends carrying a request for credentials. The application runs the
 consent flow and starts a new run with the answer, and ADK re-executes the tool
 call that was waiting.
 
-Two types describe what is needed, and `AuthConfig` pairs them:
-
-- `AuthScheme` says how the API expects to be authenticated. It is a union of
-  `SecuritySchemeObject` from `openapi-types` (`apiKey`, `http`, `oauth2`,
-  `openIdConnect`) and `OpenIdConnectWithConfig`.
-- `AuthCredential` is the secret. `authType` picks the shape (`API_KEY`,
-  `HTTP`, `OAUTH2`, `OPEN_ID_CONNECT`, `SERVICE_ACCOUNT`) and the matching
-  field (`apiKey`, `http`, `oauth2`, `serviceAccount`) holds it.
-
-`AuthenticatedFunctionTool` takes an `AuthConfig` and delegates to
-`CredentialManager`. The `AuthPreprocessor` in the LLM flow pauses the
+`AuthConfig` pairs an `AuthScheme`, which says how the API authenticates, with
+an `AuthCredential`, which holds the secret. `AuthenticatedFunctionTool` takes
+one and delegates to `CredentialManager`. `AuthPreprocessor` pauses the
 invocation and later resumes the waiting call, and a `BaseCredentialService`
 remembers the credential between turns.
 
 ## Get started
 
-This agent has one tool that needs an OAuth2 access token. The model only ever
-sees `folder`: the framework supplies `credential` as a third argument, and the
-declaration it builds comes from the `parameters` schema.
+The model only ever sees `folder`. The framework supplies `credential` as a
+third argument, and the declaration the model reads comes from `parameters`.
 
 ```ts
 import {
@@ -81,98 +72,67 @@ const listDocuments = new AuthenticatedFunctionTool({
   },
 });
 
-const agent = new LlmAgent({
-  name: 'documents_agent',
-  model: 'gemini-2.0-flash',
-  instruction: 'Use list_documents to answer questions about the user files.',
-  tools: [listDocuments],
-});
-
 const runner = new Runner({
   appName: 'documents_app',
-  agent,
+  agent: new LlmAgent({
+    name: 'documents_agent',
+    model: 'gemini-2.0-flash',
+    instruction: 'Use list_documents to answer questions about the user files.',
+    tools: [listDocuments],
+  }),
   sessionService: new InMemorySessionService(),
   credentialService: new InMemoryCredentialService(),
 });
 ```
 
 Pass a `credentialService` to the `Runner`, as above. Without one the credential
-lives only for the current invocation and the next turn asks for consent again.
+lives only for the current invocation, and the next turn asks for consent again.
 
-## How it works
+## The pause and resume
 
-1.  The tool asks `CredentialManager.getAuthCredential`. A raw credential that
-    is already usable, an API key or an HTTP credential, comes back as a copy
-    and nothing pauses. Otherwise the manager reads the credential service, then
-    the auth response in session state, then checks whether the scheme is a
-    client-credentials flow that needs no user. An authorization-code flow with
-    nothing stored yields nothing.
-2.  With no credential the tool calls `requestCredential` and returns
-    `responseForAuthRequired`, by default the string
-    `"Pending User Authorization."`, instead of running your function.
-    `AuthHandler` builds the authorization URL for OAuth2 and OpenID Connect
-    schemes and writes it to `exchangedAuthCredential.oauth2.authUri`, with a
-    `state`.
-3.  The flow emits one long-running function call named
-    `adk_request_credential` per request. Its arguments are `function_call_id`,
-    the waiting tool call, and `auth_config`, the config from step 2. The flow
-    then ends the invocation, which is what pauses the run.
-4.  Your application reads `authConfig.exchangedAuthCredential.oauth2.authUri`,
-    sends the user there, and collects the redirect.
-5.  You resume with a new run whose message is a user `Content` holding a
+`CredentialManager` returns a usable raw credential, an API key or an HTTP
+credential, straight away and nothing pauses. Otherwise it reads the credential
+service, then the auth response in session state, then checks for a
+client-credentials flow that needs no user. An authorization-code flow with
+nothing stored yields nothing, and the tool pauses:
+
+1.  The tool returns `responseForAuthRequired`, by default
+    `"Pending User Authorization."`, instead of running your function. The flow
+    emits one long-running function call named `adk_request_credential` and ends
+    the invocation.
+2.  Read `auth_config.exchangedAuthCredential.oauth2.authUri` from that call's
+    arguments, send the user there, and collect the redirect.
+3.  Resume with a new run whose message is a user `Content` holding a
     `FunctionResponse` named `adk_request_credential`. Its id must be the id of
-    that call, not of the tool call waiting on it. Its response is the config
-    with the answer filled into `exchangedAuthCredential`: either
-    `authResponseUri`, the full redirect URL including the code, or `authCode`.
-6.  `AuthPreprocessor` matches the response to its request, exchanges the
-    authorization code for a token, stores the credential under
-    `temp:<credentialKey>` in session state, and re-executes the waiting tool
-    call.
-7.  On that re-execution `CredentialManager` finds the credential in state and
-    saves it to the credential service under `credentialKey`. Later calls load
-    it from there, and refresh an expired OAuth2 token rather than prompting
-    again.
+    that call, not of the tool call waiting on it. Fill the answer into
+    `exchangedAuthCredential.oauth2`: either `authResponseUri`, the full
+    redirect URL, or `authCode`.
+4.  `AuthPreprocessor` exchanges the code for a token, stores the credential
+    under `temp:<credentialKey>`, and re-executes the waiting tool call.
+    `CredentialManager` then saves the credential to the credential service, so
+    later calls load it from there and refresh an expired token rather than
+    prompting again.
 
-The resume only works when the `FunctionResponse` is the most recent event with
+The resume only works when that `FunctionResponse` is the most recent event with
 content and is authored by `user`. That is the only event `AuthPreprocessor`
 reads.
 
 ## Ordering
 
-`AuthenticatedFunctionTool` resolves the credential after `FunctionTool`
-validates the arguments and after the `requireConfirmation` gate. A call with
-invalid arguments, or one the user rejected, never starts a consent flow. An
-error raised while resolving the credential surfaces as
-`Error in tool '<name>': <message>`, like any other tool failure.
-
-## Configuration options
-
-| Option                                                                      | Type                                | Default                         | Description                                                                                                                                                        |
-| --------------------------------------------------------------------------- | ----------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `execute`                                                                   | `AuthenticatedToolExecuteFunction`  | _required_                      | Runs once a credential is available. The third argument is the credential.                                                                                         |
-| `authConfig`                                                                | `AuthConfig`                        | none                            | What the tool authenticates with. Without it the tool runs the function straight away, the credential argument is `undefined`, and the constructor logs a warning. |
-| `responseForAuthRequired`                                                   | `Record<string, unknown> \| string` | `"Pending User Authorization."` | What the tool returns while it waits for the client.                                                                                                               |
-| `name`, `description`, `parameters`, `isLongRunning`, `requireConfirmation` | see `ToolOptions`                   | as `FunctionTool`               | Unchanged.                                                                                                                                                         |
-
-`AuthConfig` fields:
-
-| Field                     | Type             | Default    | Description                                                                                                                                                                                                |
-| ------------------------- | ---------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `authScheme`              | `AuthScheme`     | _required_ | How the API authenticates. For an authorization-code flow it carries the authorization and token URLs and the scopes.                                                                                      |
-| `rawAuthCredential`       | `AuthCredential` | none       | What you configured, such as an OAuth client id and secret. Required for `oauth2` and `openIdConnect` schemes. For an API key or an HTTP credential it is the credential itself, and no consent is needed. |
-| `exchangedAuthCredential` | `AuthCredential` | none       | The working copy ADK and the client fill in. Leave it unset when you build the config.                                                                                                                     |
-| `credentialKey`           | `string`         | _required_ | The key the credential is stored under, scoped to the app and the user.                                                                                                                                    |
+The tool resolves the credential after `FunctionTool` validates the arguments
+and after the `requireConfirmation` gate. A call with invalid arguments, or one
+the user rejected, never starts a consent flow. An error raised while resolving
+surfaces as `Error in tool '<name>': <message>`, like any other tool failure.
 
 ## Limitations
 
 - **Experimental.** `AuthenticatedFunctionTool`, `CredentialManager` and the
-  credential exchangers are experimental. They warn once on first use and
-  their APIs may change.
-- **The OAuth2 token endpoint must be public HTTPS.**
-  `fetchOAuth2Tokens` refuses a plain HTTP endpoint, and refuses any private,
-  loopback or cloud-metadata address. A local provider cannot be used.
+  credential exchangers warn once on first use, and their APIs may change.
+- **The OAuth2 token endpoint must be public HTTPS.** `fetchOAuth2Tokens`
+  refuses plain HTTP, and refuses any private, loopback or cloud-metadata
+  address. A local provider cannot be used.
 - **`CredentialManager` does not discover OAuth server metadata.** Give the
-  scheme its authorization and token URLs; a flow that declares one without
+  scheme its authorization and token URLs. A flow that declares one without
   the URL it needs is rejected.
 - **Session state is not a secret store.** `SessionStateCredentialService`
   puts tokens wherever session state lives.
