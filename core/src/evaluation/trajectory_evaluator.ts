@@ -9,30 +9,15 @@ import {isDeepStrictEqual} from 'node:util';
 
 import {ConversationScenario} from './conversation_scenarios.js';
 import {getAllToolCalls, Invocation} from './eval_case.js';
-import {
-  EvalMetric,
-  MatchType,
-  ToolTrajectoryCriterionSchema,
-} from './eval_metrics.js';
+import {MatchType, ToolTrajectoryCriterionSchema} from './eval_metrics.js';
 import {
   EvalStatus,
   EvaluationResult,
   Evaluator,
+  EvaluatorConstructorOptions,
   PerInvocationResult,
   validateInvocationLengths,
 } from './evaluator.js';
-
-/**
- * Options for constructing a {@link TrajectoryEvaluator}.
- *
- * Either `evalMetric` or a bare `threshold` may be supplied, but not both.
- */
-export interface TrajectoryEvaluatorOptions {
-  /** A bare threshold (implies an EXACT match). */
-  threshold?: number;
-  /** The metric whose criterion/threshold drives the evaluation. */
-  evalMetric?: EvalMetric;
-}
 
 /**
  * Returns whether two tool calls are equal: same name and deeply-equal args.
@@ -135,34 +120,25 @@ export class TrajectoryEvaluator extends Evaluator {
   private readonly threshold?: number;
   private readonly matchType: MatchType;
 
-  constructor({threshold, evalMetric}: TrajectoryEvaluatorOptions = {}) {
+  constructor({evalMetric}: EvaluatorConstructorOptions) {
     super();
-    if (threshold !== undefined && evalMetric !== undefined) {
-      throw new Error(
-        'Either eval_metric should be specified or threshold should be' +
-          ' specified.',
-      );
-    }
-
-    if (evalMetric !== undefined && evalMetric.criterion !== undefined) {
-      const parsed = ToolTrajectoryCriterionSchema.safeParse(
-        evalMetric.criterion,
-      );
-      if (!parsed.success) {
-        throw new Error(
-          `\`${evalMetric.metricName}\` metric expects a criterion of type` +
-            ' `ToolTrajectoryCriterion`.',
-        );
-      }
-      this.threshold = parsed.data.threshold;
-      this.matchType = parsed.data.matchType;
-    } else if (evalMetric !== undefined) {
+    if (evalMetric.criterion === undefined) {
       this.threshold = evalMetric.threshold;
       this.matchType = MatchType.EXACT;
-    } else {
-      this.threshold = threshold;
-      this.matchType = MatchType.EXACT;
+      return;
     }
+
+    const parsed = ToolTrajectoryCriterionSchema.safeParse(
+      evalMetric.criterion,
+    );
+    if (!parsed.success) {
+      throw new Error(
+        `\`${evalMetric.metricName}\` metric expects a criterion of type` +
+          ' `ToolTrajectoryCriterion`.',
+      );
+    }
+    this.threshold = parsed.data.threshold;
+    this.matchType = parsed.data.matchType;
   }
 
   evaluateInvocations(

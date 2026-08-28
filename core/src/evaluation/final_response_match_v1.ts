@@ -72,7 +72,7 @@ export function isWordChar(char: string): boolean {
 }
 
 function isAscii(word: string): boolean {
-  return [...word].every((char) => char.codePointAt(0)! <= 0x7f);
+  return [...word].every((char) => char.charCodeAt(0) <= 0x7f);
 }
 
 /**

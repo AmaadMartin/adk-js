@@ -127,18 +127,6 @@ describe('evaluation/trajectory_evaluator', () => {
       expect(result.overallScore).toBe(1.0);
     });
 
-    it('throws when both threshold and evalMetric are specified', () => {
-      expect(
-        () =>
-          new TrajectoryEvaluator({
-            threshold: 0.5,
-            evalMetric: trajectoryEvalMetric(MatchType.EXACT),
-          }),
-      ).toThrow(
-        'Either eval_metric should be specified or threshold should be specified.',
-      );
-    });
-
     it('throws when the criterion is not a ToolTrajectoryCriterion', () => {
       const evalMetric = EvalMetricSchema.parse({
         metricName: PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
@@ -157,17 +145,6 @@ describe('evaluation/trajectory_evaluator', () => {
         threshold: 0.5,
       };
       const evaluator = new TrajectoryEvaluator({evalMetric});
-      const toolCall: FunctionCall = {name: 'test_func', args: {arg1: 'val1'}};
-      const result = evaluator.evaluateInvocations(
-        [toolUsesInvocation([toolCall])],
-        [toolUsesInvocation([toolCall])],
-      );
-      expect(result.overallScore).toBe(1.0);
-      expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
-    });
-
-    it('supports a bare threshold with EXACT match', () => {
-      const evaluator = new TrajectoryEvaluator({threshold: 1.0});
       const toolCall: FunctionCall = {name: 'test_func', args: {arg1: 'val1'}};
       const result = evaluator.evaluateInvocations(
         [toolUsesInvocation([toolCall])],

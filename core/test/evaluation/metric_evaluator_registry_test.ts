@@ -132,10 +132,14 @@ class SubclassedCustomMetricEvaluator extends CustomMetricEvaluator {}
 function registeredMetricInfo(
   registry: MetricEvaluatorRegistry,
   metricName: string,
-): MetricInfo | undefined {
-  return registry
+): MetricInfo {
+  const info = registry
     .getRegisteredMetrics()
-    .find((info) => info.metricName === metricName);
+    .find((entry) => entry.metricName === metricName);
+  if (!info) {
+    expect.fail(`No metric named ${metricName} is registered.`);
+  }
+  return info;
 }
 
 describe('evaluation/metric_evaluator_registry', () => {
@@ -185,9 +189,9 @@ describe('evaluation/metric_evaluator_registry', () => {
     it('returns deep copies from getRegisteredMetrics', () => {
       const registry = new MetricEvaluatorRegistry();
       registry.registerEvaluator(DUMMY_METRIC_INFO, DummyEvaluator);
-      const first = registeredMetricInfo(registry, DUMMY_METRIC_NAME)!;
+      const first = registeredMetricInfo(registry, DUMMY_METRIC_NAME);
       first.description = 'mutated';
-      const second = registeredMetricInfo(registry, DUMMY_METRIC_NAME)!;
+      const second = registeredMetricInfo(registry, DUMMY_METRIC_NAME);
       expect(second.description).toBe('Dummy metric description');
     });
   });
@@ -214,7 +218,7 @@ describe('evaluation/metric_evaluator_registry', () => {
       const result = registerCustomMetricsFromConfig(evalConfig, registry);
 
       expect(result).toBe(registry);
-      const info = registeredMetricInfo(registry, CUSTOM_METRIC_NAME)!;
+      const info = registeredMetricInfo(registry, CUSTOM_METRIC_NAME);
       expect(info.metricValueInfo.interval?.maxValue).toBe(5.0);
       expect(
         registry
@@ -242,7 +246,7 @@ describe('evaluation/metric_evaluator_registry', () => {
 
       registerCustomMetricsFromConfig(evalConfig, registry);
 
-      const info = registeredMetricInfo(registry, CUSTOM_METRIC_NAME)!;
+      const info = registeredMetricInfo(registry, CUSTOM_METRIC_NAME);
       expect(info.description).toBe('A custom metric');
       expect(info.metricValueInfo.interval?.minValue).toBe(0.0);
       expect(info.metricValueInfo.interval?.maxValue).toBe(1.0);

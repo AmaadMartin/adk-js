@@ -484,7 +484,6 @@ export {
   TrajectoryEvaluatorMetricInfoProvider,
 } from './evaluation/metric_info_providers.js';
 export {ResponseEvaluator} from './evaluation/response_evaluator.js';
-export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
 export {
   DEFAULT_HTTP_RETRY_OPTIONS,
   EnsureRetryOptionsPlugin,
@@ -507,7 +506,6 @@ export type {
 } from './evaluation/simulation/user_simulator_personas.js';
 export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
 export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
-export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {
   PrebuiltMetric,
   SingleTurnVertexAiEvalFacade,
