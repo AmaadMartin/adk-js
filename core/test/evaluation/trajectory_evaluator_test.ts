@@ -6,6 +6,7 @@
 
 import {
   type EvalMetric,
+  EvalMetricSchema,
   EvalStatus,
   type Invocation,
   InvocationSchema,
@@ -111,11 +112,11 @@ describe('evaluation/trajectory_evaluator', () => {
 
   describe('constructor', () => {
     it('accepts a string match type from an eval metric criterion dict', () => {
-      const evalMetric: EvalMetric = {
+      const evalMetric = EvalMetricSchema.parse({
         metricName: PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
         threshold: 0.5,
         criterion: {threshold: 0.5, matchType: 'ANY_ORDER'},
-      };
+      });
       const evaluator = new TrajectoryEvaluator({evalMetric});
       const toolCall1: FunctionCall = {name: 'test_func1', args: {}};
       const toolCall2: FunctionCall = {name: 'test_func2', args: {}};
@@ -139,11 +140,11 @@ describe('evaluation/trajectory_evaluator', () => {
     });
 
     it('throws when the criterion is not a ToolTrajectoryCriterion', () => {
-      const evalMetric: EvalMetric = {
+      const evalMetric = EvalMetricSchema.parse({
         metricName: PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
         threshold: 0.5,
         criterion: {threshold: 0.5, matchType: 'random string'},
-      };
+      });
       expect(() => new TrajectoryEvaluator({evalMetric})).toThrow(
         '`tool_trajectory_avg_score` metric expects a criterion of type' +
           ' `ToolTrajectoryCriterion`.',

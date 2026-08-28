@@ -162,7 +162,7 @@ class SilentAgent extends BaseAgent {
 /** A simulator that always reports it has nothing more to say. */
 class SilentUserSimulator extends UserSimulator {
   async getNextUserMessage(): Promise<NextUserMessage> {
-    return {status: SimulatorStatus.NO_MESSAGE};
+    return {status: SimulatorStatus.NO_MESSAGE_GENERATED};
   }
 }
 

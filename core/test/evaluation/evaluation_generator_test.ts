@@ -309,7 +309,9 @@ describe('EvaluationGenerator.convertEventsToEvalInvocations', () => {
 
 describe('EvaluationGenerator.getAppDetailsByInvocationId', () => {
   function mockIntercepter(): RequestIntercepterPlugin {
-    const intercepter = new RequestIntercepterPlugin();
+    const intercepter = new RequestIntercepterPlugin(
+      'request_intercepter_plugin',
+    );
     vi.spyOn(intercepter, 'getModelRequest');
     return intercepter;
   }
@@ -603,6 +605,36 @@ describe('EvaluationGenerator.generateInferencesFromRootAgent', () => {
     expect(invocations[0].finalResponse?.parts?.[0].text).toBe(
       'agent_response',
     );
+  });
+
+  it('stops on a non-success status even when a message is present', async () => {
+    const rootAgent = new SilentAgent({name: 'mock_agent'});
+    let calls = 0;
+    const userSimulator = new (class extends UserSimulator {
+      async getNextUserMessage(): Promise<NextUserMessage> {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            status: Status.NO_MESSAGE_GENERATED,
+            userMessage: {parts: [{text: 'must not be sent'}]},
+          };
+        }
+        return {status: Status.STOP_SIGNAL_DETECTED};
+      }
+    })();
+    const singleTurnSpy = vi.spyOn(
+      EvaluationGenerator,
+      'generateInferencesForSingleUserInvocation',
+    );
+
+    const invocations =
+      await EvaluationGenerator.generateInferencesFromRootAgent({
+        rootAgent,
+        userSimulator,
+      });
+
+    expect(singleTurnSpy).not.toHaveBeenCalled();
+    expect(invocations).toEqual([]);
   });
 
   it('uses the provided session, ids, and services', async () => {
