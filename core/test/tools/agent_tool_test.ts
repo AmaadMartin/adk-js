@@ -806,6 +806,37 @@ describe('AgentTool parity with adk-python', () => {
     expect(declaration.response).toEqual({type: Type.STRING});
   });
 
+  it("parses the reply against the last sub-agent's output schema", async () => {
+    const sequence = new SequentialAgent({
+      name: 'sequence',
+      description: 'Draft then format',
+      subAgents: [
+        new LlmAgent({name: 'drafter'}),
+        new LlmAgent({
+          name: 'formatter',
+          outputSchema: {
+            type: Type.OBJECT,
+            properties: {summary: {type: Type.STRING}},
+            required: ['summary'],
+          },
+        }),
+      ],
+    });
+    mockSubAgentRun([
+      createEvent({
+        author: 'formatter',
+        content: {role: 'model', parts: [{text: '{"summary":"all done"}'}]},
+      }),
+    ]);
+
+    const result = await new AgentTool({agent: sequence}).runAsync({
+      args: {request: 'go'},
+      toolContext: parentContext(sequence),
+    });
+
+    expect(result).toEqual({summary: 'all done'});
+  });
+
   it('rejects args that violate the input schema before the sub-agent runs', async () => {
     const agent = new LlmAgent({
       name: SUB_AGENT_NAME,
