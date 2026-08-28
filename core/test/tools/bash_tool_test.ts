@@ -30,8 +30,11 @@ const NODE = `"${process.execPath}"`;
 /** Spawning a child process is slow on a loaded CI runner. */
 const SPAWN_TIMEOUT_MS = 30_000;
 
-/** How long the command used by the timeout test would run if left alone. */
-const NEVER_FINISHES_MS = 30_000;
+/** How long the timeout test's command tree runs if nothing kills it. */
+const SURVIVOR_LIFETIME_MS = 10_000;
+
+/** Upper bound on a timed-out call: comfortably short of the command itself. */
+const TIMED_OUT_BY_MS = 5_000;
 
 function makePolicy(
   overrides: Partial<ResolvedBashToolPolicy> = {},
@@ -250,6 +253,13 @@ describe.skipIf(process.platform === 'win32')('ExecuteBashTool', () => {
       '# Reference\n',
     );
     await fs.writeFile(path.join(workspace, 'sample.pdf'), '%PDF-1.4 fake');
+    await fs.writeFile(
+      path.join(workspace, 'spawner.cjs'),
+      "require('node:child_process').spawn(process.execPath, " +
+        `['-e', 'setTimeout(() => {}, ${SURVIVOR_LIFETIME_MS})'], ` +
+        "{stdio: 'inherit'});\n" +
+        `setTimeout(() => {}, ${SURVIVOR_LIFETIME_MS});\n`,
+    );
   });
 
   afterEach(async () => {
@@ -364,7 +374,7 @@ describe.skipIf(process.platform === 'win32')('ExecuteBashTool', () => {
   });
 
   it(
-    'kills the process group when the command runs past the timeout',
+    'kills the whole process group when the command runs past the timeout',
     async () => {
       const tool = new ExecuteBashTool({
         workspace,
@@ -372,10 +382,11 @@ describe.skipIf(process.platform === 'win32')('ExecuteBashTool', () => {
       });
       const started = Date.now();
 
+      // `spawner.cjs` forks a grandchild that inherits the pipes. Killing only
+      // the spawned process leaves that grandchild holding stdout open, so the
+      // call would return no earlier than SURVIVOR_LIFETIME_MS.
       const result = await tool.runAsync({
-        args: {
-          command: `${NODE} -e "setTimeout(() => {}, ${NEVER_FINISHES_MS})"`,
-        },
+        args: {command: `${NODE} spawner.cjs`},
         toolContext: confirmedContext(),
       });
 
@@ -383,7 +394,7 @@ describe.skipIf(process.platform === 'win32')('ExecuteBashTool', () => {
         error: 'Command timed out after 1 seconds.',
         returncode: -9,
       });
-      expect(Date.now() - started).toBeLessThan(NEVER_FINISHES_MS);
+      expect(Date.now() - started).toBeLessThan(TIMED_OUT_BY_MS);
     },
     SPAWN_TIMEOUT_MS,
   );
