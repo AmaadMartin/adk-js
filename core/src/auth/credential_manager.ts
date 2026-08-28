@@ -13,32 +13,46 @@ import {experimental} from '../utils/experimental.js';
 import {AuthCredential, AuthCredentialTypes} from './auth_credential.js';
 import {AuthScheme, OAuthGrantType} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
-import {CredentialExchangerRegistry} from './exchanger/credential_exchanger_registry.js';
+import {BaseCredentialExchanger} from './exchanger/base_credential_exchanger.js';
 import {
   determineGrantType,
   OAuth2CredentialExchanger,
 } from './oauth2/oauth2_credential_exchanger.js';
 import {OAuth2CredentialRefresher} from './oauth2/oauth2_credential_refresher.js';
-import {CredentialRefresherRegistry} from './refresher/credential_refresher_registry.js';
+import {BaseCredentialRefresher} from './refresher/base_credential_refresher.js';
 
-/** Scheme types that cannot authenticate without a configured credential. */
-const OAUTH_SCHEME_TYPES: ReadonlyArray<AuthScheme['type']> = [
-  'oauth2',
-  'openIdConnect',
-];
+const OAUTH2_EXCHANGER = new OAuth2CredentialExchanger();
+const OAUTH2_REFRESHER = new OAuth2CredentialRefresher();
 
-/** Credential types whose secret lives in the `oauth2` field. */
-const OAUTH_CREDENTIAL_TYPES: readonly AuthCredentialTypes[] = [
-  AuthCredentialTypes.OAUTH2,
-  AuthCredentialTypes.OPEN_ID_CONNECT,
-];
+/** The refresher for each credential type that can expire. */
+const REFRESHERS: Partial<
+  Record<AuthCredentialTypes, BaseCredentialRefresher>
+> = {
+  [AuthCredentialTypes.OAUTH2]: OAUTH2_REFRESHER,
+  [AuthCredentialTypes.OPEN_ID_CONNECT]: OAUTH2_REFRESHER,
+};
 
-/** Whether a credential can be used as configured, with no exchange. */
-function isCredentialReady(credential: AuthCredential): boolean {
-  return (
-    credential.authType === AuthCredentialTypes.API_KEY ||
-    credential.authType === AuthCredentialTypes.HTTP
-  );
+let exchangers:
+  | Partial<Record<AuthCredentialTypes, BaseCredentialExchanger>>
+  | undefined;
+
+/**
+ * The exchanger for a credential type, from one table the whole process
+ * shares. An exchanger reads only its arguments, so no tool can contribute
+ * state to it. The table is built on first use because constructing
+ * `ServiceAccountCredentialExchanger` logs an experimental warning, which must
+ * not fire just because someone imported the package.
+ */
+function exchangerFor(
+  authType: AuthCredentialTypes,
+): BaseCredentialExchanger | undefined {
+  exchangers ??= {
+    [AuthCredentialTypes.OAUTH2]: OAUTH2_EXCHANGER,
+    [AuthCredentialTypes.OPEN_ID_CONNECT]: OAUTH2_EXCHANGER,
+    [AuthCredentialTypes.SERVICE_ACCOUNT]:
+      new ServiceAccountCredentialExchanger(),
+  };
+  return exchangers[authType];
 }
 
 /**
@@ -89,37 +103,10 @@ function missingOAuthUrl(authScheme: AuthScheme): string | undefined {
  */
 @experimental
 export class CredentialManager {
-  private readonly exchangerRegistry = new CredentialExchangerRegistry();
-  private readonly refresherRegistry = new CredentialRefresherRegistry();
-
   /**
    * @param authConfig The scheme and the configured credential to resolve.
    */
-  constructor(private readonly authConfig: AuthConfig) {
-    const oauth2Exchanger = new OAuth2CredentialExchanger();
-    this.exchangerRegistry.register(
-      AuthCredentialTypes.OAUTH2,
-      oauth2Exchanger,
-    );
-    this.exchangerRegistry.register(
-      AuthCredentialTypes.OPEN_ID_CONNECT,
-      oauth2Exchanger,
-    );
-    this.exchangerRegistry.register(
-      AuthCredentialTypes.SERVICE_ACCOUNT,
-      new ServiceAccountCredentialExchanger(),
-    );
-
-    const oauth2Refresher = new OAuth2CredentialRefresher();
-    this.refresherRegistry.register(
-      AuthCredentialTypes.OAUTH2,
-      oauth2Refresher,
-    );
-    this.refresherRegistry.register(
-      AuthCredentialTypes.OPEN_ID_CONNECT,
-      oauth2Refresher,
-    );
-  }
+  constructor(private readonly authConfig: AuthConfig) {}
 
   /**
    * Asks the client for a credential. The invocation pauses as a result: the
@@ -145,7 +132,11 @@ export class CredentialManager {
     this.validateCredential();
 
     const rawAuthCredential = this.authConfig.rawAuthCredential;
-    if (rawAuthCredential && isCredentialReady(rawAuthCredential)) {
+    if (
+      rawAuthCredential &&
+      (rawAuthCredential.authType === AuthCredentialTypes.API_KEY ||
+        rawAuthCredential.authType === AuthCredentialTypes.HTTP)
+    ) {
       // A copy, because a long-lived tool shares one config across users.
       return cloneDeep(rawAuthCredential);
     }
@@ -189,14 +180,18 @@ export class CredentialManager {
   /** Rejects a configuration that cannot produce a credential. */
   private validateCredential(): void {
     const {authScheme, rawAuthCredential} = this.authConfig;
-    if (!rawAuthCredential && OAUTH_SCHEME_TYPES.includes(authScheme.type)) {
+    if (
+      !rawAuthCredential &&
+      (authScheme.type === 'oauth2' || authScheme.type === 'openIdConnect')
+    ) {
       throw new Error(
         `rawAuthCredential is required for authScheme type ${authScheme.type}.`,
       );
     }
     if (
       rawAuthCredential &&
-      OAUTH_CREDENTIAL_TYPES.includes(rawAuthCredential.authType) &&
+      (rawAuthCredential.authType === AuthCredentialTypes.OAUTH2 ||
+        rawAuthCredential.authType === AuthCredentialTypes.OPEN_ID_CONNECT) &&
       !rawAuthCredential.oauth2
     ) {
       throw new Error(
@@ -221,7 +216,7 @@ export class CredentialManager {
   private async exchangeCredential(
     credential: AuthCredential,
   ): Promise<{credential: AuthCredential; wasExchanged: boolean}> {
-    const exchanger = this.exchangerRegistry.getExchanger(credential.authType);
+    const exchanger = exchangerFor(credential.authType);
     if (!exchanger) {
       return {credential, wasExchanged: false};
     }
@@ -235,7 +230,7 @@ export class CredentialManager {
   private async refreshCredential(
     credential: AuthCredential,
   ): Promise<{credential: AuthCredential; wasRefreshed: boolean}> {
-    const refresher = this.refresherRegistry.getRefresher(credential.authType);
+    const refresher = REFRESHERS[credential.authType];
     if (!refresher) {
       return {credential, wasRefreshed: false};
     }
