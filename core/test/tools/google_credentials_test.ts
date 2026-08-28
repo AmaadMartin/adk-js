@@ -106,6 +106,14 @@ describe('BaseGoogleCredentialsConfig identity adoption', () => {
     expect(config.scopes).toBeUndefined();
   });
 
+  it('reads an empty granted scope as no scopes, not as one blank scope', () => {
+    const config = new BaseGoogleCredentialsConfig({
+      credentials: makeOAuthClient(''),
+    });
+
+    expect(config.scopes).toBeUndefined();
+  });
+
   it('adopts an identity that carries only a client secret', () => {
     const client = new OAuth2Client({clientSecret: 'secret-only'});
 

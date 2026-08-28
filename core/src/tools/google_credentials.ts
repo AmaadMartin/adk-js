@@ -38,8 +38,6 @@ export interface BaseGoogleCredentialsConfigOptions {
  * client, an `externalAccessTokenKey`, or a `clientId` and `clientSecret`
  * pair. The constructor rejects anything else. A subclass names the scopes and
  * the token cache key for one Google API.
- *
- * @experimental Do not use this in production; it may change or be removed.
  */
 export class BaseGoogleCredentialsConfig {
   credentials?: AuthClient;
@@ -63,7 +61,10 @@ export class BaseGoogleCredentialsConfig {
     if (options.credentials && isOAuth2UserCredential(options.credentials)) {
       this.clientId = options.credentials._clientId;
       this.clientSecret = options.credentials._clientSecret;
-      this.scopes = splitScopes(options.credentials.credentials.scope);
+      // The auth library stores the granted scope as one space-delimited
+      // string. An empty one means no scope was granted.
+      const {scope} = options.credentials.credentials;
+      this.scopes = scope ? scope.split(' ') : undefined;
     }
   }
 }
@@ -113,16 +114,9 @@ function validateCredentialsOptions(
  * match every client. Only a client built with a client id populates it, so
  * the guard tests the values.
  */
-function isOAuth2UserCredential(
-  client: AuthClient,
-): client is OAuth2Client & {_clientId?: string; _clientSecret?: string} {
+function isOAuth2UserCredential(client: AuthClient): client is OAuth2Client {
   return (
     ('_clientId' in client && typeof client._clientId === 'string') ||
     ('_clientSecret' in client && typeof client._clientSecret === 'string')
   );
-}
-
-/** Splits the space-delimited scope string the auth library stores. */
-function splitScopes(scope: string | undefined): string[] | undefined {
-  return scope ? scope.split(' ') : undefined;
 }
