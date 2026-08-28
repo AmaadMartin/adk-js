@@ -19,13 +19,15 @@ import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {
-  EvalResult,
-  EvalStatus,
   getEvaluationCriteriaOrDefault,
   parseAndGetEvalsToRun,
-  runEvals,
-  TOOL_TRAJECTORY_SCORE_KEY,
 } from '../../src/cli/cli_eval.js';
+import {runEvals} from '../../src/evaluation/eval_runner.js';
+import {
+  EvalResult,
+  EvalStatus,
+  TOOL_TRAJECTORY_SCORE_KEY,
+} from '../../src/evaluation/eval_types.js';
 
 /**
  * The whole eval flow over a real `LlmAgent`, a real `Runner` and a real
@@ -170,8 +172,7 @@ afterEach(async () => {
 
 async function collectResults(inputs: string[]): Promise<EvalResult[]> {
   const criteria = await getEvaluationCriteriaOrDefault(configPath);
-  const results: EvalResult[] = [];
-  for await (const result of runEvals({
+  return runEvals({
     evalSetToEvals: parseAndGetEvalsToRun(inputs),
     rootAgent: buildAgent(),
     evalMetrics: Object.entries(criteria).map(([metricName, threshold]) => ({
@@ -179,10 +180,7 @@ async function collectResults(inputs: string[]): Promise<EvalResult[]> {
       threshold,
     })),
     sessionService: new InMemorySessionService(),
-  })) {
-    results.push(result);
-  }
-  return results;
+  });
 }
 
 describe('adk eval over a real agent', () => {
@@ -233,7 +231,7 @@ describe('adk eval over a real agent', () => {
     const agent = buildAgent();
     const criteria = await getEvaluationCriteriaOrDefault(configPath);
 
-    for await (const _result of runEvals({
+    await runEvals({
       evalSetToEvals: parseAndGetEvalsToRun([evalSetPath]),
       rootAgent: agent,
       evalMetrics: Object.entries(criteria).map(([metricName, threshold]) => ({
@@ -241,9 +239,7 @@ describe('adk eval over a real agent', () => {
         threshold,
       })),
       sessionService: new InMemorySessionService(),
-    })) {
-      // Drain the generator; the assertion is about the agent afterwards.
-    }
+    });
 
     expect(agent.beforeToolCallback).toBeUndefined();
   });
