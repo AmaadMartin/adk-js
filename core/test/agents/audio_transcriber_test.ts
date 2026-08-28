@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {protos} from '@google-cloud/speech';
+import {SpeechClient, type protos} from '@google-cloud/speech';
 import {
   AudioTranscriber,
   createSession,
@@ -439,6 +439,30 @@ describe('AudioTranscriber', () => {
     );
     await transcriber.transcribeFile(
       contextWithCache([audioEntry('user', 'b')]),
+    );
+
+    expect(speech.constructions).toBe(1);
+  });
+
+  it('uses a client supplied to the constructor', async () => {
+    const client = new SpeechClient();
+    speech.constructions = 0;
+    speech.responses = [scriptedResponse('injected')];
+
+    const contents = await new AudioTranscriber({client}).transcribeFile(
+      contextWithCache([audioEntry('user', 'aa')]),
+    );
+
+    expect(contents).toEqual([textContent('user', 'injected')]);
+    expect(speech.calls.map((call) => call.audio)).toEqual([Buffer.from('aa')]);
+    expect(speech.constructions).toBe(0);
+  });
+
+  it('constructs a default client when options carry none', async () => {
+    speech.responses = [scriptedResponse('default')];
+
+    await new AudioTranscriber({}).transcribeFile(
+      contextWithCache([audioEntry('user', 'aa')]),
     );
 
     expect(speech.constructions).toBe(1);

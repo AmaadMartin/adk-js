@@ -61,6 +61,22 @@ async function transcribeTurn(
 }
 ```
 
+## Supplying your own client
+
+`AudioTranscriber` builds a default client on first use, which reads
+Application Default Credentials. Pass a client to select other credentials, a
+project or a regional endpoint. The transcriber then uses it and never loads
+`@google-cloud/speech` itself.
+
+```ts
+import {SpeechClient} from '@google-cloud/speech';
+import {AudioTranscriber} from '@google/adk';
+
+const transcriber = new AudioTranscriber({
+  client: new SpeechClient({projectId: process.env.GOOGLE_CLOUD_PROJECT}),
+});
+```
+
 ## Failure modes
 
 - `@google-cloud/speech` is not installed: the first call with audio throws an
