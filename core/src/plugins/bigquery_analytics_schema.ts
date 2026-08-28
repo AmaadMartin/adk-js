@@ -49,18 +49,6 @@ export enum AnalyticsEventType {
   HITL_CREDENTIAL_REQUEST_COMPLETED = 'HITL_CREDENTIAL_REQUEST_COMPLETED',
   HITL_CONFIRMATION_REQUEST_COMPLETED = 'HITL_CONFIRMATION_REQUEST_COMPLETED',
   HITL_INPUT_REQUEST_COMPLETED = 'HITL_INPUT_REQUEST_COMPLETED',
-  /**
-   * Declared so the enum matches the Python one, never written by this SDK.
-   * adk-js `BasePlugin` has no `onAgentErrorCallback`, so the plugin has no
-   * hook that reports an agent failure.
-   */
-  AGENT_ERROR = 'AGENT_ERROR',
-  /**
-   * Declared so the enum matches the Python one, never written by this SDK.
-   * adk-js `BasePlugin` has no `onRunErrorCallback`, so the plugin has no hook
-   * that reports an invocation failure.
-   */
-  INVOCATION_ERROR = 'INVOCATION_ERROR',
 }
 
 /** The `attributes.adk.pause_kind` value for a non-HITL long-running tool. */

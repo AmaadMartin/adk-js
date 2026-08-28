@@ -698,6 +698,9 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     }
     for (const id of event.longRunningToolIds ?? []) {
       const call = calls.find((candidate) => candidate.id === id);
+      if (hitlMappingFor(call?.name) !== undefined) {
+        continue;
+      }
       if (call === undefined) {
         logger.warn(UNMATCHED_LONG_RUNNING_ID_LOG);
       }
@@ -707,10 +710,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         rawContent: {tool: call?.name ?? null, args: call?.args ?? null},
         data: {
           sourceEvent: event,
-          extraAttributes: pauseAttributes(
-            hitlMappingFor(call?.name)?.pauseKind ?? TOOL_PAUSE_KIND,
-            id,
-          ),
+          extraAttributes: pauseAttributes(TOOL_PAUSE_KIND, id),
         },
       });
     }
