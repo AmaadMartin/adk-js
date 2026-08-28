@@ -67,11 +67,7 @@ export class AgentTool extends BaseTool {
   /** A unique symbol to identify ADK agent tool class. */
   readonly [AGENT_TOOL_SIGNATURE_SYMBOL] = true;
 
-  /**
-   * The agent this tool wraps. Public, as in adk-python, so a caller can tell
-   * what a tool call actually reaches.
-   */
-  readonly agent: BaseAgent;
+  private readonly agent: BaseAgent;
 
   private readonly skipSummarization: boolean;
 

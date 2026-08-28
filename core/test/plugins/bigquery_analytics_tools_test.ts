@@ -90,8 +90,25 @@ describe('getToolOrigin', () => {
   });
 
   it('classifies an agent tool wrapping a remote agent as A2A', () => {
+    const helper = remoteAgent('helper');
+    const tool = new AgentTool({agent: helper});
+    expect(getToolOrigin(tool, {}, localAgent('root', [helper]))).toBe(
+      ToolOrigin.A2A,
+    );
+  });
+
+  it('classifies an agent tool whose agent the tree cannot resolve as SUB_AGENT', () => {
+    // AgentTool keeps its agent private, so an agent that is not also a
+    // sub-agent, a parent or a peer cannot be told apart from a local one.
     const tool = new AgentTool({agent: remoteAgent('helper')});
-    expect(getToolOrigin(tool, {}, localAgent('root'))).toBe(ToolOrigin.A2A);
+    expect(getToolOrigin(tool, {}, localAgent('root'))).toBe(
+      ToolOrigin.SUB_AGENT,
+    );
+  });
+
+  it('classifies an agent tool as SUB_AGENT when there is no calling agent', () => {
+    const tool = new AgentTool({agent: remoteAgent('helper')});
+    expect(getToolOrigin(tool, {}, undefined)).toBe(ToolOrigin.SUB_AGENT);
   });
 
   it('classifies an unrecognized tool as UNKNOWN', () => {

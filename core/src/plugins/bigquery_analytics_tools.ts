@@ -86,6 +86,29 @@ function transferOrigin(
 }
 
 /**
+ * The kind of agent an `AgentTool` reaches.
+ *
+ * `AgentTool` keeps its agent private, so the name is resolved against the
+ * caller's tree, exactly as a handoff target is. `AgentTool` takes its name
+ * from that agent, so the lookup is by the right name. An agent the tree does
+ * not resolve stays the local kind, which is the same fallback a handoff uses.
+ *
+ * @param toolName The tool's name, which `AgentTool` takes from its agent.
+ * @param agent The agent making the call.
+ */
+function agentToolOrigin(
+  toolName: string,
+  agent: BaseAgent | undefined,
+): ToolOrigin {
+  if (agent === undefined) {
+    return ToolOrigin.SUB_AGENT;
+  }
+  return isRemoteA2AAgent(findTransferTarget(agent, toolName))
+    ? ToolOrigin.A2A
+    : ToolOrigin.SUB_AGENT;
+}
+
+/**
  * Classifies where a tool call runs.
  *
  * The order is load-bearing: the handoff tool is a `FunctionTool`, and an
@@ -111,7 +134,7 @@ export function getToolOrigin(
     return transferOrigin(toolArgs, agent);
   }
   if (isAgentTool(tool)) {
-    return isRemoteA2AAgent(tool.agent) ? ToolOrigin.A2A : ToolOrigin.SUB_AGENT;
+    return agentToolOrigin(tool.name, agent);
   }
   if (isFunctionTool(tool)) {
     return ToolOrigin.LOCAL;
