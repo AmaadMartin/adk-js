@@ -17,11 +17,12 @@ import {
   OpenAPIToolset,
   PluginManager,
   ReadonlyContext,
+  RestApiTool,
   setLogger,
 } from '@google/adk';
 import yaml from 'js-yaml';
 import {OpenAPIV3} from 'openapi-types';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 describe('OpenAPIToolset', () => {
   const mockSpec: OpenAPIV3.Document = {
@@ -642,8 +643,14 @@ describe('OpenAPIToolset spec loading', () => {
 });
 
 describe('OpenAPIToolset transport', () => {
+  const realFetch = globalThis.fetch;
+
   beforeEach(() => {
     globalThis.fetch = createFetchStub();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
   });
 
   it('should call the injected fetch instead of the global one', async () => {
@@ -811,6 +818,37 @@ describe('OpenAPIToolset property names', () => {
 });
 
 describe('OpenAPIToolset.getTools', () => {
+  it('should warn and return all tools for a predicate filter with no context', async () => {
+    const warn = vi.fn();
+    const recordingLogger: Logger = {
+      log: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn,
+      error: vi.fn(),
+      setLogLevel: vi.fn(),
+    };
+    const toolset = new OpenAPIToolset({
+      specDict: usersSpec,
+      toolFilter: () => false,
+    });
+    const previousLogger = getLogger();
+    setLogger(recordingLogger);
+
+    let tools: RestApiTool[];
+    try {
+      tools = await toolset.getTools();
+    } finally {
+      setLogger(previousLogger);
+    }
+
+    expect(tools.map((tool) => tool.name)).toEqual(['get_users']);
+    expect(warn).toHaveBeenCalledWith(
+      'OpenAPIToolset: a ToolPredicate toolFilter was provided but getTools() ' +
+        'was called without a ReadonlyContext. The filter will not be applied.',
+    );
+  });
+
   it('should return a copy the caller cannot use to drop a tool', async () => {
     const toolset = new OpenAPIToolset({specDict: usersSpec});
 

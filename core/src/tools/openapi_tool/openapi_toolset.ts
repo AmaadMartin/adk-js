@@ -170,15 +170,26 @@ export class OpenAPIToolset extends BaseToolset {
 
   @experimental
   override async getTools(context?: ReadonlyContext): Promise<RestApiTool[]> {
-    return this.tools.filter((tool) => {
-      if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
-        return (this.toolFilter as string[]).includes(tool.name);
-      }
-      if (context) {
-        return this.isToolSelected(tool, context);
-      }
-      return true;
-    });
+    const filter = this.toolFilter;
+    if (!filter || (Array.isArray(filter) && filter.length === 0)) {
+      return [...this.tools];
+    }
+
+    if (Array.isArray(filter)) {
+      return this.tools.filter((tool) => filter.includes(tool.name));
+    }
+
+    if (context) {
+      return this.tools.filter((tool) => this.isToolSelected(tool, context));
+    }
+
+    // Predicate filter requested but no context provided — return all tools
+    // and log a warning so callers are aware the filter was not applied.
+    logger.warn(
+      'OpenAPIToolset: a ToolPredicate toolFilter was provided but getTools() ' +
+        'was called without a ReadonlyContext. The filter will not be applied.',
+    );
+    return [...this.tools];
   }
 
   @experimental
