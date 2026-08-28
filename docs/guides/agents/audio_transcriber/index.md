@@ -61,19 +61,6 @@ async function transcribeTurn(
 }
 ```
 
-## What it guarantees
-
-- Cache order is result order. Speakers are never reordered.
-- Only consecutive audio from the same speaker merges. A different speaker, or
-  an interleaved `Content`, ends the run.
-- A blob with no data is skipped. It does not split a run and does not produce
-  an empty request.
-- `transcriptionCache` is `[]` after every call, including a call that found
-  nothing to do and a call whose recognition request failed.
-- The emitted `role` is the entry's role, lower-cased.
-- Each recognition result becomes one `Content`, so a response with two results
-  yields two.
-
 ## Failure modes
 
 - `@google-cloud/speech` is not installed: the first call with audio throws an

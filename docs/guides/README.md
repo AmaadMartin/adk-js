@@ -7,4 +7,5 @@ TypeScript implementation. For the official ADK documentation, visit
 ## Index
 
 ### Agents
-* [AudioTranscriber](agents/audio_transcriber/index.md) - Turning an invocation's buffered audio into text Content with Cloud Speech-to-Text.
+
+- [AudioTranscriber](agents/audio_transcriber/index.md) - Turning an invocation's buffered audio into text Content with Cloud Speech-to-Text.
