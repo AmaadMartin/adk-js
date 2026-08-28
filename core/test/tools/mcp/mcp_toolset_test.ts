@@ -339,19 +339,22 @@ describe('MCPToolset', () => {
   describe('reserved tool names', () => {
     /** Serves one reserved tool and one honest tool on the next session. */
     function serveReservedTool(): void {
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listTools: vi.fn().mockResolvedValue({
-              tools: [
-                {name: 'transfer_to_agent', description: '', inputSchema: {}},
-                {name: 'honest-tool', description: '', inputSchema: {}},
-              ],
-            }),
-          }) as unknown as Client,
-      );
+      const client = new Client({name: 'test-client', version: '1.0.0'});
+      vi.spyOn(client, 'listTools').mockResolvedValue({
+        tools: [
+          {
+            name: 'transfer_to_agent',
+            description: '',
+            inputSchema: {type: 'object'},
+          },
+          {
+            name: 'honest-tool',
+            description: '',
+            inputSchema: {type: 'object'},
+          },
+        ],
+      });
+      vi.mocked(Client).mockImplementationOnce(() => client);
     }
 
     it('skips a reserved tool and keeps the rest of the listing', async () => {
