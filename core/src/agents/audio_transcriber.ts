@@ -94,7 +94,17 @@ function bundleTranscriptionCache(
   return segments;
 }
 
-/** Transcribes audio using Google Cloud Speech-to-Text. */
+/**
+ * Transcribes audio using Google Cloud Speech-to-Text.
+ *
+ * Cached blobs must be 16 kHz mono LINEAR16 PCM, base64-encoded as
+ * `@google/genai` represents `Blob.data`. The recognition config is fixed at
+ * that format and `en-US`; `Blob.mimeType` is not read, so audio at another
+ * sample rate transcribes incorrectly rather than failing.
+ *
+ * `@google-cloud/speech` is an optional peer dependency. It is loaded on the
+ * first call that has audio, so a text-only cache never needs it installed.
+ */
 export class AudioTranscriber {
   private clientPromise?: Promise<SpeechClient>;
 
