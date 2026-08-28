@@ -127,10 +127,10 @@ export class CredentialManager {
     }
 
     let credential = await this.loadFromCredentialService(context);
-    let wasFromAuthResponse = false;
+    let needsSave = false;
     if (!credential) {
       credential = context.getAuthResponse(this.authConfig);
-      wasFromAuthResponse = credential !== undefined;
+      needsSave = credential !== undefined;
     }
 
     if (!credential) {
@@ -148,15 +148,15 @@ export class CredentialManager {
     }
 
     const exchanged = await this.exchangeCredential(credential);
-    let wasRefreshed = false;
     credential = exchanged.credential;
+    needsSave ||= exchanged.wasExchanged;
     if (!exchanged.wasExchanged) {
       const refreshed = await this.refreshCredential(credential);
       credential = refreshed.credential;
-      wasRefreshed = refreshed.wasRefreshed;
+      needsSave ||= refreshed.wasRefreshed;
     }
 
-    if (wasFromAuthResponse || exchanged.wasExchanged || wasRefreshed) {
+    if (needsSave) {
       await this.saveCredential(context, credential);
     }
     return credential;
