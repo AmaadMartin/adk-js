@@ -211,10 +211,6 @@ function isIntermediateData(data: object): data is IntermediateData {
   return 'toolUses' in data;
 }
 
-function isInvocationEvents(data: object): data is InvocationEvents {
-  return 'invocationEvents' in data;
-}
-
 function collectFromEvents<T>(
   events: InvocationEvents,
   select: (part: Part) => T | undefined,
@@ -235,7 +231,6 @@ function collectFromEvents<T>(
  * Retrieves all tool calls from intermediate data.
  *
  * @returns An empty array when `intermediateData` is undefined.
- * @throws {Error} If `intermediateData` is of an unsupported shape.
  */
 export function getAllToolCalls(
   intermediateData?: IntermediateDataType,
@@ -243,24 +238,16 @@ export function getAllToolCalls(
   if (!intermediateData) {
     return [];
   }
-  if (typeof intermediateData === 'object') {
-    if (isIntermediateData(intermediateData)) {
-      return intermediateData.toolUses;
-    }
-    if (isInvocationEvents(intermediateData)) {
-      return collectFromEvents(intermediateData, (part) => part.functionCall);
-    }
+  if (isIntermediateData(intermediateData)) {
+    return intermediateData.toolUses;
   }
-  throw new Error(
-    `Unsupported type for intermediate_data \`${intermediateData}\``,
-  );
+  return collectFromEvents(intermediateData, (part) => part.functionCall);
 }
 
 /**
  * Retrieves all tool responses from intermediate data.
  *
  * @returns An empty array when `intermediateData` is undefined.
- * @throws {Error} If `intermediateData` is of an unsupported shape.
  */
 export function getAllToolResponses(
   intermediateData?: IntermediateDataType,
@@ -268,20 +255,10 @@ export function getAllToolResponses(
   if (!intermediateData) {
     return [];
   }
-  if (typeof intermediateData === 'object') {
-    if (isIntermediateData(intermediateData)) {
-      return intermediateData.toolResponses;
-    }
-    if (isInvocationEvents(intermediateData)) {
-      return collectFromEvents(
-        intermediateData,
-        (part) => part.functionResponse,
-      );
-    }
+  if (isIntermediateData(intermediateData)) {
+    return intermediateData.toolResponses;
   }
-  throw new Error(
-    `Unsupported type for intermediate_data \`${intermediateData}\``,
-  );
+  return collectFromEvents(intermediateData, (part) => part.functionResponse);
 }
 
 /**
