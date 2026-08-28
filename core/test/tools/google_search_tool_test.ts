@@ -50,7 +50,7 @@ describe('GoogleSearchTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         }),
       ).rejects.toThrow(
         'Google search tool is not supported for model undefined',
@@ -176,7 +176,7 @@ describe('GoogleSearchTool', () => {
 
         await tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         });
 
         expect(req.config!.tools).toEqual([{googleSearch: {}}]);
@@ -191,7 +191,7 @@ describe('GoogleSearchTool', () => {
 
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{googleSearch: {}}]);
@@ -204,7 +204,7 @@ describe('GoogleSearchTool', () => {
 
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([existingTool, {googleSearch: {}}]);
@@ -222,7 +222,7 @@ describe('GoogleSearchTool', () => {
 
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{googleSearch: {}}]);
@@ -237,7 +237,7 @@ describe('GoogleSearchTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         }),
       ).rejects.toThrow(
         'Google search tool is not supported for model projects/265104255505/locations/us-central1/publishers/google/models/claude-3-sonnet',
@@ -251,7 +251,7 @@ describe('GoogleSearchTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         }),
       ).rejects.toThrow('Google search tool is not supported for model');
 
@@ -269,7 +269,7 @@ describe('GoogleSearchTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         }),
       ).rejects.toThrow('Google search tool is not supported for model');
 
@@ -282,7 +282,7 @@ describe('GoogleSearchTool', () => {
 
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.model).toBe('gemini-2.5-flash-lite');
@@ -295,7 +295,7 @@ describe('GoogleSearchTool', () => {
 
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.model).toBe('gemini-2.5-flash');
@@ -308,7 +308,7 @@ describe('GoogleSearchTool', () => {
 
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.model).toBe('gemini-2.5-flash');
@@ -322,7 +322,7 @@ describe('GoogleSearchTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         }),
       ).rejects.toThrow('Google search tool is not supported for model');
 
@@ -337,7 +337,7 @@ describe('GoogleSearchTool', () => {
 
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([
