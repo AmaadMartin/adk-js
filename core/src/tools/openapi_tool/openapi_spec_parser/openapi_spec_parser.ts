@@ -5,7 +5,7 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
-import {toSnakeCase} from '../../../utils/case_utils.js';
+import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
 import {ApiParameter, OperationParser} from './operation_parser.js';
 
@@ -310,19 +310,19 @@ function collectOperations(
       operation.parameters = [...opParams, ...pathParams];
 
       if (!operation.operationId) {
-        operation.operationId = toSnakeCase(`${path}_${method}`);
+        operation.operationId = snakeCase(`${path}_${method}`);
       }
 
       const parser = new OperationParser(operation, {
         preservePropertyNames,
       });
 
-      // An operation that declares security of its own overrides the global
-      // requirement, including when it declares that no auth is needed.
-      let authSchemeName = requiredSchemeName(operation.security);
-      if (!authSchemeName && operation.security === undefined) {
-        authSchemeName = globalSchemeName;
-      }
+      // Declaring security of its own overrides the global requirement, even
+      // when the operation declares an empty list.
+      const authSchemeName =
+        operation.security === undefined
+          ? globalSchemeName
+          : requiredSchemeName(operation.security);
 
       const authScheme = authSchemeName
         ? authSchemes[authSchemeName]

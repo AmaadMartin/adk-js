@@ -159,10 +159,7 @@ export class OperationParser {
   }
 
   /**
-   * Gets the operation's response, parsed from its lowest 2xx response.
-   *
-   * @returns The response parameter, whose schema is empty when the operation
-   *   declares no 2xx response with a schema.
+   * @returns The operation's response, from its lowest 2xx response code.
    */
   @experimental
   public getReturnValue(): ApiParameter {
@@ -221,11 +218,8 @@ export class OperationParser {
 }
 
 /**
- * Extracts the response of an operation from its lowest 2xx response code.
- *
  * @param operation The OpenAPI operation to read.
- * @returns The response parameter, carrying an empty schema when the
- *   operation declares no 2xx response with a schema.
+ * @returns The operation's response, from its lowest 2xx response code.
  */
 function parseReturnValue(operation: OpenAPIV3.OperationObject): ApiParameter {
   const responses = operation.responses || {};
