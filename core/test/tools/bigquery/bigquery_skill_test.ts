@@ -14,15 +14,11 @@ import {
   validateSkillDir,
 } from '@google/adk';
 import * as path from 'node:path';
-import {pathToFileURL} from 'node:url';
 import {describe, expect, it} from 'vitest';
 import {SNAKE_OR_KEBAB_NAME_PATTERN} from '../../../src/skills/skill.js';
-// These stay out of the public barrel, mirroring adk-python's module-private
-// `_SKILL_DIR`.
-import {
-  bigQuerySkillDir,
-  resolveModuleDir,
-} from '../../../src/tools/bigquery/bigquery_skill.js';
+// bigQuerySkillDir stays out of the public barrel, mirroring adk-python's
+// module-private `_SKILL_DIR`.
+import {bigQuerySkillDir} from '../../../src/tools/bigquery/bigquery_skill.js';
 
 const EXPECTED_REFERENCES = [
   'bigquery_ai_classify.md',
@@ -61,7 +57,7 @@ describe('getBigQuerySkill', () => {
     expect(Object.keys(references).sort()).toEqual(EXPECTED_REFERENCES);
     for (const name of EXPECTED_REFERENCES) {
       expect(references[name]).toBeTypeOf('string');
-      expect(references[name]!.length).toBeGreaterThan(0);
+      expect(references[name].length).toBeGreaterThan(0);
     }
   });
 
@@ -95,27 +91,5 @@ describe('getBigQuerySkill', () => {
     expect(skill.frontmatter.license).toBe('Apache-2.0');
     expect(skill.frontmatter.metadata).toHaveProperty('author');
     expect(skill.frontmatter.metadata).toHaveProperty('version');
-  });
-});
-
-describe('resolveModuleDir', () => {
-  const modulePath = path.resolve('pkg', 'esm', 'mod.js');
-
-  it('prefers the module URL, which only the ESM output defines', () => {
-    expect(
-      resolveModuleDir(pathToFileURL(modulePath).href, path.resolve('cwd')),
-    ).toBe(path.dirname(modulePath));
-  });
-
-  it('falls back to __dirname, which only the CommonJS output defines', () => {
-    const dirname = path.resolve('pkg', 'cjs');
-
-    expect(resolveModuleDir(undefined, dirname)).toBe(dirname);
-  });
-
-  it('refuses a build that defines neither locator', () => {
-    expect(() => resolveModuleDir(undefined, undefined)).toThrow(
-      /defines neither import.meta.url nor __dirname/,
-    );
   });
 });

@@ -25,16 +25,15 @@ uses.
 
 ## Get started
 
-Load the skill and hand it to a `SkillToolset`:
-
 ```ts
 import {getBigQuerySkill, LlmAgent, SkillToolset} from '@google/adk';
+import {executeSql} from './my_bigquery_client.js';
 
 const agent = new LlmAgent({
   name: 'bq_analyst',
   model: 'gemini-2.5-flash',
   instruction: 'Answer data questions with BigQuery SQL.',
-  tools: [new SkillToolset([await getBigQuerySkill()])],
+  tools: [new SkillToolset([await getBigQuerySkill()]), executeSql],
 });
 ```
 
@@ -44,50 +43,17 @@ The agent now has `list_skills`, `load_skill`, `load_skill_resource` and
 `load_skill_resource` for `references/bigquery_ai_forecast.md` before it writes
 `AI.FORECAST`.
 
-Add your own tools alongside it, since the skill's SQL needs somewhere to run:
+Read the same content yourself through the returned object. The routing table
+lives in `skill.instructions`, and one reference file documents each function:
 
 ```ts
-import {getBigQuerySkill, LlmAgent, SkillToolset} from '@google/adk';
-import {executeSql} from './my_bigquery_client.js';
-
-const agent = new LlmAgent({
-  name: 'bq_analyst',
-  model: 'gemini-2.5-flash',
-  tools: [new SkillToolset([await getBigQuerySkill()]), executeSql],
-});
-```
-
-## What the skill contains
-
-`SKILL.md` holds the routing table. One reference file documents each function:
-
-| Function              | Reference file                               |
-| --------------------- | -------------------------------------------- |
-| `AI.CLASSIFY`         | `references/bigquery_ai_classify.md`         |
-| `AI.DETECT_ANOMALIES` | `references/bigquery_ai_detect_anomalies.md` |
-| `AI.FORECAST`         | `references/bigquery_ai_forecast.md`         |
-| `AI.GENERATE`         | `references/bigquery_ai_generate.md`         |
-| `AI.GENERATE_BOOL`    | `references/bigquery_ai_generate_bool.md`    |
-| `AI.GENERATE_DOUBLE`  | `references/bigquery_ai_generate_double.md`  |
-| `AI.GENERATE_INT`     | `references/bigquery_ai_generate_int.md`     |
-| `AI.IF`               | `references/bigquery_ai_if.md`               |
-| `AI.SCORE`            | `references/bigquery_ai_score.md`            |
-| `AI.SEARCH`           | `references/bigquery_ai_search.md`           |
-| `AI.SIMILARITY`       | `references/bigquery_ai_similarity.md`       |
-
-Read them yourself through the returned object:
-
-```ts
-import {getBigQuerySkill} from '@google/adk';
-
 const skill = await getBigQuerySkill();
 
-const name = skill.frontmatter.name; // 'bigquery-ai-ml'
-const routingTable = skill.instructions; // the SKILL.md body
+const routingTable = skill.instructions;
 const forecast = skill.resources?.references?.['bigquery_ai_forecast.md'];
 ```
 
-## Where the files come from
+## Packaging
 
 The markdown ships inside the installed package, next to the compiled module,
 and `getBigQuerySkill` reads it from disk on every call. Two consequences
