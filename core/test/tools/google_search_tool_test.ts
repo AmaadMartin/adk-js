@@ -64,7 +64,7 @@ describe('GoogleSearchTool', () => {
       const req = makeRequest('gemini-1.5-pro');
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{googleSearchRetrieval: {}}]);
@@ -76,7 +76,7 @@ describe('GoogleSearchTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         }),
       ).rejects.toThrow(
         'Google search tool can not be used with other tools in Gemini 1.x.',
@@ -88,7 +88,7 @@ describe('GoogleSearchTool', () => {
       const req = makeRequest('gemini-2.0-flash');
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{googleSearch: {}}]);
@@ -100,7 +100,7 @@ describe('GoogleSearchTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         }),
       ).rejects.toThrow('Google search tool is not supported for model gpt-4');
     });
@@ -115,7 +115,7 @@ describe('GoogleSearchTool', () => {
       };
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{googleSearch: {}}]);
