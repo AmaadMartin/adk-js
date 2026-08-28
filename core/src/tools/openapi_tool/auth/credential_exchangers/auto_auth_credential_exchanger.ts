@@ -14,76 +14,41 @@ import {
   CredentialExchangeError,
   ExchangeResult,
 } from '../../../../auth/exchanger/base_credential_exchanger.js';
+import {CredentialExchangerRegistry} from '../../../../auth/exchanger/credential_exchanger_registry.js';
 import {OAuth2CredentialExchanger} from '../../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {experimental} from '../../../../utils/experimental.js';
 import {ServiceAccountCredentialExchanger} from './service_account_exchanger.js';
 
-/**
- * Builds the built-in exchanger table. This is a factory rather than a shared
- * constant so that two instances never share one table.
- */
-function createDefaultExchangers(): Partial<
-  Record<AuthCredentialTypes, BaseCredentialExchanger>
-> {
-  const oauth2Exchanger = new OAuth2CredentialExchanger();
+const oauth2Exchanger = new OAuth2CredentialExchanger();
 
-  return {
-    [AuthCredentialTypes.OAUTH2]: oauth2Exchanger,
-    [AuthCredentialTypes.OPEN_ID_CONNECT]: oauth2Exchanger,
-    [AuthCredentialTypes.SERVICE_ACCOUNT]:
-      new ServiceAccountCredentialExchanger(),
-  };
-}
+const DEFAULT_EXCHANGERS: Partial<
+  Record<AuthCredentialTypes, BaseCredentialExchanger>
+> = {
+  [AuthCredentialTypes.OAUTH2]: oauth2Exchanger,
+  [AuthCredentialTypes.OPEN_ID_CONNECT]: oauth2Exchanger,
+  [AuthCredentialTypes.SERVICE_ACCOUNT]:
+    new ServiceAccountCredentialExchanger(),
+};
 
 /**
  * Selects a credential exchanger from the credential's `authType`, then
  * delegates the exchange to it.
  *
- * The built-in table maps `OAUTH2` and `OPEN_ID_CONNECT` to
- * {@link OAuth2CredentialExchanger}, and `SERVICE_ACCOUNT` to
- * {@link ServiceAccountCredentialExchanger}. A credential of any other type
- * comes back unchanged.
- *
- * @example Common case
- * ```ts
- * const exchanger = new AutoAuthCredentialExchanger();
- * const {credential} = await exchanger.exchange({
- *   authScheme,
- *   authCredential: serviceAccountCredential,
- * });
- * ```
- *
- * @example Add an exchanger for a type with no built-in
- * ```ts
- * const exchanger = new AutoAuthCredentialExchanger({
- *   [AuthCredentialTypes.API_KEY]: new MyApiKeyExchanger(),
- * });
- * ```
- *
- * @example Override a built-in
- * ```ts
- * const exchanger = new AutoAuthCredentialExchanger({
- *   [AuthCredentialTypes.OAUTH2]: new MyOAuth2Exchanger(),
- * });
- * ```
+ * The built-in exchangers map `OAUTH2` and `OPEN_ID_CONNECT` to
+ * `OAuth2CredentialExchanger`, and `SERVICE_ACCOUNT` to
+ * `ServiceAccountCredentialExchanger`. A credential of any other type comes
+ * back unchanged.
  */
 @experimental
 export class AutoAuthCredentialExchanger implements BaseCredentialExchanger {
-  private readonly exchangers: Partial<
-    Record<AuthCredentialTypes, BaseCredentialExchanger>
-  >;
-
   /**
-   * @param customExchangers - Exchangers that add to the built-in table. An
-   *   entry whose credential type already has a built-in replaces it.
+   * @param customExchangers - Exchangers that take priority over the built-in
+   *   ones. Registering a credential type that has no built-in adds it;
+   *   registering one that has a built-in replaces it.
    */
   constructor(
-    customExchangers: Partial<
-      Record<AuthCredentialTypes, BaseCredentialExchanger>
-    > = {},
-  ) {
-    this.exchangers = {...createDefaultExchangers(), ...customExchangers};
-  }
+    private readonly customExchangers = new CredentialExchangerRegistry(),
+  ) {}
 
   @experimental
   async exchange(params: {
@@ -98,7 +63,9 @@ export class AutoAuthCredentialExchanger implements BaseCredentialExchanger {
       );
     }
 
-    const exchanger = this.exchangers[authCredential.authType];
+    const exchanger =
+      this.customExchangers.getExchanger(authCredential.authType) ??
+      DEFAULT_EXCHANGERS[authCredential.authType];
 
     if (!exchanger) {
       // If no exchanger found, return the original credential as not exchanged

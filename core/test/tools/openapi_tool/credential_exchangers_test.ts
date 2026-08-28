@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Context, ToolAuthHandler} from '@google/adk';
 import {JWT} from 'google-auth-library';
 import {afterEach, describe, expect, it, MockInstance, vi} from 'vitest';
 import {
@@ -16,7 +17,9 @@ import {
   CredentialExchangeError,
   ExchangeResult,
 } from '../../../src/auth/exchanger/base_credential_exchanger.js';
+import {CredentialExchangerRegistry} from '../../../src/auth/exchanger/credential_exchanger_registry.js';
 import {OAuth2CredentialExchanger} from '../../../src/auth/oauth2/oauth2_credential_exchanger.js';
+import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
 
@@ -54,6 +57,17 @@ function spyOnExchange(exchangerClass: {
   activeSpies.push(spy);
 
   return spy;
+}
+
+/** Builds an override registry holding a single exchanger. */
+function registryWith(
+  credentialType: AuthCredentialTypes,
+  exchanger: BaseCredentialExchanger,
+): CredentialExchangerRegistry {
+  const registry = new CredentialExchangerRegistry();
+  registry.register(credentialType, exchanger);
+
+  return registry;
 }
 
 /** An exchanger that reports the call it received and marks it exchanged. */
@@ -124,9 +138,9 @@ describe('AutoAuthCredentialExchanger', () => {
 
   it('uses a custom exchanger for a type with no default', async () => {
     const recording = createRecordingExchanger();
-    const exchanger = new AutoAuthCredentialExchanger({
-      [AuthCredentialTypes.API_KEY]: recording,
-    });
+    const exchanger = new AutoAuthCredentialExchanger(
+      registryWith(AuthCredentialTypes.API_KEY, recording),
+    );
     const authCredential: AuthCredential = {
       authType: AuthCredentialTypes.API_KEY,
       apiKey: 'key',
@@ -150,9 +164,9 @@ describe('AutoAuthCredentialExchanger', () => {
     const spy = spyOnExchange(OAuth2CredentialExchanger).mockResolvedValue(
       sentinel,
     );
-    const exchanger = new AutoAuthCredentialExchanger({
-      [AuthCredentialTypes.API_KEY]: createRecordingExchanger(),
-    });
+    const exchanger = new AutoAuthCredentialExchanger(
+      registryWith(AuthCredentialTypes.API_KEY, createRecordingExchanger()),
+    );
     const authCredential: AuthCredential = {
       authType: AuthCredentialTypes.OPEN_ID_CONNECT,
     };
@@ -166,9 +180,9 @@ describe('AutoAuthCredentialExchanger', () => {
   it('lets a custom exchanger override a built-in', async () => {
     const recording = createRecordingExchanger();
     const builtIn = spyOnExchange(ServiceAccountCredentialExchanger);
-    const exchanger = new AutoAuthCredentialExchanger({
-      [AuthCredentialTypes.SERVICE_ACCOUNT]: recording,
-    });
+    const exchanger = new AutoAuthCredentialExchanger(
+      registryWith(AuthCredentialTypes.SERVICE_ACCOUNT, recording),
+    );
     const authCredential: AuthCredential = {
       authType: AuthCredentialTypes.SERVICE_ACCOUNT,
       serviceAccount: {useDefaultCredential: true},
@@ -347,5 +361,34 @@ describe('ServiceAccountCredentialExchanger', () => {
     ).rejects.toThrow(
       'Failed to exchange explicit service account token: Auth failed',
     );
+  });
+});
+
+describe('ToolAuthHandler with an injected exchanger', () => {
+  it('routes an apiKey credential through a custom exchanger', async () => {
+    const recording = createRecordingExchanger();
+    const context = {
+      state: new State(),
+      getAuthResponse: vi.fn().mockReturnValue({
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'key',
+      }),
+    } as unknown as Context;
+
+    const handler = ToolAuthHandler.fromToolContext(
+      context,
+      {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+      undefined,
+      {
+        credentialExchanger: new AutoAuthCredentialExchanger(
+          registryWith(AuthCredentialTypes.API_KEY, recording),
+        ),
+      },
+    );
+
+    const result = await handler.prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(recording.exchange).toHaveBeenCalledTimes(1);
   });
 });
