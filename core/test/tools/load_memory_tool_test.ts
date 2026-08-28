@@ -192,9 +192,11 @@ describe('LoadMemoryTool', () => {
       llmRequest,
     });
 
-    expect(llmRequest.config?.systemInstruction).toContain('You have memory.');
-    expect(llmRequest.config?.systemInstruction).toContain(
-      'call load_memory function with a query',
+    expect(llmRequest.config?.systemInstruction).toEqual(
+      expect.stringContaining('You have memory.'),
+    );
+    expect(llmRequest.config?.systemInstruction).toEqual(
+      expect.stringContaining('call load_memory function with a query'),
     );
   });
 
