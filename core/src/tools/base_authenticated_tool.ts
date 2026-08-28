@@ -6,11 +6,13 @@
 
 import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthConfig} from '../auth/auth_tool.js';
-import {CredentialManager} from '../auth/credential_manager.js';
+import {
+  CredentialManager,
+  PENDING_USER_AUTHORIZATION,
+} from '../auth/credential_manager.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 
-import {PENDING_USER_AUTHORIZATION} from './authenticated_function_tool.js';
 import {BaseTool, BaseToolParams, RunAsyncToolRequest} from './base_tool.js';
 
 /** The constructor parameters for a {@link BaseAuthenticatedTool}. */
@@ -46,23 +48,6 @@ export interface RunAsyncAuthenticatedToolRequest extends RunAsyncToolRequest {
  *
  * {@link AuthenticatedFunctionTool} is the equivalent for a plain function.
  * Reach for this class when the tool needs its own declaration or state.
- *
- * @example
- * ```ts
- * class ListDocumentsTool extends BaseAuthenticatedTool {
- *   constructor() {
- *     super({
- *       name: 'list_documents',
- *       description: 'Lists the documents in a folder.',
- *       authConfig,
- *     });
- *   }
- *
- *   protected override async runAsyncImpl({args, credential}) {
- *     return fetchDocuments(args.folder, credential?.oauth2?.accessToken);
- *   }
- * }
- * ```
  */
 @experimental
 export abstract class BaseAuthenticatedTool extends BaseTool {
