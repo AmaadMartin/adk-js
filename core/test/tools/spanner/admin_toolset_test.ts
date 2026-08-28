@@ -242,6 +242,35 @@ describe('SpannerAdminToolset', () => {
       expect(fakeDatabaseAdmin.close).toHaveBeenCalledTimes(1);
     });
 
+    it('serves the turn after the one the runner closed', async () => {
+      // Constructing a gax client gives a live one, and closing it makes every
+      // later call reject. `Runner` closes every toolset at the end of a turn,
+      // so the second turn only works if the toolset built a new client.
+      InstanceAdminClientMock.mockImplementation(() => {
+        fakeInstanceAdmin.listInstances.mockResolvedValue([[]]);
+        return fakeInstanceAdmin;
+      });
+      fakeInstanceAdmin.close.mockImplementation(async () => {
+        fakeInstanceAdmin.listInstances.mockRejectedValue(
+          new Error('The client has already been closed.'),
+        );
+      });
+      const toolset = new SpannerAdminToolset();
+      const [listInstances] = await toolset.getTools();
+      const runTurn = async () => {
+        const result = await listInstances.runAsync({
+          args: {project_id: 'my-project'},
+          toolContext: makeToolContext(),
+        });
+        await toolset.close();
+        return result;
+      };
+      await runTurn();
+
+      expect(await runTurn()).toEqual({status: 'SUCCESS', results: []});
+      expect(InstanceAdminClientMock).toHaveBeenCalledTimes(2);
+    });
+
     it('does not build a client when no tool ever ran', async () => {
       await new SpannerAdminToolset().close();
 

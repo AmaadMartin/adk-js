@@ -78,6 +78,17 @@ describe('SpannerAdminClientProvider', () => {
       expect(fakeDatabaseAdmin.close).toHaveBeenCalledTimes(1);
     });
 
+    it('builds a fresh pair for the call after it', async () => {
+      const provider = new SpannerAdminClientProvider();
+      await provider.getClients();
+
+      await provider.close();
+      await provider.getClients();
+
+      expect(InstanceAdminClientMock).toHaveBeenCalledTimes(2);
+      expect(DatabaseAdminClientMock).toHaveBeenCalledTimes(2);
+    });
+
     it('does nothing when the clients were never built', async () => {
       await new SpannerAdminClientProvider().close();
 

@@ -62,13 +62,19 @@ export class SpannerAdminClientProvider {
   }
 
   /**
-   * Closes both admin clients. Safe to call twice, and safe to call when no
-   * tool ever ran, in which case no client was created and there is nothing to
-   * release.
+   * Closes both admin clients and drops them, so the next tool call builds a
+   * fresh pair. `Runner` closes every toolset in the agent tree at the end of
+   * each turn, and a closed gax client rejects every later call, so a provider
+   * that kept the closed clients would serve one turn and fail on the next.
+   *
+   * Safe to call twice, and safe to call when no tool ever ran, in which case
+   * no client was created and there is nothing to release.
    */
   async close(): Promise<void> {
+    const closing = this.clientsPromise;
+    this.clientsPromise = undefined;
     // A provider whose clients failed to build has nothing to release either.
-    const clients = await this.clientsPromise?.catch(() => undefined);
+    const clients = await closing?.catch(() => undefined);
     if (!clients) {
       return;
     }
