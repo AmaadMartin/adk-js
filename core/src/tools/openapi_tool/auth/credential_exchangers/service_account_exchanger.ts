@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleAuth, JWT} from 'google-auth-library';
+import {GoogleAuth, IdTokenClient, JWT} from 'google-auth-library';
 import {
   AuthCredential,
   AuthCredentialTypes,
@@ -31,6 +31,83 @@ const QUOTA_PROJECT_HEADER = 'x-goog-user-project';
 
 /** Shared by the two access-token paths; the ID-token path has its own. */
 const ACCESS_TOKEN_FAILURE = 'Failed to exchange service account token';
+
+/**
+ * Cap on each client cache. A configuration can arrive from a runtime auth
+ * response as well as from static tool configuration, so the maps below are
+ * bounded rather than left to grow for the life of the process.
+ */
+const MAX_CACHED_CLIENTS = 100;
+
+/**
+ * Auth clients, keyed by service-account configuration.
+ *
+ * Reusing a client is what makes a repeated exchange cheap. `JWT.authorize`,
+ * `AuthClient.getAccessToken` and `IdTokenClient.getRequestHeaders` each return
+ * the token their client already holds, and go to Google only inside the
+ * client's eager-refresh window. A fresh client holds nothing, so it always
+ * mints.
+ *
+ * The caches are module-level because `ToolAuthHandler` builds a new exchanger
+ * for every tool call: an instance field would never survive to be read.
+ */
+const adcClients = new Map<string, GoogleAuth>();
+const jwtClients = new Map<string, JWT>();
+const idTokenClients = new Map<string, IdTokenClient>();
+
+/**
+ * Identifies a service-account configuration. `useDefaultCredential` is part of
+ * the key because it overrides any key material the caller also supplied, so
+ * two configurations that differ only there mint different tokens.
+ *
+ * The private key is deliberately absent: `privateKeyId` and `clientEmail`
+ * already tell two accounts apart, and the key must never reach a long-lived
+ * string.
+ */
+function cacheKey(saConfig: ServiceAccount): string {
+  const creds = saConfig.serviceAccountCredential;
+  return JSON.stringify([
+    saConfig.useDefaultCredential ?? false,
+    creds?.privateKeyId ?? null,
+    creds?.clientEmail ?? null,
+    saConfig.scopes ?? [],
+    saConfig.audience ?? null,
+  ]);
+}
+
+/** Returns the cached client for `key`, creating and storing it on a miss. */
+async function cachedClient<T>(
+  cache: Map<string, T>,
+  key: string,
+  create: () => T | Promise<T>,
+): Promise<T> {
+  const existing = cache.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const created = await create();
+  cache.set(key, created);
+  for (const oldestKey of cache.keys()) {
+    if (cache.size <= MAX_CACHED_CLIENTS) {
+      break;
+    }
+    cache.delete(oldestKey);
+  }
+
+  return created;
+}
+
+/**
+ * Drops every cached auth client, so the next exchange builds a fresh one and
+ * mints a fresh token. The caches are module-level, which makes one test's
+ * client visible to the next test; call this between tests.
+ */
+export function resetCredentialCaches(): void {
+  adcClients.clear();
+  jwtClients.clear();
+  idTokenClients.clear();
+}
 
 /**
  * Builds the HTTP bearer credential the exchange returns.
@@ -86,9 +163,14 @@ async function exchangeAdcAccessToken(
   saConfig: ServiceAccount,
 ): Promise<ExchangeResult> {
   try {
-    const auth = new GoogleAuth({
-      scopes: saConfig.scopes?.length ? saConfig.scopes : DEFAULT_SCOPES,
-    });
+    const auth = await cachedClient(
+      adcClients,
+      cacheKey(saConfig),
+      () =>
+        new GoogleAuth({
+          scopes: saConfig.scopes?.length ? saConfig.scopes : DEFAULT_SCOPES,
+        }),
+    );
     const client = await auth.getClient();
     const {token} = await client.getAccessToken();
 
@@ -108,15 +190,18 @@ async function exchangeAdcAccessToken(
 }
 
 async function exchangeExplicitAccessToken(
+  saConfig: ServiceAccount,
   creds: ServiceAccountCredential,
   scopes: string[],
 ): Promise<ExchangeResult> {
   try {
-    const client = new JWT({
-      email: creds.clientEmail,
-      key: creds.privateKey,
-      scopes,
-    });
+    const client = await cachedClient(
+      jwtClients,
+      cacheKey(saConfig),
+      () => new JWT({email: creds.clientEmail, key: creds.privateKey, scopes}),
+    );
+    // On a client that already holds a token, this returns it without a round
+    // trip; it re-mints only inside the client's eager-refresh window.
     const {access_token: token} = await client.authorize();
 
     if (!token) {
@@ -146,12 +231,7 @@ async function exchangeForAccessToken(
     );
   }
 
-  return exchangeExplicitAccessToken(creds, saConfig.scopes);
-}
-
-async function fetchAdcIdToken(audience: string): Promise<string> {
-  const client = await new GoogleAuth().getIdTokenClient(audience);
-  return client.idTokenProvider.fetchIdToken(audience);
+  return exchangeExplicitAccessToken(saConfig, creds, saConfig.scopes);
 }
 
 async function exchangeForIdToken(
@@ -170,12 +250,25 @@ async function exchangeForIdToken(
     : requireExplicitCredential(saConfig);
 
   try {
-    const token = creds
-      ? await new JWT({
-          email: creds.clientEmail,
-          key: creds.privateKey,
-        }).fetchIdToken(audience)
-      : await fetchAdcIdToken(audience);
+    const client = await cachedClient(idTokenClients, cacheKey(saConfig), () =>
+      creds
+        ? new IdTokenClient({
+            targetAudience: audience,
+            idTokenProvider: new JWT({
+              email: creds.clientEmail,
+              key: creds.privateKey,
+            }),
+          })
+        : new GoogleAuth().getIdTokenClient(audience),
+    );
+    // The client re-fetches only when its ID token is missing or near the
+    // `exp` claim it decoded when it was minted.
+    await client.getRequestHeaders();
+    const token = client.credentials.id_token;
+
+    if (!token) {
+      throw new Error('Failed to get ID token');
+    }
 
     return bearerResult(token);
   } catch (error: unknown) {
