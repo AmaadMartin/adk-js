@@ -32,27 +32,26 @@ const REFRESHERS: Partial<
   [AuthCredentialTypes.OPEN_ID_CONNECT]: OAUTH2_REFRESHER,
 };
 
-let exchangers:
-  | Partial<Record<AuthCredentialTypes, BaseCredentialExchanger>>
-  | undefined;
+/** The exchanger for each credential type exchanged over the network. */
+const EXCHANGERS: Partial<
+  Record<AuthCredentialTypes, BaseCredentialExchanger>
+> = {
+  [AuthCredentialTypes.OAUTH2]: OAUTH2_EXCHANGER,
+  [AuthCredentialTypes.OPEN_ID_CONNECT]: OAUTH2_EXCHANGER,
+};
 
 /**
- * The exchanger for a credential type, from one table the whole process
- * shares. An exchanger reads only its arguments, so no tool can contribute
- * state to it. The table is built on first use because constructing
- * `ServiceAccountCredentialExchanger` logs an experimental warning, which must
- * not fire just because someone imported the package.
+ * The exchanger for a credential type. An exchanger reads only its arguments,
+ * so no tool can contribute state to it. `ServiceAccountCredentialExchanger`
+ * is built on the one path that uses it, because constructing it logs an
+ * experimental warning that must not fire on import.
  */
 function exchangerFor(
   authType: AuthCredentialTypes,
 ): BaseCredentialExchanger | undefined {
-  exchangers ??= {
-    [AuthCredentialTypes.OAUTH2]: OAUTH2_EXCHANGER,
-    [AuthCredentialTypes.OPEN_ID_CONNECT]: OAUTH2_EXCHANGER,
-    [AuthCredentialTypes.SERVICE_ACCOUNT]:
-      new ServiceAccountCredentialExchanger(),
-  };
-  return exchangers[authType];
+  return authType === AuthCredentialTypes.SERVICE_ACCOUNT
+    ? new ServiceAccountCredentialExchanger()
+    : EXCHANGERS[authType];
 }
 
 /**
