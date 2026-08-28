@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys} from '../../src/utils/case_utils.js';
+import {camelCaseKeys, snakeCase} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
   describe('camelCaseKeys', () => {
@@ -89,6 +89,22 @@ describe('case_utils', () => {
       expect(camelCaseKeys(123)).toBe(123);
       expect(camelCaseKeys('hello')).toBe('hello');
       expect(camelCaseKeys(true)).toBe(true);
+    });
+  });
+
+  describe('snakeCase', () => {
+    it.each([
+      ['camelCase', 'camel_case'],
+      ['UpperCamelCase', 'upper_camel_case'],
+      ['space separated', 'space_separated'],
+      ['REST API', 'rest_api'],
+      ['Mock API', 'mock_api'],
+      ['already_snake_case', 'already_snake_case'],
+      ['HTTPResponseCode2', 'http_response_code2'],
+      ['', ''],
+      ['  --leading__and trailing-- ', 'leading_and_trailing'],
+    ])('should convert %s', (input, expected) => {
+      expect(snakeCase(input)).toBe(expected);
     });
   });
 });
