@@ -5,8 +5,10 @@
  */
 
 import {
+  App,
   BaseArtifactService,
   BaseSessionService,
+  isApp,
   RunnableRoot,
 } from '@google/adk';
 import {randomUUID} from 'node:crypto';
@@ -111,6 +113,11 @@ export interface RunEvalsOptions {
   /** Eval-set file to the case names to run from it; empty means all. */
   evalSetToEvals: Map<string, string[]>;
   rootAgent: RunnableRoot;
+  /**
+   * The app the agent file exported, when it exported one. Passing it keeps
+   * the run's plugins and resumability config the same as `adk run` uses.
+   */
+  app?: App;
   resetFunc?: ResetFunc;
   evalMetrics: EvalMetric[];
   sessionService?: BaseSessionService;
@@ -194,7 +201,9 @@ export async function getEvaluationCriteriaOrDefault(
 ): Promise<Record<string, number>> {
   if (!configFilePath) {
     logger.info('No config file supplied. Using default criteria.');
-    return DEFAULT_CRITERIA;
+    // A copy: the return type is mutable, so handing back the constant itself
+    // would let a caller edit it for the rest of the process.
+    return {...DEFAULT_CRITERIA};
   }
 
   const configData = await loadFileData<unknown>(
@@ -258,6 +267,7 @@ export async function* runEvals(
         const turns = await processQueryWithRootAgent({
           data: evalItem.data,
           rootAgent: options.rootAgent,
+          app: options.app,
           resetFunc: options.resetFunc,
           initialSession: evalItem.initial_session,
           sessionId,
@@ -424,13 +434,16 @@ export async function evalAgent(options: EvalAgentOptions): Promise<void> {
     getAbsolutePath(options.agentPath),
     options.agentFileLoadOptions,
   );
-  const rootAgent = await agentFile.loadAgent();
+  const loaded = await agentFile.load();
+  const app = isApp(loaded) ? loaded : undefined;
+  const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
   const resetFunc = tryGetResetFunc(agentFile);
 
   const evalResults: EvalResult[] = [];
   for await (const evalResult of runEvals({
     evalSetToEvals: parseAndGetEvalsToRun(options.evalSetFilePaths),
     rootAgent,
+    app,
     resetFunc,
     evalMetrics,
     sessionService: options.sessionService,

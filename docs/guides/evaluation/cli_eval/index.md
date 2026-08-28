@@ -103,6 +103,10 @@ adk eval ./agent.ts ./roll_die.evalset.json:case_1,case_3
 You can pass several eval sets at once. Naming the same file twice adds its
 selectors together.
 
+Do not put a space after the comma. A selector must equal the case name
+exactly, so `case_1, case_2` looks for a case named `" case_2"` and runs
+nothing for it. adk-python behaves the same way.
+
 ## The eval-set file format
 
 The keys are `snake_case`, because adk-python reads the same files.
@@ -121,6 +125,17 @@ The keys are `snake_case`, because adk-python reads the same files.
 A case without `initial_session` runs under the app name `EvaluationGenerator`
 and the user id `test_user_id`. Every case runs in a fresh session whose id
 starts with `___eval___session___`.
+
+## Agent files that export an App
+
+If your agent file exports an `App` rather than a bare agent, `adk eval` runs
+that `App`, so its plugins and its resumability config apply exactly as they do
+under `adk run`. A plugin's `beforeToolCallback` can intercept a tool call, so
+running without it would score a composition you never execute.
+
+The app names the run. When an `App` is present its `name` is the app name, and
+an `initial_session.app_name` in the eval data is ignored, because the runner
+prefers the app's own name.
 
 ## Mocking a tool
 

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseAgent, Event, InvocationContext} from '@google/adk';
+import {App, BaseAgent, Event, InvocationContext} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -810,15 +810,15 @@ describe('DEFAULT_CRITERIA', () => {
 
 describe('evalAgent', () => {
   const rootAgent = new StubAgent({name: 'root_agent'});
-  let loadAgent: ReturnType<typeof vi.spyOn>;
+  let load: ReturnType<typeof vi.spyOn>;
   let dispose: ReturnType<typeof vi.spyOn>;
   let moduleExports: Record<string, unknown>;
 
   beforeEach(() => {
     moduleExports = {};
-    loadAgent = vi
-      .spyOn(AgentFile.prototype, 'loadAgent')
-      .mockResolvedValue(rootAgent);
+    // `evalAgent` calls `load()`, not `loadAgent()`, so it can keep an
+    // exported `App` and hand its plugins to the runner.
+    load = vi.spyOn(AgentFile.prototype, 'load').mockResolvedValue(rootAgent);
     dispose = vi
       .spyOn(AgentFile.prototype, 'dispose')
       .mockResolvedValue(undefined);
@@ -881,6 +881,28 @@ describe('evalAgent', () => {
     );
   });
 
+  it('forwards an exported App, so the run keeps its plugins', async () => {
+    const evalSetFile = await writePassingEvalSet();
+    const app = new App({name: 'my_app', rootAgent});
+    load.mockResolvedValue(app);
+
+    await evalAgent({agentPath: 'agent.ts', evalSetFilePaths: [evalSetFile]});
+
+    expect(processQueryWithRootAgent).toHaveBeenCalledWith(
+      expect.objectContaining({app, rootAgent: app.rootAgent}),
+    );
+  });
+
+  it('passes no app when the agent file exports a bare agent', async () => {
+    const evalSetFile = await writePassingEvalSet();
+
+    await evalAgent({agentPath: 'agent.ts', evalSetFilePaths: [evalSetFile]});
+
+    expect(processQueryWithRootAgent).toHaveBeenCalledWith(
+      expect.objectContaining({app: undefined, rootAgent}),
+    );
+  });
+
   it('disposes the agent file when a criteria file is malformed', async () => {
     const evalSetFile = await writePassingEvalSet();
     const configFilePath = await writeFile('bad_config.json', '{}');
@@ -893,7 +915,7 @@ describe('evalAgent', () => {
       }),
     ).rejects.toThrow('Invalid format for');
 
-    expect(loadAgent).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
   });
 
   it('disposes the agent file when an eval set file is malformed', async () => {
