@@ -17,7 +17,7 @@ import {
 } from '@google/adk';
 import {Type} from '@google/genai';
 import {StructuredTool, Tool, tool} from '@langchain/core/tools';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it} from 'vitest';
 import {z} from 'zod';
 
 /** A structured `@langchain/core` tool backed by a synchronous function. */
@@ -269,39 +269,7 @@ describe('LangchainTool', () => {
     });
   });
 
-  describe('entry point precedence', () => {
-    it('runs a tool that only exposes func', async () => {
-      const adkTool = new LangchainTool({
-        tool: {name: 'onlyFunc', func: () => 'ran'},
-      });
-
-      await expect(
-        adkTool.runAsync({args: {}, toolContext: emptyContext}),
-      ).resolves.toEqual('ran');
-    });
-
-    it('runs a tool that only exposes call', async () => {
-      const adkTool = new LangchainTool({
-        tool: {name: 'onlyCall', call: () => 'called'},
-      });
-
-      await expect(
-        adkTool.runAsync({args: {}, toolContext: emptyContext}),
-      ).resolves.toEqual('called');
-    });
-
-    it('prefers invoke over func', async () => {
-      const func = vi.fn(() => 'func');
-      const adkTool = new LangchainTool({
-        tool: {name: 'both', invoke: () => 'invoke', func},
-      });
-
-      await expect(
-        adkTool.runAsync({args: {}, toolContext: emptyContext}),
-      ).resolves.toEqual('invoke');
-      expect(func).not.toHaveBeenCalled();
-    });
-
+  describe('entry point', () => {
     it('binds the entry point to the wrapped tool', async () => {
       const adkTool = new LangchainTool({
         tool: {
@@ -317,9 +285,9 @@ describe('LangchainTool', () => {
       ).resolves.toEqual('selfAware');
     });
 
-    it('rejects an object with no entry point', () => {
+    it('rejects an object with no invoke method', () => {
       expect(() => new LangchainTool({tool: {name: 'nope'}})).toThrow(
-        "Tool must be a LangChain tool with an 'invoke', 'call' or 'func' method.",
+        "Tool must be a LangChain tool with an 'invoke' method.",
       );
     });
 
@@ -350,19 +318,7 @@ describe('LangchainTool', () => {
       expect(context.actions.skipSummarization).toBe(true);
     });
 
-    it('sets skipSummarization when the error key is falsy', async () => {
-      const context = makeContext();
-      const adkTool = new LangchainTool({
-        tool: makeReturnDirectTool({error: null, value: 1}),
-      });
-
-      await expect(
-        adkTool.runAsync({args: {}, toolContext: context}),
-      ).resolves.toEqual({error: null, value: 1});
-      expect(context.actions.skipSummarization).toBe(true);
-    });
-
-    it('leaves skipSummarization unset for a truthy error key', async () => {
+    it('sets skipSummarization for a result that carries an error key', async () => {
       const context = makeContext();
       const adkTool = new LangchainTool({
         tool: makeReturnDirectTool({error: 'boom'}),
@@ -371,7 +327,7 @@ describe('LangchainTool', () => {
       await expect(
         adkTool.runAsync({args: {}, toolContext: context}),
       ).resolves.toEqual({error: 'boom'});
-      expect(context.actions.skipSummarization).toBeUndefined();
+      expect(context.actions.skipSummarization).toBe(true);
     });
 
     it('leaves skipSummarization unset when the tool rejects', async () => {

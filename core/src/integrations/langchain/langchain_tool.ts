@@ -30,12 +30,8 @@ export interface LangchainToolLike {
   returnDirect?: boolean;
   /** A Zod schema (v3 or v4), or a plain JSON Schema object. */
   schema?: unknown;
-  /** The current public entry point (`Runnable.invoke`). */
+  /** The tool's entry point, inherited from LangChain's `Runnable`. */
   invoke?(input: unknown): unknown;
-  /** The deprecated entry point kept by `StructuredTool`. */
-  call?(input: unknown): unknown;
-  /** The bare function held by a `DynamicTool` / `DynamicStructuredTool`. */
-  func?(input: unknown): unknown;
 }
 
 /** Options for {@link LangchainTool}. */
@@ -48,65 +44,14 @@ export interface LangchainToolOptions {
   description?: string;
 }
 
-/**
- * Returns the tool's entry point, bound to the tool because LangChain's
- * methods use `this`.
- *
- * `invoke` wins over `call` (deprecated in LangChain) and over `func` (the raw
- * function, which skips the tool's own argument validation and callbacks).
- */
+/** Returns `invoke` bound to the tool, because LangChain's methods use `this`. */
 function resolveEntryPoint(
   tool: LangchainToolLike,
 ): (input: unknown) => unknown {
-  const entryPoint = tool.invoke ?? tool.call ?? tool.func;
-  if (typeof entryPoint !== 'function') {
-    throw new Error(
-      "Tool must be a LangChain tool with an 'invoke', 'call' or 'func' method.",
-    );
+  if (typeof tool.invoke !== 'function') {
+    throw new Error("Tool must be a LangChain tool with an 'invoke' method.");
   }
-  return entryPoint.bind(tool);
-}
-
-/** Returns true when `value` is a plain JSON Schema object. */
-function isJsonSchemaObject(value: unknown): value is object {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Converts a LangChain tool's schema to the parameters of the model-facing
- * declaration, or `undefined` when the tool declares no schema.
- *
- * A Zod schema is rendered as JSON Schema first. That step matters for
- * LangChain's string-input `Tool`, whose schema is a transformed
- * `z.object({input})` rather than a plain object: rendering it yields the
- * transform's input side, `{input: string}`, which is what the model must send.
- */
-function toDeclarationParameters(schema: unknown): Schema | undefined {
-  if (schema === undefined) {
-    return undefined;
-  }
-  if (isZodSchema(schema)) {
-    return toGeminiSchema(toJsonSchema(schema));
-  }
-  if (isJsonSchemaObject(schema)) {
-    return toGeminiSchema(schema);
-  }
-  throw new Error(`unsupported schema of type ${typeof schema}`);
-}
-
-/**
- * Returns true when the tool reported a failure rather than a result.
- *
- * The check is on truthiness, not presence: a tool that returns
- * `{error: null, ...}` produced a real result.
- */
-function isErrorResult(result: unknown): boolean {
-  return (
-    typeof result === 'object' &&
-    result !== null &&
-    'error' in result &&
-    Boolean(result.error)
-  );
+  return tool.invoke.bind(tool);
 }
 
 /** Resolves the model-facing name, which the declaration cannot go without. */
@@ -120,10 +65,32 @@ function resolveName(options: LangchainToolOptions): string {
   return name;
 }
 
-/** Resolves the declaration parameters, reporting a schema it cannot convert. */
+/**
+ * Converts the tool's schema to the parameters of the model-facing
+ * declaration, or `undefined` when the tool declares no schema.
+ *
+ * A Zod schema is rendered as JSON Schema first. That step matters for
+ * LangChain's string-input `Tool`, whose schema is a transformed
+ * `z.object({input})` rather than a plain object: rendering it yields the
+ * transform's input side, `{input: string}`, which is what the model must send.
+ */
 function resolveParameters(tool: LangchainToolLike): Schema | undefined {
+  const {schema} = tool;
+  if (schema === undefined) {
+    return undefined;
+  }
   try {
-    return toDeclarationParameters(tool.schema);
+    if (isZodSchema(schema)) {
+      return toGeminiSchema(toJsonSchema(schema));
+    }
+    if (
+      typeof schema !== 'object' ||
+      schema === null ||
+      Array.isArray(schema)
+    ) {
+      throw new Error(`unsupported schema of type ${typeof schema}`);
+    }
+    return toGeminiSchema(schema);
   } catch (error: unknown) {
     throw new Error(
       `Failed to build function declaration for Langchain tool: ${formatError(error)}`,
@@ -179,12 +146,12 @@ export class LangchainTool extends FunctionTool<Schema> {
    * Runs the wrapped tool and, for a `returnDirect` tool, asks the framework to
    * skip summarization.
    *
-   * An error result stays summarizable so the model sees the failure and can
-   * retry, which is why it does not set the flag.
+   * A tool that fails throws instead of returning, so a run that reaches the
+   * flag produced a result.
    */
   override async runAsync(req: RunAsyncToolRequest): Promise<unknown> {
     const result = await super.runAsync(req);
-    if (this.returnDirect && !isErrorResult(result)) {
+    if (this.returnDirect) {
       req.toolContext.actions.skipSummarization = true;
     }
     return result;
