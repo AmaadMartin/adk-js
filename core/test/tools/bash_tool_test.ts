@@ -130,6 +130,12 @@ describe('validateCommand', () => {
   });
 });
 
+/** The clause every description carries, stating that no shell runs. */
+const NO_SHELL_NOTE =
+  'All commands require user confirmation. No shell runs the command, so ' +
+  '`|`, `;`, `&&`, `$()`, redirection and globs are passed to the program ' +
+  'as literal arguments instead of being interpreted.';
+
 describe('ExecuteBashTool declaration', () => {
   it('declares a required command string named execute_bash', () => {
     const tool = new ExecuteBashTool();
@@ -141,7 +147,10 @@ describe('ExecuteBashTool declaration', () => {
         properties: {
           command: {
             type: 'STRING',
-            description: 'The bash command to execute.',
+            description:
+              'The command to execute, as a program and its arguments. ' +
+              'Quoting follows POSIX shell rules, but no shell interprets ' +
+              'the result, so it cannot pipe, redirect or chain.',
           },
         },
         required: ['command'],
@@ -151,9 +160,7 @@ describe('ExecuteBashTool declaration', () => {
 
   it('describes the default policy as allowing any command', () => {
     expect(new ExecuteBashTool().description).toBe(
-      'Executes a bash command with the working directory set to the ' +
-        'workspace. Allowed: any command. All commands require user ' +
-        'confirmation.',
+      `Executes a command with the working directory set to the workspace. ${'Allowed: any command. '}${NO_SHELL_NOTE}`,
     );
   });
 
@@ -166,9 +173,7 @@ describe('ExecuteBashTool declaration', () => {
       },
     });
     expect(tool.description).toBe(
-      'Executes a bash command with the working directory set to the ' +
-        'workspace. Allowed: any command. All commands require user ' +
-        'confirmation.',
+      `Executes a command with the working directory set to the workspace. ${'Allowed: any command. '}${NO_SHELL_NOTE}`,
     );
   });
 
@@ -177,9 +182,7 @@ describe('ExecuteBashTool declaration', () => {
       policy: {allowedCommandPrefixes: ['ls', 'cat']},
     });
     expect(tool.description).toBe(
-      'Executes a bash command with the working directory set to the ' +
-        'workspace. Allowed: commands matching prefixes: ls, cat. ' +
-        'All commands require user confirmation.',
+      `Executes a command with the working directory set to the workspace. ${'Allowed: commands matching prefixes: ls, cat. '}${NO_SHELL_NOTE}`,
     );
   });
 

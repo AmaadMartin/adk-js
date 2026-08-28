@@ -150,9 +150,11 @@ export class ExecuteBashTool extends BaseTool {
     super({
       name: 'execute_bash',
       description:
-        'Executes a bash command with the working directory set to the ' +
+        'Executes a command with the working directory set to the ' +
         `workspace. Allowed: ${describeAllowed(policy)}. All commands ` +
-        'require user confirmation.',
+        'require user confirmation. No shell runs the command, so `|`, ' +
+        '`;`, `&&`, `$()`, redirection and globs are passed to the program ' +
+        'as literal arguments instead of being interpreted.',
     });
     this.workspace = options.workspace ?? process.cwd();
     this.policy = policy;
@@ -167,7 +169,10 @@ export class ExecuteBashTool extends BaseTool {
         properties: {
           command: {
             type: Type.STRING,
-            description: 'The bash command to execute.',
+            description:
+              'The command to execute, as a program and its arguments. ' +
+              'Quoting follows POSIX shell rules, but no shell interprets ' +
+              'the result, so it cannot pipe, redirect or chain.',
           },
         },
         required: ['command'],
