@@ -9,7 +9,6 @@ import {Part, ThinkingConfig} from '@google/genai';
 import {Context} from '../agents/context.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
 import {LlmRequest} from '../models/llm_request.js';
-import {logger} from '../utils/logger.js';
 
 import {BasePlanner} from './base_planner.js';
 
@@ -74,12 +73,6 @@ export class BuiltInPlanner implements BasePlanner {
    */
   applyThinkingConfig(llmRequest: LlmRequest): void {
     llmRequest.config ??= {};
-    if (llmRequest.config.thinkingConfig) {
-      logger.debug(
-        'Overwriting `thinkingConfig` from `generateContentConfig` with the ' +
-          'one provided by the `BuiltInPlanner`.',
-      );
-    }
     llmRequest.config.thinkingConfig = this.thinkingConfig;
   }
 

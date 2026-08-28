@@ -82,7 +82,7 @@ import {INTERACTIONS_REQUEST_PROCESSOR} from './processors/interactions_request_
 import {
   NL_PLANNING_REQUEST_PROCESSOR,
   NL_PLANNING_RESPONSE_PROCESSOR,
-} from './processors/nl_planning_request_processor.js';
+} from './processors/nl_planning_processor.js';
 import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_confirmation_llm_request_processor.js';
 import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './processors/request_input_llm_request_processor.js';
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';

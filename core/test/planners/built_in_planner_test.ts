@@ -18,9 +18,7 @@ import {
   ReadonlyContext,
 } from '@google/adk';
 import {ThinkingLevel} from '@google/genai';
-import {describe, expect, it, vi} from 'vitest';
-// `logger` is not part of the public surface, so the test reaches for it here.
-import {logger} from '../../src/utils/logger.js';
+import {describe, expect, it} from 'vitest';
 
 const THINKING_CONFIG = {includeThoughts: true, thinkingBudget: 1024};
 
@@ -84,29 +82,6 @@ describe('BuiltInPlanner', () => {
 
     expect(llmRequest.config.thinkingConfig).toEqual(THINKING_CONFIG);
     expect(llmRequest.config.temperature).toBe(0.5);
-  });
-
-  it('logs the overwrite of an existing thinking config', () => {
-    const debug = vi.spyOn(logger, 'debug').mockImplementation(() => {});
-    const planner = new BuiltInPlanner({thinkingConfig: THINKING_CONFIG});
-    const llmRequest = createLlmRequest();
-    llmRequest.config = {thinkingConfig: {includeThoughts: false}};
-
-    planner.applyThinkingConfig(llmRequest);
-
-    expect(debug).toHaveBeenCalledOnce();
-    expect(debug.mock.calls[0][0]).toContain('Overwriting `thinkingConfig`');
-    debug.mockRestore();
-  });
-
-  it('logs nothing when the request has no thinking config yet', () => {
-    const debug = vi.spyOn(logger, 'debug').mockImplementation(() => {});
-    const planner = new BuiltInPlanner({thinkingConfig: THINKING_CONFIG});
-
-    planner.applyThinkingConfig(createLlmRequest());
-
-    expect(debug).not.toHaveBeenCalled();
-    debug.mockRestore();
   });
 
   it('applies an empty thinking config, matching adk-python', () => {

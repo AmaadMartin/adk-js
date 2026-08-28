@@ -25,7 +25,7 @@ import {describe, expect, it, vi} from 'vitest';
 import {
   NL_PLANNING_REQUEST_PROCESSOR,
   NL_PLANNING_RESPONSE_PROCESSOR,
-} from '../../../src/agents/processors/nl_planning_request_processor.js';
+} from '../../../src/agents/processors/nl_planning_processor.js';
 
 const AGENT_NAME = 'test_agent';
 const BRANCH = 'root.test_agent';

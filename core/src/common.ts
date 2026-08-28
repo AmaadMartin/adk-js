@@ -67,7 +67,7 @@ export {
   NL_PLANNING_RESPONSE_PROCESSOR,
   NlPlanningRequestProcessor,
   NlPlanningResponseProcessor,
-} from './agents/processors/nl_planning_request_processor.js';
+} from './agents/processors/nl_planning_processor.js';
 export {ReadonlyContext} from './agents/readonly_context.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
