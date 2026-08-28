@@ -23,12 +23,6 @@ type BundledSegment =
   | {kind: 'audio'; speaker?: string; audio: Buffer}
   | {kind: 'content'; content: Content};
 
-/** A run of consecutive audio being accumulated for one speaker. */
-interface PendingRun {
-  speaker?: string;
-  chunks: Buffer[];
-}
-
 /**
  * Merges the transcription cache into segments, preserving speaker order.
  *
@@ -48,7 +42,7 @@ function bundleTranscriptionCache(
   cache: TranscriptionEntry[],
 ): BundledSegment[] {
   const segments: BundledSegment[] = [];
-  let pending: PendingRun | undefined;
+  let pending: {speaker?: string; chunks: Buffer[]} | undefined;
 
   const flush = () => {
     if (pending === undefined) {
