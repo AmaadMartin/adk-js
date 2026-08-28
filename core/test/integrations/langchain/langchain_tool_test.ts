@@ -7,13 +7,15 @@
 import {
   Context,
   createEventActions,
-  EventActions,
+  createSession,
+  InvocationContext,
   isBaseTool,
   isFunctionTool,
   LangchainTool,
   LlmRequest,
+  PluginManager,
 } from '@google/adk';
-import {Tool as GenaiTool, Type} from '@google/genai';
+import {Type} from '@google/genai';
 import {StructuredTool, Tool, tool} from '@langchain/core/tools';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
@@ -38,15 +40,21 @@ function makeReturnDirectTool(result: unknown) {
 }
 
 /** A context whose actions a test can inspect after a run. */
-function makeContext(): {context: Context; actions: EventActions} {
-  const actions = createEventActions();
-  return {context: {actions} as unknown as Context, actions};
+function makeContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      session: createSession({id: 'test-session', appName: 'test'}),
+      pluginManager: new PluginManager(),
+    }),
+    eventActions: createEventActions(),
+  });
 }
 
 describe('LangchainTool', () => {
   let emptyContext: Context;
   beforeEach(() => {
-    emptyContext = {} as Context;
+    emptyContext = makeContext();
   });
 
   it('derives the FunctionDeclaration from the wrapped Zod schema', () => {
@@ -165,10 +173,12 @@ describe('LangchainTool', () => {
     });
 
     expect(llmRequest.toolsDict['add']).toBe(adkTool);
-    const firstTool = llmRequest.config?.tools?.[0] as GenaiTool | undefined;
-    const declarations = firstTool?.functionDeclarations ?? [];
-    expect(declarations).toHaveLength(1);
-    expect(declarations[0].name).toEqual('add');
+    const [firstTool] = llmRequest.config?.tools ?? [];
+    if (!firstTool || !('functionDeclarations' in firstTool)) {
+      expect.fail('processLlmRequest appended no function declarations');
+    }
+    expect(firstTool.functionDeclarations).toHaveLength(1);
+    expect(firstTool.functionDeclarations?.[0].name).toEqual('add');
   });
 
   it('uses the tool description when no override is given', () => {
@@ -322,26 +332,26 @@ describe('LangchainTool', () => {
 
   describe('returnDirect', () => {
     it('sets skipSummarization after a successful run', async () => {
-      const {context, actions} = makeContext();
+      const context = makeContext();
       const adkTool = new LangchainTool({tool: makeReturnDirectTool('done')});
 
       await expect(
         adkTool.runAsync({args: {}, toolContext: context}),
       ).resolves.toEqual('done');
-      expect(actions.skipSummarization).toBe(true);
+      expect(context.actions.skipSummarization).toBe(true);
     });
 
     it('sets skipSummarization when the result is null', async () => {
-      const {context, actions} = makeContext();
+      const context = makeContext();
       const adkTool = new LangchainTool({tool: makeReturnDirectTool(null)});
 
       await adkTool.runAsync({args: {}, toolContext: context});
 
-      expect(actions.skipSummarization).toBe(true);
+      expect(context.actions.skipSummarization).toBe(true);
     });
 
     it('sets skipSummarization when the error key is falsy', async () => {
-      const {context, actions} = makeContext();
+      const context = makeContext();
       const adkTool = new LangchainTool({
         tool: makeReturnDirectTool({error: null, value: 1}),
       });
@@ -349,11 +359,11 @@ describe('LangchainTool', () => {
       await expect(
         adkTool.runAsync({args: {}, toolContext: context}),
       ).resolves.toEqual({error: null, value: 1});
-      expect(actions.skipSummarization).toBe(true);
+      expect(context.actions.skipSummarization).toBe(true);
     });
 
     it('leaves skipSummarization unset for a truthy error key', async () => {
-      const {context, actions} = makeContext();
+      const context = makeContext();
       const adkTool = new LangchainTool({
         tool: makeReturnDirectTool({error: 'boom'}),
       });
@@ -361,11 +371,11 @@ describe('LangchainTool', () => {
       await expect(
         adkTool.runAsync({args: {}, toolContext: context}),
       ).resolves.toEqual({error: 'boom'});
-      expect(actions.skipSummarization).toBeUndefined();
+      expect(context.actions.skipSummarization).toBeUndefined();
     });
 
     it('leaves skipSummarization unset when the tool rejects', async () => {
-      const {context, actions} = makeContext();
+      const context = makeContext();
       const rejectingTool = tool(() => 'unreachable', {
         name: 'strict',
         description: 'Rejects bad arguments',
@@ -377,16 +387,16 @@ describe('LangchainTool', () => {
       await expect(
         adkTool.runAsync({args: {x: 'not a number'}, toolContext: context}),
       ).rejects.toThrow("Error in tool 'strict'");
-      expect(actions.skipSummarization).toBeUndefined();
+      expect(context.actions.skipSummarization).toBeUndefined();
     });
 
     it('leaves skipSummarization unset when the tool is not returnDirect', async () => {
-      const {context, actions} = makeContext();
+      const context = makeContext();
       const adkTool = new LangchainTool({tool: makeAddTool()});
 
       await adkTool.runAsync({args: {x: 1, y: 1}, toolContext: context});
 
-      expect(actions.skipSummarization).toBeUndefined();
+      expect(context.actions.skipSummarization).toBeUndefined();
     });
   });
 });
