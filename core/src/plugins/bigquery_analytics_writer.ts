@@ -140,6 +140,7 @@ export class BigQueryRowWriter {
   private pendingRows = 0;
   private setupFailures = 0;
   private nextSetupAttemptMs = 0;
+  private abandoned = false;
 
   constructor(private readonly options: BigQueryRowWriterOptions) {}
 
@@ -149,8 +150,17 @@ export class BigQueryRowWriter {
     return `${projectId}.${datasetId}.${tableId}`;
   }
 
-  /** Records one lost or degraded row against `reason`. */
+  /**
+   * Records one lost or degraded row against `reason`.
+   *
+   * Counting stops once shutdown gives up on an insert: shutdown has already
+   * charged those rows, and the abandoned insert settles afterwards, so
+   * counting again would report the same row twice under two reasons.
+   */
   countDrop(reason: AnalyticsDropReason, rows = 1): void {
+    if (this.abandoned) {
+      return;
+    }
     this.drops[reason] += rows;
   }
 
@@ -207,6 +217,7 @@ export class BigQueryRowWriter {
     if (lost > 0) {
       this.queue.length = 0;
       this.countDrop(AnalyticsDropReason.SHUTDOWN_TIMEOUT, lost);
+      this.abandoned = true;
       logger.warn(
         `BigQuery analytics shutdown timed out after ` +
           `${this.options.shutdownTimeoutMs}ms; ${lost} row(s) for ` +
