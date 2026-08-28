@@ -109,22 +109,9 @@ export class AudioTranscriber {
   private clientPromise?: Promise<SpeechClient>;
 
   /**
-   * @param client Speech-to-Text client to use. Supply one to select
-   *     credentials, a project or a regional endpoint. When omitted, a default
-   *     client is constructed on the first request that has audio, which is
-   *     also when `@google-cloud/speech` is loaded.
-   */
-  constructor(client?: SpeechClient) {
-    if (client !== undefined) {
-      this.clientPromise = Promise.resolve(client);
-    }
-  }
-
-  /**
    * Resolves the Speech client, loading the `@google-cloud/speech` optional
-   * peer on first use. A client supplied to the constructor is used instead,
-   * so the package is never loaded. Nothing calls this when the cache holds no
-   * audio, so an application that only caches text never needs the package.
+   * peer on first use. Nothing calls this when the cache holds no audio, so an
+   * application that only caches text never needs the package.
    */
   private getClient(): Promise<SpeechClient> {
     this.clientPromise ??= loadOptionalPeer(
