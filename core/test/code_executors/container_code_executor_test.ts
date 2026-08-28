@@ -16,6 +16,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {PassThrough} from 'node:stream';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  PYTHON_TIMEOUT_WRAPPER,
+  TIMEOUT_EXIT_CODE,
+} from '../../src/code_executors/python_timeout_wrapper.js';
 import {logger} from '../../src/utils/logger.js';
 
 // Mock the dynamically-imported dockerode module so the lazy client
@@ -27,6 +31,11 @@ interface MockConfig {
   stdout?: string;
   stderr?: string;
   exitCode?: number | null;
+  /**
+   * Exit code of every exec after the `which python3` probe. Defaults to
+   * `exitCode`, so a run can fail without failing the probe.
+   */
+  codeExitCode?: number | null;
   buildError?: Error;
   stopError?: Error;
 }
@@ -60,16 +69,22 @@ function createMockDocker(config: MockConfig = {}): {
     stdout = '',
     stderr = '',
     exitCode = 0,
+    codeExitCode,
     buildError,
     stopError,
   } = config;
 
+  let execCount = 0;
   const container: MockContainer = {
     id: 'test-container-id',
-    exec: vi.fn().mockImplementation(async () => ({
-      start: vi.fn().mockResolvedValue(new PassThrough()),
-      inspect: vi.fn().mockResolvedValue({ExitCode: exitCode}),
-    })),
+    exec: vi.fn().mockImplementation(async () => {
+      const isProbe = execCount++ === 0;
+      const status = isProbe ? exitCode : (codeExitCode ?? exitCode);
+      return {
+        start: vi.fn().mockResolvedValue(new PassThrough()),
+        inspect: vi.fn().mockResolvedValue({ExitCode: status}),
+      };
+    }),
     start: vi.fn().mockResolvedValue(undefined),
     stop: stopError
       ? vi.fn().mockRejectedValue(stopError)
@@ -210,8 +225,12 @@ describe('ContainerCodeExecutor', () => {
     expect(result.stderr).toBe('a warning\n');
     expect(result.outputFiles).toEqual([]);
 
-    // First exec verifies python; second runs the user code.
+    // First exec verifies python; second runs the user code under the bound.
     expect(container.exec.mock.calls[1][0].Cmd).toEqual([
+      'python3',
+      '-c',
+      PYTHON_TIMEOUT_WRAPPER,
+      '300',
       'python3',
       '-c',
       'print("hello from the sandbox")',
@@ -245,12 +264,119 @@ describe('ContainerCodeExecutor', () => {
       const result = await executor.executeCode(makeParams(code, language));
 
       expect(result.stdout).toBe('ok\n');
-      // First exec verifies python3; second runs the user code.
-      expect(container.exec.mock.calls[1][0].Cmd).toEqual(cmd);
+      // First exec verifies python3; second runs the user code. The supervisor
+      // takes the first four arguments, the interpreter argv follows.
+      expect(container.exec.mock.calls[1][0].Cmd.slice(4)).toEqual(cmd);
 
       await executor.close();
     },
   );
+
+  it('passes the configured timeout to the supervisor', async () => {
+    const {docker, container} = createMockDocker();
+    const executor = new ContainerCodeExecutor({
+      image: 'test-image',
+      timeoutSeconds: 7,
+      docker: asDocker(docker),
+    });
+
+    await executor.executeCode(makeParams('while True: pass'));
+
+    expect(container.exec.mock.calls[1][0].Cmd.slice(0, 4)).toEqual([
+      'python3',
+      '-c',
+      PYTHON_TIMEOUT_WRAPPER,
+      '7',
+    ]);
+
+    await executor.close();
+  });
+
+  it('bounds a non-python interpreter with the same supervisor', async () => {
+    const {docker, container} = createMockDocker();
+    const executor = new ContainerCodeExecutor({
+      image: 'test-image',
+      timeoutSeconds: 9,
+      docker: asDocker(docker),
+    });
+
+    await executor.executeCode(
+      makeParams('while true; do :; done', CodeExecutionLanguage.SHELL),
+    );
+
+    expect(container.exec.mock.calls[1][0].Cmd).toEqual([
+      'python3',
+      '-c',
+      PYTHON_TIMEOUT_WRAPPER,
+      '9',
+      'sh',
+      '-c',
+      'while true; do :; done',
+    ]);
+
+    await executor.close();
+  });
+
+  it.each([0, -1, 1.5, NaN])(
+    'rejects a timeout of %s at construction',
+    (timeoutSeconds) => {
+      expect(
+        () => new ContainerCodeExecutor({image: 'test-image', timeoutSeconds}),
+      ).toThrow('timeoutSeconds must be a positive integer.');
+    },
+  );
+
+  it('reports a run the supervisor cut short', async () => {
+    const {docker} = createMockDocker({codeExitCode: TIMEOUT_EXIT_CODE});
+    const executor = new ContainerCodeExecutor({
+      image: 'test-image',
+      timeoutSeconds: 7,
+      docker: asDocker(docker),
+    });
+
+    const result = await executor.executeCode(makeParams('while True: pass'));
+
+    expect(result.stderr).toBe('Code execution timed out after 7 seconds.');
+
+    await executor.close();
+  });
+
+  it('keeps the code stderr alongside the timeout notice', async () => {
+    const {docker} = createMockDocker({
+      stderr: 'a warning from the code',
+      codeExitCode: TIMEOUT_EXIT_CODE,
+    });
+    const executor = new ContainerCodeExecutor({
+      image: 'test-image',
+      timeoutSeconds: 7,
+      docker: asDocker(docker),
+    });
+
+    const result = await executor.executeCode(makeParams('while True: pass'));
+
+    expect(result.stderr).toBe(
+      'a warning from the code\nCode execution timed out after 7 seconds.',
+    );
+
+    await executor.close();
+  });
+
+  it('leaves stderr untouched when the code fails without timing out', async () => {
+    const {docker} = createMockDocker({
+      stderr: 'Traceback: boom',
+      codeExitCode: 1,
+    });
+    const executor = new ContainerCodeExecutor({
+      image: 'test-image',
+      docker: asDocker(docker),
+    });
+
+    const result = await executor.executeCode(makeParams('raise Exception()'));
+
+    expect(result.stderr).toBe('Traceback: boom');
+
+    await executor.close();
+  });
 
   it('throws for a language with no configured interpreter', async () => {
     const {docker} = createMockDocker();

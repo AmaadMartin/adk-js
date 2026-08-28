@@ -17,8 +17,13 @@ import {
   DockerContainer,
   type DockerContainerOptions,
 } from './docker_container.js';
+import {
+  PYTHON_TIMEOUT_WRAPPER,
+  TIMEOUT_EXIT_CODE,
+} from './python_timeout_wrapper.js';
 
 const DEFAULT_IMAGE_TAG = 'adk-code-executor:latest';
+const DEFAULT_TIMEOUT_SECONDS = 300;
 
 /**
  * Options for {@link ContainerCodeExecutor}.
@@ -45,6 +50,11 @@ export interface ContainerCodeExecutorOptions {
    */
   networkEnabled?: boolean;
   /**
+   * Wall-clock bound in seconds on a single execution, enforced inside the
+   * container. Must be a positive integer. Defaults to 300.
+   */
+  timeoutSeconds?: number;
+  /**
    * Injected Docker client, primarily for testing so unit tests never touch a
    * real Docker daemon. Defaults to a new client built from `baseUrl`.
    */
@@ -68,6 +78,16 @@ const LANGUAGE_RUNTIME_COMMAND_MAP: Partial<
 };
 
 /**
+ * Appends the timeout notice to what the code wrote to stderr. It is appended
+ * rather than assigned: the code's own stderr is the useful diagnostic, but on
+ * its own it hides that the supervisor cut the run short.
+ */
+function withTimeoutNotice(stderr: string, timeoutSeconds: number): string {
+  const notice = `Code execution timed out after ${timeoutSeconds} seconds.`;
+  return stderr ? `${stderr}\n${notice}` : notice;
+}
+
+/**
  * A code executor that runs model-generated code inside a hardened Docker
  * container via the `dockerode` client.
  *
@@ -78,11 +98,16 @@ const LANGUAGE_RUNTIME_COMMAND_MAP: Partial<
  * metadata endpoint at `169.254.169.254`) or escalate privileges. Networking
  * can be re-enabled via `networkEnabled: true` when the executed code is
  * trusted.
+ *
+ * Every execution runs under a wall-clock bound inside the container, so a run
+ * that never returns cannot pin the container for later callers. See
+ * `timeoutSeconds`.
  */
 @experimental
 export class ContainerCodeExecutor extends BaseCodeExecutor {
   private readonly dockerPath?: string;
   private readonly containerOptions: DockerContainerOptions;
+  private readonly timeoutSeconds: number;
   private container?: DockerContainer;
   private initPromise?: Promise<void>;
 
@@ -92,6 +117,10 @@ export class ContainerCodeExecutor extends BaseCodeExecutor {
       throw new Error(
         'Either image or dockerPath must be set for ContainerCodeExecutor.',
       );
+    }
+    this.timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
+    if (!Number.isInteger(this.timeoutSeconds) || this.timeoutSeconds <= 0) {
+      throw new Error('timeoutSeconds must be a positive integer.');
     }
     this.dockerPath = options.dockerPath
       ? path.resolve(options.dockerPath)
@@ -123,9 +152,26 @@ export class ContainerCodeExecutor extends BaseCodeExecutor {
       );
     }
     await this.ensureContainer();
-    const {stdout, stderr} = await this.container!.execute([...command, code]);
+    // One container serves every invocation, so an unbounded run would pin it
+    // for all later callers. The supervisor holds the deadline in a process the
+    // executed code never runs in, so the code cannot disarm it.
+    const {stdout, stderr, exitCode} = await this.container!.execute([
+      'python3',
+      '-c',
+      PYTHON_TIMEOUT_WRAPPER,
+      String(this.timeoutSeconds),
+      ...command,
+      code,
+    ]);
     logger.debug(`Executed ${language} code:\n\`\`\`\n${code}\n\`\`\``);
-    return {stdout, stderr, outputFiles: []};
+    return {
+      stdout,
+      stderr:
+        exitCode === TIMEOUT_EXIT_CODE
+          ? withTimeoutNotice(stderr, this.timeoutSeconds)
+          : stderr,
+      outputFiles: [],
+    };
   }
 
   /**
