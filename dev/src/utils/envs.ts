@@ -112,3 +112,36 @@ export function loadDotenvForAgent(
     `Loaded ${filename} file for ${agentName} at ${dotenvPath}`,
   );
 }
+
+/** The loads already queued, so a new one waits for them. */
+let queuedLoads: Promise<unknown> = Promise.resolve();
+
+/**
+ * Applies an agent's `.env`, then runs `load` before any other agent's `.env`
+ * can be applied.
+ *
+ * `process.env` holds one agent's values at a time, and an agent module reads
+ * them while it is imported. A caller that loads several agents at once must
+ * therefore not interleave them: the second agent's `.env` would land while
+ * the first agent is still being imported, and both agents would read the
+ * second file. Loads run one after another to keep each agent on its own
+ * `.env`.
+ *
+ * @param agentName The agent's folder or file name.
+ * @param agentParentFolder The folder holding the agent.
+ * @param load Imports the agent. It runs with the agent's `.env` applied.
+ */
+export function withAgentDotenv<T>(
+  agentName: string,
+  agentParentFolder: string,
+  load: () => Promise<T>,
+): Promise<T> {
+  const loaded = queuedLoads.then(() => {
+    loadDotenvForAgent(agentName, agentParentFolder);
+    return load();
+  });
+  // The caller owns this failure. Swallow it here so one agent that fails to
+  // load does not reject every agent queued behind it.
+  queuedLoads = loaded.catch(() => {});
+  return loaded;
+}

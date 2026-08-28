@@ -74,6 +74,10 @@ DEBUG: [ADK] <timestamp> Loaded .env file for agent.ts at /home/me/agents/billin
 search always starts at the agent, so the file that is loaded depends on the
 agent, not on the directory you started the command in.
 
+`adk web` and `adk api_server` load every agent in the directory at startup.
+All agents share one `process.env`, so the CLI loads them one after another.
+Each agent reads its own `.env` while it is imported.
+
 ## Turning it off
 
 Set `ADK_DISABLE_LOAD_DOTENV` to `1` or `true`. The CLI then reads no `.env`

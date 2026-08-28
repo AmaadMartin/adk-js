@@ -13,7 +13,7 @@ import {createRequire} from 'node:module';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-import {loadDotenvForAgent} from './envs.js';
+import {withAgentDotenv} from './envs.js';
 import {
   createTempDir,
   isFile,
@@ -571,11 +571,10 @@ export class AgentLoader {
 
   private async loadAgentFromFile(file: FileMetadata): Promise<void> {
     try {
-      // The agent module reads `process.env` while it is imported, so the
-      // `.env` has to be in place before `load()` runs.
-      loadDotenvForAgent(file.name, path.dirname(file.path));
       const agentFile = new AgentFile(file.path, this.options);
-      await agentFile.load();
+      await withAgentDotenv(file.name, path.dirname(file.path), () =>
+        agentFile.load(),
+      );
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(file.name, file.path, e);
@@ -593,9 +592,10 @@ export class AgentLoader {
     }
 
     try {
-      loadDotenvForAgent(dir.name, path.dirname(dir.path));
       const agentFile = new AgentFile(possibleEntryFile.path, this.options);
-      await agentFile.load();
+      await withAgentDotenv(dir.name, path.dirname(dir.path), () =>
+        agentFile.load(),
+      );
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(dir.name, possibleEntryFile.path, e);

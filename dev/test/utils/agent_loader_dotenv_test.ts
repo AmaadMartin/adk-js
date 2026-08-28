@@ -62,6 +62,26 @@ describe('AgentLoader .env loading', () => {
     return agentFile.loadAgent();
   }
 
+  it('gives each agent its own .env when it loads them together', async () => {
+    const names = ['alpha', 'bravo', 'charlie'];
+    for (const name of names) {
+      const folder = await writeAgentFolder(name);
+      await fs.writeFile(
+        path.join(folder, '.env'),
+        `${AGENT_ENV_KEY}=from-${name}\n`,
+      );
+    }
+    loader = new AgentLoader(agentsDir, {compile: false, bundle: false});
+
+    await loader.preloadAgents();
+
+    for (const name of names) {
+      const agentFile = await loader.getAgentFile(name);
+      const agent = await agentFile.loadAgent();
+      expect(agent.name).toBe(`from-${name}`);
+    }
+  });
+
   it('applies the agent folder .env before importing the agent', async () => {
     const folder = await writeAgentFolder('agent1');
     await fs.writeFile(
