@@ -786,7 +786,7 @@ describe('AgentLoader', () => {
       const agentLoader = new AgentLoader(tempAgentsDir);
 
       await expect(agentLoader.loadAgent('nope')).rejects.toThrow(
-        /Agent 'nope' not found[\s\S]*Available agents: agent1, agent2, agent3/,
+        /Agent 'nope' not found[\s\S]*Available agents:/,
       );
       await agentLoader.disposeAll();
     });

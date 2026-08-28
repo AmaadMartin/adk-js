@@ -314,9 +314,9 @@ describe('AdkWebServer', () => {
 
     beforeEach(async () => {
       guardServer = new AdkApiServer({
-        agentLoader: {
-          listAgents: () => Promise.resolve(['testApp']),
-        } as unknown as AgentLoader,
+        agentLoader: new InMemoryAgentLoader(
+          new Map([['testApp', TEST_AGENT]]),
+        ),
       });
       await guardServer.start();
     });
@@ -726,31 +726,25 @@ describe('AdkWebServer', () => {
     });
 
     it('should return the events a failed invocation produced', async () => {
-      const originalGetAgentFile = agentLoader.getAgentFile;
-      agentLoader.getAgentFile = (() =>
-        Promise.resolve({
-          load: () =>
-            Promise.resolve(
-              new Workflow({
-                name: 'wf',
-                edges: [
-                  [
-                    'START',
-                    node(async () => 'ok', {name: 'first'}),
-                    node(
-                      async () => {
-                        throw new Error('boom');
-                      },
-                      {name: 'second'},
-                    ),
-                  ],
-                ],
-              }),
-            ),
-          async [Symbol.asyncDispose](): Promise<void> {
-            return;
-          },
-        })) as unknown as AgentLoader['getAgentFile'];
+      const originalLoadAgent = agentLoader.loadAgent;
+      agentLoader.loadAgent = () =>
+        Promise.resolve(
+          new Workflow({
+            name: 'wf',
+            edges: [
+              [
+                'START',
+                node(async () => 'ok', {name: 'first'}),
+                node(
+                  async () => {
+                    throw new Error('boom');
+                  },
+                  {name: 'second'},
+                ),
+              ],
+            ],
+          }),
+        );
 
       await sessionService.createSession({
         appName: 'testApp',
@@ -773,7 +767,7 @@ describe('AdkWebServer', () => {
         status = response.status;
         body = response.data;
       } finally {
-        agentLoader.getAgentFile = originalGetAgentFile;
+        agentLoader.loadAgent = originalLoadAgent;
       }
 
       expect(status).toBe(500);
