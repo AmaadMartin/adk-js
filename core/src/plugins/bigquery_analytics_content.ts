@@ -100,9 +100,10 @@ function buildContentPart(
   const record = baseContentPart(index);
 
   if (part.fileData) {
+    const {fileUri, mimeType} = part.fileData;
     record.storage_mode = AnalyticsStorageMode.EXTERNAL_URI;
-    record.uri = redactUriPassword(part.fileData.fileUri ?? '');
-    record.mime_type = part.fileData.mimeType ?? record.mime_type;
+    record.uri = fileUri === undefined ? null : redactUriPassword(fileUri);
+    record.mime_type = mimeType ?? record.mime_type;
     return {part: record, truncated: false};
   }
 

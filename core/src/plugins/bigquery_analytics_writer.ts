@@ -90,14 +90,18 @@ async function awaitWithTimeout(
 export class BigQueryRowWriter {
   private readonly queue: AnalyticsRow[] = [];
   private readonly inFlight = new Set<Promise<void>>();
-  private readonly drops = new Map<AnalyticsDropReason, number>(
-    Object.values(AnalyticsDropReason).map((reason) => [reason, 0]),
-  );
+  private readonly drops: Record<AnalyticsDropReason, number> = {
+    [AnalyticsDropReason.QUEUE_FULL]: 0,
+    [AnalyticsDropReason.WRITE_FAILED]: 0,
+    [AnalyticsDropReason.SHUTDOWN_TIMEOUT]: 0,
+    [AnalyticsDropReason.SETUP_UNAVAILABLE]: 0,
+    [AnalyticsDropReason.FORMATTER_FAILED]: 0,
+    [AnalyticsDropReason.CONTENT_PARSE_FAILED]: 0,
+  };
   private table?: Table;
   private tablePromise?: Promise<Table>;
   private timer?: ReturnType<typeof setTimeout>;
   private inFlightRows = 0;
-  private shutDown = false;
 
   constructor(private readonly options: BigQueryRowWriterOptions) {}
 
@@ -109,7 +113,7 @@ export class BigQueryRowWriter {
 
   /** Records one lost or degraded row against `reason`. */
   countDrop(reason: AnalyticsDropReason, rows = 1): void {
-    this.drops.set(reason, (this.drops.get(reason) ?? 0) + rows);
+    this.drops[reason] += rows;
   }
 
   /**
@@ -117,7 +121,7 @@ export class BigQueryRowWriter {
    * can export the loss after the run has finished.
    */
   getDropStats(): Record<string, number> {
-    return Object.fromEntries(this.drops);
+    return {...this.drops};
   }
 
   /**
@@ -135,7 +139,7 @@ export class BigQueryRowWriter {
       this.countDrop(AnalyticsDropReason.QUEUE_FULL);
       logger.warn(
         `BigQuery analytics queue for ${this.tableName} is full; dropping a ` +
-          `row. Rows dropped so far: ${this.drops.get(AnalyticsDropReason.QUEUE_FULL)}.`,
+          `row. Rows dropped so far: ${this.drops[AnalyticsDropReason.QUEUE_FULL]}.`,
       );
       return;
     }
@@ -154,13 +158,10 @@ export class BigQueryRowWriter {
 
   /**
    * Drains the queue, releases the flush timer, and counts whatever could not
-   * be written within the shutdown timeout. Safe to call more than once.
+   * be written within the shutdown timeout. The owning plugin is what makes
+   * shutting down idempotent, so this runs once per process.
    */
   async shutdown(): Promise<void> {
-    if (this.shutDown) {
-      return;
-    }
-    this.shutDown = true;
     this.clearTimer();
     await awaitWithTimeout(this.flush(), this.options.shutdownTimeoutMs);
     const lost = this.queue.length + this.inFlightRows;

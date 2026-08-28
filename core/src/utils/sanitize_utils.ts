@@ -48,8 +48,9 @@ export const MAX_SANITIZE_DEPTH = 50;
 export const MAX_SANITIZE_NODES = 100_000;
 
 /**
- * Keys whose values are credentials. Compared after lower-casing the key and
- * normalizing `-` to `_`, so `X-Api-Key` and `x_api_key` both match.
+ * Keys whose values are credentials, written in snake_case.
+ * {@link normalizeKey} brings `X-Api-Key`, `apiKey` and `x_api_key` to the
+ * same form, so one entry covers every spelling a payload might use.
  */
 const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
   'client_secret',
@@ -99,13 +100,28 @@ interface SanitizeState {
 }
 
 /**
+ * Brings a property name to the snake_case form {@link SENSITIVE_KEYS} uses.
+ *
+ * adk-python only folds case and `-`, because Python payloads spell these keys
+ * `access_token`. A JavaScript payload spells the same key `accessToken`, so
+ * camel humps are split too. That only widens redaction, and a key nobody
+ * meant to protect keeps its value because it is still absent from the set.
+ */
+function normalizeKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replaceAll('-', '_');
+}
+
+/**
  * Returns whether `key` names a credential and must have its value replaced.
  *
  * @param key The property name to classify.
  * @return True when the value under `key` must be redacted.
  */
 export function isSensitiveKey(key: string): boolean {
-  const normalized = key.toLowerCase().replaceAll('-', '_');
+  const normalized = normalizeKey(key);
   return (
     SENSITIVE_KEYS.has(normalized) || normalized.startsWith(TEMP_KEY_PREFIX)
   );
@@ -208,7 +224,7 @@ function sanitizeValue(
   depth: number,
 ): SanitizeResult {
   state.budget -= 1;
-  if (state.budget < 0) {
+  if (state.budget <= 0) {
     return {value: SANITIZE_BUDGET_EXCEEDED, truncated: true};
   }
   if (depth >= MAX_SANITIZE_DEPTH) {
