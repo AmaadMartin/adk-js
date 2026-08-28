@@ -5,11 +5,15 @@
  */
 
 import {
+  ApiParameter,
   createApiParameter,
+  generateParamDoc,
+  generateReturnDoc,
   getTypeHint,
   normalizeSchema,
   toSnakeCaseName,
 } from '@google/adk';
+import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 
 describe('normalizeSchema', () => {
@@ -255,5 +259,372 @@ describe('createApiParameter', () => {
         paramSchema: false,
       }),
     ).toThrow("parameter 'petId' uses an unsatisfiable false schema");
+  });
+});
+
+describe('generateParamDoc', () => {
+  it('should document a simple parameter', () => {
+    const param = createApiParameter({
+      originalName: 'test_param',
+      paramLocation: 'query',
+      paramSchema: {type: 'string'},
+      description: 'Test description',
+    });
+
+    expect(generateParamDoc(param)).toBe(
+      'test_param (string): Test description',
+    );
+  });
+
+  it('should accept a parameter that declares no description', () => {
+    const param: ApiParameter = {
+      originalName: 'test_param',
+      paramLocation: 'query',
+      paramSchema: {type: 'string'},
+      name: 'test_param',
+      required: false,
+    };
+
+    expect(generateParamDoc(param)).toBe('test_param (string): ');
+  });
+
+  it('should keep the trailing space when there is no description', () => {
+    const param = createApiParameter({
+      originalName: 'test_param',
+      paramLocation: 'query',
+      paramSchema: {type: 'integer'},
+    });
+
+    expect(generateParamDoc(param)).toBe('test_param (number): ');
+  });
+
+  it('should document the properties of an object parameter', () => {
+    const param = createApiParameter({
+      originalName: 'test_param',
+      paramLocation: 'query',
+      paramSchema: {
+        type: 'object',
+        properties: {
+          prop1: {type: 'string', description: 'Prop1 desc'},
+          prop2: {type: 'integer'},
+        },
+      },
+      description: 'Test object parameter',
+    });
+
+    expect(generateParamDoc(param)).toBe(
+      'test_param (Record<string, unknown>): Test object parameter Object' +
+        ' properties:\n       prop1 (string): Prop1 desc\n       prop2' +
+        ' (number): \n',
+    );
+  });
+
+  it('should document a referenced property as unknown', () => {
+    const param = createApiParameter({
+      originalName: 'test_param',
+      paramLocation: 'query',
+      paramSchema: {
+        type: 'object',
+        properties: {prop1: {$ref: '#/components/schemas/Pet'}},
+      },
+      description: 'Test object parameter',
+    });
+
+    expect(generateParamDoc(param)).toBe(
+      'test_param (Record<string, unknown>): Test object parameter Object' +
+        ' properties:\n       prop1 (unknown): \n',
+    );
+  });
+
+  it('should omit the properties block for an object with no properties', () => {
+    const param = createApiParameter({
+      originalName: 'test_param',
+      paramLocation: 'query',
+      paramSchema: {type: 'object', description: 'A test schema'},
+      description: 'The description.',
+    });
+
+    expect(generateParamDoc(param)).toBe(
+      'test_param (Record<string, unknown>): The description.',
+    );
+  });
+
+  it('should omit the properties block for an empty properties map', () => {
+    const param = createApiParameter({
+      originalName: 'test_param',
+      paramLocation: 'query',
+      paramSchema: {type: 'object', properties: {}},
+      description: 'The description.',
+    });
+
+    expect(generateParamDoc(param)).toBe(
+      'test_param (Record<string, unknown>): The description.',
+    );
+  });
+
+  it('should omit the properties block for a nullable object type', () => {
+    const param = createApiParameter({
+      originalName: 'test_param',
+      paramLocation: 'query',
+      paramSchema: {
+        type: ['object', 'null'],
+        properties: {prop1: {type: 'string'}},
+      },
+      description: 'The description.',
+    });
+
+    expect(generateParamDoc(param)).toBe(
+      'test_param (Record<string, unknown>): The description.',
+    );
+  });
+});
+
+describe('generateReturnDoc', () => {
+  it('should document a simple return value', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {
+        description: 'Successful response',
+        content: {'application/json': {schema: {type: 'string'}}},
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe(
+      'Returns (string): Successful response',
+    );
+  });
+
+  it('should return nothing for a response without content', () => {
+    expect(generateReturnDoc({'204': {description: 'No content'}})).toBe('');
+  });
+
+  it('should return nothing for a response with an empty content map', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {description: 'Successful response', content: {}},
+    };
+
+    expect(generateReturnDoc(responses)).toBe('');
+  });
+
+  it('should document the properties of an object return value', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {
+        description: 'Successful object response',
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                prop1: {type: 'string', description: 'Prop1 desc'},
+                prop2: {type: 'integer'},
+              },
+            },
+          },
+        },
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe(
+      'Returns (Record<string, unknown>): Successful object response Object' +
+        ' properties:\n        prop1 (string): Prop1 desc\n        prop2' +
+        ' (number): \n',
+    );
+  });
+
+  it('should ignore a non-2xx response', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {
+        description: 'Successful response',
+        content: {'application/json': {schema: {type: 'string'}}},
+      },
+      '400': {description: 'Bad request'},
+    };
+
+    expect(generateReturnDoc(responses)).toBe(
+      'Returns (string): Successful response',
+    );
+  });
+
+  it('should take the smallest 2xx status code', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '201': {
+        description: '201 response',
+        content: {'application/json': {schema: {type: 'integer'}}},
+      },
+      '200': {
+        description: '200 response',
+        content: {'application/json': {schema: {type: 'string'}}},
+      },
+      '400': {description: 'Bad request'},
+    };
+
+    expect(generateReturnDoc(responses)).toBe('Returns (string): 200 response');
+  });
+
+  it('should sort a numeric status key before a non-numeric one', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '2XX': {
+        description: 'Range response',
+        content: {'application/json': {schema: {type: 'integer'}}},
+      },
+      '200': {
+        description: 'Successful response',
+        content: {'application/json': {schema: {type: 'string'}}},
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe(
+      'Returns (string): Successful response',
+    );
+  });
+
+  it('should ignore a default response alongside a 2xx one', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {
+        description: 'Successful response',
+        content: {'application/json': {schema: {type: 'string'}}},
+      },
+      default: {
+        description: 'Unexpected error',
+        content: {'application/json': {schema: {type: 'object'}}},
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe(
+      'Returns (string): Successful response',
+    );
+  });
+
+  it('should return nothing when only a default response exists', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      default: {
+        description: 'Unexpected error',
+        content: {'application/json': {schema: {type: 'object'}}},
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe('');
+  });
+
+  it('should order two non-numeric 2xx keys by string', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '2YY': {
+        description: 'Second range',
+        content: {'application/json': {schema: {type: 'integer'}}},
+      },
+      '2XX': {
+        description: 'First range',
+        content: {'application/json': {schema: {type: 'string'}}},
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe('Returns (string): First range');
+  });
+
+  it('should skip a 2xx response that has no content', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {description: 'No content response'},
+      '201': {
+        description: '201 response',
+        content: {'application/json': {schema: {type: 'string'}}},
+      },
+      '400': {description: 'Bad request'},
+    };
+
+    expect(generateReturnDoc(responses)).toBe('Returns (string): 201 response');
+  });
+
+  it('should prefer JSON over another content type', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {
+        description: 'Successful response',
+        content: {
+          'application/xml': {schema: {type: 'integer'}},
+          'application/json': {schema: {type: 'string'}},
+        },
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe(
+      'Returns (string): Successful response',
+    );
+  });
+
+  it('should fall back to the first content type', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {
+        description: 'Successful response',
+        content: {
+          'application/xml': {schema: {type: 'integer'}},
+          'text/plain': {schema: {type: 'string'}},
+        },
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe(
+      'Returns (number): Successful response',
+    );
+  });
+
+  it('should keep the JSON entry that declares no schema', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {
+        description: 'Successful response',
+        content: {
+          'application/json': {},
+          'application/xml': {schema: {type: 'integer'}},
+        },
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe(
+      'Returns (unknown): Successful response',
+    );
+  });
+
+  it('should trim the response description', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {
+        description: '  Successful response  ',
+        content: {'application/json': {schema: {type: 'string'}}},
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe(
+      'Returns (string): Successful response',
+    );
+  });
+
+  it('should accept a response with an empty description', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {
+        description: '',
+        content: {'application/json': {schema: {type: 'string'}}},
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe('Returns (string): ');
+  });
+
+  it('should skip a referenced response', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {$ref: '#/components/responses/Ok'},
+    };
+
+    expect(generateReturnDoc(responses)).toBe('');
+  });
+
+  it('should reject a referenced response schema', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '200': {
+        description: 'Successful response',
+        content: {
+          'application/json': {schema: {$ref: '#/components/schemas/Pet'}},
+        },
+      },
+    };
+
+    expect(() => generateReturnDoc(responses)).toThrow(
+      "response body contains unresolved reference '#/components/schemas/Pet'",
+    );
   });
 });

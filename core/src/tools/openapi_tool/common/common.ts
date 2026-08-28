@@ -36,6 +36,15 @@ const DEFAULT_NAME_BY_LOCATION = new Map<string, string>([
 /** Fallback when the location is unknown. */
 const DEFAULT_NAME = 'value';
 
+/** Indent of a property line under a parameter's documentation. */
+const PARAM_PROPERTY_INDENT = '       ';
+
+/** Indent of a property line under the return documentation. */
+const RETURN_PROPERTY_INDENT = '        ';
+
+/** Matches an all-digit response status key such as `200`. */
+const NUMERIC_STATUS = /^\d+$/;
+
 /** A single argument of a tool generated from an OpenAPI operation. */
 export interface ApiParameter {
   originalName: string;
@@ -186,4 +195,99 @@ export function createApiParameter(init: ApiParameterInit): ApiParameter {
       DEFAULT_NAME,
     required: init.required ?? false,
   };
+}
+
+/** Renders the `Object properties:` block of a schema, or `''`. */
+function propertiesDoc(schema: OpenAPIV3.SchemaObject, indent: string): string {
+  if (schema.type !== 'object' || !schema.properties) {
+    return '';
+  }
+  const entries = Object.entries(schema.properties);
+  if (entries.length === 0) {
+    return '';
+  }
+
+  let doc = ' Object properties:\n';
+  for (const [propName, propDetails] of entries) {
+    if ('$ref' in propDetails) {
+      doc += `${indent}${propName} (${UNKNOWN_TYPE}): \n`;
+      continue;
+    }
+    const propDoc = propDetails.description || '';
+    doc += `${indent}${propName} (${getTypeHint(propDetails)}): ${propDoc}\n`;
+  }
+  return doc;
+}
+
+/**
+ * Renders the documentation line for one argument.
+ *
+ * @param param The parameter to document.
+ * @returns The documentation string.
+ */
+export function generateParamDoc(param: ApiParameter): string {
+  const description = param.description?.trim() ?? '';
+  const typeHint = getTypeHint(param.paramSchema);
+  const properties = propertiesDoc(param.paramSchema, PARAM_PROPERTY_INDENT);
+  return `${param.name} (${typeHint}): ${description}${properties}`;
+}
+
+/** Orders two response status keys; numeric keys sort before the rest. */
+function sortsBefore(key: string, other: string): boolean {
+  const keyIsNumeric = NUMERIC_STATUS.test(key);
+  if (keyIsNumeric !== NUMERIC_STATUS.test(other)) {
+    return keyIsNumeric;
+  }
+  return keyIsNumeric ? Number(key) < Number(other) : key < other;
+}
+
+/** The 2xx response that the tool returns. */
+interface SuccessResponse {
+  key: string;
+  content: {[media: string]: OpenAPIV3.MediaTypeObject};
+  description: string;
+}
+
+/** Picks the 2xx response with content that the tool returns. */
+function selectSuccessResponse(
+  responses: OpenAPIV3.ResponsesObject,
+): SuccessResponse | undefined {
+  let best: SuccessResponse | undefined;
+  for (const [key, response] of Object.entries(responses)) {
+    if (!key.startsWith('2') || '$ref' in response) {
+      continue;
+    }
+    const content = response.content;
+    // `{}` is truthy in JavaScript, so an empty content map must be counted.
+    if (!content || Object.keys(content).length === 0) {
+      continue;
+    }
+    if (!best || sortsBefore(key, best.key)) {
+      best = {key, content, description: response.description};
+    }
+  }
+  return best;
+}
+
+/**
+ * Renders the `Returns (...)` documentation of an operation.
+ *
+ * @param responses The operation's responses.
+ * @throws {Error} If the selected response schema is an unresolved `$ref`.
+ * @returns The documentation string, or `''` when no 2xx response has content.
+ */
+export function generateReturnDoc(
+  responses: OpenAPIV3.ResponsesObject,
+): string {
+  const response = selectSuccessResponse(responses);
+  if (!response) {
+    return '';
+  }
+
+  const {content} = response;
+  const mediaType = content['application/json'] ?? Object.values(content)[0];
+  const schema = normalizeSchema(mediaType.schema, 'response body');
+  const description = (response.description || '').trim();
+  const properties = propertiesDoc(schema, RETURN_PROPERTY_INDENT);
+  return `Returns (${getTypeHint(schema)}): ${description}${properties}`;
 }
