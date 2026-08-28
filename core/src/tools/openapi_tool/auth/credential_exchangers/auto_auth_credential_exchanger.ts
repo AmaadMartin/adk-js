@@ -13,9 +13,30 @@ import {
   BaseCredentialExchanger,
   ExchangeResult,
 } from '../../../../auth/exchanger/base_credential_exchanger.js';
-import {OAuth2CredentialExchanger} from '../../../../auth/oauth2/oauth2_credential_exchanger.js';
+import {OAuth2CredentialExchanger as OAuth2TokenExchanger} from '../../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {experimental} from '../../../../utils/experimental.js';
+import {OAuth2CredentialExchanger} from './oauth2_exchanger.js';
 import {ServiceAccountCredentialExchanger} from './service_account_exchanger.js';
+
+/**
+ * Obtains an OAuth2 access token, then converts it into the HTTP bearer
+ * credential that the OpenAPI layer sends in the Authorization header.
+ */
+async function exchangeOAuth2(params: {
+  authScheme?: AuthScheme;
+  authCredential: AuthCredential;
+}): Promise<ExchangeResult> {
+  const acquired = await new OAuth2TokenExchanger().exchange(params);
+  const converted = await new OAuth2CredentialExchanger().exchange({
+    authScheme: params.authScheme,
+    authCredential: acquired.credential,
+  });
+
+  return {
+    credential: converted.credential,
+    wasExchanged: acquired.wasExchanged || converted.wasExchanged,
+  };
+}
 
 /**
  * Automatically selects the appropriate credential exchanger based on the auth scheme.
@@ -27,14 +48,12 @@ export class AutoAuthCredentialExchanger implements BaseCredentialExchanger {
     new Map();
 
   constructor() {
-    this.exchangers.set(
-      AuthCredentialTypes.OAUTH2,
-      new OAuth2CredentialExchanger(),
-    );
-    this.exchangers.set(
-      AuthCredentialTypes.OPEN_ID_CONNECT,
-      new OAuth2CredentialExchanger(),
-    );
+    this.exchangers.set(AuthCredentialTypes.OAUTH2, {
+      exchange: exchangeOAuth2,
+    });
+    this.exchangers.set(AuthCredentialTypes.OPEN_ID_CONNECT, {
+      exchange: exchangeOAuth2,
+    });
     this.exchangers.set(
       AuthCredentialTypes.SERVICE_ACCOUNT,
       new ServiceAccountCredentialExchanger(),

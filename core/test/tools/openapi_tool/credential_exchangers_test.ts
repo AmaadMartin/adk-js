@@ -10,6 +10,7 @@ import {
   AuthCredential,
   AuthCredentialTypes,
 } from '../../../src/auth/auth_credential.js';
+import {OpenIdConnectWithConfig} from '../../../src/auth/auth_schemes.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
 
@@ -52,6 +53,30 @@ describe('AutoAuthCredentialExchanger', () => {
 
     expect(result.wasExchanged).toBe(true);
     expect(result.credential.http?.credentials.token).toBe('mock-adc-token');
+  });
+
+  it('should convert an oauth2 access token into a bearer credential', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {accessToken: 'oauth2-access-token'},
+    };
+    const authScheme = {
+      type: 'openIdConnect',
+      openIdConnectUrl: 'https://example.com/.well-known/openid-configuration',
+      authorizationEndpoint: 'https://example.com/auth',
+      tokenEndpoint: 'https://example.com/token',
+    } satisfies OpenIdConnectWithConfig;
+
+    const result = await exchanger.exchange({
+      authScheme,
+      authCredential: credential,
+    });
+
+    expect(result.credential.authType).toBe(AuthCredentialTypes.HTTP);
+    expect(result.credential.http?.credentials.token).toBe(
+      'oauth2-access-token',
+    );
   });
 });
 
