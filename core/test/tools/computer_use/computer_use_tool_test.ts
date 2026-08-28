@@ -16,7 +16,6 @@ import {
   ToolConfirmation,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {z} from 'zod';
 
 const SCREENSHOT = new TextEncoder().encode('test_screenshot');
 const SCREENSHOT_BASE64 = 'dGVzdF9zY3JlZW5zaG90';
@@ -55,7 +54,6 @@ function recordingTool(options?: {
   const tool = new ComputerUseTool({
     name: 'click_at',
     description: 'Clicks at a coordinate.',
-    parameters: z.object({x: z.number(), y: z.number()}),
     screenSize: options?.screenSize ?? [1920, 1080],
     virtualScreenSize: options?.virtualScreenSize,
     invoke: async (args) => {
@@ -103,12 +101,9 @@ describe('ComputerUseTool construction', () => {
     expect(isComputerUseTool(null)).toBe(false);
   });
 
-  it('declares its parameters for introspection', () => {
-    const declaration = recordingTool().tool._getDeclaration();
-
-    expect(declaration.name).toBe('click_at');
-    expect(declaration.parameters?.properties).toHaveProperty('x');
-    expect(declaration.parameters?.properties).toHaveProperty('y');
+  it('declares nothing, so no duplicate reaches the API', () => {
+    // The API generates the predefined declarations from `Tool.computerUse`.
+    expect(recordingTool().tool._getDeclaration()).toBeUndefined();
   });
 
   it('leaves the request untouched in processLlmRequest', async () => {
@@ -193,12 +188,6 @@ describe('ComputerUseTool coordinate normalization', () => {
     const tool = new ComputerUseTool({
       name: 'drag_and_drop',
       description: 'Drags an element.',
-      parameters: z.object({
-        x: z.number(),
-        y: z.number(),
-        destination_x: z.number(),
-        destination_y: z.number(),
-      }),
       screenSize: [1920, 1080],
       invoke: async (args) => {
         received.push(args);
@@ -224,7 +213,6 @@ describe('ComputerUseTool coordinate normalization', () => {
     const tool = new ComputerUseTool({
       name: 'scroll_document',
       description: 'Scrolls the page.',
-      parameters: z.object({direction: z.enum(['up', 'down'])}),
       screenSize: [1920, 1080],
       invoke: async (args) => {
         received.push(args);

@@ -355,7 +355,6 @@ export class ComputerUseToolset extends BaseToolset {
     return new ComputerUseTool({
       name: action.name,
       description: action.description,
-      parameters: action.parameters,
       screenSize,
       invoke: async (args, toolContext) => {
         await this.computer.prepare(toolContext);
@@ -394,8 +393,17 @@ export class ComputerUseToolset extends BaseToolset {
     _toolContext: Context,
     llmRequest: LlmRequest,
   ): Promise<void> {
+    // `toolsDict` is what the runtime dispatches a function call on, and these
+    // tools declare nothing of their own, so this loop is the only thing that
+    // makes an action reachable. It has to honour the plugin tool filter, or a
+    // filtered-out action stays callable.
     for (const tool of await this.getTools()) {
-      llmRequest.toolsDict[tool.name] = tool;
+      if (
+        !llmRequest.allowedTools ||
+        llmRequest.allowedTools.includes(tool.name)
+      ) {
+        llmRequest.toolsDict[tool.name] = tool;
+      }
     }
 
     llmRequest.config ??= {};

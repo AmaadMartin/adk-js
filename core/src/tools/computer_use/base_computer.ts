@@ -48,7 +48,7 @@ export function isComputerState(value: unknown): value is ComputerState {
   if (!Object.keys(value).every((key) => COMPUTER_STATE_KEYS.has(key))) {
     return false;
   }
-  const {screenshot, url} = value as ComputerState;
+  const {screenshot, url} = value as Record<string, unknown>;
   if (screenshot !== undefined && !ArrayBuffer.isView(screenshot)) {
     return false;
   }

@@ -16,6 +16,7 @@ import {
   createSession,
   InMemorySessionService,
   InvocationContext,
+  isComputerUseTool,
   LlmAgent,
   LlmRequest,
   PluginManager,
@@ -23,7 +24,6 @@ import {
 } from '@google/adk';
 import {Environment, Tool} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {z} from 'zod';
 
 // Declaring the mock ahead of `vi.mock` pins it to the single `{all: true}`
 // overload the implementation uses, so it stays typed without a cast.
@@ -139,13 +139,12 @@ const ALL_TOOL_NAMES = [
   'key_combination',
   'navigate',
   'open_web_browser',
-  'screenshot_placeholder',
   'scroll_at',
   'scroll_document',
   'search',
   'type_text_at',
   'wait',
-].filter((name) => name !== 'screenshot_placeholder');
+];
 
 /** Builds a `Context` a tool can run against. */
 function createToolContext(): Context {
@@ -388,6 +387,31 @@ describe('ComputerUseToolset.processLlmRequest', () => {
     ]);
   });
 
+  it('registers only the tools the plugin filter allowed', async () => {
+    const toolset = new ComputerUseToolset({computer: new MockComputer()});
+    const llmRequest = emptyRequest();
+    llmRequest.allowedTools = ['click_at', 'navigate'];
+
+    await toolset.processLlmRequest(createToolContext(), llmRequest);
+
+    // toolsDict is what the runtime dispatches on, so an action left in it
+    // stays callable however the model was configured.
+    expect(Object.keys(llmRequest.toolsDict).sort()).toEqual([
+      'click_at',
+      'navigate',
+    ]);
+    expect(llmRequest.toolsDict).not.toHaveProperty('drag_and_drop');
+  });
+
+  it('registers every tool when the filter set no allowedTools', async () => {
+    const toolset = new ComputerUseToolset({computer: new MockComputer()});
+    const llmRequest = emptyRequest();
+
+    await toolset.processLlmRequest(createToolContext(), llmRequest);
+
+    expect(Object.keys(llmRequest.toolsDict)).toHaveLength(14);
+  });
+
   it('forwards the exclusions to the API verbatim', async () => {
     const toolset = new ComputerUseToolset({
       computer: new MockComputer(),
@@ -593,7 +617,6 @@ describe('ComputerUseToolset.adaptComputerUseTool', () => {
         new ComputerUseTool({
           name: 'wait_5_seconds',
           description: 'Waits five seconds.',
-          parameters: z.object({}),
           screenSize: tool.screenSize,
           virtualScreenSize: tool.virtualScreenSize,
           invoke: () => computer.wait({seconds: 5}),
@@ -602,11 +625,11 @@ describe('ComputerUseToolset.adaptComputerUseTool', () => {
 
     expect(llmRequest.toolsDict).not.toHaveProperty('wait');
     const adapted = llmRequest.toolsDict['wait_5_seconds'];
-    expect(adapted).toBeInstanceOf(ComputerUseTool);
-    expect((adapted as ComputerUseTool).screenSize).toEqual([800, 600]);
-    expect((adapted as ComputerUseTool).virtualScreenSize).toEqual([
-      1000, 1000,
-    ]);
+    if (!isComputerUseTool(adapted)) {
+      return expect.fail('the replacement is not a ComputerUseTool');
+    }
+    expect(adapted.screenSize).toEqual([800, 600]);
+    expect(adapted.virtualScreenSize).toEqual([1000, 1000]);
 
     await adapted.runAsync({args: {}, toolContext: createToolContext()});
     expect(computer.calls[0]).toEqual({method: 'wait', args: {seconds: 5}});
@@ -623,7 +646,6 @@ describe('ComputerUseToolset.adaptComputerUseTool', () => {
         new ComputerUseTool({
           name: 'search_now',
           description: 'Searches.',
-          parameters: z.object({}),
           screenSize: tool.screenSize,
           invoke: async () => ({}),
         }),

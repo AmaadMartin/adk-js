@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration} from '@google/genai';
 import {z} from 'zod';
 
 import {Context} from '../../agents/context.js';
 import {base64Encode} from '../../utils/env_aware_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {zodObjectToSchema} from '../../utils/simple_zod_to_json.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {isComputerState} from './base_computer.js';
 
@@ -49,9 +47,13 @@ const CONFIRMATION_REQUIRED_ERROR =
 /** Returned when a human rejected the action. */
 const CONFIRMATION_REJECTED_ERROR = 'This tool call is rejected.';
 
-/** The argument keys that carry a coordinate and are therefore normalized. */
-const X_ARGUMENT_KEYS = ['x', 'destination_x'] as const;
-const Y_ARGUMENT_KEYS = ['y', 'destination_y'] as const;
+/** The coordinate arguments, and the screen axis each is scaled against. */
+const COORDINATE_ARGUMENTS = [
+  ['x', 0],
+  ['y', 1],
+  ['destination_x', 0],
+  ['destination_y', 1],
+] as const;
 
 /**
  * The safety verdict the computer-use model attaches to an action. It is not
@@ -68,8 +70,6 @@ export interface ComputerUseToolOptions {
   name: string;
   /** The description the model reads. */
   description: string;
-  /** The declared arguments, keyed by their wire (snake_case) names. */
-  parameters: z.ZodObject<z.ZodRawShape>;
   /** Performs the action. Receives coordinates already normalized. */
   invoke(args: Record<string, unknown>, toolContext: Context): Promise<unknown>;
   /** The real screen size as `[width, height]` in pixels. */
@@ -111,19 +111,14 @@ function normalizeCoordinates(
   virtualScreenSize: readonly [number, number],
 ): Record<string, unknown> {
   const normalized = {...args};
-  for (const [keys, axis] of [
-    [X_ARGUMENT_KEYS, 0],
-    [Y_ARGUMENT_KEYS, 1],
-  ] as const) {
-    for (const key of keys) {
-      const value = normalized[key];
-      if (typeof value === 'number') {
-        normalized[key] = normalizeCoordinate(
-          value,
-          virtualScreenSize[axis],
-          screenSize[axis],
-        );
-      }
+  for (const [key, axis] of COORDINATE_ARGUMENTS) {
+    const value = normalized[key];
+    if (typeof value === 'number') {
+      normalized[key] = normalizeCoordinate(
+        value,
+        virtualScreenSize[axis],
+        screenSize[axis],
+      );
     }
   }
   return normalized;
@@ -168,7 +163,6 @@ export class ComputerUseTool extends BaseTool {
   /** The coordinate space the model addresses. */
   readonly virtualScreenSize: readonly [number, number];
 
-  private readonly parameters: z.ZodObject<z.ZodRawShape>;
   private readonly invoke: ComputerUseToolOptions['invoke'];
 
   constructor(options: ComputerUseToolOptions) {
@@ -176,25 +170,20 @@ export class ComputerUseTool extends BaseTool {
     this.screenSize = options.screenSize;
     this.virtualScreenSize =
       options.virtualScreenSize ?? DEFAULT_VIRTUAL_SCREEN_SIZE;
-    this.parameters = options.parameters;
     this.invoke = options.invoke;
 
     assertScreenSize(this.screenSize, 'screenSize');
     assertScreenSize(this.virtualScreenSize, 'virtualScreenSize');
   }
 
-  override _getDeclaration(): FunctionDeclaration {
-    return {
-      name: this.name,
-      description: this.description,
-      parameters: zodObjectToSchema(this.parameters),
-    };
-  }
-
   /**
    * A no-op: `ComputerUseToolset` registers this tool and attaches the
    * `computerUse` config, and the API populates the predefined function
    * declarations from that config. Sending our own would duplicate them.
+   *
+   * `_getDeclaration` is deliberately left returning `undefined` from the base
+   * class for the same reason: a caller that built declarations from these
+   * tools would send the duplicates this override exists to avoid.
    */
   override async processLlmRequest(): Promise<void> {}
 
