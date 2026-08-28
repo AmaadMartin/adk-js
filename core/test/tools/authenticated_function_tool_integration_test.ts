@@ -103,16 +103,6 @@ function authRequestCall(events: Event[]) {
     .filter((call) => call.name === 'adk_request_credential');
 }
 
-/** Narrows the `auth_config` argument the credential request carries. */
-function isAuthConfig(value: unknown): value is AuthConfig {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'authScheme' in value &&
-    'credentialKey' in value
-  );
-}
-
 function toolResponses(events: Event[]) {
   return events
     .flatMap((event) => getFunctionResponses(event))
@@ -214,11 +204,9 @@ describe('AuthenticatedFunctionTool through the Runner', () => {
     expect(toolResponses(firstTurn)[0].response).toEqual({
       result: PENDING_USER_AUTHORIZATION,
     });
-    const requestedConfig = requests[0].args?.['auth_config'];
-    if (!isAuthConfig(requestedConfig)) {
-      expect.fail('the credential request carried no auth config');
-    }
-    expect(requestedConfig.credentialKey).toBe('documents_api');
+    expect(requests[0].args?.['auth_config']).toMatchObject({
+      credentialKey: 'documents_api',
+    });
 
     const secondTurn = await run({
       role: 'user',
