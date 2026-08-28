@@ -6,6 +6,7 @@
 
 import type {
   BigQueryOptions,
+  Dataset,
   Table,
   TableMetadata,
 } from '@google-cloud/bigquery';
@@ -64,6 +65,28 @@ export interface BigQueryRowWriterOptions {
 }
 
 /** Returns whether `err` is BigQuery reporting that the table already exists. */
+/**
+ * Finds or creates `dataset`. A create that loses the race to a concurrent
+ * writer is treated as success, the same way the table path treats it.
+ */
+async function ensureDataset(
+  dataset: Dataset,
+  location: string,
+): Promise<void> {
+  const [exists] = await dataset.exists();
+  if (exists) {
+    return;
+  }
+  try {
+    await dataset.create({location});
+    logger.debug(`BigQuery analytics created dataset ${dataset.id}.`);
+  } catch (err: unknown) {
+    if (!isAlreadyExists(err)) {
+      throw err;
+    }
+  }
+}
+
 function isAlreadyExists(err: unknown): boolean {
   return (
     typeof err === 'object' &&
@@ -122,7 +145,7 @@ function rejectedRowCount(err: unknown, batchSize: number): number {
  * caller: a failure is counted in {@link getDropStats} and logged, because the
  * caller is an agent callback and analytics must not break an agent run.
  *
- * The dataset must already exist; the writer creates only the table.
+ * The writer creates the dataset and the table if they are absent.
  */
 export class BigQueryRowWriter {
   private readonly queue: AnalyticsRow[] = [];
@@ -276,7 +299,10 @@ export class BigQueryRowWriter {
     );
   }
 
-  /** Loads the optional peer, then finds or creates the events table. */
+  /**
+   * Loads the optional peer, then finds or creates the dataset and the events
+   * table.
+   */
   private async openTable(): Promise<Table> {
     const {projectId, datasetId, tableId, location, clusteringFields} =
       this.options;
@@ -289,6 +315,7 @@ export class BigQueryRowWriter {
     );
     const clientOptions: BigQueryOptions = {projectId, location};
     const dataset = new BigQuery(clientOptions).dataset(datasetId);
+    await ensureDataset(dataset, location);
     const table = dataset.table(tableId);
     const [exists] = await table.exists();
     if (exists) {

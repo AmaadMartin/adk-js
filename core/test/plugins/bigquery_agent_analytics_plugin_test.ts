@@ -53,10 +53,13 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     insertIds: string[];
     insertCalls: number;
     created: CreatedTable[];
+    datasetsCreated: Array<{id: string; options: {location?: string}}>;
     getCalls: number;
     tableExists: boolean;
+    datasetExists: boolean;
     clientError?: Error;
     createError?: Error;
+    datasetCreateError?: Error;
     insertError?: unknown;
     insertGate?: Promise<void>;
   }
@@ -67,8 +70,10 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     insertIds: [],
     insertCalls: 0,
     created: [],
+    datasetsCreated: [],
     getCalls: 0,
     tableExists: false,
+    datasetExists: true,
   };
 
   class FakeTable {
@@ -105,6 +110,17 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
 
     table(id: string): FakeTable {
       return new FakeTable(id);
+    }
+
+    async exists(): Promise<[boolean]> {
+      return [fake.datasetExists];
+    }
+
+    async create(options: {location?: string}): Promise<void> {
+      fake.datasetsCreated.push({id: this.id, options});
+      if (fake.datasetCreateError !== undefined) {
+        throw fake.datasetCreateError;
+      }
     }
 
     async createTable(
@@ -320,10 +336,13 @@ beforeEach(() => {
   fake.insertIds = [];
   fake.insertCalls = 0;
   fake.created = [];
+  fake.datasetsCreated = [];
   fake.getCalls = 0;
   fake.tableExists = false;
+  fake.datasetExists = true;
   fake.clientError = undefined;
   fake.createError = undefined;
+  fake.datasetCreateError = undefined;
   fake.insertError = undefined;
   fake.insertGate = undefined;
 });
@@ -416,6 +435,51 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     expect(rows()).toHaveLength(1);
   });
 
+  it('creates the dataset at the configured location when it is absent', async () => {
+    fake.datasetExists = false;
+    const plugin = makePlugin();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await plugin.flush();
+    expect(fake.datasetsCreated).toEqual([
+      {id: DATASET_ID, options: {location: 'US'}},
+    ]);
+    expect(rows()).toHaveLength(1);
+  });
+
+  it('reuses an existing dataset without creating one', async () => {
+    const plugin = makePlugin();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await plugin.flush();
+    expect(fake.datasetsCreated).toHaveLength(0);
+  });
+
+  it('proceeds when a concurrent process created the dataset first', async () => {
+    fake.datasetExists = false;
+    fake.datasetCreateError = conflictError();
+    const plugin = makePlugin();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await plugin.flush();
+    expect(rows()).toHaveLength(1);
+  });
+
+  it('drops the row when the dataset cannot be created', async () => {
+    fake.datasetExists = false;
+    fake.datasetCreateError = new Error('permission denied');
+    const plugin = makePlugin();
+    await expect(
+      plugin.beforeRunCallback({invocationContext: makeInvocationContext()}),
+    ).resolves.toBeUndefined();
+    await plugin.flush();
+    expect(rows()).toHaveLength(0);
+    expect(plugin.getDropStats()['setup_unavailable']).toBe(1);
+  });
+
   it('re-reads the table when a concurrent process created it first', async () => {
     fake.createError = conflictError();
     const plugin = makePlugin();
@@ -487,6 +551,26 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     await plugin.shutdown();
     await plugin.shutdown();
     await plugin.afterRunCallback({invocationContext});
+    expect(rows()).toHaveLength(1);
+  });
+
+  it('makes a concurrent second shutdown wait for the first drain', async () => {
+    let releaseInsert = (): void => {};
+    fake.insertGate = new Promise<void>((resolve) => {
+      releaseInsert = resolve;
+    });
+    const plugin = makePlugin();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    const settled: string[] = [];
+    const first = plugin.shutdown().then(() => void settled.push('first'));
+    const second = plugin.shutdown().then(() => void settled.push('second'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toEqual([]);
+    releaseInsert();
+    await Promise.all([first, second]);
+    expect(settled).toHaveLength(2);
     expect(rows()).toHaveLength(1);
   });
 

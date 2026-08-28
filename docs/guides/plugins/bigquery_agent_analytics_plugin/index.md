@@ -18,11 +18,10 @@ Three properties are worth knowing before you enable it:
 
 ## Get started
 
-`@google-cloud/bigquery` is an optional peer dependency. Install it, and create the dataset first — the plugin creates the table, never the dataset.
+`@google-cloud/bigquery` is an optional peer dependency. Install it. The plugin creates the dataset and the table on first use, so your credentials need permission to create both.
 
 ```bash
 npm install @google-cloud/bigquery
-bq mk --dataset "${GOOGLE_CLOUD_PROJECT}:agent_analytics"
 ```
 
 Then register the plugin on the runner and shut it down when the process ends.
@@ -86,6 +85,8 @@ On first use the plugin looks the table up and, when it is absent, creates it wi
 - `error_message` is also set on some `LLM_RESPONSE` rows whose `status` is `OK`, because a model can decline without failing.
 
 The `event_type` values are the members of `AnalyticsEventType`. They cover the invocation (`INVOCATION_STARTING`, `INVOCATION_COMPLETED`), the agent (`AGENT_STARTING`, `AGENT_COMPLETED`, `AGENT_TRANSFER`, `AGENT_RESPONSE`), the model (`LLM_REQUEST`, `LLM_RESPONSE`, `LLM_ERROR`), the tool (`TOOL_STARTING`, `TOOL_COMPLETED`, `TOOL_ERROR`, `TOOL_PAUSED`), the workflow node (`NODE_OUTPUT`, `NODE_ERROR`), the user message (`USER_MESSAGE_RECEIVED`), session state (`STATE_DELTA`, `AGENT_STATE_CHECKPOINT`), and the three human-in-the-loop requests with their `_COMPLETED` counterparts.
+
+Two of those types do not appear yet. `AGENT_STARTING` and `AGENT_COMPLETED` need `beforeAgentCallback` and `afterAgentCallback`. adk-js declares both hooks on `BasePlugin`, but nothing fires them: `PluginManager.runBeforeAgentCallback` and `runAfterAgentCallback` have no caller, so no plugin receives them. Use `INVOCATION_STARTING` and `INVOCATION_COMPLETED` for turn boundaries until the framework calls the hooks.
 
 Every tool row — `TOOL_STARTING`, `TOOL_COMPLETED`, `TOOL_ERROR` — carries `tool_origin` in its `content`, saying where the call runs: `LOCAL`, `MCP`, `SUB_AGENT`, `A2A`, `TRANSFER_AGENT`, `TRANSFER_A2A` or `UNKNOWN`. adk-python writes the same key with the same values.
 

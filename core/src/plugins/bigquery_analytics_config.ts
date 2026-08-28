@@ -78,7 +78,7 @@ export interface BigQueryLoggerConfig {
 export interface BigQueryAgentAnalyticsPluginOptions {
   /** The Google Cloud project holding the dataset. */
   projectId: string;
-  /** The dataset holding the events table. It must already exist. */
+  /** The dataset holding the events table. Created on first use. */
   datasetId: string;
   /** The events table. Created on first use. Defaults to `agent_events`. */
   tableId?: string;
