@@ -21,6 +21,7 @@ export {
   findEventByFunctionCallId,
   findMatchingFunctionCall,
   functionsExportedForTestingOnly,
+  isToolNotFound,
 } from './agents/functions.js';
 export {InvocationContext, requireAgent} from './agents/invocation_context.js';
 export type {
@@ -146,6 +147,14 @@ export {TruncatingContextCompactor} from './context/truncating_context_compactor
 export type {TruncatingContextCompactorOptions} from './context/truncating_context_compactor.js';
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
+export {AlreadyExistsError} from './errors/already_exists_error.js';
+export {InputValidationError} from './errors/input_validation_error.js';
+export {NotFoundError} from './errors/not_found_error.js';
+export {SessionNotFoundError} from './errors/session_not_found_error.js';
+export {
+  ToolErrorType,
+  ToolExecutionError,
+} from './errors/tool_execution_error.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
@@ -209,10 +218,29 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
+export {
+  GLOBAL_SCOPE_KEY,
+  REFLECT_AND_RETRY_RESPONSE_TYPE,
+  ScopedFailureTracker,
+  TrackingScope,
+  resolveScopeKey,
+  type PerItemFailuresCounter,
+  type ToolFailureResponse,
+} from './plugins/_reflect_retry_utils.js';
 export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
 export {GlobalInstructionPlugin} from './plugins/global_instruction_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
 export {PluginManager} from './plugins/plugin_manager.js';
+export {
+  ADK_HANDLE_MODEL_ERROR_TOOL_NAME,
+  RESERVED_TOOL_CALL_ERROR_TYPE,
+  ReflectAndRetryModelPlugin,
+  type ReflectAndRetryModelPluginOptions,
+} from './plugins/reflect_retry_model_plugin.js';
+export {
+  ReflectAndRetryToolPlugin,
+  type ReflectAndRetryToolPluginOptions,
+} from './plugins/reflect_retry_tool_plugin.js';
 export {
   InMemoryPolicyEngine,
   PolicyOutcome,
@@ -246,7 +274,7 @@ export type {
 export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
-export {State} from './sessions/state.js';
+export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
@@ -296,7 +324,12 @@ export {
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
-export {ToolConfirmation} from './tools/tool_confirmation.js';
+export {
+  IntentMismatchError,
+  ToolConfirmation,
+  isIntentMismatchError,
+} from './tools/tool_confirmation.js';
+export type {IntentMismatchReason} from './tools/tool_confirmation.js';
 export {URL_CONTEXT, UrlContextTool} from './tools/url_context_tool.js';
 export {VertexAiSearchTool} from './tools/vertex_ai_search_tool.js';
 export type {
@@ -367,6 +400,7 @@ export {
   Graph,
   JoinNode,
   NodeContext,
+  NodeReportedError,
   NodeSchemaValidationError,
   NodeStatus,
   NodeTimeoutError,
@@ -383,6 +417,7 @@ export {
   createNodeState,
   createSubBranch,
   isNodeErrorEvent,
+  isNodeReportedError,
   isNodeSchemaValidationError,
   isNodeState,
   isNodeTimeoutError,

@@ -18,6 +18,7 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
+import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
 
@@ -57,6 +58,12 @@ export interface InvocationContextParams {
   isolationScope?: string;
   /** Nesting depth of node-as-tool executions; used to bound recursion. */
   nodeToolDepth?: number;
+  liveRequestQueue?: LiveRequestQueue;
+  liveSessionResumptionHandle?: string;
+  /**
+   * Request-level metadata passed from an incoming A2A request or caller.
+   */
+  a2aMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -243,6 +250,24 @@ export class InvocationContext {
   readonly nodeToolDepth: number;
 
   /**
+   * The live request queue feeding the model on the bidirectional (live) path.
+   * Set only for invocations started via `runner.runLive`.
+   */
+  readonly liveRequestQueue?: LiveRequestQueue;
+
+  /**
+   * The most recent session resumption handle observed on the live path.
+   * Updated as the server emits resumption updates so a reconnect can restore
+   * server-side state instead of replaying history. Mutable by design.
+   */
+  liveSessionResumptionHandle?: string;
+
+  /**
+   * Request-level metadata passed from an incoming A2A request or caller.
+   */
+  readonly a2aMetadata?: Record<string, unknown>;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -263,6 +288,7 @@ export class InvocationContext {
     this.workflowInstructionScope = params.workflowInstructionScope;
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
+    this.a2aMetadata = params.a2aMetadata;
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop
@@ -273,6 +299,8 @@ export class InvocationContext {
     this.invocationCostManager =
       (params as {invocationCostManager?: InvocationCostManager})
         .invocationCostManager ?? new InvocationCostManager();
+    this.liveRequestQueue = params.liveRequestQueue;
+    this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
   }
 
   /**
