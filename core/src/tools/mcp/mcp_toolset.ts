@@ -14,12 +14,22 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import {ReadonlyContext} from '../../agents/readonly_context.js';
+import {AuthCredential} from '../../auth/auth_credential.js';
+import {buildAuthHeaders} from '../../auth/auth_headers.js';
+import {AuthScheme} from '../../auth/auth_schemes.js';
+import {AuthConfig} from '../../auth/auth_tool.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
+
+/**
+ * Slot the exchanged MCP credential is stored under when the caller names no
+ * `credentialKey`, following the OpenAPI toolset's `default_openapi_key`.
+ */
+const DEFAULT_MCP_CREDENTIAL_KEY = 'default_mcp_key';
 
 /**
  * Resolves request headers immediately before an MCP session is created.
@@ -34,6 +44,70 @@ import {MCPTool} from './mcp_tool.js';
 export type MCPHeaderProvider = (
   context?: ReadonlyContext,
 ) => Promise<Record<string, string>> | Record<string, string>;
+
+/**
+ * Configures an {@link MCPToolset}.
+ *
+ * Prefer this over the positional constructor: an MCP server that needs both
+ * headers and a credential is otherwise configured through four trailing
+ * positional arguments.
+ */
+export interface MCPToolsetOptions {
+  /** How to reach the MCP server. */
+  connectionParams: MCPConnectionParams;
+  /** Selects the tools this toolset exposes. Defaults to no filter. */
+  toolFilter?: ToolPredicate | string[];
+  /** Prepended as `${prefix}_` to every discovered tool name. */
+  prefix?: string;
+  /** Resolves extra request headers before each MCP session is created. */
+  headerProvider?: MCPHeaderProvider;
+  /**
+   * The scheme the MCP server authenticates with. Supplying it makes
+   * {@link MCPToolset.getAuthConfig} return an auth config.
+   */
+  authScheme?: AuthScheme;
+  /** The raw credential to exchange for the scheme above. */
+  authCredential?: AuthCredential;
+  /**
+   * Names the slot the exchanged credential is stored under. Defaults to
+   * `default_mcp_key`.
+   */
+  credentialKey?: string;
+}
+
+/**
+ * Reads the options out of either constructor form.
+ *
+ * The forms are told apart by `type`: every `MCPConnectionParams` member
+ * carries it and {@link MCPToolsetOptions} never does.
+ *
+ * @throws If the connection params are missing.
+ */
+function normalizeToolsetOptions(
+  optionsOrConnectionParams: MCPToolsetOptions | MCPConnectionParams,
+  toolFilter: ToolPredicate | string[],
+  prefix?: string,
+  headerProvider?: MCPHeaderProvider,
+): MCPToolsetOptions {
+  if (!optionsOrConnectionParams) {
+    throw new Error('Missing connection params in MCPToolset.');
+  }
+
+  const options =
+    'type' in optionsOrConnectionParams
+      ? {
+          connectionParams: optionsOrConnectionParams,
+          toolFilter,
+          prefix,
+          headerProvider,
+        }
+      : optionsOrConnectionParams;
+
+  if (!options.connectionParams) {
+    throw new Error('Missing connection params in MCPToolset.');
+  }
+  return options;
+}
 
 /**
  * A toolset that dynamically discovers and provides tools from a Model Context
@@ -73,22 +147,78 @@ export type MCPHeaderProvider = (
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
   private readonly headerProvider?: MCPHeaderProvider;
+  private readonly authConfig?: AuthConfig;
 
+  constructor(options: MCPToolsetOptions);
   constructor(
     connectionParams: MCPConnectionParams,
+    toolFilter?: ToolPredicate | string[],
+    prefix?: string,
+    headerProvider?: MCPHeaderProvider,
+  );
+  constructor(
+    optionsOrConnectionParams: MCPToolsetOptions | MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
     headerProvider?: MCPHeaderProvider,
   ) {
-    super(toolFilter, prefix);
-    this.mcpSessionManager = new MCPSessionManager(connectionParams);
-    this.headerProvider = headerProvider;
+    const options = normalizeToolsetOptions(
+      optionsOrConnectionParams,
+      toolFilter,
+      prefix,
+      headerProvider,
+    );
+    super(options.toolFilter ?? [], options.prefix);
+    this.mcpSessionManager = new MCPSessionManager(options.connectionParams);
+    this.headerProvider = options.headerProvider;
+    this.authConfig = options.authScheme
+      ? {
+          authScheme: options.authScheme,
+          rawAuthCredential: options.authCredential,
+          credentialKey: options.credentialKey || DEFAULT_MCP_CREDENTIAL_KEY,
+        }
+      : undefined;
+  }
+
+  /**
+   * Returns the auth config the MCP server is reached with.
+   *
+   * The same instance is returned on every call, so a caller can set
+   * `exchangedAuthCredential` on it and have the next {@link getTools} call —
+   * and every tool that call returns — send the matching header.
+   *
+   * @return The auth config, or `undefined` when no auth scheme was
+   *     configured.
+   */
+  getAuthConfig(): AuthConfig | undefined {
+    return this.authConfig;
+  }
+
+  /**
+   * Builds the headers one MCP session is opened with.
+   *
+   * Auth headers are merged over the provider's, so a credential ADK exchanged
+   * wins over a header the caller hardcoded.
+   */
+  private async buildHeaders(
+    context?: ReadonlyContext,
+  ): Promise<Record<string, string> | undefined> {
+    const providerHeaders = this.headerProvider
+      ? await this.headerProvider(context)
+      : undefined;
+    const authHeaders = buildAuthHeaders(
+      this.authConfig?.exchangedAuthCredential,
+      this.authConfig?.authScheme,
+    );
+
+    if (!authHeaders) {
+      return providerHeaders;
+    }
+    return {...providerHeaders, ...authHeaders};
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    const headers = this.headerProvider
-      ? await this.headerProvider(context)
-      : undefined;
+    const headers = await this.buildHeaders(context);
     const session = await this.mcpSessionManager.createSession(headers);
 
     let listResult: ListToolsResult;
@@ -145,10 +275,13 @@ export class MCPToolset extends BaseToolset {
   /**
    * Lists the names of the resources advertised by the MCP server.
    *
+   * @param context Context passed to the header provider.
    * @return The resource names available on the server.
    */
-  async listResources(): Promise<string[]> {
-    const session = await this.mcpSessionManager.createSession();
+  async listResources(context?: ReadonlyContext): Promise<string[]> {
+    const session = await this.mcpSessionManager.createSession(
+      await this.buildHeaders(context),
+    );
     try {
       const result = (await session.listResources()) as ListResourcesResult;
       return result.resources.map((resource) => resource.name);
@@ -161,11 +294,17 @@ export class MCPToolset extends BaseToolset {
    * Returns metadata for the resource whose name matches `name`.
    *
    * @param name The advertised name of the resource.
+   * @param context Context passed to the header provider.
    * @return The matching MCP `Resource`.
    * @throws If no resource with the given name is advertised by the server.
    */
-  async getResourceInfo(name: string): Promise<Resource> {
-    const session = await this.mcpSessionManager.createSession();
+  async getResourceInfo(
+    name: string,
+    context?: ReadonlyContext,
+  ): Promise<Resource> {
+    const session = await this.mcpSessionManager.createSession(
+      await this.buildHeaders(context),
+    );
     let result: ListResourcesResult;
     try {
       result = (await session.listResources()) as ListResourcesResult;
@@ -190,18 +329,22 @@ export class MCPToolset extends BaseToolset {
    * by the server (never decoded and re-encoded).
    *
    * @param name The advertised name of the resource to read.
+   * @param context Context passed to the header provider.
    * @return The resource contents (text and/or base64-encoded binary).
    * @throws If the resource is unknown or has no URI.
    */
   async readResource(
     name: string,
+    context?: ReadonlyContext,
   ): Promise<Array<TextResourceContents | BlobResourceContents>> {
-    const resourceInfo = await this.getResourceInfo(name);
+    const resourceInfo = await this.getResourceInfo(name, context);
     if (!resourceInfo.uri) {
       throw new Error(`Resource '${name}' has no URI.`);
     }
 
-    const session = await this.mcpSessionManager.createSession();
+    const session = await this.mcpSessionManager.createSession(
+      await this.buildHeaders(context),
+    );
     try {
       const result = (await session.readResource({
         uri: resourceInfo.uri,

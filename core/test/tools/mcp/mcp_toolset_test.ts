@@ -12,12 +12,18 @@ import {BaseAgent} from '../../../src/agents/base_agent.js';
 import {Context} from '../../../src/agents/context.js';
 import {InvocationContext} from '../../../src/agents/invocation_context.js';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+} from '../../../src/auth/auth_credential.js';
+import {AuthScheme} from '../../../src/auth/auth_schemes.js';
 import {PluginManager} from '../../../src/plugins/plugin_manager.js';
 import {createSession} from '../../../src/sessions/session.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {
   MCPHeaderProvider,
   MCPToolset,
+  MCPToolsetOptions,
 } from '../../../src/tools/mcp/mcp_toolset.js';
 
 vi.hoisted(() => {
@@ -513,6 +519,282 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+
+  describe('options constructor', () => {
+    it('discovers the same tools as the positional form', async () => {
+      const toolset = new MCPToolset({connectionParams: stdioParams});
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'test-tool',
+        'other-tool',
+      ]);
+    });
+
+    it('applies the prefix and the tool filter it carries', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: stdioParams,
+        toolFilter: ['srv_test-tool'],
+        prefix: 'srv',
+      });
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['srv_test-tool']);
+    });
+
+    it('uses the header provider it carries', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: () => ({Authorization: 'Bearer from-options'}),
+      });
+
+      await toolset.getTools();
+
+      expect(
+        vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1)?.[1],
+      ).toEqual({
+        requestInit: {
+          headers: {'X-Static': 'yes', Authorization: 'Bearer from-options'},
+        },
+      });
+    });
+
+    it('rejects options that carry no connection params', () => {
+      // A configuration document read at runtime can omit the field that
+      // TypeScript makes mandatory.
+      const options: MCPToolsetOptions = JSON.parse('{"prefix": "srv"}');
+
+      expect(() => new MCPToolset(options)).toThrow(
+        'Missing connection params in MCPToolset.',
+      );
+    });
+
+    it('rejects a missing argument', () => {
+      const options: MCPToolsetOptions = JSON.parse('null');
+
+      expect(() => new MCPToolset(options)).toThrow(
+        'Missing connection params in MCPToolset.',
+      );
+    });
+  });
+
+  describe('authentication', () => {
+    const apiKeyScheme: AuthScheme = {
+      type: 'apiKey',
+      in: 'header',
+      name: 'X-API-Key',
+    };
+    const oauth2Scheme: AuthScheme = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/auth',
+          tokenUrl: 'https://example.com/token',
+          scopes: {read: 'Read access'},
+        },
+      },
+    };
+    const oauth2Credential: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'test-client-id', clientSecret: 'test-secret'},
+    };
+
+    /** Headers the most recently constructed HTTP transport was given. */
+    const lastTransportHeaders = () =>
+      vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1)?.[1]
+        ?.requestInit?.headers;
+
+    /** Sets the exchanged credential the way ADK's auth flow would. */
+    const setExchangedCredential = (
+      toolset: MCPToolset,
+      credential: AuthCredential,
+    ) => {
+      const authConfig = toolset.getAuthConfig();
+      if (!authConfig) {
+        expect.fail('an auth scheme was configured, so getAuthConfig is set');
+      }
+      authConfig.exchangedAuthCredential = credential;
+    };
+
+    const apiKeyCredential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'test-api-key',
+    };
+    const accessTokenCredential: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {accessToken: 'exchanged-token'},
+    };
+
+    beforeEach(() => {
+      vi.mocked(StreamableHTTPClientTransport).mockClear();
+      vi.mocked(Client).mockClear();
+    });
+
+    it('getAuthConfig returns undefined without an auth scheme', () => {
+      const toolset = new MCPToolset({connectionParams: httpParams});
+
+      expect(toolset.getAuthConfig()).toBeUndefined();
+    });
+
+    it('getAuthConfig carries the scheme, the raw credential and the default key', () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: oauth2Scheme,
+        authCredential: oauth2Credential,
+      });
+
+      expect(toolset.getAuthConfig()).toEqual({
+        authScheme: oauth2Scheme,
+        rawAuthCredential: oauth2Credential,
+        credentialKey: 'default_mcp_key',
+      });
+    });
+
+    it('getAuthConfig uses the credential key the caller named', () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: oauth2Scheme,
+        credentialKey: 'my-mcp-key',
+      });
+
+      expect(toolset.getAuthConfig()?.credentialKey).toBe('my-mcp-key');
+    });
+
+    it('getAuthConfig returns the same instance on every call', () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: oauth2Scheme,
+      });
+
+      expect(toolset.getAuthConfig()).toBe(toolset.getAuthConfig());
+    });
+
+    it('sends no auth header before the credential is exchanged', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: oauth2Scheme,
+        authCredential: oauth2Credential,
+      });
+
+      await toolset.getTools();
+
+      expect(lastTransportHeaders()).toEqual({'X-Static': 'yes'});
+    });
+
+    it('sends the exchanged access token as a bearer header', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: oauth2Scheme,
+        authCredential: oauth2Credential,
+      });
+      setExchangedCredential(toolset, accessTokenCredential);
+
+      await toolset.getTools();
+
+      expect(lastTransportHeaders()).toEqual({
+        'X-Static': 'yes',
+        Authorization: 'Bearer exchanged-token',
+      });
+    });
+
+    it('sends an API key in the header its scheme names', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: apiKeyScheme,
+      });
+      setExchangedCredential(toolset, apiKeyCredential);
+
+      await toolset.getTools();
+
+      expect(lastTransportHeaders()).toEqual({
+        'X-Static': 'yes',
+        'X-API-Key': 'test-api-key',
+      });
+    });
+
+    it('an auth header wins over the header provider on a conflict', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        headerProvider: () => ({
+          Authorization: 'Bearer from-provider',
+          'X-Tenant': 'acme',
+        }),
+        authScheme: oauth2Scheme,
+      });
+      setExchangedCredential(toolset, accessTokenCredential);
+
+      await toolset.getTools();
+
+      expect(lastTransportHeaders()).toEqual({
+        'X-Static': 'yes',
+        'X-Tenant': 'acme',
+        Authorization: 'Bearer exchanged-token',
+      });
+    });
+
+    it('the discovered tools carry the auth header into their calls', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: apiKeyScheme,
+      });
+      setExchangedCredential(toolset, apiKeyCredential);
+
+      const tools = await toolset.getTools();
+      const toolContext = new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'inv-auth',
+          agent: {} as BaseAgent,
+          session: createSession({id: 'session-auth', appName: 'app'}),
+          pluginManager: new PluginManager(),
+          abortSignal: new AbortController().signal,
+        }),
+      });
+      await tools[0].runAsync({args: {}, toolContext});
+
+      // Two transports: the discovery session, then the tool-call session.
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledTimes(2);
+      expect(lastTransportHeaders()).toEqual({
+        'X-Static': 'yes',
+        'X-API-Key': 'test-api-key',
+      });
+    });
+
+    it('listResources sends the auth header', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: apiKeyScheme,
+      });
+      setExchangedCredential(toolset, apiKeyCredential);
+
+      await toolset.listResources();
+
+      expect(lastTransportHeaders()).toEqual({
+        'X-Static': 'yes',
+        'X-API-Key': 'test-api-key',
+      });
+    });
+
+    it('readResource sends the auth header on both sessions', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authScheme: apiKeyScheme,
+      });
+      setExchangedCredential(toolset, apiKeyCredential);
+
+      await toolset.readResource('res1');
+
+      // One session resolves the name, the second reads the resource.
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledTimes(2);
+      for (const call of vi.mocked(StreamableHTTPClientTransport).mock.calls) {
+        expect(call[1]?.requestInit?.headers).toEqual({
+          'X-Static': 'yes',
+          'X-API-Key': 'test-api-key',
+        });
+      }
     });
   });
 });
