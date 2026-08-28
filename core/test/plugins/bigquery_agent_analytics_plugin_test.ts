@@ -1476,7 +1476,7 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
     });
   });
 
-  it('writes both the request and the pause for a long-running HITL call', async () => {
+  it('writes one row, not two, for a long-running HITL call', async () => {
     const plugin = makePlugin();
     await plugin.onEventCallback({
       invocationContext: makeInvocationContext(),
@@ -1497,11 +1497,13 @@ describe('BigQueryAgentAnalyticsPlugin pauses and human in the loop', () => {
         },
       }),
     });
+    // The framework puts a confirmation call's id in longRunningToolIds, so
+    // both pause paths match it. Only the HITL row is written; it already
+    // carries the function_call_id a TOOL_PAUSED row would have paired on.
     expect(rows().map((row) => row.event_type)).toEqual([
       AnalyticsEventType.HITL_CONFIRMATION_REQUEST,
-      AnalyticsEventType.TOOL_PAUSED,
     ]);
-    expect(parseColumn(rows()[1].attributes)).toMatchObject({
+    expect(parseColumn(rows()[0].attributes)).toMatchObject({
       adk: {pause_kind: 'hitl_confirmation', function_call_id: 'fc-7'},
     });
   });
