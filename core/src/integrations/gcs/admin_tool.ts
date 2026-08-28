@@ -17,7 +17,7 @@ import {formatError} from '../../utils/error_utils.js';
 import {getGcsClient} from './client.js';
 
 /** Prepended to every tool name the Cloud Storage toolsets expose. */
-export const DEFAULT_GCS_TOOL_NAME_PREFIX = 'gcs';
+const GCS_TOOL_NAME_PREFIX = 'gcs';
 
 /**
  * The bucket names these tools accept.
@@ -350,13 +350,13 @@ export function createGcsAdminReadTools(
 ): BaseTool[] {
   return [
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_get_bucket`,
+      name: `${GCS_TOOL_NAME_PREFIX}_get_bucket`,
       description: 'Get metadata information about a GCS bucket.',
       parameters: getBucketParameters,
       execute: (input) => getBucket(input, storageOptions),
     }),
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_list_buckets`,
+      name: `${GCS_TOOL_NAME_PREFIX}_list_buckets`,
       description: 'List GCS bucket names in a Google Cloud project.',
       parameters: listBucketsParameters,
       execute: (input) => listBuckets(input, storageOptions),
@@ -376,19 +376,19 @@ export function createGcsAdminWriteTools(
 ): BaseTool[] {
   return [
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_create_bucket`,
+      name: `${GCS_TOOL_NAME_PREFIX}_create_bucket`,
       description: 'Create a new GCS bucket.',
       parameters: createBucketParameters,
       execute: (input) => createBucket(input, storageOptions),
     }),
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_update_bucket`,
+      name: `${GCS_TOOL_NAME_PREFIX}_update_bucket`,
       description: 'Update properties of a GCS bucket.',
       parameters: updateBucketParameters,
       execute: (input) => updateBucket(input, storageOptions),
     }),
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_delete_bucket`,
+      name: `${GCS_TOOL_NAME_PREFIX}_delete_bucket`,
       description: 'Delete a GCS bucket.',
       parameters: deleteBucketParameters,
       execute: (input) => deleteBucket(input, storageOptions),

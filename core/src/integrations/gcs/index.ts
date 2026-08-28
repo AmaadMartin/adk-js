@@ -5,7 +5,6 @@
  */
 
 export {
-  DEFAULT_GCS_TOOL_NAME_PREFIX,
   type GcsListBucketsSuccess,
   type GcsToolError,
   type GcsToolResponse,
