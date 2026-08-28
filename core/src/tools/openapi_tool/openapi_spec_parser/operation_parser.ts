@@ -20,8 +20,8 @@ export interface ApiParameter {
 export interface OperationParserOptions {
   preservePropertyNames?: boolean;
   /**
-   * Parameters that are already parsed. When they are set the operation is
-   * not read; `OperationParser.load` is the entry point that sets them.
+   * Parameters that are already parsed. When a caller sets them the operation
+   * is not read, so a name the caller renamed or de-duplicated survives.
    */
   parameters?: ApiParameter[];
   /** The return value that goes with `parameters`. */
@@ -54,32 +54,6 @@ export class OperationParser {
     this.processRequestBody();
     this.processReturnValue();
     this.dedupeParamNames();
-  }
-
-  /**
-   * Builds a parser that reports parameters somebody else already parsed.
-   *
-   * The caller owns the parameter list, so a name it renamed or de-duplicated
-   * survives instead of being derived from `operation` a second time.
-   *
-   * @param operation The OpenAPI operation the parameters came from.
-   * @param parameters The parameters this parser reports.
-   * @param returnValue The return value this parser reports.
-   * @param options Options forwarded to the constructor.
-   * @returns A parser seeded with the supplied parameters.
-   */
-  @experimental
-  static load(
-    operation: OpenAPIV3.OperationObject,
-    parameters: ApiParameter[],
-    returnValue?: ApiParameter,
-    options: {preservePropertyNames?: boolean} = {},
-  ): OperationParser {
-    return new OperationParser(operation, {
-      ...options,
-      parameters,
-      returnValue,
-    });
   }
 
   private getParamName(originalName: string): string {

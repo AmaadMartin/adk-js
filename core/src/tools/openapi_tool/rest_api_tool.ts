@@ -17,6 +17,7 @@ import {applyCredential} from './auth/auth_helpers.js';
 import {
   ApiParameter,
   OperationParser,
+  OperationParserOptions,
 } from './openapi_spec_parser/operation_parser.js';
 import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
@@ -42,17 +43,11 @@ const MAX_TOOL_NAME_LENGTH = 60;
 export type FetchFn = typeof globalThis.fetch;
 
 /** Options accepted by `RestApiTool` and `createRestApiTool`. */
-export interface RestApiToolOptions {
-  preservePropertyNames?: boolean;
+export interface RestApiToolOptions extends OperationParserOptions {
   headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   credentialKey?: string;
   /** Issues the request. Defaults to `globalThis.fetch`. */
   fetchFn?: FetchFn;
-  /**
-   * Reports the operation's parameters instead of a parser built from
-   * `operation`. Use it to carry over parameters that are already parsed.
-   */
-  operationParser?: OperationParser;
 }
 
 @experimental
@@ -79,8 +74,7 @@ export class RestApiTool extends BaseTool {
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
     this.fetchFn = options.fetchFn;
-    this.operationParser =
-      options.operationParser ?? new OperationParser(operation, options);
+    this.operationParser = new OperationParser(operation, options);
   }
 
   @experimental
@@ -493,14 +487,8 @@ export function createRestApiTool(
     parsed.authCredential,
     {
       ...options,
-      operationParser:
-        options.operationParser ??
-        OperationParser.load(
-          parsed.operation,
-          parsed.parameters,
-          parsed.returnValue,
-          {preservePropertyNames: options.preservePropertyNames},
-        ),
+      parameters: parsed.parameters,
+      returnValue: parsed.returnValue,
     },
   );
 }
@@ -519,13 +507,14 @@ export function createRestApiToolFromJson(
   // The document reaches this entry point from outside the process, so the
   // shape the type promises is checked rather than assumed.
   if (
-    !Array.isArray(parsed?.parameters) ||
+    typeof parsed?.name !== 'string' ||
+    !Array.isArray(parsed.parameters) ||
     !parsed.endpoint ||
     !parsed.operation
   ) {
     throw new Error(
-      'A serialized ParsedOperation needs an endpoint, an operation and a ' +
-        'parameters array.',
+      'A serialized ParsedOperation needs a name, an endpoint, an operation ' +
+        'and a parameters array.',
     );
   }
   return createRestApiTool(parsed);
