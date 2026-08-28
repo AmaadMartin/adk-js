@@ -51,10 +51,18 @@ export class OpenApiSpecParser {
    * Parses an OpenAPI specification document and extracts a list of operations.
    *
    * @param openapiSpec The OpenAPI V3 document to parse.
+   * @throws {TypeError} If the spec is not an object.
    * @returns An array of parsed operations.
    */
   @experimental
   public parse(openapiSpec: OpenAPIV3.Document): ParsedOperation[] {
+    if (
+      typeof openapiSpec !== 'object' ||
+      openapiSpec === null ||
+      Array.isArray(openapiSpec)
+    ) {
+      throw new TypeError('OpenAPI spec must be an object.');
+    }
     const resolvedSpec = resolveReferences(openapiSpec);
     const sanitizedSpec = sanitizeSchemaTypes(resolvedSpec);
     return collectOperations(sanitizedSpec, {
