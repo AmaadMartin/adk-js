@@ -26,6 +26,7 @@ import {runEvals} from '../../src/evaluation/eval_runner.js';
 import {
   EvalResult,
   EvalStatus,
+  RESPONSE_MATCH_SCORE_KEY,
   TOOL_TRAJECTORY_SCORE_KEY,
 } from '../../src/evaluation/eval_types.js';
 
@@ -224,6 +225,43 @@ describe('adk eval over a real agent', () => {
     expect(result.evalMetricResults[0][1]).toEqual({
       score: 0,
       evalStatus: EvalStatus.FAILED,
+    });
+  });
+
+  it('scores the agent response against a recorded reference', async () => {
+    const referencedPath = path.join(tempDir, 'referenced.evalset.json');
+    await fs.writeFile(
+      referencedPath,
+      JSON.stringify([
+        {
+          name: 'referenced_case',
+          data: [
+            {
+              query: 'Roll a die.',
+              expected_tool_use: [
+                {
+                  tool_name: 'roll_die',
+                  tool_input: {sides: ROLLED_SIDES},
+                  mock_tool_output: 4,
+                },
+              ],
+              reference: 'You rolled a 4.',
+            },
+          ],
+        },
+      ]),
+    );
+
+    const [result] = await runEvals({
+      evalSetToEvals: parseAndGetEvalsToRun([referencedPath]),
+      rootAgent: buildAgent(),
+      evalMetrics: [{metricName: RESPONSE_MATCH_SCORE_KEY, threshold: 0.8}],
+      sessionService: new InMemorySessionService(),
+    });
+
+    expect(result.evalMetricResults[0][1]).toEqual({
+      score: 1,
+      evalStatus: EvalStatus.PASSED,
     });
   });
 

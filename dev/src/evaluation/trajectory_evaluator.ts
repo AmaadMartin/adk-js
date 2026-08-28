@@ -58,25 +58,18 @@ function projectForComparison(
 }
 
 /**
- * Returns the mean tool-use accuracy over every turn of every conversation.
+ * Returns the mean tool-use accuracy over every turn of an eval case.
  *
  * A turn scores 1 when its recorded tool calls match the expected ones exactly,
  * and 0 otherwise. The value range is [0, 1] and higher is better.
  *
- * @param dataset One entry per conversation, each a list of scored turns.
- * @throws Error when the dataset holds no conversation.
+ * @param turns The scored turns of one eval case.
  */
 export function evaluateTrajectory(
-  dataset: EvalTurn[][],
+  turns: EvalTurn[],
   options: EvaluateTrajectoryOptions = {},
 ): number {
-  if (dataset.length === 0) {
-    throw new Error('The evaluation dataset is empty.');
-  }
-
-  const rows = dataset.flatMap((conversation) =>
-    conversation.map((turn, index) => scoreTurn(turn, index + 1)),
-  );
+  const rows = turns.map((turn, index) => scoreTurn(turn, index + 1));
 
   reportFailures(rows.filter((row) => row.score !== 1));
 
@@ -100,10 +93,7 @@ function scoreTurn(turn: EvalTurn, turnNumber: number): TrajectoryRow {
   };
 }
 
-/**
- * `dataset` is never empty here, but a conversation in it can be, so guard the
- * divisor rather than returning NaN as a score.
- */
+/** A case can hold no turns, so guard the divisor rather than return NaN. */
 function mean(scores: number[]): number {
   if (scores.length === 0) {
     return 0;
