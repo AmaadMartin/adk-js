@@ -791,6 +791,20 @@ describe('AgentLoader', () => {
       await agentLoader.disposeAll();
     });
 
+    it('leaves the agent file usable for the next caller', async () => {
+      const agentLoader = new AgentLoader(tempAgentsDir);
+
+      await agentLoader.loadAgent('agent1');
+
+      // `getAgentFile` hands out one cached, shared `AgentFile` per name, so
+      // disposing it after a load would break every later caller.
+      const agentFile = await agentLoader.getAgentFile('agent1');
+      expect(() => agentFile.getFilePath()).not.toThrow();
+      await expect(agentLoader.loadAgent('agent1')).resolves.toBeDefined();
+
+      await agentLoader.disposeAll();
+    });
+
     /**
      * An agent whose module throws while constructing (a malformed workflow
      * graph, a bad config) must not stop the other agents from loading —

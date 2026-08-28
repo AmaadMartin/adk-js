@@ -480,12 +480,12 @@ export class AgentLoader implements BaseAgentLoader {
   }
 
   async loadAgent(agentName: string): Promise<RunnableRoot | App> {
-    // The `await` keeps the compiled bundle on disk until `load()` has
-    // imported it. Returning the promise directly would dispose the file
-    // while the dynamic import is still reading it.
-    await using agentFile = await this.getAgentFile(agentName);
+    // Not `await using`: this `AgentFile` is the cached, shared one, so
+    // disposing it here unlinks the compiled bundle other callers still read.
+    // `invalidateAll` and `disposeAll` own its lifetime.
+    const agentFile = await this.getAgentFile(agentName);
 
-    return await agentFile.load();
+    return agentFile.load();
   }
 
   async listApps(): Promise<string[]> {
