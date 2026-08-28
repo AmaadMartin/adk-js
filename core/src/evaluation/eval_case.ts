@@ -29,7 +29,14 @@ export interface InvocationEvent {
   groundingMetadata?: GroundingMetadata;
 }
 
-/** A container for the events that occur during one invocation. */
+/**
+ * A container for the events that occur during one invocation.
+ *
+ * The wrapper is the shape an `.evalset.json` file carries, and the
+ * `invocationEvents` key is what tells `google/adk-python` to read the object
+ * as this arm of its `intermediate_data` union rather than as the tool-use
+ * arm. Do not flatten it to a bare array.
+ */
 export interface InvocationEvents {
   /** The events of the invocation, in the order the agent emitted them. */
   invocationEvents: InvocationEvent[];
@@ -50,9 +57,10 @@ export interface Invocation {
    * Intermediate steps generated as part of agent execution.
    *
    * For a multi-agent system, these show the route the agents took to reach
-   * the final response.
+   * the final response. A turn with no intermediate step carries an empty
+   * list, so readers never have to test for absence.
    */
-  intermediateData?: InvocationEvents;
+  intermediateData: InvocationEvents;
 
   /**
    * Creation time in milliseconds since the epoch, taken from the invocation's

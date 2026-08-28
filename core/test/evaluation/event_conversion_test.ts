@@ -48,7 +48,7 @@ describe('convertEventsToEvalInvocations', () => {
     expect(invocation.invocationId).toBe('inv1');
     expect(invocation.userContent.parts?.[0].text).toBe('Hello');
     expect(invocation.finalResponse?.parts?.[0].text).toBe('Hi there!');
-    expect(invocation.intermediateData?.invocationEvents).toHaveLength(0);
+    expect(invocation.intermediateData.invocationEvents).toHaveLength(0);
   });
 
   it('keeps the text response over trailing audio of the same turn', () => {
@@ -64,9 +64,9 @@ describe('convertEventsToEvalInvocations', () => {
     const invocations = convertEventsToEvalInvocations(events);
 
     expect(invocations[0].finalResponse?.parts?.[0].text).toBe('Hello there.');
-    const intermediate = invocations[0].intermediateData?.invocationEvents;
+    const intermediate = invocations[0].intermediateData.invocationEvents;
     expect(intermediate).toHaveLength(1);
-    expect(intermediate?.[0].content?.parts?.[0].inlineData?.data).toBe(
+    expect(intermediate[0].content?.parts?.[0].inlineData?.data).toBe(
       'ZmFrZS1hdWRpbw==',
     );
   });
@@ -83,10 +83,10 @@ describe('convertEventsToEvalInvocations', () => {
     const invocation = invocations[0];
     expect(invocation.userContent.parts?.[0].text).toBe('what is the weather?');
     expect(invocation.finalResponse).toBeUndefined();
-    const intermediate = invocation.intermediateData?.invocationEvents;
+    const intermediate = invocation.intermediateData.invocationEvents;
     expect(intermediate).toHaveLength(1);
-    expect(intermediate?.[0].author).toBe('agent');
-    expect(intermediate?.[0].content?.parts?.[0].functionCall?.name).toBe(
+    expect(intermediate[0].author).toBe('agent');
+    expect(intermediate[0].content?.parts?.[0].functionCall?.name).toBe(
       'get_weather',
     );
   });
@@ -104,9 +104,9 @@ describe('convertEventsToEvalInvocations', () => {
     expect(invocation.finalResponse?.parts?.[0].text).toBe(
       'It is sunny in SF.',
     );
-    const intermediate = invocation.intermediateData?.invocationEvents;
+    const intermediate = invocation.intermediateData.invocationEvents;
     expect(intermediate).toHaveLength(1);
-    expect(intermediate?.[0].content?.parts?.[0].functionCall?.name).toBe(
+    expect(intermediate[0].content?.parts?.[0].functionCall?.name).toBe(
       'get_weather',
     );
   });
@@ -146,8 +146,8 @@ describe('convertEventsToEvalInvocations', () => {
 
     const invocation = invocations[0];
     expect(invocation.finalResponse?.parts?.[0].text).toBe('All done.');
-    const intermediate = invocation.intermediateData?.invocationEvents;
-    expect(intermediate?.map((e) => e.author)).toEqual([
+    const intermediate = invocation.intermediateData.invocationEvents;
+    expect(intermediate.map((e) => e.author)).toEqual([
       'root_agent',
       'sub_agent_1',
       'sub_agent_1',
@@ -166,10 +166,10 @@ describe('convertEventsToEvalInvocations', () => {
 
     const invocation = invocations[0];
     expect(invocation.finalResponse?.parts?.[0].text).toBe('Second response');
-    const intermediate = invocation.intermediateData?.invocationEvents;
+    const intermediate = invocation.intermediateData.invocationEvents;
     expect(intermediate).toHaveLength(1);
-    expect(intermediate?.[0].author).toBe('agent1');
-    expect(intermediate?.[0].content?.parts?.[0].text).toBe('First response');
+    expect(intermediate[0].author).toBe('agent1');
+    expect(intermediate[0].content?.parts?.[0].text).toBe('First response');
   });
 
   it('keeps a final event that carries a tool call', () => {
@@ -189,9 +189,9 @@ describe('convertEventsToEvalInvocations', () => {
     expect(invocation.finalResponse?.parts?.[0].functionCall?.name).toBe(
       'set_light',
     );
-    const intermediate = invocation.intermediateData?.invocationEvents;
+    const intermediate = invocation.intermediateData.invocationEvents;
     expect(intermediate).toHaveLength(1);
-    expect(intermediate?.[0].content?.parts?.[0].functionCall?.name).toBe(
+    expect(intermediate[0].content?.parts?.[0].functionCall?.name).toBe(
       'set_light',
     );
   });
@@ -212,10 +212,10 @@ describe('convertEventsToEvalInvocations', () => {
 
     const invocations = convertEventsToEvalInvocations(events);
 
-    const intermediate = invocations[0].intermediateData?.invocationEvents;
+    const intermediate = invocations[0].intermediateData.invocationEvents;
     expect(intermediate).toHaveLength(1);
-    expect(intermediate?.[0].content).toBeUndefined();
-    expect(intermediate?.[0].groundingMetadata).toEqual(groundingMetadata);
+    expect(intermediate[0].content).toBeUndefined();
+    expect(intermediate[0].groundingMetadata).toEqual(groundingMetadata);
   });
 
   it('keeps an event that carries grounding metadata but no content', () => {
@@ -231,10 +231,10 @@ describe('convertEventsToEvalInvocations', () => {
 
     const invocation = invocations[0];
     expect(invocation.finalResponse).toBeUndefined();
-    const intermediate = invocation.intermediateData?.invocationEvents;
+    const intermediate = invocation.intermediateData.invocationEvents;
     expect(intermediate).toHaveLength(1);
-    expect(intermediate?.[0].content).toBeUndefined();
-    expect(intermediate?.[0].groundingMetadata).toEqual(groundingMetadata);
+    expect(intermediate[0].content).toBeUndefined();
+    expect(intermediate[0].groundingMetadata).toEqual(groundingMetadata);
   });
 
   it('records an event with no author as authored by the agent', () => {
@@ -248,9 +248,9 @@ describe('convertEventsToEvalInvocations', () => {
 
     const invocations = convertEventsToEvalInvocations(events);
 
-    const intermediate = invocations[0].intermediateData?.invocationEvents;
+    const intermediate = invocations[0].intermediateData.invocationEvents;
     expect(intermediate).toHaveLength(1);
-    expect(intermediate?.[0].author).toBe('agent');
+    expect(intermediate[0].author).toBe('agent');
   });
 
   it('treats an author of "User" as the user', () => {
@@ -259,7 +259,7 @@ describe('convertEventsToEvalInvocations', () => {
     const invocations = convertEventsToEvalInvocations(events);
 
     expect(invocations[0].userContent.parts?.[0].text).toBe('Hello');
-    expect(invocations[0].intermediateData?.invocationEvents).toHaveLength(0);
+    expect(invocations[0].intermediateData.invocationEvents).toHaveLength(0);
   });
 
   it('drops an event with no content and no grounding metadata', () => {
@@ -270,7 +270,7 @@ describe('convertEventsToEvalInvocations', () => {
 
     const invocations = convertEventsToEvalInvocations(events);
 
-    expect(invocations[0].intermediateData?.invocationEvents).toHaveLength(0);
+    expect(invocations[0].intermediateData.invocationEvents).toHaveLength(0);
   });
 
   it('drops an event whose parts carry no signal', () => {
@@ -281,7 +281,7 @@ describe('convertEventsToEvalInvocations', () => {
 
     const invocations = convertEventsToEvalInvocations(events);
 
-    expect(invocations[0].intermediateData?.invocationEvents).toHaveLength(0);
+    expect(invocations[0].intermediateData.invocationEvents).toHaveLength(0);
   });
 
   it('leaves the user content empty when a user event carries no content', () => {

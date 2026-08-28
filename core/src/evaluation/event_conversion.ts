@@ -72,31 +72,31 @@ function beatsCurrentFinalResponse(
 }
 
 /**
- * Reports whether the event is the chosen final response and adds nothing an
- * evaluator cannot read off {@link Invocation.finalResponse}.
+ * Projects the events of one invocation for an evaluator.
+ *
+ * The event chosen as the final response is dropped, because
+ * {@link Invocation.finalResponse} already holds it. It is kept when it also
+ * carries a tool call or grounding metadata, which the evaluator has no other
+ * way to read, and then its content is repeated only for the tool call.
  */
-function isRedundantFinalEvent(
-  event: Event,
+function toInvocationEvents(
+  candidates: Event[],
   finalEvent: Event | undefined,
-): boolean {
-  return (
-    event === finalEvent &&
-    getFunctionCalls(event).length === 0 &&
-    !event.groundingMetadata
-  );
-}
-
-function toInvocationEvent(
-  event: Event,
-  finalEvent: Event | undefined,
-): InvocationEvent {
-  const keepsContent =
-    event !== finalEvent || getFunctionCalls(event).length > 0;
-  return {
-    author: event.author || DEFAULT_AUTHOR,
-    content: keepsContent ? event.content : undefined,
-    groundingMetadata: event.groundingMetadata,
-  };
+): InvocationEvent[] {
+  const invocationEvents: InvocationEvent[] = [];
+  for (const event of candidates) {
+    const isChosenFinal =
+      event === finalEvent && getFunctionCalls(event).length === 0;
+    if (isChosenFinal && !event.groundingMetadata) {
+      continue;
+    }
+    invocationEvents.push({
+      author: event.author || DEFAULT_AUTHOR,
+      content: isChosenFinal ? undefined : event.content,
+      groundingMetadata: event.groundingMetadata,
+    });
+  }
+  return invocationEvents;
 }
 
 function toInvocation(invocationId: string, events: Event[]): Invocation {
@@ -134,9 +134,7 @@ function toInvocation(invocationId: string, events: Event[]): Invocation {
     userContent,
     finalResponse,
     intermediateData: {
-      invocationEvents: candidates
-        .filter((event) => !isRedundantFinalEvent(event, finalEvent))
-        .map((event) => toInvocationEvent(event, finalEvent)),
+      invocationEvents: toInvocationEvents(candidates, finalEvent),
     },
     creationTimestamp,
   };
