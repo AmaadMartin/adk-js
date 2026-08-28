@@ -41,20 +41,6 @@ const EXCHANGERS: Partial<
 };
 
 /**
- * The exchanger for a credential type. An exchanger reads only its arguments,
- * so no tool can contribute state to it. `ServiceAccountCredentialExchanger`
- * is built on the one path that uses it, because constructing it logs an
- * experimental warning that must not fire on import.
- */
-function exchangerFor(
-  authType: AuthCredentialTypes,
-): BaseCredentialExchanger | undefined {
-  return authType === AuthCredentialTypes.SERVICE_ACCOUNT
-    ? new ServiceAccountCredentialExchanger()
-    : EXCHANGERS[authType];
-}
-
-/**
  * Names the OAuth2 flow URL the scheme declares a flow for but does not
  * supply, or `undefined` when the scheme is complete.
  */
@@ -215,7 +201,12 @@ export class CredentialManager {
   private async exchangeCredential(
     credential: AuthCredential,
   ): Promise<{credential: AuthCredential; wasExchanged: boolean}> {
-    const exchanger = exchangerFor(credential.authType);
+    // The service account exchanger is built here, not at module scope: its
+    // @experimental constructor must not warn on import.
+    const exchanger =
+      credential.authType === AuthCredentialTypes.SERVICE_ACCOUNT
+        ? new ServiceAccountCredentialExchanger()
+        : EXCHANGERS[credential.authType];
     if (!exchanger) {
       return {credential, wasExchanged: false};
     }
