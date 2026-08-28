@@ -13,7 +13,10 @@ import {experimental} from '../utils/experimental.js';
 import {AuthCredential, AuthCredentialTypes} from './auth_credential.js';
 import {AuthScheme, OAuthGrantType} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
-import {BaseCredentialExchanger} from './exchanger/base_credential_exchanger.js';
+import {
+  BaseCredentialExchanger,
+  ExchangeResult,
+} from './exchanger/base_credential_exchanger.js';
 import {
   determineGrantType,
   OAuth2CredentialExchanger,
@@ -126,7 +129,11 @@ export class CredentialManager {
       return cloneDeep(rawAuthCredential);
     }
 
-    let credential = await this.loadFromCredentialService(context);
+    let credential =
+      await context.invocationContext.credentialService?.loadCredential(
+        this.authConfig,
+        context,
+      );
     let needsSave = false;
     if (!credential) {
       credential = context.getAuthResponse(this.authConfig);
@@ -189,18 +196,10 @@ export class CredentialManager {
     }
   }
 
-  /** Reads the credential the credential service holds, when there is one. */
-  private async loadFromCredentialService(
-    context: Context,
-  ): Promise<AuthCredential | undefined> {
-    const credentialService = context.invocationContext.credentialService;
-    return credentialService?.loadCredential(this.authConfig, context);
-  }
-
   /** Exchanges the credential when a exchanger is registered for its type. */
   private async exchangeCredential(
     credential: AuthCredential,
-  ): Promise<{credential: AuthCredential; wasExchanged: boolean}> {
+  ): Promise<ExchangeResult> {
     // The service account exchanger is built here, not at module scope: its
     // @experimental constructor must not warn on import.
     const exchanger =
@@ -243,12 +242,9 @@ export class CredentialManager {
     context: Context,
     credential: AuthCredential,
   ): Promise<void> {
-    const credentialService = context.invocationContext.credentialService;
-    if (!credentialService) {
-      return;
-    }
-    const authConfigToSave = cloneDeep(this.authConfig);
-    authConfigToSave.exchangedAuthCredential = credential;
-    await credentialService.saveCredential(authConfigToSave, context);
+    await context.invocationContext.credentialService?.saveCredential(
+      {...this.authConfig, exchangedAuthCredential: credential},
+      context,
+    );
   }
 }
