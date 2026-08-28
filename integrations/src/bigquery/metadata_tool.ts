@@ -36,13 +36,9 @@ interface MetadataToolSpec<TParameters extends z.ZodObject<z.ZodRawShape>> {
   name: string;
   description: string;
   parameters: TParameters;
-  /**
-   * The BigQuery read this tool performs. `connect` builds a client for the
-   * project the call names; the tool cannot know that project before the model
-   * supplies it.
-   */
+  /** The BigQuery read this tool performs. */
   read: (
-    connect: (projectId: string) => BigQuery,
+    client: BigQuery,
     input: ToolExecuteArgument<TParameters>,
   ) => Promise<unknown>;
 }
@@ -56,6 +52,12 @@ const DATASET_PARAMETERS = z.object({
   project_id: PROJECT_ID,
   dataset_id: DATASET_ID,
 });
+
+/**
+ * The one parameter every metadata tool takes. Reading it back narrows the
+ * project id out of a tool's own parameters, whatever else they hold.
+ */
+const PROJECT_PARAMETERS = z.object({project_id: PROJECT_ID});
 
 /** The ids of the listed resources, dropping any the API left unnamed. */
 function resourceIds(resources: Array<{id?: string}>): string[] {
@@ -85,22 +87,15 @@ function createMetadataTool<TParameters extends z.ZodObject<z.ZodRawShape>>(
     parameters: spec.parameters,
     execute: async (input) => {
       try {
-        return await spec.read(
-          (projectId) =>
-            new BigQuery({
-              projectId,
-              authClient: deps.credentials,
-              location: deps.settings.location,
-              userAgent: [
-                BQ_USER_AGENT,
-                deps.settings.applicationName,
-                spec.name,
-              ]
-                .filter(Boolean)
-                .join(' '),
-            }),
-          input,
-        );
+        const client = new BigQuery({
+          projectId: PROJECT_PARAMETERS.parse(input).project_id,
+          authClient: deps.credentials,
+          location: deps.settings.location,
+          userAgent: [BQ_USER_AGENT, deps.settings.applicationName, spec.name]
+            .filter(Boolean)
+            .join(' '),
+        });
+        return await spec.read(client, input);
       } catch (error: unknown) {
         return toBigQueryToolError(error);
       }
@@ -124,10 +119,8 @@ export function createBigQueryMetadataTools(
         'Get metadata information about a BigQuery dataset, such as its ' +
         'description, location and access list.',
       parameters: DATASET_PARAMETERS,
-      read: async (connect, input) => {
-        const [metadata] = await connect(input.project_id)
-          .dataset(input.dataset_id, {projectId: input.project_id})
-          .getMetadata();
+      read: async (client, input) => {
+        const [metadata] = await client.dataset(input.dataset_id).getMetadata();
         return metadata;
       },
     }),
@@ -141,9 +134,9 @@ export function createBigQueryMetadataTools(
         dataset_id: DATASET_ID,
         table_id: z.string().describe('The BigQuery table id.'),
       }),
-      read: async (connect, input) => {
-        const [metadata] = await connect(input.project_id)
-          .dataset(input.dataset_id, {projectId: input.project_id})
+      read: async (client, input) => {
+        const [metadata] = await client
+          .dataset(input.dataset_id)
           .table(input.table_id)
           .getMetadata();
         return metadata;
@@ -156,10 +149,8 @@ export function createBigQueryMetadataTools(
         'list_dataset_ids("bigquery-public-data") returns ["austin_311", ' +
         '"baseball", ...].',
       parameters: z.object({project_id: PROJECT_ID}),
-      read: async (connect, input) => {
-        const [datasets] = await connect(input.project_id).getDatasets({
-          projectId: input.project_id,
-        });
+      read: async (client) => {
+        const [datasets] = await client.getDatasets();
         return resourceIds(datasets);
       },
     }),
@@ -170,10 +161,8 @@ export function createBigQueryMetadataTools(
         'list_table_ids("bigquery-public-data", "cdc_places") returns ' +
         '["chronic_disease_indicators", ...].',
       parameters: DATASET_PARAMETERS,
-      read: async (connect, input) => {
-        const [tables] = await connect(input.project_id)
-          .dataset(input.dataset_id, {projectId: input.project_id})
-          .getTables();
+      read: async (client, input) => {
+        const [tables] = await client.dataset(input.dataset_id).getTables();
         return resourceIds(tables);
       },
     }),
@@ -190,10 +179,8 @@ export function createBigQueryMetadataTools(
             'The BigQuery job id, either bare or as project_id:region.job_id.',
           ),
       }),
-      read: async (connect, input) => {
-        const [metadata] = await connect(input.project_id)
-          .job(input.job_id)
-          .getMetadata();
+      read: async (client, input) => {
+        const [metadata] = await client.job(input.job_id).getMetadata();
         return metadata;
       },
     }),

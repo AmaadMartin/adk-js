@@ -26,16 +26,3 @@ export interface BigQueryToolConfig {
    */
   applicationName?: string;
 }
-
-/**
- * Rejects a configuration the BigQuery API cannot accept.
- *
- * @param config The configuration to check.
- * @throws Error When `applicationName` contains a space, which would split it
- *     into two user-agent tokens.
- */
-export function validateBigQueryToolConfig(config: BigQueryToolConfig): void {
-  if (config.applicationName?.includes(' ')) {
-    throw new Error('Application name should not contain spaces.');
-  }
-}

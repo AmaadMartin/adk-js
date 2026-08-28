@@ -30,7 +30,7 @@ interface RecordedClientOptions {
 
 const bq = vi.hoisted(() => ({
   clients: [] as BigQueryOptions[],
-  datasetCalls: [] as Array<{id: string; projectId?: string}>,
+  datasetCalls: [] as Array<{id: string; options?: object}>,
   tableCalls: [] as string[],
   jobCalls: [] as string[],
   getDatasets: vi.fn(),
@@ -48,8 +48,8 @@ vi.mock('@google-cloud/bigquery', () => ({
 
     getDatasets = bq.getDatasets;
 
-    dataset(id: string, options?: {projectId?: string}) {
-      bq.datasetCalls.push({id, projectId: options?.projectId});
+    dataset(id: string, options?: object) {
+      bq.datasetCalls.push({id, options});
       return {
         getMetadata: bq.datasetMetadata,
         getTables: bq.getTables,
@@ -117,9 +117,7 @@ describe('list_dataset_ids', () => {
     });
 
     expect(result).toEqual(['austin_311', 'baseball']);
-    expect(bq.getDatasets).toHaveBeenCalledWith({
-      projectId: 'bigquery-public-data',
-    });
+    expect(bq.getDatasets).toHaveBeenCalledWith();
     expect(onlyClient().projectId).toBe('bigquery-public-data');
   });
 
@@ -156,9 +154,8 @@ describe('get_dataset_info', () => {
       dataset_id: 'cdc_places',
     });
 
-    expect(bq.datasetCalls).toEqual([
-      {id: 'cdc_places', projectId: 'bigquery-public-data'},
-    ]);
+    expect(bq.datasetCalls).toEqual([{id: 'cdc_places', options: undefined}]);
+    expect(onlyClient().projectId).toBe('bigquery-public-data');
   });
 });
 
@@ -173,8 +170,9 @@ describe('list_table_ids', () => {
 
     expect(result).toEqual(['table1', 'table2']);
     expect(bq.datasetCalls).toEqual([
-      {id: 'my_dataset_id', projectId: 'my_project_id'},
+      {id: 'my_dataset_id', options: undefined},
     ]);
+    expect(onlyClient().projectId).toBe('my_project_id');
   });
 });
 

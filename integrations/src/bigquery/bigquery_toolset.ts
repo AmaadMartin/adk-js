@@ -12,7 +12,7 @@ import {
   ToolPredicate,
 } from '@google/adk';
 
-import {BigQueryToolConfig, validateBigQueryToolConfig} from './config.js';
+import {BigQueryToolConfig} from './config.js';
 import {createBigQueryMetadataTools} from './metadata_tool.js';
 
 /** How to build a {@link BigQueryToolset}. */
@@ -62,7 +62,9 @@ export class BigQueryToolset extends BaseToolset {
   constructor(options: BigQueryToolsetOptions = {}) {
     super(options.toolFilter ?? [], options.prefix);
     const settings = options.toolConfig ?? {};
-    validateBigQueryToolConfig(settings);
+    if (settings.applicationName?.includes(' ')) {
+      throw new Error('Application name should not contain spaces.');
+    }
     this.tools = createBigQueryMetadataTools({
       credentials: options.credentials,
       settings,
