@@ -16,10 +16,10 @@ consent flow and starts a new run with the answer, and ADK re-executes the tool
 call that was waiting.
 
 `AuthConfig` pairs an `AuthScheme`, which says how the API authenticates, with
-an `AuthCredential`, which holds the secret. `AuthenticatedFunctionTool` takes
-one and delegates to `CredentialManager`. `AuthPreprocessor` pauses the
-invocation and later resumes the waiting call, and a `BaseCredentialService`
-remembers the credential between turns.
+an `AuthCredential`, which holds the secret. `AuthenticatedFunctionTool` and
+`BaseAuthenticatedTool` both take one and delegate to `CredentialManager`.
+`AuthPreprocessor` pauses the invocation and later resumes the waiting call, and
+a `BaseCredentialService` remembers the credential between turns.
 
 ## Get started
 
@@ -88,6 +88,44 @@ const runner = new Runner({
 Pass a `credentialService` to the `Runner`, as above. Without one the credential
 lives only for the current invocation, and the next turn asks for consent again.
 
+## The class-based tool
+
+`AuthenticatedFunctionTool` wraps a plain function. `BaseAuthenticatedTool` is
+the class-based equivalent: extend it, implement `runAsyncImpl`, and the
+credential arrives in the request. Reach for it when the tool needs its own
+`_getDeclaration`, or state that outlives one call. Both classes resolve the
+credential the same way, so the pause and resume below applies to either.
+
+```ts
+import {
+  BaseAuthenticatedTool,
+  RunAsyncAuthenticatedToolRequest,
+} from '@google/adk';
+
+class ListDocumentsTool extends BaseAuthenticatedTool {
+  constructor() {
+    super({
+      name: 'list_documents',
+      description: 'Lists the documents in a folder.',
+      authConfig,
+    });
+  }
+
+  protected override async runAsyncImpl({
+    args,
+    credential,
+  }: RunAsyncAuthenticatedToolRequest): Promise<unknown> {
+    const accessToken = credential?.oauth2?.accessToken;
+    // Call the provider's API with accessToken here.
+    return [`${args['folder']}/report.pdf`];
+  }
+}
+```
+
+`runAsyncImpl` runs only once a credential is available. Omit `authConfig` and
+the tool behaves like a plain `BaseTool`: the body runs straight away and
+`credential` is `undefined`.
+
 ## The pause and resume
 
 `CredentialManager` returns a usable raw credential, an API key or an HTTP
@@ -119,15 +157,18 @@ reads.
 
 ## Ordering
 
-The tool resolves the credential after `FunctionTool` validates the arguments
-and after the `requireConfirmation` gate. A call with invalid arguments, or one
-the user rejected, never starts a consent flow. An error raised while resolving
-surfaces as `Error in tool '<name>': <message>`, like any other tool failure.
+`AuthenticatedFunctionTool` resolves the credential after `FunctionTool`
+validates the arguments and after the `requireConfirmation` gate. A call with
+invalid arguments, or one the user rejected, never starts a consent flow. An
+error raised while resolving surfaces as `Error in tool '<name>': <message>`,
+like any other tool failure. `BaseAuthenticatedTool` adds no gate of its own, so
+it resolves the credential first and propagates such an error unwrapped.
 
 ## Limitations
 
-- **Experimental.** `AuthenticatedFunctionTool`, `CredentialManager` and the
-  credential exchangers warn once on first use, and their APIs may change.
+- **Experimental.** `AuthenticatedFunctionTool`, `BaseAuthenticatedTool`,
+  `CredentialManager` and the credential exchangers warn once on first use, and
+  their APIs may change.
 - **The OAuth2 token endpoint must be public HTTPS.** `fetchOAuth2Tokens`
   refuses plain HTTP, and refuses any private, loopback or cloud-metadata
   address. A local provider cannot be used.
