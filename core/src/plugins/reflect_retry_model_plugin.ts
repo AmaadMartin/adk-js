@@ -10,6 +10,7 @@ import {Context} from '../agents/context.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {FunctionTool} from '../tools/function_tool.js';
+import {SKIP_THOUGHT_SIGNATURE_VALIDATOR} from '../utils/content_utils.js';
 import {
   REFLECT_AND_RETRY_RESPONSE_TYPE,
   resolveScopeKey,
@@ -318,7 +319,8 @@ Formulate a new plan based on your analysis and try a corrected or different app
           retry_count: retryCount,
         },
       },
-    } as Part;
+      thoughtSignature: SKIP_THOUGHT_SIGNATURE_VALIDATOR,
+    };
   }
 
   /**
