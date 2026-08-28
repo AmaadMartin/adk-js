@@ -145,10 +145,7 @@ export class RestApiTool extends BaseTool {
     }
 
     try {
-      // Read at call time, so replacing `globalThis.fetch` after the tool is
-      // constructed still takes effect. Bound because a detached `fetch`
-      // reference throws in browsers. Inside the `try`, so a runtime without
-      // `fetch` reports the same error shape as a failed call.
+      // Bound: a detached `globalThis.fetch` reference throws in browsers.
       const fetchFn = this.fetchFn ?? globalThis.fetch.bind(globalThis);
       const response = await fetchFn(url, {
         method,

@@ -109,6 +109,7 @@ export class OpenAPIToolset extends BaseToolset {
         {
           preservePropertyNames: options.preservePropertyNames,
           headerProvider: options.headerProvider,
+          credentialKey: options.credentialKey,
           fetchFn: options.fetchFn,
         },
       );
@@ -117,21 +118,11 @@ export class OpenAPIToolset extends BaseToolset {
       this.tools.push(tool);
     }
 
-    if (options.authScheme || options.authCredential) {
-      this.configureAuthAll(options.authScheme, options.authCredential);
-    }
-    if (options.credentialKey) {
-      this.configureCredentialKeyAll(options.credentialKey);
-    }
-  }
-
-  private configureAuthAll(
-    authScheme?: OpenAPIV3.SecuritySchemeObject,
-    authCredential?: AuthCredential,
-  ) {
     for (const tool of this.tools) {
-      if (authScheme) tool.configureAuthScheme(authScheme);
-      if (authCredential) tool.configureAuthCredential(authCredential);
+      if (options.authScheme) tool.configureAuthScheme(options.authScheme);
+      if (options.authCredential) {
+        tool.configureAuthCredential(options.authCredential);
+      }
     }
   }
 

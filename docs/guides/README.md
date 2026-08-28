@@ -1,10 +1,8 @@
 # ADK Developer Guides
 
-This directory contains specific developer guides for the ADK JavaScript and
-TypeScript implementation. For the official ADK documentation, visit
+Developer guides for the ADK TypeScript implementation, mirroring the
+`docs/guides/` tree in adk-python. For the official ADK documentation, visit
 [adk.dev](https://adk.dev/).
-
-## Index
 
 ### Tools
 

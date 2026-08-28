@@ -11,13 +11,13 @@ generated tool carries the operation's name, description and parameter schema,
 so the model sees the same arguments the API declares. Calling the tool builds
 the request, applies the credential, and performs the HTTP call.
 
-Use it when the API is described by a spec. Write a `FunctionTool` instead when
-the call needs logic the spec cannot express, and use `MCPToolset` when the
-remote side already speaks the Model Context Protocol.
+Write a `FunctionTool` instead when the call needs logic the spec cannot
+express. Use `MCPToolset` when the remote side already speaks the Model Context
+Protocol.
 
-The toolset parses the spec once, in the constructor. The generated tools never
-change afterwards, so the `configure*All` methods below mutate the tools that
-already exist rather than rebuilding them.
+The toolset parses the spec once, in the constructor, and never rebuilds the
+tools. The `configure*All` methods below therefore mutate the tools that already
+exist, and take effect on the next call.
 
 ## Get started
 
@@ -34,24 +34,16 @@ const agent = new LlmAgent({
 });
 ```
 
-Pass an already-parsed spec with `specDict` instead of `specStr`. `specDict`
-wins when you pass both.
+`specDict` takes an already-parsed spec, and wins when you pass both.
 
 ## Selecting tools
 
 `getTool` returns one generated tool, so you can give an agent a single
-endpoint:
+endpoint. The toolset names each tool after the operation, converted to
+snake_case, and returns `undefined` when no tool carries that name.
 
-```ts
-const getUsers = toolset.getTool('get_users');
-```
-
-The toolset names each tool after the operation, converted to snake_case. It
-returns `undefined` when no tool carries that name.
-
-`prefix` prepends `${prefix}_` to every generated name. The toolset applies the
-prefix at construction, so `getTool` and a `toolFilter` list both match the
-prefixed name:
+`prefix` is applied at construction, so `getTool` and an array `toolFilter`
+both match the prefixed name:
 
 ```ts
 const toolset = new OpenAPIToolset({specDict: spec, prefix: 'crm'});
@@ -59,55 +51,25 @@ toolset.getTool('crm_get_users'); // the tool
 toolset.getTool('get_users'); // undefined
 ```
 
-`toolFilter` restricts what `getTools` returns. Pass a `string[]` of names, or a
-predicate that decides per tool.
+A predicate `toolFilter` needs a `ReadonlyContext` to run. `getTools()` called
+without one returns every tool and logs a warning.
 
-## Authentication
+## Rotating credentials and transport
 
-`authScheme` and `authCredential` apply to every generated tool and override
-the scheme the spec declares for the operation:
+Each tool calls `globalThis.fetch` unless you pass `fetchFn`. Pass a wrapper to
+route calls through a proxy, to supply a custom certificate authority, or to
+sign each request.
 
-```ts
-import {AuthCredentialTypes, OpenAPIToolset} from '@google/adk';
-
-const toolset = new OpenAPIToolset({
-  specDict: spec,
-  authScheme: {type: 'apiKey', in: 'header', name: 'X-API-Key'},
-  authCredential: {
-    authType: AuthCredentialTypes.API_KEY,
-    apiKey: process.env.MY_API_KEY,
-  },
-});
-```
-
-`credentialKey` is the key the tools use to request a credential
-interactively and to cache the exchanged result. Set it when several toolsets
-share one credential. `configureCredentialKeyAll` changes it after
-construction:
-
-```ts
-toolset.configureCredentialKeyAll('rotated-key');
-```
-
-## Custom transport
-
-Every generated tool calls `globalThis.fetch` by default. `fetchFn` replaces it
-for every tool in the toolset:
-
-```ts
-const toolset = new OpenAPIToolset({specDict: spec, fetchFn: myFetch});
-```
-
-Pass a wrapper to route calls through a proxy, to supply a custom certificate
-authority, or to sign each request. `configureFetchAll` installs one after
-construction:
+`configureFetchAll` and `configureCredentialKeyAll` replace what the constructor
+set, on every tool the toolset built:
 
 ```ts
 toolset.configureFetchAll(myFetch);
+toolset.configureCredentialKeyAll('rotated-key');
 ```
 
-The tool reads `globalThis.fetch` at call time, so replacing the global also
-takes effect on tools built earlier.
+`fetchFn` is the TypeScript equivalent of the Python toolset's `ssl_verify` and
+`httpx_client_factory`, which are httpx options with no portable `fetch` form.
 
 ## Failure modes
 
