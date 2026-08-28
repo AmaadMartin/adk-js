@@ -62,13 +62,9 @@ export class OpenAPIToolset extends BaseToolset {
       }
 
       const tool = createRestApiTool(
-        {
-          name: toolName,
-          description: op.description,
-          endpoint: op.endpoint,
-          operation: op.operation,
-          authScheme: op.authScheme,
-        },
+        // The toolset name carries the prefix, so it replaces the name the
+        // spec parser derived from the operation id.
+        {...op, name: toolName},
         {
           preservePropertyNames: options.preservePropertyNames,
           headerProvider: options.headerProvider,

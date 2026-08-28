@@ -341,6 +341,7 @@ export type {
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
+export {snakeToLowerCamel} from './utils/case_utils.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
@@ -386,7 +387,9 @@ export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';
 export {
   RestApiTool,
   createRestApiTool,
+  createRestApiToolFromJson,
 } from './tools/openapi_tool/rest_api_tool.js';
+export type {RestApiToolOptions} from './tools/openapi_tool/rest_api_tool.js';
 
 // Workflow (parity port of google/adk-python `google/adk/workflow`). Named
 // explicitly (not `export *`) so the top-level surface stays intentional and
