@@ -11,9 +11,6 @@ import {loadOptionalPeer} from '../utils/optional_peer.js';
 import type {InvocationContext} from './invocation_context.js';
 import type {TranscriptionEntry} from './transcription_entry.js';
 
-/** The role a transcript takes when its audio arrived with no role. */
-const DEFAULT_ROLE = 'user';
-
 /**
  * Discriminates the `Blob | Content` union a cache entry carries.
  *
@@ -97,24 +94,19 @@ function bundleTranscriptionCache(
   return segments;
 }
 
-/** Options for {@link AudioTranscriber}. */
-export interface AudioTranscriberOptions {
-  /**
-   * Speech-to-Text client to use. Supply one to select credentials, a project
-   * or a regional endpoint. When omitted, a default client is constructed on
-   * the first request that has audio, which is also when
-   * `@google-cloud/speech` is loaded.
-   */
-  client?: SpeechClient;
-}
-
 /** Transcribes audio using Google Cloud Speech-to-Text. */
 export class AudioTranscriber {
   private clientPromise?: Promise<SpeechClient>;
 
-  constructor(options: AudioTranscriberOptions = {}) {
-    if (options.client !== undefined) {
-      this.clientPromise = Promise.resolve(options.client);
+  /**
+   * @param client Speech-to-Text client to use. Supply one to select
+   *     credentials, a project or a regional endpoint. When omitted, a default
+   *     client is constructed on the first request that has audio, which is
+   *     also when `@google-cloud/speech` is loaded.
+   */
+  constructor(client?: SpeechClient) {
+    if (client !== undefined) {
+      this.clientPromise = Promise.resolve(client);
     }
   }
 
@@ -175,11 +167,11 @@ export class AudioTranscriber {
       });
       for (const result of response.results ?? []) {
         const transcript = result.alternatives?.[0]?.transcript;
-        if (transcript === undefined || transcript === null) {
+        if (transcript == null) {
           continue;
         }
         contents.push({
-          role: segment.speaker ? segment.speaker.toLowerCase() : DEFAULT_ROLE,
+          role: segment.speaker?.toLowerCase() || 'user',
           parts: [{text: transcript}],
         });
       }

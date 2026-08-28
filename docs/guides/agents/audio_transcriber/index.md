@@ -72,9 +72,9 @@ project or a regional endpoint. The transcriber then uses it and never loads
 import {SpeechClient} from '@google-cloud/speech';
 import {AudioTranscriber} from '@google/adk';
 
-const transcriber = new AudioTranscriber({
-  client: new SpeechClient({projectId: process.env.GOOGLE_CLOUD_PROJECT}),
-});
+const transcriber = new AudioTranscriber(
+  new SpeechClient({projectId: process.env.GOOGLE_CLOUD_PROJECT}),
+);
 ```
 
 ## Failure modes

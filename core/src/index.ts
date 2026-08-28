@@ -8,7 +8,6 @@
 // this barrel.
 export * from './a2a/index.js';
 export {AudioTranscriber} from './agents/audio_transcriber.js';
-export type {AudioTranscriberOptions} from './agents/audio_transcriber.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';

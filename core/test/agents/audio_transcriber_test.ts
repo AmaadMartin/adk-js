@@ -449,7 +449,7 @@ describe('AudioTranscriber', () => {
     speech.constructions = 0;
     speech.responses = [scriptedResponse('injected')];
 
-    const contents = await new AudioTranscriber({client}).transcribeFile(
+    const contents = await new AudioTranscriber(client).transcribeFile(
       contextWithCache([audioEntry('user', 'aa')]),
     );
 
@@ -458,10 +458,10 @@ describe('AudioTranscriber', () => {
     expect(speech.constructions).toBe(0);
   });
 
-  it('constructs a default client when options carry none', async () => {
+  it('constructs a default client when the argument is undefined', async () => {
     speech.responses = [scriptedResponse('default')];
 
-    await new AudioTranscriber({}).transcribeFile(
+    await new AudioTranscriber(undefined).transcribeFile(
       contextWithCache([audioEntry('user', 'aa')]),
     );
 
