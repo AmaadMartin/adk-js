@@ -176,6 +176,12 @@ describe('adkToMcpToolType', () => {
     expect(() => ToolSchema.parse(adkToMcpToolType(tool))).not.toThrow();
   });
 
+  it('returns a ToolSchema-valid descriptor for a tool with no declaration', () => {
+    const tool = new DeclaredTool('ping', 'Pings the server');
+
+    expect(() => ToolSchema.parse(adkToMcpToolType(tool))).not.toThrow();
+  });
+
   it('rejects a parameters schema that is not an object schema', () => {
     const tool = new DeclaredTool('echo', 'Echoes a string', {
       name: 'echo',
