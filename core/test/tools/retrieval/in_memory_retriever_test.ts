@@ -57,24 +57,6 @@ describe('InMemoryVectorRetriever', () => {
     const retriever = new InMemoryVectorRetriever(
       CHUNKS,
       new FixedEmbeddingModel([1, 0, 0]),
-      3,
-    );
-
-    const documents = await retriever.retrieve('anything');
-
-    expect(documents.map((document) => document.text)).toEqual([
-      'exact',
-      'close',
-      'orthogonal',
-    ]);
-    expect(documents[0].score).toBeCloseTo(1);
-  });
-
-  it('returns at most similarityTopK chunks', async () => {
-    const retriever = new InMemoryVectorRetriever(
-      CHUNKS,
-      new FixedEmbeddingModel([1, 0, 0]),
-      2,
     );
 
     const documents = await retriever.retrieve('anything');
@@ -83,6 +65,11 @@ describe('InMemoryVectorRetriever', () => {
       'exact',
       'close',
     ]);
+    // `score` is optional on the interface, so a missing one reads as 0 and
+    // fails the comparison rather than passing silently.
+    const scores = documents.map((document) => document.score ?? 0);
+    expect(scores[0]).toBeCloseTo(1);
+    expect(scores[0]).toBeGreaterThan(scores[1]);
   });
 
   it('keeps two chunks by default, as llama-index does', async () => {

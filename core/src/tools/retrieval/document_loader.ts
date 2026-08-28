@@ -20,21 +20,6 @@ export const DEFAULT_CHUNK_SIZE = 1024;
 /** Characters two neighbouring chunks share. */
 export const DEFAULT_CHUNK_OVERLAP = 200;
 
-/** A chunk of a file, tagged with the file it came from. */
-export interface TextChunk {
-  text: string;
-  /** Path of the file the chunk came from, relative to the process. */
-  sourcePath: string;
-}
-
-/** Options for `loadTextChunks`. */
-export interface LoadTextChunksOptions {
-  /** Characters per chunk. Defaults to 1024. */
-  chunkSize?: number;
-  /** Characters two neighbouring chunks share. Defaults to 200. */
-  chunkOverlap?: number;
-}
-
 function isFileNotFoundError(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -142,32 +127,22 @@ async function collectFilePaths(dir: string): Promise<string[]> {
  * platform.
  *
  * @param inputDir The directory to read.
- * @param options Chunking options.
  * @return The chunks, in path order and then in file order.
  */
-export async function loadTextChunks(
-  inputDir: string,
-  options: LoadTextChunksOptions = {},
-): Promise<TextChunk[]> {
+export async function loadTextChunks(inputDir: string): Promise<string[]> {
   const stats = await statOrUndefined(inputDir);
   if (!stats?.isDirectory()) {
     throw new Error(`Input directory does not exist: ${inputDir}`);
   }
 
   const filePaths = (await collectFilePaths(inputDir)).sort();
-  const chunks: TextChunk[] = [];
-  for (const sourcePath of filePaths) {
-    const text = await readTextFile(sourcePath);
+  const chunks: string[] = [];
+  for (const filePath of filePaths) {
+    const text = await readTextFile(filePath);
     if (text === undefined) {
       continue;
     }
-    for (const chunk of chunkText(
-      text,
-      options.chunkSize,
-      options.chunkOverlap,
-    )) {
-      chunks.push({text: chunk, sourcePath});
-    }
+    chunks.push(...chunkText(text));
   }
   return chunks;
 }

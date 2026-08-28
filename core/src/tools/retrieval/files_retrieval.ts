@@ -7,7 +7,7 @@
 import {logger} from '../../utils/logger.js';
 
 import {loadTextChunks} from './document_loader.js';
-import {EmbeddingModel, getDefaultEmbeddingModel} from './embedding_model.js';
+import {EmbeddingModel, GeminiEmbeddingModel} from './embedding_model.js';
 import {IndexedChunk, InMemoryVectorRetriever} from './in_memory_retriever.js';
 import {RetrieverTool, RetrieverToolParams} from './retriever_tool.js';
 
@@ -17,7 +17,7 @@ export interface FilesRetrievalOptions {
   description: string;
   /** Directory whose files are indexed. */
   inputDir: string;
-  /** Defaults to `getDefaultEmbeddingModel()`. */
+  /** Defaults to a `GeminiEmbeddingModel` with the Gemini defaults. */
   embeddingModel?: EmbeddingModel;
 }
 
@@ -45,7 +45,7 @@ export class FilesRetrieval extends RetrieverTool {
    * @throws If the directory is missing, or holds no text to index.
    */
   static async create(options: FilesRetrievalOptions): Promise<FilesRetrieval> {
-    const embeddingModel = options.embeddingModel ?? getDefaultEmbeddingModel();
+    const embeddingModel = options.embeddingModel ?? new GeminiEmbeddingModel();
 
     logger.debug(`Loading data from ${options.inputDir}`);
     const chunks = await loadTextChunks(options.inputDir);
@@ -53,11 +53,9 @@ export class FilesRetrieval extends RetrieverTool {
       throw new Error(`No files found in: ${options.inputDir}`);
     }
 
-    const embeddings = await embeddingModel.embedDocuments(
-      chunks.map((chunk) => chunk.text),
-    );
-    const indexed: IndexedChunk[] = chunks.map((chunk, index) => ({
-      text: chunk.text,
+    const embeddings = await embeddingModel.embedDocuments(chunks);
+    const indexed: IndexedChunk[] = chunks.map((text, index) => ({
+      text,
       embedding: embeddings[index],
     }));
 

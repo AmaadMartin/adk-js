@@ -88,24 +88,16 @@ describe('loadTextChunks', () => {
 
     const chunks = await loadTextChunks(inputDir);
 
-    expect(chunks.map((chunk) => chunk.text)).toEqual([
-      'nested file',
-      'second file',
-    ]);
+    expect(chunks).toEqual(['nested file', 'second file']);
   });
 
-  it('tags every chunk with the file it came from', async () => {
-    const filePath = await writeFile('notes.txt', 'abcdefghijklmnop');
+  it('splits a file longer than the chunk size', async () => {
+    await writeFile('notes.txt', 'a'.repeat(DEFAULT_CHUNK_SIZE + 1));
 
-    const chunks = await loadTextChunks(inputDir, {
-      chunkSize: 10,
-      chunkOverlap: 4,
-    });
+    const chunks = await loadTextChunks(inputDir);
 
-    expect(chunks).toEqual([
-      {text: 'abcdefghij', sourcePath: filePath},
-      {text: 'ghijklmnop', sourcePath: filePath},
-    ]);
+    expect(chunks).toEqual(chunkText('a'.repeat(DEFAULT_CHUNK_SIZE + 1)));
+    expect(chunks).toHaveLength(2);
   });
 
   it('skips a binary file', async () => {
@@ -114,7 +106,7 @@ describe('loadTextChunks', () => {
 
     const chunks = await loadTextChunks(inputDir);
 
-    expect(chunks.map((chunk) => chunk.text)).toEqual(['readable']);
+    expect(chunks).toEqual(['readable']);
   });
 
   it('skips a blank file', async () => {
@@ -123,7 +115,7 @@ describe('loadTextChunks', () => {
 
     const chunks = await loadTextChunks(inputDir);
 
-    expect(chunks.map((chunk) => chunk.text)).toEqual(['readable']);
+    expect(chunks).toEqual(['readable']);
   });
 
   it.skipIf(!onPosix)('skips a symbolic link', async () => {
@@ -133,11 +125,8 @@ describe('loadTextChunks', () => {
       path.join(inputDir, 'link.txt'),
     );
 
-    const chunks = await loadTextChunks(inputDir);
-
-    expect(chunks.map((chunk) => chunk.sourcePath)).toEqual([
-      path.join(inputDir, 'notes.txt'),
-    ]);
+    // Following the link would index the same file twice.
+    expect(await loadTextChunks(inputDir)).toEqual(['readable']);
   });
 
   it.skipIf(!onPosix || !asNonRoot)('skips a file it cannot read', async () => {
@@ -147,7 +136,7 @@ describe('loadTextChunks', () => {
 
     const chunks = await loadTextChunks(inputDir);
 
-    expect(chunks.map((chunk) => chunk.text)).toEqual(['readable']);
+    expect(chunks).toEqual(['readable']);
   });
 
   it('rejects a directory that does not exist', async () => {

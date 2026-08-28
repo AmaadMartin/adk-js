@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  EmbedContentClient,
-  GeminiEmbeddingModel,
-  getDefaultEmbeddingModel,
-} from '@google/adk';
+import {EmbedContentClient, GeminiEmbeddingModel} from '@google/adk';
 import {createDefaultEmbedContentClient} from '@google/adk/tools/retrieval/embedding_model.js';
 import {
   ContentEmbedding,
@@ -86,16 +82,14 @@ class FakeEmbedContentClient implements EmbedContentClient {
   }
 }
 
-describe('getDefaultEmbeddingModel', () => {
+describe('GeminiEmbeddingModel', () => {
   it('uses the model and the batch size adk-python defaults to', () => {
-    const model = getDefaultEmbeddingModel();
+    const model = new GeminiEmbeddingModel();
 
     expect(model.model).toBe('gemini-embedding-2-preview');
     expect(model.embedBatchSize).toBe(1);
   });
-});
 
-describe('GeminiEmbeddingModel', () => {
   it('sends one text per call at the default batch size', async () => {
     const client = new FakeEmbedContentClient();
     const model = new GeminiEmbeddingModel({client});

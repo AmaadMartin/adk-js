@@ -10,20 +10,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-const {getDefaultEmbeddingModel} = vi.hoisted(() => ({
-  getDefaultEmbeddingModel: vi.fn<() => EmbeddingModel>(),
-}));
-
-vi.mock(
-  '@google/adk/tools/retrieval/embedding_model.js',
-  async (importOriginal) => ({
-    ...(await importOriginal<
-      typeof import('@google/adk/tools/retrieval/embedding_model.js')
-    >()),
-    getDefaultEmbeddingModel,
-  }),
-);
-
 /** The words the fake embedding model scores, one dimension each. */
 const VOCABULARY = ['loop', 'sequential', 'artifact'];
 
@@ -56,10 +42,6 @@ function makeToolContext(): Context {
 let inputDir: string;
 
 beforeEach(async () => {
-  getDefaultEmbeddingModel.mockReset();
-  getDefaultEmbeddingModel.mockImplementation(
-    () => new BagOfWordsEmbeddingModel(),
-  );
   inputDir = await fs.mkdtemp(
     path.join(os.tmpdir(), 'adk-files-retrieval-test-'),
   );
@@ -119,20 +101,10 @@ describe('FilesRetrieval.create', () => {
     expect(typeof result).toBe('string');
   });
 
-  it('falls back to the default embedding model', async () => {
-    await writeFile('agents.txt', 'ADK supports the loop agent.');
-
-    await create();
-
-    expect(getDefaultEmbeddingModel).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not build the default model when one is given', async () => {
-    await writeFile('agents.txt', 'ADK supports the loop agent.');
-
-    await create(new BagOfWordsEmbeddingModel());
-
-    expect(getDefaultEmbeddingModel).not.toHaveBeenCalled();
+  it('builds the default embedding model without credentials', async () => {
+    // The default model builds its client on first use, so `create` reaches
+    // the empty-directory check before it needs an API key.
+    await expect(create()).rejects.toThrow(`No files found in: ${inputDir}`);
   });
 
   it('rejects a directory that does not exist', async () => {

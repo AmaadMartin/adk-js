@@ -328,10 +328,7 @@ export {
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
-export {
-  GeminiEmbeddingModel,
-  getDefaultEmbeddingModel,
-} from './tools/retrieval/embedding_model.js';
+export {GeminiEmbeddingModel} from './tools/retrieval/embedding_model.js';
 export type {
   EmbedContentClient,
   EmbeddingModel,

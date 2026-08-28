@@ -47,10 +47,12 @@ export class InMemoryVectorRetriever implements Retriever {
   constructor(
     private readonly chunks: IndexedChunk[],
     private readonly embeddingModel: EmbeddingModel,
-    private readonly similarityTopK: number = DEFAULT_SIMILARITY_TOP_K,
   ) {}
 
-  /** Returns the best `similarityTopK` chunks, or `[]` for an empty index. */
+  /**
+   * Returns the best `DEFAULT_SIMILARITY_TOP_K` chunks, or `[]` for an empty
+   * index.
+   */
   async retrieve(query: string): Promise<RetrievedDocument[]> {
     if (this.chunks.length === 0) {
       return [];
@@ -63,6 +65,6 @@ export class InMemoryVectorRetriever implements Retriever {
         score: cosineSimilarity(queryEmbedding, chunk.embedding),
       }))
       .sort((left, right) => right.score - left.score)
-      .slice(0, this.similarityTopK);
+      .slice(0, DEFAULT_SIMILARITY_TOP_K);
   }
 }

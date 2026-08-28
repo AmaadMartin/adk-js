@@ -15,7 +15,7 @@ import {
   GoogleLLMVariant,
 } from '../../utils/variant_utils.js';
 
-/** The embedding model `getDefaultEmbeddingModel` uses, as in adk-python. */
+/** The embedding model used when the caller names none, as in adk-python. */
 export const DEFAULT_EMBEDDING_MODEL = 'gemini-embedding-2-preview';
 
 /** Texts per `embedContent` call, as in adk-python. */
@@ -132,15 +132,4 @@ export class GeminiEmbeddingModel implements EmbeddingModel {
     }
     return vectors;
   }
-}
-
-/**
- * The embedding model the retrieval tools use when the caller supplies none.
- *
- * This is a module-level function rather than a static member so that a caller
- * can swap the default without subclassing, which is how adk-python's
- * `_get_default_embedding_model` behaves.
- */
-export function getDefaultEmbeddingModel(): GeminiEmbeddingModel {
-  return new GeminiEmbeddingModel();
 }
