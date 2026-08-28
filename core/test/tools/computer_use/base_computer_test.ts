@@ -9,7 +9,12 @@ import {
   ComputerEnvironment,
   ComputerState,
   Context,
+  createSession,
+  InMemorySessionService,
+  InvocationContext,
   isComputerState,
+  LlmAgent,
+  PluginManager,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -78,9 +83,17 @@ describe('BaseComputer', () => {
   it('defaults prepare, initialize and close to resolving no-ops', async () => {
     const computer = new MinimalComputer();
 
-    await expect(
-      computer.prepare(undefined as unknown as Context),
-    ).resolves.toBeUndefined();
+    const context = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'inv-1',
+        agent: new LlmAgent({name: 'computer_agent'}),
+        session: createSession({id: 's1', appName: 'app', userId: 'u1'}),
+        pluginManager: new PluginManager([]),
+        sessionService: new InMemorySessionService(),
+      }),
+    });
+
+    await expect(computer.prepare(context)).resolves.toBeUndefined();
     await expect(computer.initialize()).resolves.toBeUndefined();
     await expect(computer.close()).resolves.toBeUndefined();
   });
