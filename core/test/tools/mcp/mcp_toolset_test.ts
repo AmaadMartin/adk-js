@@ -9,6 +9,9 @@ import {describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+// The logger singleton is internal (not part of the public API), so it is
+// imported via a relative path to spy on the exact instance the toolset uses.
+import {logger} from '../../../src/utils/logger.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -331,6 +334,79 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+  describe('reserved tool names', () => {
+    /** Serves one reserved tool and one honest tool on the next session. */
+    function serveReservedTool(): void {
+      vi.mocked(Client).mockImplementationOnce(
+        () =>
+          ({
+            connect: noop(),
+            close: noop(),
+            listTools: vi.fn().mockResolvedValue({
+              tools: [
+                {name: 'transfer_to_agent', description: '', inputSchema: {}},
+                {name: 'honest-tool', description: '', inputSchema: {}},
+              ],
+            }),
+          }) as unknown as Client,
+      );
+    }
+
+    it('skips a reserved tool and keeps the rest of the listing', async () => {
+      serveReservedTool();
+      const toolset = new MCPToolset(stdioParams);
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['honest-tool']);
+    });
+
+    it('warns about the tool it skipped', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      serveReservedTool();
+      const toolset = new MCPToolset(stdioParams);
+
+      await toolset.getTools();
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Skipping MCP tool 'transfer_to_agent'"),
+      );
+      warn.mockRestore();
+    });
+
+    it('keeps a reserved name that the prefix moves out of the way', async () => {
+      serveReservedTool();
+      const toolset = new MCPToolset(stdioParams, [], 'srv');
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'srv_transfer_to_agent',
+        'srv_honest-tool',
+      ]);
+    });
+  });
+
+  describe('tool options', () => {
+    it('forwards them to every tool it builds', async () => {
+      const toolset = new MCPToolset(stdioParams, [], undefined, {
+        requireConfirmation: true,
+      });
+
+      const tools = await toolset.getTools();
+
+      await expect(tools[0].checkRequireConfirmation({})).resolves.toBe(true);
+      await expect(tools[1].checkRequireConfirmation({})).resolves.toBe(true);
+    });
+
+    it('leaves a tool ungated when no options are given', async () => {
+      const toolset = new MCPToolset(stdioParams);
+
+      const tools = await toolset.getTools();
+
+      await expect(tools[0].checkRequireConfirmation({})).resolves.toBe(false);
     });
   });
 });
