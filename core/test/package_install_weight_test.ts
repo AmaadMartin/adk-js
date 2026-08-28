@@ -111,6 +111,7 @@ describe('core/package.json subpath exports', () => {
     expect(subpaths.map(([subpath]) => subpath).sort()).toEqual([
       './a2a',
       './artifacts/gcs',
+      './plugins/bigquery',
       './sessions/database',
       './telemetry/gcp',
       './tools/mcp',

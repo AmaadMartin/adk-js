@@ -20,6 +20,7 @@ import type {LlmResponse} from '../models/llm_response.js';
 import type {BaseTool} from '../tools/base_tool.js';
 import {toSnakeCaseName} from '../utils/case_utils.js';
 import {formatError} from '../utils/error_utils.js';
+import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 import {
   recursiveSmartTruncate,
@@ -232,6 +233,13 @@ function buildLatency(data: AnalyticsEventData): Record<string, number> | null {
  * row. When it is missing the row is counted in {@link getDropStats} and the
  * run continues.
  *
+ * Two departures from adk-python are deliberate. Rows go through
+ * `tabledata.insertAll` rather than the Storage Write API, which changes the
+ * delivery semantics; {@link BigQueryRowWriter} says how. And the `AGENT_ERROR`
+ * and `INVOCATION_ERROR` event types are declared but never written, because
+ * adk-js `BasePlugin` has no `onAgentErrorCallback` or `onRunErrorCallback` to
+ * write them from.
+ *
  * Example:
  * ```typescript
  * const analytics = new BigQueryAgentAnalyticsPlugin({
@@ -243,6 +251,7 @@ function buildLatency(data: AnalyticsEventData): Record<string, number> | null {
  * await analytics.shutdown();
  * ```
  */
+@experimental
 export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   private readonly config: ResolvedConfig;
   private readonly writer: BigQueryRowWriter;

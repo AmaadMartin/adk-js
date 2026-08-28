@@ -43,6 +43,12 @@
       "require": "./dist/cjs/artifacts/gcs_artifact_service.js",
       "default": "./dist/esm/artifacts/gcs_artifact_service.js"
     },
+    "./plugins/bigquery": {
+      "types": "./dist/types/plugins/bigquery_agent_analytics_plugin.d.ts",
+      "import": "./dist/esm/plugins/bigquery_agent_analytics_plugin.js",
+      "require": "./dist/cjs/plugins/bigquery_agent_analytics_plugin.js",
+      "default": "./dist/esm/plugins/bigquery_agent_analytics_plugin.js"
+    },
     "./sessions/database": {
       "types": "./dist/types/sessions/database_session_service.d.ts",
       "import": "./dist/esm/sessions/database_session_service.js",
