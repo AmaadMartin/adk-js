@@ -25,6 +25,12 @@ policy, and its own [guide](../../apps/context_cache_config/index.md) covers the
 three settings. `CacheMetadata` is the per-cache record that rides on an
 `LlmResponse`, and therefore on an `Event`.
 
+`cacheableContentsTokenCount` is the previous request's measured prompt token
+count, and it is what `ContextCacheConfig.minTokens` gates on. The first
+request of a session has no such count, so caching begins on the second turn at
+the earliest. Gemini's own minimum applies on top: 2048 tokens for Gemini 2.5,
+4096 tokens for Gemini 3.
+
 WARNING: This feature is experimental. Its API or behavior may change in a
 future release.
 
