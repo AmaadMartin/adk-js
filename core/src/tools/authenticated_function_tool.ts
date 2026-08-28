@@ -29,8 +29,8 @@ export type AuthenticatedToolExecuteFunction<
   TParameters extends ToolInputParameters,
 > = (
   input: ToolExecuteArgument<TParameters>,
-  toolContext: Context | undefined,
-  credential: AuthCredential | undefined,
+  toolContext: Context,
+  credential: AuthCredential,
 ) => Promise<unknown> | unknown;
 
 /** The configuration options for creating an {@link AuthenticatedFunctionTool}. */
@@ -106,7 +106,7 @@ export function withCredential<TParameters extends ToolInputParameters>(
  *   parameters: z.object({folder: z.string()}),
  *   authConfig,
  *   execute: async ({folder}, toolContext, credential) => {
- *     const accessToken = credential?.oauth2?.accessToken;
+ *     const accessToken = credential.oauth2?.accessToken;
  *     return fetchDocuments(folder, accessToken);
  *   },
  * });

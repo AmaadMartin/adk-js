@@ -124,7 +124,7 @@ describe('AuthenticatedFunctionTool through the Runner', () => {
       description: 'Lists the documents in a folder.',
       authConfig,
       execute: (_input, _toolContext, credential) => ({
-        apiKey: credential?.apiKey,
+        apiKey: credential.apiKey,
       }),
     });
     const agent = new LlmAgent({
@@ -168,7 +168,7 @@ describe('AuthenticatedFunctionTool through the Runner', () => {
         credentialKey: 'documents_api',
       },
       execute: (_input, _toolContext, credential) => ({
-        apiKey: credential?.apiKey,
+        apiKey: credential.apiKey,
       }),
     });
     const agent = new LlmAgent({

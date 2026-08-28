@@ -125,7 +125,7 @@ describe('AuthenticatedFunctionTool', () => {
         authConfig: API_KEY_AUTH_CONFIG,
         execute: ({folder}, _toolContext, credential) => ({
           folder,
-          apiKey: credential?.apiKey,
+          apiKey: credential.apiKey,
         }),
       });
 
@@ -369,7 +369,7 @@ describe('AuthenticatedFunctionTool', () => {
         description: 'Lists the documents in a folder.',
         authConfig: CONSENT_REQUIRED_AUTH_CONFIG,
         execute: (_input, _toolContext, credential) =>
-          credential?.oauth2?.accessToken,
+          credential.oauth2?.accessToken,
       });
 
       const first = await tool.runAsync({
@@ -404,7 +404,7 @@ describe('AuthenticatedFunctionTool', () => {
         description: 'Lists the documents in a folder.',
         authConfig: CONSENT_REQUIRED_AUTH_CONFIG,
         execute: (_input, toolContext, credential) =>
-          `${toolContext?.invocationContext.session.userId}:${credential?.oauth2?.accessToken}`,
+          `${toolContext.invocationContext.session.userId}:${credential.oauth2?.accessToken}`,
       });
 
       const first = tool.runAsync({

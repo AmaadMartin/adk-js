@@ -66,7 +66,7 @@ const listDocuments = new AuthenticatedFunctionTool({
   parameters: z.object({folder: z.string()}),
   authConfig,
   execute: async ({folder}, toolContext, credential) => {
-    const accessToken = credential?.oauth2?.accessToken;
+    const accessToken = credential.oauth2?.accessToken;
     // Call the provider's API with accessToken here.
     return [`${folder}/report.pdf`];
   },
