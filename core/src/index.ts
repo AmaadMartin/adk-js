@@ -36,6 +36,13 @@ export {
   loadSkillFromDir,
   validateSkillDir,
 } from './skills/loader.js';
+export {loadTextChunks} from './tools/retrieval/document_loader.js';
+export type {
+  LoadTextChunksOptions,
+  TextChunk,
+} from './tools/retrieval/document_loader.js';
+export {FilesRetrieval} from './tools/retrieval/files_retrieval.js';
+export type {FilesRetrievalOptions} from './tools/retrieval/files_retrieval.js';
 export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
