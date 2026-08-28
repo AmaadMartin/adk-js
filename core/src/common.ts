@@ -78,11 +78,7 @@ export type {
   UserInputKind,
   UserInputRequest,
 } from './agents/user_input_request.js';
-export {
-  contextCacheTtlString,
-  createContextCacheConfig,
-  formatContextCacheConfig,
-} from './apps/context_cache_config.js';
+export {createContextCacheConfig} from './apps/context_cache_config.js';
 export type {ContextCacheConfig} from './apps/context_cache_config.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';

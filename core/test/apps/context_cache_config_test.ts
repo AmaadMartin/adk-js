@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  contextCacheTtlString,
-  createContextCacheConfig,
-  formatContextCacheConfig,
-} from '@google/adk';
+import {createContextCacheConfig} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 describe('createContextCacheConfig', () => {
@@ -156,36 +152,5 @@ describe('createContextCacheConfig', () => {
         }),
       ).toEqual({cacheIntervals: 3, ttlSeconds: 300, minTokens: 4096});
     });
-  });
-});
-
-describe('contextCacheTtlString', () => {
-  it('should render the default TTL as a duration string', () => {
-    expect(contextCacheTtlString(createContextCacheConfig())).toBe('1800s');
-  });
-
-  it('should render a custom TTL as a duration string', () => {
-    expect(
-      contextCacheTtlString(createContextCacheConfig({ttlSeconds: 3600})),
-    ).toBe('3600s');
-  });
-});
-
-describe('formatContextCacheConfig', () => {
-  it('should render custom values in the adk-python log format', () => {
-    const config = createContextCacheConfig({
-      cacheIntervals: 15,
-      ttlSeconds: 3600,
-      minTokens: 1024,
-    });
-    expect(formatContextCacheConfig(config)).toBe(
-      'ContextCacheConfig(cache_intervals=15, ttl=3600s, min_tokens=1024)',
-    );
-  });
-
-  it('should render the defaults in the adk-python log format', () => {
-    expect(formatContextCacheConfig(createContextCacheConfig())).toBe(
-      'ContextCacheConfig(cache_intervals=10, ttl=1800s, min_tokens=0)',
-    );
   });
 });

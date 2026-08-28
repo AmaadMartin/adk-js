@@ -27,63 +27,29 @@ const DEFAULT_MIN_TOKENS = 0;
 export interface ContextCacheConfig {
   /**
    * Maximum number of invocations to reuse the same cache before refreshing
-   * it.
+   * it. Must be an integer from 1 to 100.
    */
   cacheIntervals: number;
 
-  /** Time-to-live for cache in seconds. */
+  /** Time-to-live for cache in seconds. Must be an integer above 0. */
   ttlSeconds: number;
 
   /**
    * Minimum estimated request tokens required to enable caching. This compares
    * against the estimated total tokens of the request (system instruction +
    * tools + contents). Context cache storage may have cost. Set higher to
-   * avoid caching small requests where overhead may exceed benefits.
+   * avoid caching small requests where overhead may exceed benefits. Must be a
+   * non-negative integer.
    */
   minTokens: number;
 }
 
 /**
- * adk-python types every field as `int`, so pydantic rejects a fractional
- * value. TypeScript `number` does not, and a fractional TTL would reach the
- * cache API as `"1.5s"`. This also rejects `NaN` and `Infinity`.
- */
-function validateInteger(field: string, value: number): void {
-  if (!Number.isInteger(value)) {
-    throw new Error(`${field} must be an integer.`);
-  }
-}
-
-function validateCacheIntervals(value: number): void {
-  validateInteger('cacheIntervals', value);
-  if (value < MIN_CACHE_INTERVALS) {
-    throw new Error(
-      `cacheIntervals must be greater than or equal to ${MIN_CACHE_INTERVALS}.`,
-    );
-  }
-  if (value > MAX_CACHE_INTERVALS) {
-    throw new Error(
-      `cacheIntervals must be less than or equal to ${MAX_CACHE_INTERVALS}.`,
-    );
-  }
-}
-
-function validateTtlSeconds(value: number): void {
-  validateInteger('ttlSeconds', value);
-  if (value <= 0) {
-    throw new Error('ttlSeconds must be greater than 0.');
-  }
-}
-
-function validateMinTokens(value: number): void {
-  validateInteger('minTokens', value);
-  if (value < 0) {
-    throw new Error('minTokens must be greater than or equal to 0.');
-  }
-}
-
-/**
  * Creates a {@link ContextCacheConfig} with default values.
+ *
+ * An unknown key is a compile error, because `Partial<ContextCacheConfig>`
+ * makes TypeScript apply excess-property checking to an object literal. That
+ * is the counterpart of adk-python's `extra="forbid"`.
  *
  * @param params Optional partial {@link ContextCacheConfig} overriding
  *     defaults.
@@ -100,30 +66,30 @@ export function createContextCacheConfig(
     ...params,
   };
 
-  validateCacheIntervals(config.cacheIntervals);
-  validateTtlSeconds(config.ttlSeconds);
-  validateMinTokens(config.minTokens);
+  // adk-python types every field as `int`, so pydantic rejects a fractional
+  // value and TypeScript `number` does not. This also rejects NaN and Infinity.
+  for (const [field, value] of Object.entries(config)) {
+    if (!Number.isInteger(value)) {
+      throw new Error(`${field} must be an integer.`);
+    }
+  }
+
+  if (config.cacheIntervals < MIN_CACHE_INTERVALS) {
+    throw new Error(
+      `cacheIntervals must be greater than or equal to ${MIN_CACHE_INTERVALS}.`,
+    );
+  }
+  if (config.cacheIntervals > MAX_CACHE_INTERVALS) {
+    throw new Error(
+      `cacheIntervals must be less than or equal to ${MAX_CACHE_INTERVALS}.`,
+    );
+  }
+  if (config.ttlSeconds <= 0) {
+    throw new Error('ttlSeconds must be greater than 0.');
+  }
+  if (config.minTokens < 0) {
+    throw new Error('minTokens must be greater than or equal to 0.');
+  }
 
   return config;
-}
-
-/**
- * Renders the time-to-live in the duration format the Gemini cache-creation
- * API accepts, for example `"1800s"`.
- */
-export function contextCacheTtlString(config: ContextCacheConfig): string {
-  return `${config.ttlSeconds}s`;
-}
-
-/**
- * Renders a {@link ContextCacheConfig} as a single log line.
- *
- * The field names inside the returned string stay snake_case so that an
- * adk-js log line matches the adk-python one it is compared against.
- */
-export function formatContextCacheConfig(config: ContextCacheConfig): string {
-  return (
-    `ContextCacheConfig(cache_intervals=${config.cacheIntervals}, ` +
-    `ttl=${config.ttlSeconds}s, min_tokens=${config.minTokens})`
-  );
 }
