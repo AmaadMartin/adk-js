@@ -203,19 +203,13 @@ export function parseNodeRunIds(path: string): {
  *
  * @param value The isolation scope, of whatever type the event carried. A
  *     rehydrated event supplies it from storage, so it is not always a string.
- * @param onUnknown Called with the offending value when it is not a name this
- *     SDK recognizes.
  * @return The scope object, or null when the event carries no scope.
  */
-export function deriveScope(
-  value: unknown,
-  onUnknown: (value: unknown) => void,
-): AnalyticsScope | null {
+export function deriveScope(value: unknown): AnalyticsScope | null {
   if (value === undefined || value === null) {
     return null;
   }
   if (typeof value !== 'string' || value === '') {
-    onUnknown(value);
     return {id: String(value), kind: AnalyticsScopeKind.UNKNOWN};
   }
   const last = value.slice(value.lastIndexOf(NODE_PATH_SEPARATOR) + 1);

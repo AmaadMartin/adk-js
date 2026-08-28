@@ -2299,12 +2299,10 @@ describe('BigQueryAgentAnalyticsPlugin workflow nodes', () => {
 
 describe('deriveScope', () => {
   it('marks a scope that storage returned as a non-string unknown', () => {
-    const seen: unknown[] = [];
-    expect(deriveScope(42, (value) => seen.push(value))).toEqual({
+    expect(deriveScope(42)).toEqual({
       id: '42',
       kind: AnalyticsScopeKind.UNKNOWN,
     });
-    expect(seen).toEqual([42]);
   });
 });
 

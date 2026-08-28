@@ -38,6 +38,7 @@ import {
   AnalyticsEventType,
   AnalyticsNode,
   AnalyticsRow,
+  AnalyticsScopeKind,
   AnalyticsStatus,
   deriveScope,
   hitlMappingFor,
@@ -65,31 +66,6 @@ const FORMATTER_FAILED = '[FORMATTER_FAILED]';
 
 /** Content written when the payload cannot be sanitized. */
 const CONTENT_PARSE_FAILED = '[CONTENT_PARSE_FAILED]';
-
-/**
- * Log lines for the two content failures. Both are constant: the payload, the
- * exception message and even a class name can be attacker-supplied, and this
- * plugin's whole purpose is to keep such values out of durable output.
- */
-const FORMATTER_FAILED_LOG =
-  'BigQuery analytics content formatter failed; writing a sentinel instead of the content.';
-const CONTENT_PARSE_FAILED_LOG =
-  'BigQuery analytics could not sanitize the content; writing a sentinel instead of it.';
-
-/**
- * Logged when an event names a long-running call id that no function call in
- * that event carries. The id is left out: a model supplies it, so it is
- * untrusted like any other model output.
- */
-const UNMATCHED_LONG_RUNNING_ID_LOG =
-  'BigQuery analytics found a long-running tool id with no matching function call; writing the pause row without the call.';
-
-/**
- * Logged when an event carries an isolation scope that is not a name this SDK
- * recognizes. The value is left out because a rehydrated event supplies it.
- */
-const UNKNOWN_ISOLATION_SCOPE_LOG =
-  'BigQuery analytics found an isolation scope it cannot classify; writing it with kind "unknown".';
 
 /** Default configuration values, matching adk-python's `BigQueryLoggerConfig`. */
 const DEFAULT_TABLE_ID = 'agent_events';
@@ -545,10 +521,9 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         data: {
           adk: {
             node: {
+              ...parseNodeRunIds(nodeContext.nodePath),
               path: nodeContext.nodePath,
               run_id: nodeContext.runId,
-              parent_run_id: parseNodeRunIds(nodeContext.nodePath)
-                .parent_run_id,
             },
           },
         },
@@ -770,7 +745,11 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     for (const id of event.longRunningToolIds ?? []) {
       const call = calls.find((candidate) => candidate.id === id);
       if (call === undefined) {
-        logger.warn(UNMATCHED_LONG_RUNNING_ID_LOG);
+        // The id is left out of the message: a model supplies it, so it is
+        // untrusted like any other model output.
+        logger.warn(
+          'BigQuery analytics found a long-running tool id with no matching function call; writing the pause row without the call.',
+        );
       }
       this.logEvent({
         eventType: AnalyticsEventType.TOOL_PAUSED,
@@ -985,7 +964,12 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         payload = formatter(rawContent, eventType);
       } catch {
         this.writer.countDrop(AnalyticsDropReason.FORMATTER_FAILED);
-        logger.warn(FORMATTER_FAILED_LOG);
+        // Constant message: the payload, the exception message and even a class
+        // name can be attacker-supplied, and this plugin exists to keep such
+        // values out of durable output.
+        logger.warn(
+          'BigQuery analytics content formatter failed; writing a sentinel instead of the content.',
+        );
         payload = FORMATTER_FAILED;
       }
     }
@@ -993,7 +977,10 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       return parseAnalyticsContent(payload, this.config.maxContentLength);
     } catch {
       this.writer.countDrop(AnalyticsDropReason.CONTENT_PARSE_FAILED);
-      logger.warn(CONTENT_PARSE_FAILED_LOG);
+      // Constant message, for the same reason as the formatter failure above.
+      logger.warn(
+        'BigQuery analytics could not sanitize the content; writing a sentinel instead of it.',
+      );
       return {payload: CONTENT_PARSE_FAILED, parts: [], truncated: true};
     }
   }
@@ -1096,9 +1083,15 @@ function buildAdkEnvelope(
   envelope['source_event_id'] = event.id;
   envelope['node'] = nodeOf(event);
   envelope['branch'] = event.branch ?? null;
-  envelope['scope'] = deriveScope(event.isolationScope, () => {
-    logger.warn(UNKNOWN_ISOLATION_SCOPE_LOG);
-  });
+  const scope = deriveScope(event.isolationScope);
+  if (scope?.kind === AnalyticsScopeKind.UNKNOWN) {
+    // The value is left out of the message because a rehydrated event supplies
+    // it from storage.
+    logger.warn(
+      'BigQuery analytics found an isolation scope it cannot classify; writing it with kind "unknown".',
+    );
+  }
+  envelope['scope'] = scope;
   if (event.route !== undefined) {
     envelope['route'] = event.route;
   }
