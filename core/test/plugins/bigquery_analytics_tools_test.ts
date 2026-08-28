@@ -28,6 +28,10 @@ class PlainTool extends BaseTool {
   constructor() {
     super({name: 'plain', description: 'A tool of no known kind.'});
   }
+
+  override async runAsync(): Promise<unknown> {
+    return 'done';
+  }
 }
 
 function localTool(name = 'lookup'): FunctionTool {
@@ -44,7 +48,11 @@ function mcpTool(): MCPTool {
     url: 'https://mcp.example.test/mcp',
   });
   return new MCPTool(
-    {name: 'remote_lookup', description: 'Looks up remotely.', inputSchema: {}},
+    {
+      name: 'remote_lookup',
+      description: 'Looks up remotely.',
+      inputSchema: {type: 'object'},
+    },
     sessions,
   );
 }
