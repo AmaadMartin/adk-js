@@ -64,7 +64,6 @@ export interface BigQueryRowWriterOptions {
   queueMaxSize: number;
 }
 
-/** Returns whether `err` is BigQuery reporting that the table already exists. */
 /**
  * Finds or creates `dataset`. A create that loses the race to a concurrent
  * writer is treated as success, the same way the table path treats it.
@@ -87,6 +86,7 @@ async function ensureDataset(
   }
 }
 
+/** Returns whether `err` is BigQuery reporting that the resource already exists. */
 function isAlreadyExists(err: unknown): boolean {
   return (
     typeof err === 'object' &&

@@ -55,7 +55,7 @@ import {
 import {
   ambientOtelIds,
   elapsedSince,
-  newTraceId,
+  newHexId,
   SpanKind,
   SpanRecord,
   SpanTracker,
@@ -852,7 +852,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     const latency = buildLatency(data);
     const row: AnalyticsRow = {
       timestamp: new Date().toISOString(),
-      event_id: newTraceId(),
+      event_id: newHexId(),
       event_type: eventType,
       agent: invocationContext.agent?.name ?? data.sourceEvent?.author ?? null,
       session_id: invocationContext.session.id,

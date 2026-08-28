@@ -40,14 +40,14 @@ export interface SpanRecord {
   firstTokenTimeMs?: number;
 }
 
-/** A 32-hex-character identifier, the shape OpenTelemetry uses for a trace id. */
-export function newTraceId(): string {
+/** A 32-hex-character identifier. */
+export function newHexId(): string {
   return randomUUID().replaceAll('-', '');
 }
 
 /** A 16-hex-character identifier, the shape OpenTelemetry uses for a span id. */
 function newSpanId(): string {
-  return newTraceId().slice(0, 16);
+  return newHexId().slice(0, 16);
 }
 
 /**
@@ -102,7 +102,7 @@ export class SpanTracker {
     const record: SpanRecord = {
       spanId: newSpanId(),
       traceId:
-        stack.at(-1)?.traceId ?? ambientOtelIds()?.trace_id ?? newTraceId(),
+        stack.at(-1)?.traceId ?? ambientOtelIds()?.trace_id ?? newHexId(),
       startTimeMs: Date.now(),
       kind,
     };
