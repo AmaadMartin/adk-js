@@ -18,7 +18,10 @@ import {
 import {afterEach, describe, expect, it} from 'vitest';
 
 const ENTERPRISE_MODE_ENV_VAR = 'GOOGLE_GENAI_USE_ENTERPRISE';
+const DEPRECATED_ENTERPRISE_MODE_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 const API_KEY_ENV_VAR = 'GOOGLE_API_KEY';
+const PROJECT_ENV_VAR = 'GOOGLE_CLOUD_PROJECT';
+const LOCATION_ENV_VAR = 'GOOGLE_CLOUD_LOCATION';
 
 describe('createDefaultEmbedContentClient', () => {
   const originalEnv = {...process.env};
@@ -27,10 +30,12 @@ describe('createDefaultEmbedContentClient', () => {
     process.env = {...originalEnv};
   });
 
+  // The client refuses to build with no credentials at all, so both tests
+  // supply placeholders. The subject is which backend the environment selects,
+  // not the credentials themselves.
   it('builds a Gemini API client by default', () => {
     delete process.env[ENTERPRISE_MODE_ENV_VAR];
-    // The client warns when it finds no key, and the warning is not the
-    // subject of this test.
+    delete process.env[DEPRECATED_ENTERPRISE_MODE_ENV_VAR];
     process.env[API_KEY_ENV_VAR] = 'placeholder-api-key';
 
     expect(createDefaultEmbedContentClient().vertexai).toBe(false);
@@ -38,6 +43,8 @@ describe('createDefaultEmbedContentClient', () => {
 
   it('builds a Vertex AI client in enterprise mode', () => {
     process.env[ENTERPRISE_MODE_ENV_VAR] = '1';
+    process.env[PROJECT_ENV_VAR] = 'placeholder-project';
+    process.env[LOCATION_ENV_VAR] = 'us-central1';
 
     expect(createDefaultEmbedContentClient().vertexai).toBe(true);
   });
