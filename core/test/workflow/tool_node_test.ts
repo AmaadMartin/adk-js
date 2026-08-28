@@ -106,6 +106,19 @@ describe('ToolNode argument coercion', () => {
     });
   });
 
+  it('ignores a thought part when extracting args from genai Content', async () => {
+    // Reasoning text concatenated ahead of the payload makes JSON.parse fail,
+    // so the args degrade to the raw string and the node then rejects them.
+    const input = {
+      role: 'user',
+      parts: [
+        {text: 'I should call the tool with x = 1.', thought: true},
+        {text: '{"x": 1}'},
+      ],
+    };
+    expect(await drive(input)).toEqual({x: 1});
+  });
+
   it('treats null / empty string as no arguments', async () => {
     expect(await drive(null)).toEqual({});
     expect(await drive('')).toEqual({});
