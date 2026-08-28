@@ -6,7 +6,8 @@
 
 import {GenerateContentConfig, VertexRagStore} from '@google/genai';
 
-import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
+import {BaseRetrievalTool} from './base_retrieval_tool.js';
+import {ToolProcessLlmRequest} from './base_tool.js';
 
 /**
  * A tool that retrieves relevant content from a Vertex AI RAG corpus to ground
@@ -14,7 +15,9 @@ import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
  *
  * This tool operates server-side; it modifies the LLM request config to enable
  * RAG retrieval via the `retrieval.vertexRagStore` field and does not perform
- * local code execution.
+ * local code execution. It overrides `processLlmRequest`, so the `query`
+ * declaration it inherits from {@link BaseRetrievalTool} never reaches the
+ * model.
  *
  * **Note:** The Vertex AI RAG Engine only supports one corpus per
  * `ragResources` array. Create one `VertexRagRetrievalTool` instance per
@@ -33,7 +36,7 @@ import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
  * const agent = new LlmAgent({ tools: [ragTool], ... });
  * ```
  */
-export class VertexRagRetrievalTool extends BaseTool {
+export class VertexRagRetrievalTool extends BaseRetrievalTool {
   private readonly vertexRagStore: VertexRagStore;
 
   constructor(config: VertexRagStore) {
