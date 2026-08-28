@@ -230,6 +230,7 @@ export type {
   RubricContent,
   RubricScore,
 } from './evaluation/eval_rubrics.js';
+export {EvalConstants} from './evaluation/evaluation_constants.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
