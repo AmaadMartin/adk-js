@@ -21,6 +21,12 @@ import {
 import {OAuth2CredentialRefresher} from './oauth2/oauth2_credential_refresher.js';
 import {BaseCredentialRefresher} from './refresher/base_credential_refresher.js';
 
+/**
+ * What a tool returns while it waits for the client to supply a credential.
+ * Every tool that resolves through {@link CredentialManager} shares it.
+ */
+export const PENDING_USER_AUTHORIZATION = 'Pending User Authorization.';
+
 const OAUTH2_EXCHANGER = new OAuth2CredentialExchanger();
 const OAUTH2_REFRESHER = new OAuth2CredentialRefresher();
 

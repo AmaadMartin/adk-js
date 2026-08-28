@@ -7,7 +7,10 @@
 import {Context} from '../agents/context.js';
 import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthConfig} from '../auth/auth_tool.js';
-import {CredentialManager} from '../auth/credential_manager.js';
+import {
+  CredentialManager,
+  PENDING_USER_AUTHORIZATION,
+} from '../auth/credential_manager.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 
@@ -18,9 +21,6 @@ import {
   ToolInputParameters,
   ToolOptions,
 } from './function_tool.js';
-
-/** The result of a call that asked the client for a credential. */
-export const PENDING_USER_AUTHORIZATION = 'Pending User Authorization.';
 
 /**
  * The signature of the function an {@link AuthenticatedFunctionTool} runs. It
