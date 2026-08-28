@@ -19,6 +19,9 @@ export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
 /** The function call the framework emits to ask a client for input. */
 export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
 
+/** The tool name the framework registers for agent-to-agent transfer. */
+export const TRANSFER_TO_AGENT_TOOL_NAME = 'transfer_to_agent';
+
 /**
  * Names reserved for the framework's own control-plane calls.
  *

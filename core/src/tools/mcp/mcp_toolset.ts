@@ -19,7 +19,7 @@ import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
-import {MCPTool} from './mcp_tool.js';
+import {MCPTool, McpToolOptions, RESERVED_TOOL_NAMES} from './mcp_tool.js';
 
 /**
  * A toolset that dynamically discovers and provides tools from a Model Context
@@ -52,14 +52,17 @@ import {MCPTool} from './mcp_tool.js';
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
+  private readonly toolOptions?: McpToolOptions;
 
   constructor(
     connectionParams: MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
+    toolOptions?: McpToolOptions,
   ) {
     super(toolFilter, prefix);
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
+    this.toolOptions = toolOptions;
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
@@ -76,14 +79,31 @@ export class MCPToolset extends BaseToolset {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    const tools = listResult.tools.map((tool) => {
+    const tools: BaseTool[] = [];
+    for (const tool of listResult.tools) {
       // Create a cloned tool definition with the prefixed name
       const toolWithPrefix = {
         ...tool,
         name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
       };
-      return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
-    });
+      // Skip rather than let MCPTool throw: one reserved name would otherwise
+      // fail the whole listing and take the server's honest tools down with it.
+      if (RESERVED_TOOL_NAMES.has(toolWithPrefix.name)) {
+        logger.warn(
+          `Skipping MCP tool '${toolWithPrefix.name}' because it collides ` +
+            'with a reserved ADK framework tool name.',
+        );
+        continue;
+      }
+      tools.push(
+        new MCPTool(
+          toolWithPrefix,
+          this.mcpSessionManager,
+          tool.name,
+          this.toolOptions,
+        ),
+      );
+    }
 
     // Apply toolFilter when specified.
     // An empty array (the default) means no filter — all tools are returned.
