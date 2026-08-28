@@ -18,11 +18,8 @@ export interface SampleAndScoreParams {
   /** The candidate agent to be evaluated. */
   candidate: LlmAgent;
 
-  /**
-   * The set of examples to evaluate the candidate agent on. Implementations
-   * must treat an omitted value as `'validation'`.
-   */
-  exampleSet?: ExampleSet;
+  /** The set of examples to evaluate the candidate agent on. */
+  exampleSet: ExampleSet;
 
   /**
    * UIDs of the examples to evaluate the candidate agent on. When omitted, all
@@ -34,9 +31,8 @@ export interface SampleAndScoreParams {
    * When false, it is enough to only calculate the scores for each example.
    * When true, the implementation must also capture all other data required
    * for optimizing the agent (e.g. outputs, trajectories, and tool calls).
-   * Implementations must treat an omitted value as `false`.
    */
-  captureFullEvalData?: boolean;
+  captureFullEvalData: boolean;
 }
 
 /**

@@ -21,7 +21,7 @@ import {describe, expect, it} from 'vitest';
 const TRAIN_IDS = ['train_1', 'train_2', 'train_3'];
 const VALIDATION_IDS = ['validation_1', 'validation_2'];
 
-/** A `sampleAndScore` call with every optional parameter resolved. */
+/** A `sampleAndScore` call with its `batch` resolved. */
 interface ResolvedCall {
   candidateName: string;
   exampleSet: ExampleSet;
@@ -33,6 +33,13 @@ interface ResolvedCall {
 interface ScoredAgentWithLatency extends AgentWithScores {
   latencyMs: number;
 }
+
+/**
+ * Resolves to `true` only while `T` is *not* a complete
+ * {@link SampleAndScoreParams}. Assigning `true` to it therefore fails
+ * `ts:check` if the omitted parameter ever becomes optional.
+ */
+type Incomplete<T> = T extends SampleAndScoreParams ? never : true;
 
 /** Scores an example UID deterministically, so assertions stay stable. */
 function scoreOf(uid: string): number {
@@ -46,8 +53,8 @@ function meanScore(result: SamplingResult): number {
 }
 
 /**
- * A `Sampler` that records the parameters of every call, with the documented
- * defaults applied.
+ * A `Sampler` that records the parameters of every call, resolving an omitted
+ * `batch` to the whole chosen set.
  */
 class RecordingSampler implements Sampler<UnstructuredSamplingResult> {
   readonly calls: ResolvedCall[] = [];
@@ -63,24 +70,22 @@ class RecordingSampler implements Sampler<UnstructuredSamplingResult> {
   async sampleAndScore(
     params: SampleAndScoreParams,
   ): Promise<UnstructuredSamplingResult> {
-    const exampleSet = params.exampleSet ?? 'validation';
     const batch =
       params.batch ??
-      (exampleSet === 'train'
+      (params.exampleSet === 'train'
         ? this.getTrainExampleIds()
         : this.getValidationExampleIds());
-    const captureFullEvalData = params.captureFullEvalData ?? false;
     this.calls.push({
       candidateName: params.candidate.name,
-      exampleSet,
+      exampleSet: params.exampleSet,
       batch,
-      captureFullEvalData,
+      captureFullEvalData: params.captureFullEvalData,
     });
 
     const result: UnstructuredSamplingResult = {
       scores: Object.fromEntries(batch.map((uid) => [uid, scoreOf(uid)])),
     };
-    if (captureFullEvalData) {
+    if (params.captureFullEvalData) {
       result.data = Object.fromEntries(
         batch.map((uid) => [uid, {trajectory: [`${uid}:tool_call`]}]),
       );
@@ -119,6 +124,7 @@ class FakeOptimizer implements AgentOptimizer<
         candidate,
         exampleSet: 'validation',
         batch: validationIds,
+        captureFullEvalData: false,
       });
       optimizedAgents.push({
         optimizedAgent: candidate,
@@ -188,14 +194,32 @@ describe('optimization contract', () => {
     });
   });
 
-  // An interface cannot enforce a default, so these cases pin the defaults
-  // that `SampleAndScoreParams` documents for implementations.
+  describe('SampleAndScoreParams', () => {
+    it('requires exampleSet and captureFullEvalData', () => {
+      const withoutExampleSet: Incomplete<{
+        candidate: LlmAgent;
+        captureFullEvalData: boolean;
+      }> = true;
+      const withoutCaptureFullEvalData: Incomplete<{
+        candidate: LlmAgent;
+        exampleSet: ExampleSet;
+      }> = true;
+
+      expect([withoutExampleSet, withoutCaptureFullEvalData]).toEqual([
+        true,
+        true,
+      ]);
+    });
+  });
+
   describe('Sampler.sampleAndScore', () => {
-    it('accepts a call that omits every optional parameter', async () => {
+    it('scores the whole chosen set when the batch is omitted', async () => {
       const sampler = new RecordingSampler();
 
       const result = await sampler.sampleAndScore({
         candidate: newInitialAgent(),
+        exampleSet: 'validation',
+        captureFullEvalData: false,
       });
 
       expect(sampler.calls).toEqual([
@@ -206,6 +230,7 @@ describe('optimization contract', () => {
           captureFullEvalData: false,
         },
       ]);
+      expect(Object.keys(result.scores)).toEqual(VALIDATION_IDS);
       expect(result.data).toBeUndefined();
     });
 

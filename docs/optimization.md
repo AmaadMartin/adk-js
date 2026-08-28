@@ -52,10 +52,9 @@ export class MyEvalSampler implements Sampler {
   }
 
   async sampleAndScore(params: SampleAndScoreParams): Promise<SamplingResult> {
-    const exampleSet = params.exampleSet ?? 'validation';
     const batch =
       params.batch ??
-      (exampleSet === 'train'
+      (params.exampleSet === 'train'
         ? this.getTrainExampleIds()
         : this.getValidationExampleIds());
     return {scores: await scoreWithYourHarness(params.candidate, batch)};
@@ -77,17 +76,10 @@ already optimized against.
 `SampleAndScoreParams.exampleSet` selects the set for one call. Its values are
 the string literals `'train'` and `'validation'`, which match adk-python.
 
-## Defaults a Sampler must apply
-
-TypeScript cannot give an interface a default, so `sampleAndScore` documents
-three defaults that your implementation applies itself. Omitting any of them is
-a valid call, and every optimizer may make one.
-
-| Parameter             | Omitted means                   |
-| --------------------- | ------------------------------- |
-| `exampleSet`          | `'validation'`                  |
-| `batch`               | every example in the chosen set |
-| `captureFullEvalData` | `false`                         |
+`batch` is the one parameter an optimizer may omit. Omitting it asks for every
+example in the chosen set, so your implementation resolves it, as the sample
+above does. adk-python spells the same sentinel `batch: Optional[list[str]] =
+None`.
 
 ## Capturing full evaluation data
 
