@@ -48,14 +48,12 @@ export interface ApiHubResourceNames {
 
 /** An API Hub API resource. Declares the fields this client reads. */
 interface ApiHubApi {
-  name?: string;
   /** Resource names of the API's versions. */
   versions?: string[];
 }
 
 /** An API Hub API version resource. Declares the fields this client reads. */
 interface ApiHubApiVersion {
-  name?: string;
   /** Resource names of the version's specs. */
   specs?: string[];
 }
@@ -109,9 +107,7 @@ export function extractResourceName(urlOrPath: string): ApiHubResourceNames {
   const {path, queryProject} = splitPathAndProject(urlOrPath);
   const segments = path.split('/').filter((segment) => segment !== '');
 
-  const project = segments.includes('projects')
-    ? segmentAfter(segments, 'projects')
-    : queryProject;
+  const project = segmentAfter(segments, 'projects') ?? queryProject;
   if (!project) {
     throw new Error(
       'Project ID not found in URL or path in APIHubClient. Input path is' +
@@ -185,7 +181,9 @@ export class APIHubClient implements BaseAPIHubClient {
 
     let apiVersionResourceName = names.apiVersionResourceName;
     if (!apiVersionResourceName) {
-      const api = await this.getApi(names.apiResourceName);
+      const api = await this.get<ApiHubApi>(
+        `${APIHUB_ROOT_URL}/${names.apiResourceName}`,
+      );
       const versions = api.versions ?? [];
       if (versions.length === 0) {
         throw new Error(
@@ -197,7 +195,9 @@ export class APIHubClient implements BaseAPIHubClient {
 
     let apiSpecResourceName = names.apiSpecResourceName;
     if (!apiSpecResourceName) {
-      const apiVersion = await this.getApiVersion(apiVersionResourceName);
+      const apiVersion = await this.get<ApiHubApiVersion>(
+        `${APIHUB_ROOT_URL}/${apiVersionResourceName}`,
+      );
       const specs = apiVersion.specs ?? [];
       if (specs.length === 0) {
         throw new Error(
@@ -208,18 +208,6 @@ export class APIHubClient implements BaseAPIHubClient {
     }
 
     return this.fetchSpec(apiSpecResourceName);
-  }
-
-  /** Gets `projects/p/locations/l/apis/a`. */
-  private async getApi(apiResourceName: string): Promise<ApiHubApi> {
-    return this.get<ApiHubApi>(`${APIHUB_ROOT_URL}/${apiResourceName}`);
-  }
-
-  /** Gets `projects/p/locations/l/apis/a/versions/v`. */
-  private async getApiVersion(
-    apiVersionName: string,
-  ): Promise<ApiHubApiVersion> {
-    return this.get<ApiHubApiVersion>(`${APIHUB_ROOT_URL}/${apiVersionName}`);
   }
 
   private async fetchSpec(apiSpecResourceName: string): Promise<string> {
