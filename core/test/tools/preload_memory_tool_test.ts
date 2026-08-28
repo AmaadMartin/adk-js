@@ -7,6 +7,7 @@
 import {describe, expect, it} from 'vitest';
 
 import {
+  BaseMemoryService,
   Context,
   createEvent,
   createSession,
@@ -17,6 +18,7 @@ import {
   PreloadMemoryTool,
   SearchMemoryResponse,
 } from '@google/adk';
+import {Content} from '@google/genai';
 
 // We mock the logger.warn since we test a failing case
 import {vi} from 'vitest';
@@ -44,6 +46,22 @@ class StubToolContext {
   async searchMemory(_query: string): Promise<SearchMemoryResponse> {
     return {memories: this.memories};
   }
+}
+
+function userTurn(text: string): Content {
+  return {role: 'user', parts: [{text}]};
+}
+
+function modelTurn(text: string): Content {
+  return {role: 'model', parts: [{text}]};
+}
+
+function memoryOf(text: string): MemoryEntry {
+  return {
+    content: userTurn(text),
+    author: 'user',
+    timestamp: '2026-07-13T12:00:00Z',
+  };
 }
 
 describe('PreloadMemoryTool', () => {
@@ -76,8 +94,9 @@ describe('PreloadMemoryTool', () => {
     };
     const tool = new PreloadMemoryTool();
     await tool.processLlmRequest({toolContext, llmRequest});
-    // System instructions should NOT be appended.
+    // Nothing is recalled, so neither the prefix nor the contents move.
     expect(llmRequest.config?.systemInstruction).toBeUndefined();
+    expect(llmRequest.contents).toEqual([]);
   });
 
   it('does not append instruction if memory service is missing', async () => {
@@ -95,9 +114,10 @@ describe('PreloadMemoryTool', () => {
     await tool.processLlmRequest({toolContext, llmRequest});
 
     expect(llmRequest.config?.systemInstruction).toBeUndefined();
+    expect(llmRequest.contents).toEqual([]);
   });
 
-  it('appends system instructions with formatted memory if memories found', async () => {
+  it('inserts a user content with formatted memory if memories found', async () => {
     const toolContext = new StubToolContext([
       {
         content: {role: 'user', parts: [{text: 'My dog is Fido.'}]},
@@ -119,14 +139,16 @@ describe('PreloadMemoryTool', () => {
     const tool = new PreloadMemoryTool();
     await tool.processLlmRequest({toolContext, llmRequest});
 
-    const instructions = llmRequest.config?.systemInstruction;
-    expect(instructions).toBeDefined();
+    expect(llmRequest.config?.systemInstruction).toBeUndefined();
+    const inserted = llmRequest.contents[0];
+    expect(inserted?.role).toBe('user');
 
     // Verify it contains the formatted lines
-    expect(instructions).toContain('Time: 2023-01-01T12:00:00Z');
-    expect(instructions).toContain('user: My dog is Fido.');
-    expect(instructions).toContain('model: I will remember that.');
-    expect(instructions).toContain('<PAST_CONVERSATIONS>');
+    const text = inserted?.parts?.[0]?.text;
+    expect(text).toContain('Time: 2023-01-01T12:00:00Z');
+    expect(text).toContain('user: My dog is Fido.');
+    expect(text).toContain('model: I will remember that.');
+    expect(text).toContain('<PAST_CONVERSATIONS>');
   });
 
   it('does not append instruction if every memory is text-free and untimestamped', async () => {
@@ -153,6 +175,7 @@ describe('PreloadMemoryTool', () => {
     await tool.processLlmRequest({toolContext, llmRequest});
 
     expect(llmRequest.config?.systemInstruction).toBeUndefined();
+    expect(llmRequest.contents).toEqual([]);
   });
 
   it('joins mixed text and text-free parts with a single space', async () => {
@@ -179,7 +202,7 @@ describe('PreloadMemoryTool', () => {
     const tool = new PreloadMemoryTool();
     await tool.processLlmRequest({toolContext, llmRequest});
 
-    expect(llmRequest.config?.systemInstruction).toContain(
+    expect(llmRequest.contents[0]?.parts?.[0]?.text).toContain(
       '<PAST_CONVERSATIONS>\nuser: hello world\n</PAST_CONVERSATIONS>',
     );
   });
@@ -216,7 +239,9 @@ describe('PreloadMemoryTool', () => {
     const tool = new PreloadMemoryTool();
     await tool.processLlmRequest({toolContext, llmRequest});
 
-    expect(llmRequest.config?.systemInstruction).toContain('user: hello world');
+    expect(llmRequest.contents[0]?.parts?.[0]?.text).toContain(
+      'user: hello world',
+    );
   });
 
   it('handles searchMemory throwing an error gracefully', async () => {
@@ -241,7 +266,161 @@ describe('PreloadMemoryTool', () => {
       'Failed to preload memory for query: hello',
     );
     expect(llmRequest.config?.systemInstruction).toBeUndefined();
+    expect(llmRequest.contents).toEqual([]);
 
     warnSpy.mockRestore();
+  });
+
+  it('keeps the system instruction prefix stable', async () => {
+    const currentQuery = userTurn('current query');
+    const llmRequest: LlmRequest = {
+      contents: [
+        userTurn('historical question'),
+        modelTurn('historical answer'),
+        currentQuery,
+      ],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {systemInstruction: 'stable instruction'},
+    };
+
+    await new PreloadMemoryTool().processLlmRequest({
+      toolContext: createMemoryToolContext([memoryOf('likes tea')]),
+      llmRequest,
+    });
+
+    expect(llmRequest.config?.systemInstruction).toBe('stable instruction');
+    expect(llmRequest.contents.map((content) => content.role)).toEqual([
+      'user',
+      'model',
+      'user',
+      'user',
+    ]);
+    expect(llmRequest.contents[2]?.parts?.[0]?.text).toContain('likes tea');
+    expect(llmRequest.contents[3]).toBe(currentQuery);
+  });
+
+  it('stays after a trailing function response', async () => {
+    const response: Content = {
+      role: 'user',
+      parts: [{functionResponse: {name: 'lookup', response: {result: 'done'}}}],
+    };
+    const llmRequest: LlmRequest = {
+      contents: [
+        userTurn('current query'),
+        {role: 'model', parts: [{functionCall: {name: 'lookup', args: {}}}]},
+        response,
+      ],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {},
+    };
+
+    await new PreloadMemoryTool().processLlmRequest({
+      toolContext: createMemoryToolContext([memoryOf('likes tea')]),
+      llmRequest,
+    });
+
+    expect(llmRequest.contents).toHaveLength(4);
+    expect(llmRequest.contents[2]).toBe(response);
+    expect(llmRequest.contents[3]?.parts?.[0]?.text).toContain('likes tea');
+  });
+
+  it('keeps a stable prefix across different recalled memories', async () => {
+    const requests: LlmRequest[] = [];
+    for (const memoryText of ['likes tea', 'likes coffee']) {
+      const llmRequest: LlmRequest = {
+        contents: [
+          userTurn('historical question'),
+          modelTurn('historical answer'),
+          userTurn('current query'),
+        ],
+        toolsDict: {},
+        liveConnectConfig: {},
+        config: {systemInstruction: 'stable instruction'},
+      };
+      await new PreloadMemoryTool().processLlmRequest({
+        toolContext: createMemoryToolContext([memoryOf(memoryText)]),
+        llmRequest,
+      });
+      requests.push(llmRequest);
+    }
+
+    const [tea, coffee] = requests;
+    expect(tea?.config?.systemInstruction).toBe(
+      coffee?.config?.systemInstruction,
+    );
+    expect(tea?.contents.slice(0, 2)).toEqual(coffee?.contents.slice(0, 2));
+    expect(tea?.contents[2]).not.toEqual(coffee?.contents[2]);
+    expect(tea?.contents[3]).toEqual(coffee?.contents[3]);
+  });
+
+  it('leaves the request untouched when the search fails', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const failingMemoryService: BaseMemoryService = {
+      async addSessionToMemory(): Promise<void> {},
+      async searchMemory(): Promise<SearchMemoryResponse> {
+        throw new Error('unavailable');
+      },
+    };
+    const llmRequest: LlmRequest = {
+      contents: [userTurn('current query')],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {systemInstruction: 'stable instruction'},
+    };
+    const before = structuredClone(llmRequest.contents);
+
+    await new PreloadMemoryTool().processLlmRequest({
+      toolContext: createMemoryToolContext([], failingMemoryService),
+      llmRequest,
+    });
+
+    expect(llmRequest.contents).toEqual(before);
+    expect(llmRequest.config?.systemInstruction).toBe('stable instruction');
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Failed to preload memory for query: hello',
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('inserts nothing when the search returns no memories', async () => {
+    const llmRequest: LlmRequest = {
+      contents: [userTurn('current query')],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {},
+    };
+
+    await new PreloadMemoryTool().processLlmRequest({
+      toolContext: createMemoryToolContext([]),
+      llmRequest,
+    });
+
+    expect(llmRequest.contents).toHaveLength(1);
+    expect(llmRequest.contents[0]?.parts?.[0]?.text).toBe('current query');
+  });
+
+  it('inserts nothing when every memory has no text', async () => {
+    const llmRequest: LlmRequest = {
+      contents: [userTurn('current query')],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {},
+    };
+
+    await new PreloadMemoryTool().processLlmRequest({
+      toolContext: createMemoryToolContext([
+        {
+          content: {role: 'user', parts: [{functionCall: {name: 'f'}}]},
+          author: 'user',
+        },
+      ]),
+      llmRequest,
+    });
+
+    expect(llmRequest.contents).toHaveLength(1);
+    expect(llmRequest.contents[0]?.parts?.[0]?.text).toBe('current query');
   });
 });
