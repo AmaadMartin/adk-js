@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import esbuild from 'esbuild';
-import {cp, writeFile} from 'node:fs/promises';
-import {basename} from 'node:path';
+import {writeFile} from 'node:fs/promises';
 
 const platformBuildTargets = {
   'node': ['node10.4'],
   'browser': ['chrome58', 'firefox57', 'safari11'],
 };
-
-const SKILL_ASSET_DIR = 'tools/bigquery/skills';
 
 const licenseHeaderText = `/**
   * @license
@@ -92,31 +89,6 @@ function build({
 }
 
 /**
- * Copies the markdown that packaged skills are made of into the Node outputs.
- *
- * esbuild emits only the TypeScript sources, and `files` in package.json
- * publishes `dist`, so an asset that is not copied here never reaches an
- * installed package. A skill loads from a directory beside its own module, so
- * the destination follows the layout the build emits: a bundled build collapses
- * every module into `./dist/<format>/index.js`, which puts the skill at the
- * format root. The browser output is skipped: reading a skill needs `node:fs`.
- *
- * @param {!Array<string>} targetDirs - Format directories under `./dist`.
- * @param {boolean} bundle - Whether the build emits one file per format.
- * @return {!Promise} A promise that resolves when every asset is copied.
- */
-function copySkillAssets(targetDirs, bundle) {
-  const destDir = bundle ? basename(SKILL_ASSET_DIR) : SKILL_ASSET_DIR;
-  return Promise.all(
-    targetDirs.map((targetDir) =>
-      cp(`./src/${SKILL_ASSET_DIR}`, `./dist/${targetDir}/${destDir}`, {
-        recursive: true,
-      }),
-    ),
-  );
-}
-
-/**
  * The main function that builds the ADK core library.
  */
 async function main() {
@@ -131,7 +103,6 @@ async function main() {
       bundle,
       watch: true,
     });
-    await copySkillAssets(['esm'], bundle);
   } else {
     await Promise.all([
       build({targetDir: 'esm', platform: 'node', format: 'esm', bundle}),
@@ -144,8 +115,6 @@ async function main() {
         bundle,
       }),
     ]);
-
-    await copySkillAssets(['esm', 'cjs'], bundle);
 
     // Create package.json for cjs to ensure Node.js treats it as commonjs.
     await writeFile('./dist/cjs/package.json', '{"type": "commonjs"}');
