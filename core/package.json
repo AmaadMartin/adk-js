@@ -106,6 +106,7 @@
     "@daytona/sdk": "^0.204.0",
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
+    "@google-cloud/speech": "^7.2.0",
     "@google-cloud/storage": "^7.17.1",
     "@mikro-orm/sqlite": "^6.6.6",
     "@modelcontextprotocol/sdk": "^1.26.0",
@@ -123,6 +124,7 @@
     "@daytona/sdk": "^0.204.0",
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
+    "@google-cloud/speech": "^7.2.0",
     "@google-cloud/storage": "^7.17.1",
     "@mikro-orm/mariadb": "^6.6.6",
     "@mikro-orm/mssql": "^6.6.6",
@@ -143,6 +145,9 @@
       "optional": true
     },
     "@google-cloud/opentelemetry-cloud-trace-exporter": {
+      "optional": true
+    },
+    "@google-cloud/speech": {
       "optional": true
     },
     "@google-cloud/storage": {

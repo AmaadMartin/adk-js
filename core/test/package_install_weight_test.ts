@@ -44,6 +44,7 @@ const pkg: CorePackageJson = JSON.parse(
 const OPTIONAL_SUBSYSTEM_PEERS = [
   '@google-cloud/opentelemetry-cloud-monitoring-exporter',
   '@google-cloud/opentelemetry-cloud-trace-exporter',
+  '@google-cloud/speech',
   '@google-cloud/storage',
   '@mikro-orm/mariadb',
   '@mikro-orm/mssql',
@@ -74,6 +75,7 @@ describe('core/package.json install weight', () => {
   it.each([
     '@google-cloud/opentelemetry-cloud-monitoring-exporter',
     '@google-cloud/opentelemetry-cloud-trace-exporter',
+    '@google-cloud/speech',
     '@google-cloud/storage',
     '@mikro-orm/sqlite',
     '@modelcontextprotocol/sdk',

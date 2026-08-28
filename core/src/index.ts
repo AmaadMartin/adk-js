@@ -21,6 +21,7 @@ export * from './a2a/index.js';
 // would make the name ambiguous. An explicit re-export takes precedence and
 // keeps the A2A one reachable from the root barrel.
 export {IntentMismatchReason} from './a2a/intent_binding.js';
+export {AudioTranscriber} from './agents/audio_transcriber.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
