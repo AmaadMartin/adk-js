@@ -51,6 +51,24 @@ function withoutRoundTripOAuth2Fields(
   return {...credential, oauth2};
 }
 
+/**
+ * Names the credential a tool asks for, as the scheme it authenticates and the
+ * credential the tool was configured with. Both the cache slot and the auth
+ * request slot are built from this, so a tool always reads back what it wrote.
+ */
+async function credentialIdentity(
+  authScheme: OpenAPIV3.SecuritySchemeObject,
+  authCredential?: AuthCredential,
+): Promise<string> {
+  const schemeName = `${authScheme.type}_${await stableDigest(authScheme)}`;
+  const credentialName = authCredential
+    ? `${authCredential.authType}_${await stableDigest(
+        withoutRoundTripOAuth2Fields(authCredential),
+      )}`
+    : '';
+  return `${schemeName}_${credentialName}`;
+}
+
 class ToolContextCredentialStore {
   constructor(
     private readonly context: Context,
@@ -70,13 +88,8 @@ class ToolContextCredentialStore {
     // The digest identifies the scheme and the credential, so two tools that
     // declare the same scheme type against different APIs get their own slot
     // instead of serving each other the first exchanged token.
-    const schemeName = `${authScheme.type}_${await stableDigest(authScheme)}`;
-    const credentialName = authCredential
-      ? `${authCredential.authType}_${await stableDigest(
-          withoutRoundTripOAuth2Fields(authCredential),
-        )}`
-      : '';
-    return `${schemeName}_${credentialName}_existing_exchanged_credential`;
+    const identity = await credentialIdentity(authScheme, authCredential);
+    return `${identity}_existing_exchanged_credential`;
   }
 
   async getCredential(
@@ -133,19 +146,23 @@ export class ToolAuthHandler {
       this.context,
       this.credentialKey,
     );
-    const existingCredential = await store.getCredential(
+    const storedCredential = await store.getCredential(
       this.authScheme,
       this.authCredential,
     );
 
-    if (existingCredential) {
-      return {state: 'done', authCredential: existingCredential};
+    if (storedCredential) {
+      return {state: 'done', authCredential: storedCredential};
     }
 
     const authConfig: AuthConfig = {
       authScheme: this.authScheme,
       rawAuthCredential: this.authCredential,
-      credentialKey: this.credentialKey || 'default_openapi_key',
+      // The auth response lands in `temp:<credentialKey>`, so a key shared by
+      // every OpenAPI tool lets one tool consume another tool's response.
+      credentialKey:
+        this.credentialKey ||
+        `adk_${await credentialIdentity(this.authScheme, this.authCredential)}`,
     };
 
     // A credential returned by an auth response was supplied interactively by

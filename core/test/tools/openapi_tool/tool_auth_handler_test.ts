@@ -57,6 +57,31 @@ function cachedCredentialKeys(sessionState: Record<string, unknown>): string[] {
   );
 }
 
+const FUNCTION_CALL_ID = 'function-call-1';
+
+/**
+ * Builds a Context a tool call can raise an auth request from.
+ * `requestCredential` records the request against the function call it
+ * answers, so it needs that call's id.
+ */
+function createRequestingContext(
+  sessionState: Record<string, unknown>,
+): Context {
+  return new Context({
+    invocationContext: {
+      session: {state: sessionState},
+      agent: {name: 'tool-auth-handler-agent'},
+    } as unknown as InvocationContext,
+    functionCallId: FUNCTION_CALL_ID,
+  });
+}
+
+/** The state key the handler asked the client to answer under. */
+function requestedCredentialKey(context: Context): string {
+  return context.eventActions.requestedAuthConfigs[FUNCTION_CALL_ID]
+    .credentialKey;
+}
+
 describe('ToolAuthHandler', () => {
   it('should return done if no auth scheme', async () => {
     const mockContext = {} as unknown as Context;
@@ -521,6 +546,102 @@ describe('ToolAuthHandler', () => {
     expect(Object.keys(sessionState)).toHaveLength(1);
     expect(cachedCredentialKeys(sessionState)).toEqual(
       Object.keys(sessionState),
+    );
+  });
+});
+
+describe('ToolAuthHandler auth request slot', () => {
+  const SCHEME_A: OpenAPIV3.SecuritySchemeObject = {
+    type: 'apiKey',
+    name: 'X-A-Key',
+    in: 'header',
+  };
+  const SCHEME_B: OpenAPIV3.SecuritySchemeObject = {
+    type: 'apiKey',
+    name: 'X-B-Key',
+    in: 'header',
+  };
+
+  it('names the request slot after the scheme and the credential', async () => {
+    const context = createRequestingContext({});
+
+    const result = await new ToolAuthHandler(
+      context,
+      SCHEME_A,
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('pending');
+    // The trailing segment is empty because the tool was configured with no
+    // credential. adk-python derives `adk_{scheme}_{credential}` too.
+    expect(requestedCredentialKey(context)).toMatch(
+      /^adk_apiKey_[0-9a-f]{16}_$/,
+    );
+  });
+
+  it('reads the client answer back from the slot it asked for', async () => {
+    const sessionState: Record<string, unknown> = {};
+    const first = createRequestingContext(sessionState);
+    await new ToolAuthHandler(first, SCHEME_A).prepareAuthCredentials();
+
+    sessionState[`temp:${requestedCredentialKey(first)}`] = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'answered-key',
+    } satisfies AuthCredential;
+
+    const result = await new ToolAuthHandler(
+      createRequestingContext(sessionState),
+      SCHEME_A,
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'exchanged-token',
+    );
+  });
+
+  it('lets fromToolContext name the request slot', async () => {
+    // The only in-repo caller builds the handler this way, so this is the
+    // path that decides whether a tool derives its slot or names it.
+    const sessionState: Record<string, unknown> = {
+      'temp:tool_tokens': {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'answered-key',
+      } satisfies AuthCredential,
+    };
+
+    const result = await ToolAuthHandler.fromToolContext(
+      createRequestingContext(sessionState),
+      SCHEME_A,
+      undefined,
+      {credentialKey: 'tool_tokens'},
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'exchanged-token',
+    );
+  });
+
+  it('keeps one tool from consuming another tool auth response', async () => {
+    const sessionState: Record<string, unknown> = {};
+    const toolA = createRequestingContext(sessionState);
+    await new ToolAuthHandler(toolA, SCHEME_A).prepareAuthCredentials();
+
+    // The user granted this credential to tool A alone.
+    sessionState[`temp:${requestedCredentialKey(toolA)}`] = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'tool-a-key',
+    } satisfies AuthCredential;
+
+    const toolB = createRequestingContext(sessionState);
+    const result = await new ToolAuthHandler(
+      toolB,
+      SCHEME_B,
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('pending');
+    expect(requestedCredentialKey(toolB)).not.toBe(
+      requestedCredentialKey(toolA),
     );
   });
 });
