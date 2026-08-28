@@ -206,6 +206,17 @@ export class BigQueryRowWriter {
   }
 
   /**
+   * Writes everything queued, giving up the wait after the shutdown timeout.
+   *
+   * A run ends with this, so a BigQuery call that hangs rather than fails
+   * delays the run by a bounded time. Nothing is dropped: the insert keeps
+   * running and the next flush waits for it again.
+   */
+  async flushWithinTimeout(): Promise<void> {
+    return awaitWithTimeout(this.flush(), this.options.shutdownTimeoutMs);
+  }
+
+  /**
    * Drains the queue, releases the flush timer, and counts whatever could not
    * be written within the shutdown timeout. The owning plugin is what makes
    * shutting down idempotent, so this runs once per process.

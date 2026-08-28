@@ -50,12 +50,25 @@ function newSpanId(): string {
   return newTraceId().slice(0, 16);
 }
 
-/** The ambient OpenTelemetry trace id, when a valid span is active. */
-function ambientTraceId(): string | undefined {
+/**
+ * The ambient OpenTelemetry ids, when a valid span is active, keyed as the
+ * `attributes.otel` object writes them.
+ *
+ * This is a best-effort join key onto a Cloud Trace export, not a foreign key:
+ * a span the exporter did not sample is absent from it.
+ */
+export function ambientOtelIds():
+  | {span_id: string; trace_id: string}
+  | undefined {
   const context = trace.getActiveSpan()?.spanContext();
   return context !== undefined && isSpanContextValid(context)
-    ? context.traceId
+    ? {span_id: context.spanId, trace_id: context.traceId}
     : undefined;
+}
+
+/** The ambient OpenTelemetry trace id, when a valid span is active. */
+function ambientTraceId(): string | undefined {
+  return ambientOtelIds()?.trace_id;
 }
 
 /** Milliseconds since `span` started, or undefined when there is no span. */

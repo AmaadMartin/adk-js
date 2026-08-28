@@ -47,6 +47,7 @@ import {
   TOOL_PAUSE_KIND,
 } from './bigquery_analytics_schema.js';
 import {
+  ambientOtelIds,
   elapsedSince,
   newTraceId,
   SpanKind,
@@ -54,6 +55,7 @@ import {
   SpanTracker,
   timeToFirstToken,
 } from './bigquery_analytics_spans.js';
+import {getToolOrigin} from './bigquery_analytics_tools.js';
 import {
   AnalyticsDropReason,
   BigQueryRowWriter,
@@ -167,6 +169,12 @@ export interface BigQueryLoggerConfig {
   finalResponseToolNames?: readonly string[];
   /** Whether each run ends with a flush. Defaults to true. */
   flushOnRunEnd?: boolean;
+  /**
+   * Whether each row captures the ambient OpenTelemetry span into
+   * `attributes.otel`, to join against a Cloud Trace export. Defaults to
+   * false. The plugin opens no span of its own.
+   */
+  enableOtelCorrelation?: boolean;
 }
 
 /** Constructor parameters for {@link BigQueryAgentAnalyticsPlugin}. */
@@ -195,6 +203,7 @@ interface ResolvedConfig {
   customTags: Record<string, unknown>;
   finalResponseToolNames: readonly string[];
   flushOnRunEnd: boolean;
+  enableOtelCorrelation: boolean;
 }
 
 /** Structured fields one row carries beyond its content. */
@@ -229,6 +238,29 @@ function agentInstruction(agent: BaseAgent): string {
   return isLlmAgent(agent) && typeof agent.instruction === 'string'
     ? agent.instruction
     : '';
+}
+
+/**
+ * The `content` of a tool row: the tool, this event's payload, and where the
+ * call runs. Every tool row carries `tool_origin`, as adk-python's do.
+ */
+function toolContent(
+  params: {
+    tool: BaseTool;
+    toolArgs: Record<string, unknown>;
+    toolContext: Context;
+  },
+  payload: {args: Record<string, unknown>} | {result: Record<string, unknown>},
+): Record<string, unknown> {
+  return {
+    tool: params.tool.name,
+    ...payload,
+    tool_origin: getToolOrigin(
+      params.tool,
+      params.toolArgs,
+      params.toolContext.invocationContext.agent,
+    ),
+  };
 }
 
 /** Captures the generation config and request labels into row attributes. */
@@ -331,6 +363,7 @@ function resolveConfig(config: BigQueryLoggerConfig): ResolvedConfig {
     customTags: config.customTags ?? {},
     finalResponseToolNames: config.finalResponseToolNames ?? [],
     flushOnRunEnd: config.flushOnRunEnd ?? true,
+    enableOtelCorrelation: config.enableOtelCorrelation ?? false,
   };
 }
 
@@ -470,7 +503,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         },
       });
       if (this.config.flushOnRunEnd) {
-        await this.writer.flush();
+        await this.writer.flushWithinTimeout();
       }
     });
   }
@@ -639,7 +672,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       this.logEvent({
         eventType: AnalyticsEventType.TOOL_STARTING,
         invocationContext,
-        rawContent: {tool: params.tool.name, args: params.toolArgs},
+        rawContent: toolContent(params, {args: params.toolArgs}),
       });
     });
   }
@@ -657,7 +690,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       this.logEvent({
         eventType: AnalyticsEventType.TOOL_COMPLETED,
         invocationContext,
-        rawContent: {tool: params.tool.name, result: params.result},
+        rawContent: toolContent(params, {result: params.result}),
         data: this.afterPopData(invocationId, popped),
       });
       // An agent that answers through a dedicated tool emits no plain-text
@@ -686,7 +719,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       this.logEvent({
         eventType: AnalyticsEventType.TOOL_ERROR,
         invocationContext,
-        rawContent: {tool: params.tool.name, args: params.toolArgs},
+        rawContent: toolContent(params, {args: params.toolArgs}),
         data: {
           ...this.afterPopData(invocationId, popped),
           status: AnalyticsStatus.ERROR,
@@ -1094,6 +1127,12 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     }
     if (Object.keys(this.config.customTags).length > 0) {
       attributes['custom_tags'] = this.config.customTags;
+    }
+    const otel = this.config.enableOtelCorrelation
+      ? ambientOtelIds()
+      : undefined;
+    if (otel !== undefined) {
+      attributes['otel'] = otel;
     }
     return attributes;
   }
