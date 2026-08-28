@@ -28,15 +28,9 @@ const OAUTH2_SCHEME_TYPES = ['oauth2', 'openIdConnect'];
  *   Connect scheme with a matching credential.
  */
 export function checkSchemeCredentialType(
-  authScheme?: AuthScheme,
-  authCredential?: AuthCredential,
+  authScheme: AuthScheme | undefined,
+  authCredential: AuthCredential,
 ): void {
-  if (!authCredential) {
-    throw new CredentialExchangeError(
-      'authCredential is empty. Please create an AuthCredential with an oauth2 configuration.',
-    );
-  }
-
   if (!authScheme || !OAUTH2_SCHEME_TYPES.includes(authScheme.type)) {
     throw new CredentialExchangeError(
       `Invalid security scheme, expected 'oauth2' or 'openIdConnect' auth scheme, but got ${authScheme?.type}`,

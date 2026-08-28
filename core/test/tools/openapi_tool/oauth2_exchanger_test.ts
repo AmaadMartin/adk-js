@@ -68,19 +68,13 @@ describe('checkSchemeCredentialType', () => {
     ).not.toThrow();
   });
 
-  it('throws when the credential is missing', () => {
-    expect(() => checkSchemeCredentialType(authScheme, undefined)).toThrow(
-      /authCredential is empty/,
-    );
-    expect(() => checkSchemeCredentialType(authScheme, undefined)).toThrow(
-      CredentialExchangeError,
-    );
-  });
-
   it('throws when the scheme type is not oauth2 or openIdConnect', () => {
     expect(() =>
       checkSchemeCredentialType(apiKeyScheme, oauth2Credential()),
     ).toThrow(/Invalid security scheme, expected 'oauth2' or 'openIdConnect'/);
+    expect(() =>
+      checkSchemeCredentialType(apiKeyScheme, oauth2Credential()),
+    ).toThrow(CredentialExchangeError);
   });
 
   it('throws when the scheme is missing', () => {
@@ -97,10 +91,12 @@ describe('checkSchemeCredentialType', () => {
     ).toThrow(/not configured with oauth2/);
   });
 
-  it('reports the missing credential before the invalid scheme', () => {
-    expect(() => checkSchemeCredentialType(apiKeyScheme, undefined)).toThrow(
-      /authCredential is empty/,
-    );
+  it('reports the invalid scheme before the missing oauth2 configuration', () => {
+    expect(() =>
+      checkSchemeCredentialType(apiKeyScheme, {
+        authType: AuthCredentialTypes.OAUTH2,
+      }),
+    ).toThrow(/Invalid security scheme/);
   });
 });
 

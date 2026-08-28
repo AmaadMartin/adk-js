@@ -15,7 +15,7 @@ import {
 } from '../../../../auth/exchanger/base_credential_exchanger.js';
 import {OAuth2CredentialExchanger as OAuth2TokenExchanger} from '../../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {experimental} from '../../../../utils/experimental.js';
-import {OAuth2CredentialExchanger} from './oauth2_exchanger.js';
+import {OAuth2CredentialExchanger as OAuth2BearerExchanger} from './oauth2_exchanger.js';
 import {ServiceAccountCredentialExchanger} from './service_account_exchanger.js';
 
 /**
@@ -27,7 +27,7 @@ async function exchangeOAuth2(params: {
   authCredential: AuthCredential;
 }): Promise<ExchangeResult> {
   const acquired = await new OAuth2TokenExchanger().exchange(params);
-  const converted = await new OAuth2CredentialExchanger().exchange({
+  const converted = await new OAuth2BearerExchanger().exchange({
     authScheme: params.authScheme,
     authCredential: acquired.credential,
   });
@@ -37,6 +37,8 @@ async function exchangeOAuth2(params: {
     wasExchanged: acquired.wasExchanged || converted.wasExchanged,
   };
 }
+
+const oauth2Exchanger: BaseCredentialExchanger = {exchange: exchangeOAuth2};
 
 /**
  * Automatically selects the appropriate credential exchanger based on the auth scheme.
@@ -48,12 +50,8 @@ export class AutoAuthCredentialExchanger implements BaseCredentialExchanger {
     new Map();
 
   constructor() {
-    this.exchangers.set(AuthCredentialTypes.OAUTH2, {
-      exchange: exchangeOAuth2,
-    });
-    this.exchangers.set(AuthCredentialTypes.OPEN_ID_CONNECT, {
-      exchange: exchangeOAuth2,
-    });
+    this.exchangers.set(AuthCredentialTypes.OAUTH2, oauth2Exchanger);
+    this.exchangers.set(AuthCredentialTypes.OPEN_ID_CONNECT, oauth2Exchanger);
     this.exchangers.set(
       AuthCredentialTypes.SERVICE_ACCOUNT,
       new ServiceAccountCredentialExchanger(),
