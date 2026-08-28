@@ -262,6 +262,12 @@ describe('partToMessageBlock media', () => {
     ).toThrow(/image\/svg\+xml/);
   });
 
+  it('rejects an inline media type that is neither an image nor a PDF', () => {
+    expect(() =>
+      block({inlineData: {mimeType: 'audio/mpeg', data: 'YXVkaW8='}}),
+    ).toThrow(/does not support this part/);
+  });
+
   it('rejects an inline part that carries no data', () => {
     expect(() => block({inlineData: {mimeType: 'image/png'}})).toThrow(
       /does not support this part/,
@@ -313,6 +319,12 @@ describe('partToMessageBlock text, thinking and code', () => {
     expect(block({functionCall: {id: 'toolu_1', name: 't'}})).toMatchObject({
       input: {},
     });
+  });
+
+  it('rejects a function call with no name', () => {
+    expect(() => block({functionCall: {id: 'toolu_1'}})).toThrow(
+      /function call sent to Claude must have a name/,
+    );
   });
 
   it('converts an executable code part', () => {
@@ -965,8 +977,15 @@ describe('systemInstructionToText', () => {
     ).toBe('a\nb');
   });
 
-  it('flattens a Content with no parts', () => {
-    expect(systemInstructionToText({role: 'user'})).toBe('');
+  it.each([{role: 'user'}, {role: 'user', parts: undefined}])(
+    'flattens a Content with no parts',
+    (instruction) => {
+      expect(systemInstructionToText(instruction)).toBe('');
+    },
+  );
+
+  it('flattens a part whose text is undefined', () => {
+    expect(systemInstructionToText({text: undefined})).toBe('');
   });
 
   it('flattens a part with no text', () => {

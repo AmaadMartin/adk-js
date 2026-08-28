@@ -55,9 +55,9 @@ const LOCATION_ENV_VARIABLE_NAME = 'GOOGLE_CLOUD_LOCATION';
  * Both `Anthropic` and `AnthropicVertex` satisfy it, so one implementation
  * serves the direct API and Vertex AI.
  */
-type AnthropicMessagesClient = {
+export interface AnthropicMessagesClient {
   messages: Pick<Anthropic['messages'], 'create'>;
-};
+}
 
 /** Parameters for creating an {@link AnthropicLlm}. */
 export interface AnthropicLlmParams {
@@ -263,7 +263,7 @@ function buildMessageCreateParams(
     params.tools = declarations.map(functionDeclarationToToolParam);
   }
 
-  if (Object.keys(llmRequest.toolsDict ?? {}).length > 0) {
+  if (Object.keys(llmRequest.toolsDict).length > 0) {
     params.tool_choice = {type: 'auto'};
   }
 

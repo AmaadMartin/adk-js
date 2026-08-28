@@ -122,6 +122,7 @@ function blocksOf(message: MessageParam): unknown[] {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   create.mockResolvedValue(
     anthropicMessage(
       [{type: 'text', text: 'Hello, how can I help you?', citations: null}],
@@ -404,6 +405,23 @@ describe('streaming generation', () => {
     ]);
   });
 
+  it('starts a text block from a delta alone', async () => {
+    create.mockResolvedValue(
+      asStream([
+        messageStartEvent(1),
+        blockDeltaEvent(0, {type: 'text_delta', text: 'lone text'}),
+        messageStopEvent(),
+      ]),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses[1].content?.parts).toEqual([{text: 'lone text'}]);
+  });
+
   it('ignores an argument delta for an unknown block index', async () => {
     create.mockResolvedValue(
       asStream([
@@ -617,6 +635,52 @@ describe('tool call id pairing', () => {
       expect(id).toMatch(/^[a-zA-Z0-9_-]+$/);
     }
   });
+
+  it('pairs a tool result with its call when the ids arrive out of order', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({
+      contents: [
+        {
+          role: 'model',
+          parts: [
+            {functionCall: {id: 'bad A!', name: 'tool_a', args: {}}},
+            {functionCall: {id: 'bad B!', name: 'tool_b', args: {}}},
+          ],
+        },
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'bad B!',
+                name: 'tool_b',
+                response: {result: 'ok'},
+              },
+            },
+            {
+              functionResponse: {
+                id: 'bad A!',
+                name: 'tool_a',
+                response: {result: 'ok'},
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    await collect(llm.generateContentAsync(request, false));
+
+    const messages = createdParams().messages;
+    const useIds = blocksOf(messages[0])
+      .filter(isToolUseBlock)
+      .map((b) => b.id);
+    const resultIds = blocksOf(messages[1])
+      .filter(isToolResultBlock)
+      .map((b) => b.tool_use_id);
+
+    expect(resultIds).toEqual([useIds[1], useIds[0]]);
+  });
 });
 
 describe('Claude on Vertex AI', () => {
@@ -670,6 +734,17 @@ describe('Claude on Vertex AI', () => {
     vi.stubEnv('GOOGLE_CLOUD_PROJECT', '');
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', '');
     expect(() => new Claude()).not.toThrow();
+  });
+
+  it('ignores the process environment in a browser', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-location');
+    vi.stubGlobal('window', {});
+    const llm = new Claude();
+
+    await expect(
+      collect(llm.generateContentAsync(makeRequest(), false)),
+    ).rejects.toThrow(/must be set for using Anthropic on Vertex/);
   });
 
   it('rejects generation without Vertex configuration', async () => {
