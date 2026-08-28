@@ -9,6 +9,7 @@ import {
   BaseLlm,
   BaseLlmConnection,
   BasePlanner,
+  BuiltInPlanner,
   Context,
   createSession,
   Event,
@@ -381,5 +382,104 @@ describe('NlPlanningResponseProcessor', () => {
     await runResponseProcessor(createAgent(planner), llmResponse);
 
     expect(llmResponse.content?.parts).toBe(replacement);
+  });
+});
+
+describe('NlPlanningRequestProcessor with a BuiltInPlanner', () => {
+  const thinkingConfig = {includeThoughts: true, thinkingBudget: 512};
+
+  it('puts the planner thinking config on the request', async () => {
+    const llmRequest = createLlmRequest();
+
+    await runRequestProcessor(
+      createAgent(new BuiltInPlanner({thinkingConfig})),
+      llmRequest,
+    );
+
+    expect(llmRequest.config?.thinkingConfig).toEqual(thinkingConfig);
+  });
+
+  it('overrides a thinking config the request already carries', async () => {
+    const llmRequest = createLlmRequest();
+    llmRequest.config = {thinkingConfig: {includeThoughts: false}};
+
+    await runRequestProcessor(
+      createAgent(new BuiltInPlanner({thinkingConfig})),
+      llmRequest,
+    );
+
+    expect(llmRequest.config.thinkingConfig).toEqual(thinkingConfig);
+  });
+
+  it('appends no instruction and keeps the request contents', async () => {
+    const llmRequest = createLlmRequest(contentsWithThought());
+
+    await runRequestProcessor(
+      createAgent(new BuiltInPlanner({thinkingConfig})),
+      llmRequest,
+    );
+
+    expect(llmRequest.config?.systemInstruction).toBeUndefined();
+    expect(llmRequest.contents).toEqual(contentsWithThought());
+  });
+});
+
+describe('NlPlanningResponseProcessor with a BuiltInPlanner', () => {
+  const thinkingConfig = {includeThoughts: true};
+
+  it('leaves the response alone', async () => {
+    const parts: Part[] = [
+      {text: 'reasoning', thought: true},
+      {text: 'answer'},
+    ];
+    const llmResponse: LlmResponse = {content: {role: 'model', parts}};
+
+    const events = await runResponseProcessor(
+      createAgent(new BuiltInPlanner({thinkingConfig})),
+      llmResponse,
+    );
+
+    expect(llmResponse.content?.parts).toBe(parts);
+    expect(parts[0].thought).toBe(true);
+    expect(events).toHaveLength(0);
+  });
+
+  it('leaves the response alone for a subclass that adds no override', async () => {
+    class QuietPlanner extends BuiltInPlanner {}
+    const parts: Part[] = [{text: 'answer'}];
+    const llmResponse: LlmResponse = {content: {role: 'model', parts}};
+
+    const events = await runResponseProcessor(
+      createAgent(new QuietPlanner({thinkingConfig})),
+      llmResponse,
+    );
+
+    expect(llmResponse.content?.parts).toBe(parts);
+    expect(events).toHaveLength(0);
+  });
+
+  it('calls the override a subclass declares and takes its parts', async () => {
+    const replacement: Part[] = [{text: 'planned', thought: true}];
+    const seen: Part[][] = [];
+    class LoudPlanner extends BuiltInPlanner {
+      override processPlanningResponse(
+        _callbackContext: Context,
+        responseParts: Part[],
+      ): Part[] {
+        seen.push(responseParts);
+        return replacement;
+      }
+    }
+    const parts: Part[] = [{text: 'raw'}];
+    const llmResponse: LlmResponse = {content: {role: 'model', parts}};
+
+    const events = await runResponseProcessor(
+      createAgent(new LoudPlanner({thinkingConfig})),
+      llmResponse,
+    );
+
+    expect(seen).toEqual([parts]);
+    expect(llmResponse.content?.parts).toBe(replacement);
+    expect(events).toHaveLength(0);
   });
 });
