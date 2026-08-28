@@ -34,7 +34,9 @@ export function bigQuerySkillDir(): string {
  *
  * Unlike adk-python's synchronous `get_bigquery_skill`, this returns a promise,
  * because adk-js loads skills asynchronously. It reads the skill from the
- * filesystem, so it works under Node and fails in a browser.
+ * filesystem, so it works under Node and fails in a browser. The markdown ships
+ * beside the compiled module, so keep `@google/adk` external if a bundler
+ * inlines your dependencies into one file.
  *
  * @returns The loaded BigQuery AI/ML skill.
  */
