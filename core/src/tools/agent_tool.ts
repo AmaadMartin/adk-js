@@ -54,9 +54,6 @@ export function isAgentTool(obj: unknown): obj is AgentTool {
   );
 }
 
-/** Prefix marking a state key as ADK-internal, so it stays in the parent. */
-const ADK_INTERNAL_STATE_PREFIX = '_adk';
-
 /**
  * Resolves the agent whose schema an `AgentTool` speaks for. An `LlmAgent`
  * answers for itself; any other agent resolves through the sub-agent at
@@ -202,6 +199,7 @@ export class AgentTool extends BaseTool {
     const inputAgent = resolveSchemaAgent(this.agent, 'first');
     const inputSchema =
       inputAgent?.inputSchemaSource ?? inputAgent?.inputSchema;
+    const outputSchema = resolveSchemaAgent(this.agent, 'last')?.outputSchema;
     const content: Content = {
       role: 'user',
       parts: [
@@ -217,7 +215,7 @@ export class AgentTool extends BaseTool {
 
     const seedState = Object.fromEntries(
       Object.entries(toolContext.state.toRecord()).filter(
-        ([key]) => !key.startsWith(ADK_INTERNAL_STATE_PREFIX),
+        ([key]) => !key.startsWith(State.ADK_INTERNAL_PREFIX),
       ),
     );
 
@@ -282,10 +280,6 @@ export class AgentTool extends BaseTool {
       return lastErrorMessage ?? '';
     }
 
-    const hasOutputSchema = resolveSchemaAgent(
-      this.agent,
-      'last',
-    )?.outputSchema;
     // Exclude thoughts from the merged text.
     const mergedText = lastContent.parts
       .filter((part) => !part.thought)
@@ -301,6 +295,6 @@ export class AgentTool extends BaseTool {
 
     // TODO - b/425992518: In case of output schema, the output should be
     // validated. Consider similar logic to one we have in Python ADK.
-    return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
+    return outputSchema ? JSON.parse(mergedText) : mergedText;
   }
 }

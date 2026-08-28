@@ -37,6 +37,17 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   };
 });
 
+/**
+ * Builds the `Runner` stand-in the mocked constructor returns. The widening
+ * cast lives here alone, so a caller supplies only the members `AgentTool`
+ * reads and still has them checked against the real `Runner`.
+ */
+function mockRunner(
+  parts: Pick<Runner, 'appName' | 'sessionService' | 'runAsync'>,
+): Runner {
+  return parts as Runner;
+}
+
 describe('AgentTool', () => {
   it('propagates session context and state delta', async () => {
     const mockAgent = {
@@ -552,13 +563,12 @@ describe('AgentTool with composite agents', () => {
       });
     };
 
-    vi.mocked(Runner).mockImplementation(
-      (config) =>
-        ({
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          runAsync: mockRunAsync,
-        }) as unknown as Runner,
+    vi.mocked(Runner).mockImplementation((config) =>
+      mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
+        runAsync: mockRunAsync,
+      }),
     );
 
     const session = createSession({
@@ -714,11 +724,11 @@ describe('AgentTool parity with adk-python', () => {
 
     vi.mocked(Runner).mockImplementation((config) => {
       received.appName = config?.appName;
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
+      return mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
         runAsync,
-      } as unknown as Runner;
+      });
     });
 
     return {received, runAsync};
