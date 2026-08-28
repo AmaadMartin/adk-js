@@ -21,6 +21,14 @@ const SURVIVOR_LIFETIME_MS = 10_000;
 /** Short enough that the kill lands well before the script would exit. */
 const KILL_AFTER_SECONDS = 0.2;
 
+/**
+ * Enough '€' to overflow the pipe buffer on every platform we test.
+ *
+ * A pipe hands over a power-of-two number of bytes at a time, and 3 divides no
+ * power of two, so the first boundary always falls inside a character.
+ */
+const EURO_REPEATS = 40_000;
+
 describe('splitCommand', () => {
   it('returns no token for an empty or blank command', () => {
     expect(splitCommand('')).toEqual([]);
@@ -138,19 +146,22 @@ describe('collectChildOutput decoding', () => {
     });
   });
 
-  it('keeps a multi-byte character split across two writes intact', async () => {
-    // '€' is E2 82 AC. The delay puts the trailing byte in its own chunk, so
-    // decoding either chunk alone would yield replacement characters.
-    const result = await runScript(
-      'process.stdout.write(Buffer.from([0xe2, 0x82]));' +
-        'process.stderr.write(Buffer.from([0xe2, 0x82]));' +
-        'setTimeout(() => {' +
-        '  process.stdout.write(Buffer.from([0xac]));' +
-        '  process.stderr.write(Buffer.from([0xac]));' +
-        '}, 50);',
-    );
-    expect(result).toMatchObject({stdout: '€', stderr: '€'});
-  });
+  it(
+    'keeps a multi-byte character split across two chunks intact',
+    async () => {
+      const result = await runScript(
+        `const text = '\\u20ac'.repeat(${EURO_REPEATS});` +
+          'process.stdout.write(text);' +
+          'process.stderr.write(text);',
+      );
+      // Decoding a chunk on its own turns the split character into two
+      // replacement characters, which lengthens the text as well.
+      expect(result.stdout).toBe(result.stderr);
+      expect(result.stdout).not.toContain('\uFFFD');
+      expect(result.stdout).toHaveLength(EURO_REPEATS);
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 
   it('replaces an invalid byte rather than throwing', async () => {
     const result = await runScript(
