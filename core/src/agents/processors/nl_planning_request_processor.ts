@@ -63,9 +63,7 @@ export class NlPlanningResponseProcessor extends BaseLlmResponseProcessor {
       return;
     }
 
-    // Every planner here supplies processPlanningResponse, so there is no
-    // no-op implementation to skip. A future BuiltInPlanner port owns adding
-    // an opt-out if it wants one.
+    // adk-python skips BuiltInPlanner's inherited no-op here; adk-js has none.
     const callbackContext = new Context({invocationContext});
     const processedParts = await planner.processPlanningResponse(
       callbackContext,
