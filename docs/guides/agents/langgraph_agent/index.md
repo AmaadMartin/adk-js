@@ -12,24 +12,17 @@ session, the event history and the runner. `LangGraphAgent` is the adapter
 between them: it converts the ADK session's events into LangChain messages,
 invokes the graph once, and yields the graph's last message as one ADK event.
 
-The agent never compiles a graph. You pass an already-compiled one, so the graph
-keeps whatever nodes, tools and checkpointer you gave it. Because the agent is a
-`BaseAgent`, it also slots under an `LlmAgent` or a `SequentialAgent` like any
+You pass an already-compiled graph; the agent never compiles one. Because it is
+a `BaseAgent`, it also slots under an `LlmAgent` or a `SequentialAgent` like any
 other sub-agent.
-
-`@langchain/core` is an optional peer dependency. `@google/adk` stays
-installable and importable without it, and the LangChain message classes load
-only when the agent runs.
 
 ## Get started
 
-Install the LangGraph packages next to `@google/adk`:
+`@langchain/core` is an optional peer dependency, so install it yourself:
 
 ```sh
 npm install @langchain/core @langchain/langgraph
 ```
-
-Then compile a graph and hand it to the agent:
 
 ```ts
 import {InMemoryRunner, LangGraphAgent} from '@google/adk';
@@ -100,5 +93,3 @@ Live mode is not supported. `runLive` throws.
 
 Each run yields exactly one event, carrying the text of the graph's last
 message. The graph's intermediate messages do not become ADK events.
-
-Graph errors propagate unchanged. The agent adds no retry and no timeout.

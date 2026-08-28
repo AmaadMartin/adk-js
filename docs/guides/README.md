@@ -1,12 +1,10 @@
-# ADK Developer Guides
+# ADK developer guides
 
-This directory contains specific developer guides for the ADK JavaScript
-implementation. For the official ADK documentation, visit
-[adk.dev](https://adk.dev/).
+Per-feature guides for the TypeScript SDK, in the layout adk-python already
+uses for its own `docs/guides`. They carry what the API reference cannot: when
+to reach for a feature, and what it guarantees.
 
-## Index
-
-### Agents
+## Agents
 
 - [LangGraphAgent](agents/langgraph_agent/index.md) - Running a compiled
   LangGraph state graph as an ADK agent.
