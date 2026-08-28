@@ -7,7 +7,6 @@
 import {
   AppDetails,
   NotFoundError,
-  createAgentDetails,
   getDeveloperInstructions,
   getToolsByAgentName,
 } from '@google/adk';
@@ -19,50 +18,11 @@ const TOOL1: Tool = {functionDeclarations: [{name: 'tool1_func'}]};
 function createTwoAgentApp(): AppDetails {
   return {
     agentDetails: {
-      agent1: createAgentDetails({
-        name: 'agent1',
-        instructions: 'instruction for agent1',
-      }),
-      agent2: createAgentDetails({
-        name: 'agent2',
-        instructions: 'instruction for agent2',
-      }),
+      agent1: {name: 'agent1', instructions: 'instruction for agent1'},
+      agent2: {name: 'agent2', instructions: 'instruction for agent2'},
     },
   };
 }
-
-describe('createAgentDetails', () => {
-  it('fills the omitted fields with the adk-python defaults', () => {
-    expect(createAgentDetails({name: 'agent1'})).toEqual({
-      name: 'agent1',
-      instructions: '',
-      toolDeclarations: [],
-    });
-  });
-
-  it('keeps the values the caller supplied', () => {
-    expect(
-      createAgentDetails({
-        name: 'agent1',
-        instructions: 'instruction for agent1',
-        toolDeclarations: [TOOL1],
-      }),
-    ).toEqual({
-      name: 'agent1',
-      instructions: 'instruction for agent1',
-      toolDeclarations: [TOOL1],
-    });
-  });
-
-  it('gives each call its own default tool list', () => {
-    const first = createAgentDetails({name: 'agent1'});
-    const second = createAgentDetails({name: 'agent2'});
-
-    first.toolDeclarations.push(TOOL1);
-
-    expect(second.toolDeclarations).toEqual([]);
-  });
-});
 
 describe('getDeveloperInstructions', () => {
   it('returns the instructions of an existing agent', () => {
@@ -109,11 +69,8 @@ describe('getToolsByAgentName', () => {
   it('keeps an entry for an agent that declares no tool', () => {
     const appDetails: AppDetails = {
       agentDetails: {
-        agent1: createAgentDetails({
-          name: 'agent1',
-          toolDeclarations: [TOOL1],
-        }),
-        agent2: createAgentDetails({name: 'agent2'}),
+        agent1: {name: 'agent1', toolDeclarations: [TOOL1]},
+        agent2: {name: 'agent2', toolDeclarations: []},
       },
     };
 
@@ -126,9 +83,7 @@ describe('getToolsByAgentName', () => {
   it('returns the declared tool list by reference', () => {
     const toolDeclarations = [TOOL1];
     const appDetails: AppDetails = {
-      agentDetails: {
-        agent1: createAgentDetails({name: 'agent1', toolDeclarations}),
-      },
+      agentDetails: {agent1: {name: 'agent1', toolDeclarations}},
     };
 
     expect(getToolsByAgentName(appDetails)['agent1']).toBe(toolDeclarations);
@@ -162,11 +117,11 @@ describe('AppDetails', () => {
   it('round-trips through JSON with the adk-python field names', () => {
     const appDetails: Required<AppDetails> = {
       agentDetails: {
-        agent1: createAgentDetails({
+        agent1: {
           name: 'agent1',
           instructions: 'instruction for agent1',
           toolDeclarations: [TOOL1],
-        }),
+        },
       },
     };
 

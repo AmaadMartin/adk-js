@@ -156,7 +156,6 @@ export {
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
 export {
-  createAgentDetails,
   getDeveloperInstructions,
   getToolsByAgentName,
 } from './evaluation/app_details.js';

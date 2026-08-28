@@ -34,22 +34,6 @@ export interface AppDetails {
 }
 
 /**
- * Builds an {@link AgentDetails} with every optional field filled in.
- *
- * `instructions` defaults to an empty string and `toolDeclarations` to a fresh
- * empty array, so the result is safe to mutate per call.
- */
-export function createAgentDetails(
-  params: Partial<AgentDetails> & {name: string},
-): Required<AgentDetails> {
-  return {
-    name: params.name,
-    instructions: params.instructions ?? '',
-    toolDeclarations: params.toolDeclarations ?? [],
-  };
-}
-
-/**
  * Returns the developer instructions given to the named agent.
  *
  * @throws NotFoundError if the app holds no agent under that name.
