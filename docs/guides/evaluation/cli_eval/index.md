@@ -1,9 +1,8 @@
 # Running evals from the CLI
 
-`adk eval` replays recorded conversations through your agent and scores the
-tool calls it makes against the ones you recorded. Reach for it when you change
-a prompt, a tool, or a model, and you want to know whether the agent still takes
-the same steps.
+`adk eval` replays recorded conversations through your agent and scores what it
+does against what you recorded. Reach for it when you change a prompt, a tool,
+or a model, and you want to know whether the agent still behaves the same way.
 
 ## Introduction
 
@@ -14,8 +13,9 @@ tool calls a good run makes, and the command tells you whether a later run still
 makes them.
 
 The command scores the **tool trajectory** — the sequence of tool names and
-arguments. It does not judge the agent's prose. A run passes when its recorded
-tool calls match the expected ones exactly, in order.
+arguments — and, for a turn that records a reference response, how closely the
+agent's own response matches it. A case passes when every metric you asked for
+reaches its threshold.
 
 Two neighbouring pieces do different jobs. `adk run` starts one interactive
 conversation and prints it; it scores nothing. The integration harness under
@@ -82,6 +82,7 @@ adk eval ./agent.ts ./roll_die.evalset.json
 Using evaluation criteria: {"tool_trajectory_avg_score":1,"response_match_score":0.8}
 Running Eval: ./roll_die.evalset.json:roll_a_six_sided_die
 Metric: tool_trajectory_avg_score	Status: PASSED	Score: 1	Threshold: 1
+Metric: response_match_score	Status: NOT_EVALUATED	Score: N/A	Threshold: 0.8
 Result: ✅ Passed
 
 *********************************************************************
@@ -174,12 +175,38 @@ some metric fails.
 | Metric                      | Behaviour                                                                   |
 | --------------------------- | --------------------------------------------------------------------------- |
 | `tool_trajectory_avg_score` | Scored. The mean over turns of 1 for an exact tool-call match, 0 otherwise. |
-| `response_match_score`      | Reported as `NOT_EVALUATED`.                                                |
+| `response_match_score`      | Scored. The mean ROUGE-1 F-measure against each turn's `reference`.         |
 | `response_evaluation_score` | Reported as `NOT_EVALUATED`.                                                |
 
-The two response metrics need a ROUGE scorer and a model-based judge, which
-adk-js does not have yet. The command warns once per run and carries on, so the
-default criteria still produce a trajectory verdict.
+`response_evaluation_score` needs a model-based judge, which adk-js does not
+have yet. The command warns once per run and carries on.
+
+## Scoring the response
+
+Add a `reference` to a turn and `response_match_score` compares the agent's
+final response with it. The score is the ROUGE-1 F-measure: the two texts are
+split into lowercase words, and the score rises with the words they share.
+Identical text scores 1 and text sharing no word scores 0.
+
+```json
+{
+  "query": "Roll a die.",
+  "expected_tool_use": [
+    {"tool_name": "roll_die", "tool_input": {"sides": 6}, "mock_tool_output": 4}
+  ],
+  "reference": "You rolled a 4."
+}
+```
+
+A turn without a `reference` records no expectation for the agent's prose, so
+it is not scored. When no turn in a case records one, the metric reports
+`NOT_EVALUATED` for that case. This is why the default criteria still give a
+verdict on eval data that only records tool calls.
+
+adk-python computes this score through Vertex AI's evaluation service. adk-js
+computes it locally, because that service has no JavaScript client. The metric
+key, the value range and the mean over turns are the same, so the same
+threshold means the same thing. The two scores can differ in the last decimal.
 
 ## Resetting agent state between cases
 
