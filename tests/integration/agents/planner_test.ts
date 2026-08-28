@@ -5,13 +5,12 @@
  */
 
 import type {
-  BasePlanner,
-  Context,
   Event,
   LlmRequest,
   LlmResponse,
+  ProcessPlanningResponseParams,
 } from '@google/adk';
-import {LlmAgent, stringifyContent} from '@google/adk';
+import {BasePlanner, LlmAgent, stringifyContent} from '@google/adk';
 import type {Content, Part} from '@google/genai';
 import {FinishReason} from '@google/genai';
 import {describe, expect, it} from 'vitest';
@@ -53,15 +52,14 @@ class RecordingGemini extends GeminiWithMockResponses {
 }
 
 /** Marks any part carrying the plan marker as a thought. */
-class MarkerPlanner implements BasePlanner {
+class MarkerPlanner extends BasePlanner {
   buildPlanningInstruction(): string | undefined {
     return PLANNING_INSTRUCTION;
   }
 
-  processPlanningResponse(
-    _callbackContext: Context,
-    responseParts: Part[],
-  ): Part[] | undefined {
+  processPlanningResponse({
+    responseParts,
+  }: ProcessPlanningResponseParams): Part[] | undefined {
     for (const part of responseParts) {
       if (part.text?.includes(THOUGHT_MARKER)) {
         part.thought = true;

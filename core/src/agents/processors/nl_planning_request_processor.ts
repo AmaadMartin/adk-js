@@ -7,7 +7,7 @@
 import {createEvent, Event} from '../../events/event.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {LlmResponse} from '../../models/llm_response.js';
-import {BasePlanner} from '../../planners/base_planner.js';
+import {BasePlanner, isBasePlanner} from '../../planners/base_planner.js';
 import {Context} from '../context.js';
 import {InvocationContext, requireAgent} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
@@ -32,10 +32,10 @@ export class NlPlanningRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    const instruction = await planner.buildPlanningInstruction(
-      new ReadonlyContext(invocationContext),
+    const instruction = await planner.buildPlanningInstruction({
+      readonlyContext: new ReadonlyContext(invocationContext),
       llmRequest,
-    );
+    });
     if (instruction) {
       appendInstructions(llmRequest, [instruction]);
     }
@@ -64,21 +64,21 @@ export class NlPlanningResponseProcessor extends BaseLlmResponseProcessor {
     }
 
     // adk-python skips BuiltInPlanner's inherited no-op here; adk-js has none.
-    const callbackContext = new Context({invocationContext});
-    const processedParts = await planner.processPlanningResponse(
-      callbackContext,
-      content.parts,
-    );
+    const context = new Context({invocationContext});
+    const processedParts = await planner.processPlanningResponse({
+      context,
+      responseParts: content.parts,
+    });
     if (processedParts) {
       content.parts = processedParts;
     }
 
-    if (callbackContext.state.hasDelta()) {
+    if (context.state.hasDelta()) {
       yield createEvent({
         invocationId: invocationContext.invocationId,
         author: requireAgent(invocationContext).name,
         branch: invocationContext.branch,
-        actions: callbackContext.eventActions,
+        actions: context.eventActions,
       });
     }
   }
@@ -86,12 +86,20 @@ export class NlPlanningResponseProcessor extends BaseLlmResponseProcessor {
 
 /**
  * Returns the planner the invoked agent carries, if it carries one.
+ *
+ * A `planner` set from untyped JavaScript or from a config file can hold
+ * anything, so the value is checked before it is called. adk-python falls back
+ * to a default `PlanReActPlanner` here; adk-js has no such planner yet, so it
+ * plans nothing instead.
  */
 function getPlanner(
   invocationContext: InvocationContext,
 ): BasePlanner | undefined {
   const agent = invocationContext.agent;
-  return isLlmAgent(agent) ? agent.planner : undefined;
+  if (!isLlmAgent(agent) || !isBasePlanner(agent.planner)) {
+    return undefined;
+  }
+  return agent.planner;
 }
 
 /**

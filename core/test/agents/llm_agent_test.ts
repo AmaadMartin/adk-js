@@ -35,7 +35,7 @@ import {
   Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
-import {Content, Schema, Type} from '@google/genai';
+import {Content, Part, Schema, Type} from '@google/genai';
 import {
   afterEach,
   beforeEach,
@@ -1075,12 +1075,19 @@ describe('LlmAgent Default Response Processors', () => {
   });
 });
 
+class ConfiguredPlanner extends BasePlanner {
+  buildPlanningInstruction(): string | undefined {
+    return 'plan first';
+  }
+
+  processPlanningResponse(): Part[] | undefined {
+    return undefined;
+  }
+}
+
 describe('LlmAgent planner', () => {
   it('exposes the planner it was configured with', () => {
-    const planner: BasePlanner = {
-      buildPlanningInstruction: () => 'plan first',
-      processPlanningResponse: () => undefined,
-    };
+    const planner = new ConfiguredPlanner();
 
     const agent = new LlmAgent({name: 'test_agent', planner});
 

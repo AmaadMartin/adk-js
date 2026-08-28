@@ -9,7 +9,7 @@ import {
   BaseLlm,
   BaseLlmConnection,
   BasePlanner,
-  Context,
+  BuildPlanningInstructionParams,
   createSession,
   Event,
   InvocationContext,
@@ -17,10 +17,11 @@ import {
   LlmRequest,
   LlmResponse,
   PluginManager,
+  ProcessPlanningResponseParams,
   ReadonlyContext,
 } from '@google/adk';
 import {Content, Part} from '@google/genai';
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it, Mock, vi} from 'vitest';
 import {
   NL_PLANNING_REQUEST_PROCESSOR,
   NL_PLANNING_RESPONSE_PROCESSOR,
@@ -50,32 +51,38 @@ class NonLlmAgent extends BaseAgent {
 }
 
 /** The adk-js counterpart of adk-python's `CustomPlanner` test fixture. */
-class CustomPlanner implements BasePlanner {
+class CustomPlanner extends BasePlanner {
   buildPlanningInstruction(
-    _readonlyContext: ReadonlyContext,
-    _llmRequest: LlmRequest,
+    _params: BuildPlanningInstructionParams,
   ): string | undefined {
     return CUSTOM_INSTRUCTION;
   }
 
   processPlanningResponse(
-    _callbackContext: Context,
-    responseParts: Part[],
+    params: ProcessPlanningResponseParams,
   ): Part[] | undefined {
-    return responseParts;
+    return params.responseParts;
   }
 }
 
 /** A planner whose two methods are spies, so calls can be asserted. */
-function createSpyPlanner(
-  instruction: BasePlanner['buildPlanningInstruction'] = () =>
-    CUSTOM_INSTRUCTION,
-  process: BasePlanner['processPlanningResponse'] = () => undefined,
-) {
-  return {
-    buildPlanningInstruction: vi.fn(instruction),
-    processPlanningResponse: vi.fn(process),
-  };
+class SpyPlanner extends BasePlanner {
+  readonly buildPlanningInstruction: Mock<
+    BasePlanner['buildPlanningInstruction']
+  >;
+  readonly processPlanningResponse: Mock<
+    BasePlanner['processPlanningResponse']
+  >;
+
+  constructor(
+    instruction: BasePlanner['buildPlanningInstruction'] = () =>
+      CUSTOM_INSTRUCTION,
+    process: BasePlanner['processPlanningResponse'] = () => undefined,
+  ) {
+    super();
+    this.buildPlanningInstruction = vi.fn(instruction);
+    this.processPlanningResponse = vi.fn(process);
+  }
 }
 
 function createAgent(planner?: BasePlanner): LlmAgent {
@@ -84,6 +91,19 @@ function createAgent(planner?: BasePlanner): LlmAgent {
     model: new MockLlm({model: 'mock-model'}),
     planner,
   });
+}
+
+/**
+ * An agent whose `planner` holds an object with the planner methods but no
+ * planner signature, as untyped JavaScript or a config file can produce.
+ */
+function createAgentWithLookalikePlanner() {
+  const lookalike = {
+    buildPlanningInstruction: vi.fn(() => CUSTOM_INSTRUCTION),
+    processPlanningResponse: vi.fn(() => [{text: 'planned'}]),
+  };
+  const agent = Object.assign(createAgent(), {planner: lookalike});
+  return {agent, lookalike};
 }
 
 function createMockInvocationContext(agent: BaseAgent): InvocationContext {
@@ -168,7 +188,7 @@ describe('NlPlanningRequestProcessor', () => {
   });
 
   it('appends nothing when the planner returns no instruction', async () => {
-    const planner = createSpyPlanner(() => undefined);
+    const planner = new SpyPlanner(() => undefined);
     const llmRequest = createLlmRequest();
 
     await runRequestProcessor(createAgent(planner), llmRequest);
@@ -214,6 +234,17 @@ describe('NlPlanningRequestProcessor', () => {
     expect(llmRequest.contents[1].parts?.[0].thought).toBe(true);
   });
 
+  it('leaves the request untouched when the planner has no signature', async () => {
+    const {agent, lookalike} = createAgentWithLookalikePlanner();
+    const llmRequest = createLlmRequest(contentsWithThought());
+
+    await runRequestProcessor(agent, llmRequest);
+
+    expect(lookalike.buildPlanningInstruction).not.toHaveBeenCalled();
+    expect(llmRequest.config?.systemInstruction).toBeUndefined();
+    expect(llmRequest.contents[1].parts?.[0].thought).toBe(true);
+  });
+
   it('leaves the request untouched when the agent is not an LlmAgent', async () => {
     const llmRequest = createLlmRequest(contentsWithThought());
 
@@ -224,20 +255,19 @@ describe('NlPlanningRequestProcessor', () => {
   });
 
   it('passes a readonly context for the agent and the same request', async () => {
-    const planner = createSpyPlanner();
+    const planner = new SpyPlanner();
     const llmRequest = createLlmRequest();
 
     await runRequestProcessor(createAgent(planner), llmRequest);
 
-    const [readonlyContext, passedRequest] =
-      planner.buildPlanningInstruction.mock.calls[0];
-    expect(readonlyContext).toBeInstanceOf(ReadonlyContext);
-    expect(readonlyContext.agentName).toBe(AGENT_NAME);
-    expect(passedRequest).toBe(llmRequest);
+    const [params] = planner.buildPlanningInstruction.mock.calls[0];
+    expect(params.readonlyContext).toBeInstanceOf(ReadonlyContext);
+    expect(params.readonlyContext.agentName).toBe(AGENT_NAME);
+    expect(params.llmRequest).toBe(llmRequest);
   });
 
   it('lets an exception from the planner propagate', async () => {
-    const planner = createSpyPlanner(() => {
+    const planner = new SpyPlanner(() => {
       throw new Error('planner failed');
     });
     const llmRequest = createLlmRequest(contentsWithThought());
@@ -249,7 +279,7 @@ describe('NlPlanningRequestProcessor', () => {
   });
 
   it('awaits a planner that returns the instruction as a promise', async () => {
-    const planner = createSpyPlanner(async () => CUSTOM_INSTRUCTION);
+    const planner = new SpyPlanner(async () => CUSTOM_INSTRUCTION);
     const llmRequest = createLlmRequest();
 
     await runRequestProcessor(createAgent(planner), llmRequest);
@@ -261,7 +291,7 @@ describe('NlPlanningRequestProcessor', () => {
 describe('NlPlanningResponseProcessor', () => {
   it('replaces the response parts the planner returns', async () => {
     const replacement: Part[] = [{text: 'planned', thought: true}];
-    const planner = createSpyPlanner(undefined, () => replacement);
+    const planner = new SpyPlanner(undefined, () => replacement);
     const llmResponse: LlmResponse = {
       content: {role: 'model', parts: [{text: 'raw'}]},
     };
@@ -282,7 +312,7 @@ describe('NlPlanningResponseProcessor', () => {
     };
 
     const events = await runResponseProcessor(
-      createAgent(createSpyPlanner()),
+      createAgent(new SpyPlanner()),
       llmResponse,
     );
 
@@ -291,8 +321,8 @@ describe('NlPlanningResponseProcessor', () => {
   });
 
   it('emits one state delta event when the planner writes state', async () => {
-    const planner = createSpyPlanner(undefined, (callbackContext) => {
-      callbackContext.state.set('plan', 'step one');
+    const planner = new SpyPlanner(undefined, ({context}) => {
+      context.state.set('plan', 'step one');
       return undefined;
     });
     const llmResponse: LlmResponse = {
@@ -312,13 +342,10 @@ describe('NlPlanningResponseProcessor', () => {
 
   it('mutates the parts the planner was handed', async () => {
     const parts: Part[] = [{text: 'reasoning'}, {text: 'answer'}];
-    const planner = createSpyPlanner(
-      undefined,
-      (_callbackContext, responseParts) => {
-        responseParts[0].thought = true;
-        return responseParts;
-      },
-    );
+    const planner = new SpyPlanner(undefined, ({responseParts}) => {
+      responseParts[0].thought = true;
+      return responseParts;
+    });
     const llmResponse: LlmResponse = {content: {role: 'model', parts}};
 
     await runResponseProcessor(createAgent(planner), llmResponse);
@@ -329,7 +356,7 @@ describe('NlPlanningResponseProcessor', () => {
   });
 
   it('skips the planner for a response with no content', async () => {
-    const planner = createSpyPlanner();
+    const planner = new SpyPlanner();
 
     const events = await runResponseProcessor(createAgent(planner), {});
 
@@ -338,7 +365,7 @@ describe('NlPlanningResponseProcessor', () => {
   });
 
   it('skips the planner for a response with empty parts', async () => {
-    const planner = createSpyPlanner();
+    const planner = new SpyPlanner();
 
     const events = await runResponseProcessor(createAgent(planner), {
       content: {role: 'model', parts: []},
@@ -358,9 +385,21 @@ describe('NlPlanningResponseProcessor', () => {
     expect(events).toHaveLength(0);
   });
 
+  it('does nothing when the planner has no signature', async () => {
+    const {agent, lookalike} = createAgentWithLookalikePlanner();
+    const parts: Part[] = [{text: 'raw'}];
+    const llmResponse: LlmResponse = {content: {role: 'model', parts}};
+
+    const events = await runResponseProcessor(agent, llmResponse);
+
+    expect(lookalike.processPlanningResponse).not.toHaveBeenCalled();
+    expect(llmResponse.content?.parts).toBe(parts);
+    expect(events).toHaveLength(0);
+  });
+
   it('lets an exception from the planner propagate', async () => {
     const parts: Part[] = [{text: 'raw'}];
-    const planner = createSpyPlanner(undefined, () => {
+    const planner = new SpyPlanner(undefined, () => {
       throw new Error('planner failed');
     });
     const llmResponse: LlmResponse = {content: {role: 'model', parts}};
@@ -373,7 +412,7 @@ describe('NlPlanningResponseProcessor', () => {
 
   it('awaits a planner that returns the parts as a promise', async () => {
     const replacement: Part[] = [{text: 'planned', thought: true}];
-    const planner = createSpyPlanner(undefined, async () => replacement);
+    const planner = new SpyPlanner(undefined, async () => replacement);
     const llmResponse: LlmResponse = {
       content: {role: 'model', parts: [{text: 'raw'}]},
     };
