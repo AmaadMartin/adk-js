@@ -66,10 +66,20 @@ async function collect(
   return collected;
 }
 
+const AGENT_NAME = 'planning_agent';
+
+function requireAgentEvent(events: Event[]): Event {
+  const event = events.find((candidate) => candidate.author === AGENT_NAME);
+  if (!event) {
+    expect.fail(`no event came from ${AGENT_NAME}`);
+  }
+  return event;
+}
+
 function createPlanningAgent(model: RecordingGemini): LlmAgent {
   return new LlmAgent({
     model,
-    name: 'planning_agent',
+    name: AGENT_NAME,
     instruction: 'Answer store questions.',
     planner: new PlanReActPlanner(),
   });
@@ -96,10 +106,9 @@ describe('LlmAgent with a PlanReActPlanner', () => {
     expect(thoughtParts[0].text).toBe(
       '1. Check the store hours.\nThe hours are on file.\n',
     );
-    const modelEvent = events.find(
-      (event) => event.author === 'planning_agent',
+    expect(stringifyContent(requireAgentEvent(events))).toBe(
+      'The store is open.',
     );
-    expect(stringifyContent(modelEvent)).toBe('The store is open.');
     for (const part of parts) {
       expect(part.text).not.toContain('/*');
     }
@@ -111,7 +120,11 @@ describe('LlmAgent with a PlanReActPlanner', () => {
       modelTurn(`${ACTION_TAG}done`),
     ]);
     const {run} = await createRunner(createPlanningAgent(model));
-    await collect(run('Is the store open?'));
+    const firstTurn = await collect(run('Is the store open?'));
+    const firstTurnParts = firstTurn.flatMap(
+      (event) => event.content?.parts ?? [],
+    );
+    expect(firstTurnParts.some((part) => part.thought === true)).toBe(true);
 
     await collect(run('When does it close?'));
 
@@ -130,10 +143,8 @@ describe('LlmAgent with a PlanReActPlanner', () => {
 
     const events = await collect(run('Is the store open?'));
 
-    const modelEvent = events.find(
-      (event) => event.author === 'planning_agent',
-    );
+    const modelEvent = requireAgentEvent(events);
     expect(stringifyContent(modelEvent)).toBe('The store is open.');
-    expect(modelEvent?.content?.parts?.[0].thought).toBeUndefined();
+    expect(modelEvent.content?.parts?.[0].thought).toBeUndefined();
   });
 });

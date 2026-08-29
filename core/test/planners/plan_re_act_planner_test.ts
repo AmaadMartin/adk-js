@@ -166,6 +166,19 @@ describe('PlanReActPlanner.processPlanningResponse', () => {
     expect(combined).toContain('The answer is 42.');
   });
 
+  it('splits on the last final answer tag', () => {
+    const result = requireParts(
+      process([
+        {
+          text: `${REASONING_TAG}Quoting ${FINAL_ANSWER_TAG} here.${FINAL_ANSWER_TAG}The answer is 42.`,
+        },
+      ]),
+    );
+
+    expect(result).toHaveLength(2);
+    expect(result[1].text).toBe('The answer is 42.');
+  });
+
   it('drops a reasoning block that holds nothing but tags', () => {
     const result = requireParts(
       process([{text: `${PLANNING_TAG}${FINAL_ANSWER_TAG}The answer is 42.`}]),
