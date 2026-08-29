@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InputValidationError} from '../errors/input_validation_error.js';
 import type {Invocation} from './eval_case.js';
 
 /**
@@ -62,25 +61,4 @@ export interface Evaluator {
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
   ): EvaluationResult | Promise<EvaluationResult>;
-}
-
-/**
- * Rejects invocation lists that cannot be paired without truncation.
- *
- * @throws {InputValidationError} When `expectedInvocations` is supplied and its
- *   length differs from `actualInvocations`.
- */
-export function validateInvocationLengths(
-  actualInvocations: Invocation[],
-  expectedInvocations?: Invocation[],
-): void {
-  if (
-    expectedInvocations !== undefined &&
-    actualInvocations.length !== expectedInvocations.length
-  ) {
-    throw new InputValidationError(
-      'actualInvocations and expectedInvocations must have the same length; ' +
-        `got ${actualInvocations.length} and ${expectedInvocations.length}.`,
-    );
-  }
 }

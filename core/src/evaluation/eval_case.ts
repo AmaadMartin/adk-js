@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Content, FunctionCall, FunctionResponse} from '@google/genai';
+import type {Content, FunctionCall} from '@google/genai';
 
 /** Intermediate data an agent generated on the way to its final response. */
 export interface IntermediateData {
   /** Tool use trajectory in chronological order. */
   toolUses?: FunctionCall[];
-
-  /** Tool response trajectory in chronological order. */
-  toolResponses?: FunctionResponse[];
 }
 
 /**
@@ -44,20 +41,11 @@ export type IntermediateDataType = IntermediateData | InvocationEvents;
 
 /** Represents a single invocation of an agent. */
 export interface Invocation {
-  /** Unique identifier for the invocation. */
-  invocationId?: string;
-
   /** Content provided by the user in this invocation. */
   userContent: Content;
 
-  /** Final response from the agent. */
-  finalResponse?: Content;
-
   /** Intermediate steps generated as part of agent execution. */
   intermediateData?: IntermediateDataType;
-
-  /** Time at which this invocation was created, for debugging. */
-  creationTimestamp?: number;
 }
 
 /** Whether intermediate data holds recorded events rather than a trajectory. */

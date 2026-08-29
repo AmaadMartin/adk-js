@@ -10,7 +10,6 @@ import {InputValidationError} from '../errors/input_validation_error.js';
 import {getAllToolCalls, type Invocation} from './eval_case.js';
 import {
   EvalStatus,
-  validateInvocationLengths,
   type EvaluationResult,
   type Evaluator,
   type PerInvocationResult,
@@ -113,22 +112,20 @@ export function areToolCallsAnyOrderMatch(
   return true;
 }
 
-function toolCallsMatch(
-  matchType: ToolTrajectoryMatchType,
+/** Compares an actual tool call trajectory with an expected one. */
+type ToolCallMatcher = (
   actual: FunctionCall[],
   expected: FunctionCall[],
-): boolean {
-  switch (matchType) {
-    case ToolTrajectoryMatchType.EXACT:
-      return areToolCallsExactMatch(actual, expected);
-    case ToolTrajectoryMatchType.IN_ORDER:
-      return areToolCallsInOrderMatch(actual, expected);
-    case ToolTrajectoryMatchType.ANY_ORDER:
-      return areToolCallsAnyOrderMatch(actual, expected);
-    default:
-      throw new InputValidationError(`Unsupported match type ${matchType}`);
-  }
-}
+) => boolean;
+
+const TOOL_CALL_MATCHERS = new Map<ToolTrajectoryMatchType, ToolCallMatcher>([
+  [ToolTrajectoryMatchType.EXACT, areToolCallsExactMatch],
+  [ToolTrajectoryMatchType.IN_ORDER, areToolCallsInOrderMatch],
+  [ToolTrajectoryMatchType.ANY_ORDER, areToolCallsAnyOrderMatch],
+]);
+
+/** A per-invocation result this metric always scores. */
+type ScoredInvocationResult = PerInvocationResult & {score: number};
 
 /**
  * Scores an agent's tool use trajectory against a golden one.
@@ -139,11 +136,21 @@ function toolCallsMatch(
  */
 export class TrajectoryEvaluator implements Evaluator {
   private readonly threshold: number;
-  private readonly matchType: ToolTrajectoryMatchType;
+  private readonly matches: ToolCallMatcher;
 
+  /**
+   * @throws {InputValidationError} When `matchType` is not one of
+   *   {@link ToolTrajectoryMatchType}.
+   */
   constructor(options: TrajectoryEvaluatorOptions) {
+    const matchType = options.matchType ?? ToolTrajectoryMatchType.EXACT;
+    const matches = TOOL_CALL_MATCHERS.get(matchType);
+    if (!matches) {
+      throw new InputValidationError(`Unsupported match type ${matchType}`);
+    }
+
     this.threshold = options.threshold;
-    this.matchType = options.matchType ?? ToolTrajectoryMatchType.EXACT;
+    this.matches = matches;
   }
 
   /**
@@ -152,9 +159,8 @@ export class TrajectoryEvaluator implements Evaluator {
    * Scoring an empty list evaluates nothing: the result carries no overall
    * score and the status {@link EvalStatus.NOT_EVALUATED}.
    *
-   * @throws {InputValidationError} When `expectedInvocations` is absent, when
-   *   the two lists have different lengths, or when the match type is not one
-   *   of {@link ToolTrajectoryMatchType}.
+   * @throws {InputValidationError} When `expectedInvocations` is absent, or
+   *   when the two lists have different lengths.
    */
   evaluateInvocations(
     actualInvocations: Invocation[],
@@ -165,22 +171,30 @@ export class TrajectoryEvaluator implements Evaluator {
         'expectedInvocations is needed by this metric.',
       );
     }
-    validateInvocationLengths(actualInvocations, expectedInvocations);
-
-    const perInvocationResults: PerInvocationResult[] = [];
-    let totalScore = 0;
-
-    for (const [index, actualInvocation] of actualInvocations.entries()) {
-      const expectedInvocation = expectedInvocations[index];
-      const score = this.scoreInvocation(actualInvocation, expectedInvocation);
-      totalScore += score;
-      perInvocationResults.push({
-        actualInvocation,
-        expectedInvocation,
-        score,
-        evalStatus: this.getEvalStatus(score),
-      });
+    if (actualInvocations.length !== expectedInvocations.length) {
+      throw new InputValidationError(
+        'actualInvocations and expectedInvocations must have the same length; ' +
+          `got ${actualInvocations.length} and ${expectedInvocations.length}.`,
+      );
     }
+
+    const perInvocationResults: ScoredInvocationResult[] =
+      actualInvocations.map((actualInvocation, index) => {
+        const expectedInvocation = expectedInvocations[index];
+        const score = this.matches(
+          getAllToolCalls(actualInvocation.intermediateData),
+          getAllToolCalls(expectedInvocation.intermediateData),
+        )
+          ? 1.0
+          : 0.0;
+
+        return {
+          actualInvocation,
+          expectedInvocation,
+          score,
+          evalStatus: this.getEvalStatus(score),
+        };
+      });
 
     if (perInvocationResults.length === 0) {
       return {
@@ -189,23 +203,15 @@ export class TrajectoryEvaluator implements Evaluator {
       };
     }
 
-    const overallScore = totalScore / perInvocationResults.length;
+    const overallScore =
+      perInvocationResults.reduce((total, each) => total + each.score, 0) /
+      perInvocationResults.length;
 
     return {
       overallScore,
       overallEvalStatus: this.getEvalStatus(overallScore),
       perInvocationResults,
     };
-  }
-
-  private scoreInvocation(actual: Invocation, expected: Invocation): number {
-    const matches = toolCallsMatch(
-      this.matchType,
-      getAllToolCalls(actual.intermediateData),
-      getAllToolCalls(expected.intermediateData),
-    );
-
-    return matches ? 1.0 : 0.0;
   }
 
   private getEvalStatus(score: number): EvalStatus {

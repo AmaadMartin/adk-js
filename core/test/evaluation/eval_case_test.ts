@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {InvocationEvent} from '@google/adk';
+import type {FunctionCall} from '@google/genai';
+import {describe, expect, it} from 'vitest';
 import {
   getAllToolCalls,
   isInvocationEvents,
-  type InvocationEvent,
-} from '@google/adk';
-import type {FunctionCall} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+} from '../../src/evaluation/eval_case.js';
 
 const SEARCH: FunctionCall = {name: 'search', args: {query: 'weather'}};
 const BOOK: FunctionCall = {name: 'book', args: {id: 7}};

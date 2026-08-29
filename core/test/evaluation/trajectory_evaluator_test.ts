@@ -5,9 +5,6 @@
  */
 
 import {
-  areToolCallsAnyOrderMatch,
-  areToolCallsExactMatch,
-  areToolCallsInOrderMatch,
   EvalStatus,
   InputValidationError,
   ToolTrajectoryMatchType,
@@ -16,6 +13,11 @@ import {
 } from '@google/adk';
 import type {Content, FunctionCall} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {
+  areToolCallsAnyOrderMatch,
+  areToolCallsExactMatch,
+  areToolCallsInOrderMatch,
+} from '../../src/evaluation/trajectory_evaluator.js';
 
 const USER_CONTENT: Content = {parts: [{text: 'User input here.'}]};
 
@@ -326,6 +328,9 @@ describe('TrajectoryEvaluator input handling', () => {
     expect(() => evaluatorFor().evaluateInvocations([invocation(T1)])).toThrow(
       InputValidationError,
     );
+    expect(() => evaluatorFor().evaluateInvocations([invocation(T1)])).toThrow(
+      'expectedInvocations is needed by this metric.',
+    );
   });
 
   it('rejects lists of different lengths, naming both', () => {
@@ -337,12 +342,10 @@ describe('TrajectoryEvaluator input handling', () => {
     ).toThrow(/same length; got 2 and 3\./);
   });
 
-  it('rejects a match type outside the enum', () => {
-    const evaluator = evaluatorFor('SORT_OF' as ToolTrajectoryMatchType);
-
-    expect(() =>
-      evaluator.evaluateInvocations([invocation(T1)], [invocation(T1)]),
-    ).toThrow(InputValidationError);
+  it('rejects a match type outside the enum when constructed', () => {
+    expect(() => evaluatorFor('SORT_OF' as ToolTrajectoryMatchType)).toThrow(
+      InputValidationError,
+    );
   });
 });
 

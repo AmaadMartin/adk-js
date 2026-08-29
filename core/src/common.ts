@@ -155,7 +155,6 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
-export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
 export type {
   IntermediateData,
   IntermediateDataType,
@@ -163,7 +162,7 @@ export type {
   InvocationEvent,
   InvocationEvents,
 } from './evaluation/eval_case.js';
-export {EvalStatus, validateInvocationLengths} from './evaluation/evaluator.js';
+export {EvalStatus} from './evaluation/evaluator.js';
 export type {
   EvaluationResult,
   Evaluator,
@@ -172,9 +171,6 @@ export type {
 export {
   ToolTrajectoryMatchType,
   TrajectoryEvaluator,
-  areToolCallsAnyOrderMatch,
-  areToolCallsExactMatch,
-  areToolCallsInOrderMatch,
 } from './evaluation/trajectory_evaluator.js';
 export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
