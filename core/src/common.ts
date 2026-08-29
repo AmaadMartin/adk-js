@@ -469,6 +469,7 @@ export type {
   LlamaIndexRetrievalToolParams,
   LlamaIndexRetriever,
 } from './tools/retrieval/llama_index_retrieval_tool.js';
+export type {ToolArgsConfig} from './tools/tool_configs.js';
 export {
   IntentMismatchError,
   ToolConfirmation,

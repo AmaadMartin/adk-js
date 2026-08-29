@@ -5,11 +5,13 @@
  */
 
 import type {FunctionDeclaration, Tool} from '@google/genai';
+import {FunctionResponseScheduling} from '@google/genai';
 
 import type {LlmRequest} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
 import type {Context} from '../agents/context.js';
+import type {ToolArgsConfig} from './tool_configs.js';
 
 /**
  * The parameters for `runAsync`.
@@ -35,6 +37,20 @@ export interface BaseToolParams {
   description: string;
   isLongRunning?: boolean;
   customMetadata?: Record<string, unknown>;
+
+  /**
+   * Controls when the model reacts to the tool's response (Live API only).
+   *
+   * Applied to the emitted `FunctionResponse` for asynchronous function
+   * calling:
+   * - `SILENT`: feeds the response back without triggering a model turn.
+   * - `WHEN_IDLE`: defers the reaction until the model is idle.
+   * - `INTERRUPT`: reacts immediately.
+   *
+   * Ignored by models that don't support asynchronous function calling.
+   * Leaving it unset preserves the default behavior.
+   */
+  responseScheduling?: FunctionResponseScheduling;
 }
 
 /**
@@ -67,6 +83,9 @@ export abstract class BaseTool {
   readonly name: string;
   readonly description: string;
   readonly isLongRunning: boolean;
+
+  /** See {@link BaseToolParams.responseScheduling}. */
+  readonly responseScheduling?: FunctionResponseScheduling;
 
   /**
    * Optional key-value metadata for this tool, e.g. tool manifests or
@@ -108,6 +127,7 @@ export abstract class BaseTool {
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
     this.customMetadata = params.customMetadata;
+    this.responseScheduling = params.responseScheduling;
   }
 
   /**
@@ -204,6 +224,106 @@ export abstract class BaseTool {
   get apiVariant() {
     return getGoogleLlmVariant();
   }
+
+  /**
+   * Builds a tool from a config bag.
+   *
+   * Every ADK tool constructor takes a single options object, so a validated
+   * config bag is that options object. The base implementation therefore
+   * validates the keys of {@link BaseToolParams} and ignores the rest. A
+   * subclass whose constructor takes further options overrides this method,
+   * and uses `configAbsPath` to resolve paths the config states relative to
+   * the config file.
+   *
+   * `customMetadata` is checked for shape only. This method rejects an array
+   * and a non-object, and does not walk the value to confirm that it is JSON
+   * serializable, which stays the caller's obligation.
+   *
+   * @param config The args of the tool config.
+   * @param _configAbsPath The absolute path of the config file the config came
+   *     from.
+   * @return The tool instance.
+   * @throws Error if a recognized key holds a value of the wrong type.
+   */
+  static fromConfig(
+    this: new (params: BaseToolParams) => BaseTool,
+    config: ToolArgsConfig,
+    _configAbsPath: string,
+  ): BaseTool {
+    return new this(toBaseToolParams(config));
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const SCHEDULING_VALUES: readonly string[] = Object.values(
+  FunctionResponseScheduling,
+);
+
+function isResponseScheduling(
+  value: unknown,
+): value is FunctionResponseScheduling {
+  return typeof value === 'string' && SCHEDULING_VALUES.includes(value);
+}
+
+function describeType(value: unknown): string {
+  if (value === null) {
+    return 'null';
+  }
+  return Array.isArray(value) ? 'array' : typeof value;
+}
+
+function invalidToolConfig(
+  key: string,
+  expected: string,
+  value: unknown,
+): Error {
+  return new Error(
+    `Invalid tool config: "${key}" must be ${expected}, got ${describeType(value)}.`,
+  );
+}
+
+/**
+ * Validates the keys of {@link BaseToolParams} in a tool config.
+ *
+ * @param config The args of the tool config.
+ * @return The validated constructor params.
+ * @throws Error if a recognized key holds a value of the wrong type.
+ */
+function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
+  const {name, description, isLongRunning, customMetadata, responseScheduling} =
+    config;
+  if (typeof name !== 'string') {
+    throw invalidToolConfig('name', 'a string', name);
+  }
+  if (typeof description !== 'string') {
+    throw invalidToolConfig('description', 'a string', description);
+  }
+  if (isLongRunning !== undefined && typeof isLongRunning !== 'boolean') {
+    throw invalidToolConfig('isLongRunning', 'a boolean', isLongRunning);
+  }
+  if (customMetadata !== undefined && !isPlainObject(customMetadata)) {
+    throw invalidToolConfig('customMetadata', 'an object', customMetadata);
+  }
+  if (
+    responseScheduling !== undefined &&
+    !isResponseScheduling(responseScheduling)
+  ) {
+    throw invalidToolConfig(
+      'responseScheduling',
+      `one of ${SCHEDULING_VALUES.join(', ')}`,
+      responseScheduling,
+    );
+  }
+  return {
+    name,
+    description,
+    isLongRunning,
+    customMetadata,
+    responseScheduling,
+  };
 }
 
 function findToolWithFunctionDeclarations(

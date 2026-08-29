@@ -7,7 +7,7 @@
 import type {Context} from '@google/adk';
 import {FunctionTool, isFunctionTool} from '@google/adk';
 import type {Schema} from '@google/genai';
-import {Type} from '@google/genai';
+import {FunctionResponseScheduling, Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -557,6 +557,31 @@ describe('FunctionTool', () => {
         type: Type.OBJECT,
         properties: {},
       });
+    });
+  });
+
+  describe('responseScheduling', () => {
+    it('forwards responseScheduling to the tool', () => {
+      const tool = new FunctionTool({
+        name: 'my_tool',
+        description: 'Does something.',
+        execute: async () => 'done',
+        responseScheduling: FunctionResponseScheduling.WHEN_IDLE,
+      });
+
+      expect(tool.responseScheduling).toBe(
+        FunctionResponseScheduling.WHEN_IDLE,
+      );
+    });
+
+    it('leaves responseScheduling undefined by default', () => {
+      const tool = new FunctionTool({
+        name: 'my_tool',
+        description: 'Does something.',
+        execute: async () => 'done',
+      });
+
+      expect(tool.responseScheduling).toBeUndefined();
     });
   });
 });

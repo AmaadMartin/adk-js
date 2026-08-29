@@ -8,7 +8,10 @@ import type {AgentCard, TransportProtocol} from '@a2a-js/sdk';
 
 export const AGENT_REGISTRY_BASE_URL =
   'https://agentregistry.googleapis.com/v1alpha';
-export const GCP_MCP_SERVER_DESTINATION_ID = 'gcp.mcp.server.destination.id';
+
+// Telemetry owns the span-attribute name; re-exported here so the existing
+// import path keeps working.
+export {GCP_MCP_SERVER_DESTINATION_ID} from '../../telemetry/tracing.js';
 
 export enum ProtocolType {
   TYPE_UNSPECIFIED = 'TYPE_UNSPECIFIED',

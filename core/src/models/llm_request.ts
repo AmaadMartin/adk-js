@@ -11,6 +11,7 @@ import type {
   LiveConnectConfig,
   SchemaUnion,
 } from '@google/genai';
+import {Behavior} from '@google/genai';
 
 import type {ContextCacheConfig} from '../agents/context_cache_config.js';
 import type {BaseTool} from '../tools/base_tool.js';
@@ -125,6 +126,31 @@ export function appendTools(llmRequest: LlmRequest, tools: BaseTool[]): void {
       llmRequest.config.tools = [];
     }
     llmRequest.config.tools.push({functionDeclarations});
+  }
+}
+
+/**
+ * Marks the declarations of tools that set `responseScheduling` as
+ * `NON_BLOCKING`.
+ *
+ * The Live API honours `FunctionResponse.scheduling` only for `NON_BLOCKING`
+ * declarations, and `FunctionDeclaration.behavior` is supported by the
+ * bidirectional API alone. Callers therefore apply this when opening a live
+ * connection, never when building a `generateContent` request.
+ */
+export function markAsyncToolsNonBlocking(llmRequest: LlmRequest): void {
+  for (const tool of llmRequest.config?.tools ?? []) {
+    if (!('functionDeclarations' in tool)) {
+      continue;
+    }
+    for (const declaration of tool.functionDeclarations ?? []) {
+      const declaredTool = declaration.name
+        ? llmRequest.toolsDict[declaration.name]
+        : undefined;
+      if (declaredTool?.responseScheduling !== undefined) {
+        declaration.behavior = Behavior.NON_BLOCKING;
+      }
+    }
   }
 }
 

@@ -47,6 +47,15 @@ const ADK_NODE_ATTEMPT = 'adk.node.attempt';
 const ADK_NODE_STATUS = 'adk.node.status';
 const ADK_NODE_INTERRUPT_COUNT = 'adk.node.interrupt_count';
 
+/**
+ * Associates a tool-call span with the remote resource that serves the tool.
+ *
+ * A toolset writes this key into a tool's `customMetadata`, and
+ * `traceToolCall` copies it onto the span, so a client-side call can be
+ * correlated with the server that answered it.
+ */
+export const GCP_MCP_SERVER_DESTINATION_ID = 'gcp.mcp.server.destination.id';
+
 export const tracer = trace.getTracer('gcp.vertex.agent', version);
 
 /**
@@ -210,6 +219,11 @@ export function traceToolCall({
       ? safeJsonSerialize(args)
       : '{}',
   });
+
+  const destinationId = tool.customMetadata?.[GCP_MCP_SERVER_DESTINATION_ID];
+  if (typeof destinationId === 'string') {
+    span.setAttribute(GCP_MCP_SERVER_DESTINATION_ID, destinationId);
+  }
 
   // Tracing tool response
   let toolCallId = '<not specified>';

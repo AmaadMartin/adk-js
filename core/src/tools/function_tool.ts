@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {FunctionDeclaration, Schema} from '@google/genai';
+import type {
+  FunctionDeclaration,
+  FunctionResponseScheduling,
+  Schema,
+} from '@google/genai';
 import {Type} from '@google/genai';
 import type {z as z3} from 'zod/v3';
 import type {z as z4} from 'zod/v4';
@@ -89,6 +93,9 @@ export type ToolOptions<TParameters extends ToolInputParameters> = {
    * `FunctionTool(require_confirmation=...)`.
    */
   requireConfirmation?: RequireConfirmation<TParameters>;
+
+  /** See {@link BaseToolParams.responseScheduling}. */
+  responseScheduling?: FunctionResponseScheduling;
 };
 
 function toSchema<TParameters extends ToolInputParameters>(
@@ -166,6 +173,7 @@ export class FunctionTool<
       name,
       description: options.description,
       isLongRunning: options.isLongRunning,
+      responseScheduling: options.responseScheduling,
     });
     this.execute = options.execute;
     this.parameters = options.parameters;
