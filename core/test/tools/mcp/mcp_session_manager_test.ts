@@ -298,4 +298,83 @@ describe('MCPSessionManager', () => {
       errorSpy.mockRestore();
     });
   });
+
+  describe('per-session headers', () => {
+    it('merges per-session headers over the configured ones', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {
+            headers: {'x-tenant': 'configured', 'x-keep': 'kept'},
+          },
+        },
+      });
+
+      await manager.createSession({
+        headers: {'x-tenant': 'per-session', 'Authorization': 'Bearer token'},
+      });
+
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {
+              'x-tenant': 'per-session',
+              'x-keep': 'kept',
+              'authorization': 'Bearer token',
+            },
+          },
+        },
+      );
+    });
+
+    it('does not retain per-session headers on the configured options', async () => {
+      const transportOptions = {requestInit: {headers: {'x-keep': 'kept'}}};
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions,
+      });
+
+      await manager.createSession({headers: {'x-once': 'first'}});
+      await manager.createSession();
+
+      expect(transportOptions.requestInit.headers).toEqual({'x-keep': 'kept'});
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {'x-keep': 'kept'}}},
+      );
+    });
+
+    it('sends per-session headers when the transport configures none', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession({headers: {'x-tenant': 'per-session'}});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {'x-tenant': 'per-session'}}},
+      );
+    });
+
+    it('ignores per-session headers on a stdio connection', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+
+      const client = await manager.createSession({
+        headers: {'x-tenant': 'per-session'},
+      });
+
+      expect(StdioClientTransport).toHaveBeenCalledWith({
+        command: 'test-command',
+      });
+      expect(client.connect).toHaveBeenCalled();
+    });
+  });
 });
