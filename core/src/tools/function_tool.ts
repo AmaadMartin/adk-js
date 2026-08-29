@@ -34,6 +34,9 @@ export type ToolInputParameters =
 /**
  * The arguments passed to the function tool's `execute` callback, inferred
  * from the `parameters` schema type.
+ *
+ * Without a `parameters` schema there is nothing to infer from, so `execute`
+ * receives the model's argument object as it arrived.
  */
 export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
   TParameters extends z3.ZodObject<infer T, infer U, infer V>
@@ -42,7 +45,7 @@ export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
       ? z4.infer<z4.ZodObject<T>>
       : TParameters extends Schema
         ? unknown
-        : string;
+        : Record<string, unknown>;
 
 /**
  * The signature of the user-provided function executed by a {@link FunctionTool}.
