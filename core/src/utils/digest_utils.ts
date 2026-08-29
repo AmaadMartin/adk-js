@@ -46,7 +46,7 @@ function encode(value: unknown, ancestors: Set<object>): string {
 }
 
 function encodeArray(value: unknown[], ancestors: Set<object>): string {
-  return `[${value.map(item => encode(item, ancestors)).join(',')}]`;
+  return `[${value.map((item) => encode(item, ancestors)).join(',')}]`;
 }
 
 function encodeObject(value: object, ancestors: Set<object>): string {
@@ -82,7 +82,7 @@ export async function stableDigest(value: unknown): Promise<string> {
   const bytes = new TextEncoder().encode(canonicalJson(value));
   const digest = await subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest))
-    .map(byte => byte.toString(16).padStart(2, '0'))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('')
     .slice(0, DIGEST_LENGTH);
 }
