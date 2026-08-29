@@ -32,9 +32,9 @@ const graph: CompiledLangGraph = {
 
 /** Builds the error Node raises for an unresolvable ESM specifier. */
 function moduleNotFound(specifier: string): Error {
-  const err = new Error(
+  const err: Error & {code?: string} = new Error(
     `Cannot find package '${specifier}' imported from /app/index.js`,
-  ) as Error & {code?: string};
+  );
   err.code = 'ERR_MODULE_NOT_FOUND';
   return err;
 }
