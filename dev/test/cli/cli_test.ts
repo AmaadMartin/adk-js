@@ -321,7 +321,7 @@ describe('CLI Entrypoint', () => {
     it('sends the run logs to the temp folder and prints where', async () => {
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-      await parse(['run', '--log_to_tmp', 'agent.ts']);
+      await parse(['run', 'agent.ts']);
 
       expect(logToTmpFolder).toHaveBeenCalledTimes(1);
       expect(logSpy).toHaveBeenCalledWith(
@@ -338,7 +338,7 @@ describe('CLI Entrypoint', () => {
         logFilePath: LOG_FILE_PATH,
       });
 
-      await parse(['run', '--log_to_tmp', 'agent.ts']);
+      await parse(['run', 'agent.ts']);
 
       expect(logSpy).toHaveBeenCalledWith(
         `To access latest log: tail -F ${LOG_FILE_PATH}`,
@@ -353,9 +353,7 @@ describe('CLI Entrypoint', () => {
       });
       (runAgent as Mock).mockRejectedValueOnce(new Error('boom'));
 
-      await expect(parse(['run', '--log_to_tmp', 'agent.ts'])).rejects.toThrow(
-        'exit',
-      );
+      await expect(parse(['run', 'agent.ts'])).rejects.toThrow('exit');
 
       expect(errorSpy).toHaveBeenCalledWith(
         `Error running agent: boom (see ${LOG_FILE_PATH})`,
@@ -364,24 +362,83 @@ describe('CLI Entrypoint', () => {
       expect(resetFileLogTarget).toHaveBeenCalled();
     });
 
-    it('leaves the run transcript logging to the console', async () => {
+    it('redirects the run logs without being asked to', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
       await parse(['run', 'agent.ts']);
 
-      expect(logToTmpFolder).not.toHaveBeenCalled();
+      expect(logToTmpFolder).toHaveBeenCalledTimes(1);
     });
 
-    it('reports a failing run through the console logger', async () => {
+    it('rejects --log_to_tmp on run, which needs no flag', async () => {
+      await expect(
+        parse(['run', '--log_to_tmp', 'agent.ts']),
+      ).rejects.toThrow();
+    });
+
+    it('runs the agent anyway when the log folder cannot be opened', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.mocked(logToTmpFolder).mockImplementationOnce(() => {
+        throw Object.assign(
+          new Error("EEXIST: file already exists, mkdir '/tmp/agents_log'"),
+          {code: 'EEXIST'},
+        );
+      });
+
+      await parse(['run', 'agent.ts']);
+
+      expect(runAgent).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Cannot log to the system temp folder: EEXIST: file already exists, mkdir '/tmp/agents_log'",
+      );
+      expect(warnSpy).toHaveBeenCalledWith('Logging to the console instead.');
+    });
+
+    it('reports a failing run on the console when the log folder is unusable', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('exit');
+      });
+      vi.mocked(logToTmpFolder).mockImplementationOnce(() => {
+        throw new Error('EACCES: permission denied');
       });
       (runAgent as Mock).mockRejectedValueOnce(new Error('boom'));
 
       await expect(parse(['run', 'agent.ts'])).rejects.toThrow('exit');
 
+      // There is no log file to name, so the error stays with the console
+      // logger and nothing is flushed.
       expect(errorSpy).not.toHaveBeenCalled();
       expect(resetFileLogTarget).not.toHaveBeenCalled();
       expect(exit).toHaveBeenCalledWith(1);
+    });
+
+    it('starts the web server anyway when the log folder cannot be opened', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.mocked(logToTmpFolder).mockImplementationOnce(() => {
+        throw new Error('ELOOP: too many symbolic links');
+      });
+
+      await parse(['web', '--log_to_tmp']);
+
+      expect(AdkApiServer).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Cannot log to the system temp folder: ELOOP: too many symbolic links',
+      );
+    });
+
+    it('reports a thrown non-Error from the log setup', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.mocked(logToTmpFolder).mockImplementationOnce(() => {
+        throw 'a bare string';
+      });
+
+      await parse(['api_server', '--log_to_tmp']);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Cannot log to the system temp folder: a bare string',
+      );
     });
 
     it('leaves the web server logging to the console', async () => {

@@ -1,12 +1,17 @@
 # Temp folder logging
 
-`--log_to_tmp` sends the ADK log records to `<temp>/agents_log/` instead of the
+The ADK CLI can send its log records to `<temp>/agents_log/` instead of the
 terminal, one `agent.<timestamp>.log` per run with an `agent.latest.log`
-symlink beside it. `adk run`, `adk web` and `adk api_server` all take the flag,
-so you can tail the log in a second shell while the first one stays readable.
+symlink beside it. You can then tail the log in a second shell while the first
+one stays readable.
+
+`adk run` does this always, matching `adk run` in adk-python. The command paints
+a chat transcript, and a log record between the prompt and the answer is what
+the file exists to prevent. `adk web` and `adk api_server` keep logging to the
+terminal unless you pass `--log_to_tmp`.
 
 ```console
-$ adk api_server --log_to_tmp ./agents
+$ adk run ./my_agent
 Log setup complete: /tmp/agents_log/agent.20260829_000610.log
 To access latest log: tail -F /tmp/agents_log/agent.latest.log
 ```
@@ -29,15 +34,21 @@ The command creates the folder and the file before it prints the two paths, so
 timestamped file and repoints `agent.latest.log` at it.
 
 The folder is created `0700` and the file `0600`, so only your account can read
-them. A folder that already exists keeps the permissions it has. Creating the
-file also refuses to follow a symlink at the last path segment, so another
-local user cannot point the name at a file of yours and have the command
-truncate it.
+them. A folder that already exists keeps the permissions it has.
 
 The folder path is predictable, unlike the random directory `mkdtemp` gives
 you. A stable path is the point: `tail -F /tmp/agents_log/agent.latest.log` has
-to work without you reading the file name first. On a shared machine another
-local user may already own `<temp>/agents_log`.
+to work without you reading the file name first. That predictability is also
+the weakness, so treat the following as a guard and not as a sandbox. Creating
+the file passes `O_NOFOLLOW`, which refuses a symlink at the last path segment.
+The log stream then reopens the same path without that flag, so a race remains,
+and neither check covers a symlink earlier in the path. Once your account owns
+the `0700` folder, no other local user can reach inside it. On a shared machine
+another local user may already own `<temp>/agents_log`, and then these
+protections do not apply.
+
+When the folder or the file cannot be opened at all, the command says so and
+keeps logging to the terminal. It does not stop.
 
 The symlink is best effort. If a real file already sits at `agent.latest.log`,
 the command warns and keeps running, and the printed hint names the timestamped
