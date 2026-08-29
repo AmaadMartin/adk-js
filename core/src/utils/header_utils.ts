@@ -8,6 +8,17 @@
 export type HeadersLike = Headers | string[][] | Record<string, string>;
 
 /**
+ * Reports whether `init` is a `Headers` instance.
+ *
+ * The check is structural because a caller can hold a `Headers` class from
+ * another copy of the fetch implementation, which `instanceof` rejects. A
+ * plain record only ever yields a string here, never a function.
+ */
+function isHeaders(init: Headers | Record<string, string>): init is Headers {
+  return typeof init.forEach === 'function';
+}
+
+/**
  * Normalizes any headers shape into a plain record, so headers supplied as a
  * `Headers` instance or an array of pairs are not silently dropped when other
  * headers are merged over them.
@@ -16,16 +27,16 @@ export function toHeaderRecord(init?: HeadersLike): Record<string, string> {
   if (!init) return {};
 
   const record: Record<string, string> = {};
-  if (init instanceof Headers) {
+  if (Array.isArray(init)) {
+    for (const [name, value] of init) {
+      record[name] = value;
+    }
+  } else if (isHeaders(init)) {
     // `Headers` is iterable only under the DOM.Iterable lib, which this
     // package does not enable; `forEach` is on the base DOM lib.
     init.forEach((value, name) => {
       record[name] = value;
     });
-  } else if (Array.isArray(init)) {
-    for (const [name, value] of init) {
-      record[name] = value;
-    }
   } else {
     Object.assign(record, init);
   }

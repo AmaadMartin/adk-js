@@ -200,6 +200,23 @@ describe('buildAuthHeaders', () => {
       );
     });
 
+    it('sends the key in the named header when the scheme omits its location', () => {
+      const warn = spyOnWarn();
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'test-api-key',
+      };
+      // An OpenAPI document can leave `in` out, which the type does not model.
+      const schemeWithoutLocation: AuthScheme = JSON.parse(
+        '{"type": "apiKey", "name": "X-API-Key"}',
+      );
+
+      expect(buildAuthHeaders(credential, schemeWithoutLocation)).toEqual({
+        'X-API-Key': 'test-api-key',
+      });
+      expect(warn).not.toHaveBeenCalled();
+    });
+
     it('warns and sends nothing without an apiKey scheme to name the header', () => {
       const warn = spyOnWarn();
       const credential: AuthCredential = {

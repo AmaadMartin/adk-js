@@ -94,7 +94,9 @@ function buildApiKeyHeaders(
     return undefined;
   }
 
-  if (authScheme.in !== 'header') {
+  // A scheme parsed from a document can omit `in` even though the type makes
+  // it mandatory. The key then goes in the header the scheme names.
+  if (authScheme.in && authScheme.in !== 'header') {
     logger.warn(
       'Only header-based API key authentication is supported. Configured ' +
         `location: ${authScheme.in}.`,

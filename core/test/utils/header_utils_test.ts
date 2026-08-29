@@ -34,6 +34,18 @@ describe('toHeaderRecord', () => {
       ]),
     ).toEqual({'X-One': '1', 'X-Two': '2'});
   });
+
+  it('reads a headers object built by another copy of the fetch implementation', () => {
+    // An application can hold a `Headers` class this realm never defined, so
+    // the read is structural. Such an object has no prototype in common with
+    // the global `Headers`.
+    const foreign: Headers = Object.create(null);
+    foreign.forEach = (callback) => {
+      callback('Bearer token', 'authorization', foreign);
+    };
+
+    expect(toHeaderRecord(foreign)).toEqual({authorization: 'Bearer token'});
+  });
 });
 
 describe('mergeHeaders', () => {
