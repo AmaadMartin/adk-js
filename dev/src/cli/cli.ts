@@ -22,11 +22,11 @@ import {FileModuleType} from '../utils/agent_loader.js';
 import {getTempDir} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
+import {createAgent} from './cli_create.js';
 import {
   DEFAULT_OUTPUT_PATH,
   convertGoogleApi,
-} from './cli_convert_google_api.js';
-import {createAgent} from './cli_create.js';
+} from './cli_googleapi_to_openapi.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
@@ -395,7 +395,7 @@ export function createProgram(): Command {
     });
 
   program
-    .command('convert-google-api')
+    .command('googleapi_to_openapi')
     .description(
       'Converts a Google API Discovery document to an OpenAPI v3 specification',
     )

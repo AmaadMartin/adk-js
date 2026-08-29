@@ -17,7 +17,7 @@ import {createProgram} from '../../src/cli/cli.js';
 import {
   DEFAULT_OUTPUT_PATH,
   convertGoogleApi,
-} from '../../src/cli/cli_convert_google_api.js';
+} from '../../src/cli/cli_googleapi_to_openapi.js';
 
 const {converterMock, convertMock, saveMock} = vi.hoisted(() => ({
   converterMock: vi.fn(),
@@ -84,7 +84,7 @@ describe('convertGoogleApi', () => {
   });
 });
 
-describe('the convert-google-api command', () => {
+describe('the googleapi_to_openapi command', () => {
   let program: ReturnType<typeof createProgram>;
   let exitMock: MockInstance<typeof process.exit>;
 
@@ -112,7 +112,7 @@ describe('the convert-google-api command', () => {
   };
 
   it('defaults the output path', async () => {
-    await parse(['convert-google-api', 'calendar', 'v3']);
+    await parse(['googleapi_to_openapi', 'calendar', 'v3']);
 
     expect(converterMock).toHaveBeenCalledWith('calendar', 'v3');
     expect(saveMock).toHaveBeenCalledWith(DEFAULT_OUTPUT_PATH);
@@ -122,7 +122,13 @@ describe('the convert-google-api command', () => {
   it.each(['-o', '--output'])(
     'overrides the output path with %s',
     async (flag) => {
-      await parse(['convert-google-api', 'docs', 'v1', flag, 'docs_api.json']);
+      await parse([
+        'googleapi_to_openapi',
+        'docs',
+        'v1',
+        flag,
+        'docs_api.json',
+      ]);
 
       expect(converterMock).toHaveBeenCalledWith('docs', 'v1');
       expect(saveMock).toHaveBeenCalledWith('docs_api.json');
@@ -132,7 +138,7 @@ describe('the convert-google-api command', () => {
   it('exits with status 1 when the conversion fails', async () => {
     convertMock.mockRejectedValue(new Error('HTTP 404'));
 
-    await parse(['convert-google-api', 'calendar', 'v3']);
+    await parse(['googleapi_to_openapi', 'calendar', 'v3']);
 
     expect(saveMock).not.toHaveBeenCalled();
     expect(exitMock).toHaveBeenCalledWith(1);
