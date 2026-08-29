@@ -13,6 +13,7 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import type {BaseNode} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
@@ -35,6 +36,8 @@ import {BasePlugin, ContextCompactionTrigger} from './base_plugin.js';
  */
 export class PluginManager {
   private readonly plugins: Set<BasePlugin> = new Set();
+
+  private skipClosingPlugins = false;
 
   /** Whether any plugin is registered. */
   get hasPlugins(): boolean {
@@ -95,6 +98,47 @@ export class PluginManager {
    */
   listPlugins(): BasePlugin[] {
     return Array.from(this.plugins);
+  }
+
+  /**
+   * Declares that this manager does not own its plugins, so {@link close} must
+   * leave them open.
+   *
+   * A manager that borrows another manager's plugins sets this. `AgentTool`
+   * lends the caller's plugins to the runner it builds for the wrapped agent,
+   * and the caller keeps using them after that runner closes.
+   */
+  setSkipClosingPlugins(value: boolean): void {
+    this.skipClosingPlugins = value;
+  }
+
+  /**
+   * Closes every registered plugin, in registration order, unless
+   * {@link setSkipClosingPlugins} declared the plugins to be borrowed.
+   *
+   * A plugin that throws does not stop the remaining plugins from closing.
+   *
+   * @throws If one or more plugins failed to close, naming each of them.
+   */
+  async close(): Promise<void> {
+    if (this.skipClosingPlugins) {
+      logger.debug('Skipping plugin close: the plugins belong to a caller.');
+      return;
+    }
+    const failures: string[] = [];
+    // Sequential rather than concurrent: a plugin built on task-local context,
+    // an MCP session for example, breaks when torn down from another task.
+    for (const plugin of this.plugins) {
+      try {
+        await plugin.close();
+      } catch (error: unknown) {
+        failures.push(`'${plugin.name}': ${formatError(error)}`);
+        logger.error(`Error closing plugin '${plugin.name}'.`, error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new Error(`Failed to close plugins: ${failures.join(', ')}`);
+    }
   }
 
   /**
