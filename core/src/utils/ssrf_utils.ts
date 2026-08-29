@@ -52,8 +52,10 @@ const BLOCKED_IPV6_CIDRS = [
   '::1/128', // loopback
   '64:ff9b:1::/48', // local NAT64
   '100::/64', // discard-only
+  '2001::/23', // IETF protocol assignments, including Teredo (2001::/32)
   '2001:db8::/32', // documentation
   '2002::/16', // 6to4 (deprecated, RFC 7526); non-global in Python's ipaddress
+  '3fff::/20', // documentation (RFC 9637)
   'fc00::/7', // unique-local (ULA, private)
   'fe80::/10', // link-local
   'ff00::/8', // multicast
