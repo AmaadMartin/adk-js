@@ -33,6 +33,11 @@ tool called repeatedly does not mint a token per call.
 This toolset calls a BigQuery-style API with an access token from application
 default credentials. Run `gcloud auth application-default login` first.
 
+The spec has to declare a security scheme, and the operation has to require it.
+An operation that needs no authentication never asks for a credential, so the
+exchange never runs and the request goes out with no `Authorization` header.
+Pass `authScheme` to the toolset when your spec declares no scheme.
+
 ```ts
 import {
   AuthCredentialTypes,
@@ -44,6 +49,24 @@ const spec = JSON.stringify({
   openapi: '3.0.0',
   info: {title: 'Datasets', version: '1.0.0'},
   servers: [{url: 'https://bigquery.googleapis.com/bigquery/v2'}],
+  components: {
+    securitySchemes: {
+      google: {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://accounts.google.com/o/oauth2/auth',
+            tokenUrl: 'https://oauth2.googleapis.com/token',
+            scopes: {
+              'https://www.googleapis.com/auth/bigquery':
+                'Manage BigQuery data.',
+            },
+          },
+        },
+      },
+    },
+  },
+  security: [{google: ['https://www.googleapis.com/auth/bigquery']}],
   paths: {
     '/projects/{projectId}/datasets': {
       get: {
@@ -72,6 +95,9 @@ const authCredential: AuthCredential = {
 
 const toolset = new OpenAPIToolset({specStr: spec, authCredential});
 ```
+
+A tool from this toolset sends `Authorization: Bearer <access token>`. It also
+sends `x-goog-user-project` when a quota project is resolved.
 
 ## Calling a Cloud Run service
 

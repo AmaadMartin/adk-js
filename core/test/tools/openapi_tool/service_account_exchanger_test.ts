@@ -8,7 +8,12 @@ import {
   AuthCredential,
   AuthCredentialMissingError,
   AuthCredentialTypes,
+  Context,
+  createSession,
   InputValidationError,
+  InvocationContext,
+  OpenAPIToolset,
+  PluginManager,
   ServiceAccount,
   ServiceAccountCredential,
 } from '@google/adk';
@@ -130,6 +135,7 @@ describe('ServiceAccountCredentialExchanger', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   describe('access token exchange', () => {
@@ -184,6 +190,30 @@ describe('ServiceAccountCredentialExchanger', () => {
     it('falls back to the project of the default credentials for the quota header', async () => {
       googleAuthConstructor.mockImplementation(() =>
         fakeGoogleAuth({getProjectId: () => Promise.resolve('adc-project')}),
+      );
+
+      const result = await exchanger.exchange({
+        authCredential: credentialFor({
+          useDefaultCredential: true,
+          scopes: [BIGQUERY_SCOPE],
+        }),
+      });
+
+      expect(result.credential.http?.additionalHeaders).toEqual({
+        'x-goog-user-project': 'adc-project',
+      });
+    });
+
+    it('falls back to the ADC project when the quota project is empty', async () => {
+      googleAuthConstructor.mockImplementation(() =>
+        fakeGoogleAuth({
+          getClient: () =>
+            Promise.resolve({
+              getAccessToken: () => Promise.resolve({token: 'adc-token'}),
+              quotaProjectId: '',
+            }),
+          getProjectId: () => Promise.resolve('adc-project'),
+        }),
       );
 
       const result = await exchanger.exchange({
@@ -645,6 +675,136 @@ describe('ServiceAccountCredentialExchanger', () => {
       await exchanger.exchange({authCredential: oldest});
 
       expect(jwtConstructor).toHaveBeenCalledTimes(cacheCapacity + 2);
+    });
+
+    it('does not reuse an access token for an ID token request', async () => {
+      const serviceAccountCredential = SA_CREDENTIAL;
+      await exchanger.exchange({
+        authCredential: credentialFor({
+          serviceAccountCredential,
+          scopes: [CLOUD_PLATFORM_SCOPE],
+        }),
+      });
+      const idToken = await exchanger.exchange({
+        authCredential: credentialFor({
+          serviceAccountCredential,
+          scopes: [CLOUD_PLATFORM_SCOPE],
+          useIdToken: true,
+          audience: AUDIENCE,
+        }),
+      });
+
+      expect(idToken.credential.http?.credentials.token).toBe(
+        'explicit-id-token',
+      );
+      expect(jwtConstructor).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not reuse an ID token minted for another audience', async () => {
+      const serviceAccountCredential = SA_CREDENTIAL;
+      await exchanger.exchange({
+        authCredential: credentialFor({
+          serviceAccountCredential,
+          useIdToken: true,
+          audience: AUDIENCE,
+        }),
+      });
+      await exchanger.exchange({
+        authCredential: credentialFor({
+          serviceAccountCredential,
+          useIdToken: true,
+          audience: 'https://other-service.run.app',
+        }),
+      });
+
+      expect(jwtConstructor).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('as configured on an OpenAPI tool', () => {
+    /** The spec from the developer guide's "Get started" section. */
+    const GUIDE_SPEC = JSON.stringify({
+      openapi: '3.0.0',
+      info: {title: 'Datasets', version: '1.0.0'},
+      servers: [{url: 'https://bigquery.googleapis.com/bigquery/v2'}],
+      components: {
+        securitySchemes: {
+          google: {
+            type: 'oauth2',
+            flows: {
+              authorizationCode: {
+                authorizationUrl: 'https://accounts.google.com/o/oauth2/auth',
+                tokenUrl: 'https://oauth2.googleapis.com/token',
+                scopes: {[BIGQUERY_SCOPE]: 'Manage BigQuery data.'},
+              },
+            },
+          },
+        },
+      },
+      security: [{google: [BIGQUERY_SCOPE]}],
+      paths: {
+        '/projects/{projectId}/datasets': {
+          get: {
+            operationId: 'listDatasets',
+            parameters: [
+              {
+                name: 'projectId',
+                in: 'path',
+                required: true,
+                schema: {type: 'string'},
+              },
+            ],
+            responses: {'200': {description: 'The datasets of the project.'}},
+          },
+        },
+      },
+    });
+
+    function toolContext(): Context {
+      return new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'inv-1',
+          session: createSession({id: 'session-1', appName: 'app'}),
+          pluginManager: new PluginManager(),
+        }),
+      });
+    }
+
+    it('sends the bearer token and the quota project header', async () => {
+      googleAuthConstructor.mockImplementation(() =>
+        fakeGoogleAuth({
+          getClient: () =>
+            Promise.resolve({
+              getAccessToken: () => Promise.resolve({token: 'adc-token'}),
+              quotaProjectId: 'quota-project',
+            }),
+        }),
+      );
+      const fetchMock = vi.fn<typeof globalThis.fetch>(() =>
+        Promise.resolve(
+          new Response('{}', {headers: {'content-type': 'application/json'}}),
+        ),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const toolset = new OpenAPIToolset({
+        specStr: GUIDE_SPEC,
+        authCredential: credentialFor({
+          useDefaultCredential: true,
+          scopes: [BIGQUERY_SCOPE],
+        }),
+      });
+      const [tool] = await toolset.getTools();
+      await tool.runAsync({
+        args: {projectId: 'my-project'},
+        toolContext: toolContext(),
+      });
+
+      const [, request] = fetchMock.mock.calls[0];
+      expect(request?.headers).toMatchObject({
+        Authorization: 'Bearer adc-token',
+        'x-goog-user-project': 'quota-project',
+      });
     });
   });
 });
