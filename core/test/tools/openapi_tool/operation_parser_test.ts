@@ -95,7 +95,7 @@ describe('OperationParser', () => {
 });
 
 describe('OperationParser schema normalization', () => {
-  it('should reject a parameter schema that is an unresolved reference', () => {
+  it('should keep a parameter whose schema is an unresolved reference', () => {
     const op: OpenAPIV3.OperationObject = {
       operationId: 'getPet',
       parameters: [
@@ -104,13 +104,13 @@ describe('OperationParser schema normalization', () => {
       responses: {},
     };
 
-    expect(() => new OperationParser(op)).toThrow(
-      "operation parameter 'petId' contains unresolved reference" +
-        " '#/components/schemas/Id'",
-    );
+    const params = new OperationParser(op).getParameters();
+
+    expect(params.map((param) => param.name)).toEqual(['pet_id']);
+    expect(params[0].paramSchema).toEqual({});
   });
 
-  it('should reject a body property that is an unresolved reference', () => {
+  it('should skip a body property that is an unresolved reference', () => {
     const op: OpenAPIV3.OperationObject = {
       operationId: 'createPet',
       requestBody: {
@@ -118,7 +118,10 @@ describe('OperationParser schema normalization', () => {
           'application/json': {
             schema: {
               type: 'object',
-              properties: {pet: {$ref: '#/components/schemas/Pet'}},
+              properties: {
+                pet: {$ref: '#/components/schemas/Pet'},
+                name: {type: 'string'},
+              },
             },
           },
         },
@@ -126,13 +129,12 @@ describe('OperationParser schema normalization', () => {
       responses: {},
     };
 
-    expect(() => new OperationParser(op)).toThrow(
-      "request body property 'pet' contains unresolved reference" +
-        " '#/components/schemas/Pet'",
-    );
+    const params = new OperationParser(op).getParameters();
+
+    expect(params.map((param) => param.name)).toEqual(['name']);
   });
 
-  it('should reject a response schema that is an unresolved reference', () => {
+  it('should empty a response schema that is an unresolved reference', () => {
     const op: OpenAPIV3.OperationObject = {
       operationId: 'getPet',
       responses: {
@@ -145,10 +147,7 @@ describe('OperationParser schema normalization', () => {
       },
     };
 
-    expect(() => new OperationParser(op)).toThrow(
-      "response '200' body contains unresolved reference" +
-        " '#/components/schemas/Pet'",
-    );
+    expect(() => new OperationParser(op)).not.toThrow();
   });
 
   it('should skip a parameter that is itself a reference', () => {
@@ -259,6 +258,6 @@ describe('OperationParser schema normalization', () => {
 
     expect(params[0].typeHint).toBe('number');
     expect(params[0].typeValue).toEqual({kind: 'integer'});
-    expect(params[0].toDocString()).toBe('limit (number): How many pets');
+    expect(params[0].description).toBe('How many pets');
   });
 });

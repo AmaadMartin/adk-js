@@ -13,6 +13,20 @@ import {
 } from '../common/common.js';
 
 /**
+ * Normalizes a schema, tolerating a reference that stayed unresolved.
+ *
+ * `resolveReferences` leaves a dangling internal `$ref` in place. Rejecting it
+ * here would lose every tool in the spec over one broken pointer, so the
+ * parameter falls back to an unconstrained schema instead.
+ */
+function toParsedSchema(
+  value: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined,
+  context: string,
+): OpenAPIV3.SchemaObject {
+  return value && '$ref' in value ? {} : normalizeSchema(value, context);
+}
+
+/**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
  *
  * It maps OpenAPI parameters and request bodies into a flat list of `ApiParameter` objects
@@ -47,7 +61,7 @@ export class OperationParser {
       if ('name' in param) {
         const originalName = param.name;
         const description = param.description || '';
-        const schema = normalizeSchema(
+        const schema = toParsedSchema(
           param.schema,
           `operation parameter '${originalName}'`,
         );
@@ -87,6 +101,9 @@ export class OperationParser {
         const properties = schema.properties || {};
         if (Object.keys(properties).length > 0) {
           for (const [propName, propDetails] of Object.entries(properties)) {
+            if ('$ref' in propDetails) {
+              continue;
+            }
             this.params.push(
               new ApiParameter({
                 originalName: propName,
@@ -140,7 +157,7 @@ export class OperationParser {
       if (!('$ref' in response) && response.content) {
         const firstMimeType = Object.keys(response.content)[0];
         if (firstMimeType) {
-          returnSchema = normalizeSchema(
+          returnSchema = toParsedSchema(
             response.content[firstMimeType].schema,
             `response '${min20x}' body`,
           );

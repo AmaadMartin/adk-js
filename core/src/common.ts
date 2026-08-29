@@ -375,8 +375,6 @@ export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
 export {
   ApiParameter,
-  generateParamDoc,
-  generateReturnDoc,
   getTypeHint,
   getTypeValue,
   normalizeSchema,

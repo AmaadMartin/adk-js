@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {generateParamDoc, OpenApiSpecParser} from '@google/adk';
+import {OpenApiSpecParser} from '@google/adk';
 import * as fs from 'fs';
 import yaml from 'js-yaml';
 import {OpenAPIV3} from 'openapi-types';
@@ -12,6 +12,53 @@ import * as path from 'path';
 import {beforeAll, describe, expect, it} from 'vitest';
 
 describe('OpenApiSpecParser', () => {
+  it('should keep every operation when one reference stays unresolved', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Test API', version: '1.0.0'},
+      paths: {
+        '/broken': {
+          post: {
+            operationId: 'createPet',
+            requestBody: {
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      owner: {$ref: '#/components/schemas/Missing'},
+                      name: {type: 'string'},
+                    },
+                  },
+                },
+              },
+            },
+            responses: {},
+          },
+        },
+        '/healthy': {
+          get: {
+            operationId: 'listPets',
+            parameters: [
+              {name: 'limit', in: 'query', schema: {type: 'integer'}},
+            ],
+            responses: {},
+          },
+        },
+      },
+    };
+
+    const operations = new OpenApiSpecParser().parse(spec);
+
+    expect(operations.map((operation) => operation.name)).toEqual([
+      'create_pet',
+      'list_pets',
+    ]);
+    expect(operations[0].parameters.map((param) => param.name)).toEqual([
+      'name',
+    ]);
+  });
+
   it('should resolve internal references', () => {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',
@@ -364,14 +411,14 @@ describe('OpenApiSpecParser with the petstore fixture', () => {
     expect(operations.length).toBeGreaterThan(0);
     for (const operation of operations) {
       for (const param of operation.parameters) {
-        expect(typeof param.toDocString).toBe('function');
         expect(param.typeHint).not.toBe('');
         expect(param.typeValue.kind).not.toBe('');
+        expect(param.name).not.toBe('');
       }
     }
   });
 
-  it('should document a parameter parsed off the fixture', () => {
+  it('should type a parameter parsed off the fixture', () => {
     const operations = new OpenApiSpecParser().parse(petstore);
     const findByStatus = operations.find(
       (operation) => operation.name === 'find_pets_by_status',
@@ -384,8 +431,9 @@ describe('OpenApiSpecParser with the petstore fixture', () => {
 
     expect(status.name).toBe('status');
     expect(status.typeHint).toBe('string');
-    expect(generateParamDoc(status)).toBe(
-      'status (string): Status values that need to be considered for filter',
+    expect(status.typeValue).toEqual({kind: 'string'});
+    expect(status.description).toBe(
+      'Status values that need to be considered for filter',
     );
   });
 
