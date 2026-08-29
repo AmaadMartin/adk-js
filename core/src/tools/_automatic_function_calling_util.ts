@@ -265,7 +265,12 @@ function toJsonSchemaNode(
     return {};
   }
   if (isZodObject(parameters)) {
-    return zodObjectToSchema(parameters);
+    const schema = zodObjectToSchema(parameters);
+    // Zod marks a property optional without giving it a default, so its
+    // required list is the only signal, and `zodObjectToSchema` omits that list
+    // when it would be empty. An absent list therefore means no property is
+    // required, not that the source declared nothing.
+    return {...schema, required: schema.required ?? []};
   }
   return parameters;
 }

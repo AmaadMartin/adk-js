@@ -517,3 +517,55 @@ describe('buildFunctionDeclaration parameter sources', () => {
     expect(schema).toEqual(clone);
   });
 });
+
+describe('buildFunctionDeclaration optional Zod parameters', () => {
+  it('requires nothing when every Zod property is optional', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'greet',
+      parameters: z.object({
+        name: z.string().optional(),
+        count: z.number().optional(),
+      }),
+    });
+
+    const properties = propertiesOf(declaration.parameters);
+    expect(Object.keys(properties).sort()).toEqual(['count', 'name']);
+    expect(declaration.parameters?.required).toEqual([]);
+  });
+
+  it('requires nothing when a lone Zod property is optional', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'greet',
+      parameters: z.object({name: z.string().optional()}),
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(declaration.parameters?.required).toEqual([]);
+  });
+
+  it('still requires the Zod properties that are not optional', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'greet',
+      parameters: z.object({
+        name: z.string(),
+        alias: z.string(),
+        count: z.number().optional(),
+      }),
+    });
+
+    expect(declaration.parameters?.required).toEqual(['name', 'alias']);
+  });
+
+  it('derives the required list of a schema that declares none', () => {
+    // A raw node carries no optionality signal of its own, so adk-python's
+    // rule applies: a property is required unless it is nullable or defaulted.
+    const declaration = buildFunctionDeclaration({
+      name: 'greet',
+      parameters: {
+        properties: {name: {type: 'string'}, count: {type: 'integer'}},
+      },
+    });
+
+    expect(declaration.parameters?.required).toEqual(['name', 'count']);
+  });
+});

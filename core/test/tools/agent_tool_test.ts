@@ -534,4 +534,19 @@ describe('AgentTool', () => {
     expect(declaration.parameters?.properties?.['name'].type).toBe(Type.STRING);
     expect(declaration.parameters?.required).toEqual(['name']);
   });
+
+  it('requires nothing when every input schema field is optional', () => {
+    const agent = new LlmAgent({
+      name: 'greeter',
+      description: 'Greets someone.',
+      inputSchema: z.object({
+        name: z.string().optional(),
+        count: z.number().optional(),
+      }),
+    });
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration.parameters?.required).toEqual([]);
+  });
 });
