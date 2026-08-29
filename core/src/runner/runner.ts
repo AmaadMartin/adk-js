@@ -21,6 +21,8 @@ import {isLlmAgent} from '../agents/llm_agent.js';
 import type {RunConfig} from '../agents/run_config.js';
 import {createRunConfig} from '../agents/run_config.js';
 import type {App} from '../apps/app.js';
+import {runCompactionForSlidingWindow} from '../apps/compaction.js';
+import type {EventsCompactionConfig} from '../apps/events_compaction_config.js';
 import type {ResumabilityConfig} from '../apps/resumability_config.js';
 import type {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
@@ -178,6 +180,12 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
   readonly resumabilityConfig?: ResumabilityConfig;
+  /**
+   * Session-level event compaction settings. Read from the app only: Python
+   * reads `self.app.events_compaction_config`, and a second source of truth
+   * would be a knob nothing honours.
+   */
+  readonly eventsCompactionConfig?: EventsCompactionConfig;
 
   /**
    * Creates a new Runner instance.
@@ -205,6 +213,7 @@ export class Runner {
     this.credentialService = input.credentialService;
     this.resumabilityConfig =
       input.app?.resumabilityConfig ?? input.resumabilityConfig;
+    this.eventsCompactionConfig = input.app?.eventsCompactionConfig;
   }
 
   /**
@@ -486,6 +495,10 @@ export class Runner {
               if (params.abortSignal?.aborted) {
                 return;
               }
+
+              // Step 5: Compact the session now that every event of this
+              // invocation is persisted.
+              await this.runPostInvocationCompaction(session);
             }
           }
         },
@@ -579,6 +592,35 @@ export class Runner {
     }
 
     return events;
+  }
+
+  /**
+   * Summarizes a window of the session's events and persists the summary.
+   *
+   * Best-effort: the invocation has already answered the caller, so a failure
+   * here is logged and swallowed rather than allowed to fail the run. The raw
+   * events stay in the session and a later turn re-evaluates compaction against
+   * its own snapshot. adk-python narrows this to its `StaleSessionError`;
+   * `adk-js` has no equivalent error type, so every failure is caught.
+   *
+   * The compaction event is appended, never yielded: it is session bookkeeping,
+   * not part of the invocation's output.
+   */
+  private async runPostInvocationCompaction(session: Session): Promise<void> {
+    if (!this.eventsCompactionConfig) {
+      return;
+    }
+    try {
+      for await (const event of runCompactionForSlidingWindow({
+        config: this.eventsCompactionConfig,
+        rootAgent: this.agent,
+        session,
+      })) {
+        await this.sessionService.appendEvent({session, event});
+      }
+    } catch (e: unknown) {
+      logger.warn('Post-invocation event compaction failed.', e);
+    }
   }
 
   /**
