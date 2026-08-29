@@ -179,6 +179,12 @@ export class MCPToolset extends BaseToolset {
           credentialKey: options.credentialKey || DEFAULT_MCP_CREDENTIAL_KEY,
         }
       : undefined;
+    if (options.authCredential && !this.authConfig) {
+      logger.warn(
+        'MCPToolset: authCredential was given without authScheme, so the ' +
+          'toolset sends no auth header. Pass authScheme to authenticate.',
+      );
+    }
   }
 
   /**

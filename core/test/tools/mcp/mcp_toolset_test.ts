@@ -25,6 +25,7 @@ import {
   MCPToolset,
   MCPToolsetOptions,
 } from '../../../src/tools/mcp/mcp_toolset.js';
+import {logger} from '../../../src/utils/logger.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -878,6 +879,22 @@ describe('MCPToolset', () => {
           'X-API-Key': 'test-api-key',
         });
       }
+    });
+
+    it('warns and sends no auth header for a credential with no scheme', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const toolset = new MCPToolset({
+        connectionParams: httpParams,
+        authCredential: apiKeyCredential,
+      });
+
+      await toolset.getTools();
+
+      expect(toolset.getAuthConfig()).toBeUndefined();
+      expect(lastTransportHeaders()).toEqual({'X-Static': 'yes'});
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('authCredential was given without authScheme'),
+      );
     });
   });
 });
