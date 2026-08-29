@@ -69,20 +69,26 @@ a tool would be dispatched in place of the framework's own call. `getTools()`
 throws on one, matching adk-python, which refuses at registration. Only exact
 matches are refused; `transfer_to_agent_v2` is fine.
 
-## A transport that fails mid-call
+## Opening the session, and losing it
 
-The MCP SDK rejects every in-flight request when a transport closes. A
-transport _error_ that leaves the stream open is different: the SDK only
-reports it to `transport.onerror`, and the call then waits out the SDK's
-60-second request timeout. A gateway that drops the event stream after
-answering the POST does exactly this.
+Session setup is retried once. Only setup: once the call is on the wire, no
+failure re-sends it, because the server may already have run the tool. An
+invocation whose `abortSignal` is already aborted is not retried either.
 
-`MCPTool` runs every call through `MCPSessionManager.runGuarded`, which races
-the call against that error and rejects with
-`MCP session connection lost: <error>` as soon as the transport fails. Nothing
-to configure. The session is still closed, and an error the tool itself raised
-still propagates unwrapped, so a tool failure stays distinguishable from a
-transport failure.
+Losing the transport mid-call is handled separately. The MCP SDK covers most
+of it. It rethrows a failed send, and it rejects every in-flight request when
+the transport closes. It does not cover a dropped event stream that it has
+stopped trying to resume: nothing closes, so the call waits out the SDK's
+60-second request timeout. `MCPTool` runs every call through
+`MCPSessionManager.runGuarded`, which rejects with
+`MCP session connection lost: <error>` at that point. Nothing to configure.
+
+The guard fires only for that terminal case. A transport error the session
+survives is logged and otherwise ignored, so a server that refuses the
+optional standalone event stream keeps working. A POST-only gateway answering
+GET with 404 is the common example. The session is still closed on every path,
+and an error the tool itself raised still propagates unwrapped, so a tool
+failure stays distinguishable from a transport failure.
 
 ## MCP-App metadata and widgets
 
@@ -102,6 +108,7 @@ toolContext.eventActions.renderUiWidgets;
 ```
 
 The payload keys are snake_case because the MCP Apps renderer reads them.
-Nothing attaches when the call fails, when the tool declares no `_meta`, or
-when the URI is outside the `ui://` scheme. ADK collects the widgets; it does
-not render them.
+Nothing attaches when the call fails, when the tool declares no `_meta`, when
+the URI is outside the `ui://` scheme, or when the call carries no function
+call id to address the widget by. ADK collects the widgets; it does not render
+them.

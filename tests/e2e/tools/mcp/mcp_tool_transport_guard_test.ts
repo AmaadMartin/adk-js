@@ -13,30 +13,52 @@ import {
 } from '@google/adk';
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import {createServer, type IncomingMessage, type Server} from 'node:http';
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from 'node:http';
 import type {AddressInfo} from 'node:net';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {z} from 'zod';
 
 /**
- * End-to-end test with NO mocks: a real `MCPToolset` talks over real HTTP to a
- * real MCP server. Calling `stall` makes the server open the event stream and
- * then destroy the socket without answering, which is the transport failure
- * the MCP SDK only reports to `transport.onerror`. Without the guard the call
- * waits out the SDK's 60-second request timeout; the test's own timeout is far
- * shorter, so a regression fails here rather than hanging.
+ * End-to-end tests with NO mocks: a real `MCPToolset` talks over real HTTP to
+ * a real MCP server, driving the MCP SDK into two states that look alike on
+ * the error channel and must not be treated alike.
+ *
+ * `stall` opens the event stream, sends a priming event so the SDK treats the
+ * stream as resumable, then destroys the socket without answering. Every
+ * resume fails, the SDK gives up, and nothing closes the transport, so the
+ * call would otherwise wait out the SDK's 60-second request timeout.
+ *
+ * `echo` runs against the same server, which refuses the optional standalone
+ * GET stream with 404. The SDK reports that as a transport error too, but the
+ * session is healthy and the call must succeed. A POST-only gateway behaves
+ * exactly like this, so failing here would break a supported deployment.
  */
 
-/** How long the tool call may take before the test calls it a stall. */
-const GUARD_TIMEOUT_MS = 10_000;
+/** How long a call may take before the test calls it a stall. */
+const GUARD_TIMEOUT_MS = 15_000;
 
 /** How long the server holds the event stream open before dropping it. */
-const STREAM_OPEN_MS = 250;
+const STREAM_OPEN_MS = 150;
 
 let server: Server;
 let url: string;
 
 function buildMcpServer(): McpServer {
   const mcpServer = new McpServer({name: 'e2e-guard-server', version: '1.0.0'});
+
+  mcpServer.registerTool(
+    'echo',
+    {
+      description: 'Echoes the message back.',
+      inputSchema: {message: z.string()},
+    },
+    async ({message}) => ({content: [{type: 'text', text: message}]}),
+  );
 
   mcpServer.registerTool(
     'stall',
@@ -47,7 +69,7 @@ function buildMcpServer(): McpServer {
   return mcpServer;
 }
 
-/** Reads a request body without consuming it for the MCP transport. */
+/** Reads a request body so the handler can route on it. */
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -66,6 +88,21 @@ function isStallCall(body: unknown): boolean {
   return message.method === 'tools/call' && message.params?.name === 'stall';
 }
 
+/**
+ * Answers with a resumable event stream, then drops it without a response.
+ *
+ * The `id` on the priming event is what makes the SDK treat the stream as
+ * resumable, so it runs its whole reconnection ladder before giving up.
+ */
+function dropStreamAfterPrimingEvent(res: ServerResponse): void {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+  });
+  res.write('id: 1\ndata: \n\n');
+  setTimeout(() => res.socket?.destroy(), STREAM_OPEN_MS);
+}
+
 function createToolContext(): Context {
   return new Context({
     invocationContext: new InvocationContext({
@@ -79,18 +116,15 @@ function createToolContext(): Context {
 
 beforeAll(async () => {
   server = createServer(async (req, res) => {
-    const body = await readBody(req);
+    // The optional standalone stream, and every resume attempt, are refused.
+    if (req.method === 'GET') {
+      res.writeHead(404).end();
+      return;
+    }
 
+    const body = await readBody(req);
     if (isStallCall(body)) {
-      // Open the event stream, then drop the connection without a response.
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-      });
-      res.write(': open\n\n');
-      // Let the client receive the response and start reading the stream, so
-      // the failure lands on the open stream rather than on the POST itself.
-      setTimeout(() => res.socket?.destroy(), STREAM_OPEN_MS);
+      dropStreamAfterPrimingEvent(res);
       return;
     }
 
@@ -120,8 +154,28 @@ afterAll(async () => {
 });
 
 describe('MCPTool transport guard (e2e, real MCP server over HTTP)', () => {
+  it('answers normally when the server refuses the optional GET stream', async () => {
+    const toolset = new MCPToolset({
+      type: 'StreamableHTTPConnectionParams',
+      url,
+    });
+    const tools = await toolset.getTools();
+    const echo = tools.find((tool) => tool.name === 'echo');
+    if (!echo) {
+      expect.fail('the server did not advertise the echo tool');
+    }
+
+    const result = await echo.runAsync({
+      args: {message: 'hello'},
+      toolContext: createToolContext(),
+    });
+
+    expect(result).toMatchObject({content: [{type: 'text', text: 'hello'}]});
+    await toolset.close();
+  });
+
   it(
-    'reports a lost connection instead of waiting for the request timeout',
+    'reports a lost connection once the SDK stops resuming the stream',
     async () => {
       const toolset = new MCPToolset({
         type: 'StreamableHTTPConnectionParams',

@@ -32,9 +32,6 @@ interface Harness {
   tool: MCPTool;
   toolContext: Context;
   callTool: MockInstance<Client['callTool']>;
-  closeSession: MockInstance<MCPSessionManager['closeSession']>;
-  runGuarded: MockInstance<MCPSessionManager['runGuarded']>;
-  session: Client;
 }
 
 /**
@@ -57,6 +54,7 @@ function buildHarness(
     serverParams: {command: 'unused'},
   });
   vi.spyOn(sessionManager, 'createSession').mockResolvedValue(session);
+  vi.spyOn(sessionManager, 'closeSession').mockResolvedValue(undefined);
 
   const harness: Harness = {
     tool: new MCPTool(mcpTool, sessionManager),
@@ -69,11 +67,6 @@ function buildHarness(
       functionCallId: contextOptions.functionCallId,
     }),
     callTool,
-    closeSession: vi
-      .spyOn(sessionManager, 'closeSession')
-      .mockResolvedValue(undefined),
-    runGuarded: vi.spyOn(sessionManager, 'runGuarded'),
-    session,
   };
   return harness;
 }
@@ -130,15 +123,22 @@ describe('MCPTool MCP-App widget', () => {
     expect(await runAndReadWidgets(harness)).toBeUndefined();
   });
 
-  it('uses an empty id when the call carries no function call id', async () => {
+  it('attaches no widget when the call carries no function call id', async () => {
+    // A widget is addressed by its function call id. Attaching one under an
+    // empty id would collide with the next, and the collision would throw
+    // after the tool had already answered.
     const harness = buildHarness(
       toolWithMeta({ui: {resourceUri: 'ui://chart'}}),
       {},
     );
 
-    const widgets = await runAndReadWidgets(harness);
+    const result = await harness.tool.runAsync({
+      args: {},
+      toolContext: harness.toolContext,
+    });
 
-    expect(widgets?.[0]?.id).toBe('');
+    expect(result).toEqual({content: []});
+    expect(harness.toolContext.eventActions.renderUiWidgets).toBeUndefined();
   });
 
   it('attaches no widget when the call fails', async () => {
@@ -149,34 +149,5 @@ describe('MCPTool MCP-App widget', () => {
       harness.tool.runAsync({args: {}, toolContext: harness.toolContext}),
     ).rejects.toThrow('tool exploded');
     expect(harness.toolContext.eventActions.renderUiWidgets).toBeUndefined();
-  });
-});
-
-describe('MCPTool transport guard', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('runs the call through the session manager guard', async () => {
-    const harness = buildHarness(toolWithMeta());
-
-    await harness.tool.runAsync({args: {}, toolContext: harness.toolContext});
-
-    expect(harness.runGuarded).toHaveBeenCalledWith(
-      harness.session,
-      expect.any(Promise),
-    );
-  });
-
-  it('surfaces a lost connection and still closes the session', async () => {
-    const harness = buildHarness(toolWithMeta());
-    harness.runGuarded.mockRejectedValue(
-      new Error('MCP session connection lost: Forbidden'),
-    );
-
-    await expect(
-      harness.tool.runAsync({args: {}, toolContext: harness.toolContext}),
-    ).rejects.toThrow('MCP session connection lost: Forbidden');
-    expect(harness.closeSession).toHaveBeenCalledWith(harness.session);
   });
 });

@@ -417,7 +417,14 @@ describe('MCPSessionManager', () => {
       return {
         manager,
         client,
-        failTransport(message: string) {
+        /** What the SDK reports once it stops trying to resume the stream. */
+        loseTransport(detail = 'the stream is gone') {
+          transport?.onerror?.(
+            new Error(`Maximum reconnection attempts (2) exceeded. ${detail}`),
+          );
+        },
+        /** A transport error the SDK reports but the session survives. */
+        reportSurvivableError(message: string) {
           transport?.onerror?.(new Error(message));
         },
       };
@@ -439,32 +446,34 @@ describe('MCPSessionManager', () => {
       ).rejects.toThrow('tool exploded');
     });
 
-    it('rejects a pending call when the transport fails', async () => {
-      const {manager, client, failTransport} = await guardedSession();
+    it('rejects a pending call once the transport is beyond resuming', async () => {
+      const {manager, client, loseTransport} = await guardedSession();
       // A call the SDK would leave pending until its 60s request timeout.
       const guarded = manager.runGuarded(client, new Promise<string>(() => {}));
 
-      failTransport('Error POSTing to endpoint: Forbidden');
+      loseTransport('the stream is gone');
 
       await expect(guarded).rejects.toThrow(
-        /MCP session connection lost:.*Forbidden/,
+        /MCP session connection lost:.*Maximum reconnection attempts/,
       );
     });
 
     it('keeps the transport error as the cause', async () => {
-      const {manager, client, failTransport} = await guardedSession();
+      const {manager, client, loseTransport} = await guardedSession();
       const guarded = manager.runGuarded(client, new Promise<string>(() => {}));
 
-      failTransport('stream died');
+      loseTransport('stream died');
 
       const error = await guarded.catch((e: unknown) => e);
       expect((error as Error).cause).toBeInstanceOf(Error);
-      expect(((error as Error).cause as Error).message).toBe('stream died');
+      expect(((error as Error).cause as Error).message).toContain(
+        'stream died',
+      );
     });
 
     it('rejects at once when the transport already failed', async () => {
-      const {manager, client, failTransport} = await guardedSession();
-      failTransport('died before the call');
+      const {manager, client, loseTransport} = await guardedSession();
+      loseTransport('died before the call');
 
       await expect(
         manager.runGuarded(client, new Promise<string>(() => {})),
@@ -472,9 +481,9 @@ describe('MCPSessionManager', () => {
     });
 
     it('reports only the first transport error', async () => {
-      const {manager, client, failTransport} = await guardedSession();
-      failTransport('first');
-      failTransport('second');
+      const {manager, client, loseTransport} = await guardedSession();
+      loseTransport('first');
+      loseTransport('second');
 
       await expect(
         manager.runGuarded(client, new Promise<string>(() => {})),
@@ -482,10 +491,10 @@ describe('MCPSessionManager', () => {
     });
 
     it('runs unguarded once the session is closed', async () => {
-      const {manager, client, failTransport} = await guardedSession();
+      const {manager, client, loseTransport} = await guardedSession();
       await manager.closeSession(client);
 
-      failTransport('after close');
+      loseTransport('after close');
 
       await expect(
         manager.runGuarded(client, Promise.resolve('still fine')),
@@ -502,7 +511,7 @@ describe('MCPSessionManager', () => {
     });
 
     it('observes the abandoned call so it cannot go unhandled', async () => {
-      const {manager, client, failTransport} = await guardedSession();
+      const {manager, client, loseTransport} = await guardedSession();
       const unhandled = vi.fn();
       process.on('unhandledRejection', unhandled);
       let rejectCall = (_: Error) => {};
@@ -511,7 +520,7 @@ describe('MCPSessionManager', () => {
       });
 
       const guarded = manager.runGuarded(client, call);
-      failTransport('gateway closed the stream');
+      loseTransport('gateway closed the stream');
       await expect(guarded).rejects.toThrow('MCP session connection lost');
       // What closing the session does to the request the guard abandoned.
       rejectCall(new Error('Connection closed'));
@@ -519,6 +528,60 @@ describe('MCPSessionManager', () => {
 
       process.off('unhandledRejection', unhandled);
       expect(unhandled).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The transport errors below are the ones the MCP SDK reports for
+     * conditions a session survives. Treating any of them as fatal breaks
+     * servers that work: a POST-only gateway answering the optional GET
+     * stream with 404 is a supported deployment, not a dead session.
+     */
+    const SURVIVABLE_ERRORS = [
+      'Streamable HTTP error: Failed to open SSE stream: Not Found (HTTP 404)',
+      'SSE stream disconnected: TypeError: terminated',
+      'Failed to reconnect SSE stream: fetch failed',
+      'Error POSTing to endpoint: Forbidden',
+      'Unknown message type: {}',
+    ];
+
+    it.each(SURVIVABLE_ERRORS)(
+      'lets a call finish after a survivable error: %s',
+      async (message) => {
+        const {manager, client, reportSurvivableError} = await guardedSession();
+        let resolveCall = (_: string) => {};
+        const call = new Promise<string>((resolve) => {
+          resolveCall = resolve;
+        });
+        const guarded = manager.runGuarded(client, call);
+
+        reportSurvivableError(message);
+        resolveCall('tool output');
+
+        await expect(guarded).resolves.toBe('tool output');
+      },
+    );
+
+    it.each(SURVIVABLE_ERRORS)(
+      'does not poison the next call after a survivable error: %s',
+      async (message) => {
+        const {manager, client, reportSurvivableError} = await guardedSession();
+
+        reportSurvivableError(message);
+
+        await expect(
+          manager.runGuarded(client, Promise.resolve('tool output')),
+        ).resolves.toBe('tool output');
+      },
+    );
+
+    it('still logs a survivable transport error', async () => {
+      const {reportSurvivableError} = await guardedSession();
+
+      reportSurvivableError('SSE stream disconnected: TypeError: terminated');
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('MCP transport error'),
+      );
     });
   });
 });
