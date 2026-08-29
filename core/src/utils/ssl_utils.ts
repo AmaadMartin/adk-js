@@ -34,11 +34,6 @@ export interface DispatcherRequestInit extends RequestInit {
   dispatcher?: HttpDispatcher;
 }
 
-/** Narrows the "the application supplies its own dispatcher" arm. */
-function isHttpDispatcher(sslVerify: SslVerify): sslVerify is HttpDispatcher {
-  return typeof sslVerify === 'object';
-}
-
 /**
  * Maps a TLS verification setting onto the `undici` `Agent` options that
  * implement it.
@@ -78,7 +73,7 @@ export async function resolveSslDispatcher(
   if (sslVerify === undefined || sslVerify === true) {
     return undefined;
   }
-  if (isHttpDispatcher(sslVerify)) {
+  if (typeof sslVerify === 'object') {
     return sslVerify;
   }
   const options = await sslVerifyToAgentOptions(sslVerify);

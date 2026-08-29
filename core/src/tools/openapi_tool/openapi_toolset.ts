@@ -87,8 +87,8 @@ export class OpenAPIToolset extends BaseToolset {
     }
 
     for (const tool of this.tools) {
-      if (this.authConfig) {
-        tool.configureAuthScheme(this.authConfig.authScheme);
+      if (options.authScheme) {
+        tool.configureAuthScheme(options.authScheme);
       }
       if (options.authCredential) {
         tool.configureAuthCredential(options.authCredential);
@@ -148,7 +148,9 @@ export class OpenAPIToolset extends BaseToolset {
 }
 
 /**
- * Parses an OpenAPI spec string into a spec document.
+ * Parses an OpenAPI spec string into a spec document. With no `specType`, a
+ * string that starts with a YAML document marker is read as YAML and
+ * everything else as JSON.
  *
  * @throws If `specType` is not a supported type, or if the string does not
  *     parse to an object. A JSON or YAML syntax error propagates from the
@@ -158,24 +160,17 @@ function loadSpec(
   specStr: string,
   specType?: 'json' | 'yaml',
 ): OpenAPIV3.Document {
-  const parsed = parseSpecString(specStr, specType);
+  let parsed: unknown;
+  if (specType === 'yaml' || (!specType && specStr.trim().startsWith('---'))) {
+    parsed = yaml.load(specStr);
+  } else if (specType === 'json' || !specType) {
+    parsed = JSON.parse(specStr);
+  } else {
+    throw new Error(`Unsupported spec type: ${String(specType)}`);
+  }
+
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('The OpenAPI specification must be an object');
   }
   return parsed as OpenAPIV3.Document;
-}
-
-/**
- * Parses an OpenAPI spec string with the parser that `specType` names. With no
- * `specType`, a string that starts with a YAML document marker is read as YAML
- * and everything else as JSON.
- */
-function parseSpecString(specStr: string, specType?: 'json' | 'yaml'): unknown {
-  if (specType === 'yaml' || (!specType && specStr.trim().startsWith('---'))) {
-    return yaml.load(specStr);
-  }
-  if (specType === 'json' || !specType) {
-    return JSON.parse(specStr);
-  }
-  throw new Error(`Unsupported spec type: ${String(specType)}`);
 }
