@@ -292,79 +292,89 @@ export class AgentTool extends BaseTool {
         : undefined,
     });
 
-    const session = await runner.sessionService.getOrCreateSession({
-      appName: this.agent.name,
-      userId: toolContext.invocationContext.userId,
-      sessionId: toolContext.invocationContext.session.id,
-      state: seedState,
-    });
-
-    if (toolContext.abortSignal?.aborted) {
-      return '';
+    // The caller keeps using its plugins after this call returns, so the
+    // runner that borrows them must not close them.
+    if (this.includePlugins) {
+      runner.pluginManager.setSkipClosingPlugins(true);
     }
 
-    let lastContent: Content | undefined;
-    let lastErrorMessage: string | undefined;
-    let lastGroundingMetadata: GroundingMetadata | undefined;
-    for await (const event of runner.runAsync({
-      userId: session.userId,
-      sessionId: session.id,
-      newMessage: content,
-      abortSignal: toolContext.abortSignal,
-    })) {
+    try {
+      const session = await runner.sessionService.getOrCreateSession({
+        appName: this.agent.name,
+        userId: toolContext.invocationContext.userId,
+        sessionId: toolContext.invocationContext.session.id,
+        state: seedState,
+      });
+
       if (toolContext.abortSignal?.aborted) {
-        return;
+        return '';
       }
 
-      if (event.actions.stateDelta) {
-        const filteredDelta = Object.fromEntries(
-          Object.entries(event.actions.stateDelta).filter(
-            ([key]) => !key.startsWith(State.TEMP_PREFIX),
-          ),
-        );
-        if (Object.keys(filteredDelta).length > 0) {
-          toolContext.state.update(filteredDelta);
+      let lastContent: Content | undefined;
+      let lastErrorMessage: string | undefined;
+      let lastGroundingMetadata: GroundingMetadata | undefined;
+      for await (const event of runner.runAsync({
+        userId: session.userId,
+        sessionId: session.id,
+        newMessage: content,
+        abortSignal: toolContext.abortSignal,
+      })) {
+        if (toolContext.abortSignal?.aborted) {
+          return;
+        }
+
+        if (event.actions.stateDelta) {
+          const filteredDelta = Object.fromEntries(
+            Object.entries(event.actions.stateDelta).filter(
+              ([key]) => !key.startsWith(State.TEMP_PREFIX),
+            ),
+          );
+          if (Object.keys(filteredDelta).length > 0) {
+            toolContext.state.update(filteredDelta);
+          }
+        }
+
+        if (event.errorMessage) {
+          lastErrorMessage = event.errorMessage;
+        }
+        // A run can end on an event that carries no content, such as one that
+        // only reports an error. Keep the last event that did carry content,
+        // and the grounding metadata that came with it.
+        if (event.content) {
+          lastContent = event.content;
+          lastGroundingMetadata = event.groundingMetadata;
         }
       }
 
-      if (event.errorMessage) {
-        lastErrorMessage = event.errorMessage;
+      if (!lastContent?.parts?.length) {
+        return lastErrorMessage ?? '';
       }
-      // A run can end on an event that carries no content, such as one that
-      // only reports an error. Keep the last event that did carry content, and
-      // the grounding metadata that came with it.
-      if (event.content) {
-        lastContent = event.content;
-        lastGroundingMetadata = event.groundingMetadata;
+
+      // Exclude thoughts from the merged text.
+      const mergedText = lastContent.parts
+        .filter((part) => !part.thought)
+        .map(partToText)
+        .filter((text) => text)
+        .join('\n');
+
+      // An error message tells the calling model why the sub-agent produced
+      // nothing, so it beats an empty result.
+      if (!mergedText && lastErrorMessage) {
+        return lastErrorMessage;
       }
+
+      if (this.propagateGroundingMetadata && lastGroundingMetadata) {
+        toolContext.state.set(
+          GROUNDING_METADATA_STATE_KEY,
+          lastGroundingMetadata,
+        );
+      }
+
+      return outputSchema
+        ? parseJsonWithSchema(outputSchema, mergedText)
+        : mergedText;
+    } finally {
+      await runner.close();
     }
-
-    if (!lastContent?.parts?.length) {
-      return lastErrorMessage ?? '';
-    }
-
-    // Exclude thoughts from the merged text.
-    const mergedText = lastContent.parts
-      .filter((part) => !part.thought)
-      .map(partToText)
-      .filter((text) => text)
-      .join('\n');
-
-    // An error message tells the calling model why the sub-agent produced
-    // nothing, so it beats an empty result.
-    if (!mergedText && lastErrorMessage) {
-      return lastErrorMessage;
-    }
-
-    if (this.propagateGroundingMetadata && lastGroundingMetadata) {
-      toolContext.state.set(
-        GROUNDING_METADATA_STATE_KEY,
-        lastGroundingMetadata,
-      );
-    }
-
-    return outputSchema
-      ? parseJsonWithSchema(outputSchema, mergedText)
-      : mergedText;
   }
 }

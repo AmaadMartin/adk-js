@@ -37,6 +37,8 @@ import {BasePlugin, ContextCompactionTrigger} from './base_plugin.js';
 export class PluginManager {
   private readonly plugins: Set<BasePlugin> = new Set();
 
+  private skipClosingPlugins = false;
+
   /** Whether any plugin is registered. */
   get hasPlugins(): boolean {
     return this.plugins.size > 0;
@@ -99,13 +101,30 @@ export class PluginManager {
   }
 
   /**
-   * Closes every registered plugin, in registration order.
+   * Declares that this manager does not own its plugins, so {@link close} must
+   * leave them open.
+   *
+   * A manager that borrows another manager's plugins sets this. `AgentTool`
+   * lends the caller's plugins to the runner it builds for the wrapped agent,
+   * and the caller keeps using them after that runner closes.
+   */
+  setSkipClosingPlugins(value: boolean): void {
+    this.skipClosingPlugins = value;
+  }
+
+  /**
+   * Closes every registered plugin, in registration order, unless
+   * {@link setSkipClosingPlugins} declared the plugins to be borrowed.
    *
    * A plugin that throws does not stop the remaining plugins from closing.
    *
    * @throws If one or more plugins failed to close, naming each of them.
    */
   async close(): Promise<void> {
+    if (this.skipClosingPlugins) {
+      logger.debug('Skipping plugin close: the plugins belong to a caller.');
+      return;
+    }
     const failures: string[] = [];
     // Sequential rather than concurrent: a plugin built on task-local context,
     // an MCP session for example, breaks when torn down from another task.

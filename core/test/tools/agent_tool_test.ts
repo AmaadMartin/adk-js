@@ -34,6 +34,8 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
       appName: config?.appName,
       sessionService: config?.sessionService,
       runAsync: vi.fn(),
+      pluginManager: new PluginManager(config?.plugins),
+      close: vi.fn(),
     })),
   };
 });
@@ -42,11 +44,19 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
  * Builds the `Runner` stand-in the mocked constructor returns. The widening
  * cast lives here alone, so a caller supplies only the members `AgentTool`
  * reads and still has them checked against the real `Runner`.
+ *
+ * A real `Runner` always owns a `pluginManager` and a `close`, so the
+ * stand-in supplies both. A caller that asserts on either passes its own.
  */
 function mockRunner(
-  parts: Pick<Runner, 'appName' | 'sessionService' | 'runAsync'>,
+  parts: Pick<Runner, 'appName' | 'sessionService' | 'runAsync'> &
+    Partial<Pick<Runner, 'pluginManager' | 'close'>>,
 ): Runner {
-  return parts as Runner;
+  return {
+    pluginManager: new PluginManager(),
+    close: async () => {},
+    ...parts,
+  } as Runner;
 }
 
 /** A plugin that registers under a name and does nothing else. */
@@ -94,13 +104,13 @@ describe('AgentTool', () => {
       });
     };
 
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
+    vi.mocked(Runner).mockImplementation((config) =>
+      mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
         runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
+      }),
+    );
 
     const result = await tool.runAsync({
       args: {request: 'hello'},
@@ -162,13 +172,13 @@ describe('AgentTool', () => {
       });
     };
 
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
+    vi.mocked(Runner).mockImplementation((config) =>
+      mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
         runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
+      }),
+    );
 
     // Invoke twice simulating two turns in the same parent session
     await tool.runAsync({args: {request: 'first'}, toolContext});
@@ -217,13 +227,13 @@ describe('AgentTool', () => {
       });
     };
 
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
+    vi.mocked(Runner).mockImplementation((config) =>
+      mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
         runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
+      }),
+    );
 
     const result = await tool.runAsync({
       args: {request: 'hello'},
@@ -300,13 +310,13 @@ describe('AgentTool', () => {
       });
     };
 
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
+    vi.mocked(Runner).mockImplementation((config) =>
+      mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
         runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
+      }),
+    );
 
     await tool.runAsync({args: {request: 'hello'}, toolContext});
 
@@ -356,13 +366,13 @@ describe('AgentTool', () => {
       });
     };
 
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
+    vi.mocked(Runner).mockImplementation((config) =>
+      mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
         runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
+      }),
+    );
 
     const result = await tool.runAsync({
       args: {request: 'hello'},
@@ -406,13 +416,12 @@ describe('AgentTool', () => {
       });
     };
 
-    vi.mocked(Runner).mockImplementation(
-      (config) =>
-        ({
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          runAsync: mockRunAsync,
-        }) as unknown as Runner,
+    vi.mocked(Runner).mockImplementation((config) =>
+      mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
+        runAsync: mockRunAsync,
+      }),
     );
 
     await tool.runAsync({args: {request: 'go'}, toolContext});
@@ -456,13 +465,12 @@ describe('AgentTool', () => {
       });
     };
 
-    vi.mocked(Runner).mockImplementation(
-      (config) =>
-        ({
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          runAsync: mockRunAsync,
-        }) as unknown as Runner,
+    vi.mocked(Runner).mockImplementation((config) =>
+      mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
+        runAsync: mockRunAsync,
+      }),
     );
 
     await tool.runAsync({args: {request: 'go'}, toolContext});
@@ -508,13 +516,13 @@ describe('AgentTool', () => {
       });
     };
 
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
+    vi.mocked(Runner).mockImplementation((config) =>
+      mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
         runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
+      }),
+    );
 
     await tool.runAsync({
       args: {request: 'hello'},
