@@ -78,7 +78,8 @@ export function createBearerScheme(): OpenAPIV3.SecuritySchemeObject {
   };
 }
 
-function requireString(value: unknown, field: string): void {
+function requireStringField(scheme: object, field: string): void {
+  const value: unknown = Reflect.get(scheme, field);
   if (typeof value !== 'string') {
     throw new Error(
       `Invalid security scheme data: '${field}' must be a string.`,
@@ -86,7 +87,8 @@ function requireString(value: unknown, field: string): void {
   }
 }
 
-function requireObject(value: unknown, field: string): void {
+function requireObjectField(scheme: object, field: string): void {
+  const value: unknown = Reflect.get(scheme, field);
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error(
       `Invalid security scheme data: '${field}' must be an object.`,
@@ -95,47 +97,40 @@ function requireObject(value: unknown, field: string): void {
 }
 
 /**
- * Validates a security scheme supplied as an object or as JSON text.
+ * Throws unless `scheme` is a usable OpenAPI security scheme.
  *
- * The analogue of adk-python's `dict_to_auth_scheme`. It accepts the four
- * OpenAPI security scheme types and rejects a scheme that omits the fields its
- * type requires, so a bad configuration fails where it is supplied rather than
- * at the first API call.
+ * The analogue of adk-python's `dict_to_auth_scheme`. A scheme reaches a tool
+ * from a parsed specification, so its shape is not what the TypeScript type
+ * claims. Checking it here fails a bad specification where it is supplied,
+ * rather than at the first API call.
  *
- * @param value The security scheme, or the JSON text of one.
+ * @param scheme The security scheme to check.
  * @throws {Error} If the scheme has no `type`, an unsupported `type`, or a
- *     missing required field. Malformed JSON raises `JSON.parse`'s own
- *     `SyntaxError`.
- * @returns The validated security scheme.
+ *     missing required field.
  */
-export function parseAuthScheme(
-  value: OpenAPIV3.SecuritySchemeObject | string,
-): OpenAPIV3.SecuritySchemeObject {
-  const scheme: OpenAPIV3.SecuritySchemeObject =
-    typeof value === 'string'
-      ? (JSON.parse(value) as OpenAPIV3.SecuritySchemeObject)
-      : value;
-
-  if (typeof scheme !== 'object' || scheme === null || !scheme.type) {
+export function validateAuthScheme(scheme: unknown): void {
+  if (typeof scheme !== 'object' || scheme === null) {
     throw new Error("Missing 'type' field in security scheme.");
   }
-  const schemeType: string = scheme.type;
 
-  switch (scheme.type) {
+  const type: unknown = Reflect.get(scheme, 'type');
+  switch (type) {
     case 'apiKey':
-      requireString(scheme.name, 'name');
-      requireString(scheme.in, 'in');
-      return scheme;
+      requireStringField(scheme, 'name');
+      requireStringField(scheme, 'in');
+      return;
     case 'http':
-      requireString(scheme.scheme, 'scheme');
-      return scheme;
+      requireStringField(scheme, 'scheme');
+      return;
     case 'oauth2':
-      requireObject(scheme.flows, 'flows');
-      return scheme;
+      requireObjectField(scheme, 'flows');
+      return;
     case 'openIdConnect':
-      requireString(scheme.openIdConnectUrl, 'openIdConnectUrl');
-      return scheme;
+      requireStringField(scheme, 'openIdConnectUrl');
+      return;
+    case undefined:
+      throw new Error("Missing 'type' field in security scheme.");
     default:
-      throw new Error(`Invalid security scheme type: ${schemeType}`);
+      throw new Error(`Invalid security scheme type: ${String(type)}`);
   }
 }

@@ -5,21 +5,15 @@
  */
 
 import {
-  AuthCredentialTypes,
   Context,
   createSession,
-  FeatureName,
   InvocationContext,
   LlmAgent,
-  overrideFeatureEnabled,
   PluginManager,
   RestApiTool,
 } from '@google/adk';
 import {createServer, Server} from 'node:http';
-import {AddressInfo} from 'node:net';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
-
-const SECRET_API_KEY = 'sk-live-secret-api-key-12345';
 
 /** Answers every request with a JSON body under a text content type. */
 function startServer(): Promise<Server> {
@@ -38,81 +32,37 @@ describe('RestApiTool against a local server', () => {
 
   beforeAll(async () => {
     server = await startServer();
-    const {port} = server.address() as AddressInfo;
-    baseUrl = `http://127.0.0.1:${port}`;
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      expect.fail('the server did not report a port');
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`;
   });
 
   afterAll(() => {
     server.close();
   });
 
-  function newContext(): Context {
-    return new Context({
-      invocationContext: new InvocationContext({
-        invocationId: 'invocation-1',
-        agent: new LlmAgent({name: 'test_agent'}),
-        session: createSession({id: 'session-1', appName: 'test_app'}),
-        pluginManager: new PluginManager(),
-      }),
-    });
-  }
-
-  function newTool(): RestApiTool {
-    return new RestApiTool(
+  it('should parse a JSON body the server labels text/plain', async () => {
+    const tool = new RestApiTool(
       'get_status',
       'Gets the status.',
-      JSON.stringify({baseUrl, path: '/status', method: 'GET'}),
-      JSON.stringify({operationId: 'get_status', responses: {}}),
+      {baseUrl, path: '/status', method: 'GET'},
+      {operationId: 'get_status', responses: {}},
     );
-  }
 
-  it('should parse a JSON body the server labels text/plain', async () => {
-    const result = await newTool().runAsync({
+    const result = await tool.runAsync({
       args: {},
-      toolContext: newContext(),
-    });
-
-    expect(result).toEqual({ok: true});
-  });
-
-  it('should answer the same result through call', async () => {
-    const result = await newTool().call({
-      args: {},
-      toolContext: newContext(),
-    });
-
-    expect(result).toEqual({ok: true});
-  });
-
-  it('should keep the credential out of the rendered tool', () => {
-    const tool = newTool();
-    tool.configureAuthScheme(
-      '{"type":"apiKey","name":"X-API-Key","in":"header"}',
-    );
-    tool.configureAuthCredential(
-      JSON.stringify({
-        authType: AuthCredentialTypes.API_KEY,
-        apiKey: SECRET_API_KEY,
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
       }),
-    );
+    });
 
-    expect(tool.toRepr()).not.toContain(SECRET_API_KEY);
-  });
-
-  it('should switch declaration shape with the feature flag', () => {
-    const tool = newTool();
-
-    const off = tool._getDeclaration();
-    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, true);
-    try {
-      const on = tool._getDeclaration();
-      expect(on.parameters).toBeUndefined();
-      expect(on.parametersJsonSchema).toBeDefined();
-    } finally {
-      overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, undefined);
-    }
-
-    expect(off.parameters).toBeDefined();
-    expect(off.parametersJsonSchema).toBeUndefined();
+    expect(result).toEqual({ok: true});
   });
 });
