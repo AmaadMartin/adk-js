@@ -163,7 +163,6 @@ export type {
   EvalTurn,
   ToolUse,
   TrajectoryEvaluationResult,
-  TrajectoryFailure,
   TurnEvaluationResult,
 } from './evaluation/trajectory_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';

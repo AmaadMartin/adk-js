@@ -100,20 +100,6 @@ const TOOL_GET_WEATHER_ANNOTATED: AnnotatedToolUse = {
 };
 
 describe('evaluateTrajectory', () => {
-  it('rejects an undefined dataset', () => {
-    expect(() => evaluateTrajectory(undefined)).toThrow(InputValidationError);
-    expect(() => evaluateTrajectory(undefined)).toThrow(
-      'The evaluation dataset is empty.',
-    );
-  });
-
-  it('rejects a null dataset', () => {
-    expect(() => evaluateTrajectory(null)).toThrow(InputValidationError);
-    expect(() => evaluateTrajectory(null)).toThrow(
-      'The evaluation dataset is empty.',
-    );
-  });
-
   it('rejects an empty dataset', () => {
     expect(() => evaluateTrajectory([])).toThrow(InputValidationError);
     expect(() => evaluateTrajectory([])).toThrow(
@@ -216,19 +202,22 @@ describe('evaluateTrajectory', () => {
 
     expect(Number.isNaN(result.meanToolUseAccuracy)).toBe(true);
     expect(result.turnResults).toHaveLength(0);
-    expect(result.failures).toHaveLength(0);
   });
 
-  it('reports each failing turn with its position and trajectories', () => {
+  it('describes a failing turn by its position and trajectories', () => {
     const result = evaluateTrajectory([[TURN_MATCH, TURN_MISMATCH_INPUT]]);
 
-    expect(result.failures).toEqual([
+    expect(
+      result.turnResults.filter((turn) => turn.toolUseAccuracy === 0),
+    ).toEqual([
       {
         conversationIndex: 0,
         turn: 2,
         query: 'Q2',
-        actual: [TOOL_ROLL_DICE_6],
-        expected: [TOOL_ROLL_DICE_16],
+        response: 'R2',
+        actualToolUse: [TOOL_ROLL_DICE_6],
+        expectedToolUse: [TOOL_ROLL_DICE_16],
+        toolUseAccuracy: 0,
       },
     ]);
   });
@@ -238,14 +227,33 @@ describe('evaluateTrajectory', () => {
       [TURN_MATCH],
       [TURN_MATCH, TURN_MATCH, TURN_MISMATCH_INPUT],
     ]);
+    const failing = result.turnResults.filter(
+      (turn) => turn.toolUseAccuracy === 0,
+    );
 
-    expect(result.failures).toHaveLength(1);
-    expect(result.failures[0].conversationIndex).toBe(1);
-    expect(result.failures[0].turn).toBe(3);
+    expect(failing).toHaveLength(1);
+    expect(failing[0].conversationIndex).toBe(1);
+    expect(failing[0].turn).toBe(3);
   });
 
-  it('reports no failure when every turn matches', () => {
-    expect(evaluateTrajectory([[TURN_MATCH]]).failures).toEqual([]);
+  it('restarts turn numbering for each conversation', () => {
+    const result = evaluateTrajectory([[TURN_MATCH, TURN_MATCH], [TURN_MATCH]]);
+
+    expect(
+      result.turnResults.map((turn) => [turn.conversationIndex, turn.turn]),
+    ).toEqual([
+      [0, 1],
+      [0, 2],
+      [1, 1],
+    ]);
+  });
+
+  it('marks no turn as failing when every turn matches', () => {
+    const result = evaluateTrajectory([[TURN_MATCH]]);
+
+    expect(
+      result.turnResults.filter((turn) => turn.toolUseAccuracy === 0),
+    ).toEqual([]);
   });
 
   it('carries the query and response onto each turn result', () => {

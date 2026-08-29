@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {isEqual} from 'lodash-es';
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {deepEqual} from '../utils/deep_equal.js';
 import {getLogger} from '../utils/logger.js';
 
 const logger = getLogger();
@@ -40,8 +40,14 @@ export interface EvalTurn {
   expectedToolUse: ToolUse[];
 }
 
-/** Score for a single turn. */
+/** Score for a single turn, with the position it came from. */
 export interface TurnEvaluationResult {
+  /** Zero-based index of the conversation within the dataset. */
+  conversationIndex: number;
+
+  /** One-based index of the turn within its conversation. */
+  turn: number;
+
   query: string;
   response: string;
   actualToolUse: ToolUse[];
@@ -53,19 +59,6 @@ export interface TurnEvaluationResult {
   toolUseAccuracy: number;
 }
 
-/** A turn whose trajectories did not match. */
-export interface TrajectoryFailure {
-  /** Zero-based index of the conversation within the dataset. */
-  conversationIndex: number;
-
-  /** One-based index of the turn within its conversation. */
-  turn: number;
-
-  query: string;
-  actual: ToolUse[];
-  expected: ToolUse[];
-}
-
 /** Outcome of scoring a whole eval dataset. */
 export interface TrajectoryEvaluationResult {
   /**
@@ -74,11 +67,11 @@ export interface TrajectoryEvaluationResult {
    */
   meanToolUseAccuracy: number;
 
-  /** One entry per scored turn, in dataset order. */
+  /**
+   * One entry per scored turn, in dataset order. Filter on
+   * `toolUseAccuracy === 0` for the turns that did not match.
+   */
   turnResults: TurnEvaluationResult[];
-
-  /** The subset of turns that did not match. */
-  failures: TrajectoryFailure[];
 }
 
 /** A tool call reduced to the fields that take part in scoring. */
@@ -96,7 +89,7 @@ interface ComparableToolUse {
  * not matter.
  */
 export function areToolsEqual(a: ToolUse[], b: ToolUse[]): boolean {
-  return deepEqual(toComparable(a), toComparable(b));
+  return isEqual(toComparable(a), toComparable(b));
 }
 
 function toComparable(toolUses: ToolUse[]): ComparableToolUse[] {
@@ -117,27 +110,22 @@ function stripMockToolOutput(toolUses: ToolUse[]): ToolUse[] {
   });
 }
 
-function evaluateTurn(turn: EvalTurn): TurnEvaluationResult {
+function evaluateTurn(
+  turn: EvalTurn,
+  conversationIndex: number,
+  turnIndex: number,
+): TurnEvaluationResult {
   const expectedToolUse = stripMockToolOutput(turn.expectedToolUse);
 
   return {
+    conversationIndex,
+    turn: turnIndex + 1,
     query: turn.query,
     response: turn.response,
     actualToolUse: turn.actualToolUse,
     expectedToolUse,
     toolUseAccuracy: areToolsEqual(turn.actualToolUse, expectedToolUse) ? 1 : 0,
   };
-}
-
-function reportFailures(failures: TrajectoryFailure[]): void {
-  for (const failure of failures) {
-    logger.debug(
-      `Trajectory mismatch in conversation ${failure.conversationIndex}, ` +
-        `turn ${failure.turn}, query '${failure.query}'. Actual: ` +
-        `${JSON.stringify(failure.actual)}. Expected: ` +
-        `${JSON.stringify(failure.expected)}.`,
-    );
-  }
 }
 
 /**
@@ -148,41 +136,35 @@ function reportFailures(failures: TrajectoryFailure[]): void {
  * every conversation, so a conversation with more turns weighs more.
  *
  * @param evalDataset One entry per conversation, each a list of scored turns.
- *   An empty conversation contributes no turn. The parameter admits nullish
- *   input so a plain JavaScript caller gets the validation error below rather
- *   than a `TypeError`.
+ *   An empty conversation contributes no turn.
  * @throws {InputValidationError} When the dataset holds no conversation.
  *   `[[]]` does not throw: it holds one conversation, and the mean over its
  *   zero turns is `NaN`.
  */
 export function evaluateTrajectory(
-  evalDataset: EvalTurn[][] | null | undefined,
+  evalDataset: EvalTurn[][],
 ): TrajectoryEvaluationResult {
-  if (!evalDataset?.length) {
+  if (evalDataset.length === 0) {
     throw new InputValidationError('The evaluation dataset is empty.');
   }
 
   const turnResults: TurnEvaluationResult[] = [];
-  const failures: TrajectoryFailure[] = [];
 
   for (const [conversationIndex, conversation] of evalDataset.entries()) {
     for (const [turnIndex, turn] of conversation.entries()) {
-      const turnResult = evaluateTurn(turn);
+      const turnResult = evaluateTurn(turn, conversationIndex, turnIndex);
       turnResults.push(turnResult);
 
       if (turnResult.toolUseAccuracy === 0) {
-        failures.push({
-          conversationIndex,
-          turn: turnIndex + 1,
-          query: turnResult.query,
-          actual: turnResult.actualToolUse,
-          expected: turnResult.expectedToolUse,
-        });
+        logger.debug(
+          `Trajectory mismatch in conversation ${conversationIndex}, turn ` +
+            `${turnResult.turn}, query '${turnResult.query}'. Actual: ` +
+            `${JSON.stringify(turnResult.actualToolUse)}. Expected: ` +
+            `${JSON.stringify(turnResult.expectedToolUse)}.`,
+        );
       }
     }
   }
-
-  reportFailures(failures);
 
   const total = turnResults.reduce(
     (sum, result) => sum + result.toolUseAccuracy,
@@ -192,6 +174,5 @@ export function evaluateTrajectory(
   return {
     meanToolUseAccuracy: total / turnResults.length,
     turnResults,
-    failures,
   };
 }
