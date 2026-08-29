@@ -82,6 +82,30 @@ function withoutNulls(_key: string, value: unknown): unknown {
   return value === null ? undefined : value;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Returns `value` with the keys of every object inside it in ascending order,
+ * nested objects and objects held in arrays included. Matches `sort_keys=True`
+ * in adk-python's `agent_tool.py`, which sorts at every level rather than only
+ * the top one.
+ */
+function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortKeysDeep);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    sorted[key] = sortKeysDeep(value[key]);
+  }
+  return sorted;
+}
+
 /**
  * Renders `args` as prompt text for an agent that declares no input schema.
  *
@@ -97,11 +121,7 @@ function requestText(args: Record<string, unknown>): string {
   if (typeof request === 'string') {
     return request;
   }
-  const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(args).sort()) {
-    sorted[key] = args[key];
-  }
-  return JSON.stringify(sorted);
+  return JSON.stringify(sortKeysDeep(args));
 }
 
 /**

@@ -918,6 +918,28 @@ describe('AgentTool parity with adk-python', () => {
     expect(received.messageText).toBe(expected);
   });
 
+  it('sorts the keys of nested objects and of objects inside arrays', async () => {
+    const agent = new LlmAgent({name: SUB_AGENT_NAME});
+    const {received} = mockSubAgentRun([
+      createEvent({
+        author: SUB_AGENT_NAME,
+        content: {role: 'model', parts: [{text: 'done'}]},
+      }),
+    ]);
+
+    await new AgentTool({agent}).runAsync({
+      args: {
+        filters: {size: 10, colour: 'red'},
+        items: [{quantity: 2, name: 'shoe'}],
+      },
+      toolContext: parentContext(agent),
+    });
+
+    expect(received.messageText).toBe(
+      '{"filters":{"colour":"red","size":10},"items":[{"name":"shoe","quantity":2}]}',
+    );
+  });
+
   it('returns the code of an executableCode part', async () => {
     const result = await resultForParts([
       {executableCode: {code: 'print("hi")'}},
