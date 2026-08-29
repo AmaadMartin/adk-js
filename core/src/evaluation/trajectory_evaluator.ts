@@ -4,175 +4,211 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {FunctionCall} from '@google/genai';
 import {isEqual} from 'lodash-es';
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {getLogger} from '../utils/logger.js';
+import {getAllToolCalls, type Invocation} from './eval_case.js';
+import {
+  EvalStatus,
+  validateInvocationLengths,
+  type EvaluationResult,
+  type Evaluator,
+  type PerInvocationResult,
+} from './evaluator.js';
 
-const logger = getLogger();
-
-/** A single tool call in a trajectory. */
-export interface ToolUse {
-  /** Name of the tool that was called. */
-  toolName: string;
-
-  /** Arguments the tool was called with. */
-  toolInput: Record<string, unknown>;
-
-  /**
-   * Output recorded for an expected call so a replay can serve it. Ignored
-   * when scoring.
-   */
-  mockToolOutput?: unknown;
-}
-
-/** One turn of a conversation to be scored. */
-export interface EvalTurn {
-  /** What the user asked. */
-  query: string;
-
-  /** What the agent answered. */
-  response: string;
-
-  /** Tool calls the agent actually made, in order. */
-  actualToolUse: ToolUse[];
-
-  /** Tool calls the golden trajectory expected, in order. */
-  expectedToolUse: ToolUse[];
-}
-
-/** Score for a single turn, with the position it came from. */
-export interface TurnEvaluationResult {
-  /** Zero-based index of the conversation within the dataset. */
-  conversationIndex: number;
-
-  /** One-based index of the turn within its conversation. */
-  turn: number;
-
-  query: string;
-  response: string;
-  actualToolUse: ToolUse[];
-
-  /** Expected calls with `mockToolOutput` stripped. */
-  expectedToolUse: ToolUse[];
-
-  /** `1` when the trajectories matched, `0` otherwise. */
-  toolUseAccuracy: number;
-}
-
-/** Outcome of scoring a whole eval dataset. */
-export interface TrajectoryEvaluationResult {
-  /**
-   * Mean tool-use accuracy across every scored turn, in `[0, 1]`. `NaN` when
-   * the dataset contained no turns at all.
-   */
-  meanToolUseAccuracy: number;
+/**
+ * How actual tool calls are matched against the expected trajectory.
+ *
+ * The names are the values an adk-python `eval_config.json` accepts under
+ * `match_type`, which is where this enum crosses the language boundary.
+ */
+export enum ToolTrajectoryMatchType {
+  /** The actual calls equal the expected ones, with none extra or missing. */
+  EXACT = 'EXACT',
 
   /**
-   * One entry per scored turn, in dataset order. Filter on
-   * `toolUseAccuracy === 0` for the turns that did not match.
+   * Every expected call appears in the actual calls in the expected order.
+   * Extra actual calls in between are tolerated.
    */
-  turnResults: TurnEvaluationResult[];
+  IN_ORDER = 'IN_ORDER',
+
+  /**
+   * Every expected call appears in the actual calls in any order, respecting
+   * multiplicity. Extra actual calls are tolerated.
+   */
+  ANY_ORDER = 'ANY_ORDER',
 }
 
-/** A tool call reduced to the fields that take part in scoring. */
-interface ComparableToolUse {
-  toolName: string;
-  toolInput: Record<string, unknown>;
+/** Options for {@link TrajectoryEvaluator}. */
+export interface TrajectoryEvaluatorOptions {
+  /** Minimum score at which the metric passes. Range [0, 1]. */
+  threshold: number;
+
+  /** Defaults to {@link ToolTrajectoryMatchType.EXACT}. */
+  matchType?: ToolTrajectoryMatchType;
 }
 
 /**
- * Whether two tool-call trajectories match.
+ * Two tool calls are equal when their name and arguments are equal.
  *
- * The comparison is order-sensitive and length-sensitive, and reads only
- * `toolName` and `toolInput`. Every other property, `mockToolOutput` included,
- * is ignored on both sides. `toolInput` is compared deeply, so key order does
- * not matter.
+ * The call `id` never takes part: a run assigns it, so a golden trajectory
+ * cannot predict it. An omitted `args` reads as `{}`.
  */
-export function areToolsEqual(a: ToolUse[], b: ToolUse[]): boolean {
-  return isEqual(toComparable(a), toComparable(b));
+function toolCallsEqual(a: FunctionCall, b: FunctionCall): boolean {
+  return a.name === b.name && isEqual(a.args ?? {}, b.args ?? {});
 }
 
-function toComparable(toolUses: ToolUse[]): ComparableToolUse[] {
-  return toolUses.map(({toolName, toolInput}) => ({toolName, toolInput}));
+/** Whether the two trajectories hold the same calls in the same order. */
+export function areToolCallsExactMatch(
+  actual: FunctionCall[],
+  expected: FunctionCall[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((call, index) => toolCallsEqual(call, expected[index]))
+  );
 }
 
 /**
- * Copies the calls without `mockToolOutput`, leaving the input untouched.
+ * Whether every expected call appears in `actual` in the expected order.
  *
- * Any other property a caller attached survives the copy, so the recorded
- * output is the only thing dropped.
+ * Extra actual calls between the expected ones are tolerated, and an empty
+ * expected trajectory matches anything.
  */
-function stripMockToolOutput(toolUses: ToolUse[]): ToolUse[] {
-  return toolUses.map((toolUse) => {
-    const copy = {...toolUse};
-    delete copy.mockToolOutput;
-    return copy;
-  });
-}
-
-function evaluateTurn(
-  turn: EvalTurn,
-  conversationIndex: number,
-  turnIndex: number,
-): TurnEvaluationResult {
-  const expectedToolUse = stripMockToolOutput(turn.expectedToolUse);
-
-  return {
-    conversationIndex,
-    turn: turnIndex + 1,
-    query: turn.query,
-    response: turn.response,
-    actualToolUse: turn.actualToolUse,
-    expectedToolUse,
-    toolUseAccuracy: areToolsEqual(turn.actualToolUse, expectedToolUse) ? 1 : 0,
-  };
-}
-
-/**
- * Scores an agent's tool use against a recorded golden trajectory.
- *
- * A turn scores `1` when its tool calls match the expected ones exactly, and
- * `0` otherwise. `meanToolUseAccuracy` averages those scores over every turn of
- * every conversation, so a conversation with more turns weighs more.
- *
- * @param evalDataset One entry per conversation, each a list of scored turns.
- *   An empty conversation contributes no turn.
- * @throws {InputValidationError} When the dataset holds no conversation.
- *   `[[]]` does not throw: it holds one conversation, and the mean over its
- *   zero turns is `NaN`.
- */
-export function evaluateTrajectory(
-  evalDataset: EvalTurn[][],
-): TrajectoryEvaluationResult {
-  if (evalDataset.length === 0) {
-    throw new InputValidationError('The evaluation dataset is empty.');
-  }
-
-  const turnResults: TurnEvaluationResult[] = [];
-
-  for (const [conversationIndex, conversation] of evalDataset.entries()) {
-    for (const [turnIndex, turn] of conversation.entries()) {
-      const turnResult = evaluateTurn(turn, conversationIndex, turnIndex);
-      turnResults.push(turnResult);
-
-      if (turnResult.toolUseAccuracy === 0) {
-        logger.debug(
-          `Trajectory mismatch in conversation ${conversationIndex}, turn ` +
-            `${turnResult.turn}, query '${turnResult.query}'. Actual: ` +
-            `${JSON.stringify(turnResult.actualToolUse)}. Expected: ` +
-            `${JSON.stringify(turnResult.expectedToolUse)}.`,
-        );
-      }
+export function areToolCallsInOrderMatch(
+  actual: FunctionCall[],
+  expected: FunctionCall[],
+): boolean {
+  let cursor = 0;
+  for (const call of actual) {
+    if (cursor < expected.length && toolCallsEqual(call, expected[cursor])) {
+      cursor++;
     }
   }
 
-  const total = turnResults.reduce(
-    (sum, result) => sum + result.toolUseAccuracy,
-    0,
-  );
+  return cursor === expected.length;
+}
 
-  return {
-    meanToolUseAccuracy: total / turnResults.length,
-    turnResults,
-  };
+/**
+ * Whether `actual` contains every expected call, in any order.
+ *
+ * A matched call is consumed, so an expected call that repeats needs the
+ * actual trajectory to hold it as many times.
+ */
+export function areToolCallsAnyOrderMatch(
+  actual: FunctionCall[],
+  expected: FunctionCall[],
+): boolean {
+  const remaining = [...actual];
+  for (const call of expected) {
+    const index = remaining.findIndex((candidate) =>
+      toolCallsEqual(candidate, call),
+    );
+    if (index === -1) {
+      return false;
+    }
+    remaining.splice(index, 1);
+  }
+
+  return true;
+}
+
+function toolCallsMatch(
+  matchType: ToolTrajectoryMatchType,
+  actual: FunctionCall[],
+  expected: FunctionCall[],
+): boolean {
+  switch (matchType) {
+    case ToolTrajectoryMatchType.EXACT:
+      return areToolCallsExactMatch(actual, expected);
+    case ToolTrajectoryMatchType.IN_ORDER:
+      return areToolCallsInOrderMatch(actual, expected);
+    case ToolTrajectoryMatchType.ANY_ORDER:
+      return areToolCallsAnyOrderMatch(actual, expected);
+    default:
+      throw new InputValidationError(`Unsupported match type ${matchType}`);
+  }
+}
+
+/**
+ * Scores an agent's tool use trajectory against a golden one.
+ *
+ * An invocation scores 1.0 when its tool calls match the expected calls under
+ * the configured match type, and 0.0 otherwise. The overall score is the mean
+ * over the invocations, and a score at or above the threshold passes.
+ */
+export class TrajectoryEvaluator implements Evaluator {
+  private readonly threshold: number;
+  private readonly matchType: ToolTrajectoryMatchType;
+
+  constructor(options: TrajectoryEvaluatorOptions) {
+    this.threshold = options.threshold;
+    this.matchType = options.matchType ?? ToolTrajectoryMatchType.EXACT;
+  }
+
+  /**
+   * Scores each actual invocation against its expected counterpart.
+   *
+   * Scoring an empty list evaluates nothing: the result carries no overall
+   * score and the status {@link EvalStatus.NOT_EVALUATED}.
+   *
+   * @throws {InputValidationError} When `expectedInvocations` is absent, when
+   *   the two lists have different lengths, or when the match type is not one
+   *   of {@link ToolTrajectoryMatchType}.
+   */
+  evaluateInvocations(
+    actualInvocations: Invocation[],
+    expectedInvocations?: Invocation[],
+  ): EvaluationResult {
+    if (expectedInvocations === undefined) {
+      throw new InputValidationError(
+        'expectedInvocations is needed by this metric.',
+      );
+    }
+    validateInvocationLengths(actualInvocations, expectedInvocations);
+
+    const perInvocationResults: PerInvocationResult[] = [];
+    let totalScore = 0;
+
+    for (const [index, actualInvocation] of actualInvocations.entries()) {
+      const expectedInvocation = expectedInvocations[index];
+      const score = this.scoreInvocation(actualInvocation, expectedInvocation);
+      totalScore += score;
+      perInvocationResults.push({
+        actualInvocation,
+        expectedInvocation,
+        score,
+        evalStatus: this.getEvalStatus(score),
+      });
+    }
+
+    if (perInvocationResults.length === 0) {
+      return {
+        overallEvalStatus: EvalStatus.NOT_EVALUATED,
+        perInvocationResults,
+      };
+    }
+
+    const overallScore = totalScore / perInvocationResults.length;
+
+    return {
+      overallScore,
+      overallEvalStatus: this.getEvalStatus(overallScore),
+      perInvocationResults,
+    };
+  }
+
+  private scoreInvocation(actual: Invocation, expected: Invocation): number {
+    const matches = toolCallsMatch(
+      this.matchType,
+      getAllToolCalls(actual.intermediateData),
+      getAllToolCalls(expected.intermediateData),
+    );
+
+    return matches ? 1.0 : 0.0;
+  }
+
+  private getEvalStatus(score: number): EvalStatus {
+    return score >= this.threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
+  }
 }
