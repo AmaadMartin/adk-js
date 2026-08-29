@@ -5,11 +5,30 @@
  */
 
 import {FunctionDeclaration, Schema, Type} from '@google/genai';
+import {zodToJsonSchema as toJSONSchemaV3} from 'zod-to-json-schema';
 import {z as z3} from 'zod/v3';
-import {z as z4} from 'zod/v4';
+import {toJSONSchema as toJSONSchemaV4, z as z4} from 'zod/v4';
 
-import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
+import {formatError} from '../utils/error_utils.js';
+import {logger} from '../utils/logger.js';
+import {SchemaLike} from '../utils/schema.js';
+import {sanitizeJsonSchemaForGemini} from '../utils/schema_variant_utils.js';
+import {
+  isZodObject,
+  isZodSchema,
+  isZodV3Schema,
+  isZodV4Schema,
+  zodObjectToSchema,
+} from '../utils/simple_zod_to_json.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
+import {
+  buildFunctionDeclarationWithJsonSchema,
+  CONTEXT_PARAMETER_NAMES,
+  isNullReturnTypeName,
+  toSchemaType,
+  unwrapReturnTypeName,
+} from './_function_tool_declarations.js';
 
 /**
  * A JSON Schema node as handed over by a tool wrapper that already owns a
@@ -55,6 +74,11 @@ export interface BuildFunctionDeclarationOptions {
    * return annotation adk-python reflects over, which TypeScript erases.
    */
   returnType?: string;
+  /**
+   * A schema for the return value, for a return type no type name can express.
+   * Takes precedence over `returnType`.
+   */
+  returnSchema?: SchemaLike | JsonSchemaNode;
 }
 
 /** The options every schema-driven builder shares. */
@@ -80,52 +104,6 @@ export interface BuildFunctionDeclarationFromSchemaOptions extends BuildFromSche
 export interface BuildFunctionDeclarationFromPropertiesOptions extends BuildFromSchemaBaseOptions {
   /** The `properties` map of a schema, without its enclosing node. */
   parameterProperties?: Record<string, JsonSchemaNode>;
-}
-
-/**
- * Schema and language type names to genai types, transcribed from
- * adk-python's `_py_type_2_schema_type`.
- */
-const SCHEMA_TYPE_BY_NAME: Record<string, Type> = {
-  'str': Type.STRING,
-  'int': Type.INTEGER,
-  'float': Type.NUMBER,
-  'bool': Type.BOOLEAN,
-  'string': Type.STRING,
-  'integer': Type.INTEGER,
-  'number': Type.NUMBER,
-  'boolean': Type.BOOLEAN,
-  'list': Type.ARRAY,
-  'array': Type.ARRAY,
-  'tuple': Type.ARRAY,
-  'object': Type.OBJECT,
-  'Dict': Type.OBJECT,
-  'List': Type.ARRAY,
-  'Tuple': Type.ARRAY,
-  'Any': Type.TYPE_UNSPECIFIED,
-};
-
-/**
- * The same table keyed by lower-case name, so the upper-case type names
- * `zodObjectToSchema` emits (`'STRING'`, `'ARRAY'`) also resolve.
- */
-const SCHEMA_TYPE_BY_LOWERCASE_NAME: Record<string, Type> = Object.fromEntries(
-  Object.entries(SCHEMA_TYPE_BY_NAME).map(([name, type]) => [
-    name.toLowerCase(),
-    type,
-  ]),
-);
-
-/** The return type names that describe an empty return value. */
-const NULL_RETURN_TYPE_NAMES = ['none', 'null'];
-
-/** Resolves a raw type name, exact match first, then case-insensitively. */
-function toSchemaType(typeName: string): Type {
-  return (
-    SCHEMA_TYPE_BY_NAME[typeName] ??
-    SCHEMA_TYPE_BY_LOWERCASE_NAME[typeName.toLowerCase()] ??
-    Type.TYPE_UNSPECIFIED
-  );
 }
 
 /**
@@ -279,9 +257,11 @@ function toGenaiSchema(node: JsonSchemaNode): Schema {
 /**
  * `_get_return_type`: the response schema for a named return type.
  *
- * An absent return type is adk-python's `Any`. The reflection path renders it
- * as a schema with no type at all and the schema path renders it as
- * `TYPE_UNSPECIFIED`, so the caller passes the form it needs.
+ * A streaming return type declares its yield type, so the name is unwrapped
+ * before it is resolved. An absent return type is adk-python's `Any`: the
+ * reflection path renders it as a schema with no type at all and the schema
+ * path renders it as `TYPE_UNSPECIFIED`, so the caller passes the form it
+ * needs.
  */
 function mapReturnType(
   returnType: string | undefined,
@@ -290,16 +270,34 @@ function mapReturnType(
   if (returnType === undefined) {
     return absentReturnType;
   }
-  if (NULL_RETURN_TYPE_NAMES.includes(returnType.toLowerCase())) {
+  const typeName = unwrapReturnTypeName(returnType);
+  if (isNullReturnTypeName(typeName)) {
     return {type: Type.NULL};
   }
-  return {type: toSchemaType(returnType)};
+  return {type: toSchemaType(typeName)};
+}
+
+/**
+ * The genai `parameters` schema for a normalised node, or `undefined` when the
+ * node declares no property: a parameterless tool must not advertise an empty
+ * OBJECT schema.
+ */
+function toParametersSchema(schema: JsonSchemaNode): Schema | undefined {
+  const properties = mapProperties(schema.properties ?? {}, toGenaiSchema);
+  if (Object.keys(properties).length === 0) {
+    return undefined;
+  }
+  return {
+    type: Type.OBJECT,
+    properties,
+    required: schema.required ?? [],
+  };
 }
 
 function assembleDeclaration(
   name: string,
   description: string | undefined,
-  schema: JsonSchemaNode,
+  parameters: Schema | undefined,
   response: Schema | undefined,
 ): FunctionDeclaration {
   if (!name) {
@@ -309,14 +307,8 @@ function assembleDeclaration(
   if (description !== undefined) {
     declaration.description = description;
   }
-  const properties = mapProperties(schema.properties ?? {}, toGenaiSchema);
-  // A parameterless tool must not advertise an empty OBJECT schema.
-  if (Object.keys(properties).length > 0) {
-    declaration.parameters = {
-      type: Type.OBJECT,
-      properties,
-      required: schema.required ?? [],
-    };
+  if (parameters !== undefined) {
+    declaration.parameters = parameters;
   }
   if (response !== undefined) {
     declaration.response = response;
@@ -324,16 +316,194 @@ function assembleDeclaration(
   return declaration;
 }
 
-function toJsonSchemaNode(
-  parameters: FunctionDeclarationParameters,
-): JsonSchemaNode {
-  if (parameters === undefined) {
+/**
+ * Renders a schema source as a JSON Schema node with the strict converter.
+ *
+ * Only a Zod object has a strict rendering; every other Zod schema is left to
+ * {@link lenientSchemaNode}.
+ */
+function strictSchemaNode(source: SchemaLike | JsonSchemaNode): JsonSchemaNode {
+  if (isZodObject(source)) {
+    return zodObjectToSchema(source);
+  }
+  if (isZodSchema(source)) {
+    throw new Error('Only a Zod object renders as a genai Schema directly.');
+  }
+  return readJsonSchemaNode(source);
+}
+
+/**
+ * Count and length bounds, which the genai `Schema` dialect sends as strings
+ * and a JSON Schema document sends as numbers.
+ */
+const GENAI_STRING_BOUND_KEYS: ReadonlySet<string> = new Set([
+  'minItems',
+  'maxItems',
+  'minLength',
+  'maxLength',
+  'minProperties',
+  'maxProperties',
+]);
+
+/**
+ * Reads a plain JSON Schema document as a {@link JsonSchemaNode}, stringifying
+ * the bounds the two dialects spell differently.
+ *
+ * adk-python coerces the same fields when it validates a fallback document
+ * into a `types.Schema`. Anything else is copied through, so the reader is
+ * total: a document it does not recognise still produces a node.
+ */
+function readJsonSchemaNode(document: unknown): JsonSchemaNode {
+  if (
+    document === null ||
+    typeof document !== 'object' ||
+    Array.isArray(document)
+  ) {
     return {};
   }
-  if (isZodObject(parameters)) {
-    return zodObjectToSchema(parameters);
+  const node: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(document)) {
+    if (GENAI_STRING_BOUND_KEYS.has(key) && typeof value === 'number') {
+      node[key] = String(value);
+    } else if (key === 'items') {
+      node[key] = readJsonSchemaNode(value);
+    } else if (key === 'anyOf' && Array.isArray(value)) {
+      node[key] = value.map(readJsonSchemaNode);
+    } else if (
+      key === 'properties' &&
+      value !== null &&
+      typeof value === 'object'
+    ) {
+      node[key] = Object.fromEntries(
+        Object.entries(value).map(([name, property]) => [
+          name,
+          readJsonSchemaNode(property),
+        ]),
+      );
+    } else {
+      node[key] = value;
+    }
   }
-  return parameters;
+  return node as JsonSchemaNode;
+}
+
+/**
+ * Renders a schema source as a JSON Schema node with the lenient converter.
+ *
+ * `zodObjectToSchema` refuses a schema that has no JSON Schema form, such as a
+ * `z.date()` or `z.custom()` property, and that refusal would otherwise fail
+ * the whole declaration. The lenient converter renders the offending property
+ * as an unconstrained schema instead. It targets the same OpenAPI dialect the
+ * strict converter does, so the two documents differ only where the strict one
+ * refuses.
+ */
+function lenientSchemaNode(
+  source: SchemaLike | JsonSchemaNode,
+  vertexai: boolean,
+): JsonSchemaNode {
+  const node = readJsonSchemaNode(toLenientDocument(source));
+  // Vertex AI accepts the full OpenAPI `format` vocabulary, so the document
+  // reaches it untouched; the Gemini Developer API rejects most of it.
+  return vertexai
+    ? node
+    : readJsonSchemaNode(sanitizeJsonSchemaForGemini(node));
+}
+
+/** Converts a Zod schema leniently; any other source is already a document. */
+function toLenientDocument(source: SchemaLike | JsonSchemaNode): unknown {
+  if (isZodV4Schema(source)) {
+    return toJSONSchemaV4(source, {
+      target: 'openapi-3.0',
+      io: 'input',
+      unrepresentable: 'any',
+    });
+  }
+  if (isZodV3Schema(source)) {
+    return toJSONSchemaV3(source, {target: 'openApi3'});
+  }
+  return source;
+}
+
+/** Renders a schema source strictly, and leniently when that is refused. */
+function toSchemaNode(
+  source: SchemaLike | JsonSchemaNode,
+  vertexai: boolean,
+): JsonSchemaNode {
+  try {
+    return strictSchemaNode(source);
+  } catch {
+    return lenientSchemaNode(source, vertexai);
+  }
+}
+
+/**
+ * The genai `parameters` schema for a tool, with the context parameters and
+ * the caller's ignored parameters removed.
+ *
+ * Removing a property removes it from `required` too, because
+ * {@link annotateRequiredFields} derives that list from the properties that
+ * survive.
+ */
+function buildParametersSchema(
+  options: BuildFunctionDeclarationOptions,
+  vertexai: boolean,
+): Schema | undefined {
+  try {
+    const node = toSchemaNode(options.parameters ?? {}, vertexai);
+    const ignored = new Set([
+      ...CONTEXT_PARAMETER_NAMES,
+      ...(options.ignoreParams ?? []),
+    ]);
+    const properties = Object.fromEntries(
+      Object.entries(node.properties ?? {}).filter(
+        ([name]) => !ignored.has(name),
+      ),
+    );
+    return toParametersSchema(
+      processJsonSchema(vertexai, {...node, properties}),
+    );
+  } catch (error: unknown) {
+    throw new Error(
+      `Failed to parse the parameters of function ${options.name} for` +
+        ' automatic function calling. Automatic function calling works best' +
+        ' with a simpler parameter schema; consider building the declaration' +
+        ` for function ${options.name} manually.`,
+      {cause: error},
+    );
+  }
+}
+
+/**
+ * The genai `response` schema for a tool.
+ *
+ * A return schema neither converter can render degrades to no response schema
+ * at all, with one warning: adk-python never lets a return type fail a
+ * declaration whose parameters are valid.
+ */
+function buildResponseSchema(
+  options: BuildFunctionDeclarationOptions,
+  vertexai: boolean,
+): Schema | undefined {
+  const {returnSchema} = options;
+  if (returnSchema === undefined) {
+    return mapReturnType(options.returnType, {});
+  }
+  let originalError: unknown;
+  try {
+    return toGenaiSchema(strictSchemaNode(returnSchema));
+  } catch (error: unknown) {
+    originalError = error;
+  }
+  try {
+    return toGenaiSchema(lenientSchemaNode(returnSchema, vertexai));
+  } catch (error: unknown) {
+    logger.warn(
+      `Could not build a response schema for ${options.name}; omitting it.` +
+        ` Fallback error: ${formatError(error)}.` +
+        ` Original error: ${formatError(originalError)}.`,
+    );
+    return undefined;
+  }
 }
 
 /**
@@ -348,7 +518,7 @@ export function buildFunctionDeclarationUtil(
   return assembleDeclaration(
     options.name,
     options.description,
-    options.schema ?? {},
+    toParametersSchema(options.schema ?? {}),
     options.vertexai
       ? mapReturnType(options.returnType, {type: Type.TYPE_UNSPECIFIED})
       : undefined,
@@ -401,18 +571,23 @@ export function buildFunctionDeclaration(
   options: BuildFunctionDeclarationOptions,
 ): FunctionDeclaration {
   const variant = options.variant ?? GoogleLLMVariant.GEMINI_API;
+  if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+    const declaration = buildFunctionDeclarationWithJsonSchema({
+      ...options,
+      variant,
+    });
+    // The Gemini Developer API does not accept `responseJsonSchema` yet, and
+    // a serialized declaration must not carry the key at all.
+    if (variant !== GoogleLLMVariant.VERTEX_AI) {
+      delete declaration.responseJsonSchema;
+    }
+    return declaration;
+  }
   const vertexai = variant === GoogleLLMVariant.VERTEX_AI;
-  const parameters = toJsonSchemaNode(options.parameters);
-  const ignoreParams = options.ignoreParams ?? [];
-  const properties = Object.fromEntries(
-    Object.entries(parameters.properties ?? {}).filter(
-      ([name]) => !ignoreParams.includes(name),
-    ),
-  );
   return assembleDeclaration(
     options.name,
     options.description,
-    processJsonSchema(vertexai, {...parameters, properties}),
-    vertexai ? mapReturnType(options.returnType, {}) : undefined,
+    buildParametersSchema(options, vertexai),
+    vertexai ? buildResponseSchema(options, vertexai) : undefined,
   );
 }
