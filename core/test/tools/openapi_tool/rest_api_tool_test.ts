@@ -14,6 +14,7 @@ import {
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
+import {Type} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -305,7 +306,7 @@ describe('RestApiTool', () => {
     expect(declaration).toEqual({
       name: 'test_tool',
       description: 'description',
-      parameters: mockSchema,
+      parameters: {type: Type.OBJECT, properties: {}},
     });
   });
 
