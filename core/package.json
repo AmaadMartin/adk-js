@@ -105,6 +105,7 @@
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/storage": "^7.17.1",
+    "@langchain/core": "^1.2.3",
     "@mikro-orm/sqlite": "^6.6.6",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@opentelemetry/context-async-hooks": "^2.1.0",
@@ -118,6 +119,7 @@
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/storage": "^7.17.1",
+    "@langchain/core": "^1.0.0",
     "@mikro-orm/mariadb": "^6.6.6",
     "@mikro-orm/mssql": "^6.6.6",
     "@mikro-orm/mysql": "^6.6.6",
@@ -134,6 +136,9 @@
       "optional": true
     },
     "@google-cloud/storage": {
+      "optional": true
+    },
+    "@langchain/core": {
       "optional": true
     },
     "@mikro-orm/mariadb": {
