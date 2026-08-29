@@ -31,15 +31,16 @@ const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 /**
  * A single scored result returned by `searchExamples`.
  *
- * Fields holding a proto3 default value are omitted from the JSON response, so
- * everything but the nested messages themselves is optional.
+ * Every field is optional: proto3 JSON omits unset fields, and an unset nested
+ * message is omitted whole. `example` also holds a oneof, so a variant this
+ * provider does not read leaves `storedContentsExample` absent.
  */
 export interface SimilarExample {
   similarityScore?: number;
-  example: {
-    storedContentsExample: {
+  example?: {
+    storedContentsExample?: {
       searchKey?: string;
-      contentsExample?: {expectedContents?: Array<{content: Content}>};
+      contentsExample?: {expectedContents?: Array<{content?: Content}>};
     };
   };
 }
@@ -58,10 +59,9 @@ function toPart(part: Part): Part | undefined {
     return createPartFromText(part.text);
   }
   if (part.functionCall) {
-    return createPartFromFunctionCall(
-      part.functionCall.name ?? '',
-      part.functionCall.args ?? {},
-    );
+    return createPartFromFunctionCall(part.functionCall.name ?? '', {
+      ...part.functionCall.args,
+    });
   }
   if (part.functionResponse) {
     // Not createPartFromFunctionResponse: that also stamps an `id`, which
@@ -69,7 +69,7 @@ function toPart(part: Part): Part | undefined {
     return {
       functionResponse: {
         name: part.functionResponse.name,
-        response: part.functionResponse.response ?? {},
+        response: {...part.functionResponse.response},
       },
     };
   }
@@ -77,14 +77,15 @@ function toPart(part: Part): Part | undefined {
 }
 
 function toExample(result: SimilarExample): Example {
-  const {searchKey = '', contentsExample} =
-    result.example.storedContentsExample;
+  const stored = result.example?.storedContentsExample;
   return {
-    input: createUserContent(searchKey),
-    output: (contentsExample?.expectedContents ?? []).map(({content}) => ({
-      role: content.role,
-      parts: (content.parts ?? []).flatMap((part) => toPart(part) ?? []),
-    })),
+    input: createUserContent(stored?.searchKey ?? ''),
+    output: (stored?.contentsExample?.expectedContents ?? []).map(
+      ({content}) => ({
+        role: content?.role,
+        parts: (content?.parts ?? []).flatMap((part) => toPart(part) ?? []),
+      }),
+    ),
   };
 }
 
