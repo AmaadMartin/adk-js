@@ -16,6 +16,12 @@ export interface AuthPreparationResult {
   authCredential?: AuthCredential;
 }
 
+/**
+ * Credential key used when an OpenAPI tool is configured without one.
+ * `AuthConfig.credentialKey` is required, so every config needs a key.
+ */
+export const DEFAULT_OPENAPI_CREDENTIAL_KEY = 'default_openapi_key';
+
 class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
 
@@ -83,7 +89,7 @@ export class ToolAuthHandler {
     const authConfig: AuthConfig = {
       authScheme: this.authScheme,
       rawAuthCredential: this.authCredential,
-      credentialKey: this.credentialKey || 'default_openapi_key',
+      credentialKey: this.credentialKey || DEFAULT_OPENAPI_CREDENTIAL_KEY,
     };
 
     // A credential returned by an auth response was supplied interactively by

@@ -11,6 +11,11 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
+import {
+  DispatcherRequestInit,
+  resolveSslDispatcher,
+  SslVerify,
+} from '../../utils/ssl_utils.js';
 import {version} from '../../version.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
@@ -48,6 +53,8 @@ export interface RestApiToolOptions extends OperationParserOptions {
   credentialKey?: string;
   /** Issues the request. Defaults to `globalThis.fetch`. */
   fetchFn?: FetchFn;
+  /** TLS certificate verification for the request. */
+  sslVerify?: SslVerify;
 }
 
 @experimental
@@ -58,6 +65,7 @@ export class RestApiTool extends BaseTool {
   private credentialKey?: string;
   private fetchFn?: FetchFn;
   private defaultHeaders: Record<string, string> = {};
+  private sslVerify?: SslVerify;
 
   constructor(
     name: string,
@@ -74,6 +82,7 @@ export class RestApiTool extends BaseTool {
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
     this.fetchFn = options.fetchFn;
+    this.sslVerify = options.sslVerify;
     this.operationParser = new OperationParser(operation, options);
   }
 
@@ -103,6 +112,17 @@ export class RestApiTool extends BaseTool {
   @experimental
   public setDefaultHeaders(headers: Record<string, string>) {
     this.defaultHeaders = headers;
+  }
+
+  /**
+   * Sets TLS certificate verification for this tool's outgoing requests.
+   *
+   * @param sslVerify The setting. Call with no argument to restore the default
+   *     verification against the system CA.
+   */
+  @experimental
+  public configureSslVerify(sslVerify?: SslVerify) {
+    this.sslVerify = sslVerify;
   }
 
   @experimental
@@ -183,16 +203,23 @@ export class RestApiTool extends BaseTool {
     });
     addMissingHeaders(headers, this.defaultHeaders);
 
+    const init: DispatcherRequestInit = {
+      method,
+      headers,
+      // eslint-disable-next-line no-undef
+      body: body as BodyInit,
+    };
+    const dispatcher = await resolveSslDispatcher(this.sslVerify);
+    if (dispatcher) {
+      init.dispatcher = dispatcher;
+    }
+
     const fetchFn: FetchFn =
-      this.fetchFn ?? ((input, init) => globalThis.fetch(input, init));
+      this.fetchFn ??
+      ((input, requestInit) => globalThis.fetch(input, requestInit));
 
     try {
-      const response = await fetchFn(url, {
-        method,
-        headers,
-        // eslint-disable-next-line no-undef
-        body: body as BodyInit,
-      });
+      const response = await fetchFn(url, init);
 
       // The URL as built from the arguments, before the credential is applied,
       // because an apiKey scheme with `in: query` puts its secret in the URL.

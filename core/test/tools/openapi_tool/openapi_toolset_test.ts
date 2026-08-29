@@ -5,13 +5,30 @@
  */
 
 import {
+  AuthCredential,
   AuthCredentialTypes,
+  Context,
+  createSession,
+  DEFAULT_OPENAPI_CREDENTIAL_KEY,
+  HttpDispatcher,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
   OpenAPIToolset,
+  PluginManager,
   ReadonlyContext,
 } from '@google/adk';
+import yaml from 'js-yaml';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockedFunction,
+  vi,
+} from 'vitest';
 
 describe('OpenAPIToolset', () => {
   const mockSpec: OpenAPIV3.Document = {
@@ -442,5 +459,286 @@ describe('OpenApiSpecParser', () => {
       'multiProp'
     ] as OpenAPIV3.SchemaObject;
     expect(multiPropSchema.type).toEqual(['string', 'integer']);
+  });
+});
+
+const paritySpec: OpenAPIV3.Document = {
+  openapi: '3.0.0',
+  info: {title: 'Users API', version: '1.0.0'},
+  servers: [{url: 'https://api.example.com'}],
+  paths: {
+    '/users': {
+      get: {
+        operationId: 'getUsers',
+        summary: 'Get users',
+        responses: {'200': {description: 'OK'}},
+      },
+      post: {
+        operationId: 'createUser',
+        summary: 'Create user',
+        responses: {'201': {description: 'Created'}},
+      },
+    },
+  },
+};
+
+const apiKeyScheme: OpenAPIV3.ApiKeySecurityScheme = {
+  type: 'apiKey',
+  name: 'key',
+  in: 'header',
+};
+
+const apiKeyCredential: AuthCredential = {
+  authType: AuthCredentialTypes.API_KEY,
+  apiKey: 'my-key',
+};
+
+/** A dispatcher the application built itself. */
+const fakeDispatcher: HttpDispatcher = {dispatch: () => true};
+
+/**
+ * Widens a `specType` the way an untyped JavaScript caller reaches the
+ * constructor. TypeScript rejects the literal at the call site, so the
+ * `Unsupported spec type` guard is unreachable without this.
+ */
+function untypedSpecType(specType: string): 'json' | 'yaml' {
+  return specType as 'json' | 'yaml';
+}
+
+function newToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'invocation-1',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'session-1', appName: 'test_app'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
+
+describe('OpenAPIToolset.getTool', () => {
+  it('returns the tool with that name', () => {
+    const toolset = new OpenAPIToolset({specDict: paritySpec});
+
+    expect(toolset.getTool('get_users')?.name).toBe('get_users');
+  });
+
+  it('returns undefined for a name it did not generate', () => {
+    const toolset = new OpenAPIToolset({specDict: paritySpec});
+
+    expect(toolset.getTool('delete_users')).toBeUndefined();
+  });
+
+  it('matches the prefixed name, not the bare one', () => {
+    const toolset = new OpenAPIToolset({specDict: paritySpec, prefix: 'test'});
+
+    expect(toolset.getTool('test_get_users')?.name).toBe('test_get_users');
+    expect(toolset.getTool('get_users')).toBeUndefined();
+  });
+});
+
+describe('OpenAPIToolset sslVerify', () => {
+  const originalFetch = globalThis.fetch;
+  let fetchMock: MockedFunction<typeof globalThis.fetch>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response('{}', {headers: {'content-type': 'application/json'}}),
+    );
+    globalThis.fetch = fetchMock;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /** Runs every tool the toolset exposes and returns the `fetch` options. */
+  async function runAll(toolset: OpenAPIToolset) {
+    for (const tool of await toolset.getTools()) {
+      await tool.runAsync({args: {}, toolContext: newToolContext()});
+    }
+    return fetchMock.mock.calls.map(([, init]) => init ?? {});
+  }
+
+  it('sends no dispatcher when the toolset sets no sslVerify', async () => {
+    const inits = await runAll(new OpenAPIToolset({specDict: paritySpec}));
+
+    expect(inits).toHaveLength(2);
+    for (const init of inits) {
+      expect(init).not.toHaveProperty('dispatcher');
+    }
+  });
+
+  it('sends the constructor dispatcher on every tool', async () => {
+    const inits = await runAll(
+      new OpenAPIToolset({specDict: paritySpec, sslVerify: fakeDispatcher}),
+    );
+
+    expect(inits).toHaveLength(2);
+    for (const init of inits) {
+      expect(init).toEqual(
+        expect.objectContaining({dispatcher: fakeDispatcher}),
+      );
+    }
+  });
+
+  it('sends the dispatcher configureSslVerifyAll set on every tool', async () => {
+    const toolset = new OpenAPIToolset({specDict: paritySpec});
+    toolset.configureSslVerifyAll(fakeDispatcher);
+
+    const inits = await runAll(toolset);
+
+    expect(inits).toHaveLength(2);
+    for (const init of inits) {
+      expect(init).toEqual(
+        expect.objectContaining({dispatcher: fakeDispatcher}),
+      );
+    }
+  });
+
+  it('clears a configured dispatcher when called with no argument', async () => {
+    const toolset = new OpenAPIToolset({
+      specDict: paritySpec,
+      sslVerify: fakeDispatcher,
+    });
+    toolset.configureSslVerifyAll();
+
+    const inits = await runAll(toolset);
+
+    expect(inits).toHaveLength(2);
+    for (const init of inits) {
+      expect(init).not.toHaveProperty('dispatcher');
+    }
+  });
+});
+
+describe('OpenAPIToolset.getAuthConfig', () => {
+  it('reports the scheme, credential and key it was given', () => {
+    const toolset = new OpenAPIToolset({
+      specDict: paritySpec,
+      authScheme: apiKeyScheme,
+      authCredential: apiKeyCredential,
+      credentialKey: 'my-api',
+    });
+
+    expect(toolset.getAuthConfig()).toEqual({
+      authScheme: apiKeyScheme,
+      rawAuthCredential: apiKeyCredential,
+      credentialKey: 'my-api',
+    });
+  });
+
+  it('falls back to the default credential key', () => {
+    const toolset = new OpenAPIToolset({
+      specDict: paritySpec,
+      authScheme: apiKeyScheme,
+    });
+
+    expect(toolset.getAuthConfig()?.credentialKey).toBe(
+      DEFAULT_OPENAPI_CREDENTIAL_KEY,
+    );
+  });
+
+  it('reports no config when only a credential was given', () => {
+    const toolset = new OpenAPIToolset({
+      specDict: paritySpec,
+      authCredential: apiKeyCredential,
+    });
+
+    expect(toolset.getAuthConfig()).toBeUndefined();
+  });
+});
+
+describe('OpenAPIToolset spec loading', () => {
+  it('reads an explicit JSON spec string', async () => {
+    const toolset = new OpenAPIToolset({
+      specStr: JSON.stringify(paritySpec),
+      specType: 'json',
+    });
+
+    expect((await toolset.getTools()).map((tool) => tool.name)).toEqual([
+      'get_users',
+      'create_user',
+    ]);
+  });
+
+  it('reads a YAML spec string that opens with a document marker', async () => {
+    const toolset = new OpenAPIToolset({
+      specStr: `---\n${yaml.dump(paritySpec)}`,
+    });
+
+    expect((await toolset.getTools()).map((tool) => tool.name)).toEqual([
+      'get_users',
+      'create_user',
+    ]);
+  });
+
+  it('rejects a spec type it cannot parse', () => {
+    expect(
+      () =>
+        new OpenAPIToolset({
+          specStr: JSON.stringify(paritySpec),
+          specType: untypedSpecType('xml'),
+        }),
+    ).toThrow('Unsupported spec type: xml');
+  });
+
+  it('rejects a JSON spec string that parses to a scalar', () => {
+    expect(
+      () => new OpenAPIToolset({specStr: '"a string"', specType: 'json'}),
+    ).toThrow('The OpenAPI specification must be an object');
+  });
+
+  it('rejects a JSON spec string that parses to null', () => {
+    expect(
+      () => new OpenAPIToolset({specStr: 'null', specType: 'json'}),
+    ).toThrow('The OpenAPI specification must be an object');
+  });
+
+  it('rejects a JSON spec string that parses to an array', () => {
+    expect(() => new OpenAPIToolset({specStr: '[]', specType: 'json'})).toThrow(
+      'The OpenAPI specification must be an object',
+    );
+  });
+
+  it('rejects a YAML spec string that parses to a scalar', () => {
+    expect(
+      () => new OpenAPIToolset({specStr: 'a string', specType: 'yaml'}),
+    ).toThrow('The OpenAPI specification must be an object');
+  });
+
+  it('rejects a toolset built with no spec at all', () => {
+    expect(() => new OpenAPIToolset()).toThrow(
+      'Either specDict or specStr must be provided.',
+    );
+  });
+});
+
+describe('OpenAPIToolset predicate filter without a context', () => {
+  it('applies the predicate when getTools is called with no context', async () => {
+    const toolset = new OpenAPIToolset({
+      specDict: paritySpec,
+      toolFilter: (tool) => tool.name === 'get_users',
+    });
+
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['get_users']);
+  });
+
+  it('passes no context to the predicate outside an invocation', async () => {
+    const seen: Array<ReadonlyContext | undefined> = [];
+    const toolset = new OpenAPIToolset({
+      specDict: paritySpec,
+      toolFilter: (tool, readonlyContext) => {
+        seen.push(readonlyContext);
+        return true;
+      },
+    });
+
+    await toolset.getTools();
+
+    expect(seen).toEqual([undefined, undefined]);
   });
 });
