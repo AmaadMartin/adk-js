@@ -201,7 +201,7 @@ describe('OpenApiSpecParser', () => {
 
     expect(parsed.length).toBe(1);
     const op = parsed[0];
-    expect(op.name).toBe('get__users__id_');
+    expect(op.name).toBe('get_users_id');
     expect(op.parameters.length).toBe(1);
     expect(op.parameters[0].name).toBe('id');
   });

@@ -25,9 +25,9 @@ import {googleOidcAuthScheme} from '../../../src/tools/google_api_tool/google_ap
 import {CALENDAR_DISCOVERY_DOCUMENT} from './discovery_fixtures.js';
 
 const CALENDAR_TOOL_NAMES = [
-  'calendar.calendars.get',
-  'calendar.calendars.insert',
-  'calendar.events.list',
+  'calendar_calendars_get',
+  'calendar_calendars_insert',
+  'calendar_events_list',
 ];
 
 const SERVICE_ACCOUNT: ServiceAccount = {
@@ -227,26 +227,26 @@ describe('GoogleApiToolset', () => {
   });
 
   it('applies a string filter with and without a context', async () => {
-    const toolset = createToolset({toolFilter: ['calendar.events.list']});
+    const toolset = createToolset({toolFilter: ['calendar_events_list']});
 
     expect((await toolset.getTools()).map((tool) => tool.name)).toEqual([
-      'calendar.events.list',
+      'calendar_events_list',
     ]);
     expect(
       (await toolset.getTools(createReadonlyContext())).map(
         (tool) => tool.name,
       ),
-    ).toEqual(['calendar.events.list']);
+    ).toEqual(['calendar_events_list']);
   });
 
   it('applies a predicate filter when a context is available', async () => {
     const toolset = createToolset({
-      toolFilter: (tool: BaseTool) => tool.name.endsWith('.get'),
+      toolFilter: (tool: BaseTool) => tool.name.endsWith('_get'),
     });
 
     const tools = await toolset.getTools(createReadonlyContext());
 
-    expect(tools.map((tool) => tool.name)).toEqual(['calendar.calendars.get']);
+    expect(tools.map((tool) => tool.name)).toEqual(['calendar_calendars_get']);
   });
 
   it('skips a predicate filter when no context is available', async () => {
@@ -267,10 +267,10 @@ describe('GoogleApiToolset', () => {
 
     const filtered = await createToolset({
       prefix: 'cal',
-      toolFilter: ['cal_calendar.events.list'],
+      toolFilter: ['cal_calendar_events_list'],
     }).getTools();
     expect(filtered.map((tool) => tool.name)).toEqual([
-      'cal_calendar.events.list',
+      'cal_calendar_events_list',
     ]);
   });
 
@@ -321,7 +321,7 @@ describe('GoogleApiToolset', () => {
     const tools = await createToolset({
       additionalHeaders: {'x-goog-user-project': 'my-project'},
     }).getTools();
-    const tool = tools.find((t) => t.name === 'calendar.calendars.get');
+    const tool = tools.find((t) => t.name === 'calendar_calendars_get');
     if (!tool) {
       return expect.fail('expected the calendars.get tool');
     }
