@@ -486,6 +486,7 @@ describe('loadWebPage', () => {
 
       expect(sentRequests[0].options.headers).toEqual({
         'accept-encoding': 'identity',
+        host: 'example.com',
       });
     });
 
@@ -527,6 +528,44 @@ describe('loadWebPage', () => {
 
       expect(result).toBe('Failed to fetch url: https://example.com/');
       expect(sentRequests).toHaveLength(1);
+    });
+  });
+
+  describe('host header and url port', () => {
+    it.each([
+      ['http://example.com:8080/', 'example.com:8080'],
+      ['http://example.com:80/', 'example.com'],
+      ['https://example.com:443/', 'example.com'],
+      ['https://example.com/', 'example.com'],
+    ])('sends %s with a Host of %s', async (url, host) => {
+      resolveTo('93.184.216.34');
+      respondWith('<p>This page has enough words to keep.</p>');
+
+      await loadWebPage(url);
+
+      expect(sentRequests[0].options.headers).toMatchObject({host});
+    });
+
+    it('brackets an IPv6 literal in the Host header', async () => {
+      respondWith('<p>This page has enough words to keep.</p>');
+
+      await loadWebPage('http://[2606:4700:4700::1111]:8080/');
+
+      expect(sentRequests[0].options.headers).toMatchObject({
+        host: '[2606:4700:4700::1111]:8080',
+      });
+    });
+
+    it.each([
+      'http://example.com:99999/',
+      'http://example.com:-1/',
+      'http://example.com:abc/',
+    ])('rejects %s, whose port is not a valid port', async (url) => {
+      const result = await loadWebPage(url);
+
+      expect(result).toBe(`Failed to fetch url: ${url}`);
+      expectNoRequest();
+      expect(lookupMock).not.toHaveBeenCalled();
     });
   });
 

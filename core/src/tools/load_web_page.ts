@@ -73,7 +73,9 @@ function failedToFetchMessage(url: string): string {
 /**
  * Validates the URL's scheme up front (before any network access). Throws for
  * malformed URLs and disallowed schemes. An `http`/`https` URL always carries a
- * hostname: the WHATWG parser rejects the scheme without one.
+ * hostname, and its port is always in 0-65535: the WHATWG parser rejects the
+ * scheme without a hostname, and rejects a port that is out of range or not a
+ * number.
  */
 function parseRequestTarget(url: string): URL {
   const parsed = new URL(url);
@@ -230,7 +232,9 @@ function sendRequest(
 /**
  * Requests `url` over a connection pinned to `address`. `agent: false`
  * keeps every attempt on its own connection, matching the per-attempt session
- * the Python tool opens.
+ * the Python tool opens. The `Host` header is set here rather than left to
+ * Node, so the header the origin sees is a property of this tool and is
+ * covered by its tests.
  */
 function requestPinnedAddress(
   url: URL,
@@ -239,7 +243,7 @@ function requestPinnedAddress(
 ): Promise<string | null> {
   const options: RequestOptions = {
     agent: false,
-    headers: {...IDENTITY_ENCODING},
+    headers: {...IDENTITY_ENCODING, host: url.host},
     lookup: pinnedLookup(address),
   };
   if (url.protocol === 'https:') {
