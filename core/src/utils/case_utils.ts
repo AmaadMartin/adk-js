@@ -5,6 +5,26 @@
  */
 
 /**
+ * Converts a string to snake_case.
+ *
+ * A run of non-alphanumeric characters becomes one underscore, a word
+ * boundary inside camelCase or after an acronym gains one, and leading,
+ * trailing and repeated underscores collapse away.
+ *
+ * @param text The string to convert.
+ * @returns The snake_case string.
+ */
+export function snakeCase(text: string): string {
+  return text
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+/**
  * Recursively converts snake_case keys of an object to camelCase.
  *
  * @param val The value to convert.
