@@ -4,8 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthClient, GoogleAuth, OAuth2Client} from 'google-auth-library';
-import {getClientLabels} from '../../utils/client_labels.js';
+import {
+  AuthClient,
+  GoogleAuth,
+  JWTInput,
+  OAuth2Client,
+} from 'google-auth-library';
+import {getTrackingHeaders} from '../../utils/client_labels.js';
 import {formatError} from '../../utils/error_utils.js';
 
 const CLOUD_PLATFORM_SCOPES = [
@@ -39,12 +44,22 @@ export interface SecretManagerClientOptions {
   location?: string;
 }
 
-function parseServiceAccountJson(serviceAccountJson: string): object {
+/** Narrows parsed JSON to the credentials shape `GoogleAuth` accepts. */
+function isJwtInput(value: unknown): value is JWTInput {
+  return typeof value === 'object' && value !== null;
+}
+
+function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
+  let parsed: unknown;
   try {
-    return JSON.parse(serviceAccountJson) as object;
+    parsed = JSON.parse(serviceAccountJson);
   } catch (e: unknown) {
     throw new Error(`Invalid service account JSON: ${formatError(e)}`);
   }
+  if (!isJwtInput(parsed)) {
+    throw new Error('Invalid service account JSON: expected a JSON object.');
+  }
+  return parsed;
 }
 
 /**
@@ -65,12 +80,6 @@ function resolveAuth(options: SecretManagerClientOptions): GoogleAuth {
     return new GoogleAuth({authClient, scopes: CLOUD_PLATFORM_SCOPES});
   }
   return new GoogleAuth({scopes: CLOUD_PLATFORM_SCOPES});
-}
-
-/** Headers that identify this client to Google APIs. */
-function trackingHeaders(): Record<string, string> {
-  const labels = getClientLabels().join(' ');
-  return {'x-goog-api-client': labels, 'user-agent': labels};
 }
 
 /**
@@ -114,14 +123,14 @@ export class SecretManagerClient {
    * permission failure) propagate to the caller unchanged.
    *
    * @param resourceName The full resource name of the secret version, in the
-   *   format `projects/*&#47;secrets/*&#47;versions/*`, e.g.
+   *   format `projects/{project}/secrets/{secret}/versions/{version}`, e.g.
    *   `projects/my-project/secrets/my-secret/versions/latest`.
    */
   async getSecret(resourceName: string): Promise<string> {
     const client = await this.getAuthClient();
     const response = await client.request<AccessSecretVersionResponse>({
       url: `https://${this.host}/${API_VERSION}/${resourceName}:access`,
-      headers: trackingHeaders(),
+      headers: getTrackingHeaders(),
     });
     return Buffer.from(response.data.payload.data, 'base64').toString('utf-8');
   }

@@ -129,6 +129,13 @@ describe('SecretManagerClient', () => {
       expect(mocks.googleAuthConstructor).not.toHaveBeenCalled();
     });
 
+    it('rejects service account JSON that is not an object', () => {
+      expect(
+        () => new SecretManagerClient({serviceAccountJson: '123'}),
+      ).toThrow('Invalid service account JSON: expected a JSON object.');
+      expect(mocks.googleAuthConstructor).not.toHaveBeenCalled();
+    });
+
     it('rejects both service account JSON and an auth token', () => {
       expect(
         () =>
