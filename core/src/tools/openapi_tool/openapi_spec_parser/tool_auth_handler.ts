@@ -178,10 +178,9 @@ export class ToolContextCredentialStore implements CredentialStore {
       return stored;
     }
 
+    // The two formats never collide: a derived key always carries a scheme
+    // digest and a credential digest, and the legacy key has neither.
     const legacyKey = this.getLegacyCredentialKey(authScheme);
-    if (legacyKey === key) {
-      return undefined;
-    }
     const legacy = this.context.state.get<AuthCredential>(legacyKey);
     if (!legacy) {
       return undefined;
