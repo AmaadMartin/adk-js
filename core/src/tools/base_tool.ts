@@ -14,6 +14,7 @@ import {LlmRequest} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
+import {ToolArgsConfig} from './tool_configs.js';
 
 /**
  * The parameters for `runAsync`.
@@ -229,6 +230,79 @@ export abstract class BaseTool {
   get apiVariant() {
     return getGoogleLlmVariant();
   }
+
+  /**
+   * Builds a tool from a config bag.
+   *
+   * Every ADK tool constructor takes a single options object, so a validated
+   * config bag is that options object. The base implementation therefore
+   * validates the keys of {@link BaseToolParams} and ignores the rest. A
+   * subclass whose constructor takes further options overrides this method,
+   * and uses `configAbsPath` to resolve paths the config states relative to
+   * the config file.
+   *
+   * `customMetadata` is checked for shape only. This method rejects an array
+   * and a non-object, and does not walk the value to confirm that it is JSON
+   * serializable, which stays the caller's obligation.
+   *
+   * @param config The args of the tool config.
+   * @param _configAbsPath The absolute path of the config file the config came
+   *     from.
+   * @return The tool instance.
+   * @throws Error if a recognized key holds a value of the wrong type.
+   */
+  static fromConfig(
+    this: new (params: BaseToolParams) => BaseTool,
+    config: ToolArgsConfig,
+    _configAbsPath: string,
+  ): BaseTool {
+    return new this(toBaseToolParams(config));
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function describeType(value: unknown): string {
+  if (value === null) {
+    return 'null';
+  }
+  return Array.isArray(value) ? 'array' : typeof value;
+}
+
+function invalidToolConfig(
+  key: string,
+  expected: string,
+  value: unknown,
+): Error {
+  return new Error(
+    `Invalid tool config: "${key}" must be ${expected}, got ${describeType(value)}.`,
+  );
+}
+
+/**
+ * Validates the keys of {@link BaseToolParams} in a tool config.
+ *
+ * @param config The args of the tool config.
+ * @return The validated constructor params.
+ * @throws Error if a recognized key holds a value of the wrong type.
+ */
+function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
+  const {name, description, isLongRunning, customMetadata} = config;
+  if (typeof name !== 'string') {
+    throw invalidToolConfig('name', 'a string', name);
+  }
+  if (typeof description !== 'string') {
+    throw invalidToolConfig('description', 'a string', description);
+  }
+  if (isLongRunning !== undefined && typeof isLongRunning !== 'boolean') {
+    throw invalidToolConfig('isLongRunning', 'a boolean', isLongRunning);
+  }
+  if (customMetadata !== undefined && !isPlainObject(customMetadata)) {
+    throw invalidToolConfig('customMetadata', 'an object', customMetadata);
+  }
+  return {name, description, isLongRunning, customMetadata};
 }
 
 function findToolWithFunctionDeclarations(

@@ -324,8 +324,10 @@ export {
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
+export type {ToolArgsConfig} from './tools/tool_configs.js';
 export {
   IntentMismatchError,
+  ToolConfirmation,
   ToolConfirmation,
   isIntentMismatchError,
 } from './tools/tool_confirmation.js';
