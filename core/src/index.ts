@@ -36,6 +36,32 @@ export {
   loadSkillFromDir,
   validateSkillDir,
 } from './skills/loader.js';
+// ConnectionsClient reaches 'google-auth-library' through ApiTransport, which
+// is Node only, so it is exported here and not from the browser barrel
+// 'common.ts'.
+export {ConnectionsClient} from './tools/application_integration_tool/clients/connections_client.js';
+export type {
+  ActionSchema,
+  ConnectionDetails,
+  ConnectionsClientOptions,
+  EntitySchemaAndOperations,
+} from './tools/application_integration_tool/clients/connections_client.js';
+export {
+  ENTITY_OPERATIONS,
+  actionRequest,
+  actionResponse,
+  convertJsonSchemaToOpenApiSchema,
+  executeCustomQueryRequest,
+  getActionOperation,
+  getConnectorBaseSpec,
+} from './tools/application_integration_tool/clients/connector_spec_builders.js';
+export type {
+  ConnectorOperationExtensions,
+  ConnectorPathItem,
+  ConnectorSpec,
+  EntityOperationBuilder,
+  EntityOperationContext,
+} from './tools/application_integration_tool/clients/connector_spec_builders.js';
 export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
