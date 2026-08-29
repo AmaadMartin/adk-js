@@ -72,6 +72,24 @@ describe('isBlockedAddress', () => {
     expect(isBlockedAddress('::ffff:127.0.0.1')).toBe(true);
   });
 
+  it.each([
+    '2001::1', // IETF protocol assignments
+    '2001:0:53aa:64c::1', // Teredo, 2001::/32
+    '2001:1ff:ffff::1', // last address of 2001::/23
+    '3fff::1', // documentation, RFC 9637
+    '3fff:fff:ffff::1', // last address of 3fff::/20
+  ])('blocks the reserved IPv6 prefix member %s', (address) => {
+    expect(isBlockedAddress(address)).toBe(true);
+  });
+
+  it.each([
+    '2000::1', // just below 2001::/23
+    '2001:200::1', // just above 2001::/23
+    '3fff:1000::1', // just above 3fff::/20
+  ])('allows the global address %s next to a reserved prefix', (address) => {
+    expect(isBlockedAddress(address)).toBe(false);
+  });
+
   it.each(['93.184.216.34', '8.8.8.8'])(
     'allows the public IPv4 address %s',
     (address) => {

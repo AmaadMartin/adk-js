@@ -47,6 +47,21 @@ vi.mock('node:tls', async (importOriginal) => ({
 const PROXY_USER = 'agent';
 const PROXY_SECRET = 'not-a-real-password';
 
+/**
+ * Proxy variables the tool consults. They are cleared before every test so a
+ * developer's own environment cannot change what the tool does here.
+ */
+const PROXY_ENV_NAMES = [
+  'all_proxy',
+  'ALL_PROXY',
+  'http_proxy',
+  'HTTP_PROXY',
+  'https_proxy',
+  'HTTPS_PROXY',
+  'no_proxy',
+  'NO_PROXY',
+];
+
 /** A stand-in for a TCP or TLS socket. */
 class FakeSocket extends EventEmitter {
   readonly destroy = vi.fn();
@@ -81,12 +96,16 @@ let sentRequests: FakeRequest[] = [];
 /** Drives a request once the tool has finished sending it. */
 let onRequestEnd: (request: FakeRequest) => void = () => {};
 
+/** Notifies a waiting test that the tool has issued a request. */
+let onRequestSent: (() => void) | undefined;
+
 function createFakeRequest(...args: RequestArgs): FakeRequest {
   const request =
     args.length === 2
       ? new FakeRequest(args[0], args[1])
       : new FakeRequest(undefined, args[0]);
   sentRequests.push(request);
+  onRequestSent?.();
   return request;
 }
 
@@ -139,6 +158,20 @@ function expectNoRequest(): void {
   expect(sentRequests).toHaveLength(0);
 }
 
+/**
+ * Waits until the tool issues its next request, without moving the fake clock.
+ * The tool imports parse5 lazily, so a fake-timer test has to let that import
+ * settle before it advances time against a request that does not exist yet.
+ */
+function nextRequest(): Promise<void> {
+  return new Promise((resolve) => {
+    onRequestSent = () => {
+      onRequestSent = undefined;
+      resolve();
+    };
+  });
+}
+
 /** Returns the addresses the pinned lookup of `request` answers with. */
 function pinnedLookupResults(request: FakeRequest): {
   single: string;
@@ -163,10 +196,14 @@ describe('loadWebPage', () => {
   beforeEach(() => {
     sentRequests = [];
     onRequestEnd = () => {};
+    onRequestSent = undefined;
     httpRequestMock.mockImplementation(createFakeRequest);
     httpsRequestMock.mockImplementation(createFakeRequest);
     tlsConnectMock.mockImplementation(() => new FakeSocket());
     lookupMock.mockReset();
+    for (const name of PROXY_ENV_NAMES) {
+      vi.stubEnv(name, undefined);
+    }
   });
 
   afterEach(() => {
@@ -486,6 +523,7 @@ describe('loadWebPage', () => {
 
       expect(sentRequests[0].options.headers).toEqual({
         'accept-encoding': 'identity',
+        host: 'example.com',
       });
     });
 
@@ -530,15 +568,58 @@ describe('loadWebPage', () => {
     });
   });
 
-  describe('proxy option', () => {
+  describe('host header and url port', () => {
+    it.each([
+      ['http://example.com:8080/', 'example.com:8080'],
+      ['http://example.com:80/', 'example.com'],
+      ['https://example.com:443/', 'example.com'],
+      ['https://example.com/', 'example.com'],
+    ])('sends %s with a Host of %s', async (url, host) => {
+      resolveTo('93.184.216.34');
+      respondWith('<p>This page has enough words to keep.</p>');
+
+      await loadWebPage(url);
+
+      expect(sentRequests[0].options.headers).toMatchObject({host});
+    });
+
+    it('brackets an IPv6 literal in the Host header', async () => {
+      respondWith('<p>This page has enough words to keep.</p>');
+
+      await loadWebPage('http://[2606:4700:4700::1111]:8080/');
+
+      expect(sentRequests[0].options.headers).toMatchObject({
+        host: '[2606:4700:4700::1111]:8080',
+      });
+    });
+
+    it.each([
+      'http://example.com:99999/',
+      'http://example.com:-1/',
+      'http://example.com:abc/',
+    ])('rejects %s, whose port is not a valid port', async (url) => {
+      const result = await loadWebPage(url);
+
+      expect(result).toBe(`Failed to fetch url: ${url}`);
+      expectNoRequest();
+      expect(lookupMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('proxy transport', () => {
     const PROXY = 'http://proxy.example.test:8080';
+
+    /** Names `proxy` in the environment, the only way to select one. */
+    function useProxy(proxy = PROXY): void {
+      vi.stubEnv('all_proxy', proxy);
+    }
 
     it('reaches a hostname the proxy resolves, without a local DNS lookup', async () => {
       respondThroughTunnel('<p>This page has enough words to keep.</p>');
 
-      const result = await loadWebPage('https://does-not-resolve.invalid', {
-        proxy: PROXY,
-      });
+      useProxy();
+
+      const result = await loadWebPage('https://does-not-resolve.invalid');
 
       expect(result).toBe('This page has enough words to keep.');
       expect(lookupMock).not.toHaveBeenCalled();
@@ -556,16 +637,16 @@ describe('loadWebPage', () => {
       );
     });
 
-    it('ignores the proxy environment variables', async () => {
-      // An ambient proxy must not switch address vetting off, so a hostname
-      // still takes the resolved-and-vetted path.
+    it('ignores the proxy environment variables for proxy: null', async () => {
       vi.stubEnv('https_proxy', PROXY);
       vi.stubEnv('HTTPS_PROXY', PROXY);
       vi.stubEnv('all_proxy', PROXY);
       resolveTo('169.254.169.254');
       respondThroughTunnel('<p>This body must never be returned.</p>');
 
-      const result = await loadWebPage('https://metadata.example/');
+      const result = await loadWebPage('https://metadata.example/', {
+        proxy: null,
+      });
 
       expect(result).toBe('Failed to fetch url: https://metadata.example/');
       expect(lookupMock).toHaveBeenCalledWith('metadata.example', {all: true});
@@ -575,7 +656,9 @@ describe('loadWebPage', () => {
     it('gives the tunnelled request no agent, so Node uses the tunnel socket', async () => {
       respondThroughTunnel('<p>This page has enough words to keep.</p>');
 
-      await loadWebPage('https://does-not-resolve.invalid/', {proxy: PROXY});
+      useProxy();
+
+      await loadWebPage('https://does-not-resolve.invalid/');
 
       // Node consults `createConnection` only when the request has no agent,
       // and `agent: false` builds a fresh one. Setting it here would send the
@@ -593,10 +676,9 @@ describe('loadWebPage', () => {
         request.emit('socket', new FakeSocket());
         emitResponse(request, '<p>This body must never be returned.</p>');
       };
+      useProxy();
 
-      const result = await loadWebPage('https://does-not-resolve.invalid/', {
-        proxy: PROXY,
-      });
+      const result = await loadWebPage('https://does-not-resolve.invalid/');
 
       expect(result).toBe(
         'Failed to fetch url: https://does-not-resolve.invalid/',
@@ -612,10 +694,9 @@ describe('loadWebPage', () => {
         request.emit('socket', tlsConnectMock.mock.results[0].value);
         emitResponse(request, '<p>This page has enough words to keep.</p>');
       };
+      useProxy();
 
-      const result = await loadWebPage('https://does-not-resolve.invalid/', {
-        proxy: PROXY,
-      });
+      const result = await loadWebPage('https://does-not-resolve.invalid/');
 
       expect(result).toBe('This page has enough words to keep.');
     });
@@ -623,7 +704,9 @@ describe('loadWebPage', () => {
     it('destroys the tunnel socket once the request is done', async () => {
       respondThroughTunnel('<p>This page has enough words to keep.</p>');
 
-      await loadWebPage('https://does-not-resolve.invalid/', {proxy: PROXY});
+      useProxy();
+
+      await loadWebPage('https://does-not-resolve.invalid/');
 
       expect(tlsConnectMock.mock.results[0].value.destroy).toHaveBeenCalled();
     });
@@ -631,9 +714,9 @@ describe('loadWebPage', () => {
     it('sends an http target in absolute form instead of opening a tunnel', async () => {
       respondWith('<p>This page has enough words to keep.</p>');
 
-      const result = await loadWebPage('http://does-not-resolve.invalid/page', {
-        proxy: PROXY,
-      });
+      useProxy();
+
+      const result = await loadWebPage('http://does-not-resolve.invalid/page');
 
       expect(result).toBe('This page has enough words to keep.');
       expect(tlsConnectMock).not.toHaveBeenCalled();
@@ -641,6 +724,18 @@ describe('loadWebPage', () => {
         host: 'proxy.example.test',
         path: 'http://does-not-resolve.invalid/page',
       });
+    });
+
+    it('keeps the fragment out of the target it sends to the proxy', async () => {
+      respondWith('<p>This page has enough words to keep.</p>');
+
+      useProxy();
+
+      await loadWebPage('http://does-not-resolve.invalid/page?q=1#secret');
+
+      expect(sentRequests[0].options.path).toBe(
+        'http://does-not-resolve.invalid/page?q=1',
+      );
       expect(sentRequests[0].options.headers).toMatchObject({
         host: 'does-not-resolve.invalid',
       });
@@ -650,9 +745,9 @@ describe('loadWebPage', () => {
       const credentials = `${PROXY_USER}:${PROXY_SECRET}`;
       respondWith('<p>This page has enough words to keep.</p>');
 
-      await loadWebPage('http://does-not-resolve.invalid/page', {
-        proxy: `http://${credentials}@proxy.example.test:8080`,
-      });
+      useProxy(`http://${credentials}@proxy.example.test:8080`);
+
+      await loadWebPage('http://does-not-resolve.invalid/page');
 
       expect(sentRequests[0].options.headers).toMatchObject({
         'proxy-authorization': `Basic ${Buffer.from(credentials).toString('base64')}`,
@@ -661,10 +756,9 @@ describe('loadWebPage', () => {
 
     it('returns the failure string when the proxy refuses the tunnel', async () => {
       respondThroughTunnel('<p>never read</p>', 407);
+      useProxy();
 
-      const result = await loadWebPage('https://does-not-resolve.invalid/', {
-        proxy: PROXY,
-      });
+      const result = await loadWebPage('https://does-not-resolve.invalid/');
 
       expect(result).toBe(
         'Failed to fetch url: https://does-not-resolve.invalid/',
@@ -672,9 +766,9 @@ describe('loadWebPage', () => {
     });
 
     it('returns the failure string for a proxy scheme it cannot speak', async () => {
-      const result = await loadWebPage('https://example.com/', {
-        proxy: 'socks5://proxy.example.test:1080',
-      });
+      useProxy('socks5://proxy.example.test:1080');
+
+      const result = await loadWebPage('https://example.com/');
 
       expect(result).toBe('Failed to fetch url: https://example.com/');
       expectNoRequest();
@@ -684,20 +778,110 @@ describe('loadWebPage', () => {
     it('defaults the proxy port from its scheme', async () => {
       respondWith('<p>This page has enough words to keep.</p>');
 
-      await loadWebPage('http://does-not-resolve.invalid/page', {
-        proxy: 'http://proxy.example.test',
-      });
+      useProxy('http://proxy.example.test');
+
+      await loadWebPage('http://does-not-resolve.invalid/page');
 
       expect(sentRequests[0].options.port).toBe(80);
     });
 
     it('vets an IP literal before handing it to the proxy', async () => {
-      const result = await loadWebPage('http://169.254.169.254/', {
-        proxy: PROXY,
-      });
+      useProxy();
+
+      const result = await loadWebPage('http://169.254.169.254/');
 
       expect(result).toBe('Failed to fetch url: http://169.254.169.254/');
       expectNoRequest();
+    });
+  });
+
+  describe('proxy environment', () => {
+    const PROXY = 'http://proxy.example.test:8080';
+    const OTHER_PROXY = 'http://other-proxy.example.test:3128';
+
+    it('reaches a hostname through HTTPS_PROXY without a local lookup', async () => {
+      vi.stubEnv('HTTPS_PROXY', PROXY);
+      lookupMock.mockRejectedValue(new Error('unexpected local DNS lookup'));
+      respondThroughTunnel('<p>This page has enough words to keep.</p>');
+
+      const result = await loadWebPage('https://does-not-resolve.invalid/');
+
+      expect(result).toBe('This page has enough words to keep.');
+      expect(lookupMock).not.toHaveBeenCalled();
+      expect(sentRequests[0].options).toMatchObject({
+        host: 'proxy.example.test',
+        method: 'CONNECT',
+        port: 8080,
+      });
+    });
+
+    it('reaches an http hostname through http_proxy in absolute form', async () => {
+      vi.stubEnv('http_proxy', PROXY);
+      lookupMock.mockRejectedValue(new Error('unexpected local DNS lookup'));
+      respondWith('<p>This page has enough words to keep.</p>');
+
+      const result = await loadWebPage('http://does-not-resolve.invalid/page');
+
+      expect(result).toBe('This page has enough words to keep.');
+      expect(lookupMock).not.toHaveBeenCalled();
+      expect(sentRequests[0].options).toMatchObject({
+        host: 'proxy.example.test',
+        path: 'http://does-not-resolve.invalid/page',
+      });
+    });
+
+    it('takes the direct, vetted path when no_proxy covers the host', async () => {
+      vi.stubEnv('HTTPS_PROXY', PROXY);
+      vi.stubEnv('no_proxy', 'metadata.example');
+      resolveTo('169.254.169.254');
+      respondThroughTunnel('<p>This body must never be returned.</p>');
+
+      const result = await loadWebPage('https://metadata.example/');
+
+      expect(result).toBe('Failed to fetch url: https://metadata.example/');
+      expect(lookupMock).toHaveBeenCalledWith('metadata.example', {all: true});
+      expectNoRequest();
+    });
+
+    it('prefers the scheme variable over all_proxy', async () => {
+      vi.stubEnv('all_proxy', OTHER_PROXY);
+      vi.stubEnv('HTTPS_PROXY', PROXY);
+      respondThroughTunnel('<p>This page has enough words to keep.</p>');
+
+      await loadWebPage('https://does-not-resolve.invalid/');
+
+      expect(sentRequests[0].options).toMatchObject({
+        host: 'proxy.example.test',
+        port: 8080,
+      });
+    });
+
+    it('still vets an IP literal when the environment names a proxy', async () => {
+      vi.stubEnv('HTTP_PROXY', PROXY);
+
+      const result = await loadWebPage('http://169.254.169.254/');
+
+      expect(result).toBe('Failed to fetch url: http://169.254.169.254/');
+      expectNoRequest();
+    });
+
+    it('still rejects a localhost name when the environment names a proxy', async () => {
+      vi.stubEnv('HTTP_PROXY', PROXY);
+
+      const result = await loadWebPage('http://localhost:8080/');
+
+      expect(result).toBe('Failed to fetch url: http://localhost:8080/');
+      expectNoRequest();
+    });
+
+    it('returns the failure string for an unusable proxy in the environment', async () => {
+      vi.stubEnv('HTTPS_PROXY', 'socks5://proxy.example.test:1080');
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+      expectNoRequest();
+      expect(lookupMock).not.toHaveBeenCalled();
     });
   });
 
@@ -758,6 +942,39 @@ describe('loadWebPage', () => {
       expect(result).toBe('This page has enough words to keep.');
     });
 
+    it('returns the failure string for a nesting bomb, without stalling', async () => {
+      resolveTo('93.184.216.34');
+      respondWith(`<div>`.repeat(40_000) + 'x' + '</div>'.repeat(40_000));
+      const startedAt = Date.now();
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+      expect(Date.now() - startedAt).toBeLessThan(2000);
+    });
+
+    it('returns the failure string for a body in an encoding it cannot read', async () => {
+      resolveTo('93.184.216.34');
+      respondWith('<p>This page has enough words to keep.</p>', {
+        headers: {'content-encoding': 'gzip'},
+      });
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+    });
+
+    it('reads a body the server marks as identity encoded', async () => {
+      resolveTo('93.184.216.34');
+      respondWith('<p>This page has enough words to keep.</p>', {
+        headers: {'content-encoding': 'identity'},
+      });
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('This page has enough words to keep.');
+    });
+
     it('returns the failure string when the response stream errors', async () => {
       resolveTo('93.184.216.34');
       onRequestEnd = (request) => {
@@ -803,22 +1020,22 @@ describe('loadWebPage', () => {
       expect(result).toBe('The markup uses &lt; for a tag');
     });
 
-    it('leaves a named entity outside the table alone', async () => {
+    it('decodes a named entity the old table did not carry', async () => {
       resolveTo('93.184.216.34');
-      respondWith('<p>An em dash &mdash; stays as written here</p>');
+      respondWith('<p>An em dash &mdash; reads as a dash now</p>');
 
       const result = await loadWebPage('https://example.com/');
 
-      expect(result).toBe('An em dash &mdash; stays as written here');
+      expect(result).toBe('An em dash — reads as a dash now');
     });
 
-    it('leaves an unknown or out-of-range entity alone', async () => {
+    it('leaves an unknown entity alone and replaces an out-of-range one', async () => {
       resolveTo('93.184.216.34');
-      respondWith('<p>Both &notanentity; and &#1114112; stay put</p>');
+      respondWith('<p>Both &nope; and &#1114112; are handled</p>');
 
       const result = await loadWebPage('https://example.com/');
 
-      expect(result).toBe('Both &notanentity; and &#1114112; stay put');
+      expect(result).toBe('Both &nope; and \ufffd are handled');
     });
 
     it('decodes the body with the charset the response declares', async () => {
@@ -853,6 +1070,7 @@ describe('loadWebPage', () => {
       resolveTo('93.184.216.34');
 
       const pendingDefault = loadWebPage('https://example.com/');
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(29_999);
       expect(sentRequests[0].destroyed).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
@@ -864,6 +1082,7 @@ describe('loadWebPage', () => {
       const pendingOverride = loadWebPage('https://example.com/', {
         timeoutMs: 5000,
       });
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(5000);
       expect(sentRequests[1].destroyed).toBe(true);
       expect(await pendingOverride).toBe(
@@ -876,6 +1095,7 @@ describe('loadWebPage', () => {
       resolveTo('93.184.216.34');
 
       const pending = loadWebPage('https://example.com/', {});
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(29_999);
       expect(sentRequests[0].destroyed).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
@@ -886,9 +1106,10 @@ describe('loadWebPage', () => {
     it('applies the deadline to the proxy tunnel', async () => {
       vi.useFakeTimers();
 
-      const pending = loadWebPage('https://does-not-resolve.invalid/', {
-        proxy: 'http://proxy.example.test:8080',
-      });
+      vi.stubEnv('all_proxy', 'http://proxy.example.test:8080');
+
+      const pending = loadWebPage('https://does-not-resolve.invalid/');
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(30_000);
 
       expect(sentRequests[0].options.method).toBe('CONNECT');
@@ -909,9 +1130,10 @@ describe('loadWebPage', () => {
         }, 20_000);
       };
 
-      const pending = loadWebPage('https://does-not-resolve.invalid/', {
-        proxy: 'http://proxy.example.test:8080',
-      });
+      vi.stubEnv('all_proxy', 'http://proxy.example.test:8080');
+
+      const pending = loadWebPage('https://does-not-resolve.invalid/');
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(20_000);
       expect(sentRequests).toHaveLength(2);
       await vi.advanceTimersByTimeAsync(9_999);
@@ -929,6 +1151,7 @@ describe('loadWebPage', () => {
       resolveTo('93.184.216.34', '93.184.216.35');
 
       const pending = loadWebPage('https://example.com/');
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(30_000);
       await vi.advanceTimersByTimeAsync(1);
 
