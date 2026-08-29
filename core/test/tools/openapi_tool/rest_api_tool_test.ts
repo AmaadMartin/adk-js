@@ -1216,6 +1216,14 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function headerRecord(headers: Headers): Record<string, string> {
+  const record: Record<string, string> = {};
+  headers.forEach((value, name) => {
+    record[name] = value;
+  });
+  return record;
+}
+
 async function callAndReadHeaders(tool: RestApiTool): Promise<Headers> {
   const fetchSpy = stubFetch(jsonResponse({result: 'ok'}));
   await tool.runAsync({args: {}, toolContext: newContext()});
@@ -1613,9 +1621,9 @@ describe('RestApiTool auth configuration', () => {
     fromString.configureAuthScheme(API_KEY_SCHEME);
     fromString.configureAuthCredential(JSON.stringify(API_KEY_CREDENTIAL));
 
-    expect([...(await callAndReadHeaders(fromString))]).toEqual([
-      ...(await callAndReadHeaders(fromObject)),
-    ]);
+    expect(headerRecord(await callAndReadHeaders(fromString))).toEqual(
+      headerRecord(await callAndReadHeaders(fromObject)),
+    );
   });
 
   it('should clear the credential when given nothing', async () => {

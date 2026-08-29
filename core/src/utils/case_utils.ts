@@ -11,8 +11,8 @@
  * name survives the call. Every later segment is lowercased before its first
  * character is uppercased, so `TWO_WORDS` becomes `twoWords`.
  *
- * This converts one name. {@link camelCaseKeys} converts the keys of an object
- * and is a different operation.
+ * This converts one name. `camelCaseKeys` converts the keys of an object and
+ * is a different operation.
  *
  * @param value The snake_case name.
  * @returns The lowerCamelCase name.
