@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {z} from 'zod';
 import type {Event} from '../../events/event.js';
 import type {LlmRequest} from '../../models/llm_request.js';
 import {appendInstructions} from '../../models/llm_request.js';
-import {FunctionTool} from '../../tools/function_tool.js';
+import {
+  TRANSFER_TO_AGENT_TOOL_NAME,
+  TransferToAgentTool,
+} from '../../tools/transfer_to_agent_tool.js';
 import type {BaseAgent} from '../base_agent.js';
 import {Context} from '../context.js';
 import type {InvocationContext} from '../invocation_context.js';
@@ -16,28 +18,25 @@ import type {LlmAgent} from '../llm_agent.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
-/** The name the model calls to hand off control to another agent. */
-export const TRANSFER_TO_AGENT_TOOL_NAME = 'transfer_to_agent';
+export {
+  TRANSFER_TO_AGENT_TOOL_NAME,
+  TransferToAgentTool,
+} from '../../tools/transfer_to_agent_tool.js';
 
 /**
- * The synthetic tool that performs an agent transfer. Its declaration does not
- * depend on the available targets, so one instance serves every agent.
+ * Builds the transfer tool for one agent, constrained to the names it may
+ * transfer to.
+ *
+ * @param targets - The agents the model may transfer to.
+ * @returns The tool that performs the hand-off.
  */
-export const TRANSFER_TO_AGENT_TOOL = new FunctionTool({
-  name: TRANSFER_TO_AGENT_TOOL_NAME,
-  description:
-    'Transfer the question to another agent. This tool hands off control to another agent when it is more suitable to answer the user question according to the agent description.',
-  parameters: z.object({
-    agentName: z.string().describe('the agent name to transfer to.'),
-  }),
-  execute: function (args: {agentName: string}, toolContext?: Context) {
-    if (!toolContext) {
-      throw new Error('toolContext is required.');
-    }
-    toolContext.actions.transferToAgent = args.agentName;
-    return 'Transfer queued';
-  },
-});
+export function createTransferToAgentTool(
+  targets: BaseAgent[],
+): TransferToAgentTool {
+  return new TransferToAgentTool({
+    agentNames: targets.map((target) => target.name),
+  });
+}
 
 /**
  * Whether the agent is a workflow node rather than a conversational agent.
@@ -128,8 +127,9 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
     // The tool stays registered even for a workflow node agent, which gets no
     // instructions: adk-python registers it unconditionally, and the
     // confirmation-resume path re-injects it.
+    const tool = createTransferToAgentTool(transferTargets);
     const toolContext = new Context({invocationContext});
-    await TRANSFER_TO_AGENT_TOOL.processLlmRequest({toolContext, llmRequest});
+    await tool.processLlmRequest({toolContext, llmRequest});
   }
 
   private buildTargetAgentsInfo(targetAgent: BaseAgent): string {

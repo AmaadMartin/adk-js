@@ -25,8 +25,8 @@ import type {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {ReadonlyContext} from '../readonly_context.js';
 import {
+  createTransferToAgentTool,
   getTransferTargets,
-  TRANSFER_TO_AGENT_TOOL,
 } from './agent_transfer_llm_request_processor.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
@@ -121,8 +121,10 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
     // than returned by `canonicalTools`, so resuming a confirmed transfer needs
     // it registered here too. Injected only when the agent has somewhere to
     // transfer to, the way adk-python guards it.
-    if (getTransferTargets(agent).length) {
-      toolsDict[TRANSFER_TO_AGENT_TOOL.name] = TRANSFER_TO_AGENT_TOOL;
+    const transferTargets = getTransferTargets(agent);
+    if (transferTargets.length) {
+      const transferTool = createTransferToAgentTool(transferTargets);
+      toolsDict[transferTool.name] = transferTool;
     }
 
     // Step 4: check that each approval binds to the action it claims, and only
