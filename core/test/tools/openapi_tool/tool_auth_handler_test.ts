@@ -8,8 +8,12 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OAuth2Auth,
   OpenIdConnectWithConfig,
+  PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
@@ -45,12 +49,30 @@ const AUTH_CODE_SCHEME: OpenIdConnectWithConfig = {
   scopes: ['https://www.googleapis.com/auth/calendar'],
 };
 
+const FUNCTION_CALL_ID = 'call-1';
+
+/** Builds a real context whose session carries no credential. */
 function createUnauthenticatedContext(): Context {
-  return {
-    state: new State(),
-    getAuthResponse: vi.fn().mockReturnValue(undefined),
-    requestCredential: vi.fn(),
-  } as unknown as Context;
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent', model: 'gemini-2.5-flash'}),
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+        state: {},
+      }),
+      pluginManager: new PluginManager(),
+    }),
+    functionCallId: FUNCTION_CALL_ID,
+  });
+}
+
+/** Reads back the auth request a handler asked the client for, if any. */
+function requestedAuthConfig(context: Context) {
+  return context.eventActions.requestedAuthConfigs[FUNCTION_CALL_ID];
 }
 
 describe('ToolAuthHandler', () => {
@@ -233,9 +255,9 @@ describe('ToolAuthHandler', () => {
   });
 
   it('asks the user to consent to a configured authorization code credential', async () => {
-    const mockContext = createUnauthenticatedContext();
+    const context = createUnauthenticatedContext();
 
-    const result = await new ToolAuthHandler(mockContext, AUTH_CODE_SCHEME, {
+    const result = await new ToolAuthHandler(context, AUTH_CODE_SCHEME, {
       authType: AuthCredentialTypes.OPEN_ID_CONNECT,
       oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
     }).prepareAuthCredentials();
@@ -243,25 +265,23 @@ describe('ToolAuthHandler', () => {
     // A client id pair alone cannot buy a token under the authorization code
     // grant, so exchanging it here would throw instead of starting consent.
     expect(result.state).toBe('pending');
-    expect(mockContext.requestCredential).toHaveBeenCalledWith(
-      expect.objectContaining({
-        authScheme: AUTH_CODE_SCHEME,
-        rawAuthCredential: expect.objectContaining({
-          authType: AuthCredentialTypes.OPEN_ID_CONNECT,
-        }),
-      }),
+    expect(
+      requestedAuthConfig(context)?.exchangedAuthCredential?.oauth2?.authUri,
+    ).toContain(
+      'https://accounts.google.com/o/oauth2/v2/auth?client_id=client-id',
     );
   });
 
-  it('asks the user to consent to a credential that carries no oauth2 details', async () => {
-    const mockContext = createUnauthenticatedContext();
+  it('rejects a credential that carries no oauth2 details', async () => {
+    const context = createUnauthenticatedContext();
 
-    const result = await new ToolAuthHandler(mockContext, AUTH_CODE_SCHEME, {
-      authType: AuthCredentialTypes.OPEN_ID_CONNECT,
-    }).prepareAuthCredentials();
-
-    expect(result.state).toBe('pending');
-    expect(mockContext.requestCredential).toHaveBeenCalled();
+    // The handler routes to the auth request rather than to the exchanger,
+    // which reports the missing oauth2 details instead of a missing auth code.
+    await expect(
+      new ToolAuthHandler(context, AUTH_CODE_SCHEME, {
+        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+      }).prepareAuthCredentials(),
+    ).rejects.toThrow('requires oauth2 in authCredential');
   });
 
   it.each<[string, OAuth2Auth]>([
@@ -274,9 +294,9 @@ describe('ToolAuthHandler', () => {
   ])(
     'exchanges a configured credential that already carries %s',
     async (_label, oauth2) => {
-      const mockContext = createUnauthenticatedContext();
+      const context = createUnauthenticatedContext();
 
-      const result = await new ToolAuthHandler(mockContext, AUTH_CODE_SCHEME, {
+      const result = await new ToolAuthHandler(context, AUTH_CODE_SCHEME, {
         authType: AuthCredentialTypes.OPEN_ID_CONNECT,
         oauth2: {
           clientId: 'client-id',
@@ -286,7 +306,7 @@ describe('ToolAuthHandler', () => {
       }).prepareAuthCredentials();
 
       expect(result.state).toBe('done');
-      expect(mockContext.requestCredential).not.toHaveBeenCalled();
+      expect(requestedAuthConfig(context)).toBeUndefined();
     },
   );
 
