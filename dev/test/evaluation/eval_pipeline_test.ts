@@ -26,6 +26,7 @@ import {runEvals} from '../../src/evaluation/eval_runner.js';
 import {
   EvalResult,
   EvalStatus,
+  RESPONSE_MATCH_SCORE_KEY,
   TOOL_TRAJECTORY_SCORE_KEY,
 } from '../../src/evaluation/eval_types.js';
 
@@ -242,5 +243,95 @@ describe('adk eval over a real agent', () => {
     });
 
     expect(agent.beforeToolCallback).toBeUndefined();
+  });
+});
+
+/**
+ * The model answers `You rolled a 4.` once the mocked tool has returned 4, so
+ * these cases pin the response metric against text the agent really produced.
+ */
+const REFERENCE_EVAL_SET = [
+  {
+    name: 'reference_matches',
+    data: [
+      {
+        query: 'Roll a die.',
+        expected_tool_use: [
+          {
+            tool_name: 'roll_die',
+            tool_input: {sides: ROLLED_SIDES},
+            mock_tool_output: 4,
+          },
+        ],
+        reference: 'You rolled a 4.',
+      },
+    ],
+  },
+  {
+    name: 'reference_differs',
+    data: [
+      {
+        query: 'Roll a die.',
+        expected_tool_use: [
+          {
+            tool_name: 'roll_die',
+            tool_input: {sides: ROLLED_SIDES},
+            mock_tool_output: 4,
+          },
+        ],
+        reference: 'The weather today is fine.',
+      },
+    ],
+  },
+];
+
+describe('response_match_score over a real agent', () => {
+  async function collectReferenceResults(): Promise<EvalResult[]> {
+    const referenceEvalSetPath = path.join(tempDir, 'reference.evalset.json');
+    await fs.writeFile(
+      referenceEvalSetPath,
+      JSON.stringify(REFERENCE_EVAL_SET),
+    );
+
+    return runEvals({
+      evalSetToEvals: parseAndGetEvalsToRun([referenceEvalSetPath]),
+      rootAgent: buildAgent(),
+      evalMetrics: [{metricName: RESPONSE_MATCH_SCORE_KEY, threshold: 0.8}],
+      sessionService: new InMemorySessionService(),
+    });
+  }
+
+  it('scores the response the agent produced against the reference', async () => {
+    const results = await collectReferenceResults();
+
+    expect(
+      results.map((result) => [result.evalId, result.finalEvalStatus]),
+    ).toEqual([
+      ['reference_matches', EvalStatus.PASSED],
+      ['reference_differs', EvalStatus.FAILED],
+    ]);
+  });
+
+  it('gives an exactly matching response the top score', async () => {
+    const [matching] = await collectReferenceResults();
+
+    expect(matching.evalMetricResults[0][1]).toEqual({
+      score: 1,
+      evalStatus: EvalStatus.PASSED,
+    });
+  });
+
+  it('leaves the metric unevaluated when the eval data has no reference', async () => {
+    const results = await runEvals({
+      evalSetToEvals: parseAndGetEvalsToRun([evalSetPath]),
+      rootAgent: buildAgent(),
+      evalMetrics: [{metricName: RESPONSE_MATCH_SCORE_KEY, threshold: 0.8}],
+      sessionService: new InMemorySessionService(),
+    });
+
+    expect(results.map((result) => result.finalEvalStatus)).toEqual([
+      EvalStatus.NOT_EVALUATED,
+      EvalStatus.NOT_EVALUATED,
+    ]);
   });
 });
