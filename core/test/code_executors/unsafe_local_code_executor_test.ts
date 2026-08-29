@@ -98,6 +98,9 @@ describe('UnsafeLocalCodeExecutor', () => {
     spawnMock.mockReset();
     spawnMock.mockImplementation(realSpawn);
     executor = new UnsafeLocalCodeExecutor();
+    // `mockClear` drops the recorded calls but keeps the `realSpawn`
+    // implementation installed above.
+    spawnMock.mockClear();
   });
 
   it('should execute code and return stdout', async () => {
