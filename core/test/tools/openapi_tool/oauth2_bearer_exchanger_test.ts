@@ -18,7 +18,6 @@ import {CredentialExchangeError} from '../../../src/auth/exchanger/base_credenti
 import {
   checkSchemeCredentialType,
   generateAuthToken,
-  OAuth2BearerCredentialExchanger,
   OAuth2RefreshingBearerExchanger,
 } from '../../../src/tools/openapi_tool/auth/credential_exchangers/oauth2_bearer_exchanger.js';
 
@@ -137,7 +136,7 @@ describe('generateAuthToken', () => {
   });
 });
 
-describe('OAuth2BearerCredentialExchanger', () => {
+describe('OAuth2RefreshingBearerExchanger', () => {
   const fetchMock = vi.fn<typeof fetch>();
 
   /** Exchanges through the interface and returns the wrapped token. */
@@ -145,7 +144,7 @@ describe('OAuth2BearerCredentialExchanger', () => {
     scheme: AuthScheme | undefined,
     authCredential: AuthCredential,
   ) {
-    return new OAuth2BearerCredentialExchanger().exchange({
+    return new OAuth2RefreshingBearerExchanger().exchange({
       authScheme: scheme,
       authCredential,
     });
@@ -169,9 +168,9 @@ describe('OAuth2BearerCredentialExchanger', () => {
     // Wrapping a token the credential already holds reaches no token
     // endpoint, and `ToolAuthHandler` persists the credential on this flag.
     expect(result.wasExchanged).toBe(false);
-    expect(result.credential).toEqual({
-      authType: AuthCredentialTypes.HTTP,
-      http: {scheme: 'bearer', credentials: {token: 'test_access_token'}},
+    expect(result.credential.http).toEqual({
+      scheme: 'bearer',
+      credentials: {token: 'test_access_token'},
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -194,7 +193,7 @@ describe('OAuth2BearerCredentialExchanger', () => {
     const result = await exchange(authScheme, authCredential);
 
     expect(result.wasExchanged).toBe(false);
-    expect(result.credential).toBe(authCredential);
+    expect(result.credential).toEqual(authCredential);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -207,15 +206,16 @@ describe('OAuth2BearerCredentialExchanger', () => {
     const result = await exchange(authScheme, authCredential);
 
     expect(result.wasExchanged).toBe(false);
-    expect(result.credential).toBe(authCredential);
+    expect(result.credential).toEqual(authCredential);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('does not contact the token endpoint, even for an expired credential', async () => {
-    const result = await exchange(authScheme, expiredCredential());
+  it('does not contact the token endpoint for an expired credential that carries no refresh token', async () => {
+    const result = await exchange(
+      authScheme,
+      expiredCredential({refreshToken: undefined}),
+    );
 
-    // Refreshing belongs to AutoAuthCredentialExchanger, which refreshes
-    // before it converts. This exchanger only wraps the token it is given.
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.credential.http?.credentials.token).toBe(
       'stale_access_token',
@@ -223,6 +223,13 @@ describe('OAuth2BearerCredentialExchanger', () => {
   });
 
   it('does not mutate the credential it is given', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: 'fresh_access_token',
+        expires_in: 3600,
+      }),
+    } as Response);
     const authCredential = expiredCredential({
       accessToken: 'test_access_token',
     });
@@ -232,19 +239,6 @@ describe('OAuth2BearerCredentialExchanger', () => {
     expect(authCredential.authType).toBe(AuthCredentialTypes.OAUTH2);
     expect(authCredential.oauth2?.accessToken).toBe('test_access_token');
     expect(authCredential.http).toBeUndefined();
-  });
-});
-
-describe('OAuth2RefreshingBearerExchanger', () => {
-  const fetchMock = vi.fn<typeof fetch>();
-
-  beforeEach(() => {
-    fetchMock.mockReset();
-    vi.stubGlobal('fetch', fetchMock);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
   });
 
   it('refreshes an expired token before it wraps it', async () => {
@@ -256,10 +250,7 @@ describe('OAuth2RefreshingBearerExchanger', () => {
       }),
     } as Response);
 
-    const result = await new OAuth2RefreshingBearerExchanger().exchange({
-      authScheme,
-      authCredential: expiredCredential(),
-    });
+    const result = await exchange(authScheme, expiredCredential());
 
     expect(result.credential.http?.credentials.token).toBe(
       'fresh_access_token',
