@@ -134,10 +134,10 @@ describe('loadWebPage over a real proxy', () => {
     expect(proxied).toEqual(['http://origin.example/page']);
   });
 
-  it('fetches through a proxy given as an option', async () => {
-    const result = await loadWebPage('http://origin.example/page', {
-      proxy: `http://127.0.0.1:${portOf(proxy)}`,
-    });
+  it('fetches through a proxy named by all_proxy', async () => {
+    process.env['all_proxy'] = `http://127.0.0.1:${portOf(proxy)}`;
+
+    const result = await loadWebPage('http://origin.example/page');
 
     expect(result).toBe('Fish & chips are quite tasty today');
     expect(proxied).toEqual(['http://origin.example/page']);
@@ -145,10 +145,9 @@ describe('loadWebPage over a real proxy', () => {
 
   it('returns the failure string when the origin answers non-200', async () => {
     originStatus = 404;
+    process.env['http_proxy'] = `http://127.0.0.1:${portOf(proxy)}`;
 
-    const result = await loadWebPage('http://origin.example/page', {
-      proxy: `http://127.0.0.1:${portOf(proxy)}`,
-    });
+    const result = await loadWebPage('http://origin.example/page');
 
     expect(result).toBe('Failed to fetch url: http://origin.example/page');
     expect(proxied).toEqual(['http://origin.example/page']);
@@ -158,11 +157,10 @@ describe('loadWebPage over a real proxy', () => {
     // parse5's tree construction is quadratic in nesting depth, so an
     // unbounded parse of this page blocks the process for about 13 seconds.
     pageHtml = '<div>'.repeat(40_000) + 'x' + '</div>'.repeat(40_000);
+    process.env['http_proxy'] = `http://127.0.0.1:${portOf(proxy)}`;
     const startedAt = Date.now();
 
-    const result = await loadWebPage('http://origin.example/page', {
-      proxy: `http://127.0.0.1:${portOf(proxy)}`,
-    });
+    const result = await loadWebPage('http://origin.example/page');
 
     expect(result).toBe('Failed to fetch url: http://origin.example/page');
     expect(Date.now() - startedAt).toBeLessThan(2000);

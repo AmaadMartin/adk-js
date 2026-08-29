@@ -31,20 +31,16 @@ export interface LoadWebPageOptions {
   /** Request timeout in milliseconds. Defaults to 30_000 (30s). */
   timeoutMs?: number;
   /**
-   * Proxy to route the request through, such as
-   * `http://proxy.example.test:8080`. Credentials in the URL are sent as
-   * `Proxy-Authorization: Basic`.
+   * Pass `null` to force a direct, address-vetted request even when the
+   * environment names a proxy.
    *
-   * This overrides the environment. Omit it to let the environment decide
-   * (`no_proxy` first, then `https_proxy` or `http_proxy` for the URL's
-   * scheme, then `all_proxy`), or pass `null` to force a direct request even
-   * when the environment names a proxy.
-   *
-   * A proxy resolves the target hostname itself, so a hostname target is not
-   * address-vetted on this path. An IP-literal target still is, and a
-   * `localhost`-style name is still rejected.
+   * By default the environment decides: `no_proxy` first, then `https_proxy`
+   * or `http_proxy` for the URL's scheme, then `all_proxy`. A proxy resolves
+   * the target hostname itself, so a hostname target is not address-vetted on
+   * that path. An IP-literal target still is, and a `localhost`-style name is
+   * still rejected.
    */
-  proxy?: string | null;
+  proxy?: null;
 }
 
 /** URL schemes that are allowed to be fetched (WHATWG `URL.protocol` form). */
@@ -68,49 +64,30 @@ function failedToFetchMessage(url: string): string {
 }
 
 /**
- * Validates the URL's scheme up front (before any network access). Throws for
- * malformed URLs and disallowed schemes. An `http`/`https` URL always carries a
- * hostname, and its port is always in 0-65535: the WHATWG parser rejects the
- * scheme without a hostname, and rejects a port that is out of range or not a
- * number.
+ * Parses a URL this tool is allowed to speak to, for a target or for a proxy.
+ * Throws for a malformed URL and for a scheme other than `http`/`https`. An
+ * `http`/`https` URL always carries a hostname, and its port is always in
+ * 0-65535: the WHATWG parser rejects the scheme without a hostname, and
+ * rejects a port that is out of range or not a number.
  */
-function parseRequestTarget(url: string): URL {
-  const parsed = new URL(url);
+function parseAllowedUrl(value: string): URL {
+  const parsed = new URL(value);
   if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
-    throw new Error(`Unsupported url scheme: ${url}`);
-  }
-  return parsed;
-}
-
-/** Parses the caller's proxy option. Throws for a scheme this tool cannot speak. */
-function parseProxy(proxy: string): URL {
-  const parsed = new URL(proxy);
-  if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
-    throw new Error(`Unsupported proxy scheme: ${proxy}`);
+    throw new Error(`Unsupported url scheme: ${value}`);
   }
   return parsed;
 }
 
 /**
- * Returns the proxy for `target`, or `null` for a direct request. The caller's
- * option wins over the environment, and `null` disables the proxy outright.
+ * Returns the proxy the environment names for `target`, or `null` for a direct
+ * request. `proxy` is the caller's opt-out.
  */
-function resolveProxy(
-  target: URL,
-  proxy: string | null | undefined,
-): URL | null {
+function resolveProxy(target: URL, proxy: null | undefined): URL | null {
   if (proxy === null) {
     return null;
   }
-  const selected = proxy ?? selectProxy(target, process.env);
-  return selected === undefined ? null : parseProxy(selected);
-}
-
-/** Returns the absolute URL to put on the wire, without the fragment. */
-function requestTarget(url: URL): string {
-  const target = new URL(url.href);
-  target.hash = '';
-  return target.href;
+  const selected = selectProxy(target, process.env);
+  return selected === undefined ? null : parseAllowedUrl(selected);
 }
 
 /** Returns the port a URL addresses, filling in the scheme default. */
@@ -383,7 +360,7 @@ async function requestViaProxy(
       // Absolute-form request target, as an HTTP proxy expects. The fragment
       // stays on the client, which is what `requests` does and what keeps it
       // out of the proxy's logs.
-      path: requestTarget(url),
+      path: url.href.split('#')[0],
       port: portOf(proxy),
     });
     return sendRequest(request, expiresAt);
@@ -465,7 +442,7 @@ export async function loadWebPage(
   );
   const expiresAt = Date.now() + (options?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
-    const target = parseRequestTarget(url);
+    const target = parseAllowedUrl(url);
     const proxy = resolveProxy(target, options?.proxy);
     const body = await fetchBody(target, proxy, expiresAt);
     if (body === null) {
