@@ -4,10 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
-import {AuthCredential, OAuth2Auth} from '../../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+  OAuth2Auth,
+} from '../../../auth/auth_credential.js';
+import {AuthScheme, OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {AuthCredentialMissingError} from '../../../auth/exchanger/base_credential_exchanger.js';
+import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {stableDigest} from '../../../utils/hash_utils.js';
@@ -15,8 +21,22 @@ import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_au
 
 export interface AuthPreparationResult {
   state: 'pending' | 'done';
+  /** The scheme the credential authenticates, when the tool declares one. */
+  authScheme?: AuthScheme;
   authCredential?: AuthCredential;
 }
+
+/** Scheme types whose credential only an end user can grant. */
+const USER_AUTHORIZED_SCHEME_TYPES: readonly string[] = [
+  'oauth2',
+  'openIdConnect',
+];
+
+/** Property names a caller can set to name a credential slot themselves. */
+const CREDENTIAL_KEY_PROPERTIES: readonly string[] = [
+  'credential_key',
+  'credentialKey',
+];
 
 /**
  * OAuth2 fields that a consent round trip produces, or that change per
@@ -58,7 +78,7 @@ function withoutRoundTripOAuth2Fields(
  * request slot are built from this, so a tool always reads back what it wrote.
  */
 async function credentialIdentity(
-  authScheme: OpenAPIV3.SecuritySchemeObject,
+  authScheme: AuthScheme,
   authCredential?: AuthCredential,
 ): Promise<string> {
   const schemeName = `${authScheme.type}_${await stableDigest(authScheme)}`;
@@ -122,7 +142,7 @@ class ToolContextCredentialStore {
 async function refreshIfExpired(
   store: ToolContextCredentialStore,
   cacheKey: string,
-  authScheme: OpenAPIV3.SecuritySchemeObject,
+  authScheme: AuthScheme,
   stored: AuthCredential,
 ): Promise<AuthCredential> {
   const refresher = new OAuth2CredentialRefresher();
@@ -139,11 +159,101 @@ async function refreshIfExpired(
   return refreshed;
 }
 
+/** Reads a slot name a caller set on a credential or on a scheme. */
+function readCredentialKeyProperty(source?: object): string | undefined {
+  if (!source) {
+    return undefined;
+  }
+
+  for (const name of CREDENTIAL_KEY_PROPERTIES) {
+    if (!(name in source)) {
+      continue;
+    }
+    const value = (source as Record<string, unknown>)[name];
+    if (typeof value === 'string' && value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The slot the caller named, from the constructor option or from a
+ * `credential_key` property carried on the credential or on the scheme.
+ * Undefined when the caller named none, so the derived slot is used.
+ */
+function credentialKeyOverride(
+  explicitKey: string | undefined,
+  authCredential: AuthCredential | undefined,
+  authScheme: AuthScheme,
+): string | undefined {
+  return (
+    explicitKey ||
+    readCredentialKeyProperty(authCredential) ||
+    readCredentialKeyProperty(authScheme)
+  );
+}
+
+/**
+ * True when `credential` cannot authenticate a call until the end user
+ * authorizes it.
+ *
+ * An OAuth2 or OpenID Connect credential holding no access token has to come
+ * back from a consent round trip. The exception is the client-credentials
+ * grant, which `OAuth2CredentialExchanger` mints from the client id and secret
+ * with no user involved: asking the client to authorize one would leave the
+ * tool in `pending` forever.
+ */
+function needsUserAuthorization(
+  authScheme: AuthScheme,
+  credential: AuthCredential,
+): boolean {
+  if (
+    credential.authType !== AuthCredentialTypes.OAUTH2 &&
+    credential.authType !== AuthCredentialTypes.OPEN_ID_CONNECT
+  ) {
+    return false;
+  }
+  if (credential.oauth2?.accessToken) {
+    return false;
+  }
+  return determineGrantType(authScheme) !== OAuthGrantType.CLIENT_CREDENTIALS;
+}
+
+/**
+ * Throws when the tool cannot raise an authorization request the client is
+ * able to answer. The client builds the authorization URL from the OAuth2
+ * client id and secret, so a request raised without them strands the tool.
+ */
+function validateAuthorizationRequest(
+  authScheme: AuthScheme,
+  authCredential?: AuthCredential,
+): void {
+  if (!USER_AUTHORIZED_SCHEME_TYPES.includes(authScheme.type)) {
+    return;
+  }
+  if (!authCredential?.oauth2) {
+    throw new Error(
+      `authCredential is empty for scheme ${authScheme.type}. Please create an AuthCredential with an oauth2 block.`,
+    );
+  }
+  if (!authCredential.oauth2.clientId) {
+    throw new AuthCredentialMissingError(
+      'OAuth2 credentials client_id is missing.',
+    );
+  }
+  if (!authCredential.oauth2.clientSecret) {
+    throw new AuthCredentialMissingError(
+      'OAuth2 credentials client_secret is missing.',
+    );
+  }
+}
+
 @experimental
 export class ToolAuthHandler {
   constructor(
     private readonly context: Context,
-    private readonly authScheme?: OpenAPIV3.SecuritySchemeObject,
+    private readonly authScheme?: AuthScheme,
     private readonly authCredential?: AuthCredential,
     private readonly credentialKey?: string,
   ) {}
@@ -151,7 +261,7 @@ export class ToolAuthHandler {
   @experimental
   public static fromToolContext(
     context: Context,
-    authScheme?: OpenAPIV3.SecuritySchemeObject,
+    authScheme?: AuthScheme,
     authCredential?: AuthCredential,
     options: {credentialKey?: string} = {},
   ): ToolAuthHandler {
@@ -173,23 +283,33 @@ export class ToolAuthHandler {
       this.authScheme,
       this.authCredential,
     );
-    const store = new ToolContextCredentialStore(
-      this.context,
+    const keyOverride = credentialKeyOverride(
       this.credentialKey,
+      this.authCredential,
+      this.authScheme,
     );
+    const store = new ToolContextCredentialStore(this.context, keyOverride);
     const cacheKey = store.getCredentialKey(identity);
     const storedCredential = store.getCredential(cacheKey);
 
     if (storedCredential) {
-      return {
-        state: 'done',
-        authCredential: await refreshIfExpired(
-          store,
-          cacheKey,
-          this.authScheme,
-          storedCredential,
-        ),
-      };
+      const current = await refreshIfExpired(
+        store,
+        cacheKey,
+        this.authScheme,
+        storedCredential,
+      );
+      // A cached credential carries its own token, and every exchanger adk-js
+      // registers hands such a credential back unchanged, so the tool gets it
+      // as it is. One that carries no token cannot authenticate a call, so
+      // the handler asks the client to authorize a new one instead.
+      if (!needsUserAuthorization(this.authScheme, current)) {
+        return {
+          state: 'done',
+          authScheme: this.authScheme,
+          authCredential: current,
+        };
+      }
     }
 
     const authConfig: AuthConfig = {
@@ -197,7 +317,7 @@ export class ToolAuthHandler {
       rawAuthCredential: this.authCredential,
       // The auth response lands in `temp:<credentialKey>`, so a key shared by
       // every OpenAPI tool lets one tool consume another tool's response.
-      credentialKey: this.credentialKey || `adk_${identity}`,
+      credentialKey: keyOverride || `adk_${identity}`,
     };
 
     // A credential returned by an auth response was supplied interactively by
@@ -208,11 +328,15 @@ export class ToolAuthHandler {
     const authResponseCredential = this.context.getAuthResponse(authConfig);
     const credential = authResponseCredential ?? this.authCredential;
 
-    if (!credential) {
-      // No credential to work with, so ask the client for one.
+    if (!credential || needsUserAuthorization(this.authScheme, credential)) {
+      validateAuthorizationRequest(this.authScheme, this.authCredential);
       this.context.requestCredential(authConfig);
 
-      return {state: 'pending'};
+      return {
+        state: 'pending',
+        authScheme: this.authScheme,
+        authCredential: this.authCredential,
+      };
     }
 
     const exchanger = new AutoAuthCredentialExchanger();
@@ -230,6 +354,10 @@ export class ToolAuthHandler {
       store.storeCredential(cacheKey, result.credential);
     }
 
-    return {state: 'done', authCredential: result.credential};
+    return {
+      state: 'done',
+      authScheme: this.authScheme,
+      authCredential: result.credential,
+    };
   }
 }

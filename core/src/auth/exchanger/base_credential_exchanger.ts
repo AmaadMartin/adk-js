@@ -13,6 +13,17 @@ import {AuthScheme} from '../auth_schemes.js';
 export class CredentialExchangeError extends Error {}
 
 /**
+ * Raised when a credential a tool was configured with lacks a field the auth
+ * flow cannot proceed without, such as an OAuth2 client id or client secret.
+ */
+export class AuthCredentialMissingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthCredentialMissingError';
+  }
+}
+
+/**
  * Result of a credential exchange.
  */
 export interface ExchangeResult {
