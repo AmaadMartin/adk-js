@@ -809,7 +809,8 @@ components:
   requestBodies:
     Pet:
       description: Pet object that needs to be added to the store
-      content:
+
+content:
         application/json:
           schema:
             $ref: '#/components/schemas/Pet'

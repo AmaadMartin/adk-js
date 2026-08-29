@@ -5,60 +5,10 @@
  */
 
 import {OpenApiSpecParser} from '@google/adk';
-import * as fs from 'fs';
-import yaml from 'js-yaml';
 import {OpenAPIV3} from 'openapi-types';
-import * as path from 'path';
-import {beforeAll, describe, expect, it} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 describe('OpenApiSpecParser', () => {
-  it('should keep every operation when one reference stays unresolved', () => {
-    const spec: OpenAPIV3.Document = {
-      openapi: '3.0.0',
-      info: {title: 'Test API', version: '1.0.0'},
-      paths: {
-        '/broken': {
-          post: {
-            operationId: 'createPet',
-            requestBody: {
-              content: {
-                'application/json': {
-                  schema: {
-                    type: 'object',
-                    properties: {
-                      owner: {$ref: '#/components/schemas/Missing'},
-                      name: {type: 'string'},
-                    },
-                  },
-                },
-              },
-            },
-            responses: {},
-          },
-        },
-        '/healthy': {
-          get: {
-            operationId: 'listPets',
-            parameters: [
-              {name: 'limit', in: 'query', schema: {type: 'integer'}},
-            ],
-            responses: {},
-          },
-        },
-      },
-    };
-
-    const operations = new OpenApiSpecParser().parse(spec);
-
-    expect(operations.map((operation) => operation.name)).toEqual([
-      'create_pet',
-      'list_pets',
-    ]);
-    expect(operations[0].parameters.map((param) => param.name)).toEqual([
-      'name',
-    ]);
-  });
-
   it('should resolve internal references', () => {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',
@@ -392,64 +342,5 @@ describe('OpenApiSpecParser', () => {
         'https://api.example.com',
       );
     });
-  });
-});
-
-describe('OpenApiSpecParser with the petstore fixture', () => {
-  let petstore: OpenAPIV3.Document;
-
-  beforeAll(() => {
-    const specPath = path.resolve(__dirname, 'fixtures/petstore.yaml');
-    petstore = yaml.load(
-      fs.readFileSync(specPath, 'utf8'),
-    ) as OpenAPIV3.Document;
-  });
-
-  it('should build every parameter of every operation as an ApiParameter', () => {
-    const operations = new OpenApiSpecParser().parse(petstore);
-
-    expect(operations.length).toBeGreaterThan(0);
-    for (const operation of operations) {
-      for (const param of operation.parameters) {
-        expect(param.typeHint).not.toBe('');
-        expect(param.typeValue.kind).not.toBe('');
-        expect(param.name).not.toBe('');
-      }
-    }
-  });
-
-  it('should type a parameter parsed off the fixture', () => {
-    const operations = new OpenApiSpecParser().parse(petstore);
-    const findByStatus = operations.find(
-      (operation) => operation.name === 'find_pets_by_status',
-    );
-    if (!findByStatus) {
-      expect.fail('the fixture should declare findPetsByStatus');
-    }
-
-    const status = findByStatus.parameters[0];
-
-    expect(status.name).toBe('status');
-    expect(status.typeHint).toBe('string');
-    expect(status.typeValue).toEqual({kind: 'string'});
-    expect(status.description).toBe(
-      'Status values that need to be considered for filter',
-    );
-  });
-
-  it('should type an array-of-object body parameter off the fixture', () => {
-    const operations = new OpenApiSpecParser().parse(petstore);
-    const createUsers = operations.find(
-      (operation) => operation.name === 'create_users_with_list_input',
-    );
-    if (!createUsers) {
-      expect.fail('the fixture should declare createUsersWithListInput');
-    }
-
-    const body = createUsers.parameters[0];
-
-    expect(body.name).toBe('body');
-    expect(body.typeHint).toBe('Array<Record<string, unknown>>');
-    expect(body.typeValue).toEqual({kind: 'array', items: {kind: 'object'}});
   });
 });

@@ -6,25 +6,7 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../../utils/experimental.js';
-import {
-  ApiParameter,
-  normalizeSchema,
-  toSnakeCaseName,
-} from '../common/common.js';
-
-/**
- * Normalizes a schema, tolerating a reference that stayed unresolved.
- *
- * `resolveReferences` leaves a dangling internal `$ref` in place. Rejecting it
- * here would lose every tool in the spec over one broken pointer, so the
- * parameter falls back to an unconstrained schema instead.
- */
-function toParsedSchema(
-  value: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined,
-  context: string,
-): OpenAPIV3.SchemaObject {
-  return value && '$ref' in value ? {} : normalizeSchema(value, context);
-}
+import {type ApiParameter} from '../common/common.js';
 
 /**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
@@ -49,9 +31,14 @@ export class OperationParser {
     this.dedupeParamNames();
   }
 
-  /** The name to force on a parameter, or `undefined` to let it derive one. */
-  private overrideName(originalName: string): string | undefined {
-    return this.preservePropertyNames ? originalName : undefined;
+  private getParamName(originalName: string): string {
+    if (this.preservePropertyNames) {
+      return originalName;
+    }
+    // Simple snake_case conversion
+    return originalName
+      .replace(/[A-Z]/g, (g) => '_' + g.toLowerCase())
+      .replace(/^_/, '');
   }
 
   private processOperationParameters() {
@@ -61,20 +48,17 @@ export class OperationParser {
       if ('name' in param) {
         const originalName = param.name;
         const description = param.description || '';
-        const schema = toParsedSchema(
-          param.schema,
-          `operation parameter '${originalName}'`,
-        );
-        this.params.push(
-          new ApiParameter({
-            originalName,
-            paramLocation: param.in || '',
-            paramSchema: schema,
-            description,
-            required: param.required || false,
-            name: this.overrideName(originalName),
-          }),
-        );
+        const location = param.in || '';
+        const schema = (param.schema as OpenAPIV3.SchemaObject) || {};
+
+        this.params.push({
+          originalName,
+          paramLocation: location,
+          paramSchema: schema,
+          description,
+          required: param.required || false,
+          name: this.getParamName(originalName),
+        });
       }
     }
   }
@@ -101,45 +85,45 @@ export class OperationParser {
         const properties = schema.properties || {};
         if (Object.keys(properties).length > 0) {
           for (const [propName, propDetails] of Object.entries(properties)) {
-            if ('$ref' in propDetails) {
-              continue;
-            }
-            this.params.push(
-              new ApiParameter({
+            if (!('$ref' in propDetails)) {
+              this.params.push({
                 originalName: propName,
                 paramLocation: 'body',
-                paramSchema: normalizeSchema(
-                  propDetails,
-                  `request body property '${propName}'`,
-                ),
+                paramSchema: propDetails,
+                description: propDetails.description,
                 required: (schema.required || []).includes(propName),
-                name: this.overrideName(propName),
-              }),
-            );
+                name: this.getParamName(propName),
+              });
+            }
           }
         } else {
-          this.params.push(
-            new ApiParameter({
-              originalName: '',
-              paramLocation: 'body',
-              paramSchema: schema,
-              description,
-              required: true,
-              name: 'body',
-            }),
-          );
-        }
-      } else {
-        this.params.push(
-          new ApiParameter({
-            originalName: schema.type === 'array' ? 'array' : 'body',
+          this.params.push({
+            originalName: '',
             paramLocation: 'body',
             paramSchema: schema,
             description,
             required: true,
             name: 'body',
-          }),
-        );
+          });
+        }
+      } else if (schema.type === 'array') {
+        this.params.push({
+          originalName: 'array',
+          paramLocation: 'body',
+          paramSchema: schema,
+          description,
+          required: true,
+          name: 'body',
+        });
+      } else {
+        this.params.push({
+          originalName: 'body',
+          paramLocation: 'body',
+          paramSchema: schema,
+          description,
+          required: true,
+          name: 'body',
+        });
       }
     }
   }
@@ -157,21 +141,21 @@ export class OperationParser {
       if (!('$ref' in response) && response.content) {
         const firstMimeType = Object.keys(response.content)[0];
         if (firstMimeType) {
-          returnSchema = toParsedSchema(
-            response.content[firstMimeType].schema,
-            `response '${min20x}' body`,
-          );
+          const schema = response.content[firstMimeType].schema;
+          if (schema && !('$ref' in schema)) {
+            returnSchema = schema;
+          }
         }
       }
     }
 
-    this.returnValue = new ApiParameter({
+    this.returnValue = {
       originalName: '',
       paramLocation: '',
       paramSchema: returnSchema,
       required: true,
       name: 'return',
-    });
+    };
   }
 
   private dedupeParamNames() {
@@ -233,10 +217,7 @@ export class OperationParser {
     if (!operationId) {
       throw new Error('Operation ID is missing');
     }
-    const name = this.preservePropertyNames
-      ? operationId
-      : toSnakeCaseName(operationId);
-    return name.substring(0, 60);
+    return this.getParamName(operationId).substring(0, 60);
   }
 
   /**
