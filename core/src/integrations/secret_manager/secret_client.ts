@@ -26,10 +26,11 @@ const LOCATION_PATTERN = /^[a-z0-9-]+$/;
 /** The fields of `AccessSecretVersionResponse` this client reads. */
 interface AccessSecretVersionResponse {
   /**
-   * Payload `data` is base64-encoded, as proto3 JSON encodes bytes. It is
-   * absent for an empty secret, because proto3 JSON omits default values.
+   * Payload `data` is base64-encoded, as proto3 JSON encodes bytes. Both
+   * `payload` and its `data` are absent for an empty secret, because proto3
+   * JSON omits an unset message field and a default value alike.
    */
-  payload: {data?: string};
+  payload?: {data?: string};
 }
 
 /** Options for {@link SecretManagerClient}. */
@@ -154,7 +155,7 @@ export class SecretManagerClient {
       url: `https://${this.host}/${API_VERSION}/${resourceName}:access`,
       headers: getTrackingHeaders(),
     });
-    return base64Decode(response.data.payload.data ?? '');
+    return base64Decode(response.data.payload?.data ?? '');
   }
 
   /**

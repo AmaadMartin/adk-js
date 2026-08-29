@@ -10,6 +10,7 @@ import {
   SecretManagerClientOptions,
   version,
 } from '@google/adk';
+import type {Credentials, GoogleAuthOptions} from 'google-auth-library';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 /** The request options {@link SecretManagerClient} sends to the auth client. */
@@ -20,20 +21,20 @@ interface RequestOptions {
 
 /** The response shape the auth client resolves to for an `:access` call. */
 interface AccessResponse {
-  data: {payload: {data?: string}};
+  data: {payload?: {data?: string}};
 }
 
 const mocks = vi.hoisted(() => {
   const request = vi.fn<(options: RequestOptions) => Promise<AccessResponse>>();
   const getClient = vi.fn(() => Promise.resolve({request}));
-  const googleAuthConstructor = vi.fn<(options: unknown) => void>();
+  const googleAuthConstructor = vi.fn<(options: GoogleAuthOptions) => void>();
   const oauthConstructor = vi.fn<() => void>();
-  const oauthSetCredentials = vi.fn<(credentials: unknown) => void>();
+  const oauthSetCredentials = vi.fn<(credentials: Credentials) => void>();
 
   class FakeGoogleAuth {
     getClient = getClient;
 
-    constructor(options: unknown) {
+    constructor(options: GoogleAuthOptions) {
       googleAuthConstructor(options);
     }
   }
@@ -200,6 +201,14 @@ describe('SecretManagerClient', () => {
 
     it('returns an empty string when the payload omits data', async () => {
       mocks.request.mockResolvedValue({data: {payload: {}}});
+
+      const client = new SecretManagerClient();
+
+      await expect(client.getSecret(RESOURCE_NAME)).resolves.toBe('');
+    });
+
+    it('returns an empty string when the response omits the payload', async () => {
+      mocks.request.mockResolvedValue({data: {}});
 
       const client = new SecretManagerClient();
 
