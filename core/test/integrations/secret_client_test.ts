@@ -15,7 +15,7 @@ interface RequestOptions {
 
 /** The response shape the auth client resolves to for an `:access` call. */
 interface AccessResponse {
-  data: {payload: {data: string}};
+  data: {payload: {data?: string}};
 }
 
 const mocks = vi.hoisted(() => {
@@ -136,6 +136,18 @@ describe('SecretManagerClient', () => {
       expect(mocks.googleAuthConstructor).not.toHaveBeenCalled();
     });
 
+    it('rejects a location that is not a location ID', () => {
+      expect(() => new SecretManagerClient({location: 'evil.com/'})).toThrow(
+        'Invalid location: evil.com/',
+      );
+    });
+
+    it('rejects a location holding regular expression metacharacters', () => {
+      expect(() => new SecretManagerClient({location: '$&'})).toThrow(
+        'Invalid location: $&',
+      );
+    });
+
     it('rejects both service account JSON and an auth token', () => {
       expect(
         () =>
@@ -161,6 +173,14 @@ describe('SecretManagerClient', () => {
 
     it('returns an empty string for an empty payload', async () => {
       mocks.request.mockResolvedValue(accessResponse(''));
+
+      const client = new SecretManagerClient();
+
+      await expect(client.getSecret(RESOURCE_NAME)).resolves.toBe('');
+    });
+
+    it('returns an empty string when the payload omits data', async () => {
+      mocks.request.mockResolvedValue({data: {payload: {}}});
 
       const client = new SecretManagerClient();
 

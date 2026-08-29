@@ -11,6 +11,7 @@ import {
   OAuth2Client,
 } from 'google-auth-library';
 import {getTrackingHeaders} from '../../utils/client_labels.js';
+import {base64Decode} from '../../utils/env_aware_utils.js';
 import {formatError} from '../../utils/error_utils.js';
 
 const CLOUD_PLATFORM_SCOPES = [
@@ -18,11 +19,16 @@ const CLOUD_PLATFORM_SCOPES = [
 ];
 const GLOBAL_HOST = 'secretmanager.googleapis.com';
 const API_VERSION = 'v1';
+/** Google Cloud location IDs hold only lowercase letters, digits and hyphens. */
+const LOCATION_PATTERN = /^[a-z0-9-]+$/;
 
 /** The fields of `AccessSecretVersionResponse` this client reads. */
 interface AccessSecretVersionResponse {
-  /** Payload `data` is base64-encoded, as proto3 JSON encodes bytes. */
-  payload: {data: string};
+  /**
+   * Payload `data` is base64-encoded, as proto3 JSON encodes bytes. It is
+   * absent for an empty secret, because proto3 JSON omits default values.
+   */
+  payload: {data?: string};
 }
 
 /** Options for {@link SecretManagerClient}. */
@@ -63,6 +69,18 @@ function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
 }
 
 /**
+ * Builds the regional host for a location. The location reaches the hostname,
+ * so a value holding a dot or a slash would send the request, and its bearer
+ * token, to a host the caller did not intend.
+ */
+function regionalHost(location: string): string {
+  if (!LOCATION_PATTERN.test(location)) {
+    throw new Error(`Invalid location: ${location}`);
+  }
+  return `secretmanager.${location}.rep.googleapis.com`;
+}
+
+/**
  * Builds the auth in the same priority order as the Python implementation:
  * service account key material, then an existing access token, then
  * Application Default Credentials.
@@ -98,8 +116,9 @@ export class SecretManagerClient {
   private readonly host: string;
 
   /**
-   * @throws If both `serviceAccountJson` and `authToken` are provided, or if
-   *   `serviceAccountJson` is not valid JSON.
+   * @throws If both `serviceAccountJson` and `authToken` are provided, if
+   *   `serviceAccountJson` is not valid JSON, or if `location` is not a
+   *   well-formed Google Cloud location ID.
    */
   constructor(options: SecretManagerClientOptions = {}) {
     if (options.serviceAccountJson && options.authToken) {
@@ -111,9 +130,7 @@ export class SecretManagerClient {
     this.usesDefaultCredentials =
       !options.serviceAccountJson && !options.authToken;
     this.auth = resolveAuth(options);
-    this.host = options.location
-      ? `secretmanager.${options.location}.rep.googleapis.com`
-      : GLOBAL_HOST;
+    this.host = options.location ? regionalHost(options.location) : GLOBAL_HOST;
   }
 
   /**
@@ -132,7 +149,7 @@ export class SecretManagerClient {
       url: `https://${this.host}/${API_VERSION}/${resourceName}:access`,
       headers: getTrackingHeaders(),
     });
-    return Buffer.from(response.data.payload.data, 'base64').toString('utf-8');
+    return base64Decode(response.data.payload.data ?? '');
   }
 
   /**
