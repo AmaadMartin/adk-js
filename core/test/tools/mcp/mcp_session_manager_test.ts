@@ -8,6 +8,7 @@ import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {PassThrough, Writable} from 'node:stream';
 import {describe, expect, it, vi} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
@@ -294,6 +295,147 @@ describe('MCPSessionManager', () => {
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining('background stream died'),
       );
+
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe('errlog', () => {
+    /**
+     * Installs a stdio transport exposing `stderr`. The one cast lives here:
+     * the SDK module is `vi.mock`ed, so the stub carries only the property
+     * the manager reads, which cannot satisfy the full transport type.
+     */
+    function stubStdioTransport(stderr: PassThrough | null): void {
+      vi.mocked(StdioClientTransport).mockImplementationOnce(
+        () => ({stderr}) as unknown as StdioClientTransport,
+      );
+    }
+
+    /** A writable stream that keeps everything written to it. */
+    function capturingStream(): {stream: Writable; text: () => string} {
+      const chunks: string[] = [];
+      const stream = new Writable({
+        write(chunk: Buffer | string, _encoding, callback) {
+          chunks.push(chunk.toString());
+          callback();
+        },
+      });
+      return {stream, text: () => chunks.join('')};
+    }
+
+    /** Lets the stream machinery deliver every pending 'data' event. */
+    function flushStreams(): Promise<void> {
+      return new Promise((resolve) => setImmediate(resolve));
+    }
+
+    it('asks a stdio server to pipe its stderr', async () => {
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog: capturingStream().stream},
+      );
+
+      await manager.createSession();
+
+      expect(StdioClientTransport).toHaveBeenCalledWith({
+        command: 'test-command',
+        stderr: 'pipe',
+      });
+    });
+
+    it('inherits a stdio server stderr when no errlog is given', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+
+      await manager.createSession();
+
+      expect(StdioClientTransport).toHaveBeenCalledWith({
+        command: 'test-command',
+      });
+    });
+
+    it('forwards the stdio server stderr to errlog', async () => {
+      const serverStderr = new PassThrough();
+      stubStdioTransport(serverStderr);
+      const errlog = capturingStream();
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog: errlog.stream},
+      );
+
+      await manager.createSession();
+      serverStderr.write('server said something\n');
+      await flushStreams();
+
+      expect(errlog.text()).toBe('server said something\n');
+    });
+
+    it('stops forwarding stderr once the session is closed', async () => {
+      const serverStderr = new PassThrough();
+      stubStdioTransport(serverStderr);
+      const errlog = capturingStream();
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog: errlog.stream},
+      );
+
+      const client = await manager.createSession();
+      serverStderr.write('before close\n');
+      await flushStreams();
+      await manager.closeSession(client);
+      serverStderr.write('after close\n');
+      await flushStreams();
+
+      expect(errlog.text()).toBe('before close\n');
+      expect(serverStderr.listenerCount('data')).toBe(0);
+    });
+
+    it('tolerates a stdio transport that exposes no stderr', async () => {
+      stubStdioTransport(null);
+      const errlog = capturingStream();
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog: errlog.stream},
+      );
+
+      const client = await manager.createSession();
+      await manager.closeSession(client);
+
+      expect(errlog.text()).toBe('');
+      expect(manager.getActiveSessions()).toHaveLength(0);
+    });
+
+    it('sends a transport error to errlog instead of the logger', async () => {
+      const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      const errlog = capturingStream();
+      const manager = new MCPSessionManager(
+        {type: 'StreamableHTTPConnectionParams', url: 'http://test-url'},
+        {errlog: errlog.stream},
+      );
+
+      await manager.createSession();
+      const transport = vi
+        .mocked(StreamableHTTPClientTransport)
+        .mock.instances.at(-1);
+      transport?.onerror?.(new Error('background stream died'));
+
+      expect(errlog.text()).toContain('MCP transport error');
+      expect(errlog.text()).toContain('background stream died');
+      expect(errorSpy).not.toHaveBeenCalled();
 
       errorSpy.mockRestore();
     });
