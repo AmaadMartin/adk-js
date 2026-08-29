@@ -21,8 +21,8 @@ const DISABLE_FLAG = 'ADK_DISABLE_LOAD_DOTENV';
 const TEST_TIMEOUT_MS = 30000;
 
 /**
- * Re-imports the module so the memoized snapshot of explicit environment keys
- * starts empty, the way it does in a fresh process.
+ * Re-imports the module so it snapshots the environment the test set up, the
+ * way it snapshots the shell environment in a fresh process.
  */
 async function importEnvs() {
   vi.resetModules();
@@ -84,6 +84,19 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
 
     loadDotenvForAgent(agent2Dir);
     expect(process.env[DOTENV_KEY]).toBe('two');
+  });
+
+  it('overrides a variable set after the process started', async () => {
+    await writeEnvFile(agentDir, `${DOTENV_KEY}=from_agent\n`);
+    const {loadDotenvForAgent} = await importEnvs();
+    // What `cli.ts` does at startup: it applies the working directory .env
+    // after this module is evaluated. Only the shell counts as explicit, so
+    // the agent's own file still wins.
+    process.env[DOTENV_KEY] = 'from_working_directory';
+
+    loadDotenvForAgent(agentDir);
+
+    expect(process.env[DOTENV_KEY]).toBe('from_agent');
   });
 
   it('does not restore an explicit variable the caller deleted', async () => {

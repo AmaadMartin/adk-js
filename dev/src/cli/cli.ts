@@ -14,10 +14,10 @@ import {
   setLogLevel as setAdkCoreLogLevel,
 } from '@google/adk';
 import {Argument, Command, Option} from 'commander';
-import dotenv from 'dotenv';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
+import {loadDotenvForAgent} from '../utils/envs.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
@@ -26,7 +26,9 @@ import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
 
-dotenv.config({quiet: true});
+// The working directory .env goes through the same loader as an agent's own
+// file, so the agent's file can still override it.
+loadDotenvForAgent(process.cwd());
 
 const LOG_LEVEL_MAP: Record<string, LogLevel> = {
   'debug': LogLevel.DEBUG,

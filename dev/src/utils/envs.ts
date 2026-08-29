@@ -12,16 +12,18 @@ import * as path from 'node:path';
 const ADK_DISABLE_LOAD_DOTENV_ENV_VAR = 'ADK_DISABLE_LOAD_DOTENV';
 
 /**
- * The environment variable keys that existed before ADK loaded its first
- * `.env` file. Captured once per process, so a key a `.env` introduces is
- * never mistaken for one the user set.
+ * The environment variable keys the process started with.
+ *
+ * Captured while this module is evaluated. Every `.env` the CLI reads goes
+ * through this module, and under ESM a module runs before the code that
+ * imports it, so these are the keys the user set and nothing else. Capturing
+ * them at the first load instead would count the working directory `.env` that
+ * `cli.ts` applies at startup, and that file would then outrank every agent's
+ * own `.env`.
  */
-let explicitEnvKeys: ReadonlySet<string> | undefined;
-
-function getExplicitEnvKeys(): ReadonlySet<string> {
-  explicitEnvKeys ??= new Set(Object.keys(process.env));
-  return explicitEnvKeys;
-}
+const EXPLICIT_ENV_KEYS: ReadonlySet<string> = new Set(
+  Object.keys(process.env),
+);
 
 /**
  * Returns the path of the nearest `.env` at or above `startPath`, or
@@ -77,12 +79,11 @@ export function loadDotenvForAgent(agentPath: string): void {
     return;
   }
 
-  const explicitKeys = getExplicitEnvKeys();
   const parsed = dotenv.parse(fs.readFileSync(dotenvPath));
   for (const [key, value] of Object.entries(parsed)) {
     // A key the caller has since deleted is no longer set explicitly, so the
     // file supplies it again.
-    if (!explicitKeys.has(key) || process.env[key] === undefined) {
+    if (!EXPLICIT_ENV_KEYS.has(key) || process.env[key] === undefined) {
       process.env[key] = value;
     }
   }
