@@ -24,9 +24,6 @@ const RESERVED_ARG_NAMES: readonly string[] = [
   'toolContext',
 ];
 
-const DECLARATION_ERROR_PREFIX =
-  'Failed to build function declaration for CrewAI tool: ';
-
 /** The shape of a CrewAI-style tool that {@link CrewaiTool} can wrap. */
 export interface CrewaiToolLike {
   /** The tool's own name, used unless the caller overrides it. */
@@ -55,25 +52,16 @@ export interface CrewaiToolOptions {
 /** The wrapped tool's entry point, bound to the tool. */
 type CrewaiEntryPoint = (args: unknown, context?: Context) => unknown;
 
-/** The parameter schema of the wrapped tool, in the two forms callers need. */
-interface ResolvedSchema {
-  /** The model-facing declaration, absent when the tool declares no schema. */
-  parameters?: Schema;
-  /** The argument names the tool cannot run without. */
-  requiredArgs: readonly string[];
-}
-
 /** Returns true when the value is a JSON object: not null and not an array. */
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function resolveEntryPoint(tool: CrewaiToolLike): CrewaiEntryPoint {
-  const {run} = tool;
-  if (typeof run !== 'function') {
+  if (typeof tool.run !== 'function') {
     throw new Error("Tool must be a CrewAI tool with a 'run' method.");
   }
-  return (args, context) => run.call(tool, args, context);
+  return tool.run.bind(tool);
 }
 
 function resolveName(options: CrewaiToolOptions): string {
@@ -110,7 +98,10 @@ function readRequiredArgs(document: Record<string, unknown>): string[] {
   );
 }
 
-function resolveSchema(tool: CrewaiToolLike): ResolvedSchema {
+function resolveSchema(tool: CrewaiToolLike): {
+  parameters?: Schema;
+  requiredArgs: readonly string[];
+} {
   const {argsSchema} = tool;
   if (argsSchema === undefined) {
     return {requiredArgs: []};
@@ -128,7 +119,9 @@ function resolveSchema(tool: CrewaiToolLike): ResolvedSchema {
       requiredArgs,
     };
   } catch (error: unknown) {
-    throw new Error(`${DECLARATION_ERROR_PREFIX}${formatError(error)}`);
+    throw new Error(
+      `Failed to build function declaration for CrewAI tool: ${formatError(error)}`,
+    );
   }
 }
 
@@ -183,7 +176,7 @@ export class CrewaiTool extends FunctionTool<Schema> {
       name,
       description: options.description || options.tool.description || '',
       parameters,
-      execute: (input, context) => entryPoint(input, context),
+      execute: entryPoint,
     });
     this.requiredArgs = requiredArgs;
   }
