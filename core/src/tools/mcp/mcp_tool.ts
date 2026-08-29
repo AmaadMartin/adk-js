@@ -23,18 +23,6 @@ import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {MCPSessionManager} from './mcp_session_manager.js';
 
 /**
- * Type guard for the MCP SDK's `McpError`.
- *
- * Matches on `name` rather than with `instanceof`, which would need a runtime
- * import of `@modelcontextprotocol/sdk`. The SDK is an optional peer, so that
- * import would break the `@google/adk` barrel for everyone who never installed
- * it, and it would also fail across two copies of the SDK in one runtime.
- */
-function isMcpError(e: unknown): e is Error {
-  return e instanceof Error && e.name === 'McpError';
-}
-
-/**
  * Whether the caller stopped the call, rather than the call failing on its
  * own. A cancelled call keeps throwing: the caller has stopped waiting, and
  * reporting it as a tool error would feed the model a failure it did not cause.
@@ -47,9 +35,14 @@ function isCancellation(e: unknown, signal: AbortSignal | undefined): boolean {
 
 /** Describes a failed tool call for the model, and logs the same message. */
 function toErrorResult(e: unknown): {error: string} {
-  const summary = isMcpError(e)
-    ? 'MCP tool execution failed'
-    : 'Unexpected error during MCP tool execution';
+  // The MCP SDK's `McpError` is matched on `name` rather than with
+  // `instanceof`: a runtime import of `@modelcontextprotocol/sdk` would make
+  // the optional peer mandatory for the `@google/adk` barrel, and `instanceof`
+  // fails across two copies of the SDK in one runtime.
+  const summary =
+    e instanceof Error && e.name === 'McpError'
+      ? 'MCP tool execution failed'
+      : 'Unexpected error during MCP tool execution';
   const error = `${summary}: ${formatError(e)}`;
   logger.warn(error);
   return {error};
@@ -107,14 +100,13 @@ export class MCPTool extends BaseTool {
   }
 
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    if (!isFeatureEnabled(FeatureName.MCP_GRACEFUL_ERROR_HANDLING)) {
-      return this.callMcpTool(request);
-    }
-
     try {
       return await this.callMcpTool(request);
     } catch (e: unknown) {
-      if (isCancellation(e, request.toolContext.abortSignal)) {
+      if (
+        !isFeatureEnabled(FeatureName.MCP_GRACEFUL_ERROR_HANDLING) ||
+        isCancellation(e, request.toolContext.abortSignal)
+      ) {
         throw e;
       }
       return toErrorResult(e);

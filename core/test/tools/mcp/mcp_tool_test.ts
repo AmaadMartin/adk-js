@@ -186,10 +186,13 @@ describe('MCPTool graceful error handling', () => {
 
   /** A session manager handing out one client whose call rejects. */
   function failingSessionManager(error: unknown): MCPSessionManager {
-    const client = {
-      callTool: vi.fn().mockRejectedValue(error),
-    } as unknown as Client;
-    return sessionManagerFor(client);
+    return sessionManagerFor(clientCalling(vi.fn().mockRejectedValue(error)));
+  }
+
+  /** A client whose `callTool` is `call`, and which stubs nothing else. */
+  function clientCalling(call: Mock): Client {
+    const client: Partial<Client> = {callTool: call};
+    return client as Client;
   }
 
   /** A session manager handing out `client`, recording every close. */
@@ -199,10 +202,11 @@ describe('MCPTool graceful error handling', () => {
 
   /** A session manager whose `createSession` is `open`. */
   function sessionManagerOpening(open: Mock): MCPSessionManager {
-    return {
+    const sessionManager: Partial<MCPSessionManager> = {
       createSession: open,
       closeSession: vi.fn().mockResolvedValue(undefined),
-    } as unknown as MCPSessionManager;
+    };
+    return sessionManager as MCPSessionManager;
   }
 
   function contextFor(signal: AbortSignal): Context {
@@ -290,9 +294,7 @@ describe('MCPTool graceful error handling', () => {
   });
 
   it('returns the result of a call that succeeds', async () => {
-    const client = {
-      callTool: vi.fn().mockResolvedValue({content: []}),
-    } as unknown as Client;
+    const client = clientCalling(vi.fn().mockResolvedValue({content: []}));
     const tool = new MCPTool(mcpTool, sessionManagerFor(client));
 
     const result = await tool.runAsync({
