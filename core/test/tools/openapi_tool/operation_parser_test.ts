@@ -37,7 +37,7 @@ describe('OperationParser', () => {
     const params = parser.getParameters();
 
     expect(params.length).toBe(1);
-    expect(params[0].name).toBe('body');
+    expect(params[0].name).toBe('array');
     expect(params[0].paramLocation).toBe('body');
     expect(params[0].paramSchema.type).toBe('array');
   });
@@ -62,6 +62,8 @@ describe('OperationParser', () => {
 
     expect(params.length).toBe(1);
     expect(params[0].name).toBe('body');
+    expect(params[0].originalName).toBe('');
+    expect(params[0].required).toBe(false);
     expect(params[0].paramLocation).toBe('body');
     expect(params[0].paramSchema.type).toBe('string');
   });
