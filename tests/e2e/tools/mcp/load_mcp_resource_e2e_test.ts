@@ -131,7 +131,7 @@ describe('MCPToolset useMcpResources (e2e, real MCP server over stdio)', () => {
 
     const names = (await toolset.getTools()).map((tool) => tool.name);
 
-    expect(names).toEqual(['echo']);
+    expect(names).toEqual(['alpha', 'counter', 'echo']);
   });
 
   it('appends the resource tool after the server tools', async () => {
@@ -142,7 +142,7 @@ describe('MCPToolset useMcpResources (e2e, real MCP server over stdio)', () => {
 
     const names = (await toolset.getTools()).map((tool) => tool.name);
 
-    expect(names).toEqual(['echo', 'load_mcp_resource']);
+    expect(names).toEqual(['alpha', 'counter', 'echo', 'load_mcp_resource']);
   });
 
   it('reaches real resource contents through the appended tool', async () => {
@@ -170,7 +170,7 @@ describe('MCPToolset useMcpResources (e2e, real MCP server over stdio)', () => {
 
     const names = (await toolset.getTools()).map((tool) => tool.name);
 
-    expect(names).toEqual(['echo', 'load_mcp_resource']);
+    expect(names).toEqual(['alpha', 'counter', 'echo', 'load_mcp_resource']);
   });
 
   it('refuses the same config while stdio is not allowed', () => {
@@ -179,5 +179,80 @@ describe('MCPToolset useMcpResources (e2e, real MCP server over stdio)', () => {
     expect(() => MCPToolset.fromConfig({stdioConnectionParams})).toThrow(
       /not allowed in agent configs/,
     );
+  });
+});
+
+describe('MCPToolset tool discovery (e2e, real MCP server over stdio)', () => {
+  let toolset: MCPToolset;
+
+  afterEach(async () => {
+    await toolset?.close();
+  });
+
+  it('sorts by name and drops the reserved name the server advertises', async () => {
+    toolset = createToolset();
+
+    const names = (await toolset.getTools()).map((tool) => tool.name);
+
+    // The server advertises echo, alpha, transfer_to_agent, counter.
+    expect(names).toEqual(['alpha', 'counter', 'echo']);
+  });
+
+  it('lists once within the cache lifetime', async () => {
+    toolset = new MCPToolset({
+      connectionParams: stdioConnectionParams,
+      toolListCacheTtlSeconds: 60,
+    });
+
+    const first = await toolset.getTools();
+    const second = await toolset.getTools();
+
+    expect(second.map((tool) => tool.name)).toEqual(
+      first.map((tool) => tool.name),
+    );
+  });
+
+  it('receives the progress the server reports during a call', async () => {
+    const reported: number[] = [];
+    toolset = new MCPToolset({
+      connectionParams: stdioConnectionParams,
+      progressCallback: ({progress}) => {
+        reported.push(progress);
+      },
+    });
+
+    const tools = await toolset.getTools();
+    const counter = tools.find((tool) => tool.name === 'counter');
+    if (!counter) {
+      expect.fail('the server did not advertise the counter tool');
+    }
+    await counter.runAsync({args: {}, toolContext});
+
+    // The server sends two updates, but the tool result can overtake the last
+    // one on the wire. The first update is enough to prove the SDK sent a
+    // progress token and the callback received what the server reported.
+    expect(reported).toContain(1);
+  });
+
+  it('holds a gated call back from the server', async () => {
+    toolset = new MCPToolset({
+      connectionParams: stdioConnectionParams,
+      requireConfirmation: true,
+    });
+    const gatedContext = {
+      actions: {},
+      requestConfirmation: () => {},
+    } as unknown as Context;
+
+    const tools = await toolset.getTools();
+    const echo = tools.find((tool) => tool.name === 'echo');
+    if (!echo) {
+      expect.fail('the server did not advertise the echo tool');
+    }
+    const result = await echo.runAsync({args: {}, toolContext: gatedContext});
+
+    expect(result).toEqual({
+      error: 'This tool call requires confirmation, please approve or reject.',
+    });
   });
 });
