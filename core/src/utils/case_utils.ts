@@ -10,11 +10,12 @@
  * Handles lowerCamelCase, UpperCamelCase, space-separated text, acronyms
  * (e.g. "REST API") and consecutive uppercase letters.
  *
- * This matches the output of `_to_snake_case` in adk-python, which names the
- * same OpenAPI tools and tool arguments there.
+ * This ports `_to_snake_case` from adk-python, so an OpenAPI operation that
+ * omits its `operationId` gets the same generated name in both SDKs. It also
+ * names the same OpenAPI tools and tool arguments there.
  *
  * @param text The string to convert.
- * @returns The snake_case version of the string.
+ * @returns The snake_case form, without leading or trailing underscores.
  */
 export function snakeCase(text: string): string {
   return text
