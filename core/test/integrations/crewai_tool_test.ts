@@ -201,7 +201,10 @@ describe('CrewaiTool', () => {
       const tool = new CrewaiTool(crewaiTool, {name: 'async_tool'});
 
       await expect(
-        tool.runAsync({args: {}, toolContext: emptyContext}),
+        tool.runAsync({
+          args: {search_query: 'test query'},
+          toolContext: emptyContext,
+        }),
       ).resolves.toBe('async result');
     });
 
@@ -210,7 +213,10 @@ describe('CrewaiTool', () => {
       const tool = new CrewaiTool(crewaiTool, {name: 'sync_tool'});
 
       await expect(
-        tool.runAsync({args: {}, toolContext: emptyContext}),
+        tool.runAsync({
+          args: {search_query: 'test query'},
+          toolContext: emptyContext,
+        }),
       ).resolves.toBe('sync result');
     });
 
@@ -223,8 +229,134 @@ describe('CrewaiTool', () => {
       const tool = new CrewaiTool(crewaiTool, {name: 'failing_tool'});
 
       await expect(
-        tool.runAsync({args: {}, toolContext: emptyContext}),
+        tool.runAsync({
+          args: {search_query: 'test query'},
+          toolContext: emptyContext,
+        }),
       ).rejects.toThrow('crewai failure');
+    });
+
+    it('strips a model-supplied toolContext argument', async () => {
+      const crewaiTool = createCrewaiTool();
+      const tool = new CrewaiTool(crewaiTool, {name: 'test_tool'});
+
+      await tool.runAsync({
+        args: {search_query: 'test query', toolContext: 'hallucinated'},
+        toolContext: emptyContext,
+      });
+
+      expect(crewaiTool.run).toHaveBeenCalledWith(
+        {search_query: 'test query'},
+        emptyContext,
+      );
+    });
+  });
+
+  describe('required arguments', () => {
+    it('returns a retry hint instead of running when one is missing', async () => {
+      const crewaiTool = createCrewaiTool();
+      const tool = new CrewaiTool(crewaiTool, {name: 'test_tool'});
+
+      const result = await tool.runAsync({args: {}, toolContext: emptyContext});
+
+      expect(result).toEqual({
+        error: `Invoking \`test_tool()\` failed as the following mandatory input parameters are not present:
+search_query
+You could retry calling this tool, but it is IMPORTANT for you to provide all the mandatory parameters.`,
+      });
+      expect(crewaiTool.run).not.toHaveBeenCalled();
+    });
+
+    it('names every missing argument in the declared order', async () => {
+      const crewaiTool = createCrewaiTool({
+        argsSchema: {
+          type: 'object',
+          properties: {
+            search_query: {type: 'string'},
+            locale: {type: 'string'},
+          },
+          required: ['search_query', 'locale'],
+        },
+      });
+      const tool = new CrewaiTool(crewaiTool, {name: 'test_tool'});
+
+      const result = await tool.runAsync({args: {}, toolContext: emptyContext});
+
+      expect(result).toEqual({
+        error: `Invoking \`test_tool()\` failed as the following mandatory input parameters are not present:
+search_query
+locale
+You could retry calling this tool, but it is IMPORTANT for you to provide all the mandatory parameters.`,
+      });
+    });
+
+    it('reports only the missing one when the others are supplied', async () => {
+      const crewaiTool = createCrewaiTool({
+        argsSchema: {
+          type: 'object',
+          properties: {
+            search_query: {type: 'string'},
+            locale: {type: 'string'},
+          },
+          required: ['search_query', 'locale'],
+        },
+      });
+      const tool = new CrewaiTool(crewaiTool, {name: 'test_tool'});
+
+      const result = await tool.runAsync({
+        args: {search_query: 'test query'},
+        toolContext: emptyContext,
+      });
+
+      expect(result).toEqual({
+        error: `Invoking \`test_tool()\` failed as the following mandatory input parameters are not present:
+locale
+You could retry calling this tool, but it is IMPORTANT for you to provide all the mandatory parameters.`,
+      });
+    });
+
+    it('treats an explicit undefined value as supplied', async () => {
+      const crewaiTool = createCrewaiTool();
+      const tool = new CrewaiTool(crewaiTool, {name: 'test_tool'});
+
+      const result = await tool.runAsync({
+        args: {search_query: undefined},
+        toolContext: emptyContext,
+      });
+
+      expect(result).toEqual({echoed: {search_query: undefined}});
+    });
+
+    it('runs the tool when the schema declares no required list', async () => {
+      const crewaiTool = createCrewaiTool({
+        argsSchema: {type: 'object', properties: {search_query: {}}},
+      });
+      const tool = new CrewaiTool(crewaiTool, {name: 'test_tool'});
+
+      const result = await tool.runAsync({args: {}, toolContext: emptyContext});
+
+      expect(result).toEqual({echoed: {}});
+    });
+
+    it('runs the tool when it declares no schema at all', async () => {
+      const crewaiTool = createCrewaiTool({argsSchema: undefined});
+      const tool = new CrewaiTool(crewaiTool, {name: 'test_tool'});
+
+      const result = await tool.runAsync({args: {}, toolContext: emptyContext});
+
+      expect(result).toEqual({echoed: {}});
+    });
+
+    it('reports the overridden name in the retry hint', async () => {
+      const tool = new CrewaiTool(createCrewaiTool({name: 'Serper Dev Tool'}), {
+        name: 'web_search',
+      });
+
+      const result = await tool.runAsync({args: {}, toolContext: emptyContext});
+
+      expect(result).toEqual({
+        error: expect.stringContaining('Invoking `web_search()` failed'),
+      });
     });
   });
 
@@ -281,6 +413,53 @@ describe('CrewaiTool', () => {
         expect.objectContaining({
           name: 'serper_dev_tool',
           response: {results: ['adk-js']},
+        }),
+      ]);
+    });
+
+    it('hands the model a retry hint when it omits a required argument', async () => {
+      const crewaiTool = createCrewaiTool({name: 'Serper Dev Tool'});
+      const agent = new LlmAgent({
+        name: 'researcher',
+        model: new ScriptedLlm([
+          {functionCall: {name: 'serper_dev_tool', args: {}}},
+          {text: 'I need a search query.'},
+        ]),
+        tools: [new CrewaiTool(crewaiTool)],
+      });
+      const sessionService = new InMemorySessionService();
+      const session = await sessionService.createSession({
+        appName: 'crewai_app',
+        userId: 'u1',
+      });
+      const runner = new Runner({
+        appName: 'crewai_app',
+        agent,
+        sessionService,
+      });
+
+      const responses: FunctionResponse[] = [];
+      for await (const event of runner.runAsync({
+        userId: 'u1',
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: [{text: 'search for adk'}]},
+      })) {
+        for (const part of event.content?.parts ?? []) {
+          if (part.functionResponse) {
+            responses.push(part.functionResponse);
+          }
+        }
+      }
+
+      expect(crewaiTool.run).not.toHaveBeenCalled();
+      expect(responses).toEqual([
+        expect.objectContaining({
+          name: 'serper_dev_tool',
+          response: {
+            error: `Invoking \`serper_dev_tool()\` failed as the following mandatory input parameters are not present:
+search_query
+You could retry calling this tool, but it is IMPORTANT for you to provide all the mandatory parameters.`,
+          },
         }),
       ]);
     });
