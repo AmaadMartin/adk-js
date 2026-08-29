@@ -1335,4 +1335,19 @@ describe('RestApiTool auth scheme validation', () => {
       "Invalid security scheme data: 'name' must be a string.",
     );
   });
+
+  it('should reject a scheme the setter reads from configuration', () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      ENDPOINT,
+      OPERATION,
+    );
+    const scheme: OpenAPIV3.SecuritySchemeObject =
+      JSON.parse('{"type":"http"}');
+
+    expect(() => tool.configureAuthScheme(scheme)).toThrow(
+      "Invalid security scheme data: 'scheme' must be a string.",
+    );
+  });
 });
