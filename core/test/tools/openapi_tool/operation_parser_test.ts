@@ -293,4 +293,62 @@ describe('OperationParser', () => {
       expect(parser.getParameters()[0].description).toBe('Request body');
     });
   });
+  describe('getJsonSchema encoding', () => {
+    function operationWithQuerySchema(
+      schema: OpenAPIV3.SchemaObject,
+    ): OpenAPIV3.OperationObject {
+      return {
+        operationId: 'testOp',
+        parameters: [{name: 'param1', in: 'query', schema}],
+        responses: {},
+      };
+    }
+
+    it('should drop null and undefined schema members', () => {
+      const parser = new OperationParser(
+        operationWithQuerySchema({
+          type: 'object',
+          default: null,
+          example: undefined,
+          properties: {inner: {type: 'string', default: null}},
+        }),
+      );
+
+      expect(parser.getJsonSchema().properties).toEqual({
+        param1: {type: 'object', properties: {inner: {type: 'string'}}},
+      });
+    });
+
+    it('should deep-copy the schema instead of aliasing the operation', () => {
+      const schema: OpenAPIV3.SchemaObject = {
+        type: 'object',
+        properties: {inner: {type: 'string', description: 'Inner'}},
+      };
+      const parser = new OperationParser(operationWithQuerySchema(schema));
+
+      const jsonSchema = parser.getJsonSchema();
+      schema.properties = {inner: {type: 'string', description: 'Mutated'}};
+
+      expect(jsonSchema.properties).toEqual({
+        param1: {
+          type: 'object',
+          properties: {inner: {type: 'string', description: 'Inner'}},
+        },
+      });
+    });
+
+    it('should copy the members of an array schema', () => {
+      const items: OpenAPIV3.SchemaObject = {type: 'string'};
+      const parser = new OperationParser(
+        operationWithQuerySchema({type: 'array', items, enum: ['a', 'b']}),
+      );
+
+      const jsonSchema = parser.getJsonSchema();
+      items.type = 'integer';
+
+      expect(jsonSchema.properties).toEqual({
+        param1: {type: 'array', items: {type: 'string'}, enum: ['a', 'b']},
+      });
+    });
+  });
 });

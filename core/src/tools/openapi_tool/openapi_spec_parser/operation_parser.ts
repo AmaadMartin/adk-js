@@ -55,6 +55,33 @@ function describeSchema(
 }
 
 /**
+ * Deep-copies a schema and drops every member whose value is null or
+ * undefined, matching the `exclude_none` encoding of the adk-python parser.
+ *
+ * The copy also stops the generated declaration from sharing objects with the
+ * operation it came from.
+ */
+function encodeSchema(source: object): Record<string, unknown> {
+  const encoded: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value !== null && value !== undefined) {
+      encoded[key] = encodeValue(value);
+    }
+  }
+  return encoded;
+}
+
+function encodeValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(encodeValue);
+  }
+  if (typeof value === 'object' && value !== null) {
+    return encodeSchema(value);
+  }
+  return value;
+}
+
+/**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
  *
  * It maps OpenAPI parameters and request bodies into a flat list of `ApiParameter` objects
@@ -237,7 +264,7 @@ export class OperationParser {
     const required: string[] = [];
 
     for (const param of this.params) {
-      properties[param.name] = param.paramSchema;
+      properties[param.name] = encodeSchema(param.paramSchema);
       if (param.required) {
         required.push(param.name);
       }
