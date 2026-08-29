@@ -6,7 +6,11 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../../utils/experimental.js';
-import {ApiParameter, OperationParser} from './operation_parser.js';
+import {
+  ApiParameter,
+  OperationParser,
+  requiredSchemeName,
+} from './operation_parser.js';
 
 const VALID_SCHEMA_TYPES = new Set([
   'array',
@@ -239,11 +243,7 @@ function collectOperations(
   const server = spec.servers?.[0];
   const baseUrl = server ? resolveServerUrl(server) : '';
 
-  const globalSecurity = spec.security || [];
-  let globalSchemeName: string | undefined;
-  if (globalSecurity.length > 0) {
-    globalSchemeName = Object.keys(globalSecurity[0])[0];
-  }
+  const globalSchemeName = requiredSchemeName(spec.security);
 
   const authSchemes =
     (spec.components?.securitySchemes as Record<
@@ -283,11 +283,12 @@ function collectOperations(
         preservePropertyNames,
       });
 
-      let authSchemeName: string | undefined;
-      if (operation.security && operation.security.length > 0) {
-        authSchemeName = Object.keys(operation.security[0])[0];
-      }
-      authSchemeName = authSchemeName || globalSchemeName;
+      // An operation that declares its own security replaces the global
+      // requirement, including when it declares that no credential is needed.
+      const authSchemeName =
+        operation.security === undefined
+          ? globalSchemeName
+          : requiredSchemeName(operation.security);
 
       const authScheme = authSchemeName
         ? authSchemes[authSchemeName]
