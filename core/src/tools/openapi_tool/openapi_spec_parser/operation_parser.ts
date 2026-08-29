@@ -16,6 +16,18 @@ export interface ApiParameter {
   required: boolean;
 }
 
+/** Options accepted by `OperationParser`. */
+export interface OperationParserOptions {
+  preservePropertyNames?: boolean;
+  /**
+   * Parameters that are already parsed. When a caller sets them the operation
+   * is not read, so a name the caller renamed or de-duplicated survives.
+   */
+  parameters?: ApiParameter[];
+  /** The return value that goes with `parameters`. */
+  returnValue?: ApiParameter;
+}
+
 /**
  * Returns the name of the security scheme a requirement list makes mandatory,
  * or an empty string when the list makes none.
@@ -51,9 +63,14 @@ export class OperationParser {
 
   constructor(
     private readonly operation: OpenAPIV3.OperationObject,
-    options: {preservePropertyNames?: boolean} = {},
+    options: OperationParserOptions = {},
   ) {
     this.preservePropertyNames = options.preservePropertyNames ?? false;
+    if (options.parameters) {
+      this.params = options.parameters;
+      this.returnValue = options.returnValue;
+      return;
+    }
     this.processOperationParameters();
     this.processRequestBody();
     this.processReturnValue();

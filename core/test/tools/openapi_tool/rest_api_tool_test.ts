@@ -10,9 +10,18 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createRestApiToolFromJson,
+  createSession,
+  FetchFn,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
+  OperationParser,
+  ParsedOperation,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
+  version,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -671,6 +680,7 @@ describe('RestApiTool Utilities', () => {
         description: 'description',
         endpoint,
         operation,
+        parameters: [],
       };
 
       const tool = createRestApiTool(parsed);
@@ -1150,6 +1160,886 @@ describe('RestApiTool Utilities', () => {
       expect(headers).toEqual({
         'Content-Type': 'application/json',
       });
+    });
+  });
+});
+
+describe('RestApiTool adk-python parity', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/test',
+    method: 'GET',
+  };
+  const operation: OpenAPIV3.OperationObject = {responses: {}};
+
+  function createToolContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'invocation-1',
+        agent: new LlmAgent({name: 'test_agent'}),
+        session: createSession({id: 'session-1', appName: 'test_app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+  }
+
+  function mockOkResponse(contentType: string, bodyText: string) {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => contentType},
+      text: async () => bodyText,
+    });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('tool name', () => {
+    it('should truncate a name longer than 60 characters', () => {
+      const longName = 'a'.repeat(75);
+
+      const tool = new RestApiTool(
+        longName,
+        'description',
+        endpoint,
+        operation,
+      );
+
+      expect(tool.name).toHaveLength(60);
+      expect(tool.name).toBe('a'.repeat(60));
+    });
+
+    it('should keep a name of 60 characters', () => {
+      const exactName = 'b'.repeat(60);
+
+      const tool = new RestApiTool(
+        exactName,
+        'description',
+        endpoint,
+        operation,
+      );
+
+      expect(tool.name).toBe(exactName);
+    });
+  });
+
+  describe('toString', () => {
+    it('should render the name, description and endpoint', () => {
+      const tool = new RestApiTool(
+        'test_tool',
+        'a description',
+        endpoint,
+        operation,
+      );
+
+      const rendered = tool.toString();
+
+      expect(rendered).toContain('name="test_tool"');
+      expect(rendered).toContain('description="a description"');
+      expect(rendered).toContain('api.example.com');
+    });
+
+    it('should not render the configured credential', () => {
+      const tool = new RestApiTool(
+        'test_tool',
+        'a description',
+        endpoint,
+        operation,
+        undefined,
+        {authType: AuthCredentialTypes.API_KEY, apiKey: 'super-secret-key'},
+      );
+
+      expect(tool.toString()).not.toContain('super-secret-key');
+    });
+  });
+
+  describe('configureAuthCredential', () => {
+    it('should clear the credential when it is called with nothing', async () => {
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'test-key',
+      };
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        credential,
+      );
+      mockOkResponse('text/plain', 'ok');
+      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext');
+
+      tool.configureAuthCredential();
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined,
+        undefined,
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('response handling', () => {
+    it('should wrap a non-JSON body in a text field', async () => {
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+      );
+      mockOkResponse('text/plain', 'ok');
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext(),
+      });
+
+      expect(result).toEqual({text: 'ok'});
+    });
+  });
+
+  describe('prepareRequestParams embedded query and fragment', () => {
+    const searchParam: ApiParameter = {
+      name: 'key',
+      originalName: 'key',
+      paramLocation: 'query',
+      paramSchema: {},
+      required: false,
+    };
+
+    it('should let a declared parameter win over the same key in the path', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api?key=embedded', method: 'GET'},
+        [searchParam],
+        {key: 'explicit'},
+      );
+
+      expect(result.url).toBe('/api?key=explicit');
+    });
+
+    it('should keep an embedded key alongside a declared key', () => {
+      const other: ApiParameter = {
+        name: 'other',
+        originalName: 'other',
+        paramLocation: 'query',
+        paramSchema: {},
+        required: false,
+      };
+
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api?embedded=1', method: 'GET'},
+        [other],
+        {other: '2'},
+      );
+
+      const query = new URL(result.url, 'http://api.example.com').searchParams;
+      expect(query.get('other')).toBe('2');
+      expect(query.get('embedded')).toBe('1');
+    });
+
+    it('should keep both embedded values of one undeclared key', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api?tag=a&tag=b', method: 'GET'},
+        [],
+        {},
+      );
+
+      const query = new URL(result.url, 'http://api.example.com').searchParams;
+      expect(query.getAll('tag')).toEqual(['a', 'b']);
+    });
+
+    it('should strip a fragment that follows a query string', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api?key=embedded#section', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('/api?key=embedded');
+    });
+
+    it('should strip a fragment when there is no query string', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api#section', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('/api');
+    });
+
+    it('should read no query string out of a fragment', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/api#section?key=fragment', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('/api');
+    });
+
+    it('should leave a plain path untouched', () => {
+      const result = prepareRequestParams(
+        {baseUrl: 'http://api.example.com', path: '/api/items', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('http://api.example.com/api/items');
+    });
+  });
+
+  describe('prepareRequestBody content type', () => {
+    it('should set the content type for a form-urlencoded body', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/x-www-form-urlencoded': {schema: {type: 'object'}},
+        },
+      };
+      const headers: Record<string, string> = {};
+
+      prepareRequestBody(requestBody, undefined, {foo: 'bar'}, headers);
+
+      expect(headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    });
+
+    it('should leave the content type unset for a multipart body', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {'multipart/form-data': {schema: {type: 'object'}}},
+      };
+      const headers: Record<string, string> = {};
+
+      prepareRequestBody(requestBody, undefined, {foo: 'bar'}, headers);
+
+      expect(headers['Content-Type']).toBeUndefined();
+    });
+  });
+
+  describe('createRestApiTool', () => {
+    const parsedParameters: ApiParameter[] = [
+      {
+        name: 'parsed_name',
+        originalName: 'parsedName',
+        paramLocation: 'query',
+        paramSchema: {type: 'string'},
+        required: false,
+      },
+    ];
+    const operationWithOtherParams: OpenAPIV3.OperationObject = {
+      responses: {},
+      operationId: 'listThings',
+      parameters: [
+        {name: 'fromOperation', in: 'query', schema: {type: 'string'}},
+      ],
+    };
+
+    it('should report the parsed parameters, not the operation ones', () => {
+      const tool = createRestApiTool({
+        name: 'list_things',
+        description: 'description',
+        endpoint,
+        operation: operationWithOtherParams,
+        parameters: parsedParameters,
+      });
+
+      const declaration = tool._getDeclaration();
+
+      expect(Object.keys(declaration.parameters?.properties ?? {})).toEqual([
+        'parsed_name',
+      ]);
+    });
+
+    it('should truncate a parsed name longer than 60 characters', () => {
+      const tool = createRestApiTool({
+        name: 'c'.repeat(75),
+        description: 'description',
+        endpoint,
+        operation,
+        parameters: [],
+      });
+
+      expect(tool.name).toHaveLength(60);
+    });
+
+    it('should carry the parsed credential to the auth handler', async () => {
+      const authScheme: OpenAPIV3.ApiKeySecurityScheme = {
+        type: 'apiKey',
+        name: 'X-API-Key',
+        in: 'header',
+      };
+      const authCredential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'parsed-key',
+      };
+      const tool = createRestApiTool({
+        name: 'test_tool',
+        description: 'description',
+        endpoint,
+        operation,
+        parameters: [],
+        authScheme,
+        authCredential,
+      });
+      mockOkResponse('text/plain', 'ok');
+      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext');
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.anything(),
+        authScheme,
+        authCredential,
+        expect.anything(),
+      );
+    });
+
+    it('should forward the transport options to the tool', async () => {
+      const headerProvider = vi
+        .fn()
+        .mockReturnValue({'X-Correlation-Id': 'abc'});
+      const tool = createRestApiTool(
+        {
+          name: 'test_tool',
+          description: 'description',
+          endpoint,
+          operation,
+          parameters: [],
+        },
+        {headerProvider, credentialKey: 'my-key'},
+      );
+      mockOkResponse('text/plain', 'ok');
+      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext');
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined,
+        undefined,
+        {credentialKey: 'my-key'},
+      );
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          headers: expect.objectContaining({'X-Correlation-Id': 'abc'}),
+        }),
+      );
+    });
+  });
+
+  describe('createRestApiToolFromJson', () => {
+    it('should build the same tool a serialized parsed operation describes', () => {
+      const parsed: ParsedOperation = {
+        name: 'serialized_tool',
+        description: 'a serialized description',
+        endpoint,
+        operation: {responses: {}, operationId: 'serializedTool'},
+        parameters: [
+          {
+            name: 'query_arg',
+            originalName: 'queryArg',
+            paramLocation: 'query',
+            paramSchema: {type: 'string'},
+            required: true,
+          },
+        ],
+      };
+
+      const tool = createRestApiToolFromJson(JSON.stringify(parsed));
+
+      expect(tool.name).toBe('serialized_tool');
+      expect(tool.description).toBe('a serialized description');
+      expect(
+        Object.keys(tool._getDeclaration().parameters?.properties ?? {}),
+      ).toEqual(['query_arg']);
+    });
+
+    const complete = {
+      name: 'serialized_tool',
+      description: 'a serialized description',
+      endpoint,
+      operation: {responses: {}},
+      parameters: [],
+    };
+    const incomplete: Array<[string, Record<string, unknown>]> = [
+      ['no name', {...complete, name: undefined}],
+      ['no parameters', {...complete, parameters: undefined}],
+      [
+        'a parameters value that is not an array',
+        {...complete, parameters: {}},
+      ],
+      ['no endpoint', {...complete, endpoint: undefined}],
+      ['no operation', {...complete, operation: undefined}],
+    ];
+
+    it.each(incomplete)('should reject a document with %s', (_case, value) => {
+      expect(() => createRestApiToolFromJson(JSON.stringify(value))).toThrow(
+        'A serialized ParsedOperation needs a name, an endpoint, an ' +
+          'operation and a parameters array.',
+      );
+    });
+  });
+
+  describe('OperationParser', () => {
+    it('should report the parameters it is given', () => {
+      const parameters: ApiParameter[] = [
+        {
+          name: 'seeded',
+          originalName: 'seeded',
+          paramLocation: 'query',
+          paramSchema: {},
+          required: false,
+        },
+      ];
+
+      const parser = new OperationParser(
+        {
+          responses: {},
+          parameters: [{name: 'fromOperation', in: 'query', schema: {}}],
+        },
+        {parameters},
+      );
+
+      expect(parser.getParameters()).toEqual(parameters);
+    });
+  });
+});
+
+describe('RestApiTool request and response parity', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/test',
+    method: 'GET',
+  };
+  const operation: OpenAPIV3.OperationObject = {responses: {}};
+
+  function createToolContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'invocation-1',
+        agent: new LlmAgent({name: 'test_agent'}),
+        session: createSession({id: 'session-1', appName: 'test_app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+  }
+
+  /** Records the request a tool issues and answers it. */
+  function recordingFetch(
+    response: {status?: number; contentType?: string; body?: string} = {},
+  ) {
+    const calls: Array<{url: string; headers: Headers}> = [];
+    const fetchFn: FetchFn = vi.fn(async (input, init) => {
+      calls.push({url: String(input), headers: new Headers(init?.headers)});
+      return new Response(response.body ?? 'ok', {
+        status: response.status ?? 200,
+        headers: {'content-type': response.contentType ?? 'text/plain'},
+      });
+    });
+    return {calls, fetchFn};
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('headers', () => {
+    it('should send the ADK user agent', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(calls[0].headers.get('user-agent')).toBe(
+        `google-adk/${version} (tool: test_tool)`,
+      );
+    });
+
+    it('should let a header parameter override the user agent', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const parameters: ApiParameter[] = [
+        {
+          name: 'user_agent',
+          originalName: 'User-Agent',
+          paramLocation: 'header',
+          paramSchema: {type: 'string'},
+          required: false,
+        },
+      ];
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn, parameters},
+      );
+
+      await tool.runAsync({
+        args: {user_agent: 'custom-agent'},
+        toolContext: createToolContext(),
+      });
+
+      expect(calls[0].headers.get('user-agent')).toBe('custom-agent');
+    });
+
+    it('should not let a default header override the user agent', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+      tool.setDefaultHeaders({'user-agent': 'default-agent'});
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(calls[0].headers.get('user-agent')).toBe(
+        `google-adk/${version} (tool: test_tool)`,
+      );
+    });
+
+    it('should send a default header the request does not carry', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+      tool.setDefaultHeaders({'X-Tenant': 'acme'});
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(calls[0].headers.get('x-tenant')).toBe('acme');
+    });
+
+    it('should not let a default header override the body content type', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const postOperation: OpenAPIV3.OperationObject = {
+        responses: {},
+        requestBody: {
+          content: {'application/json': {schema: {type: 'object'}}},
+        },
+      };
+      const parameters: ApiParameter[] = [
+        {
+          name: 'body',
+          originalName: 'body',
+          paramLocation: 'body',
+          paramSchema: {type: 'object'},
+          required: true,
+        },
+      ];
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        {...endpoint, method: 'POST'},
+        postOperation,
+        undefined,
+        undefined,
+        {fetchFn, parameters},
+      );
+      tool.setDefaultHeaders({'Content-Type': 'text/plain'});
+
+      await tool.runAsync({
+        args: {body: {foo: 'bar'}},
+        toolContext: createToolContext(),
+      });
+
+      expect(calls[0].headers.get('content-type')).toBe('application/json');
+    });
+
+    it('should send the additional headers of an HTTP credential', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.HTTP,
+        http: {
+          scheme: 'bearer',
+          credentials: {token: 'token'},
+          additionalHeaders: {'X-Goog-User-Project': 'a-project'},
+        },
+      };
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        credential,
+        {fetchFn},
+      );
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(calls[0].headers.get('x-goog-user-project')).toBe('a-project');
+    });
+  });
+
+  describe('query parameters', () => {
+    const queryParameters: ApiParameter[] = [
+      'flag',
+      'offset',
+      'cursor',
+      'missing',
+      'empty',
+    ].map((name) => ({
+      name,
+      originalName: name,
+      paramLocation: 'query',
+      paramSchema: {},
+      required: false,
+    }));
+
+    it('should drop a null or undefined value and keep a falsy one', () => {
+      const result = prepareRequestParams(endpoint, queryParameters, {
+        flag: false,
+        offset: 0,
+        cursor: null,
+        missing: undefined,
+        empty: '',
+      });
+
+      expect(result.url).toBe(
+        'http://api.example.com/test?flag=false&offset=0&empty=',
+      );
+    });
+  });
+
+  describe('cookie parameters', () => {
+    it('should send the cookie parameters in one Cookie header', () => {
+      const parameters: ApiParameter[] = ['sid', 'theme'].map((name) => ({
+        name,
+        originalName: name,
+        paramLocation: 'cookie',
+        paramSchema: {},
+        required: false,
+      }));
+
+      const result = prepareRequestParams(endpoint, parameters, {
+        sid: 'abc',
+        theme: 'dark',
+      });
+
+      expect(result.headers).toEqual({Cookie: 'sid=abc; theme=dark'});
+      expect(result.url).toBe('http://api.example.com/test');
+    });
+  });
+
+  describe('base URL', () => {
+    it('should remove one trailing slash from the base URL', () => {
+      const result = prepareRequestParams(
+        {baseUrl: 'http://api.example.com/', path: '/trailing', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('http://api.example.com/trailing');
+    });
+
+    it('should remove only one trailing slash', () => {
+      const result = prepareRequestParams(
+        {baseUrl: 'http://api.example.com//', path: '/trailing', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('http://api.example.com//trailing');
+    });
+
+    it('should return the path alone for an empty base URL', () => {
+      const result = prepareRequestParams(
+        {baseUrl: '', path: '/no_base', method: 'GET'},
+        [],
+        {},
+      );
+
+      expect(result.url).toBe('/no_base');
+    });
+  });
+
+  describe('octet-stream body', () => {
+    it('should send the raw value and set the content type', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {'application/octet-stream': {schema: {type: 'string'}}},
+      };
+      const headers: Record<string, string> = {};
+      const raw = new Uint8Array([1, 2, 3]);
+
+      const result = prepareRequestBody(requestBody, raw, {}, headers);
+
+      expect(result).toBe(raw);
+      expect(headers['Content-Type']).toBe('application/octet-stream');
+    });
+  });
+
+  describe('schema defaults', () => {
+    const defaultedOperation: OpenAPIV3.OperationObject = {responses: {}};
+    const parameters: ApiParameter[] = [
+      {
+        name: 'user_id',
+        originalName: 'userId',
+        paramLocation: 'path',
+        paramSchema: {type: 'string', default: 'me'},
+        required: true,
+      },
+    ];
+
+    function createDefaultingTool(fetchFn: FetchFn) {
+      return new RestApiTool(
+        'test_tool',
+        'description',
+        {
+          baseUrl: 'http://api.example.com',
+          path: '/users/{userId}/messages',
+          method: 'GET',
+        },
+        defaultedOperation,
+        undefined,
+        undefined,
+        {fetchFn, parameters},
+      );
+    }
+
+    it('should fill in the default of an omitted required parameter', async () => {
+      const {calls, fetchFn} = recordingFetch();
+
+      await createDefaultingTool(fetchFn).runAsync({
+        args: {},
+        toolContext: createToolContext(),
+      });
+
+      expect(calls[0].url).toBe('http://api.example.com/users/me/messages');
+    });
+
+    it('should not override a value the model supplied', async () => {
+      const {calls, fetchFn} = recordingFetch();
+
+      await createDefaultingTool(fetchFn).runAsync({
+        args: {user_id: 'u-1'},
+        toolContext: createToolContext(),
+      });
+
+      expect(calls[0].url).toBe('http://api.example.com/users/u-1/messages');
+    });
+  });
+
+  describe('response status', () => {
+    it('should return the retry-advising error object for a non-2xx', async () => {
+      const {fetchFn} = recordingFetch({
+        status: 500,
+        body: 'Internal Server Error',
+      });
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext(),
+      });
+
+      expect(result).toEqual({
+        error:
+          'Tool test_tool execution failed. Analyze this execution error and ' +
+          'your inputs. Retry with adjustments if applicable. But make sure ' +
+          "don't retry more than 3 times. Execution Error: Status Code: 500, " +
+          'Internal Server Error',
+      });
+    });
+
+    it('should not return the parsed body of a JSON error response', async () => {
+      const {fetchFn} = recordingFetch({
+        status: 404,
+        contentType: 'application/json',
+        body: '{"message":"not found"}',
+      });
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext(),
+      });
+
+      expect(result).toEqual({
+        error: expect.stringContaining(
+          'Status Code: 404, {"message":"not found"}',
+        ),
+      });
+    });
+  });
+
+  describe('fetchFn', () => {
+    it('should use the supplied fetch instead of the global one', async () => {
+      const {calls, fetchFn} = recordingFetch();
+      globalThis.fetch = vi.fn();
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+        undefined,
+        undefined,
+        {fetchFn},
+      );
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(calls).toHaveLength(1);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('should use the global fetch when none is supplied', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: {get: () => 'text/plain'},
+        text: async () => 'ok',
+      });
+      const tool = new RestApiTool(
+        'test_tool',
+        'description',
+        endpoint,
+        operation,
+      );
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     });
   });
 });
