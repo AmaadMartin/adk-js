@@ -125,6 +125,9 @@ function isErrorResult(result: unknown): boolean {
 /**
  * Adapter that lets an ADK agent call a LangChain JS tool.
  *
+ * Reach for it to adopt a tool that already exists in LangChain form. Write a
+ * plain `FunctionTool` for new code.
+ *
  * The wrapped tool keeps its own name, description and argument schema, and
  * runs through its own entry point, so LangChain still owns argument
  * validation and its callback plumbing never reaches the model.
