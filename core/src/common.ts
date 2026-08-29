@@ -195,6 +195,10 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {
+  getDeveloperInstructions,
+  getToolsByAgentName,
+} from './evaluation/app_details.js';
 export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
 export {
   InferenceStatus,
