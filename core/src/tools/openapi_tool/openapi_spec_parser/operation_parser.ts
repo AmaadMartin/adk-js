@@ -4,8 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Type} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
+import {toSnakeCaseName} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
+import {toGeminiType} from '../../../utils/gemini_schema_util.js';
+import {generateParamDoc, generateReturnDoc, typeHint} from './doc_strings.js';
+import {deriveParameterName} from './parameter_names.js';
 
 /** The JSON Schema describing a tool function's arguments. */
 export interface ToolArgumentsSchema {
@@ -36,6 +41,9 @@ export interface OperationParserOptions {
   returnValue?: ApiParameter;
 }
 
+/** The length a generated tool function name is cut down to. */
+const MAX_FUNCTION_NAME_LENGTH = 60;
+
 /**
  * Returns the name of the security scheme a requirement list makes mandatory,
  * or an empty string when the list makes none.
@@ -58,6 +66,48 @@ export function requiredSchemeName(
 }
 
 /**
+ * Reads an operation supplied as a JSON string.
+ *
+ * @throws {Error} If the JSON holds anything other than an object.
+ */
+function parseOperationJson(operation: string): OpenAPIV3.OperationObject {
+  const parsed: unknown = JSON.parse(operation);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Operation must be a JSON object');
+  }
+  return parsed as OpenAPIV3.OperationObject;
+}
+
+/**
+ * Returns the `originalName` a request body parameter carries. It decides both
+ * the argument name and how `RestApiTool` places the value in the request.
+ *
+ * An array body is named `array`, and a body whose type the schema does not
+ * state is named `body`. A scalar body gets an empty name, so its parameter
+ * location names it instead.
+ */
+function bodyArgumentName(schema: OpenAPIV3.SchemaObject): string {
+  if (schema.type === 'array') {
+    return 'array';
+  }
+  if (schema.oneOf || schema.anyOf || schema.allOf) {
+    return 'body';
+  }
+  return schema.type ? '' : 'body';
+}
+
+/** Builds the return value that carries a response schema. */
+function returnValueOf(paramSchema: OpenAPIV3.SchemaObject): ApiParameter {
+  return {
+    originalName: '',
+    paramLocation: '',
+    paramSchema,
+    required: true,
+    name: 'return',
+  };
+}
+
+/**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
  *
  * It maps OpenAPI parameters and request bodies into a flat list of `ApiParameter` objects
@@ -65,20 +115,21 @@ export function requiredSchemeName(
  */
 @experimental
 export class OperationParser {
+  private readonly operation: OpenAPIV3.OperationObject;
   private params: ApiParameter[] = [];
-  private readonly returnValue: ApiParameter;
+  private readonly returnValue: ApiParameter = returnValueOf({});
   private preservePropertyNames: boolean;
 
   constructor(
-    private readonly operation: OpenAPIV3.OperationObject,
+    operation: OpenAPIV3.OperationObject | string,
     options: OperationParserOptions = {},
   ) {
+    this.operation =
+      typeof operation === 'string' ? parseOperationJson(operation) : operation;
     this.preservePropertyNames = options.preservePropertyNames ?? false;
     if (options.parameters) {
       this.params = options.parameters;
-      // A caller that supplies parameters may still omit the return value, so
-      // it is read from the operation rather than left unset.
-      this.returnValue = options.returnValue ?? this.parseReturnValue();
+      this.returnValue = options.returnValue ?? this.returnValue;
       return;
     }
     this.processOperationParameters();
@@ -87,14 +138,12 @@ export class OperationParser {
     this.dedupeParamNames();
   }
 
-  private getParamName(originalName: string): string {
-    if (this.preservePropertyNames) {
-      return originalName;
-    }
-    // Simple snake_case conversion
-    return originalName
-      .replace(/[A-Z]/g, (g) => '_' + g.toLowerCase())
-      .replace(/^_/, '');
+  private getParamName(originalName: string, paramLocation: string): string {
+    return deriveParameterName(
+      originalName,
+      paramLocation,
+      this.preservePropertyNames,
+    );
   }
 
   private processOperationParameters() {
@@ -118,7 +167,7 @@ export class OperationParser {
           paramSchema: schema,
           description: param.description || schema.description || '',
           required: param.required || false,
-          name: this.getParamName(originalName),
+          name: this.getParamName(originalName, location),
         });
       }
     }
@@ -137,56 +186,38 @@ export class OperationParser {
       return;
     }
 
-    const mediaTypeObject = content[firstMimeType];
-    const schema = mediaTypeObject.schema;
+    const schema = content[firstMimeType].schema;
+    if (!schema || '$ref' in schema) {
+      return;
+    }
 
-    if (schema && !('$ref' in schema)) {
-      const description = requestBody.description || schema.description || '';
-      if (schema.type === 'object') {
-        const properties = schema.properties || {};
-        if (Object.keys(properties).length > 0) {
-          for (const [propName, propDetails] of Object.entries(properties)) {
-            if (!('$ref' in propDetails)) {
-              this.params.push({
-                originalName: propName,
-                paramLocation: 'body',
-                paramSchema: propDetails,
-                description: propDetails.description ?? '',
-                required: (schema.required || []).includes(propName),
-                name: this.getParamName(propName),
-              });
-            }
-          }
-        } else {
+    if (schema.type === 'object') {
+      for (const [propName, propDetails] of Object.entries(
+        schema.properties || {},
+      )) {
+        if (!('$ref' in propDetails)) {
           this.params.push({
-            originalName: '',
+            originalName: propName,
             paramLocation: 'body',
-            paramSchema: schema,
-            description,
-            required: true,
-            name: 'body',
+            paramSchema: propDetails,
+            description: propDetails.description ?? '',
+            required: (schema.required || []).includes(propName),
+            name: this.getParamName(propName, 'body'),
           });
         }
-      } else if (schema.type === 'array') {
-        this.params.push({
-          originalName: 'array',
-          paramLocation: 'body',
-          paramSchema: schema,
-          description,
-          required: true,
-          name: 'body',
-        });
-      } else {
-        this.params.push({
-          originalName: 'body',
-          paramLocation: 'body',
-          paramSchema: schema,
-          description,
-          required: true,
-          name: 'body',
-        });
       }
+      return;
     }
+
+    const originalName = bodyArgumentName(schema);
+    this.params.push({
+      originalName,
+      paramLocation: 'body',
+      paramSchema: schema,
+      description: requestBody.description || schema.description || '',
+      required: false,
+      name: this.getParamName(originalName, 'body'),
+    });
   }
 
   private parseReturnValue(): ApiParameter {
@@ -210,24 +241,20 @@ export class OperationParser {
       }
     }
 
-    return {
-      originalName: '',
-      paramLocation: '',
-      paramSchema: returnSchema,
-      required: true,
-      name: 'return',
-    };
+    return returnValueOf(returnSchema);
   }
 
   private dedupeParamNames() {
     const nameCounts = new Map<string, number>();
     for (const param of this.params) {
       const name = param.name;
-      const count = nameCounts.get(name) || 0;
-      if (count > 0) {
-        param.name = `${name}_${count}`;
+      const seen = nameCounts.get(name);
+      if (seen === undefined) {
+        nameCounts.set(name, 0);
+        continue;
       }
-      nameCounts.set(name, count + 1);
+      nameCounts.set(name, seen + 1);
+      param.name = `${name}_${seen}`;
     }
   }
 
@@ -255,6 +282,39 @@ export class OperationParser {
   }
 
   /**
+   * Gets the TypeScript type name that describes what the operation returns.
+   *
+   * @returns A type name such as `string`, or `unknown` when the response
+   *   declares no type.
+   */
+  @experimental
+  public getReturnTypeHint(): string {
+    return typeHint(this.returnValue.paramSchema);
+  }
+
+  /**
+   * Gets the Gemini type of what the operation returns.
+   *
+   * @returns The matching `Type`, or `Type.TYPE_UNSPECIFIED` when the response
+   *   declares no type.
+   */
+  @experimental
+  public getReturnTypeValue(): Type {
+    return toGeminiType(this.returnValue.paramSchema.type);
+  }
+
+  /**
+   * Gets the name of the security scheme this operation requires.
+   *
+   * @returns The scheme name, or an empty string when the operation needs no
+   *   credential.
+   */
+  @experimental
+  public getAuthSchemeName(): string {
+    return requiredSchemeName(this.operation.security);
+  }
+
+  /**
    * Generates a JSON schema representing the arguments of the tool function call.
    *
    * @returns A JSON Schema object.
@@ -274,7 +334,7 @@ export class OperationParser {
     return {
       type: 'object',
       properties,
-      required: required.length > 0 ? required : undefined,
+      required,
       title: `${this.operation.operationId || 'unnamed'}_Arguments`,
     };
   }
@@ -291,7 +351,7 @@ export class OperationParser {
     if (!operationId) {
       throw new Error('Operation ID is missing');
     }
-    return this.getParamName(operationId).substring(0, 60);
+    return toSnakeCaseName(operationId).substring(0, MAX_FUNCTION_NAME_LENGTH);
   }
 
   /**
@@ -302,5 +362,21 @@ export class OperationParser {
   @experimental
   public getDescription(): string {
     return this.operation.description || this.operation.summary || '';
+  }
+
+  /**
+   * Gets the documentation the model reads: the summary, one line for each
+   * argument, and what the operation returns.
+   *
+   * @returns The documentation string.
+   */
+  @experimental
+  public getDocString(): string {
+    const summary = this.operation.summary || this.operation.description || '';
+    const args = this.params
+      .map((param) => `    ${generateParamDoc(param)}`)
+      .join('\n');
+    const returnDoc = generateReturnDoc(this.operation.responses ?? {});
+    return `${summary}\n\nArgs:\n${args}\n\n${returnDoc}`;
   }
 }

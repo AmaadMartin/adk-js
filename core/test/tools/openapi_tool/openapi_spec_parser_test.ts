@@ -194,7 +194,8 @@ describe('OpenApiSpecParser', () => {
             },
           ],
           get: {
-            // operationId is missing, so it is synthesized from path + method.
+            // operationId is missing, so it is generated from the path and
+            // the method, then converted to snake_case.
             responses: {},
           },
         },
@@ -511,6 +512,37 @@ describe('OpenApiSpecParser', () => {
       expect(requestSchema(resolved, '/c').properties?.name).toEqual({
         type: 'string',
       });
+    });
+  });
+
+  it('should carry the return value of each operation', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Return API', version: '1.0.0'},
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'listThings',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: {type: 'array', items: {type: 'string'}},
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed[0].returnValue?.paramSchema).toEqual({
+      type: 'array',
+      items: {type: 'string'},
     });
   });
 });

@@ -9,8 +9,13 @@
  *
  * This ports `_to_snake_case` from adk-python, so an OpenAPI operation that
  * omits its `operationId` gets the same generated name in both SDKs. It
- * handles lowerCamelCase, UpperCamelCase, space-separated text and acronyms
- * such as `REST API`. Leading and trailing separators are removed.
+ * handles lowerCamelCase, UpperCamelCase, space-separated text, punctuation
+ * and acronyms, so `REST API` becomes `rest_api`, `X-Trace-Id` becomes
+ * `x_trace_id` and `HTTPResponse` becomes `http_response`. Repeated, leading
+ * and trailing separators are removed.
+ *
+ * This converts one name. `toSnakeCase` in `object_notation_utils.ts` converts
+ * the keys of an object and is a different operation.
  *
  * ```ts
  * snakeCase('camelCase'); // 'camel_case'
@@ -26,8 +31,20 @@ export function snakeCase(text: string): string {
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
     .toLowerCase()
+    .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '');
 }
+
+/**
+ * Converts a name into snake_case.
+ *
+ * The name the OpenAPI tools use for {@link snakeCase}. Both names convert one
+ * name the same way.
+ *
+ * @param text The name to convert.
+ * @returns The snake_case form of the name.
+ */
+export const toSnakeCaseName = snakeCase;
 
 /**
  * Recursively converts snake_case keys of an object to camelCase.
