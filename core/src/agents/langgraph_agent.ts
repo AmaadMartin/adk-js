@@ -171,6 +171,9 @@ function getConversationWithAgent(
  * the graph is accepted structurally and the LangChain message constructors
  * are imported lazily, so importing `@google/adk` in a tree where neither is
  * installed never throws.
+ *
+ * Each run yields one event carrying the graph's last message; the graph's
+ * intermediate messages do not become events. Live mode is not supported.
  */
 export class LangGraphAgent extends BaseAgent<LangGraphAgentConfig> {
   /**
