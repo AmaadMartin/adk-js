@@ -15,6 +15,7 @@ import {
   EvalMetric,
   EvalStatus,
   EvalTurn,
+  RESPONSE_MATCH_SCORE_KEY,
   TOOL_TRAJECTORY_SCORE_KEY,
 } from '../../src/evaluation/eval_types.js';
 import {processQueryWithRootAgent} from '../../src/evaluation/evaluation_generator.js';
@@ -42,6 +43,11 @@ class StubAgent extends BaseAgent {
 const TOOL_TRAJECTORY_METRIC: EvalMetric = {
   metricName: TOOL_TRAJECTORY_SCORE_KEY,
   threshold: 1,
+};
+
+const RESPONSE_MATCH_METRIC: EvalMetric = {
+  metricName: RESPONSE_MATCH_SCORE_KEY,
+  threshold: 0.8,
 };
 
 let tempDir: string;
@@ -79,6 +85,11 @@ function matchingTurn(): EvalTurn {
     expected_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
     actual_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
   };
+}
+
+/** A turn with no tool calls, carrying only what the response metric reads. */
+function referencedTurn(response: string, reference: string): EvalTurn {
+  return {query: 'roll a die', response, reference};
 }
 
 function mismatchingTurn(): EvalTurn {
@@ -191,6 +202,88 @@ describe('runEvals', () => {
     expect(printedOutput()).toContain('Result: ❌ Failed');
   });
 
+  it('scores the response metric against the recorded reference', async () => {
+    const evalSetFile = await writeEvalSet('response.evalset.json', [
+      {name: 'case_1', data: [{query: 'a'}]},
+    ]);
+    stubGeneratorTurns([referencedTurn('I rolled a 4', 'I rolled a 4')]);
+
+    const results = await runEvals({
+      evalSetToEvals: new Map([[evalSetFile, []]]),
+      rootAgent,
+      evalMetrics: [RESPONSE_MATCH_METRIC],
+    });
+
+    expect(results[0].evalMetricResults[0][1]).toEqual({
+      score: 1,
+      evalStatus: EvalStatus.PASSED,
+    });
+  });
+
+  it('fails the response metric when the answer diverges', async () => {
+    const evalSetFile = await writeEvalSet('response_fail.evalset.json', [
+      {name: 'case_1', data: [{query: 'a'}]},
+    ]);
+    stubGeneratorTurns([referencedTurn('completely other words', 'I rolled')]);
+
+    const results = await runEvals({
+      evalSetToEvals: new Map([[evalSetFile, []]]),
+      rootAgent,
+      evalMetrics: [RESPONSE_MATCH_METRIC],
+    });
+
+    expect(results[0].evalMetricResults[0][1]).toEqual({
+      score: 0,
+      evalStatus: EvalStatus.FAILED,
+    });
+    expect(results[0].finalEvalStatus).toBe(EvalStatus.FAILED);
+  });
+
+  it('scores both metrics of one case', async () => {
+    const evalSetFile = await writeEvalSet('both.evalset.json', [
+      {name: 'case_1', data: [{query: 'a'}]},
+    ]);
+    stubGeneratorTurns([
+      {...matchingTurn(), response: 'I rolled a 4', reference: 'I rolled a 4'},
+    ]);
+
+    const results = await runEvals({
+      evalSetToEvals: new Map([[evalSetFile, []]]),
+      rootAgent,
+      evalMetrics: [TOOL_TRAJECTORY_METRIC, RESPONSE_MATCH_METRIC],
+    });
+
+    expect(
+      results[0].evalMetricResults.map(([metric, result]) => [
+        metric.metricName,
+        result.score,
+      ]),
+    ).toEqual([
+      [TOOL_TRAJECTORY_SCORE_KEY, 1],
+      [RESPONSE_MATCH_SCORE_KEY, 1],
+    ]);
+    expect(results[0].finalEvalStatus).toBe(EvalStatus.PASSED);
+  });
+
+  it('leaves the response metric unevaluated with no reference, and does not warn', async () => {
+    const evalSetFile = await writeEvalSet('no_reference.evalset.json', [
+      {name: 'case_1', data: [{query: 'a'}]},
+    ]);
+    stubGeneratorTurns([matchingTurn()]);
+    const warnSpy = vi.spyOn(AdkLogger.prototype, 'warn');
+
+    const results = await runEvals({
+      evalSetToEvals: new Map([[evalSetFile, []]]),
+      rootAgent,
+      evalMetrics: [RESPONSE_MATCH_METRIC],
+    });
+
+    expect(results[0].evalMetricResults[0][1]).toEqual({
+      evalStatus: EvalStatus.NOT_EVALUATED,
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
   it('records one unevaluated result per unsupported metric', async () => {
     const evalSetFile = await writeEvalSet('unsupported.evalset.json', [
       {name: 'case_1', data: [{query: 'a'}]},
@@ -200,12 +293,12 @@ describe('runEvals', () => {
     const results = await runEvals({
       evalSetToEvals: new Map([[evalSetFile, []]]),
       rootAgent,
-      evalMetrics: [{metricName: 'response_match_score', threshold: 0.8}],
+      evalMetrics: [{metricName: 'response_evaluation_score', threshold: 0.8}],
     });
 
     expect(results[0].evalMetricResults).toEqual([
       [
-        {metricName: 'response_match_score', threshold: 0.8},
+        {metricName: 'response_evaluation_score', threshold: 0.8},
         {evalStatus: EvalStatus.NOT_EVALUATED},
       ],
     ]);
@@ -223,12 +316,12 @@ describe('runEvals', () => {
     const results = await runEvals({
       evalSetToEvals: new Map([[evalSetFile, []]]),
       rootAgent,
-      evalMetrics: [{metricName: 'response_match_score', threshold: 0.8}],
+      evalMetrics: [{metricName: 'response_evaluation_score', threshold: 0.8}],
     });
 
     expect(results).toHaveLength(2);
     expect(warnSpy.mock.calls).toEqual([
-      ['`response_match_score` is not supported.'],
+      ['`response_evaluation_score` is not supported.'],
     ]);
   });
 
@@ -243,14 +336,14 @@ describe('runEvals', () => {
       evalSetToEvals: new Map([[evalSetFile, []]]),
       rootAgent,
       evalMetrics: [
-        {metricName: 'response_match_score', threshold: 0.8},
         {metricName: 'response_evaluation_score', threshold: 0.8},
+        {metricName: 'safety_v1', threshold: 0.8},
       ],
     });
 
     expect(warnSpy.mock.calls).toEqual([
-      ['`response_match_score` is not supported.'],
       ['`response_evaluation_score` is not supported.'],
+      ['`safety_v1` is not supported.'],
     ]);
   });
 
@@ -264,7 +357,7 @@ describe('runEvals', () => {
       evalSetToEvals: new Map([[evalSetFile, []]]),
       rootAgent,
       evalMetrics: [
-        {metricName: 'response_match_score', threshold: 0.8},
+        {metricName: 'response_evaluation_score', threshold: 0.8},
         TOOL_TRAJECTORY_METRIC,
       ],
     });
@@ -349,7 +442,35 @@ describe('runEvals', () => {
     });
 
     expect(printedOutput()).toContain('Error: the agent exploded');
-    expect(results.map((result) => result.evalId)).toEqual(['case_2']);
+    expect(results.map((result) => result.evalId)).toEqual([
+      'case_1',
+      'case_2',
+    ]);
+  });
+
+  it('records a throwing case as failed', async () => {
+    const evalSetFile = await writeEvalSet('throwing_failed.evalset.json', [
+      {name: 'case_1', data: [{query: 'a'}]},
+    ]);
+    vi.mocked(processQueryWithRootAgent).mockRejectedValueOnce(
+      new Error('the agent exploded'),
+    );
+
+    const results = await runEvals({
+      evalSetToEvals: new Map([[evalSetFile, []]]),
+      rootAgent,
+      evalMetrics: [TOOL_TRAJECTORY_METRIC],
+    });
+
+    expect(results).toEqual([
+      {
+        evalSetFile,
+        evalId: 'case_1',
+        finalEvalStatus: EvalStatus.FAILED,
+        evalMetricResults: [],
+        sessionId: expect.stringContaining(EVAL_SESSION_ID_PREFIX),
+      },
+    ]);
   });
 
   it('reports a thrown non-Error value', async () => {

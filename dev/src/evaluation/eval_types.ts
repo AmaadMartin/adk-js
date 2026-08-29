@@ -89,6 +89,19 @@ export enum EvalStatus {
   NOT_EVALUATED = 'NOT_EVALUATED',
 }
 
+/**
+ * Whether a case counts as failed: anything but `PASSED`, so a case whose
+ * metrics all abstained fails too.
+ *
+ * The verdict line, the summary counts and the exit code all read this one
+ * rule. Deciding it in three places is how a command prints `❌ Failed` and
+ * then exits 0. adk-python folds the same way, counting every non-`PASSED`
+ * case under "Tests failed".
+ */
+export function isFailedCase(finalEvalStatus: EvalStatus): boolean {
+  return finalEvalStatus !== EvalStatus.PASSED;
+}
+
 /** One metric the run scores, and the score it has to reach to pass. */
 export interface EvalMetric {
   metricName: string;
@@ -111,10 +124,10 @@ export interface EvalResult {
   sessionId: string;
 }
 
-/** The one metric this command scores. */
+/** Scores the tool calls the agent made against the recorded ones. */
 export const TOOL_TRAJECTORY_SCORE_KEY = 'tool_trajectory_avg_score';
 
-/** Scored by adk-python with ROUGE, which adk-js has no counterpart for. */
+/** Scores the agent's final answer against the recorded `reference`. */
 export const RESPONSE_MATCH_SCORE_KEY = 'response_match_score';
 
 /** Prefix of every session an eval case runs in. */

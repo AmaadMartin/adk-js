@@ -96,21 +96,17 @@ describe('evaluateTrajectory', () => {
     vi.restoreAllMocks();
   });
 
-  it('throws when the dataset holds no conversation', () => {
-    expect(() => evaluateTrajectory([])).toThrow(
-      'The evaluation dataset is empty.',
-    );
+  it('scores a case with no turns as 0 rather than NaN', () => {
+    expect(evaluateTrajectory([])).toBe(0);
   });
 
   it('scores 1 when every turn matches', () => {
     const score = evaluateTrajectory([
-      [
-        turn({
-          query: 'roll',
-          expected_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
-          actual_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
-        }),
-      ],
+      turn({
+        query: 'roll',
+        expected_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+        actual_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+      }),
     ]);
 
     expect(score).toBe(1);
@@ -118,13 +114,11 @@ describe('evaluateTrajectory', () => {
 
   it('scores 0 when no turn matches', () => {
     const score = evaluateTrajectory([
-      [
-        turn({
-          query: 'roll',
-          expected_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
-          actual_tool_use: [],
-        }),
-      ],
+      turn({
+        query: 'roll',
+        expected_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+        actual_tool_use: [],
+      }),
     ]);
 
     expect(score).toBe(0);
@@ -132,39 +126,37 @@ describe('evaluateTrajectory', () => {
 
   it('averages a matching and a non-matching turn to 0.5', () => {
     const score = evaluateTrajectory([
-      [
-        turn({
-          query: 'first',
-          expected_tool_use: [{tool_name: 'a', tool_input: {}}],
-          actual_tool_use: [{tool_name: 'a', tool_input: {}}],
-        }),
-        turn({
-          query: 'second',
-          expected_tool_use: [{tool_name: 'b', tool_input: {}}],
-          actual_tool_use: [],
-        }),
-      ],
+      turn({
+        query: 'first',
+        expected_tool_use: [{tool_name: 'a', tool_input: {}}],
+        actual_tool_use: [{tool_name: 'a', tool_input: {}}],
+      }),
+      turn({
+        query: 'second',
+        expected_tool_use: [{tool_name: 'b', tool_input: {}}],
+        actual_tool_use: [],
+      }),
     ]);
 
     expect(score).toBe(0.5);
   });
 
   it('treats a missing expected_tool_use as no expected calls', () => {
-    const score = evaluateTrajectory([[turn({query: 'hello'})]]);
+    const score = evaluateTrajectory([turn({query: 'hello'})]);
 
     expect(score).toBe(1);
   });
 
   it('treats a missing actual_tool_use as no recorded calls', () => {
-    expect(evaluateTrajectory([[{query: 'hello'}]])).toBe(1);
+    expect(evaluateTrajectory([{query: 'hello'}])).toBe(1);
     expect(
       evaluateTrajectory([
-        [{query: 'roll', expected_tool_use: [{tool_name: 'a'}]}],
+        {query: 'roll', expected_tool_use: [{tool_name: 'a'}]},
       ]),
     ).toBe(0);
   });
 
-  it('averages across turns, not across conversations', () => {
+  it('averages over every turn of the case', () => {
     const matching = turn({
       query: 'ok',
       expected_tool_use: [{tool_name: 'a', tool_input: {}}],
@@ -176,36 +168,29 @@ describe('evaluateTrajectory', () => {
       actual_tool_use: [],
     });
 
-    // Three turns, one of which fails: a per-conversation mean would give 0.25.
-    expect(evaluateTrajectory([[matching, matching], [failing]])).toBeCloseTo(
+    expect(evaluateTrajectory([matching, matching, failing])).toBeCloseTo(
       2 / 3,
     );
   });
 
-  it('scores an empty conversation as 0 rather than NaN', () => {
-    expect(evaluateTrajectory([[]])).toBe(0);
-  });
-
   it('reports the turn number, query, actual and expected of a failure', () => {
     evaluateTrajectory([
-      [
-        turn({
-          query: 'ok',
-          expected_tool_use: [{tool_name: 'a', tool_input: {}}],
-          actual_tool_use: [{tool_name: 'a', tool_input: {}}],
-        }),
-        turn({
-          query: 'roll a die',
-          expected_tool_use: [
-            {
-              tool_name: 'roll_die',
-              tool_input: {sides: 6},
-              mock_tool_output: 4,
-            },
-          ],
-          actual_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 20}}],
-        }),
-      ],
+      turn({
+        query: 'ok',
+        expected_tool_use: [{tool_name: 'a', tool_input: {}}],
+        actual_tool_use: [{tool_name: 'a', tool_input: {}}],
+      }),
+      turn({
+        query: 'roll a die',
+        expected_tool_use: [
+          {
+            tool_name: 'roll_die',
+            tool_input: {sides: 6},
+            mock_tool_output: 4,
+          },
+        ],
+        actual_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 20}}],
+      }),
     ]);
 
     const printed = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
@@ -222,34 +207,30 @@ describe('evaluateTrajectory', () => {
 
   it('prints no failure report when every turn passes', () => {
     evaluateTrajectory([
-      [
-        turn({
-          query: 'ok',
-          expected_tool_use: [{tool_name: 'a', tool_input: {}}],
-          actual_tool_use: [{tool_name: 'a', tool_input: {}}],
-        }),
-      ],
+      turn({
+        query: 'ok',
+        expected_tool_use: [{tool_name: 'a', tool_input: {}}],
+        actual_tool_use: [{tool_name: 'a', tool_input: {}}],
+      }),
     ]);
 
     expect(logSpy).not.toHaveBeenCalled();
   });
 
   it('prints the detail table only when asked', () => {
-    const dataset = [
-      [
-        turn({
-          query: 'roll',
-          expected_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
-          actual_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
-          response: 'I rolled a 4.',
-        }),
-      ],
+    const turns = [
+      turn({
+        query: 'roll',
+        expected_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+        actual_tool_use: [{tool_name: 'roll_die', tool_input: {sides: 6}}],
+        response: 'I rolled a 4.',
+      }),
     ];
 
-    evaluateTrajectory(dataset);
+    evaluateTrajectory(turns);
     expect(logSpy).not.toHaveBeenCalled();
 
-    evaluateTrajectory(dataset, {printDetailedResults: true});
+    evaluateTrajectory(turns, true);
 
     const printed = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
     expect(printed).toContain('query');
@@ -263,15 +244,13 @@ describe('evaluateTrajectory', () => {
     const longName = 'a_tool_with_a_rather_long_name_that_exceeds_the_header';
     evaluateTrajectory(
       [
-        [
-          turn({
-            query: 'roll',
-            expected_tool_use: [{tool_name: longName, tool_input: {}}],
-            actual_tool_use: [{tool_name: longName, tool_input: {}}],
-          }),
-        ],
+        turn({
+          query: 'roll',
+          expected_tool_use: [{tool_name: longName, tool_input: {}}],
+          actual_tool_use: [{tool_name: longName, tool_input: {}}],
+        }),
       ],
-      {printDetailedResults: true},
+      true,
     );
 
     const lines = logSpy.mock.calls.map((call) => String(call[0]));

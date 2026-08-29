@@ -23,10 +23,13 @@ import {
   EvalSetItem,
   EvalStatus,
   EvalTurn,
+  isFailedCase,
   ResetFunc,
+  RESPONSE_MATCH_SCORE_KEY,
   TOOL_TRAJECTORY_SCORE_KEY,
 } from './eval_types.js';
 import {processQueryWithRootAgent} from './evaluation_generator.js';
+import {evaluateResponses} from './response_evaluator.js';
 import {evaluateTrajectory} from './trajectory_evaluator.js';
 
 const logger = new AdkLogger({label: 'ADK Eval', colorize: {all: true}});
@@ -51,8 +54,8 @@ export interface RunEvalsOptions {
 /**
  * Runs every selected eval case and returns one result per case.
  *
- * A case that throws is reported and skipped, so one broken case cannot abort
- * the run and contributes no result. A malformed eval-set file does throw:
+ * A case that throws is reported as failed and the run carries on, so one
+ * broken case cannot abort the rest. A malformed eval-set file does throw:
  * none of its cases can run.
  */
 export async function runEvals(
@@ -69,9 +72,10 @@ export async function runEvals(
         continue;
       }
 
+      const sessionId = `${EVAL_SESSION_ID_PREFIX}${randomUUID()}`;
+
       try {
         console.log(`Running Eval: ${evalSetFile}:${evalItem.name}`);
-        const sessionId = `${EVAL_SESSION_ID_PREFIX}${randomUUID()}`;
 
         const turns = await processQueryWithRootAgent({
           data: evalItem.data,
@@ -103,13 +107,23 @@ export async function runEvals(
           sessionId,
         });
 
-        const verdict =
-          finalEvalStatus === EvalStatus.PASSED ? '✅ Passed' : '❌ Failed';
+        const verdict = isFailedCase(finalEvalStatus)
+          ? '❌ Failed'
+          : '✅ Passed';
         console.log(`Result: ${verdict}\n`);
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e));
         console.log(`Error: ${error.message}`);
         logger.debug(error.stack ?? error.message);
+        // A case that could not run is a failure, not an absence. Dropping it
+        // would let a crashed agent report a clean run to a build.
+        evalResults.push({
+          evalSetFile,
+          evalId: evalItem.name,
+          finalEvalStatus: EvalStatus.FAILED,
+          evalMetricResults: [],
+          sessionId,
+        });
       }
     }
   }
@@ -144,19 +158,39 @@ function evaluateMetric(
   turns: EvalTurn[],
   options: EvaluateMetricOptions,
 ): EvalMetricResult {
-  if (evalMetric.metricName !== TOOL_TRAJECTORY_SCORE_KEY) {
-    warnUnsupportedMetric(evalMetric.metricName, options.warnedMetrics);
+  const score = scoreMetric(evalMetric.metricName, turns, options);
+  if (score === undefined) {
     return {evalStatus: EvalStatus.NOT_EVALUATED};
   }
 
-  const score = evaluateTrajectory([turns], {
-    printDetailedResults: options.printDetailedResults,
-  });
   return {
     score,
     evalStatus:
       score >= evalMetric.threshold ? EvalStatus.PASSED : EvalStatus.FAILED,
   };
+}
+
+/**
+ * Scores one metric, or returns `undefined` when it does not apply: either the
+ * command cannot score that metric name, or the eval data recorded nothing to
+ * score it against. Both are reported as `NOT_EVALUATED`.
+ */
+function scoreMetric(
+  metricName: string,
+  turns: EvalTurn[],
+  options: EvaluateMetricOptions,
+): number | undefined {
+  const printDetailedResults = options.printDetailedResults;
+
+  switch (metricName) {
+    case TOOL_TRAJECTORY_SCORE_KEY:
+      return evaluateTrajectory(turns, printDetailedResults);
+    case RESPONSE_MATCH_SCORE_KEY:
+      return evaluateResponses(turns, printDetailedResults);
+    default:
+      warnUnsupportedMetric(metricName, options.warnedMetrics);
+      return undefined;
+  }
 }
 
 function warnUnsupportedMetric(

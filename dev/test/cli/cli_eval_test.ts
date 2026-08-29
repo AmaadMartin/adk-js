@@ -12,6 +12,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   evalAgent,
   getEvaluationCriteriaOrDefault,
+  hasFailure,
   parseAndGetEvalsToRun,
   printEvalSummary,
   tryGetResetFunc,
@@ -158,9 +159,11 @@ describe('parseAndGetEvalsToRun', () => {
     ]);
   });
 
-  it('cuts the selector list at a further colon', () => {
+  it('keeps a further colon inside a case name', () => {
+    // Only the first colon after any drive prefix separates the file from the
+    // selectors; the rest of the string is the comma-separated case list.
     expect([...parseAndGetEvalsToRun(['set.json:a,b:c'])]).toEqual([
-      ['set.json', ['a', 'b']],
+      ['set.json', ['a', 'b:c']],
     ]);
   });
 
@@ -327,6 +330,52 @@ describe('printEvalSummary', () => {
   });
 });
 
+describe('hasFailure', () => {
+  function resultWith(finalEvalStatus: EvalStatus): EvalResult {
+    return {
+      evalSetFile: 'a.json',
+      evalId: 'case_1',
+      finalEvalStatus,
+      evalMetricResults: [],
+      sessionId: 'session',
+    };
+  }
+
+  it('is false for no results', () => {
+    expect(hasFailure([])).toBe(false);
+  });
+
+  it('is false when every case passed', () => {
+    expect(hasFailure([resultWith(EvalStatus.PASSED)])).toBe(false);
+  });
+
+  it('is true for an unevaluated case, which the summary counts as failed', () => {
+    expect(hasFailure([resultWith(EvalStatus.NOT_EVALUATED)])).toBe(true);
+  });
+
+  it('is true when one case among many failed', () => {
+    expect(
+      hasFailure([
+        resultWith(EvalStatus.PASSED),
+        resultWith(EvalStatus.FAILED),
+        resultWith(EvalStatus.PASSED),
+      ]),
+    ).toBe(true);
+  });
+
+  it('agrees with the summary counts for every status', () => {
+    for (const finalEvalStatus of Object.values(EvalStatus)) {
+      const evalResults = [resultWith(finalEvalStatus)];
+      logSpy.mockClear();
+      printEvalSummary(evalResults);
+
+      expect(hasFailure(evalResults)).toBe(
+        printedOutput().includes('Tests failed: 1'),
+      );
+    }
+  });
+});
+
 describe('DEFAULT_CRITERIA', () => {
   it('matches the thresholds adk-python falls back to', () => {
     expect(DEFAULT_CRITERIA).toEqual({
@@ -385,6 +434,64 @@ describe('evalAgent', () => {
     expect(printed).toContain(
       `${evalSetFile}:\n  Tests passed: 1\n  Tests failed: 0`,
     );
+  });
+
+  it('returns one result per case, so a caller can set the exit code', async () => {
+    const evalSetFile = await writePassingEvalSet();
+
+    const evalResults = await evalAgent({
+      agentPath: 'agent.ts',
+      evalSetFilePaths: [evalSetFile],
+    });
+
+    expect(evalResults.map((result) => result.evalId)).toEqual(['case_1']);
+    expect(hasFailure(evalResults)).toBe(false);
+  });
+
+  it('returns a failed result when a case failed', async () => {
+    // The recorded run called nothing, so the expected call is missing.
+    stubGeneratorTurns([
+      {
+        query: 'roll a die',
+        expected_tool_use: [{tool_name: 'roll_die'}],
+        actual_tool_use: [],
+      },
+    ]);
+    const evalSetFile = await writeFile(
+      'failing.evalset.json',
+      JSON.stringify([{name: 'case_1', data: [{query: 'roll a die'}]}]),
+    );
+
+    const evalResults = await evalAgent({
+      agentPath: 'agent.ts',
+      evalSetFilePaths: [evalSetFile],
+      configFilePath: await writeFile(
+        'strict_config.json',
+        JSON.stringify({criteria: {[TOOL_TRAJECTORY_SCORE_KEY]: 1}}),
+      ),
+    });
+
+    expect(hasFailure(evalResults)).toBe(true);
+    expect(printedOutput()).toContain('Result: ❌ Failed');
+  });
+
+  it('fails a case whose metrics all abstained, as it printed', async () => {
+    const evalSetFile = await writePassingEvalSet();
+    const configFilePath = await writeFile(
+      'abstaining_config.json',
+      JSON.stringify({criteria: {response_evaluation_score: 0.8}}),
+    );
+
+    const evalResults = await evalAgent({
+      agentPath: 'agent.ts',
+      evalSetFilePaths: [evalSetFile],
+      configFilePath,
+    });
+
+    const printed = printedOutput();
+    expect(printed).toContain('Result: ❌ Failed');
+    expect(printed).toContain('Tests failed: 1');
+    expect(hasFailure(evalResults)).toBe(true);
   });
 
   it('falls back to the default criteria with no config file', async () => {

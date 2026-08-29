@@ -22,7 +22,7 @@ import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
-import {evalAgent} from './cli_eval.js';
+import {evalAgent, hasFailure} from './cli_eval.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
@@ -450,7 +450,7 @@ export function createProgram(): Command {
         setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
         try {
-          await evalAgent({
+          const evalResults = await evalAgent({
             agentPath,
             evalSetFilePaths,
             configFilePath: options['config_file_path'],
@@ -459,6 +459,10 @@ export function createProgram(): Command {
             artifactService: getArtifactServiceFromOptions(options),
             agentFileLoadOptions: getAgentFileOptions(options),
           });
+          if (hasFailure(evalResults)) {
+            // `exitCode`, not `exit`, so the summary finishes printing.
+            process.exitCode = 1;
+          }
         } catch (error) {
           logger.error('Error evaluating agent:', (error as Error).message);
           process.exit(1);

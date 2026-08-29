@@ -12,7 +12,7 @@ import {
   DEFAULT_CRITERIA,
   EvalMetric,
   EvalResult,
-  EvalStatus,
+  isFailedCase,
   ResetFunc,
 } from '../evaluation/eval_types.js';
 import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
@@ -41,9 +41,10 @@ export interface EvalAgentOptions {
  * names to run from it.
  *
  * A Windows drive letter is not a selector separator, so the search for `:`
- * starts after it. Listing one eval set twice accumulates its selectors. The
- * result is a `Map` so insertion order is kept and a case named `__proto__`
- * cannot collide with an object prototype key.
+ * starts after it. Everything after that first `:` is the case list, so a case
+ * name may itself contain a colon. Listing one eval set twice accumulates its
+ * selectors. The result is a `Map` so insertion order is kept and a case named
+ * `__proto__` cannot collide with an object prototype key.
  */
 export function parseAndGetEvalsToRun(inputs: string[]): Map<string, string[]> {
   const evalSetToEvals = new Map<string, string[]>();
@@ -58,7 +59,10 @@ export function parseAndGetEvalsToRun(inputs: string[]): Map<string, string[]> {
     const selectors =
       separatorIndex === -1
         ? []
-        : parseSelectors(input.slice(separatorIndex + 1));
+        : input
+            .slice(separatorIndex + 1)
+            .split(',')
+            .filter((selector) => selector.trim() !== '');
 
     const existing = evalSetToEvals.get(evalSet);
     if (existing) {
@@ -78,14 +82,6 @@ function hasWindowsDrivePrefix(input: string): boolean {
     input[1] === ':' &&
     (input[2] === '\\' || input[2] === '/')
   );
-}
-
-/** Everything up to a further `:`, split on commas, blanks dropped. */
-function parseSelectors(selectorList: string): string[] {
-  return selectorList
-    .split(':')[0]
-    .split(',')
-    .filter((selector) => selector.trim() !== '');
 }
 
 /**
@@ -148,10 +144,10 @@ export function printEvalSummary(evalResults: EvalResult[]): void {
       passed: 0,
       failed: 0,
     };
-    if (evalResult.finalEvalStatus === EvalStatus.PASSED) {
-      counts.passed++;
-    } else {
+    if (isFailedCase(evalResult.finalEvalStatus)) {
       counts.failed++;
+    } else {
+      counts.passed++;
     }
     summary.set(evalResult.evalSetFile, counts);
   }
@@ -166,8 +162,25 @@ export function printEvalSummary(evalResults: EvalResult[]): void {
   }
 }
 
-/** Loads the agent, runs every selected eval case, and prints the summary. */
-export async function evalAgent(options: EvalAgentOptions): Promise<void> {
+/**
+ * Whether any eval case failed, which is what makes the command exit 1.
+ *
+ * This reads the same rule the summary counts with, so the exit code cannot
+ * disagree with the "Tests failed" line the user just read.
+ */
+export function hasFailure(evalResults: EvalResult[]): boolean {
+  return evalResults.some((evalResult) =>
+    isFailedCase(evalResult.finalEvalStatus),
+  );
+}
+
+/**
+ * Loads the agent, runs every selected eval case, prints the summary, and
+ * returns one result per case so the caller can set the exit code.
+ */
+export async function evalAgent(
+  options: EvalAgentOptions,
+): Promise<EvalResult[]> {
   const evaluationCriteria = await getEvaluationCriteriaOrDefault(
     options.configFilePath,
   );
@@ -198,4 +211,5 @@ export async function evalAgent(options: EvalAgentOptions): Promise<void> {
   });
 
   printEvalSummary(evalResults);
+  return evalResults;
 }

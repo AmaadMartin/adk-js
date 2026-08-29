@@ -12,6 +12,7 @@ import {evalAgent} from '../../src/cli/cli_eval.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {EvalResult, EvalStatus} from '../../src/evaluation/eval_types.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
@@ -38,7 +39,10 @@ vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
 }));
 
-vi.mock('../../src/cli/cli_eval', () => ({
+// `hasFailure` stays real: `cli.ts` reads the eval results through it to pick
+// the exit code, so stubbing it would hide the wiring under test.
+vi.mock('../../src/cli/cli_eval', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/cli/cli_eval.js')>()),
   evalAgent: vi.fn(),
 }));
 
@@ -307,6 +311,45 @@ describe('CLI Entrypoint', () => {
   });
 
   describe('command: eval', () => {
+    /** One eval result with the given verdict, as `evalAgent` returns them. */
+    function evalResultWith(finalEvalStatus: EvalStatus): EvalResult {
+      return {
+        evalSetFile: 'set.evalset.json',
+        evalId: 'case_1',
+        finalEvalStatus,
+        evalMetricResults: [],
+        sessionId: 'session',
+      };
+    }
+
+    beforeEach(() => {
+      process.exitCode = undefined;
+      (evalAgent as Mock).mockResolvedValue([
+        evalResultWith(EvalStatus.PASSED),
+      ]);
+    });
+
+    afterEach(() => {
+      process.exitCode = undefined;
+    });
+
+    it('leaves the exit code at 0 when every case passed', async () => {
+      await parse(['eval', 'agent.ts', 'set.evalset.json']);
+
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('sets the exit code to 1 when a case failed', async () => {
+      (evalAgent as Mock).mockResolvedValue([
+        evalResultWith(EvalStatus.PASSED),
+        evalResultWith(EvalStatus.FAILED),
+      ]);
+
+      await parse(['eval', 'agent.ts', 'set.evalset.json']);
+
+      expect(process.exitCode).toBe(1);
+    });
+
     it('exits non-zero when the eval run fails', async () => {
       (evalAgent as Mock).mockRejectedValueOnce(
         new Error('Agent file /nope/agent.ts does not exists'),

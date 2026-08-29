@@ -5,6 +5,7 @@
  */
 
 import {isDeepStrictEqual} from 'node:util';
+import {formatAlignedTable} from '../utils/table_utils.js';
 import {ActualToolUse, EvalTurn, ExpectedToolUse} from './eval_types.js';
 
 /** A tool call from either side of the comparison. */
@@ -18,12 +19,6 @@ interface TrajectoryRow {
   actual: ActualToolUse[];
   expected: ExpectedToolUse[];
   score: number;
-}
-
-/** Options for {@link evaluateTrajectory}. */
-export interface EvaluateTrajectoryOptions {
-  /** Prints a per-turn table of what was expected and what happened. */
-  printDetailedResults?: boolean;
 }
 
 /**
@@ -58,30 +53,25 @@ function projectForComparison(
 }
 
 /**
- * Returns the mean tool-use accuracy over every turn of every conversation.
+ * Returns the mean tool-use accuracy over the turns of one eval case.
  *
  * A turn scores 1 when its recorded tool calls match the expected ones exactly,
  * and 0 otherwise. The value range is [0, 1] and higher is better.
  *
- * @param dataset One entry per conversation, each a list of scored turns.
- * @throws Error when the dataset holds no conversation.
+ * @param turns The scored turns of one case, in order.
+ * @param printDetailedResults Prints a per-turn table of expected against
+ *     actual tool calls.
  */
 export function evaluateTrajectory(
-  dataset: EvalTurn[][],
-  options: EvaluateTrajectoryOptions = {},
+  turns: EvalTurn[],
+  printDetailedResults = false,
 ): number {
-  if (dataset.length === 0) {
-    throw new Error('The evaluation dataset is empty.');
-  }
-
-  const rows = dataset.flatMap((conversation) =>
-    conversation.map((turn, index) => scoreTurn(turn, index + 1)),
-  );
+  const rows = turns.map((turn, index) => scoreTurn(turn, index + 1));
 
   reportFailures(rows.filter((row) => row.score !== 1));
 
-  if (options.printDetailedResults) {
-    printDetailedResults(rows);
+  if (printDetailedResults) {
+    printTurnTable(rows);
   }
 
   return mean(rows.map((row) => row.score));
@@ -100,10 +90,7 @@ function scoreTurn(turn: EvalTurn, turnNumber: number): TrajectoryRow {
   };
 }
 
-/**
- * `dataset` is never empty here, but a conversation in it can be, so guard the
- * divisor rather than returning NaN as a score.
- */
+/** A case can record no turns, so guard the divisor rather than scoring NaN. */
 function mean(scores: number[]): number {
   if (scores.length === 0) {
     return 0;
@@ -133,8 +120,8 @@ function reportFailures(failures: TrajectoryRow[]): void {
  * with `tabulate`; adding a table dependency for one debug view is not worth
  * the install.
  */
-function printDetailedResults(rows: TrajectoryRow[]): void {
-  const table = [
+function printTurnTable(rows: TrajectoryRow[]): void {
+  const table = formatAlignedTable([
     ['query', 'expected_tool_use', 'actual_tool_use', 'score'],
     ...rows.map((row) => [
       row.query,
@@ -142,21 +129,9 @@ function printDetailedResults(rows: TrajectoryRow[]): void {
       JSON.stringify(row.actual),
       String(row.score),
     ]),
-  ];
+  ]);
 
-  // Widths come from the content, so a trajectory longer than the header does
-  // not push the later columns out of line.
-  const widths = table[0].map((_, column) =>
-    Math.max(...table.map((cells) => cells[column].length)),
-  );
-
-  const [header, ...body] = table.map((cells) =>
-    cells.map((cell, column) => cell.padEnd(widths[column])).join(' | '),
-  );
-
-  console.log(header);
-  console.log('-'.repeat(header.length));
-  for (const line of body) {
+  for (const line of table) {
     console.log(line);
   }
 }
