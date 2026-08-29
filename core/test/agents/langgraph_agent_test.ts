@@ -36,11 +36,6 @@ const THREAD_CONFIG: LangGraphThreadConfig = {
   configurable: {thread_id: getThreadId(APP_NAME, USER_ID, SESSION_ID)},
 };
 
-/** The `{messages}` payload the agent passes to `graph.invoke`. */
-interface GraphInput {
-  messages: BaseMessage[];
-}
-
 /**
  * Creates a graph stub that records its calls, so the tests can assert on the
  * exact messages the adapter builds without involving a model.
@@ -52,7 +47,7 @@ function createStubGraph(options: {
 }) {
   const invoke = vi.fn(
     async (
-      _input: GraphInput,
+      _input: {messages: BaseMessage[]},
       _config: LangGraphThreadConfig,
     ): Promise<{messages: BaseMessage[]}> => ({
       messages: [options.response ?? new AIMessage('test response')],

@@ -6,11 +6,7 @@
 
 import {createHash} from 'node:crypto';
 
-import type {
-  AIMessage,
-  BaseMessage,
-  HumanMessage,
-} from '@langchain/core/messages';
+import type {BaseMessage} from '@langchain/core/messages';
 
 import {createEvent, Event} from '../events/event.js';
 import {loadOptionalPeer, OptionalPeer} from '../utils/optional_peer.js';
@@ -82,14 +78,8 @@ export interface CompiledLangGraph {
     config: LangGraphThreadConfig,
   ): Promise<{values?: Record<string, unknown>}>;
 
-  /**
-   * `input` is `unknown` because the real signature takes a graph-specific
-   * update type; any narrower hand-written object type would be assignable in
-   * neither direction, even under the bivariance TypeScript applies to method
-   * parameters.
-   */
   invoke(
-    input: unknown,
+    input: {messages: BaseMessage[]},
     config: LangGraphThreadConfig,
   ): Promise<{messages: BaseMessage[]}>;
 }
@@ -104,13 +94,10 @@ export interface LangGraphAgentConfig extends BaseAgentConfig {
 }
 
 /**
- * The LangChain message constructors, resolved lazily at run time so that
- * `@langchain/core` stays an optional dependency.
+ * The `@langchain/core` message module, resolved lazily at run time so that
+ * the package stays an optional dependency.
  */
-interface MessageConstructors {
-  AIMessage: typeof AIMessage;
-  HumanMessage: typeof HumanMessage;
-}
+type LangChainMessages = typeof import('@langchain/core/messages');
 
 /**
  * A unique symbol to identify ADK agent classes.
@@ -143,7 +130,7 @@ export function isLangGraphAgent(obj: unknown): obj is LangGraphAgent {
  */
 function getLastHumanMessages(
   events: Event[],
-  ctors: MessageConstructors,
+  ctors: LangChainMessages,
 ): BaseMessage[] {
   const messages: BaseMessage[] = [];
   for (let i = events.length - 1; i >= 0; i--) {
@@ -165,7 +152,7 @@ function getLastHumanMessages(
 function getConversationWithAgent(
   events: Event[],
   agentName: string,
-  ctors: MessageConstructors,
+  ctors: LangChainMessages,
 ): BaseMessage[] {
   const messages: BaseMessage[] = [];
   for (const event of events) {
