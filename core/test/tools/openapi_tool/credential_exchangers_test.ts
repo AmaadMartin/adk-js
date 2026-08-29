@@ -103,17 +103,6 @@ describe('AutoAuthCredentialExchanger', () => {
     ).rejects.toThrow('authScheme is required for OAuth2 credential exchange');
   });
 
-  it('should return null when the credential is absent', async () => {
-    const exchanger = new AutoAuthCredentialExchanger();
-
-    await expect(
-      exchanger.exchange({authScheme: AUTH_SCHEME, authCredential: undefined}),
-    ).resolves.toBeNull();
-    await expect(
-      exchanger.exchange({authScheme: AUTH_SCHEME, authCredential: null}),
-    ).resolves.toBeNull();
-  });
-
   it('should route through an exchanger set on the public exchangers map', async () => {
     const exchanger = new AutoAuthCredentialExchanger();
     const stub = createStubExchanger();

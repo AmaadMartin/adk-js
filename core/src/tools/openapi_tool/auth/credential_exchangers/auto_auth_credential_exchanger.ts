@@ -63,28 +63,12 @@ export class AutoAuthCredentialExchanger implements BaseCredentialExchanger {
     }
   }
 
-  // A definite credential yields a definite result, which is what
-  // `BaseCredentialExchanger` promises and what the call site in
-  // `tool_auth_handler.ts` relies on. Only a caller that may hold no
-  // credential sees the `| null`, so no existing caller grows a dead branch.
-  exchange(params: {
-    authScheme?: AuthScheme;
-    authCredential: AuthCredential;
-  }): Promise<ExchangeResult>;
-  exchange(params: {
-    authScheme?: AuthScheme;
-    authCredential?: AuthCredential | null;
-  }): Promise<ExchangeResult | null>;
   @experimental
   async exchange(params: {
     authScheme?: AuthScheme;
-    authCredential?: AuthCredential | null;
-  }): Promise<ExchangeResult | null> {
+    authCredential: AuthCredential;
+  }): Promise<ExchangeResult> {
     const {authCredential, authScheme} = params;
-
-    if (!authCredential) {
-      return null;
-    }
 
     const exchanger = this.exchangers.get(authCredential.authType);
 
