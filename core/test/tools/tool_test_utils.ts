@@ -20,8 +20,7 @@ export function makeLlmRequest(): LlmRequestWithConfig {
   };
 }
 
-// The tool only reads llmRequest; the context is never touched, so an empty
-// stand-in is enough.
+/** An empty `Context` stand-in, for tools that never read the context. */
 export function makeToolContext(): Context {
   return {} as Context;
 }
