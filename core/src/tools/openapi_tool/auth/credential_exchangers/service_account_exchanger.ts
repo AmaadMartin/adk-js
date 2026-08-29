@@ -317,8 +317,10 @@ export class ServiceAccountCredentialExchanger implements BaseCredentialExchange
         }
         token = response.token;
         expiryDateMs = client.credentials?.expiry_date;
+        // `||`, not `??`: an empty quota project falls back to the ADC
+        // project, as the reference's `or` does.
         quotaProjectId =
-          client.quotaProjectId ?? (await resolveAdcProjectId(auth));
+          client.quotaProjectId || (await resolveAdcProjectId(auth));
       }
     } catch (error: unknown) {
       throw new AuthCredentialMissingError(
