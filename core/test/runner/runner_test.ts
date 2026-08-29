@@ -8,6 +8,8 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  BaseTool,
+  BaseToolset,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -1513,5 +1515,112 @@ describe('Runner reserved function call rejection', () => {
     });
 
     expect(error).toBeUndefined();
+  });
+});
+
+/** A toolset that records how often the runner closed it. */
+class CountingToolset extends BaseToolset {
+  closeCount = 0;
+
+  constructor(private readonly failOnClose = false) {
+    super([]);
+  }
+
+  override async getTools(): Promise<BaseTool[]> {
+    return [];
+  }
+
+  override async close(): Promise<void> {
+    this.closeCount++;
+    if (this.failOnClose) {
+      throw new Error('the toolset held a socket open');
+    }
+  }
+}
+
+/** An agent that holds a toolset and answers without reaching a model. */
+class ToolsetAgent extends LlmAgent {
+  constructor(toolset: BaseToolset) {
+    super({name: 'toolset_agent', model: 'gemini-2.5-flash', tools: [toolset]});
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'Test LLM response'}]},
+    });
+  }
+}
+
+/** A plugin that records whether the runner closed it. */
+class ClosablePlugin extends BasePlugin {
+  closed = false;
+
+  constructor(name = 'closable_plugin') {
+    super(name);
+  }
+
+  override async close(): Promise<void> {
+    this.closed = true;
+  }
+}
+
+describe('Runner.close', () => {
+  function runnerWith(
+    toolset: BaseToolset,
+    plugin: BasePlugin,
+    sessionService: InMemorySessionService,
+  ): Runner {
+    return new Runner({
+      appName: TEST_APP_ID,
+      agent: new ToolsetAgent(toolset),
+      sessionService,
+      plugins: [plugin],
+    });
+  }
+
+  it('should close the toolsets of its agent and its plugins', async () => {
+    const toolset = new CountingToolset();
+    const plugin = new ClosablePlugin();
+
+    await runnerWith(toolset, plugin, new InMemorySessionService()).close();
+
+    expect(toolset.closeCount).toBe(1);
+    expect(plugin.closed).toBe(true);
+  });
+
+  it('should close the plugins when a toolset fails to close', async () => {
+    const toolset = new CountingToolset(true);
+    const plugin = new ClosablePlugin();
+
+    await runnerWith(toolset, plugin, new InMemorySessionService()).close();
+
+    expect(plugin.closed).toBe(true);
+  });
+
+  it('should close the toolsets again after a run already closed them', async () => {
+    const toolset = new CountingToolset();
+    const sessionService = new InMemorySessionService();
+    const runner = runnerWith(toolset, new ClosablePlugin(), sessionService);
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Consume the stream so the run reaches its toolset cleanup.
+    }
+    expect(toolset.closeCount).toBe(1);
+
+    await expect(runner.close()).resolves.toBeUndefined();
+
+    expect(toolset.closeCount).toBe(2);
   });
 });

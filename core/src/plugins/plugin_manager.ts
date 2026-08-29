@@ -13,6 +13,7 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import type {BaseNode} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
@@ -85,6 +86,30 @@ export class PluginManager {
   getPlugin(pluginName: string): BasePlugin | undefined {
     // Set operates on strict equality, we only want to match by name
     return Array.from(this.plugins).find((p) => p.name === pluginName);
+  }
+
+  /**
+   * Closes every registered plugin, in registration order.
+   *
+   * A plugin that throws does not stop the remaining plugins from closing.
+   *
+   * @throws If one or more plugins failed to close, naming each of them.
+   */
+  async close(): Promise<void> {
+    const failures: string[] = [];
+    // Sequential rather than concurrent: a plugin built on task-local context,
+    // an MCP session for example, breaks when torn down from another task.
+    for (const plugin of this.plugins) {
+      try {
+        await plugin.close();
+      } catch (error: unknown) {
+        failures.push(`'${plugin.name}': ${formatError(error)}`);
+        logger.error(`Error closing plugin '${plugin.name}'.`, error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new Error(`Failed to close plugins: ${failures.join(', ')}`);
+    }
   }
 
   /**
