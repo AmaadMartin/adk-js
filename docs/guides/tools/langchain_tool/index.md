@@ -61,7 +61,24 @@ parameters:
 | A plain JSON Schema object                                                         | The equivalent schema                         |
 | Absent                                                                             | An empty object schema                        |
 
-Anything else — a number, a string, an array — throws
+A Zod schema is read from its input side, because the declaration tells the
+model what to send. A field built with `.default()` is therefore declared
+optional, and a field built with `.transform()` is declared as the value the
+transform accepts:
+
+```ts
+const count = tool(({items}: {items: string[]}) => items.length, {
+  name: 'count',
+  description: 'Counts comma-separated items',
+  schema: z.object({
+    items: z.string().transform((value) => value.split(',')),
+  }),
+});
+// The model is asked for {items: string}, and LangChain splits it.
+```
+
+Anything else — a number, a string, an array, or a Zod type that JSON Schema
+cannot express such as `z.date()` — throws
 `Failed to build function declaration for Langchain tool: ...` at construction
 time, so a broken tool fails when you build the agent rather than mid-turn.
 

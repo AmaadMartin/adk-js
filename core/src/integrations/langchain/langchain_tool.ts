@@ -11,7 +11,11 @@ import {FunctionTool} from '../../tools/function_tool.js';
 import {formatError} from '../../utils/error_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {toJsonSchema} from '../../utils/schema.js';
-import {isZodSchema} from '../../utils/simple_zod_to_json.js';
+import {
+  isZodObject,
+  isZodSchema,
+  zodObjectToSchema,
+} from '../../utils/simple_zod_to_json.js';
 
 /**
  * The shape of a LangChain JS tool that {@link LangchainTool} can wrap.
@@ -69,10 +73,17 @@ function resolveName(options: LangchainToolOptions): string {
  * Converts the tool's schema to the parameters of the model-facing
  * declaration, or `undefined` when the tool declares no schema.
  *
- * A Zod schema is rendered as JSON Schema first. That step matters for
- * LangChain's string-input `Tool`, whose schema is a transformed
- * `z.object({input})` rather than a plain object: rendering it yields the
- * transform's input side, `{input: string}`, which is what the model must send.
+ * Zod is read from its input side, because the declaration tells the model
+ * what to send rather than what it gets back. A field built with `.default()`
+ * is therefore optional, and a field built with `.transform()` is declared as
+ * the value the transform accepts. Reading the output side instead would
+ * declare a defaulted field as required, and would fail outright on a
+ * transform, whose result JSON Schema often cannot express.
+ *
+ * A Zod object goes through the same converter as `FunctionTool`'s own
+ * parameters. Any other Zod schema is rendered as JSON Schema first, which
+ * covers LangChain's string-input `Tool`: its schema is a transformed
+ * `z.object({input})`, and the input side of that is `{input: string}`.
  */
 function resolveParameters(tool: LangchainToolLike): Schema | undefined {
   const {schema} = tool;
@@ -80,8 +91,11 @@ function resolveParameters(tool: LangchainToolLike): Schema | undefined {
     return undefined;
   }
   try {
+    if (isZodObject(schema)) {
+      return zodObjectToSchema(schema);
+    }
     if (isZodSchema(schema)) {
-      return toGeminiSchema(toJsonSchema(schema));
+      return toGeminiSchema(toJsonSchema(schema, 'input'));
     }
     if (
       typeof schema !== 'object' ||

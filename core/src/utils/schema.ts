@@ -114,10 +114,21 @@ export function parseWithSchema<T>(
  * genai `Schema` is translated out of the genai/OpenAPI dialect (uppercase
  * type names, stringified bounds, `nullable`) so that every schema form
  * produces the same JSON Schema shape for a consumer to read.
+ *
+ * `io` picks the side of a Zod v4 schema that transforms its input. The
+ * default, `'output'`, renders the value the schema produces. Pass `'input'`
+ * to render the value a caller must supply, which is what a schema shown to a
+ * model has to describe: the input side of `z.string().transform(...)` is a
+ * string, a defaulted field is optional rather than required, and a transform
+ * stays representable instead of failing to render. Zod v3 and genai schemas
+ * render the same either way.
  */
-export function toJsonSchema(schema: SchemaLike): Record<string, unknown> {
+export function toJsonSchema(
+  schema: SchemaLike,
+  io: 'input' | 'output' = 'output',
+): Record<string, unknown> {
   if (isZodV4Schema(schema)) {
-    return toJSONSchemaV4(schema) as Record<string, unknown>;
+    return toJSONSchemaV4(schema, {io}) as Record<string, unknown>;
   }
   if (isZodV3Schema(schema)) {
     return toJSONSchemaV3(schema) as Record<string, unknown>;
