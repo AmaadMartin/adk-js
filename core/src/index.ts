@@ -51,6 +51,10 @@ export {
   validateSkillDir,
 } from './skills/loader.js';
 export {
+  GoogleApiToOpenApiConverter,
+  convertDiscoveryDocument,
+} from './tools/google_api_tool/googleapi_to_openapi_converter.js';
+export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
