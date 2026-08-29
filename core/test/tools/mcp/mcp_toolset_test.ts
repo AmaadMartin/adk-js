@@ -7,7 +7,10 @@
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
-import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
+import {
+  MCPConnectionParams,
+  McpConnectionError,
+} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
 
 vi.hoisted(() => {
@@ -331,6 +334,165 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+
+  describe('error context', () => {
+    /** Installs a one-shot client whose `listTools` rejects with `err`. */
+    async function clientRejectingListTools(err: unknown): Promise<void> {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(
+        () =>
+          ({
+            connect: noop(),
+            close: noop(),
+            listTools: vi.fn().mockRejectedValue(err),
+          }) as unknown as Client,
+      );
+    }
+
+    it('names the failed operation when listTools rejects', async () => {
+      await clientRejectingListTools(new Error('socket hang up'));
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.getTools()).rejects.toThrow(
+        'Failed to get tools from MCP server: socket hang up',
+      );
+    });
+
+    it('rejects with an McpConnectionError carrying the original cause', async () => {
+      const original = new Error('socket hang up');
+      await clientRejectingListTools(original);
+      const toolset = new MCPToolset(stdioParams);
+
+      const error = await toolset.getTools().catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(McpConnectionError);
+      expect((error as McpConnectionError).name).toBe('McpConnectionError');
+      expect((error as McpConnectionError).cause).toBe(original);
+    });
+
+    it('names the failed operation when the session cannot be opened', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(
+        () =>
+          ({
+            connect: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+            close: noop(),
+          }) as unknown as Client,
+      );
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.getTools()).rejects.toThrow(
+        /^Failed to get tools from MCP server: .*ECONNREFUSED/,
+      );
+    });
+
+    it('leaves a cancellation untouched instead of naming it', async () => {
+      const aborted = new Error('The operation was aborted');
+      aborted.name = 'AbortError';
+      await clientRejectingListTools(aborted);
+      const toolset = new MCPToolset(stdioParams);
+
+      const error = await toolset.getTools().catch((err: unknown) => err);
+
+      expect(error).toBe(aborted);
+      expect(error).not.toBeInstanceOf(McpConnectionError);
+    });
+
+    it('does not name an operation twice', async () => {
+      const alreadyNamed = new McpConnectionError(
+        'Failed to list resources from MCP server: boom',
+      );
+      await clientRejectingListTools(alreadyNamed);
+      const toolset = new MCPToolset(stdioParams);
+
+      const error = await toolset.getTools().catch((err: unknown) => err);
+
+      expect(error).toBe(alreadyNamed);
+      expect((error as Error).message).toBe(
+        'Failed to list resources from MCP server: boom',
+      );
+    });
+
+    it('names a listResources failure', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(
+        () =>
+          ({
+            connect: noop(),
+            close: noop(),
+            listResources: vi.fn().mockRejectedValue(new Error('list boom')),
+          }) as unknown as Client,
+      );
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.listResources()).rejects.toThrow(
+        'Failed to list resources from MCP server: list boom',
+      );
+    });
+
+    it('names a getResourceInfo failure as a listing failure', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(
+        () =>
+          ({
+            connect: noop(),
+            close: noop(),
+            listResources: vi.fn().mockRejectedValue(new Error('list boom')),
+          }) as unknown as Client,
+      );
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.getResourceInfo('res1')).rejects.toThrow(
+        'Failed to list resources from MCP server: list boom',
+      );
+    });
+
+    it('names a readResource failure with the resource name', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client)
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: noop(),
+              close: noop(),
+              listResources: vi.fn().mockResolvedValue({
+                resources: [{uri: 'file:///res1', name: 'res1'}],
+              }),
+            }) as unknown as Client,
+        )
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: noop(),
+              close: noop(),
+              readResource: vi.fn().mockRejectedValue(new Error('read boom')),
+            }) as unknown as Client,
+        );
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.readResource('res1')).rejects.toThrow(
+        'Failed to get resource res1 from MCP server: read boom',
+      );
+    });
+
+    it('keeps the unknown-resource error unnamed', async () => {
+      const toolset = new MCPToolset(stdioParams);
+
+      const error = await toolset
+        .getResourceInfo('nope')
+        .catch((err: unknown) => err);
+
+      expect(error).not.toBeInstanceOf(McpConnectionError);
+      expect((error as Error).message).toBe(
+        "Resource with name 'nope' not found.",
+      );
     });
   });
 });
