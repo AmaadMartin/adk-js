@@ -86,6 +86,17 @@ function nameFailedOperation(operation: string, err: unknown): unknown {
  *   const mcpToolset = new MCPToolset(connectionParams);
  *   const tools = await mcpToolset.getTools();
  *
+ * Every method rejects with {@link McpConnectionError}, whose message names
+ * the MCP operation that failed and whose `cause` is the original error. The
+ * prefixes match adk-python's, so a log search works against either SDK:
+ *
+ * - `getTools`: `Failed to get tools from MCP server`
+ * - `listResources`, `getResourceInfo`: `Failed to list resources from MCP server`
+ * - `readResource`: `Failed to get resource <name> from MCP server`
+ *
+ * A cancelled call is the exception: an `AbortError` reaches the caller
+ * unchanged, so "the caller gave up" stays distinguishable from "the server
+ * broke".
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
