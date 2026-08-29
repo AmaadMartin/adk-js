@@ -65,6 +65,21 @@ function requireExplicitCredential(
   return saConfig.serviceAccountCredential;
 }
 
+/**
+ * Returns the project Application Default Credentials resolve to, or
+ * `undefined` when the environment declares none.
+ *
+ * `getProjectId` can throw synchronously, so the `try` wraps the call rather
+ * than the promise it returns. A missing project is not an exchange failure.
+ */
+async function adcProjectId(auth: GoogleAuth): Promise<string | undefined> {
+  try {
+    return await auth.getProjectId();
+  } catch {
+    return undefined;
+  }
+}
+
 async function exchangeAdcAccessToken(
   saConfig: ServiceAccount,
 ): Promise<ExchangeResult> {
@@ -81,16 +96,7 @@ async function exchangeAdcAccessToken(
 
     // `||`, not `??`: an empty quota project falls through to the ADC project,
     // as it does in adk-python.
-    let quotaProjectId = client.quotaProjectId;
-    if (!quotaProjectId) {
-      try {
-        // getProjectId fails, rather than resolving nullish, when the
-        // environment declares no project. That is "no header", not a failure.
-        quotaProjectId = await auth.getProjectId();
-      } catch {
-        quotaProjectId = undefined;
-      }
-    }
+    const quotaProjectId = client.quotaProjectId || (await adcProjectId(auth));
 
     return bearerResult(token, quotaProjectId);
   } catch (error: unknown) {
