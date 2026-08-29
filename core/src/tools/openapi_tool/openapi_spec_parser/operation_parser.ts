@@ -6,15 +6,7 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../../utils/experimental.js';
-
-export interface ApiParameter {
-  originalName: string;
-  paramLocation: string;
-  paramSchema: OpenAPIV3.SchemaObject;
-  description?: string;
-  name: string; // The name used in the generated tool schema (may be snake_cased)
-  required: boolean;
-}
+import type {ApiParameter} from '../common/common.js';
 
 /**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
