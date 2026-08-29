@@ -413,6 +413,11 @@ export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
+export {APIHubClient} from './tools/apihub_tool/clients/apihub_client.js';
+export type {
+  ApiHubApi,
+  ApiHubApiVersion,
+} from './tools/apihub_tool/clients/apihub_client.js';
 export {ConnectionsClient} from './tools/application_integration_tool/clients/connections_client.js';
 export type {
   ActionSchema,

@@ -5,6 +5,7 @@
  */
 
 import {GoogleAuth, JWTInput} from 'google-auth-library';
+import {base64Decode} from '../../../utils/env_aware_utils.js';
 
 const APIHUB_ROOT_URL = 'https://apihub.googleapis.com/v1';
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -61,6 +62,17 @@ export interface ApiHubApiVersion {
   specs?: string[];
 }
 
+/** The response of the API Hub `apis.list` method. */
+interface ApiHubApiList {
+  apis?: ApiHubApi[];
+}
+
+/** The response of the API Hub `specs.contents` method. */
+interface ApiHubSpecContents {
+  /** The base64-encoded spec text. */
+  contents?: string;
+}
+
 /** Returns the segment that follows `keyword`, if the path has one. */
 function segmentAfter(segments: string[], keyword: string): string | undefined {
   const index = segments.indexOf(keyword);
@@ -97,6 +109,9 @@ function splitPathAndProject(urlOrPath: string): {
  */
 export function extractResourceName(urlOrPath: string): ApiHubResourceNames {
   const {path, queryProject} = splitPathAndProject(urlOrPath);
+  // The segment walk below ignores any Console UI route prefix on its own, so
+  // the path needs no stripping. adk-python strips everything before
+  // 'api-hub/', which corrupts a resource path whose API id is 'api-hub'.
   const segments = path.split('/').filter((segment) => segment !== '');
 
   const project = segmentAfter(segments, 'projects') ?? queryProject;
@@ -175,6 +190,20 @@ export class APIHubClient implements BaseAPIHubClient {
   }
 
   /**
+   * Lists all APIs in the given project and location.
+   *
+   * @param project The Google Cloud project name.
+   * @param location The location of the API Hub resources, e.g. 'us-central1'.
+   * @returns The APIs, or an empty list when the project has none.
+   */
+  async listApis(project: string, location: string): Promise<ApiHubApi[]> {
+    const list = await this.get<ApiHubApiList>(
+      `${APIHUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
+    );
+    return list.apis ?? [];
+  }
+
+  /**
    * Gets an API.
    *
    * @param apiResourceName `projects/p/locations/l/apis/a`.
@@ -228,14 +257,15 @@ export class APIHubClient implements BaseAPIHubClient {
       apiSpecResourceName = specs[0];
     }
 
-    const payload = await this.get<{contents?: string}>(
+    const {contents} = await this.get<ApiHubSpecContents>(
       `${APIHUB_ROOT_URL}/${apiSpecResourceName}:contents`,
     );
-    return Buffer.from(payload.contents ?? '', 'base64').toString('utf-8');
+    return contents ? base64Decode(contents) : '';
   }
 
   private async get<T>(url: string): Promise<T> {
     const response = await fetch(url, {
+      method: 'GET',
       headers: {
         'accept': 'application/json, text/plain, */*',
         'Authorization': `Bearer ${await this.getAccessToken()}`,
