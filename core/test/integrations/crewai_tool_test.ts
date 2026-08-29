@@ -90,6 +90,37 @@ describe('CrewaiTool', () => {
       expect(tool.description).toBe('');
     });
 
+    it('accepts a tool object that carries no CrewaiBaseTool annotation', async () => {
+      // TypeScript widens `type: 'object'` to `string` on an unannotated
+      // literal. A tool object from a CrewAI port carries its own typing and
+      // cannot be annotated, so this must compile and run.
+      const unannotated = {
+        name: 'Serper Dev Tool',
+        description: 'Search the internet with Serper',
+        argsSchema: {
+          type: 'object',
+          properties: {search_query: {type: 'string'}},
+          required: ['search_query'],
+        },
+        run: (args: Record<string, unknown>) => ({echoed: args}),
+      };
+
+      const tool = new CrewaiTool(unannotated);
+
+      expect(tool.name).toBe('serper_dev_tool');
+      expect(tool._getDeclaration().parameters).toEqual({
+        type: Type.OBJECT,
+        properties: {search_query: {type: Type.STRING}},
+        required: ['search_query'],
+      });
+      await expect(
+        tool.runAsync({
+          args: {search_query: 'test query'},
+          toolContext: emptyContext,
+        }),
+      ).resolves.toEqual({echoed: {search_query: 'test query'}});
+    });
+
     it('throws when neither the options nor the tool supply a name', () => {
       expect(() => new CrewaiTool(createCrewaiTool({name: ''}))).toThrow(
         'Tool name cannot be empty. Either provide a `name` option or set a name on the CrewAI tool.',
@@ -220,7 +251,7 @@ describe('CrewaiTool', () => {
       ).resolves.toBe('sync result');
     });
 
-    it('propagates an error from the wrapped tool unwrapped', async () => {
+    it('propagates an error from the wrapped tool', async () => {
       const crewaiTool = createCrewaiTool({
         run: () => {
           throw new Error('crewai failure');
@@ -234,6 +265,36 @@ describe('CrewaiTool', () => {
           toolContext: emptyContext,
         }),
       ).rejects.toThrow('crewai failure');
+    });
+
+    it('names the tool in the error it reports', async () => {
+      const crewaiTool = createCrewaiTool({
+        run: () => {
+          throw new Error('crewai failure');
+        },
+      });
+      const tool = new CrewaiTool(crewaiTool, {name: 'failing_tool'});
+
+      await expect(
+        tool.runAsync({
+          args: {search_query: 'test query'},
+          toolContext: emptyContext,
+        }),
+      ).rejects.toThrow("Error in tool 'failing_tool': crewai failure");
+    });
+
+    it('rejects when the wrapped tool returns a rejected promise', async () => {
+      const crewaiTool = createCrewaiTool({
+        run: () => Promise.reject(new Error('crewai rejection')),
+      });
+      const tool = new CrewaiTool(crewaiTool, {name: 'failing_tool'});
+
+      await expect(
+        tool.runAsync({
+          args: {search_query: 'test query'},
+          toolContext: emptyContext,
+        }),
+      ).rejects.toThrow("Error in tool 'failing_tool': crewai rejection");
     });
 
     it('strips a model-supplied toolContext argument', async () => {

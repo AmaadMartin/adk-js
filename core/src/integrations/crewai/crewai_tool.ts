@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration} from '@google/genai';
+import {FunctionDeclaration, Schema} from '@google/genai';
 
 import {Context} from '../../agents/context.js';
-import {BaseTool, RunAsyncToolRequest} from '../../tools/base_tool.js';
+import {FunctionTool} from '../../tools/function_tool.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 
 /**
@@ -24,7 +24,13 @@ const RESERVED_CONTEXT_ARGS = ['tool_context', 'toolContext'];
  * analogue of the Python tool's `args_schema.model_json_schema()`.
  */
 export interface CrewaiToolArgsSchema {
-  type: 'object';
+  /**
+   * Widened to `string` on purpose. A literal `'object'` would force every
+   * caller to annotate the tool object, because TypeScript widens the property
+   * of an unannotated literal to `string`. A tool built by a CrewAI port
+   * carries that library's own typing and could not be annotated at all.
+   */
+  type?: string;
   properties?: Record<string, unknown>;
   required?: string[];
 }
@@ -104,6 +110,41 @@ function missingArgsError(
 }
 
 /**
+ * Narrows the value `FunctionTool` passes to `execute` to the model's argument
+ * record.
+ *
+ * `FunctionTool` types that parameter from its schema type, and this class
+ * declares no `parameters`, so the static type is `unknown`. `BaseTool` types
+ * the arguments as a record, so the guard always holds at run time.
+ */
+function isArgsRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === 'object' && input !== null;
+}
+
+/**
+ * Calls the wrapped tool the way CrewAI expects.
+ *
+ * Every model-supplied argument is forwarded except the reserved context keys.
+ * The ADK context is supplied separately, as `run`'s second parameter.
+ */
+function runCrewaiTool(
+  tool: CrewaiBaseTool,
+  toolName: string,
+  args: Record<string, unknown>,
+  toolContext?: Context,
+): unknown | Promise<unknown> {
+  const cleanedArgs = {...args};
+  for (const reservedArg of RESERVED_CONTEXT_ARGS) {
+    delete cleanedArgs[reservedArg];
+  }
+
+  return (
+    missingArgsError(toolName, tool.argsSchema?.required ?? [], cleanedArgs) ??
+    tool.run(cleanedArgs, toolContext)
+  );
+}
+
+/**
  * Wraps a CrewAI tool so an ADK agent can call it.
  *
  * The adapter derives the function declaration from the wrapped tool's name,
@@ -124,46 +165,44 @@ function missingArgsError(
  * });
  * ```
  */
-export class CrewaiTool extends BaseTool {
+export class CrewaiTool extends FunctionTool<Schema> {
   /** The wrapped CrewAI tool. */
   readonly tool: CrewaiBaseTool;
 
   constructor(tool: CrewaiBaseTool, options: CrewaiToolOptions = {}) {
+    const name = resolveName(tool, options);
     super({
-      name: resolveName(tool, options),
+      name,
       description: options.description || tool.description || '',
+      execute: (input, toolContext) =>
+        runCrewaiTool(
+          tool,
+          name,
+          isArgsRecord(input) ? input : {},
+          toolContext,
+        ),
     });
     this.tool = tool;
   }
 
+  /**
+   * `FunctionTool` builds its declaration from the `parameters` option, which
+   * this class does not use. The declaration comes from the wrapped tool's own
+   * schema instead.
+   */
   override _getDeclaration(): FunctionDeclaration {
     const argsSchema = this.tool.argsSchema;
     const hasProperties = Object.keys(argsSchema?.properties ?? {}).length > 0;
     return {
       name: this.name,
       description: this.description,
-      parameters: hasProperties ? toGeminiSchema(argsSchema) : undefined,
+      parameters: hasProperties
+        ? toGeminiSchema({
+            type: 'object',
+            properties: argsSchema?.properties,
+            required: argsSchema?.required,
+          })
+        : undefined,
     };
-  }
-
-  override async runAsync({
-    args,
-    toolContext,
-  }: RunAsyncToolRequest): Promise<unknown> {
-    const cleanedArgs = {...args};
-    for (const reservedArg of RESERVED_CONTEXT_ARGS) {
-      delete cleanedArgs[reservedArg];
-    }
-
-    const error = missingArgsError(
-      this.name,
-      this.tool.argsSchema?.required ?? [],
-      cleanedArgs,
-    );
-    if (error) {
-      return error;
-    }
-
-    return await this.tool.run(cleanedArgs, toolContext);
   }
 }
