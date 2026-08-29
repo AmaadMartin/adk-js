@@ -5,6 +5,7 @@
  */
 
 import {isDeepStrictEqual} from 'node:util';
+import {formatAlignedTable} from '../utils/table_utils.js';
 import {ActualToolUse, EvalTurn, ExpectedToolUse} from './eval_types.js';
 
 /** A tool call from either side of the comparison. */
@@ -134,7 +135,7 @@ function reportFailures(failures: TrajectoryRow[]): void {
  * the install.
  */
 function printDetailedResults(rows: TrajectoryRow[]): void {
-  const table = [
+  const table = formatAlignedTable([
     ['query', 'expected_tool_use', 'actual_tool_use', 'score'],
     ...rows.map((row) => [
       row.query,
@@ -142,21 +143,9 @@ function printDetailedResults(rows: TrajectoryRow[]): void {
       JSON.stringify(row.actual),
       String(row.score),
     ]),
-  ];
+  ]);
 
-  // Widths come from the content, so a trajectory longer than the header does
-  // not push the later columns out of line.
-  const widths = table[0].map((_, column) =>
-    Math.max(...table.map((cells) => cells[column].length)),
-  );
-
-  const [header, ...body] = table.map((cells) =>
-    cells.map((cell, column) => cell.padEnd(widths[column])).join(' | '),
-  );
-
-  console.log(header);
-  console.log('-'.repeat(header.length));
-  for (const line of body) {
+  for (const line of table) {
     console.log(line);
   }
 }
