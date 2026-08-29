@@ -203,6 +203,24 @@ describe('IntegrationClient', () => {
       });
     });
 
+    it('sends a null trigger id when no triggers were given', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
+      globalThis.fetch = fetchMock;
+
+      await createClient({
+        integration: 'test-integration',
+      }).getOpenApiSpecForIntegration();
+
+      expect(requestBody(fetchMock.mock.calls[0][1])).toEqual({
+        apiTriggerResources: [
+          {integrationResource: 'test-integration', triggerId: null},
+        ],
+        fileFormat: 'JSON',
+      });
+    });
+
     it('sends the quota project header when using default credentials', async () => {
       const fetchMock = vi
         .fn()

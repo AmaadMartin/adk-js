@@ -293,13 +293,13 @@ describe('ApplicationIntegrationToolset', () => {
           }),
       ).toThrow(
         new InputValidationError(
-          'Invalid request, Either (integration and triggers) or (connection' +
+          'Invalid request, Either integration or (connection' +
             ' and (entityOperations or actions)) should be provided.',
         ),
       );
     });
 
-    it('rejects an integration with no triggers', () => {
+    it('accepts an integration with no triggers', () => {
       expect(
         () =>
           new ApplicationIntegrationToolset({
@@ -307,7 +307,7 @@ describe('ApplicationIntegrationToolset', () => {
             location: 'us-central1',
             integration: 'test-integration',
           }),
-      ).toThrow(InputValidationError);
+      ).not.toThrow();
     });
 
     it('accepts an integration with an empty trigger list', () => {
@@ -386,6 +386,20 @@ describe('ApplicationIntegrationToolset', () => {
       expect(getOpenApiSpecForIntegration).toHaveBeenCalledTimes(1);
       expect(getConnectionDetails).not.toHaveBeenCalled();
       expect(capturedOpenApiToolsetOptions()['credentialKey']).toBe('my-key');
+    });
+
+    it('builds tools for an integration given without triggers', async () => {
+      const toolset = new ApplicationIntegrationToolset({
+        project: 'test-project',
+        location: 'us-central1',
+        integration: 'test-integration',
+      });
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['run_integration']);
+      expect(getOpenApiSpecForIntegration).toHaveBeenCalledTimes(1);
+      expect(getConnectionDetails).not.toHaveBeenCalled();
     });
 
     it('applies a tool name filter', async () => {

@@ -99,7 +99,8 @@ export class IntegrationClient {
   }
 
   /**
-   * Generates the OpenAPI spec of an integration's API triggers.
+   * Generates the OpenAPI spec of an integration's API triggers. Without
+   * `triggers` the spec covers every API trigger the integration has.
    *
    * @throws {InputValidationError} If the API rejects the integration or the
    *     triggers.
@@ -121,7 +122,9 @@ export class IntegrationClient {
         apiTriggerResources: [
           {
             integrationResource: this.options.integration,
-            triggerId: this.options.triggers,
+            // A null trigger id asks for every API trigger the integration
+            // has. Sent explicitly, because JSON.stringify drops undefined.
+            triggerId: this.options.triggers ?? null,
           },
         ],
         fileFormat: 'JSON',

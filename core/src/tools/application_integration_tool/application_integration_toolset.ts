@@ -28,13 +28,11 @@ import {IntegrationClient} from './clients/integration_client.js';
 import {IntegrationConnectorTool} from './integration_connector_tool.js';
 
 /**
- * Error thrown when neither mode is fully configured. adk-python names its own
- * `entity_operations` parameter here, and sends a null trigger list rather
- * than rejecting it; this SDK names the options it really has, and requires
- * the triggers that the spec request needs.
+ * Error thrown when neither mode is configured. adk-python names its own
+ * `entity_operations` parameter here; this SDK names the option it really has.
  */
 const MODE_ERROR_MESSAGE =
-  'Invalid request, Either (integration and triggers) or (connection and' +
+  'Invalid request, Either integration or (connection and' +
   ' (entityOperations or actions)) should be provided.';
 
 /**
@@ -61,8 +59,8 @@ export interface ApplicationIntegrationToolsetOptions {
   /** Integration name. Selects integration mode. */
   integration?: string;
   /**
-   * Trigger ids of the integration. Required in integration mode, where an
-   * empty array is still a valid trigger list.
+   * Trigger ids of the integration. Omit it to expose every API trigger the
+   * integration has.
    */
   triggers?: string[];
   /** Connection name. Selects connection mode. */
@@ -131,13 +129,13 @@ export class ApplicationIntegrationToolset extends BaseToolset {
   private tools: IntegrationConnectorTool[] = [];
 
   /**
-   * @throws {InputValidationError} If neither an integration with triggers nor
-   *     a connection with entity operations or actions was given, or the
-   *     service account key is malformed.
+   * @throws {InputValidationError} If neither an integration nor a connection
+   *     with entity operations or actions was given, or the service account
+   *     key is malformed.
    */
   constructor(options: ApplicationIntegrationToolsetOptions) {
     super(options.toolFilter ?? []);
-    const hasIntegrationWork = options.integration && options.triggers;
+    const hasIntegrationWork = options.integration;
     const hasConnectionWork =
       options.connection &&
       (Object.keys(options.entityOperations ?? {}).length > 0 ||
