@@ -7,9 +7,8 @@
 // `vi.mock` is hoisted and file-scoped, so this case cannot share a file with
 // the real-filesystem cases in log_to_tmp_folder_test.ts.
 
-import {randomUUID} from 'node:crypto';
-import {mkdirSync, rmSync} from 'node:fs';
-import {symlink} from 'node:fs/promises';
+import {mkdirSync, mkdtempSync} from 'node:fs';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -37,29 +36,42 @@ vi.mock('../../src/utils/logger.js', async (importOriginal) => {
   return {...actual, setFileLogTarget: vi.fn()};
 });
 
+/** The environment variables `os.tmpdir()` reads, across platforms. */
+const TMP_ENV_VARS = ['TMPDIR', 'TMP', 'TEMP'];
+
 describe('logToTmpFolder when the latest pointer cannot be replaced', () => {
-  let subFolder = '';
-  let logDir = '';
+  const savedEnv = new Map<string, string | undefined>();
+  let tmpRoot = '';
 
   beforeEach(async () => {
-    subFolder = `adk_test_${randomUUID()}`;
-    logDir = path.join(os.tmpdir(), subFolder);
-    mkdirSync(logDir, {recursive: true});
-    await symlink(
+    tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'adk_log_test_'));
+    for (const name of TMP_ENV_VARS) {
+      savedEnv.set(name, process.env[name]);
+      process.env[name] = tmpRoot;
+    }
+    const logDir = path.join(tmpRoot, 'agents_log');
+    mkdirSync(logDir);
+    await fs.symlink(
       path.join(logDir, 'agent.20260817_080000.log'),
       path.join(logDir, 'agent.latest.log'),
     );
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
-    rmSync(logDir, {recursive: true, force: true});
+    for (const [name, value] of savedEnv) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+    savedEnv.clear();
+    await fs.rm(tmpRoot, {recursive: true, force: true});
   });
 
   it('leaves the logs on the console, which is what the caller reports', () => {
-    expect(() =>
-      logToTmpFolder({subFolder, logFileTimestamp: '20260817_081102'}),
-    ).toThrow(/permission denied/);
+    expect(() => logToTmpFolder()).toThrow(/permission denied/);
 
     expect(setFileLogTarget).not.toHaveBeenCalled();
   });

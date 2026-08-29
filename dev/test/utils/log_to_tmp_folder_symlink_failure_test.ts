@@ -8,15 +8,16 @@
 // cannot share a file with the real-filesystem cases in
 // log_to_tmp_folder_test.ts.
 
-import {randomUUID} from 'node:crypto';
-import {mkdirSync, rmSync} from 'node:fs';
+import {mkdtempSync} from 'node:fs';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {createLatestLogLink} from '../../src/utils/log_to_tmp_folder.js';
+import {logToTmpFolder} from '../../src/utils/log_to_tmp_folder.js';
+import {resetFileLogTarget} from '../../src/utils/logger.js';
 
-// Only `symlinkSync` is replaced; `mkdirSync`, `rmSync` and the `lstatSync`
+// Only `symlinkSync` is replaced; the `mkdirSync`, `openSync` and `lstatSync`
 // the code under test calls stay real.
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -31,23 +32,42 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-describe('createLatestLogLink when the platform refuses a symlink', () => {
-  let logDir = '';
+/** The environment variables `os.tmpdir()` reads, across platforms. */
+const TMP_ENV_VARS = ['TMPDIR', 'TMP', 'TEMP'];
+
+describe('logToTmpFolder when the platform refuses a symlink', () => {
+  const savedEnv = new Map<string, string | undefined>();
+  let tmpRoot = '';
 
   beforeEach(() => {
-    logDir = path.join(os.tmpdir(), `adk_test_${randomUUID()}`);
-    mkdirSync(logDir, {recursive: true});
+    tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'adk_log_test_'));
+    for (const name of TMP_ENV_VARS) {
+      savedEnv.set(name, process.env[name]);
+      process.env[name] = tmpRoot;
+    }
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await resetFileLogTarget();
     vi.restoreAllMocks();
-    rmSync(logDir, {recursive: true, force: true});
+    for (const [name, value] of savedEnv) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+    savedEnv.clear();
+    await fs.rm(tmpRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 20,
+    });
   });
 
   it('returns no pointer path instead of throwing', () => {
-    const logFilePath = path.join(logDir, 'agent.20260817_081102.log');
-
-    expect(createLatestLogLink(logDir, logFilePath)).toBeUndefined();
+    expect(logToTmpFolder().latestLogPath).toBeUndefined();
   });
 
   it('emits no warning, matching the silent OSError path in adk-python', () => {
@@ -55,7 +75,7 @@ describe('createLatestLogLink when the platform refuses a symlink', () => {
       .spyOn(process, 'emitWarning')
       .mockImplementation(() => {});
 
-    createLatestLogLink(logDir, path.join(logDir, 'agent.20260817_081102.log'));
+    logToTmpFolder();
 
     expect(emitWarning).not.toHaveBeenCalled();
   });

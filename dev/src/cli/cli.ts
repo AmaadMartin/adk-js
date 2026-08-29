@@ -95,16 +95,24 @@ function getBoolean(option?: string | boolean): boolean {
 }
 
 /**
- * Sends the ADK logs to a file in the system temp folder and names that file
- * on the terminal. Returns the path of the file, which the caller needs to
- * point the user at it once the logs have left the console.
+ * Sends the ADK logs to a file in the system temp folder when `--log_to_tmp`
+ * is set, and names that file on the terminal. Returns the path of the file,
+ * which the caller needs to point the user at it once the logs have left the
+ * console.
  *
- * Returns undefined and leaves the logs on the console when the file cannot be
- * opened: a stale file or another user's folder occupies the fixed path, or
- * the temp folder refuses the write. Where the logs go must not decide whether
- * the command runs, so this reports the reason and continues.
+ * Returns undefined and leaves the logs on the console without the flag, and
+ * when the file cannot be opened: a stale file or another user's folder
+ * occupies the fixed path, or the temp folder refuses the write. Where the
+ * logs go must not decide whether the command runs, so this reports the reason
+ * and continues.
  */
-function startTmpFolderLogging(): string | undefined {
+function startTmpFolderLogging(
+  options: Record<string, string>,
+): string | undefined {
+  if (!getBoolean(options['log_to_tmp'])) {
+    return undefined;
+  }
+
   let destination: TmpFolderLog;
   try {
     destination = logToTmpFolder();
@@ -188,7 +196,7 @@ const OTEL_TO_CLOUD_OPTION = new Option(
 const LOG_TO_TMP_OPTION = new Option(
   '--log_to_tmp',
   'Optional. Write the logs to a file in the system temp folder instead of the console. This is useful for local debugging. Default: false',
-).default(false);
+);
 const COMPILE_AGENT_FILE = new Option(
   '--compile [boolean]',
   'Optional. Whether to compile ts agent file to js before execution',
@@ -288,9 +296,7 @@ export function createProgram(): Command {
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
-      const logFilePath = getBoolean(options['log_to_tmp'])
-        ? startTmpFolderLogging()
-        : undefined;
+      const logFilePath = startTmpFolderLogging(options);
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
 
@@ -342,9 +348,7 @@ export function createProgram(): Command {
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
-      const logFilePath = getBoolean(options['log_to_tmp'])
-        ? startTmpFolderLogging()
-        : undefined;
+      const logFilePath = startTmpFolderLogging(options);
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
 
@@ -447,9 +451,7 @@ export function createProgram(): Command {
     .action(async (agentPath: string, options: Record<string, string>) => {
       // Opt in, unlike adk-python's `cli_run`, which redirects every run and
       // leaves `-v` printing nothing to the terminal.
-      const logFilePath = getBoolean(options['log_to_tmp'])
-        ? startTmpFolderLogging()
-        : undefined;
+      const logFilePath = startTmpFolderLogging(options);
       setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
       try {

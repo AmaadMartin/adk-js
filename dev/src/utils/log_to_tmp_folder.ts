@@ -31,18 +31,6 @@ export interface TmpFolderLog {
   latestLogPath?: string;
 }
 
-/**
- * Test seam. No production caller passes these. The tests override them so
- * that the suite writes to a folder of its own and never to the developer's
- * real `<temp>/agents_log`.
- */
-export interface LogToTmpFolderOptions {
-  /** Directory under the system temp root. Default `'agents_log'`. */
-  subFolder?: string;
-  /** Timestamp segment. Default `YYYYMMDD_HHmmss` of the current local time. */
-  logFileTimestamp?: string;
-}
-
 /** Local-time `YYYYMMDD_HHmmss`, matching Python's `%Y%m%d_%H%M%S`. */
 function formatLogTimestamp(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
@@ -57,7 +45,7 @@ function formatLogTimestamp(date: Date): string {
  * file already occupies the path, or the platform refuses symlinks (Windows
  * without developer mode). Logging must never stop the run.
  */
-export function createLatestLogLink(
+function createLatestLogLink(
   logDir: string,
   logFilePath: string,
 ): string | undefined {
@@ -112,18 +100,11 @@ function createLogFile(logFilePath: string): void {
  * otherwise hand them to every local user. A folder that already exists keeps
  * the permissions it has.
  */
-export function logToTmpFolder(
-  options: LogToTmpFolderOptions = {},
-): TmpFolderLog {
-  const {
-    subFolder = LOG_SUB_FOLDER,
-    logFileTimestamp = formatLogTimestamp(new Date()),
-  } = options;
-
-  const logDir = path.join(os.tmpdir(), subFolder);
+export function logToTmpFolder(): TmpFolderLog {
+  const logDir = path.join(os.tmpdir(), LOG_SUB_FOLDER);
   const logFilePath = path.join(
     logDir,
-    `${LOG_FILE_PREFIX}.${logFileTimestamp}.log`,
+    `${LOG_FILE_PREFIX}.${formatLogTimestamp(new Date())}.log`,
   );
 
   fs.mkdirSync(logDir, {recursive: true, mode: LOG_DIR_MODE});
