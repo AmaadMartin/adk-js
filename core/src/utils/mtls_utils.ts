@@ -136,9 +136,9 @@ async function runCertProvider(
     args.push(WITH_PASSPHRASE_FLAG);
   }
 
-  // Bound here rather than at module load. A client certificate is rare, and
-  // binding `execFile` eagerly would put it in the module graph of every
-  // consumer of this package.
+  // Bound here rather than at module load: several tests replace
+  // `node:child_process` with a partial mock, and promisifying an absent
+  // `execFile` throws while this module is still being evaluated.
   const execFileAsync = promisify(childProcess.execFile);
 
   try {

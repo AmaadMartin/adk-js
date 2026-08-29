@@ -416,7 +416,7 @@ export function createProgram(): Command {
           await convertGoogleApi({
             apiName,
             apiVersion,
-            output: options['output'] ?? DEFAULT_OUTPUT_PATH,
+            output: options['output'],
           });
         } catch (error) {
           logger.error(
