@@ -20,13 +20,23 @@ vi.mock(
   () => {
     return {
       AutoAuthCredentialExchanger: vi.fn().mockImplementation(() => ({
-        exchange: vi.fn().mockResolvedValue({
-          credential: {
-            authType: AuthCredentialTypes.HTTP,
-            http: {scheme: 'bearer', credentials: {token: 'exchanged-token'}},
-          },
-          wasExchanged: true,
-        }),
+        // The real exchanger registers no exchanger for `HTTP`, so a
+        // credential already in bearer form comes back untouched.
+        exchange: vi.fn(
+          async ({authCredential}: {authCredential: AuthCredential}) =>
+            authCredential.authType === AuthCredentialTypes.HTTP
+              ? {credential: authCredential, wasExchanged: false}
+              : {
+                  credential: {
+                    authType: AuthCredentialTypes.HTTP,
+                    http: {
+                      scheme: 'bearer',
+                      credentials: {token: 'exchanged-token'},
+                    },
+                  },
+                  wasExchanged: true,
+                },
+        ),
       })),
     };
   },
