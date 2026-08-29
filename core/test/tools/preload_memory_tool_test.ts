@@ -14,6 +14,7 @@ import {
   PreloadMemoryTool,
   SearchMemoryResponse,
 } from '@google/adk';
+import {Content, createModelContent, createUserContent} from '@google/genai';
 
 // We mock the logger.warn since we test a failing case
 import {vi} from 'vitest';
@@ -40,6 +41,14 @@ class StubToolContext {
   async searchMemory(_query: string): Promise<SearchMemoryResponse> {
     return {memories: this.memories};
   }
+}
+
+function requestWithContents(contents: Content[]): LlmRequest {
+  return {contents, toolsDict: {}, liveConnectConfig: {}, config: {}};
+}
+
+function memoryEntry(text: string): MemoryEntry {
+  return {content: createUserContent(text), author: 'user'};
 }
 
 describe('PreloadMemoryTool', () => {
@@ -150,5 +159,109 @@ describe('PreloadMemoryTool', () => {
     expect(llmRequest.config?.systemInstruction).toBeUndefined();
 
     warnSpy.mockRestore();
+  });
+
+  it('keeps the system instruction stable and inserts before the current turn', async () => {
+    const toolContext = new StubToolContext([
+      memoryEntry('likes tea'),
+    ]) as unknown as Context;
+    const llmRequest = requestWithContents([
+      createUserContent('historical question'),
+      createModelContent('historical answer'),
+      createUserContent('current query'),
+    ]);
+    llmRequest.config = {systemInstruction: 'stable instruction'};
+
+    await new PreloadMemoryTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.config.systemInstruction).toBe('stable instruction');
+    expect(llmRequest.contents.map((content) => content.role)).toEqual([
+      'user',
+      'model',
+      'user',
+      'user',
+    ]);
+    expect(llmRequest.contents.at(-2)?.parts?.[0]?.text).toContain('likes tea');
+    expect(llmRequest.contents.at(-1)).toEqual(
+      createUserContent('current query'),
+    );
+  });
+
+  it('stays after a function response boundary', async () => {
+    const functionResponse: Content = {
+      role: 'user',
+      parts: [{functionResponse: {name: 'lookup', response: {result: 'done'}}}],
+    };
+    const toolContext = new StubToolContext([
+      memoryEntry('likes tea'),
+    ]) as unknown as Context;
+    const llmRequest = requestWithContents([
+      createUserContent('current query'),
+      createModelContent({functionCall: {name: 'lookup', args: {}}}),
+      functionResponse,
+    ]);
+
+    await new PreloadMemoryTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents.at(-2)).toBe(functionResponse);
+    expect(llmRequest.contents.at(-1)?.parts?.[0]?.text).toContain('likes tea');
+  });
+
+  it('leaves the whole request untouched when searchMemory throws', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const toolContext = new StubToolContext([]) as unknown as Context;
+    toolContext.searchMemory = async () => {
+      throw new Error('unavailable');
+    };
+    const llmRequest = requestWithContents([
+      createUserContent('current query'),
+    ]);
+    llmRequest.config = {systemInstruction: 'stable instruction'};
+    const original = structuredClone(llmRequest);
+
+    await new PreloadMemoryTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest).toEqual(original);
+    warnSpy.mockRestore();
+  });
+
+  it('omits the author prefix when a memory has no author', async () => {
+    const toolContext = new StubToolContext([
+      {content: createUserContent('likes tea')},
+    ]) as unknown as Context;
+    const llmRequest = requestWithContents([]);
+
+    await new PreloadMemoryTool().processLlmRequest({toolContext, llmRequest});
+
+    const memoryText = llmRequest.contents[0].parts?.[0]?.text;
+    expect(memoryText).toContain('\nlikes tea\n');
+  });
+
+  it('leaves contents untouched when no memories are found', async () => {
+    const toolContext = new StubToolContext([]) as unknown as Context;
+    const llmRequest = requestWithContents([]);
+
+    await new PreloadMemoryTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents).toEqual([]);
+  });
+
+  it('leaves contents untouched when no memory carries text', async () => {
+    const toolContext = new StubToolContext([
+      {
+        content: {
+          role: 'user',
+          parts: [
+            {inlineData: {mimeType: 'image/png', data: 'AAAA'}},
+            {functionCall: {name: 'lookup', args: {}}},
+          ],
+        },
+      },
+    ]) as unknown as Context;
+    const llmRequest = requestWithContents([]);
+
+    await new PreloadMemoryTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents).toEqual([]);
   });
 });
