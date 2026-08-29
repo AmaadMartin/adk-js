@@ -10,11 +10,9 @@ import {GenerateContentConfig} from '@google/genai';
 /** An `LlmRequest` whose `config` is guaranteed present, so tests can index it. */
 export type LlmRequestWithConfig = LlmRequest & {config: GenerateContentConfig};
 
-export function makeLlmRequest(
-  model = 'gemini-2.0-flash',
-): LlmRequestWithConfig {
+export function makeLlmRequest(): LlmRequestWithConfig {
   return {
-    model,
+    model: 'gemini-2.0-flash',
     config: {},
     contents: [],
     toolsDict: {},
@@ -22,14 +20,8 @@ export function makeLlmRequest(
   };
 }
 
-/**
- * A stand-in context for a tool that never reads one.
- *
- * `ToolProcessLlmRequest.toolContext` is required, and `processLlmRequest`
- * only touches `llmRequest`. Building a real `Context` needs an
- * `InvocationContext`, and so a session, an agent and the services behind
- * them, none of which the tool under test reaches.
- */
+// The tool only reads llmRequest; the context is never touched, so an empty
+// stand-in is enough.
 export function makeToolContext(): Context {
   return {} as Context;
 }
