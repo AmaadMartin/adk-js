@@ -6,6 +6,7 @@
 
 import {InMemoryRunner, LlmAgent, LOAD_ARTIFACTS} from '@google/adk';
 import {createUserContent} from '@google/genai';
+import AdmZip from 'adm-zip';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -78,6 +79,67 @@ describe('E2E LoadArtifactsTool', () => {
 
       // Check the output
       expect(finalResponse.toLowerCase()).toContain('30');
+    },
+    30000,
+  );
+  it.skipIf(!hasAKey)(
+    'should answer from the text of a docx artifact',
+    async () => {
+      const agent = new LlmAgent({
+        name: 'e2e_docx_agent',
+        description: 'An agent that reads document artifacts.',
+        instruction:
+          'You have tools to load artifacts. Use them to read artifacts if the user asks about them, and give a short answer based solely on the artifact content.',
+        model: 'gemini-2.5-flash',
+        tools: [LOAD_ARTIFACTS],
+      });
+
+      const runner = new InMemoryRunner({agent, appName: 'e2e_docx_test'});
+      const session = await runner.sessionService.createSession({
+        appName: 'e2e_docx_test',
+        userId: 'test_user',
+      });
+
+      const zip = new AdmZip();
+      zip.addFile(
+        'word/document.xml',
+        Buffer.from(
+          '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+            '<w:body><w:p><w:t>The warehouse in Lisbon holds 42 pallets.</w:t></w:p></w:body></w:document>',
+          'utf8',
+        ),
+      );
+      await runner.artifactService!.saveArtifact({
+        appName: 'e2e_docx_test',
+        userId: 'test_user',
+        sessionId: session.id,
+        filename: 'inventory.docx',
+        artifact: {
+          inlineData: {
+            data: zip.toBuffer().toString('base64'),
+            mimeType:
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          },
+        },
+      });
+
+      let finalResponse = '';
+      for await (const event of runner.runAsync({
+        userId: 'test_user',
+        sessionId: session.id,
+        newMessage: createUserContent(
+          'How many pallets does inventory.docx say the warehouse holds?',
+        ),
+      })) {
+        if (
+          event.author === 'e2e_docx_agent' &&
+          event.content?.parts?.[0]?.text
+        ) {
+          finalResponse += event.content.parts[0].text;
+        }
+      }
+
+      expect(finalResponse).toContain('42');
     },
     30000,
   );

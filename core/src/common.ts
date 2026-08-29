@@ -315,6 +315,8 @@ export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
   asSafePartForLlm,
+  type LoadArtifactsToolParams,
+  type ProcessArtifactCallback,
 } from './tools/load_artifacts_tool.js';
 export {LOAD_MEMORY, LoadMemoryTool} from './tools/load_memory_tool.js';
 export {LOAD_WEB_PAGE, loadWebPage} from './tools/load_web_page.js';

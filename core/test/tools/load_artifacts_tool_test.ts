@@ -6,17 +6,60 @@
 
 import {
   Context,
-  LOAD_ARTIFACTS,
+  createSession,
+  FeatureName,
+  getLogger,
+  InMemoryArtifactService,
+  InvocationContext,
   LlmRequest,
+  LOAD_ARTIFACTS,
   LoadArtifactsTool,
+  PluginManager,
+  withTemporaryFeatureOverride,
 } from '@google/adk';
 import {Blob, Part, Type} from '@google/genai';
 import AdmZip from 'adm-zip';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
+import {ScopedArtifactService} from '../../src/artifacts/scoped_artifact_service.js';
 
-/** Builds a tool context serving `artifactsByName`, as the tool sees it. */
-function stubContext(artifactsByName: Record<string, Part>): Context {
-  return new StubToolContext(artifactsByName) as unknown as Context;
+const APP_NAME = 'load_artifacts_test';
+const USER_ID = 'test_user';
+
+/**
+ * Builds a real tool context holding `artifactsByName`, so the tool reaches
+ * the artifacts through the same artifact service it uses in production.
+ */
+async function artifactContext(
+  artifactsByName: Record<string, Part>,
+): Promise<Context> {
+  const artifactService = new InMemoryArtifactService();
+  const session = createSession({
+    id: 'test_session',
+    appName: APP_NAME,
+    userId: USER_ID,
+  });
+  for (const [filename, artifact] of Object.entries(artifactsByName)) {
+    await artifactService.saveArtifact({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: session.id,
+      filename,
+      artifact,
+    });
+  }
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test_invocation',
+      session,
+      pluginManager: new PluginManager(),
+      artifactService: new ScopedArtifactService(
+        artifactService,
+        APP_NAME,
+        USER_ID,
+        session.id,
+      ),
+    }),
+  });
 }
 
 /** Builds a request whose last turn asks the tool to load `artifactNames`. */
@@ -701,7 +744,7 @@ describe('LoadArtifactsTool', () => {
   });
 
   it('appends nothing when the request carries no contents', async () => {
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       'test.txt': {text: 'hello'},
     });
     const llmRequest: LlmRequest = {
@@ -719,7 +762,7 @@ describe('LoadArtifactsTool', () => {
   it('passes non-base64 inline data through as text', async () => {
     const artifactName = 'notes.txt';
     const plainText = 'col1,col2\n1,2\n';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {data: plainText, mimeType: 'text/plain'},
       },
@@ -736,7 +779,7 @@ describe('LoadArtifactsTool', () => {
   it('converts csv bytes served as octet-stream using the filename', async () => {
     const artifactName = 'test.csv';
     const csvString = 'col1,col2\nval1,val2\n';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: Buffer.from(csvString, 'utf8').toString('base64'),
@@ -755,7 +798,7 @@ describe('LoadArtifactsTool', () => {
 
   it('extracts the text of a docx artifact', async () => {
     const artifactName = 'report.docx';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildDocx('Quarterly report').toString('base64'),
@@ -775,7 +818,7 @@ describe('LoadArtifactsTool', () => {
 
   it('extracts the text of a docx artifact whose mime type is wrong', async () => {
     const artifactName = 'minutes.DOCX';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildDocx('Mislabelled docx').toString('base64'),
@@ -792,7 +835,7 @@ describe('LoadArtifactsTool', () => {
 
   it('extracts the text of a docx artifact served as octet-stream', async () => {
     const artifactName = 'document.docx';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildDocx('Octet stream docx').toString('base64'),
@@ -809,7 +852,7 @@ describe('LoadArtifactsTool', () => {
 
   it('extracts the text of a docx artifact that has no filename extension', async () => {
     const artifactName = 'inline-file';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: buildDocx('Extensionless docx').toString('base64'),
@@ -826,7 +869,7 @@ describe('LoadArtifactsTool', () => {
 
   it('falls back to the binary placeholder when octet-stream bytes are not a docx', async () => {
     const artifactName = 'inline-file';
-    const toolContext = stubContext({
+    const toolContext = await artifactContext({
       [artifactName]: {
         inlineData: {
           data: Buffer.from([0, 1, 2, 3]).toString('base64'),
@@ -851,7 +894,7 @@ describe('LoadArtifactsTool', () => {
     async (mimeType) => {
       const artifactName = 'logo.svg';
       const svgMarkup = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
-      const toolContext = stubContext({
+      const toolContext = await artifactContext({
         [artifactName]: {
           inlineData: {
             data: Buffer.from(svgMarkup, 'utf8').toString('base64'),
@@ -871,4 +914,156 @@ describe('LoadArtifactsTool', () => {
       expect(artifactPart.text).toEqual(svgMarkup);
     },
   );
+  it('appends the part a synchronous processArtifact returns', async () => {
+    const artifactName = 'test.txt';
+    const artifact: Part = {inlineData: {data: 'AAAA', mimeType: 'text/plain'}};
+    const calls: Array<[Part, string]> = [];
+    const toolContext = await artifactContext({
+      [artifactName]: artifact,
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => {
+        calls.push([part, name]);
+        return {text: 'redacted'};
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(calls).toEqual([[artifact, artifactName]]);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('redacted');
+  });
+
+  it('awaits an asynchronous processArtifact', async () => {
+    const artifactName = 'test.txt';
+    const toolContext = await artifactContext({
+      [artifactName]: {inlineData: {data: 'AAAA', mimeType: 'text/plain'}},
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      processArtifact: async () => ({text: 'async redacted'}),
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toEqual('async redacted');
+  });
+
+  it('omits the artifact when processArtifact returns undefined', async () => {
+    const toolContext = await artifactContext({
+      'skip.txt': {text: 'skip me'},
+      'keep.txt': {text: 'keep me'},
+    });
+    const llmRequest = requestLoading(['skip.txt', 'keep.txt']);
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => (name === 'skip.txt' ? undefined : part),
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('keep me');
+  });
+
+  it('logs and skips the artifact when processArtifact throws', async () => {
+    const toolContext = await artifactContext({
+      'boom.txt': {text: 'boom'},
+      'keep.txt': {text: 'keep me'},
+    });
+    const llmRequest = requestLoading(['boom.txt', 'keep.txt']);
+    const errors = vi.spyOn(getLogger(), 'error').mockImplementation(() => {});
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => {
+        if (name === 'boom.txt') {
+          throw new Error('callback failed');
+        }
+        return part;
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(errors).toHaveBeenCalledOnce();
+    expect(errors.mock.calls[0][0]).toContain('boom.txt');
+    expect(errors.mock.calls[0][0]).toContain('callback failed');
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('keep me');
+    errors.mockRestore();
+  });
+
+  it('gives processArtifact the unprefixed name of a user artifact', async () => {
+    const artifactName = 'shared.txt';
+    const toolContext = await artifactContext({
+      [`user:${artifactName}`]: {text: 'shared content'},
+    });
+    const llmRequest = requestLoading([artifactName]);
+    const names: string[] = [];
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => {
+        names.push(name);
+        return part;
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(names).toEqual([artifactName]);
+  });
+
+  it('bypasses the safety conversion when processArtifact is supplied', async () => {
+    const artifactName = 'document.docx';
+    const base64 = buildDocx('Untouched docx').toString('base64');
+    const toolContext = await artifactContext({
+      [artifactName]: {
+        inlineData: {
+          data: base64,
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      processArtifact: (part) => part,
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).inlineData?.data).toEqual(base64);
+  });
+
+  it('declares json schema parameters when the feature is enabled', async () => {
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      true,
+      () => new LoadArtifactsTool()._getDeclaration(),
+    );
+
+    expect(declaration?.parametersJsonSchema).toEqual({
+      type: 'object',
+      properties: {
+        artifact_names: {
+          type: 'array',
+          items: {type: 'string'},
+          description: 'The names of the artifacts to load.',
+        },
+      },
+    });
+    expect(declaration?.parameters).toBeUndefined();
+  });
+
+  it('declares json schema parameters when the environment enables the feature', () => {
+    vi.stubEnv('ADK_ENABLE_JSON_SCHEMA_FOR_FUNC_DECL', 'true');
+
+    const declaration = new LoadArtifactsTool()._getDeclaration();
+
+    expect(declaration?.parametersJsonSchema).toBeDefined();
+    vi.unstubAllEnvs();
+  });
+
+  it('keeps the schema declaration when the feature is disabled', async () => {
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      false,
+      () => new LoadArtifactsTool()._getDeclaration(),
+    );
+
+    expect(declaration?.parametersJsonSchema).toBeUndefined();
+    expect(declaration?.parameters?.type).toEqual(Type.OBJECT);
+  });
 });
