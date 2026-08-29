@@ -5,14 +5,18 @@
  */
 
 import {
+  ConvertedSchema,
   DiscoveryDocument,
   DiscoveryParameter,
   DiscoverySchema,
   GoogleApiToOpenApiConverter,
   convertDiscoveryDocument,
 } from '@google/adk';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {OpenAPIV3} from 'openapi-types';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   convertExternalDocs,
   convertInfo,
@@ -30,6 +34,7 @@ import {
   CALENDAR_DISCOVERY_DOCUMENT,
   DOCS_DISCOVERY_DOCUMENT,
 } from './discovery_fixtures.js';
+import {capturedRequest, respondWith} from './https_transport_fake.js';
 import {
   asReference,
   asSchema,
@@ -38,6 +43,26 @@ import {
   requestBodyOf,
   responseAt,
 } from './openapi_narrowing.js';
+
+const {requestMock, agentMock, loadCertsMock} = vi.hoisted(() => ({
+  requestMock: vi.fn(),
+  agentMock: vi.fn(),
+  loadCertsMock: vi.fn(),
+}));
+
+vi.mock('node:https', () => ({request: requestMock, Agent: agentMock}));
+
+vi.mock('../../../src/utils/mtls_utils.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../src/utils/mtls_utils.js')>();
+  return {...actual, loadDefaultClientCerts: loadCertsMock};
+});
+
+const CLIENT_CERTS = {
+  cert: '-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----',
+  key: '-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----',
+  passphrase: 'secret',
+};
 
 describe('convertInfo', () => {
   it('copies the discovery metadata', () => {
@@ -99,6 +124,43 @@ describe('convertServers', () => {
   it('produces an empty URL for a document with no root URL', () => {
     expect(convertServers({}, 'calendar', 'v3')).toEqual([
       {url: '', description: 'calendar v3 API'},
+    ]);
+  });
+
+  const MTLS_DOC = {
+    rootUrl: 'https://www.googleapis.com/',
+    mtlsRootUrl: 'https://www.mtls.googleapis.com/',
+    servicePath: 'calendar/v3/',
+  };
+
+  it('uses the mTLS root URL when a client certificate is asked for', () => {
+    expect(convertServers(MTLS_DOC, 'calendar', 'v3', true)).toEqual([
+      {
+        url: 'https://www.mtls.googleapis.com/calendar/v3',
+        description: 'calendar v3 API',
+      },
+    ]);
+  });
+
+  it('keeps the plain root URL when no client certificate is asked for', () => {
+    expect(convertServers(MTLS_DOC, 'calendar', 'v3', false)).toEqual([
+      {
+        url: 'https://www.googleapis.com/calendar/v3',
+        description: 'calendar v3 API',
+      },
+    ]);
+  });
+
+  it('keeps the plain root URL when the document declares no mTLS host', () => {
+    const {rootUrl, servicePath} = MTLS_DOC;
+
+    expect(
+      convertServers({rootUrl, servicePath}, 'calendar', 'v3', true),
+    ).toEqual([
+      {
+        url: 'https://www.googleapis.com/calendar/v3',
+        description: 'calendar v3 API',
+      },
     ]);
   });
 });
@@ -215,7 +277,7 @@ describe('convertSchemaObject', () => {
   const cases: Array<{
     name: string;
     schemaDef: DiscoverySchema;
-    expected: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject;
+    expected: ConvertedSchema;
   }> = [
     {
       name: 'an object with a required property',
@@ -273,9 +335,33 @@ describe('convertSchemaObject', () => {
       expected: {$ref: '#/components/schemas/Calendar'},
     },
     {
-      name: 'a reference alongside sibling keys',
-      schemaDef: {$ref: 'Calendar', description: 'dropped'},
-      expected: {$ref: '#/components/schemas/Calendar'},
+      name: 'a reference alongside a description',
+      schemaDef: {$ref: 'Calendar', description: 'The calendar'},
+      expected: {
+        $ref: '#/components/schemas/Calendar',
+        description: 'The calendar',
+      },
+    },
+    {
+      name: 'a reference alongside every sibling key discovery states',
+      schemaDef: {
+        $ref: 'Calendar',
+        type: 'string',
+        format: 'date-time',
+        description: 'The calendar',
+        enum: ['a', 'b'],
+        pattern: '^c',
+        default: 'a',
+      },
+      expected: {
+        $ref: '#/components/schemas/Calendar',
+        type: 'string',
+        format: 'date-time',
+        description: 'The calendar',
+        enum: ['a', 'b'],
+        pattern: '^c',
+        default: 'a',
+      },
     },
     {
       name: 'an enum',
@@ -688,53 +774,197 @@ describe('convertDiscoveryDocument', () => {
 });
 
 describe('GoogleApiToOpenApiConverter', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'];
+    stubDiscoveryResponse(CALENDAR_DISCOVERY_DOCUMENT);
   });
 
-  function stubDiscoveryFetch(document: DiscoveryDocument) {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue({ok: true, status: 200, json: async () => document});
-    globalThis.fetch = fetchMock;
-    return fetchMock;
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'];
+  });
+
+  /** Makes the mocked transport answer with `document`. */
+  function stubDiscoveryResponse(document: DiscoveryDocument): void {
+    respondWith(requestMock, {
+      statusCode: 200,
+      body: JSON.stringify(document),
+    });
   }
 
   it('fetches and converts the discovery document', async () => {
-    const fetchMock = stubDiscoveryFetch(CALENDAR_DISCOVERY_DOCUMENT);
-
     const spec = await new GoogleApiToOpenApiConverter(
       'calendar',
       'v3',
     ).convert();
 
     expect(spec.info.title).toBe('Google Calendar API');
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(capturedRequest(requestMock).url).toBe(
       'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
-      expect.anything(),
     );
   });
 
   it('honours a custom discovery URL template', async () => {
-    const fetchMock = stubDiscoveryFetch(CALENDAR_DISCOVERY_DOCUMENT);
-
     await new GoogleApiToOpenApiConverter('calendar', 'v3', {
       discoveryUrl: 'https://private.example.com/{api}/{apiVersion}',
     }).convert();
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(capturedRequest(requestMock).url).toBe(
       'https://private.example.com/calendar/v3',
-      expect.anything(),
     );
+    expect(capturedRequest(requestMock).options.agent).toBeUndefined();
   });
 
   it('propagates a discovery fetch failure', async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue({ok: false, status: 500, json: async () => ({})});
+    respondWith(requestMock, {statusCode: 500, body: '{}'});
 
     await expect(
       new GoogleApiToOpenApiConverter('calendar', 'v3').convert(),
     ).rejects.toThrow('HTTP 500');
+  });
+
+  it('fetches the document only once across convert calls', async () => {
+    const converter = new GoogleApiToOpenApiConverter('calendar', 'v3');
+
+    await converter.convert();
+    await converter.convert();
+
+    expect(requestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('converts a document fetched by fetchGoogleApiSpec', async () => {
+    const converter = new GoogleApiToOpenApiConverter('calendar', 'v3');
+
+    await converter.fetchGoogleApiSpec();
+    const spec = await converter.convert();
+
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(spec.info.title).toBe('Google Calendar API');
+  });
+
+  describe('with a client certificate', () => {
+    beforeEach(() => {
+      process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = 'true';
+      loadCertsMock.mockResolvedValue(CLIENT_CERTS);
+    });
+
+    it('fetches from the mTLS host and presents the certificate', async () => {
+      await new GoogleApiToOpenApiConverter('calendar', 'v3').convert();
+
+      expect(capturedRequest(requestMock).url).toBe(
+        'https://www.mtls.googleapis.com/discovery/v1/apis/calendar/v3/rest',
+      );
+      expect(agentMock).toHaveBeenCalledWith({
+        cert: CLIENT_CERTS.cert,
+        key: CLIENT_CERTS.key,
+        passphrase: CLIENT_CERTS.passphrase,
+      });
+    });
+
+    it('succeeds when the certificate has no passphrase', async () => {
+      const {cert, key} = CLIENT_CERTS;
+      loadCertsMock.mockResolvedValue({cert, key});
+
+      const spec = await new GoogleApiToOpenApiConverter(
+        'calendar',
+        'v3',
+      ).convert();
+
+      expect(spec.info.title).toBe('Google Calendar API');
+      expect(agentMock).toHaveBeenCalledWith({
+        cert,
+        key,
+        passphrase: undefined,
+      });
+    });
+
+    it('serves the mTLS root URL from the converted document', async () => {
+      stubDiscoveryResponse({
+        rootUrl: 'https://www.googleapis.com/',
+        mtlsRootUrl: 'https://www.mtls.googleapis.com/',
+        servicePath: 'calendar/v3/',
+      });
+
+      const spec = await new GoogleApiToOpenApiConverter(
+        'calendar',
+        'v3',
+      ).convert();
+
+      expect(spec.servers).toEqual([
+        {
+          url: 'https://www.mtls.googleapis.com/calendar/v3',
+          description: 'calendar v3 API',
+        },
+      ]);
+    });
+
+    it('falls back to the plain host when the machine has no certificate', async () => {
+      loadCertsMock.mockResolvedValue(undefined);
+
+      await new GoogleApiToOpenApiConverter('calendar', 'v3').convert();
+
+      expect(capturedRequest(requestMock).url).toBe(
+        'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
+      );
+      expect(agentMock).not.toHaveBeenCalled();
+    });
+
+    it('propagates a certificate loading failure', async () => {
+      loadCertsMock.mockRejectedValue(new Error('cert provider exploded'));
+
+      await expect(
+        new GoogleApiToOpenApiConverter('calendar', 'v3').convert(),
+      ).rejects.toThrow('cert provider exploded');
+    });
+
+    it('ignores a later change to the environment', async () => {
+      const converter = new GoogleApiToOpenApiConverter('calendar', 'v3');
+      delete process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'];
+
+      await converter.convert();
+
+      expect(loadCertsMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('saveOpenApiSpec', () => {
+    let outputDir: string;
+
+    beforeEach(async () => {
+      outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-openapi-'));
+    });
+
+    afterEach(async () => {
+      await fs.rm(outputDir, {recursive: true, force: true});
+    });
+
+    it('writes the converted document as indented JSON', async () => {
+      const outputPath = path.join(outputDir, 'calendar_openapi.json');
+      const converter = new GoogleApiToOpenApiConverter('calendar', 'v3');
+      const spec = await converter.convert();
+
+      await converter.saveOpenApiSpec(outputPath);
+
+      const written = await fs.readFile(outputPath, 'utf-8');
+      expect(JSON.parse(written)).toEqual(spec);
+      expect(written).toBe(JSON.stringify(spec, null, 2));
+    });
+
+    it('writes the empty skeleton before anything is converted', async () => {
+      const outputPath = path.join(outputDir, 'empty.json');
+
+      await new GoogleApiToOpenApiConverter('calendar', 'v3').saveOpenApiSpec(
+        outputPath,
+      );
+
+      expect(JSON.parse(await fs.readFile(outputPath, 'utf-8'))).toEqual({
+        openapi: '3.0.0',
+        info: {title: '', version: ''},
+        servers: [],
+        paths: {},
+        components: {schemas: {}, securitySchemes: {}},
+      });
+    });
   });
 });

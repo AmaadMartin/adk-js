@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as http from 'node:http';
 import * as https from 'node:https';
 import {logger} from '../../utils/logger.js';
 import {MtlsClientCerts} from '../../utils/mtls_utils.js';
@@ -125,38 +126,51 @@ export function resolveDiscoveryUrl(
     .replaceAll('{apiVersion}', () => apiVersion);
 }
 
-/** One HTTPS GET, optionally presenting a client certificate. */
-function getWithClientCert(
+const JSON_HEADERS = {'Accept': 'application/json'};
+
+/**
+ * One GET, optionally presenting a client certificate.
+ *
+ * `globalThis.fetch` cannot present a client certificate in Node, which is why
+ * this transport is `node:https` rather than fetch. A `http:` discovery URL
+ * still works, so a private discovery service needs no TLS; a certificate is
+ * only ever presented over `https:`.
+ */
+function getJson(
   url: string,
   certs?: MtlsClientCerts,
 ): Promise<{status: number; body: string}> {
   return new Promise((resolve, reject) => {
-    const request = https.request(
-      url,
-      {
-        headers: {'Accept': 'application/json'},
-        // `globalThis.fetch` cannot present a client certificate in Node,
-        // which is why this transport is `node:https` rather than fetch.
-        agent: certs
-          ? new https.Agent({
-              cert: certs.cert,
-              key: certs.key,
-              passphrase: certs.passphrase,
-            })
-          : undefined,
-      },
-      (response) => {
-        let body = '';
-        response.setEncoding('utf-8');
-        response.on('data', (chunk: string) => {
-          body += chunk;
-        });
-        response.on('error', reject);
-        response.on('end', () => {
-          resolve({status: response.statusCode ?? 0, body});
-        });
-      },
-    );
+    const collect = (response: http.IncomingMessage) => {
+      let body = '';
+      response.setEncoding('utf-8');
+      response.on('data', (chunk: string) => {
+        body += chunk;
+      });
+      response.on('error', reject);
+      response.on('end', () => {
+        resolve({status: response.statusCode ?? 0, body});
+      });
+    };
+
+    const request =
+      new URL(url).protocol === 'http:'
+        ? http.request(url, {headers: JSON_HEADERS}, collect)
+        : https.request(
+            url,
+            {
+              headers: JSON_HEADERS,
+              agent: certs
+                ? new https.Agent({
+                    cert: certs.cert,
+                    key: certs.key,
+                    passphrase: certs.passphrase,
+                  })
+                : undefined,
+            },
+            collect,
+          );
+
     request.on('error', reject);
     request.end();
   });
@@ -186,7 +200,7 @@ export async function fetchDiscoveryDocument(
 
   logger.debug(`Fetching Google API discovery document from ${url}`);
 
-  const {status, body} = await getWithClientCert(url, options.certs);
+  const {status, body} = await getJson(url, options.certs);
 
   if (status < 200 || status >= 300) {
     throw new Error(
