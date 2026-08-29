@@ -139,24 +139,11 @@ export interface ApiParameterInit {
 }
 
 /**
- * Reads a record field, treating any other shape as an empty record.
- *
- * A document written in YAML leaves `null` wherever a key has no value, so a
- * block the typings declare as an object arrives missing or null.
- */
-function recordField(value: unknown, field: string): Record<string, unknown> {
-  if (!isRecord(value)) {
-    return {};
-  }
-  const read = value[field];
-  return isRecord(read) ? read : {};
-}
-
-/**
  * Reads a string field, treating any other shape as absent.
  *
- * The same YAML rule applies: a field the typings declare as a string arrives
- * missing, null, or holding something else entirely.
+ * A document written in YAML leaves `null` wherever a key has no value, so a
+ * field the typings declare as a string arrives missing, null, or holding
+ * something else entirely.
  */
 function stringField(value: unknown, field: string): string {
   if (!isRecord(value)) {
@@ -350,6 +337,13 @@ function statusOrder(status: string): number {
   return /^\d+$/.test(status) ? Number(status) : Infinity;
 }
 
+/** The content block of a response, empty when the document leaves it out. */
+function responseContent(
+  response: OpenAPIV3.ResponseObject,
+): Record<string, unknown> {
+  return isRecord(response.content) ? response.content : {};
+}
+
 /**
  * Finds the response a generated tool returns.
  *
@@ -369,7 +363,7 @@ export function findSuccessResponse(
     if (!status.startsWith('2') || !isRecord(response) || '$ref' in response) {
       continue;
     }
-    if (Object.keys(recordField(response, 'content')).length === 0) {
+    if (Object.keys(responseContent(response)).length === 0) {
       continue;
     }
     const order = statusOrder(status);
@@ -390,7 +384,7 @@ export function findSuccessResponse(
 export function findResponseMediaType(
   response: OpenAPIV3.ResponseObject,
 ): OpenAPIV3.MediaTypeObject | undefined {
-  const content = recordField(response, 'content');
+  const content = responseContent(response);
   const mediaType = content['application/json'] ?? Object.values(content)[0];
   return isRecord(mediaType) ? mediaType : undefined;
 }
