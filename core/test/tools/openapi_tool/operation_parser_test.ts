@@ -432,8 +432,9 @@ describe('OperationParser parity with adk-python', () => {
       expect(schemeNameOf([{}, {apiKey: []}])).toBe('');
     });
 
-    it('should name no scheme when the empty requirement comes last', () => {
-      expect(schemeNameOf([{apiKey: []}, {}])).toBe('');
+    it('should name the first scheme when the empty requirement comes last', () => {
+      // adk-python reads security[0] and ignores the alternatives.
+      expect(schemeNameOf([{apiKey: []}, {}])).toBe('apiKey');
     });
   });
 

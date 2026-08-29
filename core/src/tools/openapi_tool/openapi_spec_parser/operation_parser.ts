@@ -31,24 +31,18 @@ export interface OperationParserOptions {
 const MAX_FUNCTION_NAME_LENGTH = 60;
 
 /**
- * Returns the name of the security scheme a requirement list makes mandatory,
- * or an empty string when the list makes none.
+ * Returns the name of the security scheme an operation requires.
  *
- * OpenAPI 3.0.3 treats an empty requirement object (`{}`) as an alternative
- * that needs no credential, so a list holding one allows anonymous access.
- * Only the first of the remaining alternatives is honoured, because a tool
- * carries one credential.
+ * Only the first alternative is honoured, because a tool carries one
+ * credential. adk-python reads the same first entry, but raises IndexError
+ * when that entry is an empty requirement; an empty requirement is legal
+ * OpenAPI meaning anonymous access, so this returns an empty string instead.
  */
 export function requiredSchemeName(
   security: OpenAPIV3.SecurityRequirementObject[] | undefined,
 ): string {
-  if (!security?.length) {
-    return '';
-  }
-  if (security.some((requirement) => Object.keys(requirement).length === 0)) {
-    return '';
-  }
-  return Object.keys(security[0])[0];
+  const first = security?.[0];
+  return first ? (Object.keys(first)[0] ?? '') : '';
 }
 
 /**
