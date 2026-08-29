@@ -72,11 +72,15 @@ export abstract class BaseToolset {
   /**
    * Returns whether the tool should be exposed to LLM.
    *
+   * A name list applies with or without a context. A predicate needs one, so
+   * without a context the tool is exposed, which is what building an agent
+   * card asks for.
+   *
    * @param tool The tool to check.
    * @param context Context used to filter tools available to the agent.
    * @return Whether the tool should be exposed to LLM.
    */
-  protected isToolSelected(tool: BaseTool, context: ReadonlyContext): boolean {
+  protected isToolSelected(tool: BaseTool, context?: ReadonlyContext): boolean {
     // An empty tool filter means no filtering: all tools are selected.
     if (
       !this.toolFilter ||
@@ -86,7 +90,7 @@ export abstract class BaseToolset {
     }
 
     if (typeof this.toolFilter === 'function') {
-      return this.toolFilter(tool, context);
+      return context ? this.toolFilter(tool, context) : true;
     }
 
     if (Array.isArray(this.toolFilter)) {
@@ -94,24 +98,6 @@ export abstract class BaseToolset {
     }
 
     return false;
-  }
-
-  /**
-   * Returns whether the tool should be exposed when no context is available,
-   * for example while an agent card is being built.
-   *
-   * A name list applies with or without a context. A predicate needs one, so
-   * without a context the tool is exposed.
-   *
-   * @param tool The tool to check.
-   * @param context Context used to filter tools available to the agent.
-   * @return Whether the tool should be exposed to LLM.
-   */
-  protected isToolExposed(tool: BaseTool, context?: ReadonlyContext): boolean {
-    if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
-      return this.toolFilter.includes(tool.name);
-    }
-    return !context || this.isToolSelected(tool, context);
   }
 
   /**
