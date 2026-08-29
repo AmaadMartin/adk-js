@@ -11,6 +11,7 @@ import {z as z4} from 'zod/v4';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 
 import {Context} from '../agents/context.js';
+import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 
 /**
@@ -37,10 +38,20 @@ export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
 
 /**
  * The signature of the user-provided function executed by a {@link FunctionTool}.
+ *
+ * `inputStream` is the live input queue the framework allocated for this tool,
+ * read from `invocationContext.activeStreamingTools[toolName].stream`. It is
+ * only populated in a live (bidirectional-streaming) session that registered a
+ * stream for this tool; it is `undefined` everywhere else. The tool reads from
+ * the queue but does not own it: whoever created the queue closes it.
+ *
+ * A function that does not need the stream declares fewer parameters and is
+ * still assignable here.
  */
 export type ToolExecuteFunction<TParameters extends ToolInputParameters> = (
   input: ToolExecuteArgument<TParameters>,
   toolContext?: Context,
+  inputStream?: LiveRequestQueue,
 ) => Promise<unknown> | unknown;
 
 /**
@@ -101,6 +112,26 @@ function toSchema<TParameters extends ToolInputParameters>(
   }
 
   return parameters;
+}
+
+/**
+ * The live input stream the framework allocated for `toolName`, or `undefined`
+ * when this invocation registered none.
+ *
+ * The framework owns the lookup so a tool does not have to know the name it was
+ * registered under. Mirrors adk-python's `input_stream` injection in
+ * `src/google/adk/tools/function_tool.py`.
+ *
+ * Every hop is optional-chained: a `toolContext` assembled outside a live run
+ * may carry no `invocationContext`, and `activeStreamingTools` may hold no
+ * entry for this tool, or an entry with no stream.
+ */
+function resolveInputStream(
+  toolName: string,
+  toolContext: Context,
+): LiveRequestQueue | undefined {
+  return toolContext.invocationContext?.activeStreamingTools?.[toolName]
+    ?.stream;
 }
 
 /**
@@ -196,7 +227,11 @@ export class FunctionTool<
         return pending;
       }
 
-      return await this.execute(validatedArgs, req.toolContext);
+      return await this.execute(
+        validatedArgs,
+        req.toolContext,
+        resolveInputStream(this.name, req.toolContext),
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);

@@ -4,9 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, FunctionTool, isFunctionTool} from '@google/adk';
-import {Type} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {
+  ActiveStreamingTool,
+  Context,
+  createSession,
+  FunctionTool,
+  InvocationContext,
+  isFunctionTool,
+  LiveRequestQueue,
+  PluginManager,
+} from '@google/adk';
+import {createUserContent, Type} from '@google/genai';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 
@@ -488,6 +497,259 @@ describe('FunctionTool', () => {
           "Error in tool 'errorTool': Test error",
         );
       }
+    });
+  });
+
+  describe('input stream injection', () => {
+    const STREAMING_TOOL_NAME = 'streaming_tool';
+
+    function createToolContext(
+      activeStreamingTools?: Record<string, ActiveStreamingTool>,
+    ): Context {
+      return new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'test-invocation',
+          session: createSession({id: 'test-session', appName: 'test-app'}),
+          pluginManager: new PluginManager([]),
+          activeStreamingTools,
+        }),
+        functionCallId: 'test-function-call',
+      });
+    }
+
+    it('passes the registered stream to execute and reads from it', async () => {
+      const stream = new LiveRequestQueue();
+      let received: LiveRequestQueue | undefined;
+      const tool = new FunctionTool({
+        name: STREAMING_TOOL_NAME,
+        description: 'Reads one request from the live input stream.',
+        parameters: z4.object({}),
+        execute: async (_input, _toolContext, inputStream) => {
+          received = inputStream;
+          if (!inputStream) {
+            return 'no stream';
+          }
+          const request = await inputStream.get();
+          return request.content?.parts?.[0]?.text;
+        },
+      });
+      stream.send({content: createUserContent('hello')});
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext({
+          [STREAMING_TOOL_NAME]: new ActiveStreamingTool({stream}),
+        }),
+      });
+
+      expect(received).toBe(stream);
+      expect(result).toEqual('hello');
+    });
+
+    it('passes undefined when the invocation registered no streaming tools', async () => {
+      let received: LiveRequestQueue | undefined = new LiveRequestQueue();
+      const tool = new FunctionTool({
+        name: STREAMING_TOOL_NAME,
+        description: 'Records the third argument.',
+        parameters: z4.object({}),
+        execute: (_input, _toolContext, inputStream) => {
+          received = inputStream;
+          return 'done';
+        },
+      });
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext(),
+      });
+
+      expect(received).toBeUndefined();
+      expect(result).toEqual('done');
+    });
+
+    it('passes undefined when no stream is registered under this tool name', async () => {
+      let received: LiveRequestQueue | undefined = new LiveRequestQueue();
+      const tool = new FunctionTool({
+        name: STREAMING_TOOL_NAME,
+        description: 'Records the third argument.',
+        parameters: z4.object({}),
+        execute: (_input, _toolContext, inputStream) => {
+          received = inputStream;
+          return 'done';
+        },
+      });
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext({
+          another_tool: new ActiveStreamingTool({
+            stream: new LiveRequestQueue(),
+          }),
+        }),
+      });
+
+      expect(received).toBeUndefined();
+      expect(result).toEqual('done');
+    });
+
+    it('passes undefined when the registered entry carries no stream', async () => {
+      let received: LiveRequestQueue | undefined = new LiveRequestQueue();
+      const tool = new FunctionTool({
+        name: STREAMING_TOOL_NAME,
+        description: 'Records the third argument.',
+        parameters: z4.object({}),
+        execute: (_input, _toolContext, inputStream) => {
+          received = inputStream;
+          return 'done';
+        },
+      });
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext({
+          [STREAMING_TOOL_NAME]: new ActiveStreamingTool({}),
+        }),
+      });
+
+      expect(received).toBeUndefined();
+      expect(result).toEqual('done');
+    });
+
+    it('passes undefined when the tool context carries no invocation context', async () => {
+      let received: LiveRequestQueue | undefined = new LiveRequestQueue();
+      const tool = new FunctionTool({
+        name: STREAMING_TOOL_NAME,
+        description: 'Records the third argument.',
+        parameters: z4.object({}),
+        execute: (_input, _toolContext, inputStream) => {
+          received = inputStream;
+          return 'done';
+        },
+      });
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: emptyContext,
+      });
+
+      expect(received).toBeUndefined();
+      expect(result).toEqual('done');
+    });
+
+    it('looks the stream up by the tool name, not the function name', async () => {
+      const stream = new LiveRequestQueue();
+      let received: LiveRequestQueue | undefined;
+      function readLiveFeed(
+        _input: Record<string, never>,
+        _toolContext?: Context,
+        inputStream?: LiveRequestQueue,
+      ) {
+        received = inputStream;
+        return 'done';
+      }
+      const tool = new FunctionTool({
+        name: STREAMING_TOOL_NAME,
+        description: 'Records the third argument.',
+        parameters: z4.object({}),
+        execute: readLiveFeed,
+      });
+
+      await tool.runAsync({
+        args: {},
+        toolContext: createToolContext({
+          [STREAMING_TOOL_NAME]: new ActiveStreamingTool({stream}),
+        }),
+      });
+
+      expect(received).toBe(stream);
+    });
+
+    it('leaves the arguments and the tool context untouched', async () => {
+      const stream = new LiveRequestQueue();
+      let receivedArgs: {a: number; b: number} | undefined;
+      let receivedContext: Context | undefined;
+      const tool = new FunctionTool({
+        name: STREAMING_TOOL_NAME,
+        description: 'Records the first two arguments.',
+        parameters: z4.object({a: z4.number(), b: z4.number().default(2)}),
+        execute: (input, toolContext) => {
+          receivedArgs = input;
+          receivedContext = toolContext;
+          return 'done';
+        },
+      });
+      const toolContext = createToolContext({
+        [STREAMING_TOOL_NAME]: new ActiveStreamingTool({stream}),
+      });
+
+      await tool.runAsync({args: {a: 1}, toolContext});
+
+      expect(receivedArgs).toEqual({a: 1, b: 2});
+      expect(receivedContext).toBe(toolContext);
+    });
+
+    it('keeps the input stream out of the declaration', () => {
+      const tool = new FunctionTool({
+        name: STREAMING_TOOL_NAME,
+        description: 'Reads the live input stream.',
+        parameters: z4.object({language: z4.string()}),
+        execute: (_input, _toolContext, _inputStream?: LiveRequestQueue) =>
+          'done',
+      });
+
+      const declaration = tool._getDeclaration();
+
+      expect(Object.keys(declaration.parameters?.properties ?? {})).toEqual([
+        'language',
+      ]);
+      expect(declaration.parameters?.required).toEqual(['language']);
+    });
+
+    it('does not report the missing stream as a missing argument', async () => {
+      const tool = new FunctionTool({
+        name: STREAMING_TOOL_NAME,
+        description: 'Reads the live input stream.',
+        parameters: z4.object({language: z4.string()}),
+        execute: (input, _toolContext, inputStream) =>
+          inputStream ? input.language : 'no stream',
+      });
+
+      const result = await tool.runAsync({
+        args: {language: 'en'},
+        toolContext: createToolContext({
+          [STREAMING_TOOL_NAME]: new ActiveStreamingTool({
+            stream: new LiveRequestQueue(),
+          }),
+        }),
+      });
+
+      expect(result).toEqual('en');
+    });
+
+    it('does not pass the stream to the requireConfirmation predicate', async () => {
+      const requireConfirmation = vi.fn(() => true);
+      const execute = vi.fn(() => 'done');
+      const tool = new FunctionTool({
+        name: STREAMING_TOOL_NAME,
+        description: 'Reads the live input stream.',
+        parameters: z4.object({a: z4.number()}),
+        requireConfirmation,
+        execute,
+      });
+      const toolContext = createToolContext({
+        [STREAMING_TOOL_NAME]: new ActiveStreamingTool({
+          stream: new LiveRequestQueue(),
+        }),
+      });
+
+      const result = await tool.runAsync({args: {a: 1}, toolContext});
+
+      expect(requireConfirmation).toHaveBeenCalledWith({a: 1}, toolContext);
+      expect(execute).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        error:
+          'This tool call requires confirmation, please approve or reject.',
+      });
     });
   });
 });
