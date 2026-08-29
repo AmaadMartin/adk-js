@@ -63,13 +63,23 @@ export class RestApiTool extends BaseTool {
     this.credentialKey = credentialKey;
   }
 
+  /**
+   * Returns the JSON schema of the arguments this tool accepts.
+   *
+   * A tool that wraps this one reads the schema through here, so that
+   * `operationParser` stays private.
+   */
+  @experimental
+  public getJsonSchema(): Record<string, unknown> {
+    return this.operationParser.getJsonSchema();
+  }
+
   @experimental
   override _getDeclaration(): FunctionDeclaration {
-    const schema = this.operationParser.getJsonSchema();
     return {
       name: this.name,
       description: this.description,
-      parameters: schema,
+      parameters: this.getJsonSchema(),
     };
   }
 
@@ -231,7 +241,10 @@ export function prepareRequestParams(
     (placeholder, name: string) =>
       Object.hasOwn(pathParams, name) ? pathParams[name] : placeholder,
   );
-  let url = `${endpoint.baseUrl}${resolvedPath}`;
+  // An HTTP request carries no fragment. The generated connector spec appends
+  // `#<operation>_<entity>` to keep two operations on one path distinct, and
+  // leaving it here folds it into the last query value.
+  let url = `${endpoint.baseUrl}${resolvedPath}`.split('#')[0];
 
   // Extract query parameters from path if any
   const urlParts = url.split('?');
