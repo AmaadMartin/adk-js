@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {trace} from '@opentelemetry/api';
+import {SpanStatusCode, trace} from '@opentelemetry/api';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
@@ -45,6 +45,7 @@ describe('Telemetry Tracing Functions', () => {
     mockSpan = {
       setAttributes: vi.fn(),
       setAttribute: vi.fn(),
+      setStatus: vi.fn(),
     };
 
     mockAgent = {
@@ -199,6 +200,34 @@ describe('Telemetry Tracing Functions', () => {
         'error.type',
         'TOOL_ERROR',
       );
+    });
+
+    it('should fail the span when an error type was detected', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+        errorType: 'TOOL_ERROR',
+      });
+
+      expect(mockSpan.setStatus).toHaveBeenCalledWith({
+        code: SpanStatusCode.ERROR,
+        message: 'TOOL_ERROR',
+      });
+    });
+
+    it('should leave the span status unset when no error type was detected', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+      });
+
+      expect(mockSpan.setStatus).not.toHaveBeenCalled();
     });
 
     it('should omit the error type attribute when none was detected', () => {

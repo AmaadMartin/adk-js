@@ -16,7 +16,7 @@
  */
 
 import {Content} from '@google/genai';
-import {context, Context, trace} from '@opentelemetry/api';
+import {context, Context, SpanStatusCode, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -179,6 +179,7 @@ export function traceToolCall({
 
   if (errorType !== undefined) {
     span.setAttribute(ERROR_TYPE, errorType);
+    span.setStatus({code: SpanStatusCode.ERROR, message: errorType});
   }
 
   span.setAttributes({

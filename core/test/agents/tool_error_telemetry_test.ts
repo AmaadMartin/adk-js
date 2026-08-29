@@ -16,11 +16,12 @@ import {
   createSession,
   functionsExportedForTestingOnly,
 } from '@google/adk';
-import {context, trace} from '@opentelemetry/api';
+import {SpanStatus, SpanStatusCode, context, trace} from '@opentelemetry/api';
 import {AsyncLocalStorageContextManager} from '@opentelemetry/context-async-hooks';
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
+  ReadableSpan,
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
 import {
@@ -59,13 +60,23 @@ beforeEach(() => {
   exporter.reset();
 });
 
-/** The `error.type` recorded on the tool's span, or `undefined`. */
-function recordedErrorType(toolName: string): unknown {
+/** The tool's span, which every assertion here reads. */
+function recordedSpan(toolName: string): ReadableSpan {
   const spans = exporter
     .getFinishedSpans()
     .filter((span) => span.name === `execute_tool ${toolName}`);
   expect(spans).toHaveLength(1);
-  return spans[0].attributes['error.type'];
+  return spans[0];
+}
+
+/** The `error.type` recorded on the tool's span, or `undefined`. */
+function recordedErrorType(toolName: string): unknown {
+  return recordedSpan(toolName).attributes['error.type'];
+}
+
+/** The status recorded on the tool's span. */
+function recordedStatus(toolName: string): SpanStatus {
+  return recordedSpan(toolName).status;
 }
 
 async function runTool(tool: BaseTool): Promise<unknown> {
@@ -178,5 +189,46 @@ describe('tool error type telemetry', () => {
 
     expect(await runTool(tool)).toEqual({error: 'credential required'});
     expect(recordedErrorType('auth_tool')).toBeUndefined();
+  });
+
+  it('fails the span when the tool returns an error', async () => {
+    const tool = new FunctionTool({
+      name: 'failed_span_tool',
+      description: 'Always fails.',
+      execute: () => ({error: 'not found'}),
+    });
+
+    await runTool(tool);
+
+    expect(recordedStatus('failed_span_tool')).toEqual({
+      code: SpanStatusCode.ERROR,
+      message: 'TOOL_ERROR',
+    });
+  });
+
+  it('leaves the span status unset when the tool succeeds', async () => {
+    const tool = new FunctionTool({
+      name: 'unset_status_tool',
+      description: 'Always works.',
+      execute: () => ({result: 'ok'}),
+    });
+
+    await runTool(tool);
+
+    expect(recordedStatus('unset_status_tool').code).toBe(SpanStatusCode.UNSET);
+  });
+
+  it('leaves the span status unset while the tool waits for confirmation', async () => {
+    const tool = new FunctionTool({
+      name: 'gated_status_tool',
+      description: 'Needs approval.',
+      parameters: z.object({}),
+      execute: () => ({result: 'ok'}),
+      requireConfirmation: true,
+    });
+
+    await runTool(tool);
+
+    expect(recordedStatus('gated_status_tool').code).toBe(SpanStatusCode.UNSET);
   });
 });
