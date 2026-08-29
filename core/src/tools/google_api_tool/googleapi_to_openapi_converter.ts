@@ -4,9 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from 'node:fs/promises';
 import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
+import {
+  loadDefaultClientCerts,
+  useClientCertEffective,
+} from '../../utils/mtls_utils.js';
 import {
   DiscoveryDocument,
   DiscoveryMethod,
@@ -133,13 +138,24 @@ export function convertExternalDocs(
 /**
  * Converts the Discovery root URL and service path into an OpenAPI server
  * list.
+ *
+ * @param doc The Discovery document.
+ * @param apiName The Discovery API id, used in the server description.
+ * @param apiVersion The API version, used in the server description.
+ * @param useClientCert Whether the caller asked for a client certificate. The
+ *     mutual-TLS root URL is selected on this flag alone, matching adk-python:
+ *     it does not depend on a certificate having loaded.
  */
 export function convertServers(
   doc: DiscoveryDocument,
   apiName: string,
   apiVersion: string,
+  useClientCert = false,
 ): OpenAPIV3.ServerObject[] {
-  let url = (doc.rootUrl ?? '') + (doc.servicePath ?? '');
+  const rootUrl =
+    useClientCert && doc.mtlsRootUrl ? doc.mtlsRootUrl : (doc.rootUrl ?? '');
+
+  let url = rootUrl + (doc.servicePath ?? '');
   if (url.endsWith('/')) {
     url = url.slice(0, -1);
   }
@@ -192,14 +208,21 @@ export function convertSecuritySchemes(doc: DiscoveryDocument): {
   };
 }
 
+/**
+ * A converted schema, which may carry a `$ref` beside its own keywords.
+ *
+ * Discovery states a `description`, a `format` or a `type` next to a `$ref`,
+ * and the converter keeps both halves so no documentation is lost. That is why
+ * the emitted schema is wider than `OpenAPIV3.ReferenceObject`, which admits
+ * `$ref` alone.
+ */
+export type ConvertedSchema = OpenAPIV3.SchemaObject & {$ref?: string};
+
 /** Converts every named schema in the Discovery document. */
 export function convertSchemas(
   doc: DiscoveryDocument,
-): Record<string, OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject> {
-  const schemas: Record<
-    string,
-    OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject
-  > = {};
+): Record<string, ConvertedSchema> {
+  const schemas: Record<string, ConvertedSchema> = {};
   for (const [name, schemaDef] of Object.entries(doc.schemas ?? {})) {
     schemas[name] = convertSchemaObject(schemaDef);
   }
@@ -274,18 +297,18 @@ function applyFacets(
 /**
  * Recursively converts one Discovery schema definition into an OpenAPI schema.
  *
- * A definition carrying a `$ref` becomes a bare reference object: OpenAPI 3.0
- * requires consumers to ignore keys sibling to `$ref`, so the description and
- * format Discovery places alongside one are dropped.
+ * The `$ref` is copied independently of the type branch, so a definition that
+ * states both a reference and its own keywords keeps both. Dropping the
+ * siblings would lose the only description Discovery gives many fields.
  */
 export function convertSchemaObject(
   schemaDef: DiscoverySchema,
-): OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject {
+): ConvertedSchema {
+  const schema: ConvertedSchema = convertSchemaType(schemaDef);
   if (schemaDef.$ref) {
-    return {$ref: toComponentsRef(schemaDef.$ref)};
+    schema.$ref = toComponentsRef(schemaDef.$ref);
   }
 
-  const schema = convertSchemaType(schemaDef);
   applyFacets(schema, schemaDef);
   if (schemaDef.description !== undefined) {
     schema.description = schemaDef.description;
@@ -454,12 +477,15 @@ export function convertParameterSchema(
  * @param doc The Discovery document.
  * @param apiName The Discovery API id, e.g. `calendar`.
  * @param apiVersion The API version, e.g. `v3`.
+ * @param options.useClientCert Whether to prefer the document's mutual-TLS
+ *     root URL for the server entry.
  * @return The equivalent OpenAPI 3.0 document.
  */
 export function convertDiscoveryDocument(
   doc: DiscoveryDocument,
   apiName: string,
   apiVersion: string,
+  options: {useClientCert?: boolean} = {},
 ): OpenAPIV3.Document {
   const paths: OpenAPIV3.PathsObject = {};
   convertResources(doc.resources ?? {}, paths);
@@ -470,7 +496,7 @@ export function convertDiscoveryDocument(
   const document: OpenAPIV3.Document = {
     openapi: '3.0.0',
     info: convertInfo(doc, apiName, apiVersion),
-    servers: convertServers(doc, apiName, apiVersion),
+    servers: convertServers(doc, apiName, apiVersion, options.useClientCert),
     paths,
     components: {schemas: convertSchemas(doc), securitySchemes},
     security,
@@ -484,6 +510,17 @@ export function convertDiscoveryDocument(
   return document;
 }
 
+/** The document a converter holds before it has fetched anything. */
+function emptyOpenApiDocument(): OpenAPIV3.Document {
+  return {
+    openapi: '3.0.0',
+    info: {title: '', version: ''},
+    servers: [],
+    paths: {},
+    components: {schemas: {}, securitySchemes: {}},
+  };
+}
+
 /**
  * Converts a Google API Discovery document to an OpenAPI 3.0 document.
  *
@@ -495,6 +532,9 @@ export function convertDiscoveryDocument(
 @experimental
 export class GoogleApiToOpenApiConverter {
   private readonly discoveryUrl?: string;
+  private readonly useClientCert: boolean;
+  private googleApiSpec?: DiscoveryDocument;
+  private openApiSpec: OpenAPIV3.Document = emptyOpenApiDocument();
 
   /**
    * @param apiName The Discovery API id, e.g. `calendar`.
@@ -507,16 +547,54 @@ export class GoogleApiToOpenApiConverter {
     options: {discoveryUrl?: string} = {},
   ) {
     this.discoveryUrl = options.discoveryUrl;
+    // Captured once, so changing the environment mid-conversion cannot make
+    // the fetched document and the emitted servers disagree.
+    this.useClientCert = useClientCertEffective();
   }
 
-  /** Fetches the Discovery document and converts it to OpenAPI 3.0. */
+  /** Fetches the Discovery document and stores it on the instance. */
+  @experimental
+  async fetchGoogleApiSpec(): Promise<void> {
+    this.googleApiSpec = await this.fetchDocument();
+  }
+
+  /** Fetches the Discovery document if needed, and converts it. */
   @experimental
   async convert(): Promise<OpenAPIV3.Document> {
-    const doc = await fetchDiscoveryDocument(
+    const doc = this.googleApiSpec ?? (await this.fetchDocument());
+    this.googleApiSpec = doc;
+    this.openApiSpec = convertDiscoveryDocument(
+      doc,
       this.apiName,
       this.apiVersion,
-      this.discoveryUrl,
+      {useClientCert: this.useClientCert},
     );
-    return convertDiscoveryDocument(doc, this.apiName, this.apiVersion);
+    return this.openApiSpec;
+  }
+
+  /**
+   * Writes the OpenAPI document the converter holds to `outputPath` as JSON.
+   *
+   * It writes what is there now, so call {@link convert} first. Before that it
+   * writes the empty OpenAPI 3.0 skeleton.
+   */
+  @experimental
+  async saveOpenApiSpec(outputPath: string): Promise<void> {
+    await fs.writeFile(
+      outputPath,
+      JSON.stringify(this.openApiSpec, null, 2),
+      'utf-8',
+    );
+    logger.debug(`OpenAPI specification saved to ${outputPath}`);
+  }
+
+  private async fetchDocument(): Promise<DiscoveryDocument> {
+    const certs = this.useClientCert
+      ? await loadDefaultClientCerts()
+      : undefined;
+    return fetchDiscoveryDocument(this.apiName, this.apiVersion, {
+      discoveryUrl: this.discoveryUrl,
+      certs,
+    });
   }
 }

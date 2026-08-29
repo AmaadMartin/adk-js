@@ -316,11 +316,9 @@ export type {
   DiscoveryParameter,
   DiscoveryResource,
   DiscoverySchema,
+  FetchDiscoveryOptions,
 } from './tools/google_api_tool/discovery_document.js';
-export {
-  GoogleApiToOpenApiConverter,
-  convertDiscoveryDocument,
-} from './tools/google_api_tool/googleapi_to_openapi_converter.js';
+export type {ConvertedSchema} from './tools/google_api_tool/googleapi_to_openapi_converter.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
   OperationEndpoint,

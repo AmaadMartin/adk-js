@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as https from 'node:https';
 import {logger} from '../../utils/logger.js';
+import {MtlsClientCerts} from '../../utils/mtls_utils.js';
 
 /**
  * A schema definition inside a Google API Discovery document.
@@ -59,6 +61,8 @@ export interface DiscoveryDocument {
   version?: string;
   documentationLink?: string;
   rootUrl?: string;
+  /** The root URL of the mutual-TLS variant of the service, when it has one. */
+  mtlsRootUrl?: string;
   servicePath?: string;
   auth?: {oauth2?: {scopes?: Record<string, {description?: string}>}};
   schemas?: Record<string, DiscoverySchema>;
@@ -75,39 +79,148 @@ export const DEFAULT_DISCOVERY_URL =
   'https://www.googleapis.com/discovery/v1/apis/{api}/{apiVersion}/rest';
 
 /**
+ * The mutual-TLS Discovery service endpoint template.
+ *
+ * It is the default once a client certificate is loaded, because the plain
+ * host does not accept one.
+ */
+export const MTLS_DISCOVERY_URL =
+  'https://www.mtls.googleapis.com/discovery/v1/apis/{api}/{apiVersion}/rest';
+
+/** How a Discovery document is fetched. */
+export interface FetchDiscoveryOptions {
+  /**
+   * An alternative Discovery URL template, which wins over both defaults.
+   * `{api}` and `{apiVersion}` are substituted when present; a URL with no
+   * placeholders is fetched verbatim.
+   */
+  discoveryUrl?: string;
+  /** A client certificate to present, for a mutual-TLS connection. */
+  certs?: MtlsClientCerts;
+}
+
+/**
+ * Picks the Discovery URL to fetch and substitutes its placeholders.
+ *
+ * @param apiName The Discovery API id, e.g. `calendar`.
+ * @param apiVersion The API version, e.g. `v3`.
+ * @param discoveryUrl An explicit template, which wins over both defaults.
+ * @param hasClientCerts Whether a client certificate will be presented.
+ * @return The URL to request.
+ */
+export function resolveDiscoveryUrl(
+  apiName: string,
+  apiVersion: string,
+  discoveryUrl?: string,
+  hasClientCerts = false,
+): string {
+  const template =
+    discoveryUrl ??
+    (hasClientCerts ? MTLS_DISCOVERY_URL : DEFAULT_DISCOVERY_URL);
+
+  // Function replacements, so a `$` in an api id cannot be expanded as a
+  // replacement pattern.
+  return template
+    .replaceAll('{api}', () => apiName)
+    .replaceAll('{apiVersion}', () => apiVersion);
+}
+
+/** One HTTPS GET, optionally presenting a client certificate. */
+function getWithClientCert(
+  url: string,
+  certs?: MtlsClientCerts,
+): Promise<{status: number; body: string}> {
+  return new Promise((resolve, reject) => {
+    const request = https.request(
+      url,
+      {
+        headers: {'Accept': 'application/json'},
+        // `globalThis.fetch` cannot present a client certificate in Node,
+        // which is why this transport is `node:https` rather than fetch.
+        agent: certs
+          ? new https.Agent({
+              cert: certs.cert,
+              key: certs.key,
+              passphrase: certs.passphrase,
+            })
+          : undefined,
+      },
+      (response) => {
+        let body = '';
+        response.setEncoding('utf-8');
+        response.on('data', (chunk: string) => {
+          body += chunk;
+        });
+        response.on('error', reject);
+        response.on('end', () => {
+          resolve({status: response.statusCode ?? 0, body});
+        });
+      },
+    );
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+/**
  * Fetches the Discovery document describing a Google API.
  *
  * @param apiName The Discovery API id, e.g. `calendar`.
  * @param apiVersion The API version, e.g. `v3`.
- * @param discoveryUrl An alternative Discovery URL template. `{api}` and
- *     `{apiVersion}` are substituted when present; a URL with no placeholders
- *     is fetched verbatim.
+ * @param options How to reach the Discovery service.
  * @return The parsed Discovery document.
- * @throws If the Discovery service responds with a non-2xx status.
+ * @throws If the Discovery service responds with a non-2xx status, or answers
+ *     with something that is not a Discovery document.
  */
 export async function fetchDiscoveryDocument(
   apiName: string,
   apiVersion: string,
-  discoveryUrl: string = DEFAULT_DISCOVERY_URL,
+  options: FetchDiscoveryOptions = {},
 ): Promise<DiscoveryDocument> {
-  // Function replacements, so a `$` in an api id cannot be expanded as a
-  // replacement pattern.
-  const url = discoveryUrl
-    .replaceAll('{api}', () => apiName)
-    .replaceAll('{apiVersion}', () => apiVersion);
+  const url = resolveDiscoveryUrl(
+    apiName,
+    apiVersion,
+    options.discoveryUrl,
+    options.certs !== undefined,
+  );
 
   logger.debug(`Fetching Google API discovery document from ${url}`);
 
-  const response = await globalThis.fetch(url, {
-    headers: {'Accept': 'application/json'},
-  });
+  const {status, body} = await getWithClientCert(url, options.certs);
 
-  if (!response.ok) {
+  if (status < 200 || status >= 300) {
     throw new Error(
       `Failed to fetch the discovery document for ${apiName} ${apiVersion} ` +
-        `from ${url}: HTTP ${response.status}`,
+        `from ${url}: HTTP ${status}`,
     );
   }
 
-  return (await response.json()) as DiscoveryDocument;
+  const document = parseDiscoveryDocument(body);
+  if (!document) {
+    throw new Error(
+      `Failed to retrieve the API specification for ${apiName} ` +
+        `${apiVersion} from ${url}: the response is not a discovery document.`,
+    );
+  }
+  return document;
+}
+
+/** Parses a response body, or returns `undefined` when it is not a document. */
+function parseDiscoveryDocument(body: string): DiscoveryDocument | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body) as unknown;
+  } catch {
+    return undefined;
+  }
+
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    Object.keys(parsed).length === 0
+  ) {
+    return undefined;
+  }
+  return parsed;
 }
