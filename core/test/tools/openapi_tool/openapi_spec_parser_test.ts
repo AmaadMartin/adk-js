@@ -343,4 +343,49 @@ describe('OpenApiSpecParser', () => {
       );
     });
   });
+
+  describe('optional security requirements', () => {
+    function parseSecuritySpec(
+      globalSecurity: OpenAPIV3.SecurityRequirementObject[],
+      operationSecurity?: OpenAPIV3.SecurityRequirementObject[],
+    ): OpenAPIV3.SecuritySchemeObject | undefined {
+      const spec: OpenAPIV3.Document = {
+        openapi: '3.0.0',
+        info: {title: 'Optional Security API', version: '1.0.0'},
+        security: globalSecurity,
+        paths: {
+          '/items': {
+            get: {
+              operationId: 'listItems',
+              security: operationSecurity,
+              responses: {},
+            },
+          },
+        },
+        components: {
+          securitySchemes: {
+            ApiKeyAuth: {type: 'apiKey', in: 'header', name: 'X-API-KEY'},
+          },
+        },
+      };
+
+      return new OpenApiSpecParser().parse(spec)[0].authScheme;
+    }
+
+    it('should require no scheme when the operation makes auth optional', () => {
+      expect(parseSecuritySpec([{ApiKeyAuth: []}], [{}])).toBeUndefined();
+    });
+
+    it('should require no scheme when the operation removes the global requirement', () => {
+      expect(parseSecuritySpec([{ApiKeyAuth: []}], [])).toBeUndefined();
+    });
+
+    it('should require no scheme when the global list makes auth optional', () => {
+      expect(parseSecuritySpec([{}, {ApiKeyAuth: []}])).toBeUndefined();
+    });
+
+    it('should inherit the global scheme when the operation declares none', () => {
+      expect(parseSecuritySpec([{ApiKeyAuth: []}])?.type).toBe('apiKey');
+    });
+  });
 });

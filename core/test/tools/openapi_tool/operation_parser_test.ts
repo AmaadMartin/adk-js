@@ -92,4 +92,54 @@ describe('OperationParser', () => {
     expect(schema).toBeTruthy();
     expect(schema.title).toBe('testOp_Arguments');
   });
+
+  describe('getAuthSchemeName', () => {
+    function operationWithSecurity(
+      security?: OpenAPIV3.SecurityRequirementObject[],
+    ): OpenAPIV3.OperationObject {
+      return {operationId: 'testOp', security, responses: {}};
+    }
+
+    it('should return the declared scheme name', () => {
+      const parser = new OperationParser(
+        operationWithSecurity([{oauth2: ['read']}]),
+      );
+
+      expect(parser.getAuthSchemeName()).toBe('oauth2');
+    });
+
+    it('should return an empty name when the operation declares no security', () => {
+      const parser = new OperationParser(operationWithSecurity());
+
+      expect(parser.getAuthSchemeName()).toBe('');
+    });
+
+    it('should return an empty name for an empty security list', () => {
+      const parser = new OperationParser(operationWithSecurity([]));
+
+      expect(parser.getAuthSchemeName()).toBe('');
+    });
+
+    it('should return an empty name for an empty security requirement', () => {
+      const parser = new OperationParser(operationWithSecurity([{}]));
+
+      expect(parser.getAuthSchemeName()).toBe('');
+    });
+
+    it('should return an empty name when the optional requirement is listed first', () => {
+      const parser = new OperationParser(
+        operationWithSecurity([{}, {apiKey: []}]),
+      );
+
+      expect(parser.getAuthSchemeName()).toBe('');
+    });
+
+    it('should return an empty name when the optional requirement is listed last', () => {
+      const parser = new OperationParser(
+        operationWithSecurity([{apiKey: []}, {}]),
+      );
+
+      expect(parser.getAuthSchemeName()).toBe('');
+    });
+  });
 });
