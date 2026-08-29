@@ -1,9 +1,9 @@
 # Running evals from the CLI
 
-`adk eval` replays recorded conversations through your agent and scores the
-tool calls it makes against the ones you recorded. Reach for it when you change
-a prompt, a tool, or a model, and you want to know whether the agent still takes
-the same steps.
+`adk eval` replays recorded conversations through your agent and scores what it
+did against what you recorded: the tool calls it made, and the answer it gave.
+Reach for it when you change a prompt, a tool, or a model, and you want to know
+whether the agent still behaves the same way.
 
 ## Introduction
 
@@ -13,9 +13,11 @@ conversation. `adk eval` gives you a regression signal for that: you record the
 tool calls a good run makes, and the command tells you whether a later run still
 makes them.
 
-The command scores the **tool trajectory** — the sequence of tool names and
-arguments. It does not judge the agent's prose. A run passes when its recorded
-tool calls match the expected ones exactly, in order.
+The command scores two things. The **tool trajectory** is the sequence of tool
+names and arguments; a turn passes it when the recorded calls match the expected
+ones exactly, in order. The **response match** compares the agent's final answer
+with the answer you recorded as `reference`. Neither metric asks a model to
+judge the agent, so a run costs nothing beyond the agent's own calls.
 
 Two neighbouring pieces do different jobs. `adk run` starts one interactive
 conversation and prints it; it scores nothing. The integration harness under
@@ -78,10 +80,13 @@ Run it:
 adk eval ./agent.ts ./roll_die.evalset.json
 ```
 
+The case records no `reference`, so the response metric abstains:
+
 ```
 Using evaluation criteria: {"tool_trajectory_avg_score":1,"response_match_score":0.8}
 Running Eval: ./roll_die.evalset.json:roll_a_six_sided_die
 Metric: tool_trajectory_avg_score	Status: PASSED	Score: 1	Threshold: 1
+Metric: response_match_score	Status: NOT_EVALUATED	Score: N/A	Threshold: 0.8
 Result: ✅ Passed
 
 *********************************************************************
@@ -118,6 +123,7 @@ The keys are `snake_case`, because adk-python reads the same files.
 | `initial_session`   | case     | Optional `app_name`, `user_id` and `state` to start from. |
 | `query`             | turn     | The user message to send.                                 |
 | `expected_tool_use` | turn     | The tool calls the agent should make.                     |
+| `reference`         | turn     | The answer to score the agent's final answer against.     |
 | `tool_name`         | tool use | The tool's name.                                          |
 | `tool_input`        | tool use | The arguments. Omitting it means no arguments.            |
 | `mock_tool_output`  | tool use | The value to return instead of running the tool.          |
@@ -174,12 +180,53 @@ some metric fails.
 | Metric                      | Behaviour                                                                   |
 | --------------------------- | --------------------------------------------------------------------------- |
 | `tool_trajectory_avg_score` | Scored. The mean over turns of 1 for an exact tool-call match, 0 otherwise. |
-| `response_match_score`      | Reported as `NOT_EVALUATED`.                                                |
+| `response_match_score`      | Scored. The mean ROUGE-1 F-measure against each turn's `reference`.         |
 | `response_evaluation_score` | Reported as `NOT_EVALUATED`.                                                |
 
-The two response metrics need a ROUGE scorer and a model-based judge, which
-adk-js does not have yet. The command warns once per run and carries on, so the
-default criteria still produce a trajectory verdict.
+`response_evaluation_score` asks a model to judge how coherent the answer is.
+adk-js has no judge for it, so the command warns once per run and carries on.
+
+Any other metric name takes the same path: one warning, and `NOT_EVALUATED` for
+every case.
+
+## Scoring the answer
+
+Record a `reference` on a turn and `response_match_score` compares the agent's
+final answer with it:
+
+```json
+[
+  {
+    "name": "roll_a_six_sided_die",
+    "data": [
+      {
+        "query": "Roll a die.",
+        "expected_tool_use": [
+          {
+            "tool_name": "roll_die",
+            "tool_input": {"sides": 6},
+            "mock_tool_output": 4
+          }
+        ],
+        "reference": "You rolled a 4."
+      }
+    ]
+  }
+]
+```
+
+The score is the ROUGE-1 F-measure of the two texts, averaged over the turns
+that recorded a `reference`. Both sides are lowercased and split into words on
+every non-alphanumeric character, so case and punctuation do not matter and word
+order does not either. A word that the answer repeats counts only as often as
+the reference repeats it.
+
+A turn with no `reference` is not scored. When no turn in a case has one, the
+metric reports `NOT_EVALUATED` and the case is not failed for it.
+
+adk-python scores this with Vertex AI's hosted `rouge_1` metric. adk-js computes
+the same measure locally, so the command needs no Google Cloud project and makes
+no extra network call.
 
 ## Resetting agent state between cases
 
@@ -208,13 +255,16 @@ adk-python calls this export `reset_data`. adk-js agent files are camelCase
 | The criteria file has no `criteria` object, or a threshold is not a finite number | The command throws and names the file.                        |
 | No `--config_file_path`                                                           | Not an error. The default criteria apply.                     |
 
-The process exits `0` whether cases pass or fail, matching adk-python. Read the
-summary block, or call `runEvals` yourself, to gate a build on the result.
+The command exits `1` when any case failed, and `0` otherwise, so a build can
+gate on it directly. A case that threw counts as failed. adk-python v0.1.0
+always exits `0`; adk-js diverges here because an eval command that cannot fail
+a build cannot protect one.
 
 ## Seeing the detail
 
-`--print_detailed_results` prints a per-turn table of the query, the expected
-tool calls, the actual tool calls and the score.
+`--print_detailed_results` prints a per-turn table for each scored metric: the
+expected and actual tool calls for the trajectory, and the answer against its
+reference for the response match.
 
 ```bash
 adk eval ./agent.ts ./roll_die.evalset.json --print_detailed_results
