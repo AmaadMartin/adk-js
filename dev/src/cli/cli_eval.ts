@@ -41,9 +41,10 @@ export interface EvalAgentOptions {
  * names to run from it.
  *
  * A Windows drive letter is not a selector separator, so the search for `:`
- * starts after it. Listing one eval set twice accumulates its selectors. The
- * result is a `Map` so insertion order is kept and a case named `__proto__`
- * cannot collide with an object prototype key.
+ * starts after it. Everything after that first `:` is the case list, so a case
+ * name may itself contain a colon. Listing one eval set twice accumulates its
+ * selectors. The result is a `Map` so insertion order is kept and a case named
+ * `__proto__` cannot collide with an object prototype key.
  */
 export function parseAndGetEvalsToRun(inputs: string[]): Map<string, string[]> {
   const evalSetToEvals = new Map<string, string[]>();
@@ -58,7 +59,10 @@ export function parseAndGetEvalsToRun(inputs: string[]): Map<string, string[]> {
     const selectors =
       separatorIndex === -1
         ? []
-        : parseSelectors(input.slice(separatorIndex + 1));
+        : input
+            .slice(separatorIndex + 1)
+            .split(',')
+            .filter((selector) => selector.trim() !== '');
 
     const existing = evalSetToEvals.get(evalSet);
     if (existing) {
@@ -78,14 +82,6 @@ function hasWindowsDrivePrefix(input: string): boolean {
     input[1] === ':' &&
     (input[2] === '\\' || input[2] === '/')
   );
-}
-
-/** Everything up to a further `:`, split on commas, blanks dropped. */
-function parseSelectors(selectorList: string): string[] {
-  return selectorList
-    .split(':')[0]
-    .split(',')
-    .filter((selector) => selector.trim() !== '');
 }
 
 /**

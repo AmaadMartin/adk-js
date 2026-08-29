@@ -159,9 +159,11 @@ describe('parseAndGetEvalsToRun', () => {
     ]);
   });
 
-  it('cuts the selector list at a further colon', () => {
+  it('keeps a further colon inside a case name', () => {
+    // Only the first colon after any drive prefix separates the file from the
+    // selectors; the rest of the string is the comma-separated case list.
     expect([...parseAndGetEvalsToRun(['set.json:a,b:c'])]).toEqual([
-      ['set.json', ['a', 'b']],
+      ['set.json', ['a', 'b:c']],
     ]);
   });
 
