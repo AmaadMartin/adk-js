@@ -9,15 +9,10 @@ import {createHash} from 'node:crypto';
 import type {BaseMessage} from '@langchain/core/messages';
 
 import {createEvent, Event} from '../events/event.js';
-import {loadOptionalPeer, OptionalPeer} from '../utils/optional_peer.js';
+import {loadOptionalPeer} from '../utils/optional_peer.js';
 
 import {BaseAgent, BaseAgentConfig} from './base_agent.js';
 import {InvocationContext} from './invocation_context.js';
-
-const LANGCHAIN_CORE: OptionalPeer = {
-  packageName: '@langchain/core',
-  feature: 'LangGraphAgent',
-};
 
 /**
  * The LangGraph thread configuration used to address a conversation thread.
@@ -219,7 +214,7 @@ export class LangGraphAgent extends BaseAgent<LangGraphAgentConfig> {
     }
 
     const ctors = await loadOptionalPeer(
-      LANGCHAIN_CORE,
+      {packageName: '@langchain/core', feature: 'LangGraphAgent'},
       () => import('@langchain/core/messages'),
     );
 
