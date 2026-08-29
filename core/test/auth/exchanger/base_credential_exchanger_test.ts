@@ -48,6 +48,21 @@ class NoCredentialExchanger extends BaseAuthCredentialExchanger {
   }
 }
 
+/** The exchanger the developer guide shows. */
+class ApiKeyExchanger extends BaseAuthCredentialExchanger {
+  override async exchangeCredential(
+    _authScheme: AuthScheme,
+    authCredential?: AuthCredential,
+  ): Promise<AuthCredential> {
+    if (!authCredential) {
+      throw new AuthCredentialMissingError(
+        'authCredential is empty. Provide an API key credential.',
+      );
+    }
+    return authCredential;
+  }
+}
+
 describe('BaseAuthCredentialExchanger', () => {
   it('rejects when a subclass does not implement exchangeCredential', async () => {
     const exchanger = new UnimplementedExchanger();
@@ -85,6 +100,17 @@ describe('BaseAuthCredentialExchanger', () => {
     await expect(
       exchanger.exchangeCredential(AUTH_SCHEME, API_KEY_CREDENTIAL),
     ).resolves.toBeUndefined();
+  });
+
+  it('lets a subclass reject a missing credential', async () => {
+    const exchanger = new ApiKeyExchanger();
+
+    await expect(exchanger.exchangeCredential(AUTH_SCHEME)).rejects.toThrow(
+      AuthCredentialMissingError,
+    );
+    await expect(
+      exchanger.exchangeCredential(AUTH_SCHEME, API_KEY_CREDENTIAL),
+    ).resolves.toBe(API_KEY_CREDENTIAL);
   });
 });
 
