@@ -9,7 +9,6 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   BaseTool,
-  ConnectionDetails,
   Context,
   createSession,
   InMemorySessionService,
@@ -21,6 +20,7 @@ import {
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {ConnectionDetails} from '../../../src/tools/application_integration_tool/clients/connections_client.js';
 import {asJsonObject} from '../../../src/utils/json_utils.js';
 import {logger} from '../../../src/utils/logger.js';
 

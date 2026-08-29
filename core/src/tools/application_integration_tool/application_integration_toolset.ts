@@ -21,7 +21,7 @@ import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {OpenApiSpecParser} from '../openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 import {OpenAPIToolset} from '../openapi_tool/openapi_toolset.js';
 import {createRestApiTool} from '../openapi_tool/rest_api_tool.js';
-import {CLOUD_PLATFORM_SCOPE} from './clients/api_transport.js';
+import {ApiTransport, CLOUD_PLATFORM_SCOPE} from './clients/api_transport.js';
 import {ConnectionDetails} from './clients/connections_client.js';
 import {ConnectorOperationExtensions} from './clients/connector_spec_builders.js';
 import {IntegrationClient} from './clients/integration_client.js';
@@ -146,25 +146,28 @@ export class ApplicationIntegrationToolset extends BaseToolset {
       throw new InputValidationError(MODE_ERROR_MESSAGE);
     }
     // The key is parsed here rather than on the first call, so a malformed one
-    // is reported while the agent is being assembled.
+    // is reported while the agent is being assembled. The generated tools and
+    // the metadata clients then share this one credential.
+    const serviceAccountCredential = options.serviceAccountJson
+      ? parseServiceAccountCredential(options.serviceAccountJson)
+      : undefined;
     this.auth = {
       authScheme: {type: 'http', scheme: 'bearer', bearerFormat: 'JWT'},
       authCredential: {
         authType: AuthCredentialTypes.SERVICE_ACCOUNT,
         serviceAccount: {
-          ...(options.serviceAccountJson
-            ? {
-                serviceAccountCredential: parseServiceAccountCredential(
-                  options.serviceAccountJson,
-                ),
-              }
+          ...(serviceAccountCredential
+            ? {serviceAccountCredential}
             : {useDefaultCredential: true}),
           scopes: [CLOUD_PLATFORM_SCOPE],
         },
       },
     };
     this.options = options;
-    this.integrationClient = new IntegrationClient(options);
+    this.integrationClient = new IntegrationClient(
+      options,
+      new ApiTransport(serviceAccountCredential),
+    );
   }
 
   @experimental

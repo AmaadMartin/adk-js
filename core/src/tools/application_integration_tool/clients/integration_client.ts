@@ -48,7 +48,6 @@ export type IntegrationClientOptions = Pick<
   | 'connection'
   | 'entityOperations'
   | 'actions'
-  | 'serviceAccountJson'
 >;
 
 /**
@@ -57,12 +56,12 @@ export type IntegrationClientOptions = Pick<
  */
 @experimental
 export class IntegrationClient {
-  private readonly transport: ApiTransport;
   private connectionsClient?: ConnectionsClient;
 
-  constructor(private readonly options: IntegrationClientOptions) {
-    this.transport = new ApiTransport(options.serviceAccountJson);
-  }
+  constructor(
+    private readonly options: IntegrationClientOptions,
+    private readonly transport: ApiTransport,
+  ) {}
 
   /**
    * Returns the connector metadata client, building it on first use. One
@@ -78,12 +77,14 @@ export class IntegrationClient {
         'A connection name is required to read connector metadata.',
       );
     }
-    this.connectionsClient ??= new ConnectionsClient({
-      project: this.options.project,
-      location: this.options.location,
-      connection,
-      serviceAccountJson: this.options.serviceAccountJson,
-    });
+    this.connectionsClient ??= new ConnectionsClient(
+      {
+        project: this.options.project,
+        location: this.options.location,
+        connection,
+      },
+      this.transport,
+    );
     return this.connectionsClient;
   }
 
@@ -106,11 +107,9 @@ export class IntegrationClient {
    */
   @experimental
   async getOpenApiSpecForIntegration(): Promise<OpenAPIV3.Document> {
-    const headers: Record<string, string> = {};
-    if (!this.options.serviceAccountJson) {
-      headers['x-goog-user-project'] =
-        (await this.transport.getQuotaProjectId()) ?? this.options.project;
-    }
+    const headers = await this.transport.quotaProjectHeaders(
+      this.options.project,
+    );
 
     const response = await this.transport.fetchJson({
       url:

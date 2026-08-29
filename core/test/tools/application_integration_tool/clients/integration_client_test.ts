@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InputValidationError, IntegrationClient} from '@google/adk';
+import {InputValidationError} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {ApiTransport} from '../../../../src/tools/application_integration_tool/clients/api_transport.js';
+import {IntegrationClient} from '../../../../src/tools/application_integration_tool/clients/integration_client.js';
+import {parseServiceAccountCredential} from '../../../../src/utils/service_account_utils.js';
 
 const getAccessToken = vi.fn();
 const getProjectId = vi.fn();
@@ -122,12 +125,16 @@ function connectorRoutes(
 
 function createClient(
   options: Partial<ConstructorParameters<typeof IntegrationClient>[0]> = {},
+  serviceAccountJson?: string,
 ): IntegrationClient {
-  return new IntegrationClient({
-    project: 'test-project',
-    location: 'us-central1',
-    ...options,
-  });
+  return new IntegrationClient(
+    {project: 'test-project', location: 'us-central1', ...options},
+    new ApiTransport(
+      serviceAccountJson === undefined
+        ? undefined
+        : parseServiceAccountCredential(serviceAccountJson),
+    ),
+  );
 }
 
 /** Reads and decodes the JSON body a mocked fetch call carried. */
@@ -246,11 +253,10 @@ describe('IntegrationClient', () => {
         .mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
       globalThis.fetch = fetchMock;
 
-      await createClient({
-        integration: 'test-integration',
-        triggers: [],
-        serviceAccountJson: SERVICE_ACCOUNT_KEY,
-      }).getOpenApiSpecForIntegration();
+      await createClient(
+        {integration: 'test-integration', triggers: []},
+        SERVICE_ACCOUNT_KEY,
+      ).getOpenApiSpecForIntegration();
 
       expect(fetchMock).toHaveBeenCalledWith(
         GENERATE_SPEC_URL,

@@ -16,6 +16,9 @@ import {
 } from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
+/** Records the key a signed request was built from. */
+const jwtConstructor = vi.fn();
+
 vi.mock('google-auth-library', () => ({
   GoogleAuth: class {
     getClient() {
@@ -29,6 +32,9 @@ vi.mock('google-auth-library', () => ({
     }
   },
   JWT: class {
+    constructor(options: unknown) {
+      jwtConstructor(options);
+    }
     getAccessToken() {
       return Promise.resolve({token: 'test_token'});
     }
@@ -37,6 +43,14 @@ vi.mock('google-auth-library', () => ({
     }
   },
 }));
+
+/** A service account key file, as the parser requires one. */
+const SERVICE_ACCOUNT_KEY = JSON.stringify({
+  type: 'service_account',
+  project_id: 'key-project',
+  private_key: 'test-key',
+  client_email: 'test@example.com',
+});
 
 const ENTITY_SCHEMA = {
   type: 'object',
@@ -186,6 +200,7 @@ function toolNamed(tools: BaseTool[], name: string): BaseTool {
 describe('ApplicationIntegrationToolset over a stubbed integration API', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    jwtConstructor.mockClear();
   });
 
   it('turns the generated spec into callable tools', async () => {
@@ -209,6 +224,30 @@ describe('ApplicationIntegrationToolset over a stubbed integration API', () => {
       'priority',
     ]);
     expect(declaration?.parameters?.required).toEqual(['summary']);
+  });
+
+  it('signs the metadata request with the given service account key', async () => {
+    const fetchMock = stubIntegrationApi();
+    globalThis.fetch = fetchMock;
+    const toolset = new ApplicationIntegrationToolset({
+      project: 'test-project',
+      location: 'us-central1',
+      integration: 'test-integration',
+      triggers: ['api_trigger/create_issue'],
+      serviceAccountJson: SERVICE_ACCOUNT_KEY,
+    });
+
+    await toolset.getTools();
+
+    expect(jwtConstructor).toHaveBeenCalledTimes(1);
+    expect(jwtConstructor).toHaveBeenCalledWith({
+      email: 'test@example.com',
+      key: 'test-key',
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    });
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty(
+      'x-goog-user-project',
+    );
   });
 
   it('calls the trigger with an access token', async () => {
