@@ -263,4 +263,72 @@ describe('ToolAuthHandler', () => {
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
   });
+
+  it('qualifies the cached slot with the credential key', async () => {
+    const state = new State();
+    const mockContext = {
+      state,
+      getAuthResponse: vi.fn().mockReturnValue({
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'key',
+      }),
+    } as unknown as Context;
+
+    await new ToolAuthHandler(
+      mockContext,
+      {type: 'http', scheme: 'bearer'},
+      undefined,
+      'jira_service_identity',
+    ).prepareAuthCredentials();
+
+    // Two tools can share a scheme type and still speak for different
+    // identities, so the key keeps their slots apart.
+    const stored = state.get<{http?: {credentials: {token: string}}}>(
+      'http_jira_service_identity_existing_exchanged_credential',
+    );
+    expect(stored?.http?.credentials.token).toBe('exchanged-token');
+    expect(state.get('http_existing_exchanged_credential')).toBeUndefined();
+  });
+
+  it('reads back a credential cached under the qualified slot', async () => {
+    const mockContext = {
+      state: new State({
+        'http_jira_existing_exchanged_credential': {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'user-token'}},
+        },
+      }),
+    } as unknown as Context;
+
+    const result = await new ToolAuthHandler(
+      mockContext,
+      {type: 'http', scheme: 'bearer'},
+      undefined,
+      'jira',
+    ).prepareAuthCredentials();
+
+    expect(result.authCredential?.http?.credentials.token).toBe('user-token');
+  });
+
+  it('keeps the unqualified slot when the tool names no credential key', async () => {
+    const state = new State();
+    const mockContext = {
+      state,
+      getAuthResponse: vi.fn().mockReturnValue({
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'key',
+      }),
+    } as unknown as Context;
+
+    await new ToolAuthHandler(mockContext, {
+      type: 'http',
+      scheme: 'bearer',
+    }).prepareAuthCredentials();
+
+    // A credential cached by an earlier release is still read back.
+    const stored = state.get<{http?: {credentials: {token: string}}}>(
+      'http_existing_exchanged_credential',
+    );
+    expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
 });
