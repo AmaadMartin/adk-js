@@ -240,7 +240,7 @@ function returnDoc(responses: OpenAPIV3.ResponsesObject): string {
       return '';
     }
     const schema = schemaOrEmpty(mediaType.schema);
-    const description = (response.description ?? '').trim();
+    const description = response.description.trim();
     return (
       `Returns (${typeHint(schema)}): ${description}` +
       objectPropertiesDoc(schema, RETURN_PROPERTY_INDENT)

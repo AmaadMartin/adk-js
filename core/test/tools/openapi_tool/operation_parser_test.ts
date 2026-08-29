@@ -453,6 +453,15 @@ describe('OperationParser parity with adk-python', () => {
         }).getDescription(),
       ).toBe('The summary');
     });
+
+    it('should be empty when there is neither', () => {
+      expect(
+        new OperationParser({
+          operationId: 'testOp',
+          responses: {},
+        }).getDescription(),
+      ).toBe('');
+    });
   });
 
   describe('json schema', () => {
@@ -601,6 +610,16 @@ describe('OperationParser parity with adk-python', () => {
       expect(parser.getParameters()[0].name).toBe('body');
       expect(parser.getParameters()[0].required).toBe(false);
       expect(parser.getJsonSchema().required).toEqual([]);
+    });
+
+    it('should ignore a request body that declares no content', () => {
+      // A document can omit `content`, which the OperationObject type requires,
+      // so the JSON form is the only way to reach this operation.
+      const params = new OperationParser(
+        '{"operationId":"testOp","requestBody":{"description":"none"},"responses":{}}',
+      ).getParameters();
+
+      expect(params).toEqual([]);
     });
 
     it('should describe a body from the request body description', () => {
@@ -844,6 +863,49 @@ describe('OperationParser parity with adk-python', () => {
       }).getDocString();
 
       expect(doc).toContain('Returns (string): created');
+    });
+
+    it('should leave an undescribed property description empty', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        parameters: [
+          {
+            name: 'filter',
+            in: 'query',
+            schema: {type: 'object', properties: {since: {type: 'string'}}},
+          },
+        ],
+        responses: {},
+      }).getDocString();
+
+      expect(doc).toContain('since (string):');
+    });
+
+    it('should replace a referenced property with an untyped one', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        parameters: [
+          {
+            name: 'filter',
+            in: 'query',
+            schema: {
+              type: 'object',
+              properties: {since: {$ref: '#/components/schemas/Since'}},
+            },
+          },
+        ],
+        responses: {},
+      }).getDocString();
+
+      expect(doc).toContain('since (unknown):');
+    });
+
+    it('should document an operation whose JSON declares no responses', () => {
+      const doc = new OperationParser(
+        '{"operationId":"testOp","summary":"No responses."}',
+      ).getDocString();
+
+      expect(doc).toBe('No responses.\n\nArgs:');
     });
 
     it('should skip a referenced response', () => {
