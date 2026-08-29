@@ -57,10 +57,4 @@ describe('extractText', () => {
   it('drops a part whose text is the empty string', () => {
     expect(extractText(memoryWithParts([{text: ''}, {text: 'b'}]))).toBe('b');
   });
-
-  it('joins with a caller-supplied splitter', () => {
-    expect(extractText(memoryWithParts([{text: 'a'}, {text: 'b'}]), '\n')).toBe(
-      'a\nb',
-    );
-  });
 });

@@ -15,11 +15,10 @@ import {MemoryEntry} from './memory_entry.js';
  * "nothing to show".
  *
  * @param memory The memory entry to read.
- * @param splitter The separator placed between the text parts.
  */
-export function extractText(memory: MemoryEntry, splitter = ' '): string {
+export function extractText(memory: MemoryEntry): string {
   return (memory.content.parts ?? [])
     .map((part) => part.text)
     .filter((text): text is string => !!text)
-    .join(splitter);
+    .join(' ');
 }

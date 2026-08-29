@@ -66,7 +66,7 @@ describe('PreloadMemoryTool', () => {
 
   it('throws error   in runAsync as it is not meant to be called by model', async () => {
     const tool = new PreloadMemoryTool();
-    const mockContext = new StubToolContext([]) as unknown as Context;
+    const mockContext = stubContext([]);
 
     await expect(
       tool.runAsync({
@@ -77,7 +77,7 @@ describe('PreloadMemoryTool', () => {
   });
 
   it('does not append instruction if userContent is empty', async () => {
-    const toolContext = new StubToolContext([]) as unknown as Context;
+    const toolContext = stubContext([]);
     // empty content, get around read-only with a trip to types unknown
     (toolContext as unknown as {userContent: unknown}).userContent = undefined;
 
@@ -94,7 +94,7 @@ describe('PreloadMemoryTool', () => {
   });
 
   it('does not append instruction if memory service is missing', async () => {
-    const toolContext = new StubToolContext([]) as unknown as Context;
+    const toolContext = stubContext([]);
     (toolContext.invocationContext as {memoryService?: unknown}).memoryService =
       undefined;
 
@@ -111,7 +111,7 @@ describe('PreloadMemoryTool', () => {
   });
 
   it('inserts formatted memory into contents if memories found', async () => {
-    const toolContext = new StubToolContext([
+    const toolContext = stubContext([
       {
         content: {role: 'user', parts: [{text: 'My dog is Fido.'}]},
         author: 'user',
@@ -121,7 +121,7 @@ describe('PreloadMemoryTool', () => {
         content: {role: 'model', parts: [{text: 'I will remember that.'}]},
         author: 'model',
       },
-    ]) as unknown as Context;
+    ]);
 
     const llmRequest: LlmRequest = {
       contents: [],
@@ -145,7 +145,7 @@ describe('PreloadMemoryTool', () => {
 
   it('handles searchMemory throwing an error gracefully', async () => {
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-    const toolContext = new StubToolContext([]) as unknown as Context;
+    const toolContext = stubContext([]);
     toolContext.searchMemory = async () => {
       throw new Error('Search failed');
     };

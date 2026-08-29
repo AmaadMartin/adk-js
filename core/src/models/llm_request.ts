@@ -96,17 +96,15 @@ export function insertTransientUserContent(
   }
 
   let insertIndex = llmRequest.contents.length;
-  for (let i = llmRequest.contents.length - 1; i >= 0; i--) {
-    const content = llmRequest.contents[i];
-    if (content.role !== 'user') {
-      insertIndex = i + 1;
+  while (insertIndex > 0) {
+    const content = llmRequest.contents[insertIndex - 1];
+    if (
+      content.role !== 'user' ||
+      content.parts?.some((part) => part.functionResponse)
+    ) {
       break;
     }
-    if (content.parts?.some((part) => part.functionResponse)) {
-      insertIndex = i + 1;
-      break;
-    }
-    insertIndex = i;
+    insertIndex--;
   }
 
   llmRequest.contents.splice(insertIndex, 0, ...contents);
