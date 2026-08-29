@@ -7,12 +7,29 @@
 import {
   AuthCredential,
   AuthCredentialTypes,
+  AuthScheme,
   Context,
   ToolAuthHandler,
+  ToolContextCredentialStore,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
+
+/** An exchanger that returns the credential it was given, as the real one
+ * does for a credential type it has no exchanger for. */
+function passThroughExchanger() {
+  return {
+    exchange: vi
+      .fn()
+      .mockImplementation(
+        async ({authCredential}: {authCredential: AuthCredential}) => ({
+          credential: authCredential,
+          wasExchanged: false,
+        }),
+      ),
+  };
+}
 
 // Mock AutoAuthCredentialExchanger
 vi.mock(
@@ -86,20 +103,29 @@ describe('ToolAuthHandler', () => {
   });
 
   it('should return cached credential if available', async () => {
-    const mockContext = {
-      state: new State({
-        'apiKey_existing_exchanged_credential': {
-          authType: AuthCredentialTypes.HTTP,
-          http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
-        },
-      }),
-    } as unknown as Context;
-
-    const handler = new ToolAuthHandler(mockContext, {
+    // A cached credential is handed back to the exchanger, which has nothing
+    // registered for an http credential and returns it unchanged.
+    vi.mocked(AutoAuthCredentialExchanger).mockImplementationOnce(
+      () => passThroughExchanger() as unknown as AutoAuthCredentialExchanger,
+    );
+    const scheme: AuthScheme = {
       type: 'apiKey',
       name: 'X-API-Key',
       in: 'header',
+    };
+    const state = new State();
+    const mockContext = {state} as unknown as Context;
+    // Derive the key instead of hardcoding it, so this pins the caching
+    // behaviour rather than the key format.
+    const key = await new ToolContextCredentialStore(
+      mockContext,
+    ).getCredentialKey(scheme);
+    state.set(key, {
+      authType: AuthCredentialTypes.HTTP,
+      http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
     });
+
+    const handler = new ToolAuthHandler(mockContext, scheme);
 
     const result = await handler.prepareAuthCredentials();
 
@@ -107,7 +133,12 @@ describe('ToolAuthHandler', () => {
     expect(result.authCredential?.http?.credentials.token).toBe('cached-token');
   });
 
-  it('should store exchanged credential in state and record it in the delta', async () => {
+  it('should store the auth response credential in state and record it in the delta', async () => {
+    const scheme: AuthScheme = {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    };
     const state = new State();
     const mockContext = {
       state,
@@ -117,22 +148,18 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {
-      type: 'apiKey',
-      name: 'X-API-Key',
-      in: 'header',
-    });
+    const handler = new ToolAuthHandler(mockContext, scheme);
 
     const result = await handler.prepareAuthCredentials();
 
     expect(result.state).toBe('done');
     // Stored via the State API so it is readable back through State.get...
-    const stored = state.get<{http?: {credentials: {token: string}}}>(
-      'apiKey_existing_exchanged_credential',
-    );
-    expect(stored?.http?.credentials.token).toBe('exchanged-token');
+    const key = await new ToolContextCredentialStore(
+      mockContext,
+    ).getCredentialKey(scheme);
+    expect(state.get<AuthCredential>(key)?.apiKey).toBe('key');
     // ...and recorded in the delta so it is persisted to the session (rather
-    // than being re-exchanged on every subsequent tool call).
+    // than being re-requested on every subsequent tool call).
     expect(state.hasDelta()).toBe(true);
   });
 
@@ -232,6 +259,19 @@ describe('ToolAuthHandler', () => {
   });
 
   it('caches a static credential that did require an exchange', async () => {
+    const scheme: AuthScheme = {
+      type: 'oauth2',
+      flows: {
+        clientCredentials: {
+          tokenUrl: 'https://example.com/token',
+          scopes: {},
+        },
+      },
+    };
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+    };
     const state = new State();
     const mockContext = {
       state,
@@ -241,25 +281,17 @@ describe('ToolAuthHandler', () => {
 
     const result = await new ToolAuthHandler(
       mockContext,
-      {
-        type: 'oauth2',
-        flows: {
-          clientCredentials: {
-            tokenUrl: 'https://example.com/token',
-            scopes: {},
-          },
-        },
-      },
-      {
-        authType: AuthCredentialTypes.OAUTH2,
-        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
-      },
+      scheme,
+      credential,
     ).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
     // An exchange costs a round trip, so its result is worth persisting.
     const stored = state.get<{http?: {credentials: {token: string}}}>(
-      'oauth2_existing_exchanged_credential',
+      await new ToolContextCredentialStore(mockContext).getCredentialKey(
+        scheme,
+        credential,
+      ),
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
   });
