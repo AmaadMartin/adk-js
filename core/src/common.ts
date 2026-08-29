@@ -319,6 +319,7 @@ export type {GoogleSearchToolParams} from './tools/google_search_tool.js';
 export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
+  asSafePartForLlm,
 } from './tools/load_artifacts_tool.js';
 export {LOAD_MEMORY, LoadMemoryTool} from './tools/load_memory_tool.js';
 export type {LoadMemoryResponse} from './tools/load_memory_tool.js';

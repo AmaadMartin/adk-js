@@ -11,7 +11,54 @@ import {
   LoadArtifactsTool,
 } from '@google/adk';
 import {Blob, Part, Type} from '@google/genai';
+import AdmZip from 'adm-zip';
 import {describe, expect, it} from 'vitest';
+
+/** Builds a tool context serving `artifactsByName`, as the tool sees it. */
+function stubContext(artifactsByName: Record<string, Part>): Context {
+  return new StubToolContext(artifactsByName) as unknown as Context;
+}
+
+/** Builds a request whose last turn asks the tool to load `artifactNames`. */
+function requestLoading(artifactNames: string[]): LlmRequest {
+  return {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              name: 'load_artifacts',
+              response: {artifact_names: artifactNames},
+            },
+          },
+        ],
+      },
+    ],
+    toolsDict: {},
+    liveConnectConfig: {},
+  };
+}
+
+/** Builds a DOCX buffer whose only paragraph holds `text`. */
+function buildDocx(text: string): Buffer {
+  const zip = new AdmZip();
+  zip.addFile(
+    'word/document.xml',
+    Buffer.from(
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+        `<w:body><w:p><w:t>${text}</w:t></w:p></w:body></w:document>`,
+      'utf8',
+    ),
+  );
+  return zip.toBuffer();
+}
+
+/** Returns the artifact part the tool appended to `llmRequest`. */
+function appendedArtifactPart(llmRequest: LlmRequest): Part {
+  const addedContent = llmRequest.contents[llmRequest.contents.length - 1];
+  return addedContent.parts![1];
+}
 
 class StubToolContext {
   private artifactsByName: Record<string, Part>;
@@ -652,4 +699,176 @@ describe('LoadArtifactsTool', () => {
     );
     expect(addedContent).toBeUndefined();
   });
+
+  it('appends nothing when the request carries no contents', async () => {
+    const toolContext = stubContext({
+      'test.txt': {text: 'hello'},
+    });
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents).toHaveLength(0);
+    expect(llmRequest.config?.systemInstruction).toBeDefined();
+  });
+
+  it('passes non-base64 inline data through as text', async () => {
+    const artifactName = 'notes.txt';
+    const plainText = 'col1,col2\n1,2\n';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {data: plainText, mimeType: 'text/plain'},
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    const artifactPart = appendedArtifactPart(llmRequest);
+    expect(artifactPart.inlineData).toBeUndefined();
+    expect(artifactPart.text).toEqual(plainText);
+  });
+
+  it('converts csv bytes served as octet-stream using the filename', async () => {
+    const artifactName = 'test.csv';
+    const csvString = 'col1,col2\nval1,val2\n';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: Buffer.from(csvString, 'utf8').toString('base64'),
+          mimeType: 'application/octet-stream',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    const artifactPart = appendedArtifactPart(llmRequest);
+    expect(artifactPart.inlineData).toBeUndefined();
+    expect(artifactPart.text).toEqual(csvString);
+  });
+
+  it('extracts the text of a docx artifact', async () => {
+    const artifactName = 'report.docx';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: buildDocx('Quarterly report').toString('base64'),
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    const artifactPart = appendedArtifactPart(llmRequest);
+    expect(artifactPart.inlineData).toBeUndefined();
+    expect(artifactPart.text).toEqual('Quarterly report');
+  });
+
+  it('extracts the text of a docx artifact whose mime type is wrong', async () => {
+    const artifactName = 'minutes.DOCX';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: buildDocx('Mislabelled docx').toString('base64'),
+          mimeType: 'application/zip',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toEqual('Mislabelled docx');
+  });
+
+  it('extracts the text of a docx artifact served as octet-stream', async () => {
+    const artifactName = 'document.docx';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: buildDocx('Octet stream docx').toString('base64'),
+          mimeType: 'application/octet-stream',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toEqual('Octet stream docx');
+  });
+
+  it('extracts the text of a docx artifact that has no filename extension', async () => {
+    const artifactName = 'inline-file';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: buildDocx('Extensionless docx').toString('base64'),
+          mimeType: 'application/octet-stream',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toEqual('Extensionless docx');
+  });
+
+  it('falls back to the binary placeholder when octet-stream bytes are not a docx', async () => {
+    const artifactName = 'inline-file';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: Buffer.from([0, 1, 2, 3]).toString('base64'),
+          mimeType: 'application/octet-stream',
+        },
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    const artifactPart = appendedArtifactPart(llmRequest);
+    expect(artifactPart.inlineData).toBeUndefined();
+    expect(artifactPart.text).toContain(
+      '[Binary artifact: inline-file, type: application/octet-stream',
+    );
+    expect(artifactPart.text).toContain('Content cannot be displayed inline.');
+  });
+
+  it.each(['image/svg+xml', 'image/svg', 'application/svg+xml', 'image/xml'])(
+    'delivers a %s artifact as text rather than inline data',
+    async (mimeType) => {
+      const artifactName = 'logo.svg';
+      const svgMarkup = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
+      const toolContext = stubContext({
+        [artifactName]: {
+          inlineData: {
+            data: Buffer.from(svgMarkup, 'utf8').toString('base64'),
+            mimeType,
+          },
+        },
+      });
+      const llmRequest = requestLoading([artifactName]);
+
+      await new LoadArtifactsTool().processLlmRequest({
+        toolContext,
+        llmRequest,
+      });
+
+      const artifactPart = appendedArtifactPart(llmRequest);
+      expect(artifactPart.inlineData).toBeUndefined();
+      expect(artifactPart.text).toEqual(svgMarkup);
+    },
+  );
 });
