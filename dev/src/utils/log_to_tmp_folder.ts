@@ -128,10 +128,11 @@ export function logToTmpFolder(
 
   fs.mkdirSync(logDir, {recursive: true, mode: LOG_DIR_MODE});
   createLogFile(logFilePath);
+  // The logs move last. `createLatestLogLink` still throws on the errors it
+  // does not handle, and the caller then reports that the logs stay on the
+  // console, so they have to still be there.
+  const latestLogPath = createLatestLogLink(logDir, logFilePath);
   setFileLogTarget(logFilePath);
 
-  return {
-    logFilePath,
-    latestLogPath: createLatestLogLink(logDir, logFilePath),
-  };
+  return {logFilePath, latestLogPath};
 }
