@@ -48,6 +48,19 @@ function functionResponsePart(
   return {functionResponse: {id, name: 'some_tool', response}};
 }
 
+/** Runs `run`, and returns the `Error` it throws. */
+function expectThrown(run: () => unknown): Error {
+  try {
+    run();
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      return error;
+    }
+    expect.fail(`expected an Error, got ${typeof error}`);
+  }
+  expect.fail('expected a throw');
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -277,6 +290,15 @@ describe('partToMessageBlock media', () => {
     expect(() =>
       block({inlineData: {mimeType: 'audio/mpeg', data: 'YXVkaW8='}}),
     ).toThrow(/does not support this part/);
+  });
+
+  it('names the fields of an unsupported part without its bytes', () => {
+    const failure = expectThrown(() =>
+      block({inlineData: {mimeType: 'audio/mpeg', data: 'c3VwZXItc2VjcmV0'}}),
+    );
+
+    expect(failure.message).toContain('inlineData');
+    expect(failure.message).not.toContain('c3VwZXItc2VjcmV0');
   });
 
   it('rejects an inline part that carries no data', () => {
@@ -1110,6 +1132,12 @@ describe('toGenaiFinishReason', () => {
 
   it.each([undefined, null])('maps %s to undefined', (stopReason) => {
     expect(toGenaiFinishReason(stopReason)).toBeUndefined();
+  });
+
+  it('maps a stop reason the SDK does not type yet to unspecified', () => {
+    expect(toGenaiFinishReason('a_reason_shipped_after_this_sdk')).toBe(
+      FinishReason.FINISH_REASON_UNSPECIFIED,
+    );
   });
 });
 

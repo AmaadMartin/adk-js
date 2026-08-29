@@ -60,6 +60,14 @@ export interface AnthropicGenerateContentConfig extends GenerateContentConfig {
  * The map is exhaustive on purpose: when the SDK adds a stop reason, this
  * fails to compile rather than silently reporting the wrong finish reason.
  */
+/**
+ * A stop reason as it arrives on the wire.
+ *
+ * Anthropic ships a new stop reason before the SDK types it, so the wire
+ * carries values the `StopReason` union does not list yet.
+ */
+export type WireStopReason = StopReason | (string & {});
+
 const GENAI_FINISH_REASONS: Record<StopReason, FinishReason> = {
   end_turn: FinishReason.STOP,
   stop_sequence: FinishReason.STOP,
@@ -353,7 +361,20 @@ export function partToMessageBlock(
         '\n```',
     };
   }
-  throw new Error(`Claude does not support this part: ${JSON.stringify(part)}`);
+  throw new Error(unsupportedPartMessage(part));
+}
+
+/**
+ * Describes a part by its field names.
+ *
+ * A part can carry inline media bytes, so the message names the fields rather
+ * than serializing the part and writing a credential or a payload to a log.
+ */
+function unsupportedPartMessage(part: Part): string {
+  const fields = Object.keys(part);
+  return `Claude does not support this part: ${
+    fields.length > 0 ? fields.join(', ') : 'an empty part'
+  }`;
 }
 
 /**
@@ -425,13 +446,21 @@ export function contentBlockToPart(block: ContentBlock): Part {
 /**
  * Maps an Anthropic stop reason onto the genai finish reason.
  *
+ * Anthropic ships a new stop reason before the SDK types it, so a reason the
+ * map does not know reports `FINISH_REASON_UNSPECIFIED`. A caller then sees
+ * that the turn finished, rather than an absent reason it reads as unfinished.
+ *
  * @param stopReason The stop reason Claude reported, if any.
  * @return The finish reason, or `undefined` when Claude reported none.
  */
 export function toGenaiFinishReason(
-  stopReason?: StopReason | null,
+  stopReason?: WireStopReason | null,
 ): FinishReason | undefined {
-  return stopReason ? GENAI_FINISH_REASONS[stopReason] : undefined;
+  if (!stopReason) {
+    return undefined;
+  }
+  const known: Partial<Record<string, FinishReason>> = GENAI_FINISH_REASONS;
+  return known[stopReason] ?? FinishReason.FINISH_REASON_UNSPECIFIED;
 }
 
 /**
