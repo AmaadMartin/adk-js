@@ -22,10 +22,6 @@ per operation.
 The client is read-only. It never writes to API Hub, and it holds no state
 except the cached credential.
 
-`BaseAPIHubClient` is the one-method interface `APIHubClient` implements. Depend
-on it when you want to supply the spec text from somewhere else, such as a test
-fixture.
-
 ## Get started
 
 Enable the API Hub API on your project, then authenticate with Application

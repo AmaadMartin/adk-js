@@ -376,7 +376,6 @@ export {APIHubClient} from './tools/apihub_tool/clients/apihub_client.js';
 export type {
   ApiHubApi,
   ApiHubApiVersion,
-  BaseAPIHubClient,
 } from './tools/apihub_tool/clients/apihub_client.js';
 export * from './tools/base_tool.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';

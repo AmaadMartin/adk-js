@@ -50,12 +50,6 @@ export interface ApiHubResourceNames {
   apiSpecResourceName?: string;
 }
 
-/** Seam for fetching an OpenAPI spec out of Google Cloud API Hub. */
-export interface BaseAPIHubClient {
-  /** From a given resource name, get the spec text from API Hub. */
-  getSpecContent(resourceName: string): Promise<string>;
-}
-
 /** Returns the segment that follows `key`, or undefined if there is none. */
 function segmentAfter(segments: string[], key: string): string | undefined {
   const index = segments.indexOf(key);
@@ -141,7 +135,7 @@ function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
  * service account JSON string, or Application Default Credentials, in that
  * order of precedence.
  */
-export class APIHubClient implements BaseAPIHubClient {
+export class APIHubClient {
   private readonly accessToken?: string;
   private readonly serviceAccountJson?: string;
   private auth?: GoogleAuth;
