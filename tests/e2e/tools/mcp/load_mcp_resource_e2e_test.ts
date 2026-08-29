@@ -6,6 +6,7 @@
 
 import {
   Context,
+  InvocationContext,
   LlmRequest,
   LoadMcpResourceTool,
   MCPToolset,
@@ -239,10 +240,13 @@ describe('MCPToolset tool discovery (e2e, real MCP server over stdio)', () => {
       connectionParams: stdioConnectionParams,
       requireConfirmation: true,
     });
-    const gatedContext = {
-      actions: {},
-      requestConfirmation: () => {},
-    } as unknown as Context;
+    const gatedContext = new Context({
+      invocationContext: {
+        abortSignal: new AbortController().signal,
+        session: {state: {}},
+      } as unknown as InvocationContext,
+      functionCallId: 'call-1',
+    });
 
     const tools = await toolset.getTools();
     const echo = tools.find((tool) => tool.name === 'echo');

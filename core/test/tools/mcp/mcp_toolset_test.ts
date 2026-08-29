@@ -7,8 +7,10 @@
 import {
   ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR,
   Context,
+  InvocationContext,
   LlmRequest,
   setAllowConfigStdioMcpServers,
+  ToolConfirmation,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {
@@ -107,15 +109,23 @@ afterEach(() => {
   );
 });
 
-/** A tool context carrying only what the confirmation gate reads. */
+/**
+ * A real tool context over a stub invocation. `functionCallId` is set because
+ * `requestConfirmation` refuses to raise a request without one.
+ */
 function createToolContext(
-  overrides: Partial<Context> = {},
-): Context & {requestConfirmation: Mock} {
-  return {
-    actions: {},
-    requestConfirmation: vi.fn(),
-    ...overrides,
-  } as unknown as Context & {requestConfirmation: Mock};
+  options: {toolConfirmation?: ToolConfirmation} = {},
+) {
+  const invocationContext = {
+    abortSignal: new AbortController().signal,
+    session: {state: {}},
+  } as unknown as InvocationContext;
+
+  return new Context({
+    invocationContext,
+    functionCallId: 'call-1',
+    toolConfirmation: options.toolConfirmation,
+  });
 }
 
 describe('MCPToolset', () => {
@@ -584,7 +594,10 @@ describe('MCPToolset', () => {
           'This tool call requires confirmation, please approve or reject.',
       });
       expect(callTool).not.toHaveBeenCalled();
-      expect(toolContext.requestConfirmation).toHaveBeenCalledOnce();
+      expect(
+        toolContext.actions.requestedToolConfirmations['call-1'],
+      ).toMatchObject({confirmed: false});
+      expect(toolContext.actions.skipSummarization).toBe(true);
     });
 
     it('returns the rejection payload when the user declined', async () => {
@@ -597,7 +610,7 @@ describe('MCPToolset', () => {
         requireConfirmation: true,
       });
       const toolContext = createToolContext({
-        toolConfirmation: {confirmed: false, hint: ''},
+        toolConfirmation: new ToolConfirmation({confirmed: false}),
       });
 
       const [tool] = await toolset.getTools();
@@ -617,7 +630,7 @@ describe('MCPToolset', () => {
         requireConfirmation: true,
       });
       const toolContext = createToolContext({
-        toolConfirmation: {confirmed: true, hint: ''},
+        toolConfirmation: new ToolConfirmation({confirmed: true}),
       });
 
       const [tool] = await toolset.getTools();
