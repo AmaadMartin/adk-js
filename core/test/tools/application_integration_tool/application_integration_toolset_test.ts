@@ -12,15 +12,17 @@ import {
   BaseTool,
   ConnectionDetails,
   Context,
+  createSession,
   InputValidationError,
   IntegrationConnectorTool,
+  InvocationContext,
   OpenAPIToolset,
+  PluginManager,
   ReadonlyContext,
   RestApiTool,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {State} from '../../../src/sessions/state.js';
 import {
   ConnectorOperationExtensions,
   ENTITY_OPERATIONS,
@@ -206,13 +208,20 @@ function createToolset(
   });
 }
 
-/** A context whose state already holds `slots`, keyed by slot name. */
+/** A tool context whose session state already holds `slots`. */
 function createContext(slots: Record<string, AuthCredential> = {}): Context {
-  return {
-    state: new State({...slots}),
-    getAuthResponse: vi.fn().mockReturnValue(undefined),
-    requestCredential: vi.fn(),
-  } as unknown as Context;
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv-1',
+      session: createSession({
+        id: 'session-1',
+        appName: 'test-app',
+        state: {...slots},
+      }),
+      pluginManager: new PluginManager(),
+    }),
+    functionCallId: 'call-1',
+  });
 }
 
 function bearer(token: string): AuthCredential {

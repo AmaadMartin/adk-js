@@ -5,17 +5,18 @@
  */
 
 import {
-  AuthCredential,
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
   IntegrationConnectorTool,
   IntegrationConnectorToolOptions,
+  InvocationContext,
+  PluginManager,
   RestApiTool,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {State} from '../../../src/sessions/state.js';
 
 /**
  * The request schema of a generated `ExecuteConnection` operation, cut down to
@@ -93,13 +94,17 @@ function createTool(overrides: Partial<IntegrationConnectorToolOptions> = {}): {
   return {tool, restApiTool};
 }
 
-/** A context that answers the auth handler with `credential`. */
-function createContext(credential?: AuthCredential): Context {
-  return {
-    state: new State(),
-    getAuthResponse: vi.fn().mockReturnValue(credential),
-    requestCredential: vi.fn(),
-  } as unknown as Context;
+/** A tool context with empty session state. */
+function createContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv-1',
+      session: createSession({id: 'session-1', appName: 'test-app'}),
+      pluginManager: new PluginManager(),
+    }),
+    // A credential request is only meaningful inside a function call.
+    functionCallId: 'call-1',
+  });
 }
 
 describe('IntegrationConnectorTool', () => {
@@ -189,18 +194,10 @@ describe('IntegrationConnectorTool', () => {
     });
 
     it('returns the pending result and calls nothing while auth is pending', async () => {
+      // A scheme with no credential: the handler asks the client for one.
       const {tool} = createTool({
         restApiTool,
-        authScheme: {
-          type: 'oauth2',
-          flows: {
-            authorizationCode: {
-              authorizationUrl: 'https://example.com/auth',
-              tokenUrl: 'https://example.com/token',
-              scopes: {},
-            },
-          },
-        },
+        authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
       });
 
       const result = await tool.runAsync({
@@ -240,10 +237,7 @@ describe('IntegrationConnectorTool', () => {
 
       const declaration = tool._getDeclaration();
 
-      const parameters = declaration.parameters as unknown as {
-        properties: Record<string, unknown>;
-        required: string[];
-      };
+      const {properties = {}, required = []} = declaration.parameters ?? {};
       for (const field of [
         'connection_name',
         'service_name',
@@ -253,14 +247,14 @@ describe('IntegrationConnectorTool', () => {
         'action',
         'dynamic_auth_config',
       ]) {
-        expect(parameters.properties).not.toHaveProperty(field);
-        expect(parameters.required).not.toContain(field);
+        expect(properties).not.toHaveProperty(field);
+        expect(required).not.toContain(field);
       }
-      expect(parameters.required).not.toContain('page_size');
+      expect(required).not.toContain('page_size');
       // adk-python leaves `timeout` required, and so does this port.
-      expect(parameters.required).toContain('timeout');
-      expect(parameters.required).toContain('entity_id');
-      expect(parameters.properties).toHaveProperty('page_size');
+      expect(required).toContain('timeout');
+      expect(required).toContain('entity_id');
+      expect(properties).toHaveProperty('page_size');
     });
 
     it('keeps a schema that declares no required fields intact', () => {
@@ -276,13 +270,10 @@ describe('IntegrationConnectorTool', () => {
       });
       const {tool} = createTool({restApiTool});
 
-      const parameters = tool._getDeclaration().parameters as unknown as {
-        properties: Record<string, unknown>;
-        required?: string[];
-      };
+      const parameters = tool._getDeclaration().parameters;
 
-      expect(parameters.properties).toEqual({});
-      expect(parameters.required).toBeUndefined();
+      expect(parameters?.properties).toEqual({});
+      expect(parameters?.required).toBeUndefined();
     });
   });
 

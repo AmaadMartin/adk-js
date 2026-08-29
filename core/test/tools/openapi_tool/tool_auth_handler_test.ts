@@ -8,6 +8,9 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
+  InvocationContext,
+  PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
@@ -265,17 +268,16 @@ describe('ToolAuthHandler', () => {
   });
 
   it('qualifies the cached slot with the credential key', async () => {
-    const state = new State();
-    const mockContext = {
-      state,
-      getAuthResponse: vi.fn().mockReturnValue({
+    const context = createContext({
+      // What the client answered a credential request with.
+      'temp:jira_service_identity': {
         authType: AuthCredentialTypes.API_KEY,
         apiKey: 'key',
-      }),
-    } as unknown as Context;
+      },
+    });
 
     await new ToolAuthHandler(
-      mockContext,
+      context,
       {type: 'http', scheme: 'bearer'},
       undefined,
       'jira_service_identity',
@@ -283,25 +285,25 @@ describe('ToolAuthHandler', () => {
 
     // Two tools can share a scheme type and still speak for different
     // identities, so the key keeps their slots apart.
-    const stored = state.get<{http?: {credentials: {token: string}}}>(
+    const stored = context.state.get<AuthCredential>(
       'http_jira_service_identity_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
-    expect(state.get('http_existing_exchanged_credential')).toBeUndefined();
+    expect(
+      context.state.get('http_existing_exchanged_credential'),
+    ).toBeUndefined();
   });
 
   it('reads back a credential cached under the qualified slot', async () => {
-    const mockContext = {
-      state: new State({
-        'http_jira_existing_exchanged_credential': {
-          authType: AuthCredentialTypes.HTTP,
-          http: {scheme: 'bearer', credentials: {token: 'user-token'}},
-        },
-      }),
-    } as unknown as Context;
+    const context = createContext({
+      'http_jira_existing_exchanged_credential': {
+        authType: AuthCredentialTypes.HTTP,
+        http: {scheme: 'bearer', credentials: {token: 'user-token'}},
+      },
+    });
 
     const result = await new ToolAuthHandler(
-      mockContext,
+      context,
       {type: 'http', scheme: 'bearer'},
       undefined,
       'jira',
@@ -311,24 +313,38 @@ describe('ToolAuthHandler', () => {
   });
 
   it('keeps the unqualified slot when the tool names no credential key', async () => {
-    const state = new State();
-    const mockContext = {
-      state,
-      getAuthResponse: vi.fn().mockReturnValue({
+    const context = createContext({
+      'temp:default_openapi_key': {
         authType: AuthCredentialTypes.API_KEY,
         apiKey: 'key',
-      }),
-    } as unknown as Context;
+      },
+    });
 
-    await new ToolAuthHandler(mockContext, {
+    await new ToolAuthHandler(context, {
       type: 'http',
       scheme: 'bearer',
     }).prepareAuthCredentials();
 
     // A credential cached by an earlier release is still read back.
-    const stored = state.get<{http?: {credentials: {token: string}}}>(
+    const stored = context.state.get<AuthCredential>(
       'http_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
   });
 });
+
+/** A tool context whose session state already holds `slots`. */
+function createContext(slots: Record<string, unknown> = {}): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv-1',
+      session: createSession({
+        id: 'session-1',
+        appName: 'test-app',
+        state: {...slots},
+      }),
+      pluginManager: new PluginManager(),
+    }),
+    functionCallId: 'call-1',
+  });
+}
