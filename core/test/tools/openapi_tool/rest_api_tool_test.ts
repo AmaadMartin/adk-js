@@ -10,7 +10,11 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  FeatureName,
   OpenApiSpecParser,
+  OperationEndpoint,
+  OperationParser,
+  overrideFeatureEnabled,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -1155,6 +1159,364 @@ describe('RestApiTool Utilities', () => {
       expect(headers).toEqual({
         'Content-Type': 'application/json',
       });
+    });
+  });
+});
+
+const ENDPOINT: OperationEndpoint = {
+  baseUrl: 'http://api.example.com',
+  path: '/test',
+  method: 'GET',
+};
+
+const OPERATION: OpenAPIV3.OperationObject = {responses: {}};
+
+const API_KEY_SCHEME: OpenAPIV3.SecuritySchemeObject = {
+  type: 'apiKey',
+  name: 'X-API-Key',
+  in: 'header',
+};
+
+const API_KEY_CREDENTIAL: AuthCredential = {
+  authType: AuthCredentialTypes.API_KEY,
+  apiKey: 'sk-live-secret-api-key-12345',
+};
+
+/** Stubs `fetch` with a response whose body is `body`. */
+function stubFetch(body: string, contentType = 'application/json'): void {
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    headers: {get: () => contentType},
+    text: async () => body,
+  });
+}
+
+function newTool(): RestApiTool {
+  return new RestApiTool('test_tool', 'description', ENDPOINT, OPERATION);
+}
+
+describe('RestApiTool declaration', () => {
+  afterEach(() => {
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, undefined);
+  });
+
+  it('should convert the schema to a Gemini schema when the flag is off', () => {
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, false);
+    const tool = new RestApiTool('test_tool', 'description', ENDPOINT, {
+      operationId: 'test_op',
+      parameters: [
+        {name: 'q', in: 'query', required: true, schema: {type: 'string'}},
+      ],
+      responses: {},
+    });
+
+    const declaration = tool._getDeclaration();
+
+    expect(declaration.parametersJsonSchema).toBeUndefined();
+    expect(declaration.parameters).toEqual({
+      type: Type.OBJECT,
+      properties: {q: {type: Type.STRING}},
+      required: ['q'],
+    });
+  });
+
+  it('should pass the raw schema through when the flag is on', () => {
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, true);
+    const tool = new RestApiTool('test_tool', 'description', ENDPOINT, {
+      operationId: 'test_op',
+      parameters: [
+        {name: 'q', in: 'query', required: true, schema: {type: 'string'}},
+      ],
+      responses: {},
+    });
+    const parser = new OperationParser({
+      operationId: 'test_op',
+      parameters: [
+        {name: 'q', in: 'query', required: true, schema: {type: 'string'}},
+      ],
+      responses: {},
+    });
+
+    const declaration = tool._getDeclaration();
+
+    expect(declaration.parameters).toBeUndefined();
+    expect(declaration.parametersJsonSchema).toEqual(parser.getJsonSchema());
+  });
+});
+
+describe('RestApiTool.call', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should run the API call that runAsync runs', async () => {
+    const tool = newTool();
+    stubFetch(JSON.stringify({result: 'ok'}));
+
+    const viaRunAsync = await tool.runAsync({
+      args: {},
+      toolContext: {} as unknown as Context,
+    });
+    const viaCall = await tool.call({
+      args: {},
+      toolContext: {} as unknown as Context,
+    });
+
+    expect(viaCall).toEqual(viaRunAsync);
+    expect(viaCall).toEqual({result: 'ok'});
+  });
+
+  it('should be the method runAsync delegates to', async () => {
+    const tool = newTool();
+    stubFetch(JSON.stringify({result: 'ok'}));
+    const spy = vi.spyOn(tool, 'call');
+
+    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should report the pending auth state that runAsync reports', async () => {
+    const tool = newTool();
+    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
+      prepareAuthCredentials: async () => ({state: 'pending'}),
+    } as unknown as ToolAuthHandler);
+
+    const viaRunAsync = await tool.runAsync({
+      args: {},
+      toolContext: {} as unknown as Context,
+    });
+    const viaCall = await tool.call({
+      args: {},
+      toolContext: {} as unknown as Context,
+    });
+
+    expect(viaCall).toEqual(viaRunAsync);
+    expect(viaCall).toEqual({
+      pending: true,
+      message: 'Needs your authorization to access your data.',
+    });
+  });
+});
+
+describe('RestApiTool.toRepr', () => {
+  it('should render the name, description, endpoint, operation and scheme', () => {
+    const tool = newTool();
+    tool.configureAuthScheme(API_KEY_SCHEME);
+
+    const rendered = tool.toRepr();
+
+    expect(rendered).toContain('name="test_tool"');
+    expect(rendered).toContain('description="description"');
+    expect(rendered).toContain(`endpoint="${JSON.stringify(ENDPOINT)}"`);
+    expect(rendered).toContain(`operation="${JSON.stringify(OPERATION)}"`);
+    expect(rendered).toContain(
+      `authScheme="${JSON.stringify(API_KEY_SCHEME)}"`,
+    );
+  });
+
+  it('should never render the credential', () => {
+    const tool = newTool();
+    tool.configureAuthScheme(API_KEY_SCHEME);
+    tool.configureAuthCredential(API_KEY_CREDENTIAL);
+
+    expect(tool.toRepr()).not.toContain('sk-live-secret-api-key-12345');
+  });
+});
+
+describe('RestApiTool.detectErrorInResponse', () => {
+  it.each([
+    ['an error object', {error: 'boom'}, 'HTTP_ERROR'],
+    ['an empty error', {error: ''}, undefined],
+    ['a success object', {result: 'ok'}, undefined],
+    ['a string', 'a string', undefined],
+    ['null', null, undefined],
+    ['undefined', undefined, undefined],
+    ['an array', ['error'], undefined],
+  ])('should classify %s', (_label, response, expected) => {
+    expect(newTool().detectErrorInResponse(response)).toBe(expected);
+  });
+
+  it('should classify the error the tool returns for a transport failure', async () => {
+    const tool = newTool();
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network down'));
+
+    const response = await tool.runAsync({
+      args: {},
+      toolContext: {} as unknown as Context,
+    });
+
+    expect(tool.detectErrorInResponse(response)).toBe('HTTP_ERROR');
+  });
+});
+
+describe('RestApiTool string inputs', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should issue the same request from a JSON endpoint and operation', async () => {
+    const fromStrings = new RestApiTool(
+      'test_tool',
+      'description',
+      JSON.stringify(ENDPOINT),
+      JSON.stringify(OPERATION),
+    );
+    stubFetch('{}');
+
+    await fromStrings.runAsync({
+      args: {},
+      toolContext: {} as unknown as Context,
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://api.example.com/test',
+      expect.objectContaining({method: 'GET'}),
+    );
+  });
+
+  it('should apply a credential supplied as JSON', async () => {
+    const tool = newTool();
+    tool.configureAuthScheme(JSON.stringify(API_KEY_SCHEME));
+    tool.configureAuthCredential(JSON.stringify(API_KEY_CREDENTIAL));
+    stubFetch('{}');
+    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
+      prepareAuthCredentials: async () => ({
+        state: 'done',
+        authCredential: API_KEY_CREDENTIAL,
+      }),
+    } as unknown as ToolAuthHandler);
+
+    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'X-API-Key': 'sk-live-secret-api-key-12345',
+        }),
+      }),
+    );
+  });
+
+  it('should clear the credential when configured with nothing', async () => {
+    const tool = newTool();
+    tool.configureAuthCredential(API_KEY_CREDENTIAL);
+    tool.configureAuthCredential();
+    stubFetch('{}');
+    const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
+      prepareAuthCredentials: async () => ({state: 'done'}),
+    } as unknown as ToolAuthHandler);
+
+    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.anything(),
+      undefined,
+      undefined,
+      expect.anything(),
+    );
+  });
+
+  it('should reject an endpoint missing a field', () => {
+    expect(
+      () =>
+        new RestApiTool(
+          'test_tool',
+          'description',
+          '{"baseUrl": "http://api.example.com", "method": "GET"}',
+          OPERATION,
+        ),
+    ).toThrow("Invalid endpoint: 'path' must be a string.");
+  });
+
+  it('should reject an endpoint that is not an object', () => {
+    expect(
+      () => new RestApiTool('test_tool', 'description', 'null', OPERATION),
+    ).toThrow("Invalid endpoint: 'baseUrl' must be a string.");
+  });
+
+  it('should reject an operation that is an array', () => {
+    expect(
+      () => new RestApiTool('test_tool', 'description', ENDPOINT, '[]'),
+    ).toThrow('Invalid operation: must be an object.');
+  });
+
+  it('should reject an operation that is null', () => {
+    expect(
+      () => new RestApiTool('test_tool', 'description', ENDPOINT, 'null'),
+    ).toThrow('Invalid operation: must be an object.');
+  });
+
+  it('should reject a credential with no authType', () => {
+    expect(() => newTool().configureAuthCredential('{"apiKey": "k"}')).toThrow(
+      "Invalid auth credential: 'authType' must be a string.",
+    );
+  });
+
+  it('should reject a credential that is an array', () => {
+    expect(() => newTool().configureAuthCredential('[]')).toThrow(
+      "Invalid auth credential: 'authType' must be a string.",
+    );
+  });
+
+  it('should surface a JSON syntax error', () => {
+    expect(
+      () => new RestApiTool('test_tool', 'description', '{not json', OPERATION),
+    ).toThrow(SyntaxError);
+  });
+});
+
+describe('RestApiTool response parsing', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    [
+      'a JSON body served as text/plain',
+      '{"ok":true}',
+      'text/plain',
+      {ok: true},
+    ],
+    [
+      'a JSON body served as application/json',
+      '{"ok":true}',
+      'application/json',
+      {ok: true},
+    ],
+    [
+      'a body that is not JSON',
+      'plain text',
+      'text/plain',
+      {text: 'plain text'},
+    ],
+    ['an empty body', '', 'text/plain', {text: ''}],
+    ['a JSON string body', '"hi"', 'application/json', 'hi'],
+    ['a JSON number body', '42', 'application/json', 42],
+  ])('should return %s', async (_label, body, contentType, expected) => {
+    const tool = newTool();
+    stubFetch(body, contentType);
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: {} as unknown as Context,
+    });
+
+    expect(result).toEqual(expected);
+  });
+
+  it('should report a transport failure rather than a parse failure', async () => {
+    const tool = newTool();
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network down'));
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: {} as unknown as Context,
+    });
+
+    expect(result).toEqual({
+      error: 'Failed to execute API call: network down',
     });
   });
 });
