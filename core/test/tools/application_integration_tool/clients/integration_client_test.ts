@@ -18,11 +18,17 @@ const quotaProjectId = vi.fn();
 const authClientRequests = vi.fn();
 /** Stands in for `AuthClient.request`, which signs and sends every call. */
 const request = vi.fn();
+/** Error the Application Default Credentials lookup fails with, if any. */
+const adcError = vi.fn<() => Error | undefined>();
 
 vi.mock('google-auth-library', () => ({
   GoogleAuth: class {
     getClient() {
       authClientRequests();
+      const error = adcError();
+      if (error) {
+        return Promise.reject(error);
+      }
       return Promise.resolve({
         getAccessToken,
         request,
@@ -171,6 +177,7 @@ describe('IntegrationClient', () => {
     getAccessToken.mockResolvedValue({token: 'test_token'});
     getProjectId.mockResolvedValue('adc-project');
     quotaProjectId.mockReturnValue(undefined);
+    adcError.mockReturnValue(undefined);
   });
 
   afterEach(() => {
@@ -319,6 +326,31 @@ describe('IntegrationClient', () => {
       ).rejects.toThrow('Request error: 500 Error');
     });
 
+    it('reports a failing status that carries no status text', async () => {
+      request.mockResolvedValue({status: 503, data: {}});
+
+      await expect(
+        createClient({
+          integration: 'test-integration',
+          triggers: [],
+        }).getOpenApiSpecForIntegration(),
+      ).rejects.toThrow(/^Request error: 503$/);
+    });
+
+    it('lets the auth client treat a failing status as a value', async () => {
+      request.mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
+
+      await createClient({
+        integration: 'test-integration',
+        triggers: [],
+      }).getOpenApiSpecForIntegration();
+
+      const {validateStatus} = request.mock.calls[0][0] as {
+        validateStatus: (status: number) => boolean;
+      };
+      expect(validateStatus(500)).toBe(true);
+    });
+
     it('reports a transport failure as a request error', async () => {
       request.mockRejectedValue(new Error('socket hang up'));
 
@@ -364,6 +396,23 @@ describe('IntegrationClient', () => {
           triggers: [],
         }).getOpenApiSpecForIntegration(),
       ).rejects.toThrow('Credentials error: no ADC');
+    });
+
+    it('surfaces a failed Application Default Credentials lookup', async () => {
+      adcError.mockReturnValue(
+        new Error('Could not load the default credentials'),
+      );
+
+      await expect(
+        createClient({
+          integration: 'test-integration',
+          triggers: [],
+        }).getOpenApiSpecForIntegration(),
+      ).rejects.toThrow(
+        'Credentials error: Could not load the default credentials',
+      );
+      expect(getAccessToken).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled();
     });
 
     it('rejects a response body that is not a JSON object', async () => {
