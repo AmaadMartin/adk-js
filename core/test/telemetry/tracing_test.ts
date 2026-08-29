@@ -9,6 +9,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   BaseAgent,
+  BaseTool,
   Event,
   InvocationContext,
   LlmRequest,
@@ -16,8 +17,6 @@ import {
   Session,
   createEventActions,
 } from '@google/adk';
-// The tracing functions under test are imported from source, so the tools they
-// accept must be typed by the same source module.
 import {
   GCP_MCP_SERVER_DESTINATION_ID,
   traceAgentInvocation,
@@ -25,7 +24,6 @@ import {
   traceMergedToolCalls,
   traceToolCall,
 } from '../../src/telemetry/tracing.js';
-import {BaseTool} from '../../src/tools/base_tool.js';
 
 class MetadataTool extends BaseTool {
   constructor(customMetadata: Record<string, unknown> | undefined) {

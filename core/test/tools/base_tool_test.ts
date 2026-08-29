@@ -5,6 +5,7 @@
  */
 
 import {BaseTool, ToolArgsConfig} from '@google/adk';
+import {FunctionResponseScheduling} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 class PlainTool extends BaseTool {
@@ -166,6 +167,44 @@ describe('BaseTool.fromConfig', () => {
 
     expect(tool.isLongRunning).toBe(true);
     expect(tool.customMetadata).toEqual({'my.vendor.key': 'v'});
+  });
+
+  it('carries responseScheduling through', () => {
+    const tool = PlainTool.fromConfig(
+      {
+        name: 'plain_tool',
+        description: 'A tool.',
+        responseScheduling: FunctionResponseScheduling.SILENT,
+      },
+      CONFIG_PATH,
+    );
+
+    expect(tool.responseScheduling).toBe(FunctionResponseScheduling.SILENT);
+  });
+
+  it('leaves responseScheduling undefined when the config omits it', () => {
+    const tool = PlainTool.fromConfig(
+      {name: 'plain_tool', description: 'A tool.'},
+      CONFIG_PATH,
+    );
+
+    expect(tool.responseScheduling).toBeUndefined();
+  });
+
+  it('rejects a responseScheduling outside the enum', () => {
+    expect(() =>
+      PlainTool.fromConfig(
+        {
+          name: 'plain_tool',
+          description: 'A tool.',
+          responseScheduling: 'EVENTUALLY',
+        },
+        CONFIG_PATH,
+      ),
+    ).toThrow(
+      'Invalid tool config: "responseScheduling" must be one of ' +
+        'SCHEDULING_UNSPECIFIED, SILENT, WHEN_IDLE, INTERRUPT, got string.',
+    );
   });
 
   it('ignores a key the base implementation does not recognize', () => {

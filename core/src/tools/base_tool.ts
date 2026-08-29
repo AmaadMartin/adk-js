@@ -264,6 +264,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+const SCHEDULING_VALUES: readonly string[] = Object.values(
+  FunctionResponseScheduling,
+);
+
+function isResponseScheduling(
+  value: unknown,
+): value is FunctionResponseScheduling {
+  return typeof value === 'string' && SCHEDULING_VALUES.includes(value);
+}
+
 function describeType(value: unknown): string {
   if (value === null) {
     return 'null';
@@ -289,7 +299,8 @@ function invalidToolConfig(
  * @throws Error if a recognized key holds a value of the wrong type.
  */
 function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
-  const {name, description, isLongRunning, customMetadata} = config;
+  const {name, description, isLongRunning, customMetadata, responseScheduling} =
+    config;
   if (typeof name !== 'string') {
     throw invalidToolConfig('name', 'a string', name);
   }
@@ -302,7 +313,23 @@ function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
   if (customMetadata !== undefined && !isPlainObject(customMetadata)) {
     throw invalidToolConfig('customMetadata', 'an object', customMetadata);
   }
-  return {name, description, isLongRunning, customMetadata};
+  if (
+    responseScheduling !== undefined &&
+    !isResponseScheduling(responseScheduling)
+  ) {
+    throw invalidToolConfig(
+      'responseScheduling',
+      `one of ${SCHEDULING_VALUES.join(', ')}`,
+      responseScheduling,
+    );
+  }
+  return {
+    name,
+    description,
+    isLongRunning,
+    customMetadata,
+    responseScheduling,
+  };
 }
 
 function findToolWithFunctionDeclarations(
