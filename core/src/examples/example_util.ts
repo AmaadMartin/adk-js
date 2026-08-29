@@ -122,16 +122,10 @@ export function buildExampleSi(
     return Promise.resolve(convertExamplesToText(examples, model));
   }
   if (isBaseExampleProvider(examples)) {
-    return renderProviderExamples(examples, query, model);
+    return Promise.resolve(examples.getExamples(query)).then((resolved) =>
+      convertExamplesToText(resolved, model),
+    );
   }
 
   throw new Error('Invalid example configuration');
-}
-
-async function renderProviderExamples(
-  provider: BaseExampleProvider,
-  query: string,
-  model?: string,
-): Promise<string> {
-  return convertExamplesToText(await provider.getExamples(query), model);
 }
