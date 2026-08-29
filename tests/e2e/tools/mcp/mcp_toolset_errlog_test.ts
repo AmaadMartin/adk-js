@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {McpConnectionError, MCPToolset} from '@google/adk';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  McpConnectionError,
+  MCPToolset,
+  PluginManager,
+} from '@google/adk';
 import {Writable} from 'node:stream';
 import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -22,6 +29,9 @@ const SERVER_PATH = fileURLToPath(
 
 /** Written to stderr by the fixture server once it is connected. */
 const STDERR_BANNER = 'e2e-errlog-server: ready';
+
+/** Written to stderr by the fixture server while the `ping` tool runs. */
+const STDERR_TOOL_LINE = 'e2e-errlog-server: ping called';
 
 /** Milliseconds to wait for the child process to flush its stderr. */
 const STDERR_FLUSH_TIMEOUT_MS = 5000;
@@ -52,6 +62,17 @@ async function waitForText(
   }
 }
 
+/** A tool context with the minimum an MCP tool call reads from it. */
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'e2e-invocation',
+      session: createSession({id: 's1', appName: 'app', userId: 'user'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
+}
+
 describe('MCPToolset errlog (e2e, real MCP server over stdio)', () => {
   let toolset: MCPToolset | undefined;
 
@@ -80,6 +101,28 @@ describe('MCPToolset errlog (e2e, real MCP server over stdio)', () => {
       {uri: 'file:///greeting.txt', mimeType: 'text/plain', text: 'hello'},
     ]);
     await waitForText(errlog.text, STDERR_BANNER);
+  });
+
+  it('forwards the server stderr while a tool runs', async () => {
+    const errlog = capturingStream();
+    toolset = new MCPToolset(
+      {
+        type: 'StdioConnectionParams',
+        serverParams: {command: process.execPath, args: [SERVER_PATH]},
+      },
+      [],
+      undefined,
+      {errlog: errlog.stream},
+    );
+    const tools = await toolset.getTools();
+    const ping = tools.find((tool) => tool.name === 'ping');
+    if (ping === undefined) {
+      expect.fail(`the fixture server advertised no ping tool: ${tools}`);
+    }
+
+    await ping.runAsync({args: {}, toolContext: createToolContext()});
+
+    await waitForText(errlog.text, STDERR_TOOL_LINE);
   });
 
   it('names the failed operation when the server command does not exist', async () => {

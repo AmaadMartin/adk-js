@@ -5,8 +5,14 @@
  */
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+import {Writable} from 'node:stream';
 import {describe, expect, it, vi} from 'vitest';
+import {Context} from '../../../src/agents/context.js';
+import {InvocationContext} from '../../../src/agents/invocation_context.js';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {createSession} from '../../../src/sessions/session.js';
 import {
   MCPConnectionParams,
   McpConnectionError,
@@ -467,6 +473,63 @@ describe('MCPToolset', () => {
       expect((error as Error).message).toBe(
         "Resource with name 'nope' not found.",
       );
+    });
+  });
+
+  describe('errlog', () => {
+    /** A writable stream that keeps everything written to it. */
+    function capturingStream(): Writable {
+      return new Writable({
+        write(_chunk, _encoding, callback) {
+          callback();
+        },
+      });
+    }
+
+    /** A tool context with the minimum the MCP tool reads from it. */
+    function createToolContext(): Context {
+      return new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'inv-1',
+          session: createSession({id: 's1', appName: 'app', userId: 'user'}),
+          pluginManager: new PluginManager([]),
+        }),
+      });
+    }
+
+    it('asks the stdio server to pipe its stderr when a tool runs', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      const toolset = new MCPToolset(stdioParams, [], undefined, {
+        errlog: capturingStream(),
+      });
+      const tools = await toolset.getTools();
+      vi.mocked(StdioClientTransport).mockClear();
+      vi.mocked(Client).mockImplementationOnce(() =>
+        stubClient({callTool: vi.fn().mockResolvedValue({content: []})}),
+      );
+
+      await tools[0].runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(StdioClientTransport).toHaveBeenCalledWith({
+        command: 'test',
+        stderr: 'pipe',
+      });
+    });
+
+    it('leaves the stdio server stderr inherited when no errlog is set', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      const toolset = new MCPToolset(stdioParams);
+      const tools = await toolset.getTools();
+      vi.mocked(StdioClientTransport).mockClear();
+      vi.mocked(Client).mockImplementationOnce(() =>
+        stubClient({callTool: vi.fn().mockResolvedValue({content: []})}),
+      );
+
+      await tools[0].runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(StdioClientTransport).toHaveBeenCalledWith({command: 'test'});
     });
   });
 });

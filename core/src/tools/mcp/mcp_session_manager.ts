@@ -41,12 +41,13 @@ export class McpConnectionError extends Error {
   }
 }
 
-/** Options accepted by {@link MCPSessionManager.createSession}. */
-export interface CreateSessionOptions {
+/** Optional configuration for an {@link MCPSessionManager}. */
+export interface MCPSessionManagerOptions {
   /**
-   * Stream that receives the MCP server's stderr and this session's transport
-   * errors. When omitted, transport errors go to `logger.error` and a stdio
-   * server's stderr is inherited by the parent process.
+   * Stream that receives the MCP server's stderr and the transport errors of
+   * every session this manager opens, including the ones an {@link MCPTool}
+   * opens to run a tool. When omitted, transport errors go to `logger.error`
+   * and a stdio server's stderr is inherited by the parent process.
    */
   errlog?: Writable;
 }
@@ -152,13 +153,18 @@ export class MCPSessionManager {
    * outlive `client.close()` — currently the stderr pipe into `errlog`.
    */
   private readonly activeSessions = new Map<Client, (() => void) | undefined>();
+  private readonly errlog?: Writable;
 
-  constructor(connectionParams: MCPConnectionParams) {
+  constructor(
+    connectionParams: MCPConnectionParams,
+    options: MCPSessionManagerOptions = {},
+  ) {
     this.connectionParams = connectionParams;
+    this.errlog = options.errlog;
   }
 
-  async createSession(options: CreateSessionOptions = {}): Promise<Client> {
-    const {errlog} = options;
+  async createSession(): Promise<Client> {
+    const {errlog} = this;
     const {Client} = await loadOptionalPeer(
       MCP_SDK,
       () => import('@modelcontextprotocol/sdk/client/index.js'),

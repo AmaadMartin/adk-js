@@ -33,9 +33,11 @@ import {MCPTool} from './mcp_tool.js';
 /** Optional configuration for an {@link MCPToolset}. */
 export interface McpToolsetOptions {
   /**
-   * Stream that receives the MCP server's stderr and its transport errors.
-   * When omitted, transport errors go to the ADK logger and a stdio server's
-   * stderr is inherited by the parent process.
+   * Stream that receives the MCP server's stderr and its transport errors, for
+   * every session the toolset opens — tool discovery, resource reads, and the
+   * sessions its {@link MCPTool}s open to run a tool. When omitted, transport
+   * errors go to the ADK logger and a stdio server's stderr is inherited by
+   * the parent process.
    */
   errlog?: Writable;
 }
@@ -102,7 +104,6 @@ function nameFailedOperation(operation: string, err: unknown): unknown {
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
-  private readonly errlog?: Writable;
 
   constructor(
     connectionParams: MCPConnectionParams,
@@ -111,8 +112,9 @@ export class MCPToolset extends BaseToolset {
     options: McpToolsetOptions = {},
   ) {
     super(toolFilter, prefix);
-    this.mcpSessionManager = new MCPSessionManager(connectionParams);
-    this.errlog = options.errlog;
+    this.mcpSessionManager = new MCPSessionManager(connectionParams, {
+      errlog: options.errlog,
+    });
   }
 
   /**
@@ -136,9 +138,7 @@ export class MCPToolset extends BaseToolset {
   ): Promise<T> {
     let session: Client | undefined;
     try {
-      session = await this.mcpSessionManager.createSession({
-        errlog: this.errlog,
-      });
+      session = await this.mcpSessionManager.createSession();
       return await run(session);
     } catch (err: unknown) {
       throw nameFailedOperation(operation, err);

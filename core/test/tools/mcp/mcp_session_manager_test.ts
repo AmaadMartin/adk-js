@@ -330,12 +330,15 @@ describe('MCPSessionManager', () => {
     }
 
     it('asks a stdio server to pipe its stderr', async () => {
-      const manager = new MCPSessionManager({
-        type: 'StdioConnectionParams',
-        serverParams: {command: 'test-command'},
-      });
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog: capturingStream().stream},
+      );
 
-      await manager.createSession({errlog: capturingStream().stream});
+      await manager.createSession();
 
       expect(StdioClientTransport).toHaveBeenCalledWith({
         command: 'test-command',
@@ -360,12 +363,15 @@ describe('MCPSessionManager', () => {
       const serverStderr = new PassThrough();
       stubStdioTransport(serverStderr);
       const errlog = capturingStream();
-      const manager = new MCPSessionManager({
-        type: 'StdioConnectionParams',
-        serverParams: {command: 'test-command'},
-      });
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog: errlog.stream},
+      );
 
-      await manager.createSession({errlog: errlog.stream});
+      await manager.createSession();
       serverStderr.write('server said something\n');
       await flushStreams();
 
@@ -376,12 +382,15 @@ describe('MCPSessionManager', () => {
       const serverStderr = new PassThrough();
       stubStdioTransport(serverStderr);
       const errlog = capturingStream();
-      const manager = new MCPSessionManager({
-        type: 'StdioConnectionParams',
-        serverParams: {command: 'test-command'},
-      });
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog: errlog.stream},
+      );
 
-      const client = await manager.createSession({errlog: errlog.stream});
+      const client = await manager.createSession();
       serverStderr.write('before close\n');
       await flushStreams();
       await manager.closeSession(client);
@@ -395,12 +404,15 @@ describe('MCPSessionManager', () => {
     it('tolerates a stdio transport that exposes no stderr', async () => {
       stubStdioTransport(null);
       const errlog = capturingStream();
-      const manager = new MCPSessionManager({
-        type: 'StdioConnectionParams',
-        serverParams: {command: 'test-command'},
-      });
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog: errlog.stream},
+      );
 
-      const client = await manager.createSession({errlog: errlog.stream});
+      const client = await manager.createSession();
       await manager.closeSession(client);
 
       expect(errlog.text()).toBe('');
@@ -410,12 +422,12 @@ describe('MCPSessionManager', () => {
     it('sends a transport error to errlog instead of the logger', async () => {
       const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
       const errlog = capturingStream();
-      const manager = new MCPSessionManager({
-        type: 'StreamableHTTPConnectionParams',
-        url: 'http://test-url',
-      });
+      const manager = new MCPSessionManager(
+        {type: 'StreamableHTTPConnectionParams', url: 'http://test-url'},
+        {errlog: errlog.stream},
+      );
 
-      await manager.createSession({errlog: errlog.stream});
+      await manager.createSession();
       const transport = vi
         .mocked(StreamableHTTPClientTransport)
         .mock.instances.at(-1);
