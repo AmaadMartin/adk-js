@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenApiSpecParser} from '@google/adk';
+import {OpenApiSpecParser, ParsedOperation} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
-import {resolveReferences} from '../../../src/tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 
 describe('OpenApiSpecParser', () => {
   it('should resolve internal references', () => {
@@ -429,12 +428,12 @@ describe('OpenApiSpecParser', () => {
     });
   });
 
-  describe('resolveReferences', () => {
+  describe('shared references', () => {
     it('should give each use of a reference its own subtree', () => {
-      const resolved = resolveReferences(sharedRefSpec());
+      const parsed = new OpenApiSpecParser().parse(sharedRefSpec());
 
       const schemas = SHARED_REF_PATHS.map((path) =>
-        requestSchema(resolved, path),
+        requestSchema(parsed, path),
       );
 
       expect(new Set(schemas).size).toBe(SHARED_REF_PATHS.length);
@@ -443,16 +442,24 @@ describe('OpenApiSpecParser', () => {
     });
 
     it('should keep an edit to one use out of the others', () => {
-      const resolved = resolveReferences(sharedRefSpec());
+      const parsed = new OpenApiSpecParser().parse(sharedRefSpec());
 
-      requestSchema(resolved, '/a').properties!.name = {type: 'integer'};
+      requestSchema(parsed, '/a').properties!.name = {type: 'integer'};
 
-      expect(requestSchema(resolved, '/b').properties?.name).toEqual({
+      expect(requestSchema(parsed, '/b').properties?.name).toEqual({
         type: 'string',
       });
-      expect(requestSchema(resolved, '/c').properties?.name).toEqual({
+      expect(requestSchema(parsed, '/c').properties?.name).toEqual({
         type: 'string',
       });
+    });
+
+    it('should leave the caller’s document unchanged', () => {
+      const spec = sharedRefSpec();
+
+      new OpenApiSpecParser().parse(spec);
+
+      expect(spec).toEqual(sharedRefSpec());
     });
   });
 });
@@ -527,10 +534,11 @@ function sharedRefSpec(): OpenAPIV3.Document {
 
 /** Reads a resolved request body schema, failing the test if it is missing. */
 function requestSchema(
-  spec: OpenAPIV3.Document,
+  parsed: ParsedOperation[],
   path: string,
 ): OpenAPIV3.SchemaObject {
-  const requestBody = spec.paths[path]?.post?.requestBody;
+  const operation = parsed.find((op) => op.endpoint.path === path)?.operation;
+  const requestBody = operation?.requestBody;
   if (!requestBody || '$ref' in requestBody) {
     expect.fail(`no resolved request body on ${path}`);
   }

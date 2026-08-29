@@ -68,12 +68,9 @@ export class OpenApiSpecParser {
  * Resolves all internal $ref references in the OpenAPI spec document.
  *
  * The cache holds one resolved subtree per reference and hands out a copy of
- * it, so two uses of one reference never share an object. Exported for its own
- * tests; `index.ts` does not re-export it.
+ * it, so two uses of one reference never share an object.
  */
-export function resolveReferences(
-  spec: OpenAPIV3.Document,
-): OpenAPIV3.Document {
+function resolveReferences(spec: OpenAPIV3.Document): OpenAPIV3.Document {
   const resolvedCache = new Map<string, unknown>();
   const specCopy = JSON.parse(JSON.stringify(spec)); // Deep copy
 
@@ -153,12 +150,13 @@ function resolveRef(
 
 /**
  * Sanitizes schema types in the spec to ensure compatibility with Gemini function calling.
+ *
+ * Edits the document in place. Its one caller owns a document that
+ * `resolveReferences` built, so no caller of `parse` shares it.
  */
 function sanitizeSchemaTypes(
   openapiSpec: OpenAPIV3.Document,
 ): OpenAPIV3.Document {
-  const specCopy = JSON.parse(JSON.stringify(openapiSpec));
-
   const sanitizeTypeField = (schemaDict: Record<string, unknown>) => {
     if (!('type' in schemaDict)) return;
 
@@ -214,7 +212,7 @@ function sanitizeSchemaTypes(
     return objRecord;
   };
 
-  return sanitizeRecursive(specCopy, false) as OpenAPIV3.Document;
+  return sanitizeRecursive(openapiSpec, false) as OpenAPIV3.Document;
 }
 
 /**
