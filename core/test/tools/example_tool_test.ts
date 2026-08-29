@@ -220,7 +220,7 @@ const CONFIG_PATH = fileURLToPath(
  * parsed at run time, so its contents are not what the type promises.
  */
 function malformedConfig(examples: unknown): ExampleToolConfig {
-  return {examples} as unknown as ExampleToolConfig;
+  return {examples} as ExampleToolConfig;
 }
 
 /** Runs the tool and returns the system instruction it appended. */

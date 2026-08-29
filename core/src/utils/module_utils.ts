@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {builtinModules} from 'node:module';
+import {isBuiltin} from 'node:module';
 import {isAbsolute} from 'node:path';
 import {pathToFileURL} from 'node:url';
 
@@ -16,12 +16,6 @@ const EXPORT_SEPARATOR = '#';
 /** Export read when a qualified name names no export. */
 const DEFAULT_EXPORT = 'default';
 
-/** Prefix of an explicitly namespaced Node built-in specifier. */
-const BUILTIN_PREFIX = 'node:';
-
-/** Every Node built-in module, by the bare name a specifier may use. */
-const BUILTIN_MODULES = new Set(builtinModules);
-
 /** Splits a qualified name into its module specifier and its export name. */
 function splitQualifiedName(name: string): [string, string] {
   const separatorIndex = name.indexOf(EXPORT_SEPARATOR);
@@ -30,11 +24,6 @@ function splitQualifiedName(name: string): [string, string] {
   }
   const exportName = name.slice(separatorIndex + 1);
   return [name.slice(0, separatorIndex), exportName || DEFAULT_EXPORT];
-}
-
-/** Returns true when the specifier names a Node built-in module. */
-function isBuiltinModule(specifier: string): boolean {
-  return specifier.startsWith(BUILTIN_PREFIX) || BUILTIN_MODULES.has(specifier);
 }
 
 /** Returns true when the specifier is resolved against a base file. */
@@ -96,7 +85,7 @@ export async function resolveFullyQualifiedName(
   baseFilePath?: string,
 ): Promise<unknown> {
   const [specifier, exportName] = splitQualifiedName(name);
-  if (isBuiltinModule(specifier)) {
+  if (isBuiltin(specifier)) {
     throw invalidName(
       name,
       new Error(
