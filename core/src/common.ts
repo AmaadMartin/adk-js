@@ -113,7 +113,10 @@ export type {BaseAuthProvider} from './auth/base_auth_provider.js';
 export type {BaseCredentialService} from './auth/credential_service/base_credential_service.js';
 export {InMemoryCredentialService} from './auth/credential_service/in_memory_credential_service.js';
 export {SessionStateCredentialService} from './auth/credential_service/session_state_credential_service.js';
-export {CredentialExchangeError} from './auth/exchanger/base_credential_exchanger.js';
+export {
+  AuthCredentialMissingError,
+  CredentialExchangeError,
+} from './auth/exchanger/base_credential_exchanger.js';
 export type {
   BaseCredentialExchanger,
   ExchangeResult,
