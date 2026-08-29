@@ -167,10 +167,9 @@ function getConversationWithAgent(
 /**
  * Adapts a compiled LangGraph state graph for single or multi-turn use.
  *
- * `@langchain/langgraph` and `@langchain/core` are optional peer dependencies:
- * the graph is accepted structurally and the LangChain message constructors
- * are imported lazily, so importing `@google/adk` in a tree where neither is
- * installed never throws.
+ * `@langchain/core` is an optional peer dependency, loaded lazily; the graph is
+ * accepted structurally, so `@google/adk` never imports `@langchain/langgraph`
+ * at all.
  *
  * Each run yields one event carrying the graph's last message; the graph's
  * intermediate messages do not become events. Live mode is not supported.
@@ -208,13 +207,11 @@ export class LangGraphAgent extends BaseAgent<LangGraphAgentConfig> {
 
     // The graph only holds state that can be read back when it was compiled
     // with a checkpointer.
-    let hasGraphHistory = false;
-    if (hasCheckpointer) {
-      const state = await this.graph.getState(config);
-      const graphMessages = state.values?.['messages'];
-      hasGraphHistory =
-        Array.isArray(graphMessages) && graphMessages.length > 0;
-    }
+    const graphMessages = hasCheckpointer
+      ? (await this.graph.getState(config)).values?.['messages']
+      : undefined;
+    const hasGraphHistory =
+      Array.isArray(graphMessages) && graphMessages.length > 0;
 
     const ctors = await loadOptionalPeer(
       {packageName: '@langchain/core', feature: 'LangGraphAgent'},
