@@ -370,6 +370,101 @@ describe('CLI Entrypoint', () => {
     });
   });
 
+  describe('option: --log_to_tmp', () => {
+    /** Makes the next server the CLI builds fail to start. */
+    const failNextStart = (message: string) => {
+      (AdkApiServer as unknown as Mock).mockImplementationOnce(() => ({
+        start: vi.fn().mockRejectedValue(new Error(message)),
+      }));
+    };
+
+    it('sends the web server logs to the temp folder and prints where', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await parse(['web', '--log_to_tmp']);
+
+      expect(logToTmpFolder).toHaveBeenCalledTimes(1);
+      expect(logSpy).toHaveBeenCalledWith(
+        `Log setup complete: ${LOG_FILE_PATH}`,
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        `To access latest log: tail -F ${LATEST_LOG_PATH}`,
+      );
+    });
+
+    it('sends the api server logs to the temp folder', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await parse(['api_server', '--log_to_tmp']);
+
+      expect(logToTmpFolder).toHaveBeenCalledTimes(1);
+    });
+
+    it('still starts the server it was asked for', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await parse(['api_server', '--log_to_tmp', '--port', '9091']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args).toMatchObject({port: 9091, serveDebugUI: false});
+    });
+
+    it('ignores an explicit --log_to_tmp false', async () => {
+      await parse(['web', '--log_to_tmp', 'false']);
+
+      expect(logToTmpFolder).not.toHaveBeenCalled();
+    });
+
+    it('names the log file on the terminal when the web server fails', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      failNextStart('port in use');
+
+      await expect(parse(['web', '--log_to_tmp'])).rejects.toThrow('exit');
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        `Error starting web server: port in use (see ${LOG_FILE_PATH})`,
+      );
+      // The mocked exit throws, so this call can only have run before it.
+      expect(resetFileLogTarget).toHaveBeenCalled();
+    });
+
+    it('names the log file on the terminal when the api server fails', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      failNextStart('port in use');
+
+      await expect(parse(['api_server', '--log_to_tmp'])).rejects.toThrow(
+        'exit',
+      );
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        `Error starting API server: port in use (see ${LOG_FILE_PATH})`,
+      );
+      expect(resetFileLogTarget).toHaveBeenCalled();
+    });
+
+    it('leaves a failing web server reporting through the console logger', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const exit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => undefined) as never);
+      failNextStart('port in use');
+
+      await parse(['web']);
+
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(resetFileLogTarget).not.toHaveBeenCalled();
+      expect(exit).toHaveBeenCalledWith(1);
+    });
+  });
+
   describe('command: deploy cloud_run', () => {
     it('should call deployToCloudRun with defaults', async () => {
       await parse(['deploy', 'cloud_run']);
