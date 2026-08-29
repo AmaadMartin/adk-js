@@ -20,7 +20,11 @@ export interface FakeResponse {
 /** The arguments the converter passes to `https.request`. */
 export interface CapturedRequest {
   url: string;
-  options: {agent?: unknown; headers?: Record<string, string>};
+  options: {
+    agent?: unknown;
+    headers?: Record<string, string>;
+    timeout?: number;
+  };
 }
 
 /** Makes a mocked `https.request` answer every call the same way. */
@@ -43,6 +47,29 @@ export function respondWith(requestMock: Mock, response: FakeResponse): void {
       return {on: vi.fn(), end: vi.fn()};
     },
   );
+}
+
+/**
+ * Makes a mocked `https.request` time out instead of answering.
+ *
+ * The fake follows Node here: the timeout only emits an event, and the request
+ * fails with whatever error the caller destroys it with.
+ */
+export function timeoutRequest(requestMock: Mock): void {
+  requestMock.mockImplementation(() => {
+    const listeners = new Map<string, (error?: Error) => void>();
+    return {
+      on: (event: string, listener: (error?: Error) => void) => {
+        listeners.set(event, listener);
+      },
+      destroy: (error: Error) => {
+        listeners.get('error')?.(error);
+      },
+      end: () => {
+        listeners.get('timeout')?.();
+      },
+    };
+  });
 }
 
 /** Makes a mocked `https.request` fail at the connection level. */

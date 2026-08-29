@@ -16,6 +16,7 @@ import {
   capturedRequest,
   failRequestWith,
   respondWith,
+  timeoutRequest,
 } from './https_transport_fake.js';
 
 const {requestMock, agentMock, plainRequestMock} = vi.hoisted(() => ({
@@ -119,6 +120,21 @@ describe('fetchDiscoveryDocument', () => {
     expect(options.headers).toEqual({'Accept': 'application/json'});
     expect(options.agent).toBeUndefined();
     expect(agentMock).not.toHaveBeenCalled();
+  });
+
+  it('bounds the request with a timeout', async () => {
+    await fetchDiscoveryDocument('calendar', 'v3');
+
+    expect(capturedRequest(requestMock).options.timeout).toBe(60_000);
+  });
+
+  it('rejects when the discovery service does not answer in time', async () => {
+    timeoutRequest(requestMock);
+
+    await expect(fetchDiscoveryDocument('calendar', 'v3')).rejects.toThrow(
+      'Discovery request timed out after 60000 ms: ' +
+        'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
+    );
   });
 
   it('substitutes the placeholders of a custom URL template', async () => {

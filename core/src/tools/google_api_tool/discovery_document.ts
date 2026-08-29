@@ -129,6 +129,13 @@ export function resolveDiscoveryUrl(
 const JSON_HEADERS = {'Accept': 'application/json'};
 
 /**
+ * How long one Discovery request may take. Node applies no timeout of its own,
+ * so without this an unresponsive host stalls `convert()` for good. adk-python
+ * gives `httplib2` the same 60 seconds.
+ */
+const DISCOVERY_REQUEST_TIMEOUT_MS = 60_000;
+
+/**
  * One GET, optionally presenting a client certificate.
  *
  * `globalThis.fetch` cannot present a client certificate in Node, which is why
@@ -155,11 +162,16 @@ function getJson(
 
     const request =
       new URL(url).protocol === 'http:'
-        ? http.request(url, {headers: JSON_HEADERS}, collect)
+        ? http.request(
+            url,
+            {headers: JSON_HEADERS, timeout: DISCOVERY_REQUEST_TIMEOUT_MS},
+            collect,
+          )
         : https.request(
             url,
             {
               headers: JSON_HEADERS,
+              timeout: DISCOVERY_REQUEST_TIMEOUT_MS,
               agent: certs
                 ? new https.Agent({
                     cert: certs.cert,
@@ -171,6 +183,14 @@ function getJson(
             collect,
           );
 
+    // A timeout only fires the event; the request stays open until destroyed.
+    request.on('timeout', () => {
+      request.destroy(
+        new Error(
+          `Discovery request timed out after ${DISCOVERY_REQUEST_TIMEOUT_MS} ms: ${url}`,
+        ),
+      );
+    });
     request.on('error', reject);
     request.end();
   });
