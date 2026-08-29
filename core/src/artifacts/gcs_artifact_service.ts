@@ -32,6 +32,13 @@ const GCS_FILE_MIME_TYPE_METADATA_KEY = 'adkFileMimeType';
 const GCS_DISPLAY_NAME_METADATA_KEY = 'adkDisplayName';
 const GCS_IS_TEXT_METADATA_KEY = 'adkIsText';
 const USER_NAMESPACE_PREFIX = 'user:';
+const VERSION_SUFFIX_PATTERN = /^\d+$/;
+
+/** A blob that holds one version of an artifact, with its parsed version. */
+interface VersionedFile {
+  version: number;
+  file: File;
+}
 
 export class GcsArtifactService implements BaseArtifactService {
   private readonly bucketName: string;
@@ -258,43 +265,48 @@ export class GcsArtifactService implements BaseArtifactService {
     return;
   }
 
-  async listVersions(request: ListVersionsRequest): Promise<number[]> {
+  /**
+   * Lists the blobs that hold a version of this artifact, sorted ascending.
+   *
+   * `getFiles` returns the metadata of every listed blob, so both public list
+   * methods are projections of this one request.
+   */
+  private async scanVersions(
+    request: ListVersionsRequest,
+  ): Promise<VersionedFile[]> {
     const prefix = getFileName(request);
     // We need to add a trailing slash to prefix to ensure we only get children
     const searchPrefix = prefix + '/';
     const bucket = await this.getBucket();
     const [files] = await bucket.getFiles({prefix: searchPrefix});
-    const versions = [];
+    const versioned: VersionedFile[] = [];
     for (const file of files) {
       // GCS is a flat namespace: 'doc/' also matches 'doc/nested/3', a version
       // of the distinct artifact 'doc/nested'. Only '{prefix}{digits}' is ours.
       const suffix = file.name.slice(searchPrefix.length);
-      if (/^\d+$/.test(suffix)) {
-        versions.push(Number(suffix));
+      if (VERSION_SUFFIX_PATTERN.test(suffix)) {
+        versioned.push({version: Number(suffix), file});
       }
     }
 
-    return versions.sort((a, b) => a - b);
+    return versioned.sort((a, b) => a.version - b.version);
+  }
+
+  async listVersions(request: ListVersionsRequest): Promise<number[]> {
+    const versioned = await this.scanVersions(request);
+    return versioned.map(({version}) => version);
   }
 
   async listArtifactVersions(
     request: ListVersionsRequest,
   ): Promise<ArtifactVersion[]> {
-    const versions = await this.listVersions(request);
-    const artifactVersions: ArtifactVersion[] = [];
-
-    for (const version of versions) {
-      const artifactVersion = await this.getArtifactVersion({
-        ...request,
-        version,
-      });
-
-      if (artifactVersion) {
-        artifactVersions.push(artifactVersion);
-      }
-    }
-
-    return artifactVersions;
+    const versioned = await this.scanVersions(request);
+    return versioned.map(({version, file}) => ({
+      version,
+      mimeType: file.metadata.contentType,
+      customMetadata: file.metadata.metadata,
+      canonicalUri: file.publicUrl(),
+    }));
   }
 
   async getArtifactVersion(
