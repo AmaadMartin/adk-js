@@ -28,8 +28,14 @@ const OAUTH2_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 /**
  * The alternatives that stand in for Discovery's `any` type, which OpenAPI 3.0
- * has no direct equivalent of. The final member accepts `null`, which in
- * OpenAPI 3.0 is spelled `nullable` rather than as a type.
+ * has no direct equivalent of.
+ *
+ * Every member must constrain the value. `oneOf` means exactly one match, so an
+ * unconstrained member matches everything and pushes every other value to two
+ * matches, which rejects it. That rules out `{nullable: true}` for the null
+ * alternative, because `nullable` without a `type` constrains nothing.
+ * `{enum: [null]}` admits null alone and is the OpenAPI 3.0 spelling of the
+ * `{type: 'null'}` that adk-python emits; both accept the same values.
  */
 const ANY_TYPE_ONE_OF: OpenAPIV3.SchemaObject[] = [
   {type: 'object'},
@@ -37,7 +43,7 @@ const ANY_TYPE_ONE_OF: OpenAPIV3.SchemaObject[] = [
   {type: 'string'},
   {type: 'number'},
   {type: 'boolean'},
-  {nullable: true},
+  {enum: [null]},
 ];
 
 /** The error responses every converted operation declares. */

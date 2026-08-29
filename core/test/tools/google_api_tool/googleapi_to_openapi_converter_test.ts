@@ -378,7 +378,7 @@ describe('convertSchemaObject', () => {
           {type: 'string'},
           {type: 'number'},
           {type: 'boolean'},
-          {nullable: true},
+          {enum: [null]},
         ],
       },
     },
@@ -411,6 +411,19 @@ describe('convertSchemaObject', () => {
 
   it.each(cases)('converts $name', ({schemaDef, expected}) => {
     expect(convertSchemaObject(schemaDef)).toEqual(expected);
+  });
+
+  it('constrains every alternative of the any type', () => {
+    const oneOf = asSchema(convertSchemaObject({type: 'any'})).oneOf ?? [];
+
+    expect(oneOf.length).toBeGreaterThan(0);
+    for (const alternative of oneOf) {
+      // `oneOf` matches exactly one alternative. An alternative that declares
+      // neither `type` nor `enum` matches every value, so every other value
+      // matches twice and the schema then rejects it.
+      const schema = asSchema(alternative);
+      expect(schema.type ?? schema.enum).toBeDefined();
+    }
   });
 
   it('does not expand a dollar pattern in a reference name', () => {
