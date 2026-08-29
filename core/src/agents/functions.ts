@@ -19,7 +19,7 @@ import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../events/event_actions.js';
-import {BaseTool, isErrorDetectingTool} from '../tools/base_tool.js';
+import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
@@ -208,13 +208,12 @@ function detectErrorTypeForTelemetry(
 ): string | undefined {
   if (
     !isEmpty(toolContext.actions.requestedAuthConfigs) ||
-    !isEmpty(toolContext.actions.requestedToolConfirmations) ||
-    !isErrorDetectingTool(tool)
+    !isEmpty(toolContext.actions.requestedToolConfirmations)
   ) {
     return undefined;
   }
   try {
-    return tool.detectErrorInResponse(response);
+    return tool.detectErrorInResponse?.(response);
   } catch (error) {
     logger.error(
       `Error while detecting the error type of tool '${tool.name}'.`,

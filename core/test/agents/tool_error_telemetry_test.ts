@@ -13,7 +13,6 @@ import {
   LlmAgent,
   PluginManager,
   RunAsyncToolRequest,
-  ToolResponseErrorType,
   createSession,
   functionsExportedForTestingOnly,
 } from '@google/adk';
@@ -112,9 +111,7 @@ describe('tool error type telemetry', () => {
     });
 
     expect(await runTool(tool)).toEqual({error: 'not found'});
-    expect(recordedErrorType('failing_tool')).toBe(
-      ToolResponseErrorType.TOOL_ERROR,
-    );
+    expect(recordedErrorType('failing_tool')).toBe('TOOL_ERROR');
   });
 
   it('records nothing when the tool succeeds', async () => {

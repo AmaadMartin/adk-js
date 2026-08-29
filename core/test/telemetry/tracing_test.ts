@@ -15,7 +15,6 @@ import {
   LlmRequest,
   LlmResponse,
   Session,
-  ToolResponseErrorType,
   createEventActions,
 } from '@google/adk';
 import {
@@ -193,7 +192,7 @@ describe('Telemetry Tracing Functions', () => {
         tool: mockTool,
         args: {},
         functionResponseEvent: mockEvent,
-        errorType: ToolResponseErrorType.TOOL_ERROR,
+        errorType: 'TOOL_ERROR',
       });
 
       expect(mockSpan.setAttribute).toHaveBeenCalledWith(

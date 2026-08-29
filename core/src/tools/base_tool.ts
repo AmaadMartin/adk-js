@@ -57,47 +57,6 @@ export function isBaseTool(obj: unknown): obj is BaseTool {
 }
 
 /**
- * The `error.type` values a tool reports for its own response.
- *
- * Distinct from `ToolErrorType`, which labels an HTTP-shaped failure a tool
- * raised. This one labels a failure the tool returned instead of raising.
- */
-export enum ToolResponseErrorType {
-  TOOL_ERROR = 'TOOL_ERROR',
-}
-
-/**
- * A tool that classifies its own response as a failure, for telemetry only.
- *
- * The hook is deliberately absent from {@link BaseTool}: a tool that does not
- * implement it reports no error type at all, rather than inheriting a default
- * classification that does not fit it.
- */
-export interface ToolErrorDetector {
-  /**
-   * The `error.type` to record for `response`, or `undefined` when the
-   * response is not a failure. Must not modify the response. Returns a
-   * {@link ToolResponseErrorType} member, or a tool-specific string.
-   */
-  detectErrorInResponse(response: unknown): string | undefined;
-}
-
-/**
- * Whether `tool` classifies its own responses.
- *
- * Structural, so a tool built by a second copy of this package in the same
- * runtime is still recognized.
- */
-export function isErrorDetectingTool(
-  tool: BaseTool,
-): tool is BaseTool & ToolErrorDetector {
-  return (
-    'detectErrorInResponse' in tool &&
-    typeof tool.detectErrorInResponse === 'function'
-  );
-}
-
-/**
  * The base class for all tools.
  */
 export abstract class BaseTool {
@@ -118,6 +77,15 @@ export abstract class BaseTool {
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
   }
+
+  /**
+   * The `error.type` to record on this call's telemetry span, or `undefined`
+   * when the response is not a failure. Must not modify the response.
+   *
+   * Optional on purpose: a tool that does not implement it reports no error
+   * type at all, rather than inheriting a classification that does not fit it.
+   */
+  detectErrorInResponse?(response: unknown): string | undefined;
 
   /**
    * Gets the OpenAPI specification of this tool in the form of a

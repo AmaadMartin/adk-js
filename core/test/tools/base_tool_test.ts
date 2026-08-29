@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseTool,
-  FunctionTool,
-  RunAsyncToolRequest,
-  isErrorDetectingTool,
-} from '@google/adk';
+import {BaseTool, FunctionTool, RunAsyncToolRequest} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 /** A tool that does not classify its own responses. */
@@ -23,18 +18,18 @@ class PlainTool extends BaseTool {
   }
 }
 
-describe('isErrorDetectingTool', () => {
-  it('accepts a tool that declares the hook', () => {
+describe('BaseTool.detectErrorInResponse', () => {
+  it('is implemented by a tool that classifies its own responses', () => {
     const tool = new FunctionTool({
       name: 'echo',
       description: 'Echoes.',
       execute: () => 'ok',
     });
 
-    expect(isErrorDetectingTool(tool)).toBe(true);
+    expect(typeof tool.detectErrorInResponse).toBe('function');
   });
 
-  it('rejects a tool that does not declare the hook', () => {
-    expect(isErrorDetectingTool(new PlainTool())).toBe(false);
+  it('is absent on a tool that does not declare it', () => {
+    expect(new PlainTool().detectErrorInResponse).toBeUndefined();
   });
 });

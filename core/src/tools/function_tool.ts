@@ -20,12 +20,7 @@ import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
-import {
-  BaseTool,
-  RunAsyncToolRequest,
-  ToolErrorDetector,
-  ToolResponseErrorType,
-} from './base_tool.js';
+import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 
 /**
  * Input parameters of the function tool.
@@ -114,6 +109,9 @@ export type ToolOptions<TParameters extends ToolInputParameters> = {
   requireConfirmation?: RequireConfirmation<TParameters>;
 };
 
+/** The `error.type` a tool reports for a response that carries an error. */
+const TOOL_ERROR = 'TOOL_ERROR';
+
 /** The schema of a tool that declares no parameters. */
 function emptyObjectSchema(): Schema {
   return {type: Type.OBJECT, properties: {}};
@@ -133,19 +131,6 @@ function toSchema<TParameters extends ToolInputParameters>(
   return parameters;
 }
 
-/** What a built declaration depends on, beyond the tool's own fields. */
-interface DeclarationContext {
-  variant: GoogleLLMVariant;
-  jsonSchema: boolean;
-}
-
-function sameDeclarationContext(
-  a: DeclarationContext,
-  b: DeclarationContext,
-): boolean {
-  return a.variant === b.variant && a.jsonSchema === b.jsonSchema;
-}
-
 /**
  * Renders a tool as the declaration sent to the model.
  *
@@ -161,7 +146,8 @@ function buildDeclaration(
   name: string,
   description: string,
   parameters: ToolInputParameters,
-  {variant, jsonSchema}: DeclarationContext,
+  variant: GoogleLLMVariant,
+  jsonSchema: boolean,
 ): FunctionDeclaration {
   if (jsonSchema) {
     const rendered = toJsonSchema(parameters ?? emptyObjectSchema());
@@ -221,10 +207,9 @@ export function isFunctionTool(obj: unknown): obj is FunctionTool {
  * framework validates the arguments and invokes the user-provided `execute`
  * callback.
  */
-export class FunctionTool<TParameters extends ToolInputParameters = undefined>
-  extends BaseTool
-  implements ToolErrorDetector
-{
+export class FunctionTool<
+  TParameters extends ToolInputParameters = undefined,
+> extends BaseTool {
   /** A unique symbol to identify ADK function tool class. */
   readonly [FUNCTION_TOOL_SIGNATURE_SYMBOL] = true;
 
@@ -234,11 +219,8 @@ export class FunctionTool<TParameters extends ToolInputParameters = undefined>
   private readonly parameters?: TParameters;
   // Whether the tool requires user confirmation before running.
   private readonly requireConfirmation: RequireConfirmation<TParameters>;
-  // The last built declaration, with the context it was built for.
-  private declarationCache?: {
-    context: DeclarationContext;
-    declaration: FunctionDeclaration;
-  };
+  // The last built declaration, and the `variant:jsonSchema` key it is for.
+  private cache?: {key: string; declaration: FunctionDeclaration};
 
   /**
    * The constructor acts as the user-friendly factory.
@@ -272,22 +254,22 @@ export class FunctionTool<TParameters extends ToolInputParameters = undefined>
    * declaration or the tool itself.
    */
   override _getDeclaration(): FunctionDeclaration {
-    const context: DeclarationContext = {
-      variant: this.apiVariant,
-      jsonSchema: isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL),
-    };
-    let cache = this.declarationCache;
-    if (!cache || !sameDeclarationContext(cache.context, context)) {
+    const variant = this.apiVariant;
+    const jsonSchema = isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL);
+    const key = `${variant}:${jsonSchema}`;
+    let cache = this.cache;
+    if (cache?.key !== key) {
       cache = {
-        context,
+        key,
         declaration: buildDeclaration(
           this.name,
           this.description,
           this.parameters,
-          context,
+          variant,
+          jsonSchema,
         ),
       };
-      this.declarationCache = cache;
+      this.cache = cache;
     }
     return cloneDeep(cache.declaration);
   }
@@ -306,7 +288,7 @@ export class FunctionTool<TParameters extends ToolInputParameters = undefined>
       'error' in response &&
       response.error
     ) {
-      return ToolResponseErrorType.TOOL_ERROR;
+      return TOOL_ERROR;
     }
     return undefined;
   }
@@ -409,11 +391,13 @@ export class FunctionTool<TParameters extends ToolInputParameters = undefined>
 
   /**
    * The live request queue registered for this tool, or `undefined` outside a
-   * live run. A tool context assembled without an invocation — as several unit
-   * tests do — resolves to `undefined` rather than throwing.
+   * live run.
+   *
+   * `invocationContext` is optional-chained because the repo's tool tests pass
+   * `{} as Context`, which bypasses the constructor that would set it.
    */
-  private inputStream(toolContext?: Context): LiveRequestQueue | undefined {
-    return toolContext?.invocationContext?.activeStreamingTools?.[this.name]
+  private inputStream(toolContext: Context): LiveRequestQueue | undefined {
+    return toolContext.invocationContext?.activeStreamingTools?.[this.name]
       ?.stream;
   }
 

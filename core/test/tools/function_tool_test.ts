@@ -10,7 +10,6 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
-  ToolResponseErrorType,
   createSession,
   isFunctionTool,
 } from '@google/adk';
@@ -940,7 +939,7 @@ describe('FunctionTool.detectErrorInResponse', () => {
 
   it('reports TOOL_ERROR for a response carrying a truthy error', () => {
     expect(tool.detectErrorInResponse({error: 'missing arg'})).toBe(
-      ToolResponseErrorType.TOOL_ERROR,
+      'TOOL_ERROR',
     );
   });
 
