@@ -7,7 +7,9 @@
 /**
  * Converts a string to snake_case.
  *
- * Handles lowerCamelCase, UpperCamelCase, space-separated text and acronyms
+ * This ports `_to_snake_case` from adk-python, so an OpenAPI operation that
+ * omits its `operationId` gets the same generated name in both SDKs. It
+ * handles lowerCamelCase, UpperCamelCase, space-separated text and acronyms
  * such as `REST API`. Leading and trailing separators are removed.
  *
  * ```ts
@@ -16,7 +18,7 @@
  * ```
  *
  * @param text The string to convert.
- * @returns The snake_case form of the string.
+ * @returns The snake_case form, without leading or trailing underscores.
  */
 export function snakeCase(text: string): string {
   return text
