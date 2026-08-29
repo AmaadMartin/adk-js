@@ -277,6 +277,10 @@ export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
+export {
+  BaseRetrievalTool,
+  isBaseRetrievalTool,
+} from './tools/base_retrieval_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
 export type {
   BaseToolParams,
@@ -326,6 +330,20 @@ export {
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
+export {GeminiEmbeddingModel} from './tools/retrieval/embedding_model.js';
+export type {
+  EmbedContentClient,
+  EmbeddingModel,
+  GeminiEmbeddingModelOptions,
+} from './tools/retrieval/embedding_model.js';
+export {InMemoryVectorRetriever} from './tools/retrieval/in_memory_retriever.js';
+export type {IndexedChunk} from './tools/retrieval/in_memory_retriever.js';
+export {RetrieverTool} from './tools/retrieval/retriever_tool.js';
+export type {
+  RetrievedDocument,
+  Retriever,
+  RetrieverToolParams,
+} from './tools/retrieval/retriever_tool.js';
 export {
   IntentMismatchError,
   ToolConfirmation,
