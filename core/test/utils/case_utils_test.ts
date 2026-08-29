@@ -5,9 +5,38 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys} from '../../src/utils/case_utils.js';
+import {camelCaseKeys, snakeCase} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
+  describe('snakeCase', () => {
+    it.each([
+      ['camelCase', 'camel_case'],
+      ['UpperCamelCase', 'upper_camel_case'],
+      ['space separated', 'space_separated'],
+      ['REST API', 'rest_api'],
+      ['getHTTPResponse', 'get_http_response'],
+      ['already_snake', 'already_snake'],
+    ])('should convert %s to %s', (input, expected) => {
+      expect(snakeCase(input)).toBe(expected);
+    });
+
+    it.each([
+      ['/test_get', 'test_get'],
+      ['/users/{id}_get', 'users_id_get'],
+      ['/pets/{petId}_get', 'pets_pet_id_get'],
+      ['/Orders/{orderId}/lineItems_patch', 'orders_order_id_line_items_patch'],
+      ['/v1/REST API/items_post', 'v1_rest_api_items_post'],
+      ['/a--b/_delete', 'a_b_delete'],
+    ])('should name the operation %s the way adk-python does', (path, name) => {
+      expect(snakeCase(path)).toBe(name);
+    });
+
+    it('should return an empty string when nothing alphanumeric remains', () => {
+      expect(snakeCase('___')).toBe('');
+      expect(snakeCase('')).toBe('');
+    });
+  });
+
   describe('camelCaseKeys', () => {
     it('should convert simple object keys', () => {
       const input = {
