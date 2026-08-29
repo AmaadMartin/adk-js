@@ -165,7 +165,6 @@ export type {
 export {
   ToolTrajectoryMatchType,
   TrajectoryEvaluator,
-  parseToolTrajectoryMatchType,
 } from './evaluation/trajectory_evaluator.js';
 export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';

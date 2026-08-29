@@ -18,14 +18,8 @@ export interface IntermediateData {
  * A single user turn and what the agent did with it.
  */
 export interface Invocation {
-  /** Unique identifier for the invocation. */
-  invocationId?: string;
-
   /** Content provided by the user in this invocation. */
   userContent: Content;
-
-  /** Final response from the agent. */
-  finalResponse?: Content;
 
   /** Intermediate steps generated as part of agent execution. */
   intermediateData?: IntermediateData;

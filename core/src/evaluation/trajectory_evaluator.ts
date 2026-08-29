@@ -13,7 +13,6 @@ import {
   EvaluationResult,
   Evaluator,
   PerInvocationResult,
-  validateInvocationLengths,
 } from './evaluator.js';
 
 /** How actual and expected tool call trajectories are compared. */
@@ -109,36 +108,6 @@ const TOOL_TRAJECTORY_MATCHERS: Record<
   [ToolTrajectoryMatchType.ANY_ORDER]: isAnyOrderMatch,
 };
 
-const MATCH_TYPES_BY_NAME = new Map<string, ToolTrajectoryMatchType>(
-  Object.values(ToolTrajectoryMatchType).map((matchType) => [
-    matchType.toUpperCase(),
-    matchType,
-  ]),
-);
-
-/**
- * Resolves a configured match type written as a string.
- *
- * Case, surrounding blanks, hyphens and spaces are all accepted, so `ANY
- * ORDER`, `any-order` and `any_order` all resolve to
- * {@link ToolTrajectoryMatchType.ANY_ORDER}.
- *
- * @throws {InputValidationError} When the string names no match type.
- */
-export function parseToolTrajectoryMatchType(
-  value: string,
-): ToolTrajectoryMatchType {
-  const normalized = value.trim().toUpperCase().replace(/[- ]/g, '_');
-  const matchType = MATCH_TYPES_BY_NAME.get(normalized);
-  if (matchType === undefined) {
-    throw new InputValidationError(
-      `Unknown tool trajectory match type: ${value}.`,
-    );
-  }
-
-  return matchType;
-}
-
 /**
  * Scores an agent's tool use trajectory against an expected one.
  *
@@ -161,16 +130,21 @@ export class TrajectoryEvaluator implements Evaluator {
    * @throws {InputValidationError} When `expectedInvocations` is missing, or
    *   when the two lists have different lengths.
    */
-  evaluateInvocations(
+  async evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-  ): EvaluationResult {
+  ): Promise<EvaluationResult> {
     if (expectedInvocations === undefined) {
       throw new InputValidationError(
         'expectedInvocations is needed by this metric.',
       );
     }
-    validateInvocationLengths(actualInvocations, expectedInvocations);
+    if (actualInvocations.length !== expectedInvocations.length) {
+      throw new InputValidationError(
+        'actualInvocations and expectedInvocations must have the same length; ' +
+          `got ${actualInvocations.length} and ${expectedInvocations.length}.`,
+      );
+    }
 
     const scores = actualInvocations.map((actual, index) =>
       this.scoreInvocation(actual, expectedInvocations[index]),

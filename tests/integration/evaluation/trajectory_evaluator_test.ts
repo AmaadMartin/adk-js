@@ -96,7 +96,7 @@ describe('TrajectoryEvaluator against a real agent run', () => {
       intermediateData: {toolUses: [{name: 'roll_die', args: {sides: 16}}]},
     };
 
-    const result = new TrajectoryEvaluator({
+    const result = await new TrajectoryEvaluator({
       threshold: 1.0,
     }).evaluateInvocations([actual], [expected]);
 
@@ -112,7 +112,7 @@ describe('TrajectoryEvaluator against a real agent run', () => {
       intermediateData: {toolUses: [{name: 'roll_die', args: {sides: 6}}]},
     };
 
-    const result = new TrajectoryEvaluator({
+    const result = await new TrajectoryEvaluator({
       threshold: 1.0,
     }).evaluateInvocations([actual], [expected]);
 

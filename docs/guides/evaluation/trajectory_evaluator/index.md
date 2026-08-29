@@ -29,77 +29,40 @@ predict it.
 ## Get started
 
 The actual trajectory comes from a real run. `getFunctionCalls` turns the
-session events into the list of calls the agent made.
+session events into the list of calls the agent made, and the expected
+trajectory is the golden recording you compare against.
 
 ```ts
 import {
   EvalStatus,
-  FunctionTool,
   getFunctionCalls,
-  InMemoryRunner,
   Invocation,
-  LlmAgent,
+  Session,
   TrajectoryEvaluator,
 } from '@google/adk';
 import {createUserContent} from '@google/genai';
-import {z} from 'zod';
 
-const APP_NAME = 'dice_app';
-const USER_ID = 'user-1';
+export async function scoreDiceRun(session: Session): Promise<EvalStatus> {
+  const actual: Invocation = {
+    userContent: createUserContent('Roll a 16 sided die'),
+    intermediateData: {toolUses: session.events.flatMap(getFunctionCalls)},
+  };
+  const expected: Invocation = {
+    userContent: createUserContent('Roll a 16 sided die'),
+    intermediateData: {toolUses: [{name: 'roll_die', args: {sides: 16}}]},
+  };
 
-const rollDie = new FunctionTool({
-  name: 'roll_die',
-  description: 'Rolls a die with the given number of sides.',
-  parameters: z.object({sides: z.number()}),
-  execute: ({sides}) => ({result: 1 + Math.floor(Math.random() * sides)}),
-});
+  const result = await new TrajectoryEvaluator({
+    threshold: 1.0,
+  }).evaluateInvocations([actual], [expected]);
 
-const agent = new LlmAgent({
-  name: 'dice_agent',
-  instruction: 'Call roll_die when the user asks for a die roll.',
-  tools: [rollDie],
-});
-
-const runner = new InMemoryRunner({agent, appName: APP_NAME});
-const session = await runner.sessionService.createSession({
-  appName: APP_NAME,
-  userId: USER_ID,
-});
-
-const newMessage = createUserContent('Roll a 16 sided die');
-for await (const _ of runner.runAsync({
-  userId: USER_ID,
-  sessionId: session.id,
-  newMessage,
-})) {
-  // Drive the run to completion; the events are read back below.
+  return result.overallEvalStatus; // EvalStatus.PASSED
 }
-
-const finished = await runner.sessionService.getSession({
-  appName: APP_NAME,
-  userId: USER_ID,
-  sessionId: session.id,
-});
-
-const actual: Invocation = {
-  userContent: newMessage,
-  intermediateData: {
-    toolUses: finished?.events.flatMap(getFunctionCalls) ?? [],
-  },
-};
-const expected: Invocation = {
-  userContent: newMessage,
-  intermediateData: {toolUses: [{name: 'roll_die', args: {sides: 16}}]},
-};
-
-const result = new TrajectoryEvaluator({threshold: 1.0}).evaluateInvocations(
-  [actual],
-  [expected],
-);
-
-result.overallScore; // 1.0
-result.overallEvalStatus === EvalStatus.PASSED; // true
 ```
+
+`tests/integration/evaluation/trajectory_evaluator_test.ts` is the runnable
+version: it builds the agent, drives it through `InMemoryRunner`, reads the
+session back, and scores the run.
 
 ## Choosing a match type
 
@@ -127,19 +90,13 @@ const evaluator = new TrajectoryEvaluator({
 });
 ```
 
-When the match type arrives as a string, from a config file for instance,
-`parseToolTrajectoryMatchType` resolves it. It ignores case, surrounding blanks,
-hyphens and spaces, so `ANY ORDER`, `any-order` and `any_order` all resolve to
-`ToolTrajectoryMatchType.ANY_ORDER`. A string that names no match type raises
-`InputValidationError`.
-
 ## What the result contains
 
 `perInvocationResults` holds one entry per pair, in input order. Each entry
 carries both invocations, the score, and its own status against the same
 threshold, so you can report which turn regressed.
 
-`evaluateInvocations` raises `InputValidationError` when `expectedInvocations` is
+`evaluateInvocations` rejects with `InputValidationError` when `expectedInvocations` is
 missing, and when the two lists have different lengths. Scoring an empty pair of
 lists is not an error: it returns an undefined `overallScore` and an
 `overallEvalStatus` of `NOT_EVALUATED`.
