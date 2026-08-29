@@ -94,6 +94,41 @@ function getBoolean(option?: string | boolean): boolean {
   return false;
 }
 
+/**
+ * Sends the ADK logs to a file in the system temp folder and names that file
+ * on the terminal. Returns the path of the file, which the caller needs to
+ * point the user at it once the logs have left the console.
+ */
+function startTmpFolderLogging(): string {
+  const {logFilePath, latestLogPath} = logToTmpFolder();
+  // `setLogger` runs before `setAdkCoreLogLevel`, which proxies to whichever
+  // logger is current.
+  setLogger(new AdkLogger({label: 'ADK'}));
+  console.log(`Log setup complete: ${logFilePath}`);
+  console.log(`To access latest log: tail -F ${latestLogPath ?? logFilePath}`);
+  return logFilePath;
+}
+
+/**
+ * Reports a fatal error and exits. When `logFilePath` is given the logger no
+ * longer reaches the terminal, so the message also goes to the console, and
+ * the log file is flushed: `process.exit` drops winston's buffered writes.
+ */
+async function exitWithError(
+  logger: AdkLogger,
+  prefix: string,
+  error: unknown,
+  logFilePath?: string,
+): Promise<never> {
+  const message = (error as Error).message;
+  logger.error(`${prefix}:`, message);
+  if (logFilePath) {
+    console.error(`${prefix}: ${message} (see ${logFilePath})`);
+    await resetFileLogTarget();
+  }
+  process.exit(1);
+}
+
 const AGENT_DIR_ARGUMENT = new Argument(
   '[agents_dir]',
   'Agent file or directory of agents to serve. For directory the internal structure should be agents_dir/{agentName}.js or agents_dir/{agentName}/agent.js. Agent file should has export of the rootAgent as instance of BaseAgent (e.g LlmAgent) or a Workflow',
@@ -129,6 +164,10 @@ const ARTIFACT_SERVICE_URI_OPTION = new Option(
 const OTEL_TO_CLOUD_OPTION = new Option(
   '--otel_to_cloud [boolean]',
   'Optional. Whether to send otel traces to cloud.',
+).default(false);
+const LOG_TO_TMP_OPTION = new Option(
+  '--log_to_tmp [boolean]',
+  'Optional. Whether to write the logs to a file in the system temp folder instead of the console. This is useful for local debugging. Default: false',
 ).default(false);
 const COMPILE_AGENT_FILE = new Option(
   '--compile [boolean]',
@@ -218,6 +257,7 @@ export function createProgram(): Command {
     .addOption(ORIGINS_OPTION)
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
+    .addOption(LOG_TO_TMP_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
@@ -228,6 +268,9 @@ export function createProgram(): Command {
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
+      const logFilePath = getBoolean(options['log_to_tmp'])
+        ? startTmpFolderLogging()
+        : undefined;
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
 
@@ -250,8 +293,12 @@ export function createProgram(): Command {
 
         await server.start();
       } catch (error) {
-        logger.error('Error starting web server:', (error as Error).message);
-        process.exit(1);
+        await exitWithError(
+          logger,
+          'Error starting web server',
+          error,
+          logFilePath,
+        );
       }
     });
 
@@ -264,6 +311,7 @@ export function createProgram(): Command {
     .addOption(ORIGINS_OPTION)
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
+    .addOption(LOG_TO_TMP_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
@@ -274,6 +322,9 @@ export function createProgram(): Command {
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
+      const logFilePath = getBoolean(options['log_to_tmp'])
+        ? startTmpFolderLogging()
+        : undefined;
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
 
@@ -295,8 +346,12 @@ export function createProgram(): Command {
         });
         await server.start();
       } catch (error) {
-        logger.error('Error starting API server:', (error as Error).message);
-        process.exit(1);
+        await exitWithError(
+          logger,
+          'Error starting API server',
+          error,
+          logFilePath,
+        );
       }
     });
 
@@ -369,16 +424,10 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
-      // `adk run` paints a chat transcript on stdout, so its logs go to a file
-      // rather than interleaving with it. `setLogger` runs before
-      // `setAdkCoreLogLevel`, which proxies to whichever logger is current.
-      const {logFilePath, latestLogPath} = logToTmpFolder();
-      setLogger(new AdkLogger({label: 'ADK'}));
+      // `adk run` paints a chat transcript on stdout, so its logs always go to
+      // a file rather than interleaving with it.
+      const logFilePath = startTmpFolderLogging();
       setAdkCoreLogLevel(getLogLevelFromOptions(options));
-      console.log(`Log setup complete: ${logFilePath}`);
-      console.log(
-        `To access latest log: tail -F ${latestLogPath ?? logFilePath}`,
-      );
 
       try {
         await runAgent({
@@ -394,15 +443,7 @@ export function createProgram(): Command {
           reloadAgents: getBoolean(options['reload_agents']),
         });
       } catch (error) {
-        const message = (error as Error).message;
-        logger.error('Error running agent:', message);
-        // The logger no longer reaches the terminal, so exiting on this path
-        // would be silent without this line.
-        console.error(`Error running agent: ${message} (see ${logFilePath})`);
-        // `process.exit` drops buffered writes, which would cost the log file
-        // the very failure the line above sends the user to it for.
-        await resetFileLogTarget();
-        process.exit(1);
+        await exitWithError(logger, 'Error running agent', error, logFilePath);
       }
     });
 
