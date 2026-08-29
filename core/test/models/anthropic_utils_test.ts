@@ -136,7 +136,6 @@ describe('partToMessageBlock function responses', () => {
       type: 'tool_result',
       tool_use_id: 'test_id_123',
       content: json,
-      is_error: false,
     });
   });
 
@@ -409,6 +408,20 @@ describe('contentToMessageParam', () => {
       }
     },
   );
+
+  it.each([
+    ['a role-less content', undefined],
+    ['a tool turn', 'tool'],
+  ])('keeps the media %s sends as a user turn', (_name, role) => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const content: Content = {role, parts: [{text: 'hi'}, imagePart]};
+
+    const result = contentToMessageParam(content, new ToolUseIdSanitizer());
+
+    expect(result.role).toBe('user');
+    expect(result.content).toHaveLength(2);
+    expect(warn).not.toHaveBeenCalled();
+  });
 
   it('handles a content with no parts', () => {
     expect(
@@ -1253,7 +1266,6 @@ describe('tool result media', () => {
     ).toEqual({
       type: 'tool_result',
       tool_use_id: 'toolu_1',
-      is_error: false,
       content: [
         {type: 'text', text: 'captured'},
         {

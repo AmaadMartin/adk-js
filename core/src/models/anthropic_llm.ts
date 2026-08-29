@@ -65,6 +65,9 @@ const RATE_LIMIT_POSSIBLE_FIX_MESSAGE =
   'On how to mitigate this issue, please refer to:\n\n' +
   'https://docs.anthropic.com/en/api/errors#http-errors';
 
+/** The HTTP status Anthropic returns when the caller exceeds a rate limit. */
+const HTTP_TOO_MANY_REQUESTS = 429;
+
 /**
  * The part of the Anthropic client this provider drives.
  *
@@ -180,12 +183,12 @@ function buildMessageCreateParams(
     params.system = system;
   }
 
+  // Gated on the declarations, not on `toolsDict`: a plugin can register a
+  // tool there without declaring it, and Anthropic rejects a `tool_choice`
+  // sent without `tools`.
   const declarations = collectFunctionDeclarations(config);
   if (declarations.length > 0) {
     params.tools = declarations.map(functionDeclarationToToolParam);
-  }
-
-  if (Object.keys(llmRequest.toolsDict).length > 0) {
     params.tool_choice = {type: 'auto'};
   }
 
@@ -210,25 +213,42 @@ function buildMessageCreateParams(
   return params;
 }
 
+/** The shape of the rate-limit error this provider annotates. */
+interface RateLimitedError {
+  status: number;
+  message: string;
+}
+
 /**
- * Adds the documented mitigation to an Anthropic rate-limit error.
+ * Reports whether an error is an Anthropic rate-limit error.
  *
  * The status is read structurally rather than with `instanceof
  * RateLimitError`, which would need a value import of the optional SDK.
+ */
+function isRateLimited(error: unknown): error is RateLimitedError {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    error.status === HTTP_TOO_MANY_REQUESTS &&
+    'message' in error &&
+    typeof error.message === 'string'
+  );
+}
+
+/**
+ * Adds the documented mitigation to an Anthropic rate-limit error.
+ *
+ * The message is rewritten in place so the SDK's own error reaches the caller
+ * with `status`, `headers` and the `retry-after` value a backoff reads.
  *
  * @return The error to throw, unchanged unless it reports HTTP 429.
  */
 function withRateLimitHelp(error: unknown): unknown {
-  if (typeof error !== 'object' || error === null) {
-    return error;
+  if (isRateLimited(error)) {
+    error.message = `${RATE_LIMIT_POSSIBLE_FIX_MESSAGE}\n\n${error.message}`;
   }
-  if (!('status' in error) || error.status !== 429) {
-    return error;
-  }
-  const message = 'message' in error ? String(error.message) : String(error);
-  return new Error(`${RATE_LIMIT_POSSIBLE_FIX_MESSAGE}\n\n${message}`, {
-    cause: error,
-  });
+  return error;
 }
 
 /**

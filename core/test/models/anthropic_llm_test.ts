@@ -295,6 +295,17 @@ describe('tools', () => {
     expect(params).not.toHaveProperty('tool_choice');
   });
 
+  it('omits tool_choice when toolsDict holds an undeclared tool', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({toolsDict: {get_time: getTimeTool}});
+
+    await collect(llm.generateContentAsync(request, false));
+
+    const params = createdParams();
+    expect(params).not.toHaveProperty('tools');
+    expect(params).not.toHaveProperty('tool_choice');
+  });
+
   it('omits tools when the first entry declares no functions', async () => {
     const llm = new AnthropicLlm();
     const request = makeRequest({
@@ -1059,7 +1070,26 @@ describe('rate limiting', () => {
       'https://docs.anthropic.com/en/api/errors#http-errors',
     );
     expect(failure.message).toContain('Too many requests');
-    expect(failure.cause).toBe(original);
+    expect(failure).toBe(original);
+  });
+
+  it('keeps the retry fields the SDK error carries on a 429', async () => {
+    const original = Object.assign(new Error('Too many requests'), {
+      status: 429,
+      headers: {'retry-after': '30'},
+    });
+    create.mockRejectedValue(original);
+    const llm = new AnthropicLlm();
+
+    const failure = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    ).catch((error: unknown) => error);
+
+    if (!(failure instanceof Error) || !('status' in failure)) {
+      return expect.fail('the rate-limit error lost its status.');
+    }
+    expect(failure.status).toBe(429);
+    expect(failure).toHaveProperty('headers', {'retry-after': '30'});
   });
 
   it('adds the mitigation link to a 429 raised mid-stream', async () => {

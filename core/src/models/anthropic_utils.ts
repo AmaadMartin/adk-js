@@ -285,7 +285,6 @@ function toolResultBlock(
     type: 'tool_result',
     tool_use_id: sanitizer.sanitize(functionResponse.id),
     content: text,
-    is_error: false,
   };
   if (media.length > 0) {
     const blocks: Array<TextBlockParam | ImageBlockParam | DocumentBlockParam> =
@@ -372,7 +371,8 @@ export function contentToMessageParam(
 ): MessageParam {
   const blocks: AnthropicMessageBlock[] = [];
   for (const part of content.parts ?? []) {
-    const kind = content.role === 'user' ? undefined : inlineMediaKind(part);
+    const kind =
+      toClaudeRole(content.role) === 'user' ? undefined : inlineMediaKind(part);
     if (kind !== undefined) {
       logger.warn(
         `${kind === 'pdf' ? 'PDF' : 'Image'} data is not supported in Claude ` +
@@ -466,7 +466,7 @@ export function toUsageMetadata(
     candidatesTokenCount: outputTokens - (thoughtsTokenCount ?? 0),
     totalTokenCount: promptTokenCount + outputTokens,
   };
-  if (usage.cache_read_input_tokens !== null) {
+  if (usage.cache_read_input_tokens != null) {
     metadata.cachedContentTokenCount = usage.cache_read_input_tokens;
   }
   if (thoughtsTokenCount !== undefined) {
