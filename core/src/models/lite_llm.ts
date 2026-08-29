@@ -80,9 +80,6 @@ export interface LiteLlmParams {
  * handed to an agent. `LiteLlm` is never registered in `LLMRegistry`, and a
  * bare model name never resolves to it.
  *
- * See `docs/guides/models/lite_llm/index.md` for configuration, streaming and
- * failure behaviour.
- *
  * @example
  * ```ts
  * const agent = new LlmAgent({
