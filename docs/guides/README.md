@@ -22,6 +22,9 @@ TypeScript implementation. For the official ADK documentation, visit
   contract: run the agent over an eval set, then score the results.
 - [Session to eval format](evaluation/session_to_eval_format/index.md) - Turning
   a recorded session into eval-set turn records.
+- [TrajectoryEvaluator](evaluation/trajectory_evaluator/index.md) - Scoring an
+  agent's tool calls against a golden trajectory, and the `Evaluator` seam every
+  metric sits behind.
 
 ### Models
 

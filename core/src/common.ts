@@ -231,6 +231,17 @@ export type {
   RubricScore,
 } from './evaluation/eval_rubrics.js';
 export {EvalConstants} from './evaluation/evaluation_constants.js';
+export type {
+  EvaluationResult,
+  Evaluator,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {
+  ToolTrajectoryMatchType,
+  TrajectoryEvaluator,
+  parseToolTrajectoryMatchType,
+} from './evaluation/trajectory_evaluator.js';
+export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
