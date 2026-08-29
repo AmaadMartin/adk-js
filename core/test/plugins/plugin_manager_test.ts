@@ -234,6 +234,27 @@ describe('PluginManager', () => {
     expect(plugin2.callLog).toEqual(['close']);
   });
 
+  it('should close no plugin once told the plugins are borrowed', async () => {
+    service.registerPlugin(plugin1);
+    service.registerPlugin(plugin2);
+    service.setSkipClosingPlugins(true);
+
+    await service.close();
+
+    expect(plugin1.callLog).toEqual([]);
+    expect(plugin2.callLog).toEqual([]);
+  });
+
+  it('should close the plugins again once told they are not borrowed', async () => {
+    service.registerPlugin(plugin1);
+    service.setSkipClosingPlugins(true);
+    service.setSkipClosingPlugins(false);
+
+    await service.close();
+
+    expect(plugin1.callLog).toEqual(['close']);
+  });
+
   it('should throw an error when registering a duplicate plugin object', () => {
     service.registerPlugin(plugin1);
     expect(() => service.registerPlugin(plugin1)).toThrowError(

@@ -1235,4 +1235,141 @@ describe('AgentTool parity with adk-python', () => {
 
     expect(result).toEqual({summary: 'all done'});
   });
+
+  /** What a `Runner` the tool built did over its lifetime. */
+  interface SubRunnerLog {
+    closeCount: number;
+    skipClosingCalls: boolean[];
+  }
+
+  /**
+   * Points the mocked `Runner` at `events` and gives it the plugin lifecycle a
+   * real `Runner` has: a manager holding the plugins it was given, and a
+   * `close` that delegates to that manager.
+   */
+  function mockSubRunnerLifecycle(events: Event[]): SubRunnerLog {
+    const log: SubRunnerLog = {closeCount: 0, skipClosingCalls: []};
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      const pluginManager = new PluginManager(config.plugins);
+      const setSkip = pluginManager.setSkipClosingPlugins.bind(pluginManager);
+      pluginManager.setSkipClosingPlugins = (value: boolean) => {
+        log.skipClosingCalls.push(value);
+        setSkip(value);
+      };
+
+      return mockRunner({
+        appName: config?.appName ?? '',
+        sessionService: config.sessionService,
+        runAsync: async function* () {
+          yield* events;
+        },
+        pluginManager,
+        close: async () => {
+          log.closeCount += 1;
+          await pluginManager.close();
+        },
+      });
+    });
+
+    return log;
+  }
+
+  /** A plugin that counts how many times it was closed. */
+  class CountingClosePlugin extends BasePlugin {
+    closeCount = 0;
+
+    override async close(): Promise<void> {
+      this.closeCount += 1;
+    }
+  }
+
+  function replyEvent(text: string): Event {
+    return createEvent({
+      author: SUB_AGENT_NAME,
+      content: {role: 'model', parts: [{text}]},
+    });
+  }
+
+  it('closes the sub-runner once the nested run is done', async () => {
+    const agent = new LlmAgent({name: SUB_AGENT_NAME});
+    const log = mockSubRunnerLifecycle([replyEvent('done')]);
+
+    await new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: parentContext(agent),
+    });
+
+    expect(log.closeCount).toBe(1);
+  });
+
+  it('closes the sub-runner when the reply breaks the output schema', async () => {
+    const agent = new LlmAgent({
+      name: SUB_AGENT_NAME,
+      outputSchema: SUMMARY_SCHEMA,
+    });
+    const log = mockSubRunnerLifecycle([replyEvent('{"summary":42}')]);
+
+    await expect(
+      new AgentTool({agent}).runAsync({
+        args: {request: 'go'},
+        toolContext: parentContext(agent),
+      }),
+    ).rejects.toThrow();
+
+    expect(log.closeCount).toBe(1);
+  });
+
+  it('closes the sub-runner when the caller aborts before the run', async () => {
+    const agent = new LlmAgent({name: SUB_AGENT_NAME});
+    const log = mockSubRunnerLifecycle([replyEvent('done')]);
+    const controller = new AbortController();
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        agent,
+        session: createSession({
+          id: 'parent-session',
+          appName: PARENT_APP_NAME,
+          userId: 'parent-user',
+        }),
+        pluginManager: new PluginManager([]),
+        sessionService: new InMemorySessionService(),
+        abortSignal: controller.signal,
+      }),
+    });
+    controller.abort();
+
+    await new AgentTool({agent}).runAsync({args: {request: 'go'}, toolContext});
+
+    expect(log.closeCount).toBe(1);
+  });
+
+  it('tells the sub-runner not to close the plugins it borrowed', async () => {
+    const agent = new LlmAgent({name: SUB_AGENT_NAME});
+    const plugin = new CountingClosePlugin('parent-plugin');
+    const log = mockSubRunnerLifecycle([replyEvent('done')]);
+
+    await new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: contextWithPlugins(agent, [plugin]),
+    });
+
+    expect(log.skipClosingCalls).toEqual([true]);
+    expect(plugin.closeCount).toBe(0);
+  });
+
+  it('leaves the sub-runner closing its own plugins when includePlugins is false', async () => {
+    const agent = new LlmAgent({name: SUB_AGENT_NAME});
+    const plugin = new CountingClosePlugin('parent-plugin');
+    const log = mockSubRunnerLifecycle([replyEvent('done')]);
+
+    await new AgentTool({agent, includePlugins: false}).runAsync({
+      args: {request: 'go'},
+      toolContext: contextWithPlugins(agent, [plugin]),
+    });
+
+    expect(log.skipClosingCalls).toEqual([]);
+    expect(plugin.closeCount).toBe(0);
+  });
 });
