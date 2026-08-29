@@ -6,13 +6,11 @@
 
 import {
   Context,
-  FeatureName,
   InvocationContext,
   MCPSessionManager,
   MCPTool,
   PluginManager,
   createSession,
-  withTemporaryFeatureOverride,
 } from '@google/adk';
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {fileURLToPath} from 'node:url';
@@ -21,8 +19,8 @@ import {afterEach, describe, expect, it} from 'vitest';
 /**
  * End-to-end test with NO mocks: a real `MCPTool` calls a real MCP server
  * (spawned as a stdio child process, see `mcp_app_tool_server.mjs`). It proves
- * that the `_meta` block survives a real listing, and that a real MCP protocol
- * error becomes an `{error}` result only while the feature is on.
+ * that the `_meta` block survives a real listing, that a real call returns the
+ * server's result, and that a real failure reaches the caller.
  */
 
 const SERVER_PATH = fileURLToPath(
@@ -87,7 +85,6 @@ describe('MCPTool (e2e, real MCP server over stdio)', () => {
       sessionManager,
     );
 
-    expect(tool.visibility).toEqual(['app', 'debug']);
     expect(tool.mcpAppResourceUri).toBe('ui://widget/echo');
     expect(tool.rawMcpTool.name).toBe('echo');
   });
@@ -117,32 +114,15 @@ describe('MCPTool (e2e, real MCP server over stdio)', () => {
       sessionManager,
     );
 
-    const result = await withTemporaryFeatureOverride(
-      FeatureName.MCP_GRACEFUL_ERROR_HANDLING,
-      true,
-      () => tool.runAsync({args: {}, toolContext: createToolContext()}),
-    );
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createToolContext(),
+    });
 
     expect(result).toMatchObject({isError: true});
   });
 
-  it('returns an error result when the real server dies mid-call and the feature is on', async () => {
-    sessionManager = createSessionManager();
-    const declaration = await fetchEchoDeclaration(sessionManager);
-    const tool = new MCPTool({...declaration, name: 'crash'}, sessionManager);
-
-    const result = await withTemporaryFeatureOverride(
-      FeatureName.MCP_GRACEFUL_ERROR_HANDLING,
-      true,
-      () => tool.runAsync({args: {}, toolContext: createToolContext()}),
-    );
-
-    expect(result).toEqual({
-      error: `MCP tool execution failed: ${CONNECTION_CLOSED}`,
-    });
-  });
-
-  it('throws when the real server dies mid-call and the feature is off', async () => {
+  it('throws when the real server dies mid-call', async () => {
     sessionManager = createSessionManager();
     const declaration = await fetchEchoDeclaration(sessionManager);
     const tool = new MCPTool({...declaration, name: 'crash'}, sessionManager);

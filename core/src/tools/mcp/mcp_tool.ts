@@ -24,20 +24,9 @@ import {
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
-import {
-  FeatureName,
-  isFeatureEnabled,
-} from '../../features/feature_registry.js';
-import {formatError} from '../../utils/error_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
-import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {ToolAuthHandler} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
-import {
-  applyConfirmationGate,
-  resolveRequireConfirmation,
-  ToolConfirmationRejection,
-} from '../tool_confirmation.js';
 
 import {credentialToHeaders} from './auth_headers.js';
 import {MCPSessionManager} from './mcp_session_manager.js';
@@ -82,14 +71,6 @@ export type McpHeaderProvider = (
   context: ReadonlyContext,
 ) => Record<string, string> | Promise<Record<string, string>>;
 
-/** Whether a call is gated on human approval: a flag, or a predicate. */
-export type McpRequireConfirmation =
-  | boolean
-  | ((
-      args: Record<string, unknown>,
-      toolContext?: Context,
-    ) => boolean | Promise<boolean>);
-
 /**
  * The optional behaviour an {@link MCPTool} can be built with.
  *
@@ -122,15 +103,6 @@ export interface McpToolOptions {
   /** The session-state key the resolved credential is stored under. */
   credentialKey?: string;
   /**
-   * Whether a call waits for human approval.
-   *
-   * The first gated call records a pending confirmation and returns
-   * `{error: 'This tool call requires confirmation, please approve or
-   * reject.'}`. A declined call returns `{error: 'This tool call is
-   * rejected.'}` and never reaches the server.
-   */
-  requireConfirmation?: McpRequireConfirmation;
-  /**
    * Extra headers, resolved per invocation and merged over the auth headers,
    * so the provider wins a key collision. Use it for what changes per turn: a
    * tenant, a request id, a short-lived token.
@@ -155,18 +127,6 @@ function asUiResourceUri(value: unknown): string | undefined {
 }
 
 /**
- * Type guard for the MCP SDK's `McpError`.
- *
- * Matches on `name` rather than with `instanceof`, which would need a runtime
- * import of `@modelcontextprotocol/sdk`. The SDK is an optional peer, so such
- * an import would break the `@google/adk` barrel for everyone who never
- * installed it.
- */
-function isMcpError(e: unknown): e is Error {
-  return e instanceof Error && e.name === 'McpError';
-}
-
-/**
  * The active trace context, as an MCP `_meta` block.
  *
  * The MCP protocol carries out-of-band data in `_meta`, which is where a trace
@@ -177,15 +137,6 @@ function injectedTraceContext(): Record<string, string> | undefined {
   const carrier: Record<string, string> = {};
   propagation.inject(otelContext.active(), carrier);
   return Object.keys(carrier).length > 0 ? carrier : undefined;
-}
-
-/** Describes a failed tool call for the model, and logs the same message. */
-function toErrorResult(e: unknown): {error: string} {
-  const error = isMcpError(e)
-    ? `MCP tool execution failed: ${e.message}`
-    : `Unexpected error during MCP tool execution: ${formatError(e)}`;
-  logger.warn(error);
-  return {error};
 }
 
 /**
@@ -206,10 +157,6 @@ function toErrorResult(e: unknown): {error: string} {
  * exposed by the MCP server. This is critical when the toolset applies a
  * prefix to tool names (e.g., for LLM namespace disambiguation), ensuring
  * the correct original name is used when executing on the server.
- *
- * A failed call throws by default. Enable the
- * {@link FeatureName.MCP_GRACEFUL_ERROR_HANDLING} feature to receive an
- * `{error}` result instead, which lets the agent turn continue.
  */
 export class MCPTool extends BaseTool {
   private readonly mcpTool: Tool;
@@ -252,22 +199,6 @@ export class MCPTool extends BaseTool {
   }
 
   /**
-   * The surfaces this tool is visible on, from `_meta.ui.visibility`.
-   *
-   * Empty when the server declares no visibility. Non-string entries are
-   * dropped.
-   */
-  get visibility(): string[] {
-    const declared = asRecord(this.mcpTool._meta?.['ui'])?.['visibility'];
-    if (!Array.isArray(declared)) {
-      return [];
-    }
-    return declared.filter(
-      (entry): entry is string => typeof entry === 'string',
-    );
-  }
-
-  /**
    * The MCP-App UI resource URI this tool declares, or undefined for a tool
    * that declares none.
    *
@@ -283,69 +214,7 @@ export class MCPTool extends BaseTool {
     );
   }
 
-  /**
-   * Whether this call is gated on human approval — the static flag, or the
-   * predicate evaluated against the arguments.
-   *
-   * @param args The arguments the tool would run with.
-   * @param toolContext The context of the call, when there is one.
-   * @return Whether the call requires confirmation.
-   */
-  override async checkRequireConfirmation(
-    args: Record<string, unknown>,
-    toolContext?: Context,
-  ): Promise<boolean> {
-    return resolveRequireConfirmation(
-      this.options.requireConfirmation,
-      args,
-      toolContext,
-    );
-  }
-
-  override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    const rejection = await this.checkConfirmation(request);
-    if (rejection) {
-      return rejection;
-    }
-
-    if (!isFeatureEnabled(FeatureName.MCP_GRACEFUL_ERROR_HANDLING)) {
-      return this.callMcpTool(request);
-    }
-
-    try {
-      return await this.callMcpTool(request);
-    } catch (e: unknown) {
-      return toErrorResult(e);
-    }
-  }
-
-  /**
-   * Evaluates the confirmation gate.
-   *
-   * Unlike `FunctionTool`, this does not suppress the model's summary of the
-   * approval request: `McpTool` does not, and parity governs the behaviour a
-   * caller can see.
-   *
-   * @return Undefined when the call may proceed, otherwise the payload to
-   *     return in its place.
-   */
-  private async checkConfirmation(
-    request: RunAsyncToolRequest,
-  ): Promise<ToolConfirmationRejection | undefined> {
-    const {toolContext} = request;
-    const required = await this.checkRequireConfirmation(
-      request.args,
-      toolContext,
-    );
-    if (!required) {
-      return undefined;
-    }
-    return applyConfirmationGate(this.name, toolContext, {
-      skipSummarization: false,
-    });
-  }
-
-  private async callMcpTool(
+  override async runAsync(
     request: RunAsyncToolRequest,
   ): Promise<CallToolResult | string> {
     const {toolContext} = request;

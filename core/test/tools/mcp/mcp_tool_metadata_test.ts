@@ -43,56 +43,6 @@ describe('MCPTool MCP-App metadata', () => {
     });
   });
 
-  describe('visibility', () => {
-    it('reads the declared surfaces from _meta.ui.visibility', () => {
-      const tool = new MCPTool(
-        toolWithMeta({ui: {visibility: ['app', 'debug']}}),
-        SESSION_MANAGER,
-      );
-
-      expect(tool.visibility).toEqual(['app', 'debug']);
-    });
-
-    it('is empty when the tool declares no _meta', () => {
-      const tool = new MCPTool(toolWithMeta(), SESSION_MANAGER);
-
-      expect(tool.visibility).toEqual([]);
-    });
-
-    it('is empty when _meta declares no ui block', () => {
-      const tool = new MCPTool(toolWithMeta({}), SESSION_MANAGER);
-
-      expect(tool.visibility).toEqual([]);
-    });
-
-    it('is empty when the ui block is not an object', () => {
-      const tool = new MCPTool(
-        toolWithMeta({ui: 'not a block'}),
-        SESSION_MANAGER,
-      );
-
-      expect(tool.visibility).toEqual([]);
-    });
-
-    it('is empty when visibility is not an array', () => {
-      const tool = new MCPTool(
-        toolWithMeta({ui: {visibility: 'app'}}),
-        SESSION_MANAGER,
-      );
-
-      expect(tool.visibility).toEqual([]);
-    });
-
-    it('drops a non-string surface', () => {
-      const tool = new MCPTool(
-        toolWithMeta({ui: {visibility: ['app', 7, null]}}),
-        SESSION_MANAGER,
-      );
-
-      expect(tool.visibility).toEqual(['app']);
-    });
-  });
-
   describe('mcpAppResourceUri', () => {
     it('reads the nested _meta.ui.resourceUri form', () => {
       const tool = new MCPTool(

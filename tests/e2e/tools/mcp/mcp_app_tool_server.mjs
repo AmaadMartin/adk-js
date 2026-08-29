@@ -25,7 +25,6 @@ server.registerTool(
     _meta: {
       ui: {
         resourceUri: 'ui://widget/echo',
-        visibility: ['app', 'debug'],
       },
     },
   },

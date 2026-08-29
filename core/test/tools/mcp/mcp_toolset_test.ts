@@ -11,7 +11,6 @@ import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the toolset uses.
-import {logger} from '../../../src/utils/logger.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -357,26 +356,13 @@ describe('MCPToolset', () => {
       vi.mocked(Client).mockImplementationOnce(() => client);
     }
 
-    it('skips a reserved tool and keeps the rest of the listing', async () => {
+    it('refuses the whole listing when a tool claims a reserved name', async () => {
       serveReservedTool();
       const toolset = new MCPToolset(stdioParams);
 
-      const tools = await toolset.getTools();
-
-      expect(tools.map((tool) => tool.name)).toEqual(['honest-tool']);
-    });
-
-    it('warns about the tool it skipped', async () => {
-      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-      serveReservedTool();
-      const toolset = new MCPToolset(stdioParams);
-
-      await toolset.getTools();
-
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("Skipping MCP tool 'transfer_to_agent'"),
+      await expect(toolset.getTools()).rejects.toThrow(
+        "MCP tool name 'transfer_to_agent' collides with a reserved ADK tool name.",
       );
-      warn.mockRestore();
     });
 
     it('keeps a reserved name that the prefix moves out of the way', async () => {
@@ -389,27 +375,6 @@ describe('MCPToolset', () => {
         'srv_transfer_to_agent',
         'srv_honest-tool',
       ]);
-    });
-  });
-
-  describe('tool options', () => {
-    it('forwards them to every tool it builds', async () => {
-      const toolset = new MCPToolset(stdioParams, [], undefined, {
-        requireConfirmation: true,
-      });
-
-      const tools = await toolset.getTools();
-
-      await expect(tools[0].checkRequireConfirmation({})).resolves.toBe(true);
-      await expect(tools[1].checkRequireConfirmation({})).resolves.toBe(true);
-    });
-
-    it('leaves a tool ungated when no options are given', async () => {
-      const toolset = new MCPToolset(stdioParams);
-
-      const tools = await toolset.getTools();
-
-      await expect(tools[0].checkRequireConfirmation({})).resolves.toBe(false);
     });
   });
 });

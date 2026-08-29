@@ -19,7 +19,7 @@ import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
-import {MCPTool, McpToolOptions, RESERVED_TOOL_NAMES} from './mcp_tool.js';
+import {MCPTool, McpToolOptions} from './mcp_tool.js';
 
 /**
  * A toolset that dynamically discovers and provides tools from a Model Context
@@ -79,31 +79,19 @@ export class MCPToolset extends BaseToolset {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    const tools: BaseTool[] = [];
-    for (const tool of listResult.tools) {
+    const tools = listResult.tools.map((tool) => {
       // Create a cloned tool definition with the prefixed name
       const toolWithPrefix = {
         ...tool,
         name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
       };
-      // Skip rather than let MCPTool throw: one reserved name would otherwise
-      // fail the whole listing and take the server's honest tools down with it.
-      if (RESERVED_TOOL_NAMES.has(toolWithPrefix.name)) {
-        logger.warn(
-          `Skipping MCP tool '${toolWithPrefix.name}' because it collides ` +
-            'with a reserved ADK framework tool name.',
-        );
-        continue;
-      }
-      tools.push(
-        new MCPTool(
-          toolWithPrefix,
-          this.mcpSessionManager,
-          tool.name,
-          this.toolOptions,
-        ),
+      return new MCPTool(
+        toolWithPrefix,
+        this.mcpSessionManager,
+        tool.name,
+        this.toolOptions,
       );
-    }
+    });
 
     // Apply toolFilter when specified.
     // An empty array (the default) means no filter — all tools are returned.
