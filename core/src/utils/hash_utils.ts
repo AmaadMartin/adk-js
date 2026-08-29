@@ -8,9 +8,10 @@
 const FNV_PRIME = 16777619;
 
 /**
- * The offset bases the two digest passes start from. One 32-bit pass is too
- * narrow for a key space every tool in a session shares, so `stableDigest`
- * runs two and concatenates them for 64 bits.
+ * The offset bases the two digest passes start from. Every tool in a session
+ * shares one key space, and a collision there serves one tool the credential
+ * that belongs to another, so `stableDigest` runs two passes and concatenates
+ * them for 64 bits rather than leaving a single 32-bit pass to collide.
  */
 const FNV_OFFSET_BASES: readonly number[] = [2166136261, 2654435761];
 
@@ -83,13 +84,18 @@ function fnv1a(bytes: Uint8Array, offsetBasis: number): number {
  * more, so it must not be used for integrity, authentication, or any other
  * security decision.
  *
- * The hash is written out here rather than delegating to a platform digest.
- * `crypto.subtle` is asynchronous and needs a secure context, and
- * `globalThis.crypto` stayed behind a flag until Node v19, so a bare
- * `crypto.subtle.digest` throws a `TypeError` on a default Node 18 and on a
- * plain-HTTP browser origin. This module reaches the browser bundle through
- * `common.ts`, and it sits on the unconditional path of every authenticated
- * OpenAPI tool call, so it cannot depend on either being present.
+ * The hash is written out here because neither platform digest runs
+ * everywhere this module does. `common.ts` re-exports it into the browser
+ * bundle, and it sits on the unconditional path of every authenticated
+ * OpenAPI tool call, so it has to work in both runtimes.
+ *
+ * `node:crypto` offers a synchronous `createHash`, but `build.js` aliases that
+ * specifier to `crypto_shim.ts` for the web bundle, and the shim exports only
+ * a `randomUUID` that throws. Importing `createHash` breaks that build.
+ *
+ * `crypto.subtle` is asynchronous, needs a secure context, and hangs off a
+ * `globalThis.crypto` that stayed behind a flag until Node v19, so it throws a
+ * `TypeError` on a default Node 18 and on a plain-HTTP browser origin.
  */
 export function stableDigest(value: unknown): string {
   const bytes = new TextEncoder().encode(canonicalJson(value));

@@ -14,7 +14,6 @@ import {AuthScheme, OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
 import {
   AuthCredentialMissingError,
-  BaseCredentialExchanger,
   ExchangeResult,
 } from '../../../auth/exchanger/base_credential_exchanger.js';
 import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
@@ -24,24 +23,10 @@ import {stableDigest} from '../../../utils/hash_utils.js';
 import {logger} from '../../../utils/logger.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
-/** How far the handler got towards a credential the tool can use. */
-export type AuthPreparationState = 'pending' | 'done';
-
 /** What `ToolAuthHandler.prepareAuthCredentials` resolved to. */
 export interface AuthPreparationResult {
-  state: AuthPreparationState;
-  authScheme?: AuthScheme;
+  state: 'pending' | 'done';
   authCredential?: AuthCredential;
-}
-
-/** Overrides for the pieces `ToolAuthHandler` would otherwise build itself. */
-export interface ToolAuthHandlerOptions {
-  /** Pins the key the credential is saved and loaded under. */
-  credentialKey?: string;
-  /** Defaults to `new AutoAuthCredentialExchanger()`. */
-  credentialExchanger?: BaseCredentialExchanger;
-  /** Defaults to a `ToolContextCredentialStore` over the tool's context. */
-  credentialStore?: ToolContextCredentialStore;
 }
 
 /** Scheme types that authenticate through an OAuth2 authorization server. */
@@ -55,9 +40,6 @@ const OAUTH_CREDENTIAL_TYPES: ReadonlySet<AuthCredentialTypes> = new Set([
   AuthCredentialTypes.OAUTH2,
   AuthCredentialTypes.OPEN_ID_CONNECT,
 ]);
-
-/** Field names a scheme or credential may pin its storage key under. */
-const CREDENTIAL_KEY_FIELDS = ['credentialKey', 'credential_key'] as const;
 
 /**
  * OAuth2 fields that a consent round trip produces, or that change per
@@ -113,38 +95,6 @@ function credentialIdentity(
       )}`
     : '';
   return `${schemeName}_${credentialName}`;
-}
-
-/** Reads `key` off `source` when it holds a non-empty string there. */
-function readStringField(source: unknown, key: string): string | undefined {
-  if (typeof source !== 'object' || source === null || !(key in source)) {
-    return undefined;
-  }
-  const value: unknown = Reflect.get(source, key);
-  return typeof value === 'string' && value !== '' ? value : undefined;
-}
-
-/**
- * Returns the storage key the developer pinned, taking the explicit option
- * first, then the credential, then the scheme.
- */
-function credentialKeyOverride(
-  explicitKey?: string,
-  authScheme?: AuthScheme,
-  authCredential?: AuthCredential,
-): string | undefined {
-  if (explicitKey) {
-    return explicitKey;
-  }
-  for (const source of [authCredential, authScheme]) {
-    for (const field of CREDENTIAL_KEY_FIELDS) {
-      const pinned = readStringField(source, field);
-      if (pinned) {
-        return pinned;
-      }
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -226,7 +176,7 @@ function assertConsentCredentialComplete(
 }
 
 /** Reads and writes a tool's credential in the session state. */
-export class ToolContextCredentialStore {
+class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
 
   getCredential(key: string): AuthCredential | undefined {
@@ -282,24 +232,16 @@ async function refreshIfExpired(
 @experimental
 export class ToolAuthHandler {
   private readonly store: ToolContextCredentialStore;
-  private readonly exchanger: BaseCredentialExchanger;
   private readonly credentialKey?: string;
 
   constructor(
     private readonly context: Context,
     private readonly authScheme?: AuthScheme,
     private readonly authCredential?: AuthCredential,
-    options: ToolAuthHandlerOptions = {},
+    options: {credentialKey?: string} = {},
   ) {
-    this.store =
-      options.credentialStore ?? new ToolContextCredentialStore(context);
-    this.exchanger =
-      options.credentialExchanger ?? new AutoAuthCredentialExchanger();
-    this.credentialKey = credentialKeyOverride(
-      options.credentialKey,
-      authScheme,
-      authCredential,
-    );
+    this.store = new ToolContextCredentialStore(context);
+    this.credentialKey = options.credentialKey || undefined;
   }
 
   @experimental
@@ -307,7 +249,7 @@ export class ToolAuthHandler {
     context: Context,
     authScheme?: AuthScheme,
     authCredential?: AuthCredential,
-    options: ToolAuthHandlerOptions = {},
+    options: {credentialKey?: string} = {},
   ): ToolAuthHandler {
     return new ToolAuthHandler(context, authScheme, authCredential, options);
   }
@@ -322,13 +264,13 @@ export class ToolAuthHandler {
       assertCredentialFitsScheme(authScheme, this.authCredential);
     }
 
+    const identity = credentialIdentity(authScheme, this.authCredential);
     const cacheKey =
-      this.credentialKey ??
-      `${credentialIdentity(authScheme, this.authCredential)}_existing_exchanged_credential`;
+      this.credentialKey ?? `${identity}_existing_exchanged_credential`;
 
     const cached = await this.cachedCredential(authScheme, cacheKey);
     if (cached && !requiresClientRoundTrip(authScheme, cached)) {
-      return {state: 'done', authScheme, authCredential: cached};
+      return {state: 'done', authCredential: cached};
     }
 
     const authConfig: AuthConfig = {
@@ -336,9 +278,7 @@ export class ToolAuthHandler {
       rawAuthCredential: this.authCredential,
       // The auth response lands in `temp:<credentialKey>`, so a key shared by
       // every OpenAPI tool lets one tool consume another tool's response.
-      credentialKey:
-        this.credentialKey ??
-        `adk_${credentialIdentity(authScheme, this.authCredential)}`,
+      credentialKey: this.credentialKey ?? `adk_${identity}`,
     };
 
     // A credential the tool was configured with is used as it stands, unless
@@ -356,16 +296,12 @@ export class ToolAuthHandler {
       assertConsentCredentialComplete(authScheme, this.authCredential);
       this.context.requestCredential(authConfig);
 
-      return {
-        state: 'pending',
-        authScheme,
-        authCredential: this.authCredential,
-      };
+      return {state: 'pending'};
     }
 
     const exchange = await this.exchange(authScheme, credential);
     if (!exchange) {
-      return {state: 'done', authScheme};
+      return {state: 'done'};
     }
 
     // Only cache what cannot cheaply be obtained again: an auth response is
@@ -377,7 +313,7 @@ export class ToolAuthHandler {
       this.store.storeCredential(cacheKey, exchange.credential);
     }
 
-    return {state: 'done', authScheme, authCredential: exchange.credential};
+    return {state: 'done', authCredential: exchange.credential};
   }
 
   private async cachedCredential(
@@ -395,16 +331,17 @@ export class ToolAuthHandler {
    * Exchanges `credential`, resolving `undefined` when the exchange fails.
    *
    * A provider that refuses the exchange leaves the tool with no credential,
-   * not with a broken invocation: `RestApiTool` then calls the API without
-   * one and surfaces whatever the API answers, which is a clearer report than
-   * an exchange error raised several layers below the call.
+   * not with a broken invocation: `RestApiTool` then calls the API without one
+   * and surfaces whatever the API answers. The exchange error reaches the
+   * operator through `logger.error`, because nothing reads a failure carried
+   * on the result.
    */
   private async exchange(
     authScheme: AuthScheme,
     credential: AuthCredential,
   ): Promise<ExchangeResult | undefined> {
     try {
-      return await this.exchanger.exchange({
+      return await new AutoAuthCredentialExchanger().exchange({
         authScheme,
         authCredential: credential,
       });

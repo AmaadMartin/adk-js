@@ -17,7 +17,6 @@ import {
   PluginManager,
   setLogger,
   ToolAuthHandler,
-  ToolContextCredentialStore,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -41,6 +40,21 @@ vi.mock(
     };
   },
 );
+
+/**
+ * Makes the next `AutoAuthCredentialExchanger` this file constructs exchange
+ * through `exchange`.
+ *
+ * The real class holds a private field, so a stub object is not assignable to
+ * it without a cast. This is the file's only cast: the `vi.mock` above already
+ * replaced the constructor, so no part of the real class survives for the cast
+ * to misrepresent.
+ */
+function stubNextExchange(exchange: BaseCredentialExchanger['exchange']): void {
+  vi.mocked(AutoAuthCredentialExchanger).mockImplementationOnce(
+    () => ({exchange}) as unknown as AutoAuthCredentialExchanger,
+  );
+}
 
 /** Matches a cache key derived from a scheme, with or without a credential. */
 const IDENTITY_KEY_PATTERN =
@@ -270,14 +284,11 @@ describe('ToolAuthHandler', () => {
     };
     // The real exchanger has no exchanger registered for apiKey/http, so it
     // hands the credential straight back.
-    vi.mocked(AutoAuthCredentialExchanger).mockImplementationOnce(
-      () =>
-        ({
-          exchange: vi.fn().mockResolvedValue({
-            credential: staticCredential,
-            wasExchanged: false,
-          }),
-        }) as unknown as AutoAuthCredentialExchanger,
+    stubNextExchange(
+      vi.fn().mockResolvedValue({
+        credential: staticCredential,
+        wasExchanged: false,
+      }),
     );
 
     const state = new State();
@@ -916,8 +927,6 @@ describe('ToolAuthHandler consent round trip', () => {
     // Without this the tool sends a credential carrying no token, and the
     // provider answers with a permission error far from its cause.
     expect(result.state).toBe('pending');
-    expect(result.authScheme).toBe(AUTHORIZATION_CODE_SCHEME);
-    expect(result.authCredential).toBe(UNGRANTED_CREDENTIAL);
     expect(requestedCredentialKey(context)).toMatch(
       /^adk_oauth2_[0-9a-f]{16}_oauth2_[0-9a-f]{16}$/,
     );
@@ -980,21 +989,6 @@ describe('ToolAuthHandler consent round trip', () => {
     expect(result.authCredential?.http?.credentials.token).toBe(
       'exchanged-token',
     );
-  });
-
-  it('reports the scheme it prepared', async () => {
-    const scheme: OpenAPIV3.SecuritySchemeObject = {
-      type: 'apiKey',
-      name: 'X-API-Key',
-      in: 'header',
-    };
-
-    const result = await new ToolAuthHandler(createContext({}), scheme, {
-      authType: AuthCredentialTypes.API_KEY,
-      apiKey: 'static-key',
-    }).prepareAuthCredentials();
-
-    expect(result.authScheme).toBe(scheme);
   });
 });
 
@@ -1072,147 +1066,6 @@ describe('ToolAuthHandler credential validation', () => {
   });
 });
 
-describe('ToolAuthHandler injected collaborators', () => {
-  const SCHEME: OpenAPIV3.SecuritySchemeObject = {
-    type: 'apiKey',
-    name: 'X-API-Key',
-    in: 'header',
-  };
-  const CREDENTIAL: AuthCredential = {
-    authType: AuthCredentialTypes.API_KEY,
-    apiKey: 'static-key',
-  };
-
-  it('exchanges through the injected exchanger', async () => {
-    const exchange = vi.fn().mockResolvedValue({
-      credential: {
-        authType: AuthCredentialTypes.HTTP,
-        http: {scheme: 'bearer', credentials: {token: 'injected-token'}},
-      },
-      wasExchanged: true,
-    });
-    const credentialExchanger: BaseCredentialExchanger = {exchange};
-
-    const result = await new ToolAuthHandler(
-      createContext({}),
-      SCHEME,
-      CREDENTIAL,
-      {credentialExchanger},
-    ).prepareAuthCredentials();
-
-    expect(result.authCredential?.http?.credentials.token).toBe(
-      'injected-token',
-    );
-    expect(exchange).toHaveBeenCalledWith({
-      authScheme: SCHEME,
-      authCredential: CREDENTIAL,
-    });
-  });
-
-  it('reads and writes the injected store', async () => {
-    const backingState: Record<string, unknown> = {};
-    const credentialStore = new ToolContextCredentialStore(
-      createContext(backingState),
-    );
-    const toolState: Record<string, unknown> = {};
-
-    await new ToolAuthHandler(createContext(toolState), SCHEME, CREDENTIAL, {
-      credentialStore,
-    }).prepareAuthCredentials();
-
-    // The credential went to the injected store, not to the tool's own state.
-    expect(cachedCredentialKeys(backingState)).toHaveLength(1);
-    expect(toolState).toEqual({});
-
-    const second = await new ToolAuthHandler(
-      createContext({}),
-      SCHEME,
-      CREDENTIAL,
-      {credentialStore},
-    ).prepareAuthCredentials();
-
-    expect(second.authCredential?.http?.credentials.token).toBe(
-      'exchanged-token',
-    );
-  });
-});
-
-describe('ToolAuthHandler credential key override', () => {
-  const SCHEME: OpenAPIV3.SecuritySchemeObject = {
-    type: 'apiKey',
-    name: 'X-API-Key',
-    in: 'header',
-  };
-  const CREDENTIAL: AuthCredential = {
-    authType: AuthCredentialTypes.API_KEY,
-    apiKey: 'static-key',
-  };
-
-  it('takes the key pinned on the credential', async () => {
-    const sessionState: Record<string, unknown> = {};
-
-    await new ToolAuthHandler(createContext(sessionState), SCHEME, {
-      ...CREDENTIAL,
-      credentialKey: 'pinned_by_credential',
-    }).prepareAuthCredentials();
-
-    expect(Object.keys(sessionState)).toEqual(['pinned_by_credential']);
-  });
-
-  it('takes the snake_case key pinned on the scheme', async () => {
-    const sessionState: Record<string, unknown> = {};
-
-    await new ToolAuthHandler(
-      createContext(sessionState),
-      {...SCHEME, credential_key: 'pinned_by_scheme'},
-      CREDENTIAL,
-    ).prepareAuthCredentials();
-
-    expect(Object.keys(sessionState)).toEqual(['pinned_by_scheme']);
-  });
-
-  it('prefers the explicit option over both pinned keys', async () => {
-    const sessionState: Record<string, unknown> = {};
-
-    await new ToolAuthHandler(
-      createContext(sessionState),
-      {...SCHEME, credentialKey: 'pinned_by_scheme'},
-      {...CREDENTIAL, credentialKey: 'pinned_by_credential'},
-      {credentialKey: 'chosen_by_the_caller'},
-    ).prepareAuthCredentials();
-
-    expect(Object.keys(sessionState)).toEqual(['chosen_by_the_caller']);
-  });
-
-  it('ignores a pinned key that is empty or is not a string', async () => {
-    const sessionState: Record<string, unknown> = {};
-
-    await new ToolAuthHandler(
-      createContext(sessionState),
-      {...SCHEME, credentialKey: ''},
-      {...CREDENTIAL, credentialKey: 42},
-    ).prepareAuthCredentials();
-
-    // Neither value names a slot, so the scheme and the credential still do.
-    expect(cachedCredentialKeys(sessionState)).toEqual(
-      Object.keys(sessionState),
-    );
-    expect(Object.keys(sessionState)).toHaveLength(1);
-  });
-
-  it('prefers the credential key over the scheme key', async () => {
-    const sessionState: Record<string, unknown> = {};
-
-    await new ToolAuthHandler(
-      createContext(sessionState),
-      {...SCHEME, credentialKey: 'pinned_by_scheme'},
-      {...CREDENTIAL, credentialKey: 'pinned_by_credential'},
-    ).prepareAuthCredentials();
-
-    expect(Object.keys(sessionState)).toEqual(['pinned_by_credential']);
-  });
-});
-
 describe('ToolAuthHandler exchange failure', () => {
   const originalLogger = getLogger();
 
@@ -1232,16 +1085,13 @@ describe('ToolAuthHandler exchange failure', () => {
     };
     setLogger(recordingLogger);
     const failure = new Error('the provider refused the exchange');
-    const credentialExchanger: BaseCredentialExchanger = {
-      exchange: vi.fn().mockRejectedValue(failure),
-    };
+    stubNextExchange(vi.fn().mockRejectedValue(failure));
     const state: Record<string, unknown> = {};
 
     const result = await new ToolAuthHandler(
       createContext(state),
       {type: 'apiKey', name: 'X-API-Key', in: 'header'},
       {authType: AuthCredentialTypes.API_KEY, apiKey: 'static-key'},
-      {credentialExchanger},
     ).prepareAuthCredentials();
 
     // RestApiTool then calls the API with no credential and surfaces what the
