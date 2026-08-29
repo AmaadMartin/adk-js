@@ -21,6 +21,17 @@ class FixedExampleProvider extends BaseExampleProvider {
   }
 }
 
+/** Stands in for a provider backed by a remote store, such as
+ * VertexAiExampleStore. */
+class AsyncExampleProvider extends BaseExampleProvider {
+  constructor(private readonly examples: Example[]) {
+    super();
+  }
+  override async getExamples(_query: string): Promise<Example[]> {
+    return this.examples;
+  }
+}
+
 const SIMPLE_EXAMPLE: Example = {
   input: {parts: [{text: 'What is 2+2?'}]},
   output: [{role: 'model', parts: [{text: '4'}]}],
@@ -120,6 +131,13 @@ describe('buildExampleSi', () => {
     const provider = new FixedExampleProvider([SIMPLE_EXAMPLE]);
     const result = await buildExampleSi(provider, 'my query');
     expect(result).toContain('What is 2+2?');
+  });
+
+  it('awaits a provider that resolves its examples asynchronously', async () => {
+    const provider = new AsyncExampleProvider([SIMPLE_EXAMPLE]);
+    const result = await buildExampleSi(provider, 'my query');
+    expect(result).toContain('What is 2+2?');
+    expect(result).not.toContain('[object Promise]');
   });
 
   it('passes the model string through to the provider path', async () => {

@@ -9,7 +9,6 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   Context,
   createSession,
-  ExampleStoreClient,
   ExampleTool,
   InvocationContext,
   isBaseExampleProvider,
@@ -65,19 +64,19 @@ const PASSWORD_RESET_RESPONSE: SearchExamplesResponse = {
   ],
 };
 
-function fakeClient(response: SearchExamplesResponse) {
-  return {
-    searchExamples: vi.fn<ExampleStoreClient['searchExamples']>(
-      async () => response,
-    ),
-  };
+/** Stubs the authenticated transport so no credentials are needed. */
+function mockSearchExamples(data: SearchExamplesResponse) {
+  return vi.spyOn(GoogleAuth.prototype, 'request').mockResolvedValue(
+    Object.assign(new Response(null, {status: 200, statusText: 'OK'}), {
+      config: {url: new URL(SEARCH_EXAMPLES_URL), headers: new Headers()},
+      data,
+    }),
+  );
 }
 
 function storeWith(response: SearchExamplesResponse): VertexAiExampleStore {
-  return new VertexAiExampleStore({
-    examplesStoreName: STORE_NAME,
-    client: fakeClient(response),
-  });
+  mockSearchExamples(response);
+  return new VertexAiExampleStore(STORE_NAME);
 }
 
 function makeLlmRequest(model?: string): LlmRequest {
@@ -144,7 +143,7 @@ describe('VertexAiExampleStore', () => {
     ]);
   });
 
-  it('maps a functionResponse part', async () => {
+  it('maps a functionResponse part without stamping an id', async () => {
     const store = storeWith({
       results: [
         similarExample({
@@ -169,6 +168,78 @@ describe('VertexAiExampleStore', () => {
         role: 'user',
         parts: [{functionResponse: {name: 'search', response: {hits: 3}}}],
       },
+    ]);
+    expect(example.output[0].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+
+  it('defaults omitted functionCall args and functionResponse response to an empty object', async () => {
+    const store = storeWith({
+      results: [
+        similarExample({
+          similarityScore: 0.9,
+          searchKey: 'find cats',
+          expectedContents: [
+            {role: 'model', parts: [{functionCall: {name: 'search'}}]},
+            {role: 'user', parts: [{functionResponse: {name: 'search'}}]},
+          ],
+        }),
+      ],
+    });
+
+    const [example] = await store.getExamples('find cats');
+
+    expect(example.output).toEqual([
+      {role: 'model', parts: [{functionCall: {name: 'search', args: {}}}]},
+      {
+        role: 'user',
+        parts: [{functionResponse: {name: 'search', response: {}}}],
+      },
+    ]);
+  });
+
+  it('defaults an omitted functionCall name to an empty string', async () => {
+    const store = storeWith({
+      results: [
+        similarExample({
+          similarityScore: 0.9,
+          searchKey: 'find cats',
+          expectedContents: [{role: 'model', parts: [{functionCall: {}}]}],
+        }),
+      ],
+    });
+
+    const [example] = await store.getExamples('find cats');
+
+    expect(example.output).toEqual([
+      {role: 'model', parts: [{functionCall: {name: '', args: {}}}]},
+    ]);
+  });
+
+  it('keeps only the text of a part that also carries a functionCall', async () => {
+    const store = storeWith({
+      results: [
+        similarExample({
+          similarityScore: 0.9,
+          searchKey: 'find cats',
+          expectedContents: [
+            {
+              role: 'model',
+              parts: [
+                {
+                  text: 'Searching now.',
+                  functionCall: {name: 'search', args: {q: 'cats'}},
+                },
+              ],
+            },
+          ],
+        }),
+      ],
+    });
+
+    const [example] = await store.getExamples('find cats');
+
+    expect(example.output).toEqual([
+      {role: 'model', parts: [{text: 'Searching now.'}]},
     ]);
   });
 
@@ -207,6 +278,24 @@ describe('VertexAiExampleStore', () => {
     const [example] = await store.getExamples('empty turn');
 
     expect(example.output).toEqual([{role: 'model', parts: []}]);
+  });
+
+  it('preserves a content role that is omitted', async () => {
+    const store = storeWith({
+      results: [
+        similarExample({
+          similarityScore: 0.9,
+          searchKey: 'no role',
+          expectedContents: [{parts: [{text: 'answer'}]}],
+        }),
+      ],
+    });
+
+    const [example] = await store.getExamples('no role');
+
+    expect(example.output).toEqual([
+      {role: undefined, parts: [{text: 'answer'}]},
+    ]);
   });
 
   it('preserves the order of multi-step expected contents', async () => {
@@ -322,39 +411,52 @@ describe('VertexAiExampleStore', () => {
     expect(await store.getExamples('anything')).toEqual([]);
   });
 
-  it('propagates a client failure instead of returning no examples', async () => {
-    const client: ExampleStoreClient = {
-      searchExamples: vi.fn<ExampleStoreClient['searchExamples']>(async () => {
-        throw new Error('boom');
-      }),
-    };
-    const store = new VertexAiExampleStore({
-      examplesStoreName: STORE_NAME,
-      client,
-    });
-
-    await expect(store.getExamples('anything')).rejects.toThrow('boom');
-  });
-
-  it('searches with the query as the content search key', async () => {
-    const client = fakeClient(PASSWORD_RESET_RESPONSE);
-    const store = new VertexAiExampleStore({
-      examplesStoreName: STORE_NAME,
-      client,
-    });
+  it('posts the search to the regional endpoint once per call', async () => {
+    const request = mockSearchExamples(PASSWORD_RESET_RESPONSE);
+    const store = new VertexAiExampleStore(STORE_NAME);
 
     await store.getExamples('reset password');
 
-    expect(client.searchExamples).toHaveBeenCalledWith({
-      exampleStore: STORE_NAME,
-      topK: 10,
-      storedContentsExampleParameters: {
-        contentSearchKey: {
-          contents: [{role: 'user', parts: [{text: 'reset password'}]}],
-          searchKeyGenerationMethod: {lastEntry: {}},
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith({
+      url: SEARCH_EXAMPLES_URL,
+      method: 'POST',
+      data: {
+        topK: 10,
+        storedContentsExampleParameters: {
+          contentSearchKey: {
+            contents: [{role: 'user', parts: [{text: 'reset password'}]}],
+            searchKeyGenerationMethod: {lastEntry: {}},
+          },
         },
       },
     });
+  });
+
+  it('addresses the endpoint of the region named in the store resource', async () => {
+    const request = mockSearchExamples({results: []});
+    const store = new VertexAiExampleStore(
+      'projects/p/locations/europe-west4/exampleStores/s',
+    );
+
+    await store.getExamples('anything');
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url:
+          'https://europe-west4-aiplatform.googleapis.com/v1beta1/' +
+          'projects/p/locations/europe-west4/exampleStores/s:searchExamples',
+      }),
+    );
+  });
+
+  it('propagates a failed search instead of returning no examples', async () => {
+    vi.spyOn(GoogleAuth.prototype, 'request').mockRejectedValue(
+      new Error('Request failed with status code 403'),
+    );
+    const store = new VertexAiExampleStore(STORE_NAME);
+
+    await expect(store.getExamples('anything')).rejects.toThrow('403');
   });
 
   it('is recognised as an example provider', () => {
@@ -366,9 +468,12 @@ describe('VertexAiExampleStore', () => {
     ['projects/p/locations/l'],
     ['projects/p/locations/l/exampleStores/s/extra'],
   ])('rejects the malformed store name %s', (examplesStoreName) => {
-    expect(() => new VertexAiExampleStore({examplesStoreName})).toThrow(
+    const request = mockSearchExamples({});
+
+    expect(() => new VertexAiExampleStore(examplesStoreName)).toThrow(
       'examplesStoreName',
     );
+    expect(request).not.toHaveBeenCalled();
   });
 
   it('feeds the fetched examples into an ExampleTool system instruction', async () => {
@@ -387,29 +492,5 @@ describe('VertexAiExampleStore', () => {
     expect(instruction).toContain('<EXAMPLES>');
     expect(instruction).toContain('how do I reset my password');
     expect(instruction).toContain('Use the reset link.');
-  });
-});
-
-describe('VertexAiExampleStore default REST client', () => {
-  it('posts to the regional searchExamples endpoint', async () => {
-    const request = vi.spyOn(GoogleAuth.prototype, 'request').mockResolvedValue(
-      Object.assign(new Response(null, {status: 200, statusText: 'OK'}), {
-        config: {url: new URL(SEARCH_EXAMPLES_URL), headers: new Headers()},
-        data: PASSWORD_RESET_RESPONSE,
-      }),
-    );
-    const store = new VertexAiExampleStore({examplesStoreName: STORE_NAME});
-
-    const examples = await store.getExamples('reset password');
-
-    expect(request).toHaveBeenCalledWith(
-      expect.objectContaining({method: 'POST', url: SEARCH_EXAMPLES_URL}),
-    );
-    expect(examples).toEqual([
-      {
-        input: {role: 'user', parts: [{text: 'how do I reset my password'}]},
-        output: [{role: 'model', parts: [{text: 'Use the reset link.'}]}],
-      },
-    ]);
   });
 });

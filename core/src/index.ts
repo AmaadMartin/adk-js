@@ -38,6 +38,9 @@ export {
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
 export * from './common.js';
+// Not re-exported from common.ts: index_web.ts re-exports common.ts wholesale
+// and this provider pulls in google-auth-library, which is Node-only.
+export {VertexAiExampleStore} from './examples/vertex_ai_example_store.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
