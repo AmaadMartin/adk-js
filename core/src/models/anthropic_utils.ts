@@ -54,14 +54,6 @@ export interface AnthropicGenerateContentConfig extends GenerateContentConfig {
   effort?: AnthropicEffort | null;
 }
 
-const ANTHROPIC_EFFORTS: readonly AnthropicEffort[] = [
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-];
-
 /**
  * Maps every Anthropic stop reason onto its genai counterpart.
  *
@@ -608,20 +600,16 @@ export function buildThinkingParam(
  *
  * genai's own `thinkingConfig.thinkingLevel` has no Anthropic equivalent, so
  * it is ignored with a warning, and combining the two is an error rather than
- * a silent choice between them. A level outside the ones Anthropic defines
- * counts as unset, which only an untyped caller can produce.
+ * a silent choice between them.
  *
  * @param config The generate-content config, if any.
  * @return The effort level, or `undefined` to leave `output_config` unset.
  * @throws If both `effort` and `thinkingConfig.thinkingLevel` are set.
  */
 export function buildEffortParam(
-  config?: GenerateContentConfig,
+  config?: AnthropicGenerateContentConfig,
 ): AnthropicEffort | undefined {
-  const effort =
-    config !== undefined && 'effort' in config
-      ? ANTHROPIC_EFFORTS.find((level) => level === config.effort)
-      : undefined;
+  const effort = config?.effort ?? undefined;
   const thinkingLevel = config?.thinkingConfig?.thinkingLevel;
   if (effort !== undefined) {
     if (thinkingLevel) {
