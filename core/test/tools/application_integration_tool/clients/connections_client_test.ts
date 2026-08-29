@@ -30,6 +30,9 @@ vi.mock('google-auth-library', () => ({
   },
 }));
 
+const CONNECTORS_HOST = 'https://connectors.googleapis.com';
+const MTLS_CONNECTORS_HOST = 'https://connectors.mtls.googleapis.com';
+
 const CONNECTION_URL =
   'https://connectors.googleapis.com/v1/projects/test-project/locations/' +
   'us-central1/connections/test-connection';
@@ -470,6 +473,68 @@ describe('ConnectionsClient', () => {
         'Please provide a service account that has the required permissions' +
           ' to access the connection.',
       );
+    });
+  });
+
+  describe('endpoint resolution', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    /** Reads the host of the nth `fetch` call the client made. */
+    function requestedHost(call: number): string {
+      const fetchMock = vi.mocked(globalThis.fetch);
+      const url = fetchMock.mock.calls[call - 1]?.[0];
+      if (typeof url !== 'string') {
+        expect.fail(`fetch call ${call} was not made with a URL string`);
+      }
+      return new URL(url).origin;
+    }
+
+    it.each([
+      ['always', undefined, MTLS_CONNECTORS_HOST],
+      ['never', 'true', CONNECTORS_HOST],
+      ['auto', 'true', MTLS_CONNECTORS_HOST],
+      ['auto', 'false', CONNECTORS_HOST],
+      [undefined, undefined, CONNECTORS_HOST],
+    ])(
+      'calls %s with a client certificate of %s on host %s',
+      async (setting, certificate, expectedHost) => {
+        vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', setting);
+        vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', certificate);
+        globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({}));
+
+        await createClient().getConnectionDetails();
+
+        expect(requestedHost(1)).toBe(expectedHost);
+      },
+    );
+
+    it('polls the operation on the mutual-TLS host too', async () => {
+      vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'always');
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({name: 'operations/abc'}))
+        .mockResolvedValueOnce(jsonResponse({done: true}));
+
+      await createClient().getEntitySchemaAndOperations('Issues');
+
+      expect(vi.mocked(globalThis.fetch)).toHaveBeenNthCalledWith(
+        2,
+        `${MTLS_CONNECTORS_HOST}/v1/operations/abc`,
+        expect.objectContaining({method: 'GET'}),
+      );
+    });
+
+    it('keeps the host the constructor resolved when the environment changes', async () => {
+      vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'always');
+      const client = createClient();
+      vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'never');
+      globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({}));
+
+      await client.getConnectionDetails();
+
+      expect(requestedHost(1)).toBe(MTLS_CONNECTORS_HOST);
     });
   });
 });

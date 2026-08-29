@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it} from 'vitest';
 import {
   actionRequest,
   actionResponse,
@@ -13,7 +12,8 @@ import {
   executeCustomQueryRequest,
   getActionOperation,
   getConnectorBaseSpec,
-} from '../../../../src/tools/application_integration_tool/clients/connector_spec_builders.js';
+} from '@google/adk';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
@@ -551,5 +551,38 @@ describe('convertJsonSchemaToOpenApiSchema', () => {
     expect(
       convertJsonSchemaToOpenApiSchema({type: 'string', description: 7}),
     ).toEqual({type: 'string'});
+  });
+});
+
+describe('server url', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** Reads the single server URL the base spec declares. */
+  function serverUrl(): string | undefined {
+    return getConnectorBaseSpec().servers?.[0]?.url;
+  }
+
+  it('serves the default host when the environment asks for no mutual TLS', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', undefined);
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', undefined);
+
+    expect(serverUrl()).toBe('https://integrations.googleapis.com');
+  });
+
+  it('serves the mutual-TLS host when the environment asks for it', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'always');
+
+    expect(serverUrl()).toBe('https://integrations.mtls.googleapis.com');
+  });
+
+  it('re-reads the environment on every call', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'never');
+    const first = serverUrl();
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'always');
+
+    expect(serverUrl()).not.toBe(first);
+    expect(serverUrl()).toBe('https://integrations.mtls.googleapis.com');
   });
 });
