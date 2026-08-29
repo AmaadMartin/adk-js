@@ -65,6 +65,54 @@ describe('createApiParameter', () => {
     expect(param.name).toBe(expected);
   });
 
+  it.each([
+    ['in', 'param_in'],
+    ['class', 'param_class'],
+    ['function', 'param_function'],
+    ['await', 'param_await'],
+    ['let', 'param_let'],
+    ['typeof', 'param_typeof'],
+  ])('should prefix the reserved word %s', (original, expected) => {
+    const param = createApiParameter({
+      originalName: original,
+      paramLocation: 'query',
+      paramSchema: {type: 'string'},
+    });
+
+    expect(param.name).toBe(expected);
+  });
+
+  it('should prefix a name the snake_case rule turns into a reserved word', () => {
+    const param = createApiParameter({
+      originalName: 'Class',
+      paramLocation: 'query',
+      paramSchema: {type: 'string'},
+    });
+
+    expect(param.name).toBe('param_class');
+  });
+
+  it('should leave a name that only begins with a reserved word', () => {
+    const param = createApiParameter({
+      originalName: 'className',
+      paramLocation: 'query',
+      paramSchema: {type: 'string'},
+    });
+
+    expect(param.name).toBe('class_name');
+  });
+
+  it('should not prefix an explicit name that is a reserved word', () => {
+    const param = createApiParameter({
+      originalName: 'petId',
+      paramLocation: 'query',
+      paramSchema: {type: 'string'},
+      name: 'class',
+    });
+
+    expect(param.name).toBe('class');
+  });
+
   it('should let an explicit name win', () => {
     const param = createApiParameter({
       originalName: 'testParam',

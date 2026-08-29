@@ -7,7 +7,11 @@
 import {OpenAPIV3} from 'openapi-types';
 import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
-import {createApiParameter, type ApiParameter} from '../common/common.js';
+import {
+  createApiParameter,
+  renameReservedWords,
+  type ApiParameter,
+} from '../common/common.js';
 
 /**
  * Narrows a schema the document may leave unusable.
@@ -46,9 +50,16 @@ export class OperationParser {
     this.dedupeParamNames();
   }
 
-  /** The name to force on a parameter, or nothing to let it derive one. */
+  /**
+   * The name to force on a parameter, or nothing to let it derive one.
+   *
+   * A preserved name still gets the reserved-word guard: the caller opted out
+   * of the snake_case rule, not out of getting a usable identifier.
+   */
   private overrideName(originalName: string): string | undefined {
-    return this.preservePropertyNames ? originalName : undefined;
+    return this.preservePropertyNames
+      ? renameReservedWords(originalName)
+      : undefined;
   }
 
   private processOperationParameters() {

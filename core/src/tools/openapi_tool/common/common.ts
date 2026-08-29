@@ -10,6 +10,64 @@ import {snakeCase} from '../../../utils/case_utils.js';
 /** Argument name used when a parameter's location is not a known one. */
 const DEFAULT_NAME = 'value';
 
+/** Prefix given to an argument name that is a reserved word. */
+const RESERVED_WORD_PREFIX = 'param_';
+
+/**
+ * The ECMAScript reserved words, with the strict-mode and contextual ones.
+ *
+ * A `Set` rather than an object literal: the lookup key comes from an
+ * untrusted document, and an object lookup also resolves inherited names.
+ */
+const RESERVED_WORDS: ReadonlySet<string> = new Set([
+  'await',
+  'break',
+  'case',
+  'catch',
+  'class',
+  'const',
+  'continue',
+  'debugger',
+  'default',
+  'delete',
+  'do',
+  'else',
+  'enum',
+  'export',
+  'extends',
+  'false',
+  'finally',
+  'for',
+  'function',
+  'if',
+  'implements',
+  'import',
+  'in',
+  'instanceof',
+  'interface',
+  'let',
+  'new',
+  'null',
+  'package',
+  'private',
+  'protected',
+  'public',
+  'return',
+  'static',
+  'super',
+  'switch',
+  'this',
+  'throw',
+  'true',
+  'try',
+  'typeof',
+  'var',
+  'void',
+  'while',
+  'with',
+  'yield',
+]);
+
 /**
  * Argument name used when a parameter's name derives to nothing.
  *
@@ -105,11 +163,25 @@ function normalizeOpenApiSchema(
 }
 
 /**
+ * Prefixes an argument name that is an ECMAScript reserved word.
+ *
+ * A generated argument name reaches a reader as an identifier, in a call the
+ * model writes and in the documentation of the tool. `class` and `in` do not
+ * work there, so they become `param_class` and `param_in`.
+ *
+ * @param name The name to check.
+ * @returns The prefixed name, or `name` when it is not a reserved word.
+ */
+export function renameReservedWords(name: string): string {
+  return RESERVED_WORDS.has(name) ? `${RESERVED_WORD_PREFIX}${name}` : name;
+}
+
+/**
  * Derives a tool-facing parameter from an OpenAPI parameter.
  *
- * The name is the caller's, else the snake_case original, else a name for the
- * parameter's location. The description is the caller's, else the schema's
- * own. `init` is not modified.
+ * The name is the caller's, else the snake_case original with a reserved word
+ * prefixed, else a name for the parameter's location. The description is the
+ * caller's, else the schema's own. `init` is not modified.
  *
  * @param init The parameter as the document declares it.
  * @throws {Error} If the schema is unusable.
@@ -127,7 +199,7 @@ export function createApiParameter(init: ApiParameterInit): ApiParameter {
     description: init.description || paramSchema.description || '',
     name:
       init.name ||
-      snakeCase(init.originalName) ||
+      renameReservedWords(snakeCase(init.originalName)) ||
       DEFAULT_NAME_BY_LOCATION.get(init.paramLocation) ||
       DEFAULT_NAME,
     required: init.required ?? false,

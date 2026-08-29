@@ -113,6 +113,22 @@ describe('OperationParser naming', () => {
     expect(parseWithParameter(original)).toBe(expected);
   });
 
+  it('should prefix a parameter named after a reserved word', () => {
+    expect(parseWithParameter('class')).toBe('param_class');
+  });
+
+  it('should prefix a reserved word even when preserving names', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [{name: 'class', in: 'query', schema: {type: 'string'}}],
+      responses: {},
+    };
+
+    const parser = new OperationParser(op, {preservePropertyNames: true});
+
+    expect(parser.getParameters()[0].name).toBe('param_class');
+  });
+
   it('should keep the original parameter name when asked to preserve it', () => {
     const op: OpenAPIV3.OperationObject = {
       operationId: 'testOp',
