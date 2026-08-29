@@ -22,6 +22,13 @@ const GLOBAL_HOST = 'secretmanager.googleapis.com';
 const API_VERSION = 'v1';
 /** Google Cloud location IDs hold only lowercase letters, digits and hyphens. */
 const LOCATION_PATTERN = /^[a-z0-9-]+$/;
+/**
+ * The two documented forms of a secret version resource name, global and
+ * regional. Each segment excludes `/`, `?` and `#`, which the name would
+ * otherwise carry into the request URL.
+ */
+const RESOURCE_NAME_PATTERN =
+  /^projects\/[^/?#]+(\/locations\/[^/?#]+)?\/secrets\/[^/?#]+\/versions\/[^/?#]+$/;
 
 /** The fields of `AccessSecretVersionResponse` this client reads. */
 interface AccessSecretVersionResponse {
@@ -147,9 +154,19 @@ export class SecretManagerClient {
    *
    * @param resourceName The full resource name of the secret version, in the
    *   format `projects/{project}/secrets/{secret}/versions/{version}`, e.g.
-   *   `projects/my-project/secrets/my-secret/versions/latest`.
+   *   `projects/my-project/secrets/my-secret/versions/latest`. A regional
+   *   secret carries a `locations/{location}` segment as well.
+   * @throws {InputValidationError} If `resourceName` is not a full resource
+   *   name. The name reaches the request path, so a value holding `?` or `#`
+   *   would retarget the call.
    */
   async getSecret(resourceName: string): Promise<string> {
+    if (!RESOURCE_NAME_PATTERN.test(resourceName)) {
+      throw new InputValidationError(
+        `Invalid secret resource name: ${resourceName}. Expected ` +
+          '"projects/*/secrets/*/versions/*".',
+      );
+    }
     const client = await this.getAuthClient();
     const response = await client.request<AccessSecretVersionResponse>({
       url: `https://${this.host}/${API_VERSION}/${resourceName}:access`,
