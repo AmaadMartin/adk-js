@@ -37,6 +37,9 @@ const UI_RESOURCE_URI_SCHEME = 'ui://';
 /** Deprecated flat spelling of the MCP-App UI resource URI key. */
 const FLAT_UI_RESOURCE_URI_KEY = 'ui/resourceUri';
 
+/** Selects the MCP App iframe renderer on a {@link UiWidget}. */
+const MCP_WIDGET_PROVIDER = 'mcp';
+
 /**
  * Names the framework itself puts on the wire; an MCP server may not claim one.
  *
@@ -249,15 +252,41 @@ export class MCPTool extends BaseTool {
         options.onprogress = onprogress;
       }
 
-      const result = await session.callTool(
-        callRequest.params,
-        undefined,
-        options,
-      );
-      return result as CallToolResult;
+      const result = (await this.mcpSessionManager.runGuarded(
+        session,
+        session.callTool(callRequest.params, undefined, options),
+      )) as CallToolResult;
+      this.renderMcpAppWidget(toolContext, request.args);
+      return result;
     } finally {
       await this.mcpSessionManager.closeSession(session);
     }
+  }
+
+  /**
+   * Attaches the MCP App widget this tool declares, so the host renders the
+   * app beside the result. A tool that declares none attaches nothing.
+   *
+   * The payload keys are snake_case because the MCP Apps renderer reads them,
+   * and adk-python already feeds it those names.
+   */
+  private renderMcpAppWidget(
+    toolContext: Context,
+    args: Record<string, unknown>,
+  ): void {
+    const resourceUri = this.mcpAppResourceUri;
+    if (!resourceUri) {
+      return;
+    }
+    toolContext.renderUiWidget({
+      id: toolContext.functionCallId ?? '',
+      provider: MCP_WIDGET_PROVIDER,
+      payload: {
+        resource_uri: resourceUri,
+        tool: this.mcpTool,
+        tool_args: args,
+      },
+    });
   }
 
   /**
