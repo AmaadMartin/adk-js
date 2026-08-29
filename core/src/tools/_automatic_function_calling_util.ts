@@ -117,7 +117,7 @@ const SCHEMA_TYPE_BY_LOWERCASE_NAME: Record<string, Type> = Object.fromEntries(
 );
 
 /** The return type names that describe an empty return value. */
-const NULL_TYPE_NAMES = ['None', 'null'];
+const NULL_RETURN_TYPE_NAMES = ['none', 'null'];
 
 /** Resolves a raw type name, exact match first, then case-insensitively. */
 function toSchemaType(typeName: string): Type {
@@ -126,6 +126,17 @@ function toSchemaType(typeName: string): Type {
     SCHEMA_TYPE_BY_LOWERCASE_NAME[typeName.toLowerCase()] ??
     Type.TYPE_UNSPECIFIED
   );
+}
+
+/**
+ * Whether a raw type name means null.
+ *
+ * The comparison folds case, as the type lookup does. `zodObjectToSchema` and
+ * the genai `Type` enum both spell it `'NULL'`, and a union member that is not
+ * recognised as the null member erases the property's own type.
+ */
+function isNullType(typeName: string | undefined): boolean {
+  return typeName?.toLowerCase() === 'null';
 }
 
 function mapProperties<T>(
@@ -150,7 +161,7 @@ function annotateNullableFields(
 ): Record<string, JsonSchemaNode> {
   return mapProperties(properties, (property) => {
     const {anyOf = []} = property;
-    const nullIndex = anyOf.findIndex((member) => member.type === 'null');
+    const nullIndex = anyOf.findIndex((member) => isNullType(member.type));
     if (nullIndex < 0) {
       return {...property};
     }
@@ -196,7 +207,7 @@ function mergeUnionMembers(property: JsonSchemaNode): JsonSchemaNode {
   const merged: JsonSchemaNode = {...property};
   delete merged.anyOf;
   for (const member of property.anyOf ?? []) {
-    if (member.type !== 'null') {
+    if (!isNullType(member.type)) {
       Object.assign(merged, member);
     }
   }
@@ -279,7 +290,7 @@ function mapReturnType(
   if (returnType === undefined) {
     return absentReturnType;
   }
-  if (NULL_TYPE_NAMES.includes(returnType)) {
+  if (NULL_RETURN_TYPE_NAMES.includes(returnType.toLowerCase())) {
     return {type: Type.NULL};
   }
   return {type: toSchemaType(returnType)};

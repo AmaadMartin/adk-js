@@ -480,6 +480,17 @@ describe('buildFunctionDeclaration', () => {
     expect(declaration.response?.type).toBe(Type.NULL);
   });
 
+  it('maps an upper-case null return type to Type.NULL for VERTEX_AI', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'functionNoneReturn',
+      parameters,
+      returnType: Type.NULL,
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(declaration.response?.type).toBe(Type.NULL);
+  });
+
   it('maps a regular return type for VERTEX_AI', () => {
     const declaration = buildFunctionDeclaration({
       name: 'functionStringReturn',
@@ -506,6 +517,20 @@ describe('buildFunctionDeclaration', () => {
     expect(declaration.parameters?.required).toEqual(['name']);
   });
 
+  it('collapses a Zod union with null to the non-null member', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'greet',
+      parameters: z.object({nickname: z.union([z.string(), z.null()])}),
+    });
+
+    // zodObjectToSchema spells the null member `NULL`, which still has to be
+    // recognised as the null member.
+    const nickname = propertiesOf(declaration.parameters)['nickname'];
+    expect(nickname.type).toBe(Type.STRING);
+    expect(nickname.anyOf).toBeUndefined();
+    expect(declaration.parameters?.required).toEqual([]);
+  });
+
   it('accepts a genai Schema as the parameter source', () => {
     const schema: Schema = {
       type: Type.OBJECT,
@@ -524,6 +549,26 @@ describe('buildFunctionDeclaration', () => {
     expect(properties['name'].type).toBe(Type.STRING);
     expect(properties['count'].type).toBe(Type.INTEGER);
     expect(declaration.parameters?.required).toEqual(['name']);
+  });
+
+  it('recognises a genai Type.NULL union member on the Vertex path', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        nickname: {anyOf: [{type: Type.STRING}, {type: Type.NULL}]},
+      },
+    };
+
+    const declaration = buildFunctionDeclaration({
+      name: 'greet',
+      parameters: schema,
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    const nickname = propertiesOf(declaration.parameters)['nickname'];
+    expect(nickname.nullable).toBe(true);
+    expect(nickname.anyOf).toEqual([{type: Type.STRING}]);
+    expect(nickname.type).toBe(Type.STRING);
   });
 
   it('throws when the name is empty', () => {
