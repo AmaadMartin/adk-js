@@ -6,10 +6,14 @@
 
 import {experimental} from '../../../utils/experimental.js';
 import {asJsonObject, readString} from '../../../utils/json_utils.js';
+import {getApiEndpoint} from '../../../utils/mtls_utils.js';
 import {ApiTransport} from './api_transport.js';
 
-/** Host serving the Integration Connectors API. */
-const CONNECTORS_URL = 'https://connectors.googleapis.com';
+/** Host template serving the Integration Connectors API. */
+const CONNECTORS_ENDPOINT_TEMPLATE = 'connectors.googleapis.com';
+
+/** Mutual-TLS host template serving the Integration Connectors API. */
+const MTLS_CONNECTORS_ENDPOINT_TEMPLATE = 'connectors.mtls.googleapis.com';
 
 /** Delay between two polls of a long-running connector operation. */
 const POLL_INTERVAL_MS = 1000;
@@ -69,8 +73,20 @@ export interface ConnectionsClientOptions {
 export class ConnectionsClient {
   private readonly transport: ApiTransport;
 
+  /**
+   * Resolved once, so a single client never switches hosts mid-flight. The
+   * location carries no placeholder today, but the reference passes it and a
+   * regional template would need it.
+   */
+  private readonly connectorUrl: string;
+
   constructor(private readonly options: ConnectionsClientOptions) {
     this.transport = new ApiTransport(options.serviceAccountJson);
+    this.connectorUrl = `https://${getApiEndpoint(
+      options.location,
+      CONNECTORS_ENDPOINT_TEMPLATE,
+      MTLS_CONNECTORS_ENDPOINT_TEMPLATE,
+    )}`;
   }
 
   /**
@@ -139,7 +155,7 @@ export class ConnectionsClient {
 
   private connectionUrl(): string {
     return (
-      `${CONNECTORS_URL}/v1/projects/${this.options.project}/locations/` +
+      `${this.connectorUrl}/v1/projects/${this.options.project}/locations/` +
       `${this.options.location}/connections/${this.options.connection}`
     );
   }
@@ -161,7 +177,7 @@ export class ConnectionsClient {
   private async pollOperation(
     operationName: string,
   ): Promise<Record<string, unknown>> {
-    const url = `${CONNECTORS_URL}/v1/${operationName}`;
+    const url = `${this.connectorUrl}/v1/${operationName}`;
     const deadline = Date.now() + POLL_TIMEOUT_MS;
     for (;;) {
       const operation = await this.get(url);
