@@ -426,15 +426,8 @@ export type {
 } from './tools/apihub_tool/clients/apihub_client.js';
 export {ApplicationIntegrationToolset} from './tools/application_integration_tool/application_integration_toolset.js';
 export type {ApplicationIntegrationToolsetOptions} from './tools/application_integration_tool/application_integration_toolset.js';
-export {ConnectionsClient} from './tools/application_integration_tool/clients/connections_client.js';
-export type {
-  ActionSchema,
-  ConnectionDetails,
-  ConnectionsClientOptions,
-  EntitySchemaAndOperations,
-} from './tools/application_integration_tool/clients/connections_client.js';
-export {IntegrationClient} from './tools/application_integration_tool/clients/integration_client.js';
-export type {IntegrationClientOptions} from './tools/application_integration_tool/clients/integration_client.js';
+// `ConnectionsClient` and `IntegrationClient` are exported from the Node barrel
+// `index.ts`, because they reach `google-auth-library` through ApiTransport.
 export {IntegrationConnectorTool} from './tools/application_integration_tool/integration_connector_tool.js';
 export type {IntegrationConnectorToolOptions} from './tools/application_integration_tool/integration_connector_tool.js';
 export * from './tools/base_tool.js';

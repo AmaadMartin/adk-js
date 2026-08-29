@@ -6,6 +6,7 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {asJsonObject} from '../../../utils/json_utils.js';
+import {getApiEndpoint} from '../../../utils/mtls_utils.js';
 import {CLOUD_PLATFORM_SCOPE} from './api_transport.js';
 
 /**
@@ -18,8 +19,13 @@ import {CLOUD_PLATFORM_SCOPE} from './api_transport.js';
  * `ConnectionsClient` static builders character for character.
  */
 
-/** Host that serves the generated `:execute` endpoints. */
-const INTEGRATIONS_SERVER_URL = 'https://integrations.googleapis.com';
+/**
+ * Host templates that serve the generated `:execute` endpoints. These are the
+ * global hosts, and carry no `{location}` placeholder. `integration_client.ts`
+ * calls the regional hosts, which are spelled differently.
+ */
+const INTEGRATIONS_ENDPOINT_TEMPLATE = 'integrations.googleapis.com';
+const MTLS_INTEGRATIONS_ENDPOINT_TEMPLATE = 'integrations.mtls.googleapis.com';
 
 /** Extra guidance appended to the description of a custom-query action. */
 const EXECUTE_QUERY_GUIDANCE =
@@ -89,8 +95,19 @@ export interface ConnectorSpec extends OpenAPIV3.Document<ConnectorOperationExte
   };
 }
 
-/** Builds the connector spec skeleton, with no paths and the shared schemas. */
+/**
+ * Builds the connector spec skeleton, with no paths and the shared schemas.
+ *
+ * The server host is resolved on every call, because `getApiEndpoint` reads
+ * the environment on every call. A module-scope constant would freeze the host
+ * at import time.
+ */
 export function getConnectorBaseSpec(): ConnectorSpec {
+  const serverUrl = `https://${getApiEndpoint(
+    '',
+    INTEGRATIONS_ENDPOINT_TEMPLATE,
+    MTLS_INTEGRATIONS_ENDPOINT_TEMPLATE,
+  )}`;
   return {
     openapi: '3.0.1',
     info: {
@@ -98,7 +115,7 @@ export function getConnectorBaseSpec(): ConnectorSpec {
       description: 'This tool can execute a query on connection',
       version: '4',
     },
-    servers: [{url: INTEGRATIONS_SERVER_URL}],
+    servers: [{url: serverUrl}],
     security: [{google_auth: [CLOUD_PLATFORM_SCOPE]}],
     paths: {},
     components: {
@@ -231,7 +248,7 @@ export function getActionOperation(
 }
 
 /** What an entity path-item builder reads. */
-interface EntityOperationContext {
+export interface EntityOperationContext {
   entity: string;
   /** The entity's JSON schema, quoted in a read operation's description. */
   schemaAsString: string;
@@ -337,7 +354,7 @@ interface EntityOperationSpec {
 }
 
 /** Builds the request schema and the path item of one entity operation. */
-interface EntityOperationBuilder {
+export interface EntityOperationBuilder {
   request(entity: string): OpenAPIV3.SchemaObject;
   operation(context: EntityOperationContext): ConnectorPathItem;
 }
