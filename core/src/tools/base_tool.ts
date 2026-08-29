@@ -87,10 +87,10 @@ export abstract class BaseTool {
    * Whether this tool produces its `FunctionResponse` elsewhere.
    *
    * When true, the automatic function-response event is skipped if `runAsync`
-   * resolves to an empty response; some other orchestrator (a wrapper agent, or
-   * an external system for webhook-style callbacks) supplies the matching
-   * response later in the conversation. A non-empty return is treated as a real
-   * result and emits an event as usual.
+   * resolves to `null` or `undefined`; some other orchestrator (a wrapper
+   * agent, or an external system for webhook-style callbacks) supplies the
+   * matching response later in the conversation. A present-but-falsy return
+   * (`''`, `0`, `false`) is a real result and emits an event as usual.
    *
    * Distinct from {@link BaseTool.isLongRunning}, which skips the same way but
    * also records the call in `event.longRunningToolIds`, affecting A2A task
