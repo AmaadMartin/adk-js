@@ -52,9 +52,11 @@ const agent = new LlmAgent({
 });
 ```
 
-The model sees the tool as `serper_dev_tool`. Annotate the object with
-`CrewaiBaseTool` as shown. Without the annotation TypeScript widens
-`type: 'object'` to `string`, and the object no longer matches the interface.
+The model sees the tool as `serper_dev_tool`.
+
+The `CrewaiBaseTool` annotation is optional. A plain object literal matches the
+interface too, and so does a tool object from a CrewAI port that carries the
+library's own typing.
 
 ## The tool interface
 
@@ -125,5 +127,12 @@ shown an empty object.
 
 ## Errors from the tool
 
-An error thrown or rejected by `run` propagates to the caller unchanged. The
-adapter does not catch it and does not wrap the message, matching adk-python.
+`CrewaiTool` is a `FunctionTool`, so an error thrown or rejected by `run`
+surfaces the way every other function-shaped tool in ADK reports one:
+
+```
+Error in tool 'serper_dev_tool': the underlying message
+```
+
+A missing required argument is not an error. It is a returned value, so that
+the model can read it and retry.
