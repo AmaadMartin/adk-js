@@ -68,13 +68,8 @@ export class OpenApiSpecParser {
  * Resolves all internal $ref references in the OpenAPI spec document.
  *
  * The cache holds one resolved subtree per reference and hands out a copy of
- * it, so the returned document is a tree. No `parse` caller can observe that
- * copy today: `sanitizeSchemaTypes` runs straight afterwards and deep copies
- * the whole document. The copy holds the invariant at this function's own
- * boundary, and matches adk-python.
- *
- * This is exported for its own unit tests. It is not public API and
- * `index.ts` does not re-export it.
+ * it, so two uses of one reference never share an object. Exported for its own
+ * tests; `index.ts` does not re-export it.
  */
 export function resolveReferences(
   spec: OpenAPIV3.Document,
@@ -109,7 +104,8 @@ export function resolveReferences(
       seenRefs.add(refString);
 
       if (resolvedCache.has(refString)) {
-        return deepCopy(resolvedCache.get(refString));
+        // Deep copy, so this use cannot edit another's subtree.
+        return JSON.parse(JSON.stringify(resolvedCache.get(refString)));
       }
 
       let resolvedValue = resolveRef(refString, currentDoc);
@@ -130,14 +126,6 @@ export function resolveReferences(
   };
 
   return recursiveResolve(specCopy, specCopy) as OpenAPIV3.Document;
-}
-
-/**
- * Deep copies a resolved `$ref` subtree. The subtrees are plain JSON, so a
- * JSON round trip reproduces them exactly.
- */
-function deepCopy<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 /**
