@@ -444,6 +444,21 @@ describe('CLI Entrypoint', () => {
       expect(args.agentsDir).toBe(getAbsolutePath('./agents'));
     });
 
+    it('reports a thrown non-Error rather than the word undefined', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      serverStart.mockRejectedValueOnce('a bare string');
+
+      await expect(parse(['web', '--log_to_tmp'])).rejects.toThrow('exit');
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        `Error starting web server: a bare string (see ${LOG_FILE_PATH})`,
+      );
+    });
+
     it('names the log file on the terminal when the web server fails', async () => {
       vi.spyOn(console, 'log').mockImplementation(() => {});
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

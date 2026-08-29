@@ -120,7 +120,9 @@ async function exitWithError(
   error: unknown,
   logFilePath?: string,
 ): Promise<never> {
-  const message = (error as Error).message;
+  // A rejection carries whatever was thrown, so a non-Error must not become
+  // the word "undefined" in the last thing the command tells the user.
+  const message = error instanceof Error ? error.message : String(error);
   logger.error(`${prefix}:`, message);
   if (logFilePath) {
     console.error(`${prefix}: ${message} (see ${logFilePath})`);

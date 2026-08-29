@@ -162,17 +162,12 @@ export class AdkLogger implements Logger {
     }
 
     this.consoleFormat = winston.format.combine(...formats);
-    this.logger = winston.createLogger({
-      levels: WINSTON_LEVELS,
-      level: PASS_THROUGH_LEVEL,
-      format: this.consoleFormat,
-      transports: [new winston.transports.Console()],
-    });
-
+    this.logger = winston.createLogger();
+    // `applyTransport` is the one place that configures the logger, and
+    // `undefined` already means the console, so this covers construction
+    // before and after a file target is set.
+    this.applyTransport(fileTransport);
     transportSwaps.add((transport) => this.applyTransport(transport));
-    if (fileTransport) {
-      this.applyTransport(fileTransport);
-    }
   }
 
   private applyTransport(
