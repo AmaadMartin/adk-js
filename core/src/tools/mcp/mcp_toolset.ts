@@ -6,21 +6,31 @@
 
 import type {
   BlobResourceContents,
+  ClientCapabilities,
   ListResourcesResult,
   ListToolsResult,
   ReadResourceResult,
   Resource,
   TextResourceContents,
+  Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import {RESERVED_TOOL_NAMES} from '../../agents/framework_function_calls.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {logger} from '../../utils/logger.js';
+import {TtlLruCache} from '../../utils/ttl_lru_cache.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
+import {RequireConfirmationPredicate} from '../tool_confirmation.js';
 
 import {LoadMcpResourceTool} from './load_mcp_resource_tool.js';
-import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
-import {MCPTool} from './mcp_tool.js';
+import {
+  ElicitationFn,
+  MCPConnectionParams,
+  MCPSessionManager,
+  SamplingFn,
+} from './mcp_session_manager.js';
+import {MCPTool, ProgressCallbackFactory, ProgressFn} from './mcp_tool.js';
 import {
   McpToolsetConfig,
   resolveConfigConnectionParams,
@@ -40,11 +50,47 @@ export interface MCPToolsetOptions {
   /** Prepended as `${prefix}_` to every discovered tool name. */
   prefix?: string;
   /**
+   * How long a `tools/list` response stays usable, in seconds. Omit to disable
+   * caching; a value of zero or less is rejected.
+   */
+  toolListCacheTtlSeconds?: number;
+  /** Whether a human must approve a tool call before it reaches the server. */
+  requireConfirmation?: boolean | RequireConfirmationPredicate;
+  /** Resolves extra request headers before each MCP session is created. */
+  headerProvider?: MCPHeaderProvider;
+  /** Receives progress notifications for every tool call. */
+  progressCallback?: ProgressFn;
+  /** Builds a per-call progress callback. Mutually exclusive with the above. */
+  progressCallbackFactory?: ProgressCallbackFactory;
+  /**
    * Adds {@link LoadMcpResourceTool} to the tool list, so the model can read
    * the resources the MCP server advertises. Defaults to false.
    */
   useMcpResources?: boolean;
+  /** Handles a server's `sampling/createMessage` request. */
+  samplingCallback?: SamplingFn;
+  /** Detail advertised with the sampling capability. Defaults to `{}`. */
+  samplingCapabilities?: ClientCapabilities['sampling'];
+  /** Handles a server's `elicitation/create` request. */
+  elicitationCallback?: ElicitationFn;
 }
+
+/**
+ * Resolves request headers immediately before an MCP session is created.
+ *
+ * It runs once per `getTools()` call, so a short-lived credential is freshly
+ * minted each time. Headers only apply to an HTTP transport; a stdio
+ * connection ignores them.
+ */
+export type MCPHeaderProvider = (
+  context?: ReadonlyContext,
+) => Record<string, string> | Promise<Record<string, string>>;
+
+/**
+ * The cap on cached tool lists, so a `headerProvider` that mints a fresh value
+ * per request cannot grow the cache without bound while entries are still live.
+ */
+const MAX_TOOL_LIST_CACHE_ENTRIES = 64;
 
 /**
  * Reads the options out of either constructor form.
@@ -52,7 +98,8 @@ export interface MCPToolsetOptions {
  * The forms are told apart by `connectionParams`: {@link MCPToolsetOptions}
  * always carries it and no `MCPConnectionParams` member does.
  *
- * @throws If the connection params are missing.
+ * @throws If the connection params are missing, if the cache lifetime is not
+ *     positive, or if both progress options are set.
  */
 function normalizeToolsetOptions(
   optionsOrConnectionParams: MCPToolsetOptions | MCPConnectionParams,
@@ -67,7 +114,30 @@ function normalizeToolsetOptions(
   if (!options.connectionParams) {
     throw new Error('Missing connection params in MCPToolset.');
   }
+  if (
+    options.toolListCacheTtlSeconds !== undefined &&
+    options.toolListCacheTtlSeconds <= 0
+  ) {
+    throw new Error(
+      'toolListCacheTtlSeconds must be positive. Omit it to disable caching.',
+    );
+  }
+  if (options.progressCallback && options.progressCallbackFactory) {
+    throw new Error(
+      'Set progressCallback or progressCallbackFactory, not both.',
+    );
+  }
   return options;
+}
+
+/**
+ * Returns a cache key that identifies one set of session headers.
+ *
+ * Headers are the only thing that varies session identity for a single
+ * toolset, so a cached tool list is never served to a different identity.
+ */
+function toolListCacheKey(headers: Record<string, string>): string {
+  return JSON.stringify(Object.entries(headers).sort());
 }
 
 /**
@@ -133,6 +203,11 @@ function applyToolFilter(
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
   private readonly useMcpResources: boolean;
+  private readonly headerProvider?: MCPHeaderProvider;
+  private readonly requireConfirmation: boolean | RequireConfirmationPredicate;
+  private readonly progressCallback?: ProgressFn;
+  private readonly progressCallbackFactory?: ProgressCallbackFactory;
+  private readonly toolListCache?: TtlLruCache<Tool[]>;
 
   constructor(options: MCPToolsetOptions);
   constructor(
@@ -151,8 +226,22 @@ export class MCPToolset extends BaseToolset {
       prefix,
     );
     super(options.toolFilter ?? [], options.prefix);
-    this.mcpSessionManager = new MCPSessionManager(options.connectionParams);
+    this.mcpSessionManager = new MCPSessionManager(options.connectionParams, {
+      samplingCallback: options.samplingCallback,
+      samplingCapabilities: options.samplingCapabilities,
+      elicitationCallback: options.elicitationCallback,
+    });
     this.useMcpResources = options.useMcpResources ?? false;
+    this.headerProvider = options.headerProvider;
+    this.requireConfirmation = options.requireConfirmation ?? false;
+    this.progressCallback = options.progressCallback;
+    this.progressCallbackFactory = options.progressCallbackFactory;
+    this.toolListCache = options.toolListCacheTtlSeconds
+      ? new TtlLruCache<Tool[]>(
+          options.toolListCacheTtlSeconds,
+          MAX_TOOL_LIST_CACHE_ENTRIES,
+        )
+      : undefined;
   }
 
   /**
@@ -168,13 +257,81 @@ export class MCPToolset extends BaseToolset {
       connectionParams: resolveConfigConnectionParams(config),
       toolFilter: config.toolFilter,
       prefix: config.prefix,
+      toolListCacheTtlSeconds: config.toolListCacheTtlSeconds,
       useMcpResources: config.useMcpResources,
     });
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    const session = await this.mcpSessionManager.createSession();
+    const headers = await this.buildHeaders(context);
+    const descriptors = await this.listToolDescriptors(headers);
 
+    const tools: BaseTool[] = [];
+    for (const descriptor of descriptors) {
+      // The reserved check reads the name the server advertised, before any
+      // prefix, because that is the name that would shadow a framework tool.
+      if (RESERVED_TOOL_NAMES.has(descriptor.name)) {
+        logger.warn(
+          `MCPToolset: skipping tool '${descriptor.name}' because that name ` +
+            'is reserved by the ADK framework.',
+        );
+        continue;
+      }
+      tools.push(
+        new MCPTool({
+          mcpTool: {
+            ...descriptor,
+            name: this.prefix
+              ? `${this.prefix}_${descriptor.name}`
+              : descriptor.name,
+          },
+          mcpSessionManager: this.mcpSessionManager,
+          originalName: descriptor.name,
+          requireConfirmation: this.requireConfirmation,
+          progressCallback: this.progressCallback,
+          progressCallbackFactory: this.progressCallbackFactory,
+        }),
+      );
+    }
+
+    // Sorted for a stable order across turns: an MCP server's listing order is
+    // not contractual, and a changing order invalidates the model's context
+    // cache every turn.
+    const selected = applyToolFilter(tools, this.toolFilter, context).sort(
+      (left, right) => left.name.localeCompare(right.name),
+    );
+    if (!this.useMcpResources) {
+      return selected;
+    }
+    // Appended after the sort so the resource tool is always last, and so a
+    // toolFilter naming the server's tools cannot drop it.
+    return [...selected, new LoadMcpResourceTool(this)];
+  }
+
+  /** Resolves the headers one MCP session is opened with. */
+  private async buildHeaders(
+    context?: ReadonlyContext,
+  ): Promise<Record<string, string>> {
+    return this.headerProvider ? await this.headerProvider(context) : {};
+  }
+
+  /**
+   * Returns the tool descriptors the server advertises, over the cache when one
+   * is configured. Only the round trip is cached; the tools themselves are
+   * rebuilt on every call so the filter always runs.
+   */
+  private async listToolDescriptors(
+    headers: Record<string, string>,
+  ): Promise<Tool[]> {
+    const cacheKey = this.toolListCache ? toolListCacheKey(headers) : undefined;
+    if (this.toolListCache && cacheKey !== undefined) {
+      const cached = this.toolListCache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
+    const session = await this.mcpSessionManager.createSession(headers);
     let listResult: ListToolsResult;
     try {
       listResult = (await session.listTools()) as ListToolsResult;
@@ -186,22 +343,10 @@ export class MCPToolset extends BaseToolset {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    const tools = listResult.tools.map((tool) => {
-      // Create a cloned tool definition with the prefixed name
-      const toolWithPrefix = {
-        ...tool,
-        name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
-      };
-      return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
-    });
-
-    const selected = applyToolFilter(tools, this.toolFilter, context);
-    if (!this.useMcpResources) {
-      return selected;
+    if (this.toolListCache && cacheKey !== undefined) {
+      this.toolListCache.set(cacheKey, listResult.tools);
     }
-    // Appended after the filter so the resource tool is always last, and so a
-    // toolFilter naming the server's tools cannot drop it.
-    return [...selected, new LoadMcpResourceTool(this)];
+    return listResult.tools;
   }
 
   /**
@@ -210,7 +355,9 @@ export class MCPToolset extends BaseToolset {
    * @return The resource names available on the server.
    */
   async listResources(): Promise<string[]> {
-    const session = await this.mcpSessionManager.createSession();
+    const session = await this.mcpSessionManager.createSession(
+      await this.buildHeaders(),
+    );
     try {
       const result = (await session.listResources()) as ListResourcesResult;
       return result.resources.map((resource) => resource.name);
@@ -227,7 +374,9 @@ export class MCPToolset extends BaseToolset {
    * @throws If no resource with the given name is advertised by the server.
    */
   async getResourceInfo(name: string): Promise<Resource> {
-    const session = await this.mcpSessionManager.createSession();
+    const session = await this.mcpSessionManager.createSession(
+      await this.buildHeaders(),
+    );
     let result: ListResourcesResult;
     try {
       result = (await session.listResources()) as ListResourcesResult;
@@ -263,7 +412,9 @@ export class MCPToolset extends BaseToolset {
       throw new Error(`Resource '${name}' has no URI.`);
     }
 
-    const session = await this.mcpSessionManager.createSession();
+    const session = await this.mcpSessionManager.createSession(
+      await this.buildHeaders(),
+    );
     try {
       const result = (await session.readResource({
         uri: resourceInfo.uri,
@@ -275,6 +426,7 @@ export class MCPToolset extends BaseToolset {
   }
 
   async close(): Promise<void> {
+    this.toolListCache?.clear();
     const sessions = this.mcpSessionManager.getActiveSessions();
     await Promise.allSettled(
       sessions.map((session) => this.mcpSessionManager.closeSession(session)),

@@ -34,6 +34,8 @@ export interface McpToolsetConfig {
   toolFilter?: string[];
   /** Prepended as `${prefix}_` to every discovered tool name. */
   prefix?: string;
+  /** How long a `tools/list` response stays usable, in seconds. */
+  toolListCacheTtlSeconds?: number;
   /** Adds `load_mcp_resource` so the model can read the server's resources. */
   useMcpResources?: boolean;
 }
@@ -79,7 +81,9 @@ export function resolveConfigConnectionParams(
   const populated = [
     config.stdioConnectionParams,
     config.streamableHttpConnectionParams,
-  ].filter((params): params is MCPConnectionParams => params !== undefined);
+    // `!= null` rejects an explicit `null`, which is what JSON and YAML produce
+    // for a field a config leaves blank.
+  ].filter((params): params is MCPConnectionParams => params != null);
 
   if (populated.length !== 1) {
     throw new Error(

@@ -66,8 +66,9 @@ describe('MCPToolset', () => {
     const tools = await toolset.getTools();
 
     expect(tools).toHaveLength(2);
-    expect(tools[0].name).toBe('test-tool');
-    expect(tools[1].name).toBe('other-tool');
+    // getTools() now sorts by name, so 'other-tool' comes first.
+    expect(tools[0].name).toBe('other-tool');
+    expect(tools[1].name).toBe('test-tool');
   });
 
   it('discovers tools with prefix applied', async () => {
@@ -75,8 +76,9 @@ describe('MCPToolset', () => {
     const tools = await toolset.getTools();
 
     expect(tools).toHaveLength(2);
-    expect(tools[0].name).toBe('myprefix_test-tool');
-    expect(tools[1].name).toBe('myprefix_other-tool');
+    // getTools() now sorts by name, so 'myprefix_other-tool' comes first.
+    expect(tools[0].name).toBe('myprefix_other-tool');
+    expect(tools[1].name).toBe('myprefix_test-tool');
   });
 
   describe('toolFilter', () => {
@@ -143,8 +145,8 @@ describe('MCPToolset', () => {
       const tools = await toolset.getTools();
 
       expect(tools.map((tool) => tool.name)).toEqual([
-        'test-tool',
         'other-tool',
+        'test-tool',
       ]);
     });
 
@@ -192,8 +194,8 @@ describe('MCPToolset', () => {
       const tools = await toolset.getTools();
 
       expect(tools.map((tool) => tool.name)).toEqual([
-        'test-tool',
         'other-tool',
+        'test-tool',
         'load_mcp_resource',
       ]);
     });
