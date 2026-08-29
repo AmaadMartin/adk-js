@@ -301,6 +301,17 @@ describe('MCPSessionManager', () => {
   });
 
   describe('errlog', () => {
+    /**
+     * Installs a stdio transport exposing `stderr`. The one cast lives here:
+     * the SDK module is `vi.mock`ed, so the stub carries only the property
+     * the manager reads, which cannot satisfy the full transport type.
+     */
+    function stubStdioTransport(stderr: PassThrough | null): void {
+      vi.mocked(StdioClientTransport).mockImplementationOnce(
+        () => ({stderr}) as unknown as StdioClientTransport,
+      );
+    }
+
     /** A writable stream that keeps everything written to it. */
     function capturingStream(): {stream: Writable; text: () => string} {
       const chunks: string[] = [];
@@ -347,9 +358,7 @@ describe('MCPSessionManager', () => {
 
     it('forwards the stdio server stderr to errlog', async () => {
       const serverStderr = new PassThrough();
-      vi.mocked(StdioClientTransport).mockImplementationOnce(
-        () => ({stderr: serverStderr}) as unknown as StdioClientTransport,
-      );
+      stubStdioTransport(serverStderr);
       const errlog = capturingStream();
       const manager = new MCPSessionManager({
         type: 'StdioConnectionParams',
@@ -365,9 +374,7 @@ describe('MCPSessionManager', () => {
 
     it('stops forwarding stderr once the session is closed', async () => {
       const serverStderr = new PassThrough();
-      vi.mocked(StdioClientTransport).mockImplementationOnce(
-        () => ({stderr: serverStderr}) as unknown as StdioClientTransport,
-      );
+      stubStdioTransport(serverStderr);
       const errlog = capturingStream();
       const manager = new MCPSessionManager({
         type: 'StdioConnectionParams',
@@ -386,9 +393,7 @@ describe('MCPSessionManager', () => {
     });
 
     it('tolerates a stdio transport that exposes no stderr', async () => {
-      vi.mocked(StdioClientTransport).mockImplementationOnce(
-        () => ({stderr: null}) as unknown as StdioClientTransport,
-      );
+      stubStdioTransport(null);
       const errlog = capturingStream();
       const manager = new MCPSessionManager({
         type: 'StdioConnectionParams',
