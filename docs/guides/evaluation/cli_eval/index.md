@@ -172,8 +172,11 @@ To choose your own, write a config file and pass its path:
 adk eval ./agent.ts ./roll_die.evalset.json --config_file_path ./test_config.json
 ```
 
-A metric passes when its score reaches the threshold. The case passes unless
-some metric fails.
+A metric passes when its score reaches the threshold. The case passes when at
+least one metric passed and none failed. A case whose metrics all abstained does
+not pass: the command prints `❌ Failed`, counts it under "Tests failed" and
+exits 1. Name a metric the command cannot score, or one your eval data cannot
+feed, and the gate fails rather than reporting a silent success.
 
 ## Supported metrics
 
@@ -187,7 +190,8 @@ some metric fails.
 adk-js has no judge for it, so the command warns once per run and carries on.
 
 Any other metric name takes the same path: one warning, and `NOT_EVALUATED` for
-every case.
+every case. A case needs one passing metric to pass, so criteria naming only
+metrics the command cannot score fail every case.
 
 ## Scoring the answer
 
@@ -256,9 +260,10 @@ adk-python calls this export `reset_data`. adk-js agent files are camelCase
 | No `--config_file_path`                                                           | Not an error. The default criteria apply.                     |
 
 The command exits `1` when any case failed, and `0` otherwise, so a build can
-gate on it directly. A case that threw counts as failed. adk-python v0.1.0
-always exits `0`; adk-js diverges here because an eval command that cannot fail
-a build cannot protect one.
+gate on it directly. "Failed" is exactly what the summary counts under "Tests
+failed": a case that failed a metric, a case that threw, and a case whose
+metrics all abstained. adk-python v0.1.0 always exits `0`; adk-js diverges here
+because an eval command that cannot fail a build cannot protect one.
 
 ## Seeing the detail
 

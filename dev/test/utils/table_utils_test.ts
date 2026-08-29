@@ -47,4 +47,16 @@ describe('formatAlignedTable', () => {
       '-------------',
     ]);
   });
+
+  it('renders a blank cell for a row shorter than the header', () => {
+    expect(formatAlignedTable([['a', 'b'], ['1']])).toEqual([
+      'a | b',
+      '-----',
+      '1 |  ',
+    ]);
+  });
+
+  it('cuts a row longer than the header', () => {
+    expect(formatAlignedTable([['a'], ['1', '2']])).toEqual(['a', '-', '1']);
+  });
 });

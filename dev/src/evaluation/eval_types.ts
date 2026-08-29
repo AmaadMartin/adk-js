@@ -89,6 +89,19 @@ export enum EvalStatus {
   NOT_EVALUATED = 'NOT_EVALUATED',
 }
 
+/**
+ * Whether a case counts as failed: anything but `PASSED`, so a case whose
+ * metrics all abstained fails too.
+ *
+ * The verdict line, the summary counts and the exit code all read this one
+ * rule. Deciding it in three places is how a command prints `❌ Failed` and
+ * then exits 0. adk-python folds the same way, counting every non-`PASSED`
+ * case under "Tests failed".
+ */
+export function isFailedCase(finalEvalStatus: EvalStatus): boolean {
+  return finalEvalStatus !== EvalStatus.PASSED;
+}
+
 /** One metric the run scores, and the score it has to reach to pass. */
 export interface EvalMetric {
   metricName: string;

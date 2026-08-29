@@ -23,8 +23,9 @@ import {
   EvalSetItem,
   EvalStatus,
   EvalTurn,
-  RESPONSE_MATCH_SCORE_KEY,
+  isFailedCase,
   ResetFunc,
+  RESPONSE_MATCH_SCORE_KEY,
   TOOL_TRAJECTORY_SCORE_KEY,
 } from './eval_types.js';
 import {processQueryWithRootAgent} from './evaluation_generator.js';
@@ -106,8 +107,9 @@ export async function runEvals(
           sessionId,
         });
 
-        const verdict =
-          finalEvalStatus === EvalStatus.PASSED ? '✅ Passed' : '❌ Failed';
+        const verdict = isFailedCase(finalEvalStatus)
+          ? '❌ Failed'
+          : '✅ Passed';
         console.log(`Result: ${verdict}\n`);
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e));

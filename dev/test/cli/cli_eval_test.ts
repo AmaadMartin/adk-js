@@ -347,8 +347,8 @@ describe('hasFailure', () => {
     expect(hasFailure([resultWith(EvalStatus.PASSED)])).toBe(false);
   });
 
-  it('is false for an unevaluated case, which failed nothing', () => {
-    expect(hasFailure([resultWith(EvalStatus.NOT_EVALUATED)])).toBe(false);
+  it('is true for an unevaluated case, which the summary counts as failed', () => {
+    expect(hasFailure([resultWith(EvalStatus.NOT_EVALUATED)])).toBe(true);
   });
 
   it('is true when one case among many failed', () => {
@@ -359,6 +359,18 @@ describe('hasFailure', () => {
         resultWith(EvalStatus.PASSED),
       ]),
     ).toBe(true);
+  });
+
+  it('agrees with the summary counts for every status', () => {
+    for (const finalEvalStatus of Object.values(EvalStatus)) {
+      const evalResults = [resultWith(finalEvalStatus)];
+      logSpy.mockClear();
+      printEvalSummary(evalResults);
+
+      expect(hasFailure(evalResults)).toBe(
+        printedOutput().includes('Tests failed: 1'),
+      );
+    }
   });
 });
 
@@ -459,6 +471,25 @@ describe('evalAgent', () => {
 
     expect(hasFailure(evalResults)).toBe(true);
     expect(printedOutput()).toContain('Result: ❌ Failed');
+  });
+
+  it('fails a case whose metrics all abstained, as it printed', async () => {
+    const evalSetFile = await writePassingEvalSet();
+    const configFilePath = await writeFile(
+      'abstaining_config.json',
+      JSON.stringify({criteria: {response_evaluation_score: 0.8}}),
+    );
+
+    const evalResults = await evalAgent({
+      agentPath: 'agent.ts',
+      evalSetFilePaths: [evalSetFile],
+      configFilePath,
+    });
+
+    const printed = printedOutput();
+    expect(printed).toContain('Result: ❌ Failed');
+    expect(printed).toContain('Tests failed: 1');
+    expect(hasFailure(evalResults)).toBe(true);
   });
 
   it('falls back to the default criteria with no config file', async () => {

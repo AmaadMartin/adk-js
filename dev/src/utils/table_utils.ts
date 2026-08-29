@@ -14,6 +14,10 @@ const COLUMN_SEPARATOR = ' | ';
  * not push the later columns out of line. The returned lines are the header,
  * a rule as wide as the header, then one line per body row. An empty `rows`
  * renders nothing.
+ *
+ * The header row sets the column count. A row shorter than it renders blank
+ * cells, and a longer row is cut, rather than throwing on a caller that built
+ * one row wrong.
  */
 export function formatAlignedTable(rows: string[][]): string[] {
   if (rows.length === 0) {
@@ -21,12 +25,12 @@ export function formatAlignedTable(rows: string[][]): string[] {
   }
 
   const widths = rows[0].map((_, column) =>
-    Math.max(...rows.map((cells) => cells[column].length)),
+    Math.max(...rows.map((cells) => (cells[column] ?? '').length)),
   );
 
   const [header, ...body] = rows.map((cells) =>
-    cells
-      .map((cell, column) => cell.padEnd(widths[column]))
+    widths
+      .map((width, column) => (cells[column] ?? '').padEnd(width))
       .join(COLUMN_SEPARATOR),
   );
 

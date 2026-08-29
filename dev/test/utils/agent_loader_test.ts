@@ -288,6 +288,28 @@ describe('AgentLoader', () => {
       await expect(fs.access(compiledAgentPath)).rejects.toThrow();
     });
 
+    it('exposes the loaded module exports, and nothing before load', async () => {
+      // A file name of its own: the loader caches a compiled module by path,
+      // so reusing another test's would return that test's exports.
+      const withResetHook = `${agent1JsContent}\nexports.resetData = () => {};`;
+      const agentPath = path.join(tempAgentsDir, 'reset_hook_agent.js');
+      await fs.writeFile(agentPath, withResetHook);
+
+      const compiledAgentPath = compiledPath('reset_hook_agent.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, withResetHook);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      expect(agentFile.moduleExports).toBeUndefined();
+
+      await agentFile.load();
+
+      expect(agentFile.moduleExports?.['resetData']).toBeTypeOf('function');
+      await agentFile.dispose();
+    });
+
     it('loads .ts agent file and compiles it', async () => {
       const agentPath = path.join(tempAgentsDir, 'agent2.ts');
       await fs.writeFile(agentPath, agent2TsContent);

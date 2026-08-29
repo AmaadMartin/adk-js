@@ -12,7 +12,7 @@ import {
   DEFAULT_CRITERIA,
   EvalMetric,
   EvalResult,
-  EvalStatus,
+  isFailedCase,
   ResetFunc,
 } from '../evaluation/eval_types.js';
 import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
@@ -148,10 +148,10 @@ export function printEvalSummary(evalResults: EvalResult[]): void {
       passed: 0,
       failed: 0,
     };
-    if (evalResult.finalEvalStatus === EvalStatus.PASSED) {
-      counts.passed++;
-    } else {
+    if (isFailedCase(evalResult.finalEvalStatus)) {
       counts.failed++;
+    } else {
+      counts.passed++;
     }
     summary.set(evalResult.evalSetFile, counts);
   }
@@ -166,10 +166,15 @@ export function printEvalSummary(evalResults: EvalResult[]): void {
   }
 }
 
-/** Whether any eval case failed, which is what makes the command exit 1. */
+/**
+ * Whether any eval case failed, which is what makes the command exit 1.
+ *
+ * This reads the same rule the summary counts with, so the exit code cannot
+ * disagree with the "Tests failed" line the user just read.
+ */
 export function hasFailure(evalResults: EvalResult[]): boolean {
-  return evalResults.some(
-    (evalResult) => evalResult.finalEvalStatus === EvalStatus.FAILED,
+  return evalResults.some((evalResult) =>
+    isFailedCase(evalResult.finalEvalStatus),
   );
 }
 
