@@ -32,6 +32,12 @@ export interface ParsedOperation {
   operation: OpenAPIV3.OperationObject;
   parameters: ApiParameter[];
   returnValue?: ApiParameter;
+  /**
+   * A passthrough bag the parser seeds empty for callers to populate. It
+   * mirrors `additional_context` on adk-python's `ParsedOperation`, so an
+   * operation stays portable between the two SDKs. Nothing in adk-js reads it.
+   */
+  additionalContext?: Record<string, unknown>;
   authScheme?: OpenAPIV3.SecuritySchemeObject;
 }
 
@@ -104,7 +110,7 @@ export function resolveReferences(
       seenRefs.add(refString);
 
       if (resolvedCache.has(refString)) {
-        return structuredClone(resolvedCache.get(refString));
+        return deepCopy(resolvedCache.get(refString));
       }
 
       let resolvedValue = resolveRef(refString, currentDoc);
@@ -125,6 +131,14 @@ export function resolveReferences(
   };
 
   return recursiveResolve(specCopy, specCopy) as OpenAPIV3.Document;
+}
+
+/**
+ * Deep copies a resolved `$ref` subtree. The subtrees are plain JSON, so a
+ * JSON round trip reproduces them exactly.
+ */
+function deepCopy<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 /**
@@ -311,6 +325,7 @@ function collectOperations(
         operation: operation,
         parameters: parser.getParameters(),
         returnValue: parser.getReturnValue(),
+        additionalContext: {},
         authScheme: authScheme,
       });
     }

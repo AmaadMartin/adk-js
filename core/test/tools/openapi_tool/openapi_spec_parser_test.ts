@@ -391,6 +391,22 @@ describe('OpenApiSpecParser', () => {
       });
     });
 
+    it('should seed additionalContext empty', () => {
+      const parsed = new OpenApiSpecParser().parse(minimalSpec());
+
+      expect(parsed[0].additionalContext).toEqual({});
+    });
+
+    it('should give each operation its own additionalContext', () => {
+      const spec = minimalSpec();
+      spec.paths['/other'] = {get: {responses: {}}};
+
+      const parsed = new OpenApiSpecParser().parse(spec);
+
+      expect(parsed.length).toBe(2);
+      expect(parsed[0].additionalContext).not.toBe(parsed[1].additionalContext);
+    });
+
     it.each([
       ['/pets/{petId}', 'get', 'pets_pet_id_get'],
       [
