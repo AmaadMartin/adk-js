@@ -53,6 +53,20 @@ const EXPECTED_POWERSHELL_ARGS = [
   expect.stringMatching(/script\.ps1$/),
 ];
 
+// Every case in the outer suite launches a real interpreter: the outer
+// beforeEach restores spawnMock to realSpawn. Those need a budget above
+// vitest's 5000ms default, because process cold-start on the windows-latest CI
+// runner alone can exceed it. The budget must also exceed
+// UnsafeLocalCodeExecutor's default timeoutSeconds (30) so a hung child reports
+// the executor's own timeout error instead of an opaque vitest timeout; see
+// core/src/code_executors/unsafe_local_code_executor.ts
+const TEST_EXECUTION_TIMEOUT = 40000;
+vi.setConfig({testTimeout: TEST_EXECUTION_TIMEOUT});
+
+// The spawn-argument cases replace spawnMock with a synchronous stub and never
+// create a process, so they keep vitest's default budget and still fail fast.
+const MOCKED_SPAWN_TIMEOUT = 5000;
+
 function createMockInvocationContext(): InvocationContext {
   const agent = new LlmAgent({
     name: 'test_agent',
@@ -604,7 +618,7 @@ describe('UnsafeLocalCodeExecutor', () => {
   });
 
   // This block stubs spawn, so no process is created.
-  describe('spawn arguments', () => {
+  describe('spawn arguments', {timeout: MOCKED_SPAWN_TIMEOUT}, () => {
     beforeEach(() => {
       // Return a child process that immediately exits with code 0, so the
       // interpreters under test need not be installed on the host.
@@ -752,5 +766,5 @@ describe('UnsafeLocalCodeExecutor', () => {
         );
       });
     });
-  }, 5000);
+  });
 }, 60000);
