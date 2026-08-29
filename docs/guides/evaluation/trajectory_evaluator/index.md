@@ -83,7 +83,9 @@ const finished = await runner.sessionService.getSession({
 
 const actual: Invocation = {
   userContent: newMessage,
-  intermediateData: {toolUses: finished!.events.flatMap(getFunctionCalls)},
+  intermediateData: {
+    toolUses: finished?.events.flatMap(getFunctionCalls) ?? [],
+  },
 };
 const expected: Invocation = {
   userContent: newMessage,
