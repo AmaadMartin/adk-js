@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {createUserContent} from '@google/genai';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 import {InputValidationError} from '../../src/errors/input_validation_error.js';
@@ -65,10 +66,23 @@ describe('resolveFullyQualifiedName', () => {
     expect(resolved).toBe(notAProvider);
   });
 
+  it('resolves a bare specifier through normal package resolution', async () => {
+    const resolved = await resolveFullyQualifiedName(
+      '@google/genai#createUserContent',
+    );
+
+    expect(resolved).toBe(createUserContent);
+  });
+
   it('rejects a relative specifier when no base file is given', async () => {
-    await expect(
-      resolveFullyQualifiedName('./example_providers.ts#staticProvider'),
-    ).rejects.toThrow(InputValidationError);
+    const resolving = resolveFullyQualifiedName(
+      './example_providers.ts#staticProvider',
+    );
+
+    await expect(resolving).rejects.toThrow(InputValidationError);
+    await expect(resolving).rejects.toMatchObject({
+      cause: {message: expect.stringContaining('needs the path of the file')},
+    });
   });
 
   it('reports a module that cannot be loaded, keeping the cause', async () => {

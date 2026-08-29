@@ -5,6 +5,7 @@
  */
 
 import {builtinModules} from 'node:module';
+import {isAbsolute} from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 import {InputValidationError} from '../errors/input_validation_error.js';
@@ -41,6 +42,25 @@ function isRelative(specifier: string): boolean {
   return specifier.startsWith('./') || specifier.startsWith('../');
 }
 
+/**
+ * Turns a module specifier into one `import()` resolves the same way on every
+ * platform. A filesystem path becomes a `file:` URL, because Windows reads the
+ * drive letter in `C:\dir\mod.js` as a URL scheme. A bare specifier passes
+ * through, so an installed package resolves the way Node normally resolves it.
+ */
+function toImportSpecifier(specifier: string, baseFilePath?: string): string {
+  if (isRelative(specifier)) {
+    if (baseFilePath === undefined) {
+      throw new Error(
+        `Relative specifier "${specifier}" needs the path of the file it ` +
+          `came from.`,
+      );
+    }
+    return new URL(specifier, pathToFileURL(baseFilePath)).href;
+  }
+  return isAbsolute(specifier) ? pathToFileURL(specifier).href : specifier;
+}
+
 /** Builds the error every failure mode of the resolver reports. */
 function invalidName(name: string, cause: unknown): InputValidationError {
   return new InputValidationError(`Invalid fully qualified name: ${name}`, {
@@ -64,8 +84,8 @@ function invalidName(name: string, cause: unknown): InputValidationError {
  *
  * @param name The fully-qualified name to resolve.
  * @param baseFilePath Absolute path of the file the name came from. A relative
- *   specifier resolves against its directory. Bare and absolute specifiers
- *   ignore it.
+ *   specifier resolves against its directory and needs it. Bare and absolute
+ *   specifiers ignore it.
  * @return The exported value.
  * @throws {InputValidationError} When the specifier names a built-in, the
  *   module fails to load, or the module has no such export. The underlying
@@ -85,13 +105,9 @@ export async function resolveFullyQualifiedName(
       ),
     );
   }
-  const resolved =
-    isRelative(specifier) && baseFilePath !== undefined
-      ? new URL(specifier, pathToFileURL(baseFilePath)).href
-      : specifier;
   let namespace: Record<string, unknown>;
   try {
-    namespace = await import(resolved);
+    namespace = await import(toImportSpecifier(specifier, baseFilePath));
   } catch (err: unknown) {
     throw invalidName(name, err);
   }
