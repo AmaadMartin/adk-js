@@ -988,6 +988,31 @@ describe('LoadArtifactsTool', () => {
     errors.mockRestore();
   });
 
+  it('logs and skips the artifact when processArtifact rejects', async () => {
+    const toolContext = await artifactContext({
+      'boom.txt': {text: 'boom'},
+      'keep.txt': {text: 'keep me'},
+    });
+    const llmRequest = requestLoading(['boom.txt', 'keep.txt']);
+    const errors = vi.spyOn(getLogger(), 'error').mockImplementation(() => {});
+
+    await new LoadArtifactsTool({
+      processArtifact: async (part, name) => {
+        if (name === 'boom.txt') {
+          throw new Error('callback rejected');
+        }
+        return part;
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(errors).toHaveBeenCalledOnce();
+    expect(errors.mock.calls[0][0]).toContain('boom.txt');
+    expect(errors.mock.calls[0][0]).toContain('callback rejected');
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('keep me');
+    errors.mockRestore();
+  });
+
   it('gives processArtifact the unprefixed name of a user artifact', async () => {
     const artifactName = 'shared.txt';
     const toolContext = await artifactContext({
@@ -1065,5 +1090,18 @@ describe('LoadArtifactsTool', () => {
 
     expect(declaration?.parametersJsonSchema).toBeUndefined();
     expect(declaration?.parameters?.type).toEqual(Type.OBJECT);
+  });
+
+  it('loads an artifact once when the turn names it twice', async () => {
+    const artifactName = 'dup.txt';
+    const toolContext = await artifactContext({
+      [artifactName]: {text: 'only once'},
+    });
+    const llmRequest = requestLoading([artifactName, artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('only once');
   });
 });
