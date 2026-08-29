@@ -94,7 +94,7 @@ async function exchangeAdcAccessToken(
 
     return bearerResult(token, quotaProjectId);
   } catch (error: unknown) {
-    throw new AuthCredentialMissingError(
+    throw new CredentialExchangeError(
       `Failed to exchange default service account token: ${formatError(error)}`,
     );
   }
@@ -118,7 +118,7 @@ async function exchangeExplicitAccessToken(
 
     return bearerResult(token);
   } catch (error: unknown) {
-    throw new AuthCredentialMissingError(
+    throw new CredentialExchangeError(
       `Failed to exchange explicit service account token: ${formatError(
         error,
       )}`,
@@ -154,7 +154,7 @@ async function exchangeForIdToken(
 ): Promise<ExchangeResult> {
   const {audience} = saConfig;
   if (!audience) {
-    throw new CredentialExchangeError(
+    throw new AuthCredentialMissingError(
       'audience is required when useIdToken is true. Set it to the URL of ' +
         'the target service (e.g. https://my-service.run.app).',
     );
@@ -174,7 +174,7 @@ async function exchangeForIdToken(
 
     return bearerResult(token);
   } catch (error: unknown) {
-    throw new AuthCredentialMissingError(
+    throw new CredentialExchangeError(
       `Failed to exchange service account for ID token: ${formatError(error)}`,
     );
   }

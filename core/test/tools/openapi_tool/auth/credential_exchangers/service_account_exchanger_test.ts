@@ -389,7 +389,18 @@ describe('ServiceAccountCredentialExchanger error types', () => {
     expect(error).toBeInstanceOf(AuthCredentialMissingError);
   });
 
-  it('reports a failed explicit access token exchange as missing', async () => {
+  it('reports an absent audience as missing', async () => {
+    const error = await exchangeError(
+      serviceAccountCredential({
+        serviceAccountCredential: SA_CREDENTIAL,
+        useIdToken: true,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+  });
+
+  it('does not report a failed explicit access token exchange as missing', async () => {
     authMocks.authorize.mockRejectedValue(new Error('invalid_grant'));
 
     const error = await exchangeError(
@@ -399,20 +410,22 @@ describe('ServiceAccountCredentialExchanger error types', () => {
       }),
     );
 
-    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+    expect(error).toBeInstanceOf(CredentialExchangeError);
+    expect(error).not.toBeInstanceOf(AuthCredentialMissingError);
   });
 
-  it('reports a failed ADC access token exchange as missing', async () => {
+  it('does not report a failed ADC access token exchange as missing', async () => {
     authMocks.getClient.mockRejectedValue(new Error('ADC not found'));
 
     const error = await exchangeError(
       serviceAccountCredential({useDefaultCredential: true}),
     );
 
-    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+    expect(error).toBeInstanceOf(CredentialExchangeError);
+    expect(error).not.toBeInstanceOf(AuthCredentialMissingError);
   });
 
-  it('reports a failed ID token exchange as missing', async () => {
+  it('does not report a failed ID token exchange as missing', async () => {
     authMocks.fetchIdToken.mockRejectedValue(new Error('invalid_grant'));
 
     const error = await exchangeError(
@@ -423,7 +436,8 @@ describe('ServiceAccountCredentialExchanger error types', () => {
       }),
     );
 
-    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+    expect(error).toBeInstanceOf(CredentialExchangeError);
+    expect(error).not.toBeInstanceOf(AuthCredentialMissingError);
   });
 
   it('does not report the wrong credential type as missing', async () => {
@@ -431,18 +445,6 @@ describe('ServiceAccountCredentialExchanger error types', () => {
       authType: AuthCredentialTypes.API_KEY,
       apiKey: 'an-api-key',
     });
-
-    expect(error).toBeInstanceOf(CredentialExchangeError);
-    expect(error).not.toBeInstanceOf(AuthCredentialMissingError);
-  });
-
-  it('does not report an absent audience as missing', async () => {
-    const error = await exchangeError(
-      serviceAccountCredential({
-        serviceAccountCredential: SA_CREDENTIAL,
-        useIdToken: true,
-      }),
-    );
 
     expect(error).toBeInstanceOf(CredentialExchangeError);
     expect(error).not.toBeInstanceOf(AuthCredentialMissingError);
