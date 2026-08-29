@@ -4,8 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR,
+  Context,
+  LlmRequest,
+  setAllowConfigStdioMcpServers,
+} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
@@ -128,6 +134,181 @@ describe('MCPToolset', () => {
       const tools = await toolset.getTools();
 
       expect(tools).toHaveLength(2);
+    });
+  });
+
+  describe('options constructor', () => {
+    it('discovers tools when configured with an options object', async () => {
+      const toolset = new MCPToolset({connectionParams: stdioParams});
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'test-tool',
+        'other-tool',
+      ]);
+    });
+
+    it('applies the toolFilter and prefix given as options', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: stdioParams,
+        toolFilter: ['myprefix_other-tool'],
+        prefix: 'myprefix',
+      });
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['myprefix_other-tool']);
+    });
+
+    it('rejects a missing connectionParams', () => {
+      expect(
+        () => new MCPToolset(undefined as unknown as MCPConnectionParams),
+      ).toThrow(/Missing connection params/);
+    });
+  });
+
+  describe('useMcpResources', () => {
+    it('adds no resource tool when the option is omitted', async () => {
+      const toolset = new MCPToolset(stdioParams);
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).not.toContain('load_mcp_resource');
+    });
+
+    it('adds no resource tool when the option is false', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: stdioParams,
+        useMcpResources: false,
+      });
+      const tools = await toolset.getTools();
+
+      expect(tools).toHaveLength(2);
+    });
+
+    it('appends exactly one resource tool, last', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: stdioParams,
+        useMcpResources: true,
+      });
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'test-tool',
+        'other-tool',
+        'load_mcp_resource',
+      ]);
+    });
+
+    it('keeps the resource tool when a toolFilter drops every server tool', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: stdioParams,
+        toolFilter: ['nonexistent-tool'],
+        useMcpResources: true,
+      });
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['load_mcp_resource']);
+    });
+
+    it('keeps the resource tool unprefixed when a prefix is configured', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: stdioParams,
+        prefix: 'myprefix',
+        useMcpResources: true,
+      });
+      const tools = await toolset.getTools();
+
+      expect(tools[tools.length - 1].name).toBe('load_mcp_resource');
+    });
+
+    it('keeps the resource tool when a predicate filter runs', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: stdioParams,
+        toolFilter: (tool) => tool.name === 'other-tool',
+        useMcpResources: true,
+      });
+      const tools = await toolset.getTools({} as ReadonlyContext);
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'other-tool',
+        'load_mcp_resource',
+      ]);
+    });
+
+    it('reads the toolset it was appended to', async () => {
+      const toolset = new MCPToolset({
+        connectionParams: stdioParams,
+        useMcpResources: true,
+      });
+      const tools = await toolset.getTools();
+      const llmRequest = {
+        contents: [],
+        toolsDict: {},
+      } as unknown as LlmRequest;
+
+      await tools[tools.length - 1].processLlmRequest({
+        toolContext: {} as Context,
+        llmRequest,
+      });
+
+      expect(llmRequest.config?.systemInstruction).toContain('res1');
+    });
+  });
+
+  describe('fromConfig', () => {
+    const originalEnvValue = process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR];
+
+    afterEach(() => {
+      setAllowConfigStdioMcpServers(undefined);
+      if (originalEnvValue === undefined) {
+        delete process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR];
+      } else {
+        process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR] = originalEnvValue;
+      }
+    });
+
+    it('builds a toolset from streamable HTTP params', async () => {
+      const toolset = MCPToolset.fromConfig({
+        streamableHttpConnectionParams: {
+          type: 'StreamableHTTPConnectionParams',
+          url: 'https://example.test/mcp',
+        },
+      });
+      const tools = await toolset.getTools();
+
+      expect(tools).toHaveLength(2);
+    });
+
+    it('carries toolFilter, prefix and useMcpResources onto the toolset', async () => {
+      setAllowConfigStdioMcpServers(true);
+
+      const toolset = MCPToolset.fromConfig({
+        stdioConnectionParams: {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test'},
+        },
+        toolFilter: ['myprefix_test-tool'],
+        prefix: 'myprefix',
+        useMcpResources: true,
+      });
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'myprefix_test-tool',
+        'load_mcp_resource',
+      ]);
+    });
+
+    it('refuses a stdio server the application has not opted in to', () => {
+      delete process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR];
+
+      expect(() =>
+        MCPToolset.fromConfig({
+          stdioConnectionParams: {
+            type: 'StdioConnectionParams',
+            serverParams: {command: 'test'},
+          },
+        }),
+      ).toThrow(/not allowed in agent configs/);
     });
   });
 
