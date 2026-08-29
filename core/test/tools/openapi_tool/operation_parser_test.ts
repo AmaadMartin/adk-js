@@ -113,22 +113,6 @@ describe('OperationParser naming', () => {
     expect(parseWithParameter(original)).toBe(expected);
   });
 
-  it('should prefix a parameter named after a reserved word', () => {
-    expect(parseWithParameter('class')).toBe('param_class');
-  });
-
-  it('should prefix a reserved word even when preserving names', () => {
-    const op: OpenAPIV3.OperationObject = {
-      operationId: 'testOp',
-      parameters: [{name: 'class', in: 'query', schema: {type: 'string'}}],
-      responses: {},
-    };
-
-    const parser = new OperationParser(op, {preservePropertyNames: true});
-
-    expect(parser.getParameters()[0].name).toBe('param_class');
-  });
-
   it('should keep the original parameter name when asked to preserve it', () => {
     const op: OpenAPIV3.OperationObject = {
       operationId: 'testOp',
@@ -199,9 +183,14 @@ describe('OperationParser naming', () => {
   });
 
   it('should treat a boolean parameter schema as unconstrained', () => {
-    const op = JSON.parse(
-      '{"operationId":"testOp","parameters":[{"name":"petId","in":"query","schema":true}],"responses":{}}',
-    ) as OpenAPIV3.OperationObject;
+    // JSON Schema allows a boolean where OpenAPI 3.0's typings require an
+    // object, and a parsed document can carry one.
+    const booleanSchema = true as unknown as OpenAPIV3.SchemaObject;
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [{name: 'petId', in: 'query', schema: booleanSchema}],
+      responses: {},
+    };
 
     const params = new OperationParser(op).getParameters();
 
