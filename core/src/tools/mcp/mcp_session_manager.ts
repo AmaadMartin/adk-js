@@ -24,9 +24,32 @@ const MCP_SDK: OptionalPeer = {
   feature: 'MCPSessionManager (and the MCP tools built on it)',
 };
 
-/** Surfaces a background transport error that would otherwise be dropped. */
-function logTransportError(err: unknown): void {
+/** What the manager knows about the transport behind one session. */
+interface TransportState {
+  /** The first error the transport reported, once it has reported one. */
+  failure?: Error;
+  /**
+   * The requests in flight on this session, each with the function that
+   * abandons it, keyed by the request itself.
+   */
+  readonly pendingCalls: Map<Promise<unknown>, (failure: Error) => void>;
+}
+
+/**
+ * Records the transport's first error and abandons the requests waiting on it.
+ *
+ * The error is also logged, because a transport reports errors that no request
+ * is waiting for and those would otherwise be dropped.
+ */
+function handleTransportError(state: TransportState, err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
+  state.failure ??= new Error(
+    'MCP session connection lost: ' + formatError(err),
+    {cause: err},
+  );
+  for (const abandon of state.pendingCalls.values()) {
+    abandon(state.failure);
+  }
 }
 
 /**
@@ -126,6 +149,7 @@ export type MCPConnectionParams =
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
   private readonly activeSessions = new Set<Client>();
+  private readonly transportStates = new Map<Client, TransportState>();
 
   constructor(connectionParams: MCPConnectionParams) {
     this.connectionParams = connectionParams;
@@ -147,6 +171,10 @@ export class MCPSessionManager {
       () => import('@modelcontextprotocol/sdk/client/index.js'),
     );
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
+    const transportState: TransportState = {pendingCalls: new Map()};
+    const onerror = (err: unknown) => {
+      handleTransportError(transportState, err);
+    };
 
     try {
       switch (this.connectionParams.type) {
@@ -158,7 +186,7 @@ export class MCPSessionManager {
           const transport = new StdioClientTransport(
             this.connectionParams.serverParams,
           );
-          transport.onerror = logTransportError;
+          transport.onerror = onerror;
           await client.connect(transport);
           break;
         }
@@ -176,7 +204,7 @@ export class MCPSessionManager {
             new URL(this.connectionParams.url),
             transportOptions,
           );
-          transport.onerror = logTransportError;
+          transport.onerror = onerror;
           await client.connect(transport);
           break;
         }
@@ -193,12 +221,54 @@ export class MCPSessionManager {
     }
 
     this.activeSessions.add(client);
+    this.transportStates.set(client, transportState);
     return client;
+  }
+
+  /**
+   * Runs a request on a session and abandons it if the transport fails first.
+   *
+   * The MCP SDK rejects every in-flight request when a transport *closes*, so
+   * a closed stream needs no help. A transport *error* that leaves the stream
+   * open — a gateway answering the POST with 403, for instance — only reaches
+   * `transport.onerror`, and the request then waits out the SDK's 60-second
+   * request timeout. This surfaces that error at once instead.
+   *
+   * A session this manager did not open, or one already closed, runs
+   * unguarded: the manager holds no transport state for it.
+   *
+   * @param client The session the request runs on.
+   * @param call The request, already in flight.
+   * @return What the request returned.
+   * @throws `MCP session connection lost: <error>` when the transport fails
+   *     before the request settles, or has already failed.
+   */
+  async runGuarded<T>(client: Client, call: Promise<T>): Promise<T> {
+    const state = this.transportStates.get(client);
+    if (!state) {
+      return call;
+    }
+
+    try {
+      return await new Promise<T>((resolve, reject) => {
+        state.pendingCalls.set(call, reject);
+        // This also gives `call` a rejection handler of its own: when the
+        // transport wins the race nothing else observes the call, and closing
+        // the session rejects it.
+        call.then(resolve, reject);
+        if (state.failure) {
+          reject(state.failure);
+        }
+      });
+    } finally {
+      state.pendingCalls.delete(call);
+    }
   }
 
   async closeSession(client: Client): Promise<void> {
     if (this.activeSessions.has(client)) {
       this.activeSessions.delete(client);
+      this.transportStates.delete(client);
       await client.close();
     }
   }
