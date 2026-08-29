@@ -5,8 +5,23 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
-import {type ApiParameter} from '../common/common.js';
+import {createApiParameter, type ApiParameter} from '../common/common.js';
+
+/**
+ * Narrows a schema the document may leave unusable.
+ *
+ * `resolveReferences` leaves a dangling internal `$ref` in place, and JSON
+ * Schema allows a boolean wherever a schema is allowed. Rejecting either here
+ * would lose every tool in the document over one broken pointer, so the
+ * parameter falls back to an unconstrained schema.
+ */
+function toParsedSchema(
+  value: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined,
+): OpenAPIV3.SchemaObject {
+  return value && typeof value === 'object' && !('$ref' in value) ? value : {};
+}
 
 /**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
@@ -31,14 +46,9 @@ export class OperationParser {
     this.dedupeParamNames();
   }
 
-  private getParamName(originalName: string): string {
-    if (this.preservePropertyNames) {
-      return originalName;
-    }
-    // Simple snake_case conversion
-    return originalName
-      .replace(/[A-Z]/g, (g) => '_' + g.toLowerCase())
-      .replace(/^_/, '');
+  /** The name to force on a parameter, or nothing to let it derive one. */
+  private overrideName(originalName: string): string | undefined {
+    return this.preservePropertyNames ? originalName : undefined;
   }
 
   private processOperationParameters() {
@@ -46,19 +56,16 @@ export class OperationParser {
     for (const param of parameters) {
       // Assume resolved references for now
       if ('name' in param) {
-        const originalName = param.name;
-        const description = param.description || '';
-        const location = param.in || '';
-        const schema = (param.schema as OpenAPIV3.SchemaObject) || {};
-
-        this.params.push({
-          originalName,
-          paramLocation: location,
-          paramSchema: schema,
-          description,
-          required: param.required || false,
-          name: this.getParamName(originalName),
-        });
+        this.params.push(
+          createApiParameter({
+            originalName: param.name,
+            paramLocation: param.in || '',
+            paramSchema: toParsedSchema(param.schema),
+            description: param.description || '',
+            required: param.required || false,
+            name: this.overrideName(param.name),
+          }),
+        );
       }
     }
   }
@@ -86,14 +93,16 @@ export class OperationParser {
         if (Object.keys(properties).length > 0) {
           for (const [propName, propDetails] of Object.entries(properties)) {
             if (!('$ref' in propDetails)) {
-              this.params.push({
-                originalName: propName,
-                paramLocation: 'body',
-                paramSchema: propDetails,
-                description: propDetails.description,
-                required: (schema.required || []).includes(propName),
-                name: this.getParamName(propName),
-              });
+              this.params.push(
+                createApiParameter({
+                  originalName: propName,
+                  paramLocation: 'body',
+                  paramSchema: propDetails,
+                  description: propDetails.description,
+                  required: (schema.required || []).includes(propName),
+                  name: this.overrideName(propName),
+                }),
+              );
             }
           }
         } else {
@@ -217,7 +226,10 @@ export class OperationParser {
     if (!operationId) {
       throw new Error('Operation ID is missing');
     }
-    return this.getParamName(operationId).substring(0, 60);
+    const name = this.preservePropertyNames
+      ? operationId
+      : snakeCase(operationId);
+    return name.substring(0, 60);
   }
 
   /**
