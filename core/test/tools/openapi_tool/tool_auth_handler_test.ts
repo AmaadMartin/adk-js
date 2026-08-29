@@ -10,6 +10,7 @@ import {
   Context,
   ToolAuthHandler,
 } from '@google/adk';
+import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
@@ -88,7 +89,7 @@ describe('ToolAuthHandler', () => {
   it('should return cached credential if available', async () => {
     const mockContext = {
       state: new State({
-        'apiKey_existing_exchanged_credential': {
+        'apiKey_default_openapi_key_existing_exchanged_credential': {
           authType: AuthCredentialTypes.HTTP,
           http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
         },
@@ -128,7 +129,7 @@ describe('ToolAuthHandler', () => {
     expect(result.state).toBe('done');
     // Stored via the State API so it is readable back through State.get...
     const stored = state.get<{http?: {credentials: {token: string}}}>(
-      'apiKey_existing_exchanged_credential',
+      'apiKey_default_openapi_key_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
     // ...and recorded in the delta so it is persisted to the session (rather
@@ -227,7 +228,9 @@ describe('ToolAuthHandler', () => {
     expect(result.authCredential?.apiKey).toBe('static-key');
     // It is readable from the tool on every invocation, so persisting it would
     // only write the secret into the session store for nothing.
-    expect(state.get('apiKey_existing_exchanged_credential')).toBeUndefined();
+    expect(
+      state.get('apiKey_default_openapi_key_existing_exchanged_credential'),
+    ).toBeUndefined();
     expect(state.hasDelta()).toBe(false);
   });
 
@@ -259,8 +262,75 @@ describe('ToolAuthHandler', () => {
     expect(result.state).toBe('done');
     // An exchange costs a round trip, so its result is worth persisting.
     const stored = state.get<{http?: {credentials: {token: string}}}>(
-      'oauth2_existing_exchanged_credential',
+      'oauth2_default_openapi_key_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
+
+  it('gives two credential keys two slots under one scheme type', async () => {
+    const state = new State();
+    const mockContext = {
+      state,
+      getAuthResponse: vi.fn().mockReturnValue({
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'key',
+      }),
+    } as unknown as Context;
+    const scheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    };
+
+    await new ToolAuthHandler(
+      mockContext,
+      scheme,
+      undefined,
+      'first',
+    ).prepareAuthCredentials();
+
+    expect(
+      state.get('apiKey_first_existing_exchanged_credential'),
+    ).toBeDefined();
+    expect(
+      state.get('apiKey_second_existing_exchanged_credential'),
+    ).toBeUndefined();
+  });
+
+  it('does not read back a credential stored under another credential key', async () => {
+    const state = new State({
+      'apiKey_first_existing_exchanged_credential': {
+        authType: AuthCredentialTypes.HTTP,
+        http: {scheme: 'bearer', credentials: {token: 'first-token'}},
+      },
+    });
+    const mockContext = {
+      state,
+      getAuthResponse: vi.fn().mockReturnValue(undefined),
+      requestCredential: vi.fn(),
+    } as unknown as Context;
+    const scheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    };
+
+    const result = await new ToolAuthHandler(
+      mockContext,
+      scheme,
+      {authType: AuthCredentialTypes.API_KEY, apiKey: 'second-key'},
+      'second',
+    ).prepareAuthCredentials();
+
+    // The slot belonging to `first` is not this handler's, so its token must
+    // not come back here. This handler exchanges its own credential instead.
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'exchanged-token',
+    );
+    expect(
+      state.get('apiKey_first_existing_exchanged_credential'),
+    ).toMatchObject({
+      http: {credentials: {token: 'first-token'}},
+    });
   });
 });
