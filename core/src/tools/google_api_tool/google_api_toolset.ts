@@ -12,7 +12,6 @@ import {
 } from '../../auth/auth_credential.js';
 import {OpenIdConnectWithConfig} from '../../auth/auth_schemes.js';
 import {experimental} from '../../utils/experimental.js';
-import {logger} from '../../utils/logger.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {serviceAccountSchemeCredential} from '../openapi_tool/auth/auth_helpers.js';
 import {OpenAPIToolset} from '../openapi_tool/openapi_toolset.js';
@@ -138,14 +137,6 @@ export class GoogleApiToolset extends BaseToolset {
 
   @experimental
   override async getTools(context?: ReadonlyContext): Promise<RestApiTool[]> {
-    if (!context && typeof this.toolFilter === 'function') {
-      logger.warn(
-        'GoogleApiToolset: a ToolPredicate toolFilter was provided but ' +
-          'getTools() was called without a ReadonlyContext. The filter will ' +
-          'not be applied.',
-      );
-    }
-
     const openApiToolset = await this.loadOpenApiToolset();
     const tools = await openApiToolset.getTools(context);
 
