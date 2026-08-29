@@ -12,6 +12,7 @@ import {
   objectSchemaFields,
   parseWithSchema,
   toJsonSchema,
+  tryParseWithSchema,
 } from '../../src/utils/schema.js';
 import {zodObjectToSchema} from '../../src/utils/simple_zod_to_json.js';
 
@@ -120,6 +121,72 @@ describe('parseWithSchema', () => {
     const roundTripped = zodObjectToSchema(zod);
     expect(parseWithSchema(roundTripped, {count: 3})).toEqual({count: 3});
     expect(() => parseWithSchema(roundTripped, {count: 'no'})).toThrow();
+  });
+});
+
+describe('tryParseWithSchema', () => {
+  it('returns the value unchanged when no schema is given', () => {
+    const value = {a: 1};
+    expect(tryParseWithSchema(undefined, value)).toBe(value);
+  });
+
+  it('returns the parsed value for a valid genai Schema', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {count: {type: Type.INTEGER}},
+      required: ['count'],
+    };
+    expect(tryParseWithSchema(schema, {count: 3})).toEqual({count: 3});
+  });
+
+  it('applies a genai Schema default the value omits', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        count: {type: Type.INTEGER},
+        unit: {type: Type.STRING, default: 'items'},
+      },
+      required: ['count'],
+    };
+    expect(tryParseWithSchema(schema, {count: 3})).toEqual({
+      count: 3,
+      unit: 'items',
+    });
+  });
+
+  it('returns the original value when a genai Schema rejects it', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {count: {type: Type.INTEGER}},
+      required: ['count'],
+    };
+    const value = {count: '3'};
+    expect(tryParseWithSchema(schema, value)).toBe(value);
+  });
+
+  it('returns the parsed value for a valid Zod schema', () => {
+    expect(
+      tryParseWithSchema(z4.object({count: z4.number()}), {count: 3}),
+    ).toEqual({count: 3});
+    expect(
+      tryParseWithSchema(z3.object({count: z3.number()}), {count: 3}),
+    ).toEqual({count: 3});
+  });
+
+  it('returns the original value when a Zod schema rejects it', () => {
+    const value = {count: 'no'};
+    expect(tryParseWithSchema(z4.object({count: z4.number()}), value)).toBe(
+      value,
+    );
+    expect(tryParseWithSchema(z3.object({count: z3.number()}), value)).toBe(
+      value,
+    );
+  });
+
+  it('leaves a genai Schema that has no Zod equivalent unenforced', () => {
+    const schema: Schema = {type: Type.TYPE_UNSPECIFIED};
+    const value = {anything: 'goes'};
+    expect(tryParseWithSchema(schema, value)).toEqual(value);
   });
 });
 

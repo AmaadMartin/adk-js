@@ -10,7 +10,7 @@ import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 
 import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
-import {toJsonSchema} from '../utils/schema.js';
+import {toJsonSchema, tryParseWithSchema} from '../utils/schema.js';
 import {
   flattenNullableAnyOf,
   stripUnsupportedGeminiFormats,
@@ -374,14 +374,27 @@ export class FunctionTool<
     );
   }
 
-  /** Parses `args` against the parameter schema, when one is declared. */
+  /**
+   * Parses `args` against the parameter schema, when one is declared.
+   *
+   * A Zod object rejects arguments it disagrees with, which `runAsync` turns
+   * into an error the model can retry. A raw `Schema` is best-effort instead:
+   * it parses to pick up the schema's defaults, and keeps the model's own
+   * arguments when they do not validate. Tools declared with a `Schema` — the
+   * shape MCP and OpenAPI toolsets produce — received no validation at all
+   * before, so rejecting those calls would break working tools. This is the
+   * same leniency as adk-python's `_preprocess_args`.
+   */
   private validateArgs(
     args: Record<string, unknown>,
   ): ToolExecuteArgument<TParameters> {
     if (isZodObject(this.parameters)) {
       return this.parameters.parse(args) as ToolExecuteArgument<TParameters>;
     }
-    return args as ToolExecuteArgument<TParameters>;
+    return tryParseWithSchema(
+      this.parameters,
+      args,
+    ) as ToolExecuteArgument<TParameters>;
   }
 
   /** Resolves `requireConfirmation`, which may be a flag or a predicate. */
