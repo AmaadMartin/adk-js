@@ -25,9 +25,6 @@ const MCP_SDK: OptionalPeer = {
   feature: 'MCPSessionManager (and the MCP tools built on it)',
 };
 
-/** The `name` carried by every {@link McpConnectionError}. */
-export const MCP_CONNECTION_ERROR_NAME = 'McpConnectionError';
-
 /**
  * Raised when an MCP operation fails, naming the operation that failed.
  *
@@ -37,7 +34,7 @@ export const MCP_CONNECTION_ERROR_NAME = 'McpConnectionError';
 export class McpConnectionError extends Error {
   constructor(message: string, options?: {cause?: unknown}) {
     super(message, options);
-    this.name = MCP_CONNECTION_ERROR_NAME;
+    this.name = 'McpConnectionError';
   }
 }
 

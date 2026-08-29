@@ -394,21 +394,6 @@ describe('MCPToolset', () => {
       expect(error).not.toBeInstanceOf(McpConnectionError);
     });
 
-    it('does not name an operation twice', async () => {
-      const alreadyNamed = new McpConnectionError(
-        'Failed to list resources from MCP server: boom',
-      );
-      await clientRejectingListTools(alreadyNamed);
-      const toolset = new MCPToolset(stdioParams);
-
-      const error = await toolset.getTools().catch((err: unknown) => err);
-
-      expect(error).toBe(alreadyNamed);
-      expect((error as Error).message).toBe(
-        'Failed to list resources from MCP server: boom',
-      );
-    });
-
     it('names a listResources failure', async () => {
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');

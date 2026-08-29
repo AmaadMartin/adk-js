@@ -23,7 +23,6 @@ import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
 import {
-  MCP_CONNECTION_ERROR_NAME,
   McpConnectionError,
   MCPConnectionParams,
   MCPSessionManager,
@@ -43,29 +42,15 @@ export interface McpToolsetOptions {
 }
 
 /**
- * Reports whether `err` is already an {@link McpConnectionError}. The error
- * `name` is matched rather than the class, so the check still holds when two
- * copies of the package share one runtime.
- */
-function isMcpConnectionError(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'name' in err &&
-    err.name === MCP_CONNECTION_ERROR_NAME
-  );
-}
-
-/**
  * Names the MCP operation that produced `err`, so a bare transport string
  * reaches the caller as `<operation>: <root cause>`.
  *
  * A cancellation passes through untouched: the caller has to keep seeing an
- * `AbortError` rather than a connection failure. An {@link McpConnectionError}
- * also passes through, because it already names an operation.
+ * `AbortError` rather than a connection failure. Everything else is wrapped,
+ * as `mcp_toolset.py` wraps it.
  */
 function nameFailedOperation(operation: string, err: unknown): unknown {
-  if (isAbortError(err) || isMcpConnectionError(err)) {
+  if (isAbortError(err)) {
     return err;
   }
   return new McpConnectionError(`${operation}: ${formatError(err)}`, {
