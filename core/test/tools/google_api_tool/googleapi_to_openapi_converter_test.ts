@@ -5,7 +5,6 @@
  */
 
 import {
-  ConvertedSchema,
   DiscoveryDocument,
   DiscoveryParameter,
   DiscoverySchema,
@@ -18,6 +17,7 @@ import * as path from 'node:path';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  ConvertedSchema,
   convertExternalDocs,
   convertInfo,
   convertMethods,
