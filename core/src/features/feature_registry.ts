@@ -12,6 +12,13 @@ import {logger} from '../utils/logger.js';
  */
 export enum FeatureName {
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
+
+  /**
+   * Carry a tool's arguments as raw JSON Schema in
+   * `FunctionDeclaration.parametersJsonSchema` instead of converting them to a
+   * Gemini `Schema` in `FunctionDeclaration.parameters`.
+   */
+  JSON_SCHEMA_FOR_FUNC_DECL = 'JSON_SCHEMA_FOR_FUNC_DECL',
 }
 
 /**
@@ -34,6 +41,10 @@ export interface FeatureConfig {
 // Central registry: FeatureName -> FeatureConfig
 const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: false,
+  },
+  [FeatureName.JSON_SCHEMA_FOR_FUNC_DECL]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,
   },

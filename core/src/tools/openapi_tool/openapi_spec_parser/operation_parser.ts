@@ -17,6 +17,19 @@ export interface ApiParameter {
 }
 
 /**
+ * The JSON Schema describing the arguments of a generated tool function.
+ *
+ * Always an object schema, so it can be converted to a Gemini `Schema` without
+ * a cast.
+ */
+export interface ToolArgumentsSchema {
+  type: 'object';
+  properties: Record<string, unknown>;
+  required?: string[];
+  title: string;
+}
+
+/**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
  *
  * It maps OpenAPI parameters and request bodies into a flat list of `ApiParameter` objects
@@ -194,7 +207,7 @@ export class OperationParser {
    * @returns A JSON Schema object.
    */
   @experimental
-  public getJsonSchema(): Record<string, unknown> {
+  public getJsonSchema(): ToolArgumentsSchema {
     const properties: Record<string, unknown> = {};
     const required: string[] = [];
 

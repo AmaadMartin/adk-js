@@ -8,10 +8,20 @@ import {FunctionDeclaration} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
-import {AuthCredential} from '../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  parseAuthCredential,
+} from '../../auth/auth_credential.js';
+import {
+  FeatureName,
+  isFeatureEnabled,
+} from '../../features/feature_registry.js';
+import {formatError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
+import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
+import {isRecord} from '../../utils/type_guards.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {applyCredential} from './auth/auth_helpers.js';
+import {applyCredential, dictToAuthScheme} from './auth/auth_helpers.js';
 import {
   ApiParameter,
   OperationParser,
@@ -20,42 +30,73 @@ import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
 import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
 
+/** The error type a telemetry consumer records for an in-band HTTP failure. */
+const HTTP_ERROR_TYPE = 'HTTP_ERROR';
+
 @experimental
 export class RestApiTool extends BaseTool {
-  private operationParser: OperationParser;
+  private operationParser?: OperationParser;
 
+  private readonly endpoint: OperationEndpoint;
+  private readonly operation: OpenAPIV3.OperationObject;
+  private authScheme?: OpenAPIV3.SecuritySchemeObject;
+  private authCredential?: AuthCredential;
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
 
   constructor(
     name: string,
     description: string,
-    private readonly endpoint: OperationEndpoint,
-    private readonly operation: OpenAPIV3.OperationObject,
-    private authScheme?: OpenAPIV3.SecuritySchemeObject,
-    private authCredential?: AuthCredential,
+    endpoint: OperationEndpoint | string,
+    operation: OpenAPIV3.OperationObject | string,
+    authScheme?:
+      | OpenAPIV3.SecuritySchemeObject
+      | Record<string, unknown>
+      | string,
+    authCredential?: AuthCredential | string,
     options: {
       preservePropertyNames?: boolean;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
       credentialKey?: string;
+      /**
+       * Whether the constructor parses `operation` into the tool's argument
+       * schema. Pass `false` when the operation has already been parsed
+       * elsewhere, and install the result with `setOperationParser`.
+       */
+      shouldParseOperation?: boolean;
     } = {},
   ) {
     super({name, description});
-    this.authScheme = authScheme;
-    this.authCredential = authCredential;
+    this.endpoint = parseEndpoint(endpoint);
+    this.operation = parseOperation(operation);
+    this.authCredential = parseAuthCredential(authCredential);
+    if (authScheme !== undefined) {
+      this.configureAuthScheme(authScheme);
+    }
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
-    this.operationParser = new OperationParser(operation, options);
+    if (options.shouldParseOperation ?? true) {
+      this.operationParser = new OperationParser(this.operation, options);
+    }
   }
 
   @experimental
-  public configureAuthScheme(authScheme: OpenAPIV3.SecuritySchemeObject) {
-    this.authScheme = authScheme;
+  public configureAuthScheme(
+    authScheme:
+      | OpenAPIV3.SecuritySchemeObject
+      | Record<string, unknown>
+      | string,
+  ) {
+    const data =
+      typeof authScheme === 'string'
+        ? parseJsonObject(authScheme, 'security scheme')
+        : authScheme;
+    this.authScheme = dictToAuthScheme(data);
   }
 
   @experimental
-  public configureAuthCredential(authCredential: AuthCredential) {
-    this.authCredential = authCredential;
+  public configureAuthCredential(authCredential?: AuthCredential | string) {
+    this.authCredential = parseAuthCredential(authCredential);
   }
 
   @experimental
@@ -63,14 +104,89 @@ export class RestApiTool extends BaseTool {
     this.credentialKey = credentialKey;
   }
 
+  /**
+   * Installs the operation parser a `shouldParseOperation: false` construction
+   * skipped.
+   *
+   * @param operationParser The parser to use for this tool's arguments.
+   */
+  @experimental
+  public setOperationParser(operationParser: OperationParser) {
+    this.operationParser = operationParser;
+  }
+
+  /**
+   * Classifies a tool result for telemetry.
+   *
+   * `runAsync` reports a failed call in band, as an object carrying an `error`
+   * message, so a caller cannot tell it apart from a successful call without
+   * this hook. It never throws, whatever it is given.
+   *
+   * @param response A value `runAsync` returned.
+   * @returns `'HTTP_ERROR'` when the response reports an error, otherwise
+   *   `undefined`.
+   */
+  @experimental
+  public detectErrorInResponse(response: unknown): string | undefined {
+    if (isRecord(response) && response['error']) {
+      return HTTP_ERROR_TYPE;
+    }
+    return undefined;
+  }
+
+  private requireOperationParser(): OperationParser {
+    if (!this.operationParser) {
+      throw new Error(
+        `RestApiTool '${this.name}' has no operation parser. Call ` +
+          `setOperationParser() before using the tool.`,
+      );
+    }
+    return this.operationParser;
+  }
+
   @experimental
   override _getDeclaration(): FunctionDeclaration {
-    const schema = this.operationParser.getJsonSchema();
+    const schema = this.requireOperationParser().getJsonSchema();
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.name,
+        description: this.description,
+        parametersJsonSchema: schema,
+      };
+    }
     return {
       name: this.name,
       description: this.description,
-      parameters: schema,
+      parameters: toGeminiSchema(schema),
     };
+  }
+
+  /**
+   * Renders the tool's identity. Never renders the credential.
+   *
+   * @returns The tool's name, description and endpoint.
+   */
+  toString(): string {
+    return (
+      `RestApiTool(name="${this.name}", description="${this.description}", ` +
+      `endpoint="${JSON.stringify(this.endpoint)}")`
+    );
+  }
+
+  /**
+   * Renders the tool for `util.inspect`, a debugger and `console.log`. Never
+   * renders the credential.
+   *
+   * @returns The tool's name, description, endpoint, operation and security
+   *   scheme.
+   */
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    return (
+      `RestApiTool(name="${this.name}", description="${this.description}", ` +
+      `endpoint="${JSON.stringify(this.endpoint)}", ` +
+      `operation="${JSON.stringify(this.operation)}", ` +
+      `authScheme="${JSON.stringify(this.authScheme)}")`
+    );
   }
 
   @experimental
@@ -104,7 +220,7 @@ export class RestApiTool extends BaseTool {
       bodyData,
     } = prepareRequestParams(
       this.endpoint,
-      this.operationParser.getParameters(),
+      this.requireOperationParser().getParameters(),
       args,
     );
 
@@ -157,6 +273,94 @@ export interface PreparedParams {
   headers: Record<string, string>;
   body: unknown;
   bodyData: Record<string, unknown>;
+}
+
+/**
+ * Parses JSON text that must describe an object.
+ *
+ * @param value The JSON text.
+ * @param owner The name of the parameter, used in the error message.
+ * @throws {Error} If the text is not valid JSON or does not describe an
+ *   object.
+ */
+function parseJsonObject(
+  value: string,
+  owner: string,
+): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new Error(`Invalid ${owner}: ${formatError(error)}`);
+  }
+  if (!isRecord(parsed)) {
+    throw new Error(`Invalid ${owner}: expected a JSON object.`);
+  }
+  return parsed;
+}
+
+function requireString(
+  source: Record<string, unknown>,
+  field: string,
+  owner: string,
+): string {
+  const value = source[field];
+  if (typeof value !== 'string') {
+    throw new Error(`Invalid ${owner}: '${field}' must be a string.`);
+  }
+  return value;
+}
+
+/**
+ * Accepts an endpoint as an object or as the JSON text of one.
+ *
+ * @param endpoint The endpoint, or its JSON text.
+ * @throws {Error} If the text does not describe an object carrying a string
+ *   `baseUrl`, `path` and `method`.
+ * @returns The endpoint.
+ */
+function parseEndpoint(
+  endpoint: OperationEndpoint | string,
+): OperationEndpoint {
+  if (typeof endpoint !== 'string') {
+    return endpoint;
+  }
+  const parsed = parseJsonObject(endpoint, 'endpoint');
+  return {
+    baseUrl: requireString(parsed, 'baseUrl', 'endpoint'),
+    path: requireString(parsed, 'path', 'endpoint'),
+    method: requireString(parsed, 'method', 'endpoint'),
+  };
+}
+
+// The narrowing below checks the one field OpenAPI declares required on an
+// operation. Everything else the parser reads is optional.
+function assertOperation(
+  parsed: Record<string, unknown>,
+): asserts parsed is Record<string, unknown> & OpenAPIV3.OperationObject {
+  if (!isRecord(parsed['responses'])) {
+    throw new Error("Invalid operation: 'responses' must be an object.");
+  }
+}
+
+/**
+ * Accepts an operation as an object or as the JSON text of one.
+ *
+ * @see {@link https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.1.0.md#operation-object}
+ * @param operation The operation, or its JSON text.
+ * @throws {Error} If the text does not describe an object carrying an object
+ *   `responses`.
+ * @returns The operation.
+ */
+function parseOperation(
+  operation: OpenAPIV3.OperationObject | string,
+): OpenAPIV3.OperationObject {
+  if (typeof operation !== 'string') {
+    return operation;
+  }
+  const parsed = parseJsonObject(operation, 'operation');
+  assertOperation(parsed);
+  return parsed;
 }
 
 /**
