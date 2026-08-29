@@ -373,25 +373,10 @@ export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
-export {
-  createApiParameter,
-  formatApiParameter,
-  generateParamDoc,
-  generateReturnDoc,
-  getSchemaTypeHint,
-  getSchemaTypeValue,
-  normalizeOpenApiSchema,
-  renameReservedKeyword,
-  serializeApiParameter,
-  toArgString,
-  toDictProperty,
-} from './tools/openapi_tool/common/common.js';
+export {createApiParameter} from './tools/openapi_tool/common/common.js';
 export type {
   ApiParameter,
   ApiParameterInit,
-  NormalizedApiParameter,
-  SerializedApiParameter,
-  TypeValue,
 } from './tools/openapi_tool/common/common.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
