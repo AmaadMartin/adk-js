@@ -16,6 +16,8 @@ import {connect as tlsConnect} from 'node:tls';
 
 import {z} from 'zod';
 
+import {htmlToText} from '../utils/html_text_utils.js';
+import {loadOptionalPeer} from '../utils/optional_peer.js';
 import {selectProxy} from '../utils/proxy_utils.js';
 import {
   isBlockedAddress,
@@ -59,16 +61,6 @@ const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
  * the same text without pulling a decompressor into the path.
  */
 const IDENTITY_ENCODING = {'accept-encoding': 'identity'};
-
-/** HTML entities that survive tag stripping, decoded by name. */
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  apos: "'",
-  gt: '>',
-  lt: '<',
-  nbsp: ' ',
-  quot: '"',
-};
 
 /** Builds the parity failure message for a URL. */
 function failedToFetchMessage(url: string): string {
@@ -383,38 +375,14 @@ async function requestViaProxy(
   return requestThroughTunnel(url, socket, expiresAt);
 }
 
-/** Decodes HTML entities: the named set above plus decimal and hex forms. */
-function decodeHtmlEntities(text: string): string {
-  return text.replace(
-    /&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);/g,
-    (match: string, entity: string) => {
-      if (!entity.startsWith('#')) {
-        return NAMED_ENTITIES[entity.toLowerCase()] ?? match;
-      }
-      const codePoint =
-        entity[1] === 'x' || entity[1] === 'X'
-          ? parseInt(entity.slice(2), 16)
-          : Number(entity.slice(1));
-      return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : match;
-    },
-  );
-}
-
 /**
- * Extracts readable text from an HTML document. Removes `<script>`/`<style>`
- * blocks and comments, strips remaining tags, decodes entities, and keeps only
- * lines with more than three words (parity with the Python tool).
+ * Drops the lines with three words or fewer, which are titles, menu entries
+ * and other page furniture rather than prose. Parity with the Python tool.
  */
-function htmlToText(html: string): string {
-  const withoutCode = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ');
-  const text = decodeHtmlEntities(withoutCode.replace(/<[^>]+>/g, '\n'));
+function keepProseLines(text: string): string {
   return text
     .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.split(/\s+/).filter(Boolean).length > 3)
+    .filter((line) => line.split(/\s+/).length > 3)
     .join('\n');
 }
 
@@ -462,17 +430,27 @@ async function fetchBody(
  * resolves the hostname itself, so pinning does not apply and a hostname
  * target is not address-vetted on that path. An IP-literal target still is.
  * Pass `proxy: null` to force the direct, vetted path.
+ *
+ * @throws If the optional peer dependency `parse5` is not installed. The
+ *   parser is loaded before anything else, so a missing one is reported
+ *   instead of being folded into the failure string.
  */
 export async function loadWebPage(
   url: string,
   options?: LoadWebPageOptions,
 ): Promise<string> {
+  const {parse} = await loadOptionalPeer(
+    {packageName: 'parse5', feature: 'loadWebPage'},
+    () => import('parse5'),
+  );
   const expiresAt = Date.now() + (options?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
     const target = parseRequestTarget(url);
     const proxy = resolveProxy(target, options?.proxy);
     const body = await fetchBody(target, proxy, expiresAt);
-    return body === null ? failedToFetchMessage(url) : htmlToText(body);
+    return body === null
+      ? failedToFetchMessage(url)
+      : keepProseLines(htmlToText(parse(body)));
   } catch {
     return failedToFetchMessage(url);
   }

@@ -79,12 +79,30 @@ await loadWebPage('https://untrusted.example/', {proxy: null});
 `LOAD_WEB_PAGE`, the tool the model calls, takes no options, so a model-chosen
 URL follows whichever path the environment selects.
 
+## Text extraction
+
+`parse5` parses the body, and the tool then reads the text nodes in document
+order. Each one is trimmed, the empty ones are dropped, and the rest are joined
+with newlines. Comments and the contents of `<script>`, `<style>` and
+`<template>` are left out. Finally the tool keeps only the lines with more than
+three words, which removes titles, menu entries and other page furniture. A
+page whose every line is shorter than that returns an empty string.
+
+`parse5` is an optional peer dependency, so it is not installed with
+`@google/adk`. Install it in an application that calls this tool:
+
+```sh
+npm install parse5
+```
+
+Without it, `loadWebPage` throws an error naming the package and this command.
+That is the one failure it reports by throwing, because a missing parser is a
+configuration problem rather than a page it could not read.
+
 ## Limits
 
 The body is read into memory and is capped at 10 MiB; a larger response returns
-the failure string rather than a truncated page. Entity decoding covers `&amp;`,
-`&apos;`, `&gt;`, `&lt;`, `&nbsp;`, `&quot;` and the numeric forms (`&#8212;`,
-`&#x2014;`); other named entities are left as written.
+the failure string rather than a truncated page.
 
 The tool needs Node built-ins (`node:http`, `node:https`, `node:dns`), so it
 does not run in a browser bundle.

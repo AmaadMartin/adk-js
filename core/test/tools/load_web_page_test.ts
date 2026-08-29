@@ -96,12 +96,16 @@ let sentRequests: FakeRequest[] = [];
 /** Drives a request once the tool has finished sending it. */
 let onRequestEnd: (request: FakeRequest) => void = () => {};
 
+/** Notifies a waiting test that the tool has issued a request. */
+let onRequestSent: (() => void) | undefined;
+
 function createFakeRequest(...args: RequestArgs): FakeRequest {
   const request =
     args.length === 2
       ? new FakeRequest(args[0], args[1])
       : new FakeRequest(undefined, args[0]);
   sentRequests.push(request);
+  onRequestSent?.();
   return request;
 }
 
@@ -154,6 +158,20 @@ function expectNoRequest(): void {
   expect(sentRequests).toHaveLength(0);
 }
 
+/**
+ * Waits until the tool issues its next request, without moving the fake clock.
+ * The tool imports parse5 lazily, so a fake-timer test has to let that import
+ * settle before it advances time against a request that does not exist yet.
+ */
+function nextRequest(): Promise<void> {
+  return new Promise((resolve) => {
+    onRequestSent = () => {
+      onRequestSent = undefined;
+      resolve();
+    };
+  });
+}
+
 /** Returns the addresses the pinned lookup of `request` answers with. */
 function pinnedLookupResults(request: FakeRequest): {
   single: string;
@@ -178,6 +196,7 @@ describe('loadWebPage', () => {
   beforeEach(() => {
     sentRequests = [];
     onRequestEnd = () => {};
+    onRequestSent = undefined;
     httpRequestMock.mockImplementation(createFakeRequest);
     httpsRequestMock.mockImplementation(createFakeRequest);
     tlsConnectMock.mockImplementation(() => new FakeSocket());
@@ -949,22 +968,22 @@ describe('loadWebPage', () => {
       expect(result).toBe('The markup uses &lt; for a tag');
     });
 
-    it('leaves a named entity outside the table alone', async () => {
+    it('decodes a named entity the old table did not carry', async () => {
       resolveTo('93.184.216.34');
-      respondWith('<p>An em dash &mdash; stays as written here</p>');
+      respondWith('<p>An em dash &mdash; reads as a dash now</p>');
 
       const result = await loadWebPage('https://example.com/');
 
-      expect(result).toBe('An em dash &mdash; stays as written here');
+      expect(result).toBe('An em dash — reads as a dash now');
     });
 
-    it('leaves an unknown or out-of-range entity alone', async () => {
+    it('leaves an unknown entity alone and replaces an out-of-range one', async () => {
       resolveTo('93.184.216.34');
-      respondWith('<p>Both &notanentity; and &#1114112; stay put</p>');
+      respondWith('<p>Both &nope; and &#1114112; are handled</p>');
 
       const result = await loadWebPage('https://example.com/');
 
-      expect(result).toBe('Both &notanentity; and &#1114112; stay put');
+      expect(result).toBe('Both &nope; and \ufffd are handled');
     });
 
     it('decodes the body with the charset the response declares', async () => {
@@ -999,6 +1018,7 @@ describe('loadWebPage', () => {
       resolveTo('93.184.216.34');
 
       const pendingDefault = loadWebPage('https://example.com/');
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(29_999);
       expect(sentRequests[0].destroyed).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
@@ -1010,6 +1030,7 @@ describe('loadWebPage', () => {
       const pendingOverride = loadWebPage('https://example.com/', {
         timeoutMs: 5000,
       });
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(5000);
       expect(sentRequests[1].destroyed).toBe(true);
       expect(await pendingOverride).toBe(
@@ -1022,6 +1043,7 @@ describe('loadWebPage', () => {
       resolveTo('93.184.216.34');
 
       const pending = loadWebPage('https://example.com/', {});
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(29_999);
       expect(sentRequests[0].destroyed).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
@@ -1035,6 +1057,7 @@ describe('loadWebPage', () => {
       const pending = loadWebPage('https://does-not-resolve.invalid/', {
         proxy: 'http://proxy.example.test:8080',
       });
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(30_000);
 
       expect(sentRequests[0].options.method).toBe('CONNECT');
@@ -1058,6 +1081,7 @@ describe('loadWebPage', () => {
       const pending = loadWebPage('https://does-not-resolve.invalid/', {
         proxy: 'http://proxy.example.test:8080',
       });
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(20_000);
       expect(sentRequests).toHaveLength(2);
       await vi.advanceTimersByTimeAsync(9_999);
@@ -1075,6 +1099,7 @@ describe('loadWebPage', () => {
       resolveTo('93.184.216.34', '93.184.216.35');
 
       const pending = loadWebPage('https://example.com/');
+      await nextRequest();
       await vi.advanceTimersByTimeAsync(30_000);
       await vi.advanceTimersByTimeAsync(1);
 
