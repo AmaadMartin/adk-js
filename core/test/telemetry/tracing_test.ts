@@ -9,7 +9,6 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   BaseAgent,
-  BaseTool,
   Event,
   InvocationContext,
   LlmRequest,
@@ -17,12 +16,26 @@ import {
   Session,
   createEventActions,
 } from '@google/adk';
+// The tracing functions under test are imported from source, so the tools they
+// accept must be typed by the same source module.
 import {
+  GCP_MCP_SERVER_DESTINATION_ID,
   traceAgentInvocation,
   traceCallLlm,
   traceMergedToolCalls,
   traceToolCall,
 } from '../../src/telemetry/tracing.js';
+import {BaseTool} from '../../src/tools/base_tool.js';
+
+class MetadataTool extends BaseTool {
+  constructor(customMetadata: Record<string, unknown> | undefined) {
+    super({name: 'metadata-tool', description: 'A tool.', customMetadata});
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return {result: 'ok'};
+  }
+}
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -183,6 +196,47 @@ describe('Telemetry Tracing Functions', () => {
         'gcp.vertex.agent.tool_response':
           expect.stringContaining('not specified'),
       });
+    });
+
+    it('sets the destination id from the tool custom metadata', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const tool = new MetadataTool({
+        [GCP_MCP_SERVER_DESTINATION_ID]: 'projects/p/locations/l/mcpServers/s',
+      });
+
+      traceToolCall({tool, args: {}, functionResponseEvent: mockEvent});
+
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        GCP_MCP_SERVER_DESTINATION_ID,
+        'projects/p/locations/l/mcpServers/s',
+      );
+    });
+
+    it('sets no destination id when the tool has no custom metadata', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const tool = new MetadataTool(undefined);
+
+      traceToolCall({tool, args: {}, functionResponseEvent: mockEvent});
+
+      expect(mockSpan.setAttribute).not.toHaveBeenCalled();
+    });
+
+    it('sets no destination id when the metadata omits the key', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const tool = new MetadataTool({'my.vendor.key': 'v'});
+
+      traceToolCall({tool, args: {}, functionResponseEvent: mockEvent});
+
+      expect(mockSpan.setAttribute).not.toHaveBeenCalled();
+    });
+
+    it('sets no destination id when the value is not a string', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const tool = new MetadataTool({[GCP_MCP_SERVER_DESTINATION_ID]: 42});
+
+      traceToolCall({tool, args: {}, functionResponseEvent: mockEvent});
+
+      expect(mockSpan.setAttribute).not.toHaveBeenCalled();
     });
   });
 
