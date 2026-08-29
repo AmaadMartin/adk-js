@@ -38,6 +38,23 @@ export function requiredSchemeName(
 }
 
 /**
+ * Returns the schema a parameter advertises to the model.
+ *
+ * The model sees the schema and not the OpenAPI parameter around it, so a
+ * parameter description that the schema does not carry moves onto a copy of
+ * the schema. The copy leaves the caller's operation object unchanged.
+ */
+function describeSchema(
+  schema: OpenAPIV3.SchemaObject,
+  description: string | undefined,
+): OpenAPIV3.SchemaObject {
+  if (schema.description || !description) {
+    return schema;
+  }
+  return {...schema, description};
+}
+
+/**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
  *
  * It maps OpenAPI parameters and request bodies into a flat list of `ApiParameter` objects
@@ -76,15 +93,15 @@ export class OperationParser {
       // Assume resolved references for now
       if ('name' in param) {
         const originalName = param.name;
-        const description = param.description || '';
         const location = param.in || '';
-        const schema = (param.schema as OpenAPIV3.SchemaObject) || {};
+        const declaredSchema = (param.schema as OpenAPIV3.SchemaObject) || {};
+        const schema = describeSchema(declaredSchema, param.description);
 
         this.params.push({
           originalName,
           paramLocation: location,
           paramSchema: schema,
-          description,
+          description: param.description || schema.description || '',
           required: param.required || false,
           name: this.getParamName(originalName),
         });
@@ -107,9 +124,9 @@ export class OperationParser {
 
     const mediaTypeObject = content[firstMimeType];
     const schema = mediaTypeObject.schema;
-    const description = requestBody.description || '';
 
     if (schema && !('$ref' in schema)) {
+      const description = requestBody.description || schema.description || '';
       if (schema.type === 'object') {
         const properties = schema.properties || {};
         if (Object.keys(properties).length > 0) {
@@ -119,7 +136,7 @@ export class OperationParser {
                 originalName: propName,
                 paramLocation: 'body',
                 paramSchema: propDetails,
-                description: propDetails.description,
+                description: propDetails.description ?? '',
                 required: (schema.required || []).includes(propName),
                 name: this.getParamName(propName),
               });
