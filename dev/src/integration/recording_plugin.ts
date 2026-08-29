@@ -4,14 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BasePlugin,
-  BaseTool,
-  Context,
-  LlmRequest,
-  LlmResponse,
-} from '@google/adk';
-import {Recording, ToolRecording} from './test_types.js';
+import type {BaseTool, Context, LlmRequest, LlmResponse} from '@google/adk';
+import {BasePlugin} from '@google/adk';
+import type {Recording, ToolRecording} from './test_types.js';
 
 /**
  * Returns whether a recording holds both halves of its pair.
@@ -72,7 +67,6 @@ export class RecordingPlugin extends BasePlugin {
       llmRecording: {llmRequest, llmResponses},
     });
     this.openLlmResponses.set(callbackContext.agentName, llmResponses);
-    return;
   }
 
   override async afterModelCallback({
@@ -94,7 +88,6 @@ export class RecordingPlugin extends BasePlugin {
     if (!llmResponse.partial) {
       this.openLlmResponses.delete(agentName);
     }
-    return;
   }
 
   override async beforeToolCallback({
@@ -120,7 +113,6 @@ export class RecordingPlugin extends BasePlugin {
       toolRecording,
     });
     this.openToolRecordings.set(functionCallId, toolRecording);
-    return;
   }
 
   override async afterToolCallback({
@@ -149,6 +141,5 @@ export class RecordingPlugin extends BasePlugin {
       name: tool.name,
       response: result,
     };
-    return;
   }
 }

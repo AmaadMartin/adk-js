@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {LogLevel, setLogLevel, StreamingMode} from '@google/adk';
 import type {Command} from 'commander';
 import type {Mock} from 'vitest';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -13,6 +13,7 @@ import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {recordConformanceTests} from '../../src/conformance/record_conformance_tests.js';
 import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 import {AdkLogger, setDefaultLogLevel} from '../../src/utils/logger.js';
@@ -45,6 +46,10 @@ vi.mock('../../src/integration/run_integration_tests', () => ({
   // The factory-argument fake survives the suite's `vi.restoreAllMocks()`;
   // an implementation installed with `mockResolvedValue` would not.
   runIntegrationTests: vi.fn(async () => 0),
+}));
+
+vi.mock('../../src/conformance/record_conformance_tests', () => ({
+  recordConformanceTests: vi.fn(),
 }));
 
 vi.mock('../../src/version', () => ({
@@ -795,6 +800,65 @@ describe('CLI Entrypoint', () => {
         'boom',
       );
       expect(process.exitCode).toBe(1);
+    });
+  });
+
+  describe('command: integration record', () => {
+    it('should record the non-streaming goldens by default', async () => {
+      await parse(['integration', 'record', '--tests_dir', 't']);
+
+      expect(recordConformanceTests).toHaveBeenCalledWith({
+        agentsDir: process.cwd(),
+        testsDir: 't',
+        streamingMode: StreamingMode.NONE,
+      });
+    });
+
+    it('should pass the directories and the sse streaming mode', async () => {
+      await parse([
+        'integration',
+        'record',
+        '--agents_dir',
+        'a',
+        '--tests_dir',
+        't',
+        '--streaming_mode',
+        'sse',
+      ]);
+
+      expect(recordConformanceTests).toHaveBeenCalledWith({
+        agentsDir: 'a',
+        testsDir: 't',
+        streamingMode: StreamingMode.SSE,
+      });
+    });
+
+    it('should reject a streaming mode that has no goldens', async () => {
+      // `exitOverride` on the program does not reach a subcommand, so without
+      // this the invalid choice would call `process.exit`.
+      const integration = program.commands.find(
+        (command) => command.name() === 'integration',
+      );
+      const record = integration?.commands.find(
+        (command) => command.name() === 'record',
+      );
+      if (!record) {
+        expect.fail('the integration record command is not registered');
+      }
+      record.exitOverride();
+      vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+      await expect(
+        parse(['integration', 'record', '--streaming_mode', 'bidi']),
+      ).rejects.toThrow('Allowed choices are none, sse.');
+
+      expect(recordConformanceTests).not.toHaveBeenCalled();
+    });
+
+    it('should apply the resolved log level', async () => {
+      await parse(['integration', 'record', '--log_level', 'debug']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
     });
   });
 });

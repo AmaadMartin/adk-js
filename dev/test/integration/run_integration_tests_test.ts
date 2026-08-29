@@ -7,18 +7,23 @@
 import {getLogger} from '@google/adk';
 import assert from 'node:assert';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {registerConformanceIntegrations} from '../../src/conformance/conformance_integrations.js';
-import {batchLoadYamlAgentConfig} from '../../src/conformance/yaml_agent_loader.js';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
-import type {YamlAgentConfig} from '../../src/integration/agent_types.js';
-import {AgentClass} from '../../src/integration/agent_types.js';
-import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
 import {TestRunner} from '../../src/integration/test_runner.js';
 import type {TestInfo} from '../../src/integration/test_types.js';
 
+// The setup narration moved to `buildAgentRegistry`, so
+// `yaml_agent_loader_test.ts` asserts it. Here the bootstrap only has to hand
+// back a registry.
 vi.mock('../../src/conformance/yaml_agent_loader.js', () => ({
   batchLoadYamlAgentConfig: vi.fn(async () => new Map()),
+  buildAgentRegistry: vi.fn(async () => {
+    const {AgentRegistry} =
+      await import('../../src/integration/agent_registry.js');
+    const {IntegrationRegistry} =
+      await import('../../src/integration/integration_registry.js');
+    return new AgentRegistry(new IntegrationRegistry());
+  }),
 }));
 
 vi.mock('../../src/conformance/yaml_test_loader.js', () => ({
@@ -60,22 +65,6 @@ function assertionError(): Error {
   return expect.fail('deepStrictEqual did not throw with an Error');
 }
 
-function agentConfigs(...names: string[]): Map<string, YamlAgentConfig> {
-  return new Map(
-    names.map((name) => [
-      name,
-      {
-        agentClass: AgentClass.LlmAgent,
-        name,
-        model: 'test-model',
-        description: `${name} agent`,
-        instruction: 'answer the question',
-        isRootAgent: true,
-      },
-    ]),
-  );
-}
-
 const OPTIONS = {agentsDir: '/agents', testsDir: '/tests', forceRunAll: false};
 
 const spyOnRun = () => vi.spyOn(TestRunner.prototype, 'run');
@@ -97,13 +86,6 @@ function silenceConsole() {
   return CONSOLE_METHODS.map((method) =>
     vi.spyOn(console, method).mockImplementation(() => {}),
   );
-}
-
-/** The inventory line `IntegrationRegistry.summary()` produces for a real run. */
-function conformanceSummary(): string {
-  const registry = new IntegrationRegistry();
-  registerConformanceIntegrations(registry);
-  return registry.summary();
 }
 
 describe('runIntegrationTests', () => {
@@ -252,18 +234,11 @@ describe('runIntegrationTests logging', () => {
   }
 
   it('logs the setup narration at debug', async () => {
-    vi.mocked(batchLoadYamlAgentConfig).mockResolvedValue(agentConfigs('root'));
     vi.mocked(batchLoadYamlTestDefs).mockResolvedValue(testDefs());
 
     await runIntegrationTests(OPTIONS);
 
     expect(logSpies.debug.mock.calls).toEqual([
-      ['Loading agents from /agents'],
-      [1, 'agents found'],
-      ['Registering conformance integrations.'],
-      [conformanceSummary()],
-      ['Registering agents.'],
-      ['1 configs, 0 instantiated agents'],
       ['Loading tests from /tests'],
       [0, 'tests found.'],
       ['Running tests.'],

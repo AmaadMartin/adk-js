@@ -4,11 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {getLogger} from '@google/adk';
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
 import type {Mock} from 'vitest';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {batchLoadYamlAgentConfig} from '../../src/conformance/yaml_agent_loader.js';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {registerConformanceIntegrations} from '../../src/conformance/conformance_integrations.js';
+import {
+  batchLoadYamlAgentConfig,
+  buildAgentRegistry,
+} from '../../src/conformance/yaml_agent_loader.js';
+import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
 vi.mock('fast-glob', () => ({
   default: {
@@ -380,5 +386,47 @@ nested_extra:
     expect((agent as any).extraField).toBe('extra_value');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((agent as any).nestedExtra).toEqual({someKey: 'some_value'});
+  });
+});
+
+/** The inventory line `IntegrationRegistry.summary()` produces for a real run. */
+function conformanceSummary(): string {
+  const registry = new IntegrationRegistry();
+  registerConformanceIntegrations(registry);
+  return registry.summary();
+}
+
+describe('buildAgentRegistry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (fg.stream as unknown as Mock).mockReturnValue(['/agents/root_agent.yaml']);
+    (fs.readFile as Mock).mockResolvedValue(AGENT_ONE_YAML);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('registers the loaded agents against the conformance integrations', async () => {
+    const registry = await buildAgentRegistry('/agents');
+
+    expect(registry.summary()).toBe('1 configs, 0 instantiated agents');
+  });
+
+  it('logs the setup narration at debug', async () => {
+    const debug = vi
+      .spyOn(getLogger(), 'debug')
+      .mockImplementation(() => undefined);
+
+    await buildAgentRegistry('/agents');
+
+    expect(debug.mock.calls).toEqual([
+      ['Loading agents from /agents'],
+      [1, 'agents found'],
+      ['Registering conformance integrations.'],
+      [conformanceSummary()],
+      ['Registering agents.'],
+      ['1 configs, 0 instantiated agents'],
+    ]);
   });
 });
