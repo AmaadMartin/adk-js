@@ -65,8 +65,11 @@ const AGENT_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.agentTool');
  */
 const GROUNDING_METADATA_STATE_KEY = `${State.TEMP_PREFIX}_adk_grounding_metadata`;
 
-/** A markdown code fence wrapping a whole payload. */
-const CODE_FENCE_PATTERN = /^```\w*\s*([\s\S]*?)\s*```$/;
+/** The marker that opens and closes a markdown code fence. */
+const CODE_FENCE = '```';
+
+/** The language tag a code fence opens with, such as the `json` of ```json. */
+const LANGUAGE_TAG_PATTERN = /^\w*/;
 
 /** The trailing newlines of a code execution result. */
 const TRAILING_NEWLINES_PATTERN = /\n+$/;
@@ -134,10 +137,23 @@ function partToText(part: Part): string {
  * A model asked for structured output sometimes wraps it in a fence, most
  * often when tools are configured alongside an output schema. Well-formed JSON
  * never starts with a fence, so valid input is returned unchanged.
+ *
+ * The fence is matched by position rather than by one regular expression. A
+ * pattern of the form ```` ```\s*(.*?)\s*``` ```` backtracks catastrophically
+ * on an unterminated fence followed by a long run of whitespace, and this text
+ * is whatever the wrapped agent's model produced.
  */
 function stripJsonCodeFence(text: string): string {
-  const fenced = CODE_FENCE_PATTERN.exec(text.trim());
-  return fenced ? fenced[1].trim() : text;
+  const trimmed = text.trim();
+  if (
+    trimmed.length < 2 * CODE_FENCE.length ||
+    !trimmed.startsWith(CODE_FENCE) ||
+    !trimmed.endsWith(CODE_FENCE)
+  ) {
+    return text;
+  }
+  const fenced = trimmed.slice(CODE_FENCE.length, -CODE_FENCE.length);
+  return fenced.replace(LANGUAGE_TAG_PATTERN, '').trim();
 }
 
 /**

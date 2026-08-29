@@ -534,7 +534,11 @@ function mockRunner(stream: () => AsyncGenerator<Event, void, void>) {
     plugins: undefined as BasePlugin[] | undefined,
     messageText: undefined as string | undefined,
     runCalls: 0,
+    // Set when the generator is closed, by exhaustion or by disposal.
     streamClosed: false,
+    // Set only when the caller read every event, so an early disposal is
+    // distinguishable from a stream that simply ran out.
+    streamExhausted: false,
   };
   vi.mocked(Runner).mockClear();
   vi.mocked(Runner).mockImplementation((config) => {
@@ -547,6 +551,7 @@ function mockRunner(stream: () => AsyncGenerator<Event, void, void>) {
         seen.messageText = params.newMessage.parts?.[0].text;
         try {
           yield* stream();
+          seen.streamExhausted = true;
         } finally {
           seen.streamClosed = true;
         }
@@ -846,6 +851,23 @@ describe('AgentTool output validation', () => {
     expect(result).toEqual({result: 'done'});
   });
 
+  it('rejects an unterminated fence padded with whitespace without stalling', async () => {
+    const agent = structuredAgent();
+    // An opening fence the model never closed, a long run of blank lines, and
+    // a payload after them. A backtracking fence pattern spends seconds on
+    // this and blocks the whole process, so the call must finish inside the
+    // test timeout.
+    const unclosedFence = `\`\`\`json\n${'\n'.repeat(4000)}{"result": "done"}`;
+    mockRunner(replay(reply([{text: unclosedFence}])));
+
+    await expect(
+      new AgentTool({agent}).runAsync({
+        args: {request: 'go'},
+        toolContext: createToolContext({agent}),
+      }),
+    ).rejects.toThrow();
+  });
+
   it('returns the merged text unparsed when the agent declares no output schema', async () => {
     const agent = createSubAgent();
     mockRunner(replay(reply([{text: '{"result": "done"}'}])));
@@ -1076,6 +1098,7 @@ describe('AgentTool sub-run teardown', () => {
       toolContext: createToolContext({agent}),
     });
 
+    expect(seen.streamExhausted).toBe(true);
     expect(seen.streamClosed).toBe(true);
   });
 
@@ -1096,6 +1119,8 @@ describe('AgentTool sub-run teardown', () => {
       }),
     });
 
+    // Closed without being read to the end: the tool disposed it early.
+    expect(seen.streamExhausted).toBe(false);
     expect(seen.streamClosed).toBe(true);
   });
 
@@ -1114,6 +1139,7 @@ describe('AgentTool sub-run teardown', () => {
       }),
     ).rejects.toThrow();
 
+    expect(seen.streamExhausted).toBe(true);
     expect(seen.streamClosed).toBe(true);
   });
 });
