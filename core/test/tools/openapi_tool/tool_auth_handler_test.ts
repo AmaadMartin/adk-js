@@ -18,8 +18,10 @@ import {
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {CredentialExchangeError} from '../../../src/auth/exchanger/base_credential_exchanger.js';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
+import {logger} from '../../../src/utils/logger.js';
 
 // Mock AutoAuthCredentialExchanger
 vi.mock(
@@ -1114,5 +1116,71 @@ describe('ToolAuthHandler credential key property', () => {
     expect(cachedCredentialKeys(sessionState)).toEqual(
       Object.keys(sessionState),
     );
+  });
+});
+
+describe('ToolAuthHandler failed exchange', () => {
+  const SCHEME: OpenAPIV3.SecuritySchemeObject = {
+    type: 'apiKey',
+    name: 'X-API-Key',
+    in: 'header',
+  };
+
+  /** Replaces the next exchanger with one whose round trip fails. */
+  function failNextExchange(): void {
+    vi.mocked(AutoAuthCredentialExchanger).mockImplementationOnce(
+      () =>
+        ({
+          exchange: vi
+            .fn()
+            .mockRejectedValue(
+              new CredentialExchangeError('token endpoint refused the request'),
+            ),
+        }) as unknown as AutoAuthCredentialExchanger,
+    );
+  }
+
+  it('degrades to an unauthenticated call instead of rejecting', async () => {
+    const logged = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    failNextExchange();
+
+    const result = await new ToolAuthHandler(createContext({}), SCHEME, {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: {useDefaultCredential: true},
+    }).prepareAuthCredentials();
+
+    // The tool still runs and reports what the API says. Rejecting here would
+    // abort the whole invocation.
+    expect(result.state).toBe('done');
+    expect(result.authCredential).toBeUndefined();
+    expect(logged).toHaveBeenCalledOnce();
+
+    logged.mockRestore();
+  });
+
+  it('keeps the client answer so the user is not asked to authorize twice', async () => {
+    const logged = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const answer: AuthCredential = {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: {useDefaultCredential: true},
+    };
+    const sessionState: Record<string, unknown> = {
+      'temp:my_tool_tokens': answer,
+    };
+    failNextExchange();
+
+    const result = await new ToolAuthHandler(
+      createContext(sessionState),
+      SCHEME,
+      undefined,
+      'my_tool_tokens',
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    // The answer survived the failed exchange, so the next call exchanges it
+    // again rather than sending the user back through consent.
+    expect(sessionState['my_tool_tokens']).toEqual(answer);
+
+    logged.mockRestore();
   });
 });

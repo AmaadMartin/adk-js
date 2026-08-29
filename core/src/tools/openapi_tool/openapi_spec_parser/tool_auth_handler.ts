@@ -12,11 +12,15 @@ import {
 } from '../../../auth/auth_credential.js';
 import {AuthScheme, OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
-import {AuthCredentialMissingError} from '../../../auth/exchanger/base_credential_exchanger.js';
+import {
+  AuthCredentialMissingError,
+  ExchangeResult,
+} from '../../../auth/exchanger/base_credential_exchanger.js';
 import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {stableDigest} from '../../../utils/hash_utils.js';
+import {logger} from '../../../utils/logger.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
 export interface AuthPreparationResult {
@@ -249,6 +253,29 @@ function validateAuthorizationRequest(
   }
 }
 
+/**
+ * Exchanges `credential`, or returns undefined when the exchange failed.
+ *
+ * An exchange fails for environmental reasons: expired application default
+ * credentials, an unreachable metadata server, a token endpoint that refused
+ * the request. The tool then calls the API without a credential and reports
+ * what the API says, where rejecting would abort the whole invocation.
+ */
+async function exchangeCredential(
+  authScheme: AuthScheme,
+  credential: AuthCredential,
+): Promise<ExchangeResult | undefined> {
+  try {
+    return await new AutoAuthCredentialExchanger().exchange({
+      authScheme,
+      authCredential: credential,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to exchange credential:', error);
+    return undefined;
+  }
+}
+
 @experimental
 export class ToolAuthHandler {
   constructor(
@@ -339,25 +366,27 @@ export class ToolAuthHandler {
       };
     }
 
-    const exchanger = new AutoAuthCredentialExchanger();
-    const result = await exchanger.exchange({
-      authScheme: this.authScheme,
-      authCredential: credential,
-    });
-
     // Only cache what cannot cheaply be obtained again: an auth response is
     // readable once, and an exchange costs a round trip. A statically
     // configured credential that needed no exchange is already available on
     // every invocation, so persisting it to session state would only copy a
     // secret into the session store for nothing.
-    if (authResponseCredential || result.wasExchanged) {
+    //
+    // The answer is persisted before the exchange, so an exchange that fails
+    // does not cost the user a second authorization round trip.
+    if (authResponseCredential) {
+      store.storeCredential(cacheKey, authResponseCredential);
+    }
+
+    const result = await exchangeCredential(this.authScheme, credential);
+    if (result?.wasExchanged) {
       store.storeCredential(cacheKey, result.credential);
     }
 
     return {
       state: 'done',
       authScheme: this.authScheme,
-      authCredential: result.credential,
+      authCredential: result?.credential,
     };
   }
 }
