@@ -29,9 +29,8 @@ const MAX_HTTP_STATUS = 599;
 
 /**
  * Narrows an arbitrary value to an indexable record, or `undefined` when it is
- * not a non-null object. Reads a duck-typed error shape without resorting to
- * `any`. An array passes, because an `AggregateError` style `errors` array
- * still carries fields worth reading.
+ * not a non-null object. Used to safely inspect duck-typed error shapes without
+ * resorting to `any`.
  */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'

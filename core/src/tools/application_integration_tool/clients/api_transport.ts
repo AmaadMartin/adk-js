@@ -22,9 +22,6 @@ const NO_CREDENTIALS_MESSAGE =
   'Please provide a service account that has the required permissions to' +
   ' access the connection.';
 
-/** HTTP status codes that mean the caller named a resource that cannot exist. */
-const INVALID_REQUEST_STATUS = new Set([400, 404]);
-
 /** A single JSON request against a Google Cloud API. */
 export interface JsonRequest {
   url: string;
@@ -112,7 +109,7 @@ export class ApiTransport {
     }
 
     if (!response.ok) {
-      if (INVALID_REQUEST_STATUS.has(response.status)) {
+      if (response.status === 400 || response.status === 404) {
         throw new InputValidationError(request.invalidRequestMessage);
       }
       throw new Error(
