@@ -10,6 +10,7 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  InvocationContext,
   OpenApiSpecParser,
   RestApiTool,
   ToolAuthHandler,
@@ -24,6 +25,16 @@ import {
   prepareRequestBody,
   prepareRequestParams,
 } from '../../../src/tools/openapi_tool/rest_api_tool.js';
+
+function createToolContext(state: Record<string, unknown> = {}): Context {
+  return new Context({
+    invocationContext: {
+      session: {state},
+      agent: {name: 'test-agent'},
+    } as unknown as InvocationContext,
+    functionCallId: 'call-1',
+  });
+}
 
 describe('RestApiTool', () => {
   afterEach(() => {
@@ -238,6 +249,46 @@ describe('RestApiTool', () => {
       pending: true,
       message: 'Needs your authorization to access your data.',
     });
+  });
+
+  it('authenticates a second call from the credential the first call stored', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      {responses: {}},
+      createApiKeyScheme('X-API-Key', 'header'),
+    );
+    tool.configureCredentialKey('rest_tool_key');
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    // The client answered the credential request, so the auth response is
+    // waiting in the temp slot of this invocation.
+    const first = createToolContext({
+      'temp:rest_tool_key': {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'secret-key',
+      },
+    });
+    await tool.runAsync({args: {}, toolContext: first});
+
+    // The next invocation starts from the persisted state. Temp state does
+    // not survive it, so the tool can only authenticate from the store.
+    const persisted = first.state.toRecord();
+    delete persisted['temp:rest_tool_key'];
+    const second = createToolContext(persisted);
+    const getAuthResponse = vi.spyOn(second, 'getAuthResponse');
+    await tool.runAsync({args: {}, toolContext: second});
+
+    expect(getAuthResponse).not.toHaveBeenCalled();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+    for (const call of vi.mocked(globalThis.fetch).mock.calls) {
+      expect(call[1]?.headers).toMatchObject({'X-API-Key': 'secret-key'});
+    }
   });
 
   it('should add header parameters', async () => {
