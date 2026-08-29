@@ -5,294 +5,361 @@
  */
 
 import {
-  EvalStatus,
+  areToolsEqual,
+  EvalTurn,
+  evaluateTrajectory,
   InputValidationError,
-  Invocation,
-  ToolTrajectoryMatchType,
-  TrajectoryEvaluator,
+  ToolUse,
 } from '@google/adk';
-import {FunctionCall} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
-const T1: FunctionCall = {name: 'tool_1', args: {a: 1}};
-const T1_1: FunctionCall = {name: 'tool_1_1', args: {a: 11}};
-const T2: FunctionCall = {name: 'tool_2', args: {b: 2}};
-const T2_1: FunctionCall = {name: 'tool_2_1', args: {b: 21}};
-const T3: FunctionCall = {name: 'tool_3', args: {c: 3}};
-const T3_1: FunctionCall = {name: 'tool_3_1', args: {c: 31}};
-const T4: FunctionCall = {name: 'tool_4', args: {d: 4}};
+const TOOL_ROLL_DICE_16: ToolUse = {
+  toolName: 'rollDie',
+  toolInput: {sides: 16},
+};
+const TOOL_ROLL_DICE_6: ToolUse = {toolName: 'rollDie', toolInput: {sides: 6}};
+const TOOL_GET_WEATHER: ToolUse = {
+  toolName: 'getWeather',
+  toolInput: {location: 'Paris'},
+};
+const TOOL_GET_WEATHER_SF: ToolUse = {
+  toolName: 'getWeather',
+  toolInput: {location: 'SF'},
+};
 
-/** An invocation carrying the given tool calls, with a fixed user turn. */
-function invocation(toolUses: FunctionCall[]): Invocation {
-  return {
-    userContent: {role: 'user', parts: [{text: 'do the thing'}]},
-    toolUses,
-  };
+const TURN_MATCH: EvalTurn = {
+  query: 'Q1',
+  response: 'R1',
+  actualToolUse: [TOOL_ROLL_DICE_16],
+  expectedToolUse: [TOOL_ROLL_DICE_16],
+};
+const TURN_MISMATCH_INPUT: EvalTurn = {
+  query: 'Q2',
+  response: 'R2',
+  actualToolUse: [TOOL_ROLL_DICE_6],
+  expectedToolUse: [TOOL_ROLL_DICE_16],
+};
+const TURN_MISMATCH_NAME: EvalTurn = {
+  query: 'Q3',
+  response: 'R3',
+  actualToolUse: [TOOL_GET_WEATHER],
+  expectedToolUse: [TOOL_ROLL_DICE_16],
+};
+const TURN_MATCH_MULTIPLE: EvalTurn = {
+  query: 'Q4',
+  response: 'R4',
+  actualToolUse: [TOOL_GET_WEATHER, TOOL_ROLL_DICE_6],
+  expectedToolUse: [TOOL_GET_WEATHER, TOOL_ROLL_DICE_6],
+};
+const TURN_MISMATCH_ORDER: EvalTurn = {
+  query: 'Q5',
+  response: 'R5',
+  actualToolUse: [TOOL_ROLL_DICE_6, TOOL_GET_WEATHER],
+  expectedToolUse: [TOOL_GET_WEATHER, TOOL_ROLL_DICE_6],
+};
+const TURN_MISMATCH_LENGTH_ACTUAL_LONGER: EvalTurn = {
+  query: 'Q6',
+  response: 'R6',
+  actualToolUse: [TOOL_GET_WEATHER, TOOL_ROLL_DICE_6],
+  expectedToolUse: [TOOL_GET_WEATHER],
+};
+const TURN_MISMATCH_LENGTH_EXPECTED_LONGER: EvalTurn = {
+  query: 'Q7',
+  response: 'R7',
+  actualToolUse: [TOOL_GET_WEATHER],
+  expectedToolUse: [TOOL_GET_WEATHER, TOOL_ROLL_DICE_6],
+};
+const TURN_MATCH_WITH_MOCK_OUTPUT: EvalTurn = {
+  query: 'Q8',
+  response: 'R8',
+  actualToolUse: [TOOL_GET_WEATHER_SF],
+  expectedToolUse: [{...TOOL_GET_WEATHER_SF, mockToolOutput: 'Sunny'}],
+};
+const TURN_MATCH_EMPTY_TOOLS: EvalTurn = {
+  query: 'Q9',
+  response: 'R9',
+  actualToolUse: [],
+  expectedToolUse: [],
+};
+const TURN_MISMATCH_EMPTY_VS_NONEMPTY: EvalTurn = {
+  query: 'Q10',
+  response: 'R10',
+  actualToolUse: [],
+  expectedToolUse: [TOOL_GET_WEATHER],
+};
+
+/** A tool call a caller has annotated with a property of its own. */
+interface AnnotatedToolUse extends ToolUse {
+  recordedBy: string;
 }
 
-/** Scores one pair of trajectories and returns the overall score. */
-async function scoreOnce(
-  matchType: ToolTrajectoryMatchType,
-  actual: FunctionCall[],
-  expected: FunctionCall[],
-): Promise<number | undefined> {
-  const evaluator = new TrajectoryEvaluator({threshold: 0.5, matchType});
-  const result = await evaluator.evaluateInvocations(
-    [invocation(actual)],
-    [invocation(expected)],
-  );
+const TOOL_GET_WEATHER_ANNOTATED: AnnotatedToolUse = {
+  toolName: 'getWeather',
+  toolInput: {location: 'Paris'},
+  recordedBy: 'replayer',
+};
 
-  return result.overallScore;
-}
-
-describe('TrajectoryEvaluator with EXACT match', () => {
-  const evaluator = new TrajectoryEvaluator({
-    threshold: 0.5,
-    matchType: ToolTrajectoryMatchType.EXACT,
-  });
-
-  it('scores an identical trajectory 1.0 and passes', async () => {
-    const result = await evaluator.evaluateInvocations(
-      [invocation([T1])],
-      [invocation([T1])],
+describe('evaluateTrajectory', () => {
+  it('rejects an undefined dataset', () => {
+    expect(() => evaluateTrajectory(undefined)).toThrow(InputValidationError);
+    expect(() => evaluateTrajectory(undefined)).toThrow(
+      'The evaluation dataset is empty.',
     );
-
-    expect(result.overallScore).toBe(1.0);
-    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
-    expect(result.perInvocationResults).toHaveLength(1);
-    expect(result.perInvocationResults[0].score).toBe(1.0);
-    expect(result.perInvocationResults[0].evalStatus).toBe(EvalStatus.PASSED);
   });
 
-  it('echoes both invocations back in the per-invocation result', async () => {
-    const actual = invocation([T1]);
-    const expected = invocation([T1]);
-
-    const result = await evaluator.evaluateInvocations([actual], [expected]);
-
-    expect(result.perInvocationResults[0].actualInvocation).toBe(actual);
-    expect(result.perInvocationResults[0].expectedInvocation).toBe(expected);
-  });
-
-  it('scores a different tool name 0.0', async () => {
-    const result = await evaluator.evaluateInvocations(
-      [invocation([T1])],
-      [invocation([T2])],
+  it('rejects a null dataset', () => {
+    expect(() => evaluateTrajectory(null)).toThrow(InputValidationError);
+    expect(() => evaluateTrajectory(null)).toThrow(
+      'The evaluation dataset is empty.',
     );
-
-    expect(result.overallScore).toBe(0.0);
-    expect(result.overallEvalStatus).toBe(EvalStatus.FAILED);
-    expect(result.perInvocationResults[0].evalStatus).toBe(EvalStatus.FAILED);
   });
 
-  it('scores the same tool with different args 0.0', async () => {
-    const result = await evaluator.evaluateInvocations(
-      [invocation([{name: 'tool_1', args: {a: 1}}])],
-      [invocation([{name: 'tool_1', args: {a: 2}}])],
+  it('rejects an empty dataset', () => {
+    expect(() => evaluateTrajectory([])).toThrow(InputValidationError);
+    expect(() => evaluateTrajectory([])).toThrow(
+      'The evaluation dataset is empty.',
     );
-
-    expect(result.overallScore).toBe(0.0);
   });
 
-  it('scores a different number of tool calls 0.0', async () => {
-    const result = await evaluator.evaluateInvocations(
-      [invocation([T1, T2])],
-      [invocation([T1])],
-    );
-
-    expect(result.overallScore).toBe(0.0);
+  it('scores a single matching turn 1', () => {
+    expect(evaluateTrajectory([[TURN_MATCH]]).meanToolUseAccuracy).toBe(1);
   });
 
-  it('scores two empty trajectories 1.0', async () => {
-    const result = await evaluator.evaluateInvocations(
-      [invocation([])],
-      [invocation([])],
-    );
-
-    expect(result.overallScore).toBe(1.0);
-    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
+  it('scores a turn with a different tool input 0', () => {
+    expect(
+      evaluateTrajectory([[TURN_MISMATCH_INPUT]]).meanToolUseAccuracy,
+    ).toBe(0);
   });
 
-  it('treats a missing toolUses as no tool calls', async () => {
-    const withoutToolUses: Invocation = {
-      userContent: {role: 'user', parts: [{text: 'do the thing'}]},
+  it('scores 1 when every turn of a conversation matches', () => {
+    const result = evaluateTrajectory([
+      [TURN_MATCH, TURN_MATCH_MULTIPLE, TURN_MATCH_EMPTY_TOOLS],
+    ]);
+
+    expect(result.meanToolUseAccuracy).toBe(1);
+    expect(result.turnResults).toHaveLength(3);
+  });
+
+  it('averages matching and non-matching turns', () => {
+    const result = evaluateTrajectory([
+      [
+        TURN_MATCH,
+        TURN_MISMATCH_NAME,
+        TURN_MATCH_MULTIPLE,
+        TURN_MISMATCH_ORDER,
+      ],
+    ]);
+
+    expect(result.meanToolUseAccuracy).toBe(0.5);
+  });
+
+  it('averages over turns, not over conversations', () => {
+    const result = evaluateTrajectory([
+      [TURN_MATCH, TURN_MISMATCH_INPUT],
+      [TURN_MATCH_MULTIPLE],
+      [TURN_MISMATCH_ORDER, TURN_MISMATCH_LENGTH_ACTUAL_LONGER, TURN_MATCH],
+    ]);
+
+    expect(result.turnResults).toHaveLength(6);
+    expect(result.meanToolUseAccuracy).toBe(0.5);
+  });
+
+  it('scores 0 when the actual trajectory is longer than expected', () => {
+    expect(
+      evaluateTrajectory([[TURN_MISMATCH_LENGTH_ACTUAL_LONGER]])
+        .meanToolUseAccuracy,
+    ).toBe(0);
+  });
+
+  it('scores 0 when the expected trajectory is longer than actual', () => {
+    expect(
+      evaluateTrajectory([[TURN_MISMATCH_LENGTH_EXPECTED_LONGER]])
+        .meanToolUseAccuracy,
+    ).toBe(0);
+  });
+
+  it('ignores mockToolOutput carried on an expected call', () => {
+    expect(
+      evaluateTrajectory([[TURN_MATCH_WITH_MOCK_OUTPUT]]).meanToolUseAccuracy,
+    ).toBe(1);
+  });
+
+  it('scores two empty trajectories 1', () => {
+    expect(
+      evaluateTrajectory([[TURN_MATCH_EMPTY_TOOLS]]).meanToolUseAccuracy,
+    ).toBe(1);
+  });
+
+  it('scores an empty trajectory against a non-empty one 0, both ways', () => {
+    expect(
+      evaluateTrajectory([[TURN_MISMATCH_EMPTY_VS_NONEMPTY]])
+        .meanToolUseAccuracy,
+    ).toBe(0);
+
+    const reversed: EvalTurn = {
+      ...TURN_MISMATCH_EMPTY_VS_NONEMPTY,
+      actualToolUse: [TOOL_GET_WEATHER],
+      expectedToolUse: [],
     };
-
-    const result = await evaluator.evaluateInvocations(
-      [withoutToolUses],
-      [withoutToolUses],
-    );
-
-    expect(result.overallScore).toBe(1.0);
-    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
+    expect(evaluateTrajectory([[reversed]]).meanToolUseAccuracy).toBe(0);
   });
 
-  it('averages over invocations and passes at exactly the threshold', async () => {
-    const result = await evaluator.evaluateInvocations(
-      [invocation([T1]), invocation([T1])],
-      [invocation([T1]), invocation([T2])],
-    );
+  it('lets an empty conversation contribute no turn', () => {
+    const result = evaluateTrajectory([[TURN_MATCH], []]);
 
-    expect(result.overallScore).toBe(0.5);
-    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
-    expect(result.perInvocationResults.map((r) => r.score)).toEqual([1.0, 0.0]);
-    expect(result.perInvocationResults.map((r) => r.evalStatus)).toEqual([
-      EvalStatus.PASSED,
-      EvalStatus.FAILED,
+    expect(result.meanToolUseAccuracy).toBe(1);
+    expect(result.turnResults).toHaveLength(1);
+  });
+
+  it('returns NaN when the dataset holds no turn at all', () => {
+    const result = evaluateTrajectory([[]]);
+
+    expect(Number.isNaN(result.meanToolUseAccuracy)).toBe(true);
+    expect(result.turnResults).toHaveLength(0);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('reports each failing turn with its position and trajectories', () => {
+    const result = evaluateTrajectory([[TURN_MATCH, TURN_MISMATCH_INPUT]]);
+
+    expect(result.failures).toEqual([
+      {
+        conversationIndex: 0,
+        turn: 2,
+        query: 'Q2',
+        actual: [TOOL_ROLL_DICE_6],
+        expected: [TOOL_ROLL_DICE_16],
+      },
     ]);
   });
 
-  it('ignores the tool call id', async () => {
-    const result = await evaluator.evaluateInvocations(
-      [
-        invocation([
-          {id: 'toolu_01', name: 'execute_sql', args: {query: 'SELECT 1'}},
-        ]),
-      ],
-      [invocation([{name: 'execute_sql', args: {query: 'SELECT 1'}}])],
-    );
+  it('numbers the turn within its own conversation', () => {
+    const result = evaluateTrajectory([
+      [TURN_MATCH],
+      [TURN_MATCH, TURN_MATCH, TURN_MISMATCH_INPUT],
+    ]);
 
-    expect(result.overallScore).toBe(1.0);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].conversationIndex).toBe(1);
+    expect(result.failures[0].turn).toBe(3);
   });
 
-  it('treats missing args on the actual call as empty args', async () => {
-    const result = await evaluator.evaluateInvocations(
-      [invocation([{name: 'no_args_tool'}])],
-      [invocation([{name: 'no_args_tool', args: {}}])],
-    );
-
-    expect(result.overallScore).toBe(1.0);
+  it('reports no failure when every turn matches', () => {
+    expect(evaluateTrajectory([[TURN_MATCH]]).failures).toEqual([]);
   });
 
-  it('treats missing args on the expected call as empty args', async () => {
-    const result = await evaluator.evaluateInvocations(
-      [invocation([{name: 'no_args_tool', args: {}}])],
-      [invocation([{name: 'no_args_tool'}])],
-    );
+  it('carries the query and response onto each turn result', () => {
+    const [turnResult] = evaluateTrajectory([[TURN_MATCH]]).turnResults;
 
-    expect(result.overallScore).toBe(1.0);
+    expect(turnResult.query).toBe('Q1');
+    expect(turnResult.response).toBe('R1');
+    expect(turnResult.toolUseAccuracy).toBe(1);
   });
 
-  it('defaults to EXACT when matchType is omitted', async () => {
-    const defaulted = new TrajectoryEvaluator({threshold: 0.5});
+  it('strips mockToolOutput from the result without mutating the input', () => {
+    const expectedCall: ToolUse = {
+      toolName: 'getWeather',
+      toolInput: {location: 'SF'},
+      mockToolOutput: 'Sunny',
+    };
+    const turn: EvalTurn = {
+      query: 'Q',
+      response: 'R',
+      actualToolUse: [TOOL_GET_WEATHER_SF],
+      expectedToolUse: [expectedCall],
+    };
 
-    const result = await defaulted.evaluateInvocations(
-      [invocation([T1, T2])],
-      [invocation([T1])],
+    const result = evaluateTrajectory([[turn]]);
+
+    expect(result.turnResults[0].expectedToolUse[0]).not.toHaveProperty(
+      'mockToolOutput',
     );
+    expect(expectedCall.mockToolOutput).toBe('Sunny');
+    expect(turn.expectedToolUse[0]).toHaveProperty('mockToolOutput');
+  });
 
-    expect(result.overallScore).toBe(0.0);
+  it('passes the actual calls through unchanged', () => {
+    const result = evaluateTrajectory([[TURN_MATCH]]);
+
+    expect(result.turnResults[0].actualToolUse).toEqual([TOOL_ROLL_DICE_16]);
   });
 });
 
-describe('TrajectoryEvaluator with IN_ORDER match', () => {
-  const inOrder = ToolTrajectoryMatchType.IN_ORDER;
-
-  it('accepts extra calls between the expected ones', async () => {
-    await expect(
-      scoreOnce(inOrder, [T1, T1_1, T2, T2_1, T3, T3_1], [T1, T2, T3]),
-    ).resolves.toBe(1.0);
-  });
-
-  it('rejects a missing expected call', async () => {
-    await expect(
-      scoreOnce(inOrder, [T1, T1_1, T2, T2_1, T3_1], [T1, T2, T4]),
-    ).resolves.toBe(0.0);
-  });
-
-  it('rejects expected calls that arrive out of order', async () => {
-    await expect(scoreOnce(inOrder, [T1, T3, T2], [T1, T2, T3])).resolves.toBe(
-      0.0,
-    );
-  });
-
-  it('accepts an empty expected trajectory', async () => {
-    await expect(scoreOnce(inOrder, [T1], [])).resolves.toBe(1.0);
-  });
-
-  it('rejects an empty actual trajectory', async () => {
-    await expect(scoreOnce(inOrder, [], [T1])).resolves.toBe(0.0);
-  });
-});
-
-describe('TrajectoryEvaluator with ANY_ORDER match', () => {
-  const anyOrder = ToolTrajectoryMatchType.ANY_ORDER;
-
-  it('accepts the expected calls in any order', async () => {
-    await expect(
-      scoreOnce(anyOrder, [T2, T2_1, T1, T1_1, T3, T3_1], [T1, T2, T3]),
-    ).resolves.toBe(1.0);
-  });
-
-  it('rejects a missing expected call', async () => {
-    await expect(
-      scoreOnce(anyOrder, [T1, T1_1, T2, T2_1, T3_1], [T1, T2, T4]),
-    ).resolves.toBe(0.0);
-  });
-
-  it('accepts a repeated expected call when the actual list repeats it', async () => {
-    await expect(
-      scoreOnce(anyOrder, [T1, T2, T3, T1], [T1, T2, T1]),
-    ).resolves.toBe(1.0);
-  });
-
-  it('rejects a repeated expected call the actual list holds only once', async () => {
-    await expect(scoreOnce(anyOrder, [T1, T2, T3], [T1, T2, T1])).resolves.toBe(
-      0.0,
-    );
-  });
-
-  it('accepts an empty expected trajectory', async () => {
-    await expect(scoreOnce(anyOrder, [T1], [])).resolves.toBe(1.0);
-  });
-
-  it('rejects an empty actual trajectory', async () => {
-    await expect(scoreOnce(anyOrder, [], [T1])).resolves.toBe(0.0);
-  });
-
-  it('does not mutate the trajectories it is given', async () => {
-    const actual = invocation([T1, T2, T3, T1]);
-    const expected = invocation([T1, T2, T1]);
-    const evaluator = new TrajectoryEvaluator({
-      threshold: 0.5,
-      matchType: anyOrder,
-    });
-
-    await evaluator.evaluateInvocations([actual], [expected]);
-
-    expect(actual.toolUses).toEqual([T1, T2, T3, T1]);
-    expect(expected.toolUses).toEqual([T1, T2, T1]);
-  });
-});
-
-describe('TrajectoryEvaluator input handling', () => {
-  const evaluator = new TrajectoryEvaluator({threshold: 0.5});
-
-  it('reports NOT_EVALUATED when there is nothing to score', async () => {
-    const result = await evaluator.evaluateInvocations([], []);
-
-    expect(result.overallScore).toBeUndefined();
-    expect(result.overallEvalStatus).toBe(EvalStatus.NOT_EVALUATED);
-    expect(result.perInvocationResults).toEqual([]);
-  });
-
-  it('rejects a call without expected invocations', async () => {
-    await expect(
-      evaluator.evaluateInvocations([invocation([T1])]),
-    ).rejects.toThrow(InputValidationError);
-    await expect(
-      evaluator.evaluateInvocations([invocation([T1])]),
-    ).rejects.toThrow('expectedInvocations is needed by this metric.');
-  });
-
-  it('rejects invocation lists of different lengths', async () => {
-    await expect(
-      evaluator.evaluateInvocations(
-        [invocation([T1]), invocation([T2])],
-        [invocation([T1])],
+describe('areToolsEqual', () => {
+  it('matches identical trajectories', () => {
+    expect(
+      areToolsEqual(
+        [TOOL_GET_WEATHER, TOOL_ROLL_DICE_6],
+        [TOOL_GET_WEATHER, TOOL_ROLL_DICE_6],
       ),
-    ).rejects.toThrow(
-      'actualInvocations and expectedInvocations must have the same length; got 2 and 1.',
-    );
+    ).toBe(true);
+  });
+
+  it('matches two empty trajectories', () => {
+    expect(areToolsEqual([], [])).toBe(true);
+  });
+
+  it('rejects the same calls in a different order', () => {
+    expect(
+      areToolsEqual(
+        [TOOL_ROLL_DICE_6, TOOL_GET_WEATHER],
+        [TOOL_GET_WEATHER, TOOL_ROLL_DICE_6],
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects trajectories of different lengths', () => {
+    expect(
+      areToolsEqual([TOOL_GET_WEATHER, TOOL_ROLL_DICE_6], [TOOL_GET_WEATHER]),
+    ).toBe(false);
+  });
+
+  it('rejects a different tool input', () => {
+    expect(areToolsEqual([TOOL_ROLL_DICE_16], [TOOL_ROLL_DICE_6])).toBe(false);
+  });
+
+  it('rejects a different tool name', () => {
+    expect(areToolsEqual([TOOL_ROLL_DICE_16], [TOOL_GET_WEATHER])).toBe(false);
+  });
+
+  it('ignores properties other than toolName and toolInput', () => {
+    expect(
+      areToolsEqual([TOOL_GET_WEATHER_ANNOTATED], [TOOL_GET_WEATHER]),
+    ).toBe(true);
+    expect(
+      areToolsEqual(
+        [{...TOOL_GET_WEATHER, mockToolOutput: 'Sunny'}],
+        [{...TOOL_GET_WEATHER, mockToolOutput: 'Raining'}],
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects an empty trajectory against a non-empty one', () => {
+    expect(areToolsEqual([], [TOOL_GET_WEATHER])).toBe(false);
+    expect(areToolsEqual([TOOL_GET_WEATHER], [])).toBe(false);
+  });
+
+  it('ignores the key order of a tool input', () => {
+    expect(
+      areToolsEqual(
+        [{toolName: 'search', toolInput: {a: 1, b: 2}}],
+        [{toolName: 'search', toolInput: {b: 2, a: 1}}],
+      ),
+    ).toBe(true);
+  });
+
+  it('compares a nested tool input deeply', () => {
+    expect(
+      areToolsEqual(
+        [{toolName: 'search', toolInput: {filter: {tags: ['a', 'b']}}}],
+        [{toolName: 'search', toolInput: {filter: {tags: ['a', 'b']}}}],
+      ),
+    ).toBe(true);
+    expect(
+      areToolsEqual(
+        [{toolName: 'search', toolInput: {filter: {tags: ['a', 'b']}}}],
+        [{toolName: 'search', toolInput: {filter: {tags: ['b', 'a']}}}],
+      ),
+    ).toBe(false);
   });
 });

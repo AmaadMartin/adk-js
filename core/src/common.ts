@@ -155,18 +155,17 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
-export {EvalStatus} from './evaluation/evaluator.js';
-export type {
-  EvaluationResult,
-  Evaluator,
-  Invocation,
-  PerInvocationResult,
-} from './evaluation/evaluator.js';
 export {
-  ToolTrajectoryMatchType,
-  TrajectoryEvaluator,
+  areToolsEqual,
+  evaluateTrajectory,
 } from './evaluation/trajectory_evaluator.js';
-export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
+export type {
+  EvalTurn,
+  ToolUse,
+  TrajectoryEvaluationResult,
+  TrajectoryFailure,
+  TurnEvaluationResult,
+} from './evaluation/trajectory_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
