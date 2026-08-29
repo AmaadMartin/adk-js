@@ -25,7 +25,7 @@ export interface ApiParameter {
 @experimental
 export class OperationParser {
   private params: ApiParameter[] = [];
-  private readonly returnValue: ApiParameter;
+  private returnValue?: ApiParameter;
   private preservePropertyNames: boolean;
 
   constructor(
@@ -35,7 +35,7 @@ export class OperationParser {
     this.preservePropertyNames = options.preservePropertyNames ?? false;
     this.processOperationParameters();
     this.processRequestBody();
-    this.returnValue = this.parseReturnValue();
+    this.processReturnValue();
     this.dedupeParamNames();
   }
 
@@ -136,7 +136,7 @@ export class OperationParser {
     }
   }
 
-  private parseReturnValue(): ApiParameter {
+  private processReturnValue() {
     const responses = this.operation.responses || {};
     // Find first 2xx response
     const validCodes = Object.keys(responses).filter((k) => k.startsWith('2'));
@@ -157,7 +157,7 @@ export class OperationParser {
       }
     }
 
-    return {
+    this.returnValue = {
       originalName: '',
       paramLocation: '',
       paramSchema: returnSchema,
@@ -195,9 +195,13 @@ export class OperationParser {
    * that response carries no usable schema.
    *
    * @returns The parsed return value.
+   * @throws If the constructor never parsed a return value.
    */
   @experimental
   public getReturnValue(): ApiParameter {
+    if (!this.returnValue) {
+      throw new Error('Operation return value has not been parsed');
+    }
     return this.returnValue;
   }
 
