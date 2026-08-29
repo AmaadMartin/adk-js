@@ -10,6 +10,7 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
+  ToolResponseErrorType,
   createSession,
   isFunctionTool,
 } from '@google/adk';
@@ -927,5 +928,31 @@ describe('FunctionTool', () => {
       expect(parameters.required).toEqual(['a']);
       expect(tool._getDeclaration().parameters).toEqual(parameters);
     });
+  });
+});
+
+describe('FunctionTool.detectErrorInResponse', () => {
+  const tool = new FunctionTool({
+    name: 'echo',
+    description: 'Echoes.',
+    execute: () => 'ok',
+  });
+
+  it('reports TOOL_ERROR for a response carrying a truthy error', () => {
+    expect(tool.detectErrorInResponse({error: 'missing arg'})).toBe(
+      ToolResponseErrorType.TOOL_ERROR,
+    );
+  });
+
+  it.each([
+    ['a clean result object', {result: 'ok'}],
+    ['an empty error message', {error: ''}],
+    ['a zero error code', {error: 0}],
+    ['a plain string', 'plain string'],
+    ['a number', 7],
+    ['null', null],
+    ['undefined', undefined],
+  ])('reports no error type for %s', (_name, response) => {
+    expect(tool.detectErrorInResponse(response)).toBeUndefined();
   });
 });

@@ -15,6 +15,7 @@ import {
   LlmRequest,
   LlmResponse,
   Session,
+  ToolResponseErrorType,
   createEventActions,
 } from '@google/adk';
 import {
@@ -183,6 +184,37 @@ describe('Telemetry Tracing Functions', () => {
         'gcp.vertex.agent.tool_response':
           expect.stringContaining('not specified'),
       });
+    });
+
+    it('should record the detected error type', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+        errorType: ToolResponseErrorType.TOOL_ERROR,
+      });
+
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'error.type',
+        'TOOL_ERROR',
+      );
+    });
+
+    it('should omit the error type attribute when none was detected', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+      });
+
+      expect(mockSpan.setAttribute).not.toHaveBeenCalledWith(
+        'error.type',
+        expect.anything(),
+      );
     });
   });
 

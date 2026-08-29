@@ -56,8 +56,13 @@ export function isBaseTool(obj: unknown): obj is BaseTool {
   );
 }
 
-/** Error type labels a tool reports for a response it classifies as failed. */
-export enum ToolErrorType {
+/**
+ * The `error.type` values a tool reports for its own response.
+ *
+ * Distinct from `ToolErrorType`, which labels an HTTP-shaped failure a tool
+ * raised. This one labels a failure the tool returned instead of raising.
+ */
+export enum ToolResponseErrorType {
   TOOL_ERROR = 'TOOL_ERROR',
 }
 
@@ -70,8 +75,9 @@ export enum ToolErrorType {
  */
 export interface ToolErrorDetector {
   /**
-   * The error type to record for `response`, or `undefined` when the response
-   * is not a failure. Must not modify the response.
+   * The `error.type` to record for `response`, or `undefined` when the
+   * response is not a failure. Must not modify the response. Returns a
+   * {@link ToolResponseErrorType} member, or a tool-specific string.
    */
   detectErrorInResponse(response: unknown): string | undefined;
 }

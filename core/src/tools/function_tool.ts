@@ -21,7 +21,7 @@ import {
   BaseTool,
   RunAsyncToolRequest,
   ToolErrorDetector,
-  ToolErrorType,
+  ToolResponseErrorType,
 } from './base_tool.js';
 
 /**
@@ -150,6 +150,9 @@ function sameDeclarationContext(
  * JSON-schema form is what the `JSON_SCHEMA_FOR_FUNC_DECL` feature selects,
  * and the genai `Schema` form is the default. Mirrors adk-python's
  * `build_function_declaration`.
+ *
+ * The result shares no object with `parameters`, so a caller that keeps its
+ * own `Schema` and later edits it cannot reach a cached declaration.
  */
 function buildDeclaration(
   name: string,
@@ -164,7 +167,7 @@ function buildDeclaration(
       parametersJsonSchema: toJsonSchema(parameters ?? emptyObjectSchema()),
     };
   }
-  const schema = toSchema(parameters);
+  const schema = cloneDeep(toSchema(parameters));
   return {
     name,
     description,
@@ -296,7 +299,7 @@ export class FunctionTool<TParameters extends ToolInputParameters = undefined>
       'error' in response &&
       response.error
     ) {
-      return ToolErrorType.TOOL_ERROR;
+      return ToolResponseErrorType.TOOL_ERROR;
     }
     return undefined;
   }
