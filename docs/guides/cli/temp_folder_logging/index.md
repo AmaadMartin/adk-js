@@ -21,9 +21,9 @@ run, named `agent.<timestamp>.log`, plus an `agent.latest.log` symlink that
 always points at the newest one. You tail the symlink in a second shell and the
 first shell stays readable. This mirrors `log_to_tmp_folder` in adk-python.
 
-`adk run` always logs this way. `adk web` and `adk api_server` do it only when
-you pass `--log_to_tmp`, because a server's log lines on the terminal are
-useful by default.
+`adk run`, `adk web` and `adk api_server` all take `--log_to_tmp`. It is off
+everywhere, because log lines on the terminal are what most people want and
+`-v` has to keep working.
 
 ## Get started
 
@@ -40,7 +40,7 @@ $ tail -F /tmp/agents_log/agent.latest.log
 2026-08-29 00:06:19,794 - INFO - ADK API Server - GET /list-apps
 ```
 
-The same flag works on `adk web`. `adk run` needs no flag.
+The same flag works on `adk web` and on `adk run`.
 
 ## What lands in the file
 
@@ -63,6 +63,12 @@ not useful.
 The command creates the folder and the file before it prints the two paths, so
 `tail -F` has something to attach to right away. A second run writes a new
 timestamped file and repoints `agent.latest.log` at it.
+
+The folder is created `0700` and the file `0600`, so only your account can read
+them. A folder that already exists keeps the permissions it has. Creating the
+file also refuses to follow a symlink at the last path segment, so another
+local user cannot point the name at a file of yours and have the command
+truncate it.
 
 Three things are worth knowing before you rely on it.
 
