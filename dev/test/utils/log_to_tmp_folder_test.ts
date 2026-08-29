@@ -17,7 +17,11 @@ import * as path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {logToTmpFolder} from '../../src/utils/log_to_tmp_folder.js';
-import {AdkLogger, resetFileLogTarget} from '../../src/utils/logger.js';
+import {
+  AdkLogger,
+  resetFileLogTarget,
+  setFileLogTarget,
+} from '../../src/utils/logger.js';
 
 describe('logToTmpFolder', () => {
   const createdDirs: string[] = [];
@@ -68,6 +72,55 @@ describe('logToTmpFolder', () => {
 
     expect(path.basename(logFilePath)).toMatch(/^agent\.\d{8}_\d{6}\.log$/);
   });
+
+  // Windows does not carry POSIX permission bits, so the mode cases below are
+  // POSIX-only. A log holds model prompts and responses at a predictable path
+  // in a world-traversable temp folder, so the bits are the whole protection.
+  it.skipIf(process.platform === 'win32')(
+    'keeps the folder and the file readable by their owner only',
+    async () => {
+      const {logFilePath} = logToTmpFolder({subFolder: trackedSubFolder()});
+
+      expect((await fs.stat(logDir())).mode & 0o777).toBe(0o700);
+      expect((await fs.stat(logFilePath)).mode & 0o777).toBe(0o600);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'creates an owner-only file when the transport opens the path itself',
+    async () => {
+      // `logToTmpFolder` creates the file before the transport opens it, so
+      // this drives the transport alone: it must not fall back to 0644.
+      trackedSubFolder();
+      await fs.mkdir(logDir(), {recursive: true, mode: 0o700});
+      const logFilePath = path.join(logDir(), 'transport_only.log');
+
+      setFileLogTarget(logFilePath);
+
+      await vi.waitFor(async () => {
+        expect((await fs.stat(logFilePath)).mode & 0o777).toBe(0o600);
+      });
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses to write through a symlink left at the log file path',
+    async () => {
+      const subFolder = trackedSubFolder();
+      await fs.mkdir(logDir(), {recursive: true});
+      const victim = path.join(logDir(), 'victim.txt');
+      await fs.writeFile(victim, 'precious');
+      await fs.symlink(
+        victim,
+        path.join(logDir(), 'agent.20260817_081102.log'),
+      );
+
+      expect(() =>
+        logToTmpFolder({subFolder, logFileTimestamp: '20260817_081102'}),
+      ).toThrow(/ELOOP/);
+      expect(await fs.readFile(victim, 'utf8')).toBe('precious');
+    },
+  );
 
   it('writes the adk-python line shape and no ANSI escapes', async () => {
     const {logFilePath} = logToTmpFolder({subFolder: trackedSubFolder()});

@@ -321,7 +321,7 @@ describe('CLI Entrypoint', () => {
     it('sends the run logs to the temp folder and prints where', async () => {
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-      await parse(['run', 'agent.ts']);
+      await parse(['run', '--log_to_tmp', 'agent.ts']);
 
       expect(logToTmpFolder).toHaveBeenCalledTimes(1);
       expect(logSpy).toHaveBeenCalledWith(
@@ -338,7 +338,7 @@ describe('CLI Entrypoint', () => {
         logFilePath: LOG_FILE_PATH,
       });
 
-      await parse(['run', 'agent.ts']);
+      await parse(['run', '--log_to_tmp', 'agent.ts']);
 
       expect(logSpy).toHaveBeenCalledWith(
         `To access latest log: tail -F ${LOG_FILE_PATH}`,
@@ -353,13 +353,35 @@ describe('CLI Entrypoint', () => {
       });
       (runAgent as Mock).mockRejectedValueOnce(new Error('boom'));
 
-      await expect(parse(['run', 'agent.ts'])).rejects.toThrow('exit');
+      await expect(parse(['run', '--log_to_tmp', 'agent.ts'])).rejects.toThrow(
+        'exit',
+      );
 
       expect(errorSpy).toHaveBeenCalledWith(
         `Error running agent: boom (see ${LOG_FILE_PATH})`,
       );
       // The mocked exit throws, so this call can only have run before it.
       expect(resetFileLogTarget).toHaveBeenCalled();
+    });
+
+    it('leaves the run transcript logging to the console', async () => {
+      await parse(['run', 'agent.ts']);
+
+      expect(logToTmpFolder).not.toHaveBeenCalled();
+    });
+
+    it('reports a failing run through the console logger', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      (runAgent as Mock).mockRejectedValueOnce(new Error('boom'));
+
+      await expect(parse(['run', 'agent.ts'])).rejects.toThrow('exit');
+
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(resetFileLogTarget).not.toHaveBeenCalled();
+      expect(exit).toHaveBeenCalledWith(1);
     });
 
     it('leaves the web server logging to the console', async () => {

@@ -419,6 +419,7 @@ export function createProgram(): Command {
     )
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
+    .addOption(LOG_TO_TMP_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
@@ -427,9 +428,13 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
-      // `adk run` paints a chat transcript on stdout, so its logs always go to
-      // a file rather than interleaving with it.
-      const logFilePath = startTmpFolderLogging();
+      // The flag is opt-in here as well. `adk run` paints a chat transcript on
+      // stdout and its logs interleave with it, but redirecting them by
+      // default would take `-v` and `--log_level` away from everyone already
+      // running the command.
+      const logFilePath = getBoolean(options['log_to_tmp'])
+        ? startTmpFolderLogging()
+        : undefined;
       setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
       try {
