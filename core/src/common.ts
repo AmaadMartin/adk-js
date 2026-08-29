@@ -328,7 +328,6 @@ export type {ToolArgsConfig} from './tools/tool_configs.js';
 export {
   IntentMismatchError,
   ToolConfirmation,
-  ToolConfirmation,
   isIntentMismatchError,
 } from './tools/tool_confirmation.js';
 export type {IntentMismatchReason} from './tools/tool_confirmation.js';
