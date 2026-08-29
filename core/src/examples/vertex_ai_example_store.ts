@@ -14,7 +14,6 @@ import {
 import {GoogleAuth} from 'google-auth-library';
 
 import {experimental} from '../utils/experimental.js';
-import {logger} from '../utils/logger.js';
 import {BaseExampleProvider} from './base_example_provider.js';
 import {Example} from './example.js';
 
@@ -151,11 +150,6 @@ export class VertexAiExampleStore extends BaseExampleProvider {
   }
 
   override async getExamples(query: string): Promise<Example[]> {
-    // The query is end-user content, so only its length is logged.
-    logger.debug(
-      `Searching example store ${this.examplesStoreName} ` +
-        `with a query of ${query.length} characters`,
-    );
     // The store name is bound to the URL path, so the body leaves it out.
     const {data} = await this.auth.request<SearchExamplesResponse>({
       url: this.searchUrl,
