@@ -31,6 +31,9 @@ const MAX_HTTP_STATUS = 599;
  * Narrows an arbitrary value to an indexable record, or `undefined` when it is
  * not a non-null object. Used to safely inspect duck-typed error shapes without
  * resorting to `any`.
+ *
+ * Unlike `asJsonObject` in `json_utils.ts`, an array passes: a thrown value
+ * carrying an `AggregateError` style `errors` array is still worth inspecting.
  */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'
