@@ -63,9 +63,7 @@ export interface CredentialStore {
 export interface ToolAuthHandlerOptions {
   /** Names the key the credential is stored and requested under. */
   credentialKey?: string;
-  /**
-   * Exchanges the credential. Defaults to {@link AutoAuthCredentialExchanger}.
-   */
+  /** Exchanges the credential. Defaults to an exchanger picked by type. */
   credentialExchanger?: BaseCredentialExchanger;
   /** Holds the credential between tool calls. Defaults to the session state. */
   credentialStore?: CredentialStore;
