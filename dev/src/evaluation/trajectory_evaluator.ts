@@ -10,13 +10,19 @@ import {ActualToolUse, EvalTurn, ExpectedToolUse} from './eval_types.js';
 /** A tool call from either side of the comparison. */
 type ToolUse = ExpectedToolUse | ActualToolUse;
 
+/** A tool call reduced to the fields the trajectory is scored on. */
+interface NormalizedToolUse {
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+}
+
 /** One scored turn, used by both the failure report and the detail table. */
 interface TrajectoryRow {
   /** 1-based position within its conversation. */
   turn: number;
   query: string;
-  actual: ActualToolUse[];
-  expected: ExpectedToolUse[];
+  actual: NormalizedToolUse[];
+  expected: NormalizedToolUse[];
   score: number;
 }
 
@@ -27,34 +33,26 @@ export interface EvaluateTrajectoryOptions {
 }
 
 /**
- * Drops `mock_tool_output` from every entry, leaving the fields the trajectory
- * is scored and reported on.
+ * Reduces every entry to the tool name and its arguments, which are the fields
+ * the trajectory is scored and reported on. `mock_tool_output` is dropped.
+ *
+ * A missing `tool_input` becomes `{}`, so eval data that omits the key for a
+ * no-argument tool matches a recorded call with empty arguments. adk-python
+ * compares `None` against `{}` here and scores the turn 0.
  */
-export function stripMockToolOutputs(
-  toolUses: ExpectedToolUse[],
-): ExpectedToolUse[] {
-  return toolUses.map(({tool_name, tool_input}) => ({tool_name, tool_input}));
+export function normalizeToolUses(toolUses: ToolUse[]): NormalizedToolUse[] {
+  return toolUses.map((toolUse) => ({
+    tool_name: toolUse.tool_name,
+    tool_input: toolUse.tool_input ?? {},
+  }));
 }
 
 /**
  * Whether two tool-call trajectories match, comparing only the tool name and
  * its arguments in order.
- *
- * A missing `tool_input` is read as `{}`, so eval data that omits the key for a
- * no-argument tool matches a recorded call with empty arguments. adk-python
- * compares `None` against `{}` here and scores the turn 0.
  */
 export function areToolsEqual(a: ToolUse[], b: ToolUse[]): boolean {
-  return isDeepStrictEqual(projectForComparison(a), projectForComparison(b));
-}
-
-function projectForComparison(
-  toolUses: ToolUse[],
-): Array<{tool_name: string; tool_input: Record<string, unknown>}> {
-  return toolUses.map((toolUse) => ({
-    tool_name: toolUse.tool_name,
-    tool_input: toolUse.tool_input ?? {},
-  }));
+  return isDeepStrictEqual(normalizeToolUses(a), normalizeToolUses(b));
 }
 
 /**
@@ -79,8 +77,8 @@ export function evaluateTrajectory(
 }
 
 function scoreTurn(turn: EvalTurn, turnNumber: number): TrajectoryRow {
-  const expected = stripMockToolOutputs(turn.expected_tool_use ?? []);
-  const actual = turn.actual_tool_use ?? [];
+  const expected = normalizeToolUses(turn.expected_tool_use ?? []);
+  const actual = normalizeToolUses(turn.actual_tool_use ?? []);
 
   return {
     turn: turnNumber,

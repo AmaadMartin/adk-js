@@ -9,7 +9,7 @@ import {EvalTurn} from '../../src/evaluation/eval_types.js';
 import {
   areToolsEqual,
   evaluateTrajectory,
-  stripMockToolOutputs,
+  normalizeToolUses,
 } from '../../src/evaluation/trajectory_evaluator.js';
 
 /** Builds a turn whose expected and actual trajectories are given explicitly. */
@@ -75,13 +75,19 @@ describe('areToolsEqual', () => {
   });
 });
 
-describe('stripMockToolOutputs', () => {
+describe('normalizeToolUses', () => {
   it('drops mock_tool_output and keeps the rest', () => {
     expect(
-      stripMockToolOutputs([
+      normalizeToolUses([
         {tool_name: 'roll_die', tool_input: {sides: 6}, mock_tool_output: 4},
       ]),
     ).toEqual([{tool_name: 'roll_die', tool_input: {sides: 6}}]);
+  });
+
+  it('fills in an empty tool_input for an entry that omits it', () => {
+    expect(normalizeToolUses([{tool_name: 'now'}])).toEqual([
+      {tool_name: 'now', tool_input: {}},
+    ]);
   });
 });
 
@@ -204,6 +210,21 @@ describe('evaluateTrajectory', () => {
     );
     expect(printed).toContain(
       '"expected_tool_use": [{"tool_name":"roll_die","tool_input":{"sides":6}}]',
+    );
+  });
+
+  it('prints an omitted tool_input as an empty object', () => {
+    evaluateTrajectory([
+      turn({
+        query: 'what time is it',
+        expected_tool_use: [{tool_name: 'now'}],
+        actual_tool_use: [{tool_name: 'clock', tool_input: {}}],
+      }),
+    ]);
+
+    const printed = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(printed).toContain(
+      '"expected_tool_use": [{"tool_name":"now","tool_input":{}}]',
     );
   });
 
