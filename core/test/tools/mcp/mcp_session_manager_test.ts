@@ -303,6 +303,20 @@ describe('MCPSessionManager', () => {
     const lastTransportOptions = () =>
       vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1)?.[1];
 
+    /**
+     * The headers of those options, as a record. `Headers` lower-cases every
+     * name it stores, which is the spelling that reaches the wire.
+     */
+    const lastHeaders = () => {
+      const record: Record<string, string> = {};
+      new Headers(lastTransportOptions()?.requestInit?.headers).forEach(
+        (value, name) => {
+          record[name] = value;
+        },
+      );
+      return record;
+    };
+
     beforeEach(() => {
       vi.mocked(StreamableHTTPClientTransport).mockClear();
       vi.mocked(StdioClientTransport).mockClear();
@@ -315,10 +329,11 @@ describe('MCPSessionManager', () => {
         transportOptions: {requestInit: {headers: {'x-static': 'yes'}}},
       });
 
-      await manager.createSession({Authorization: 'Bearer t'});
+      await manager.createSession(new Headers({Authorization: 'Bearer t'}));
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {headers: {'x-static': 'yes', Authorization: 'Bearer t'}},
+      expect(lastHeaders()).toEqual({
+        'x-static': 'yes',
+        authorization: 'Bearer t',
       });
     });
 
@@ -328,11 +343,9 @@ describe('MCPSessionManager', () => {
         url: 'http://test-url',
       });
 
-      await manager.createSession({Authorization: 'Bearer t'});
+      await manager.createSession(new Headers({Authorization: 'Bearer t'}));
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {headers: {Authorization: 'Bearer t'}},
-      });
+      expect(lastHeaders()).toEqual({authorization: 'Bearer t'});
     });
 
     it('extraHeaders win over static transportOptions headers on conflict', async () => {
@@ -344,11 +357,9 @@ describe('MCPSessionManager', () => {
         },
       });
 
-      await manager.createSession({Authorization: 'Bearer new'});
+      await manager.createSession(new Headers({Authorization: 'Bearer new'}));
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {headers: {Authorization: 'Bearer new'}},
-      });
+      expect(lastHeaders()).toEqual({authorization: 'Bearer new'});
     });
 
     it('merges extraHeaders over the deprecated header field', async () => {
@@ -358,12 +369,28 @@ describe('MCPSessionManager', () => {
         header: {'x-legacy': 'yes', Authorization: 'Bearer old'},
       });
 
-      await manager.createSession({Authorization: 'Bearer new'});
+      await manager.createSession(new Headers({Authorization: 'Bearer new'}));
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {
-          headers: {'x-legacy': 'yes', Authorization: 'Bearer new'},
-        },
+      expect(lastHeaders()).toEqual({
+        'x-legacy': 'yes',
+        authorization: 'Bearer new',
+      });
+    });
+
+    it('stringifies a non-string value in the deprecated header field', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        // The field is typed `Record<string, unknown>`, so a caller can put a
+        // number here and the transport only accepts strings.
+        header: {'x-count': 42},
+      });
+
+      await manager.createSession(new Headers({authorization: 'Bearer t'}));
+
+      expect(lastHeaders()).toEqual({
+        'x-count': '42',
+        authorization: 'Bearer t',
       });
     });
 
@@ -376,10 +403,11 @@ describe('MCPSessionManager', () => {
         },
       });
 
-      await manager.createSession({Authorization: 'Bearer t'});
+      await manager.createSession(new Headers({Authorization: 'Bearer t'}));
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {headers: {'x-static': 'yes', Authorization: 'Bearer t'}},
+      expect(lastHeaders()).toEqual({
+        'x-static': 'yes',
+        authorization: 'Bearer t',
       });
     });
 
@@ -390,10 +418,11 @@ describe('MCPSessionManager', () => {
         transportOptions: {requestInit: {headers: [['x-static', 'yes']]}},
       });
 
-      await manager.createSession({Authorization: 'Bearer t'});
+      await manager.createSession(new Headers({Authorization: 'Bearer t'}));
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {headers: {'x-static': 'yes', Authorization: 'Bearer t'}},
+      expect(lastHeaders()).toEqual({
+        'x-static': 'yes',
+        authorization: 'Bearer t',
       });
     });
 
@@ -404,7 +433,7 @@ describe('MCPSessionManager', () => {
         transportOptions: {requestInit: {headers: {'x-static': 'yes'}}},
       });
 
-      await manager.createSession({});
+      await manager.createSession(new Headers({}));
 
       expect(lastTransportOptions()).toEqual({
         requestInit: {headers: {'x-static': 'yes'}},
@@ -417,7 +446,7 @@ describe('MCPSessionManager', () => {
         url: 'http://test-url',
       });
 
-      await manager.createSession({});
+      await manager.createSession(new Headers({}));
 
       expect(lastTransportOptions()).toEqual({});
     });
@@ -435,13 +464,12 @@ describe('MCPSessionManager', () => {
       const snapshot = structuredClone(params);
 
       const manager = new MCPSessionManager(params);
-      await manager.createSession({Authorization: 'Bearer t'});
+      await manager.createSession(new Headers({Authorization: 'Bearer t'}));
 
       expect(params).toEqual(snapshot);
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {
-          headers: {'x-legacy': 'yes', Authorization: 'Bearer t'},
-        },
+      expect(lastHeaders()).toEqual({
+        'x-legacy': 'yes',
+        authorization: 'Bearer t',
       });
     });
 
@@ -452,12 +480,10 @@ describe('MCPSessionManager', () => {
         transportOptions: {requestInit: {headers: {'x-static': 'yes'}}},
       });
 
-      await manager.createSession({'x-first': '1'});
-      await manager.createSession({'x-second': '2'});
+      await manager.createSession(new Headers({'x-first': '1'}));
+      await manager.createSession(new Headers({'x-second': '2'}));
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {headers: {'x-static': 'yes', 'x-second': '2'}},
-      });
+      expect(lastHeaders()).toEqual({'x-static': 'yes', 'x-second': '2'});
     });
 
     it('replaces a static header that differs only in case', async () => {
@@ -467,11 +493,9 @@ describe('MCPSessionManager', () => {
         transportOptions: {requestInit: {headers: {authorization: 'old'}}},
       });
 
-      await manager.createSession({Authorization: 'new'});
+      await manager.createSession(new Headers({Authorization: 'new'}));
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {headers: {Authorization: 'new'}},
-      });
+      expect(lastHeaders()).toEqual({authorization: 'new'});
     });
 
     it('ignores extraHeaders for stdio connections', async () => {
@@ -480,7 +504,9 @@ describe('MCPSessionManager', () => {
         serverParams: {command: 'test-command'},
       });
 
-      const client = await manager.createSession({Authorization: 'Bearer t'});
+      const client = await manager.createSession(
+        new Headers({Authorization: 'Bearer t'}),
+      );
 
       expect(StdioClientTransport).toHaveBeenCalledWith({
         command: 'test-command',

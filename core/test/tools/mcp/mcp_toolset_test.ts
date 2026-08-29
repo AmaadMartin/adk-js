@@ -6,7 +6,10 @@
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {
+  StreamableHTTPClientTransport,
+  type StreamableHTTPClientTransportOptions,
+} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {BaseAgent} from '../../../src/agents/base_agent.js';
 import {Context} from '../../../src/agents/context.js';
@@ -83,6 +86,20 @@ const httpParams: MCPConnectionParams = {
   url: 'http://test-url',
   transportOptions: {requestInit: {headers: {'X-Static': 'yes'}}},
 };
+
+/**
+ * The headers of one set of transport options, as a record. `Headers`
+ * lower-cases every name it stores, which is the spelling the wire uses.
+ */
+function headersOf(
+  options?: StreamableHTTPClientTransportOptions,
+): Record<string, string> {
+  const record: Record<string, string> = {};
+  new Headers(options?.requestInit?.headers).forEach((value, name) => {
+    record[name] = value;
+  });
+  return record;
+}
 
 describe('MCPToolset', () => {
   it('discovers tools without prefix', async () => {
@@ -197,11 +214,13 @@ describe('MCPToolset', () => {
       await toolset.getTools();
 
       expect(provider).toHaveBeenCalledTimes(2);
-      expect(firstOptions).toEqual({
-        requestInit: {headers: {'X-Static': 'yes', Authorization: 'Bearer t1'}},
+      expect(headersOf(firstOptions)).toEqual({
+        'x-static': 'yes',
+        authorization: 'Bearer t1',
       });
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {headers: {'X-Static': 'yes', Authorization: 'Bearer t2'}},
+      expect(headersOf(lastTransportOptions())).toEqual({
+        'x-static': 'yes',
+        authorization: 'Bearer t2',
       });
     });
 
@@ -222,10 +241,9 @@ describe('MCPToolset', () => {
 
       await toolset.getTools();
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {
-          headers: {'X-Static': 'yes', Authorization: 'Bearer new'},
-        },
+      expect(headersOf(lastTransportOptions())).toEqual({
+        'x-static': 'yes',
+        authorization: 'Bearer new',
       });
     });
 
@@ -266,10 +284,9 @@ describe('MCPToolset', () => {
 
       await toolset.getTools();
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {
-          headers: {'X-Static': 'yes', Authorization: 'Bearer sync'},
-        },
+      expect(headersOf(lastTransportOptions())).toEqual({
+        'x-static': 'yes',
+        authorization: 'Bearer sync',
       });
     });
 
@@ -319,10 +336,9 @@ describe('MCPToolset', () => {
 
       // Two transports: the discovery session, then the tool-call session.
       expect(StreamableHTTPClientTransport).toHaveBeenCalledTimes(2);
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {
-          headers: {'X-Static': 'yes', Authorization: 'Bearer call'},
-        },
+      expect(headersOf(lastTransportOptions())).toEqual({
+        'x-static': 'yes',
+        authorization: 'Bearer call',
       });
     });
 
@@ -575,12 +591,10 @@ describe('MCPToolset', () => {
       await toolset.getTools();
 
       expect(
-        vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1)?.[1],
-      ).toEqual({
-        requestInit: {
-          headers: {'X-Static': 'yes', Authorization: 'Bearer from-options'},
-        },
-      });
+        headersOf(
+          vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1)?.[1],
+        ),
+      ).toEqual({'x-static': 'yes', authorization: 'Bearer from-options'});
     });
 
     it('rejects options that carry no connection params', () => {
@@ -625,8 +639,9 @@ describe('MCPToolset', () => {
 
     /** Headers the most recently constructed HTTP transport was given. */
     const lastTransportHeaders = () =>
-      vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1)?.[1]
-        ?.requestInit?.headers;
+      headersOf(
+        vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1)?.[1],
+      );
 
     /** Sets the exchanged credential the way ADK's auth flow would. */
     const setExchangedCredential = (
@@ -702,7 +717,7 @@ describe('MCPToolset', () => {
 
       await toolset.getTools();
 
-      expect(lastTransportHeaders()).toEqual({'X-Static': 'yes'});
+      expect(lastTransportHeaders()).toEqual({'x-static': 'yes'});
     });
 
     it('sends the configured API key without an exchange step', async () => {
@@ -715,8 +730,8 @@ describe('MCPToolset', () => {
       await toolset.getTools();
 
       expect(lastTransportHeaders()).toEqual({
-        'X-Static': 'yes',
-        'X-API-Key': 'test-api-key',
+        'x-static': 'yes',
+        'x-api-key': 'test-api-key',
       });
     });
 
@@ -734,8 +749,8 @@ describe('MCPToolset', () => {
       await toolset.getTools();
 
       expect(lastTransportHeaders()).toEqual({
-        'X-Static': 'yes',
-        'X-API-Key': 'exchanged-api-key',
+        'x-static': 'yes',
+        'x-api-key': 'exchanged-api-key',
       });
     });
 
@@ -750,8 +765,8 @@ describe('MCPToolset', () => {
       await toolset.getTools();
 
       expect(lastTransportHeaders()).toEqual({
-        'X-Static': 'yes',
-        Authorization: 'Bearer exchanged-token',
+        'x-static': 'yes',
+        authorization: 'Bearer exchanged-token',
       });
     });
 
@@ -766,8 +781,8 @@ describe('MCPToolset', () => {
       await toolset.getTools();
 
       expect(lastTransportHeaders()).toEqual({
-        'X-Static': 'yes',
-        Authorization: 'Bearer exchanged-token',
+        'x-static': 'yes',
+        authorization: 'Bearer exchanged-token',
       });
     });
 
@@ -781,8 +796,8 @@ describe('MCPToolset', () => {
       await toolset.getTools();
 
       expect(lastTransportHeaders()).toEqual({
-        'X-Static': 'yes',
-        'X-API-Key': 'test-api-key',
+        'x-static': 'yes',
+        'x-api-key': 'test-api-key',
       });
     });
 
@@ -800,9 +815,9 @@ describe('MCPToolset', () => {
       await toolset.getTools();
 
       expect(lastTransportHeaders()).toEqual({
-        'X-Static': 'yes',
-        'X-Tenant': 'acme',
-        Authorization: 'Bearer exchanged-token',
+        'x-static': 'yes',
+        'x-tenant': 'acme',
+        authorization: 'Bearer exchanged-token',
       });
     });
 
@@ -828,8 +843,8 @@ describe('MCPToolset', () => {
       // Two transports: the discovery session, then the tool-call session.
       expect(StreamableHTTPClientTransport).toHaveBeenCalledTimes(2);
       expect(lastTransportHeaders()).toEqual({
-        'X-Static': 'yes',
-        'X-API-Key': 'test-api-key',
+        'x-static': 'yes',
+        'x-api-key': 'test-api-key',
       });
     });
 
@@ -843,8 +858,8 @@ describe('MCPToolset', () => {
       await toolset.listResources();
 
       expect(lastTransportHeaders()).toEqual({
-        'X-Static': 'yes',
-        'X-API-Key': 'test-api-key',
+        'x-static': 'yes',
+        'x-api-key': 'test-api-key',
       });
     });
 
@@ -874,9 +889,9 @@ describe('MCPToolset', () => {
       // One session resolves the name, the second reads the resource.
       expect(StreamableHTTPClientTransport).toHaveBeenCalledTimes(2);
       for (const call of vi.mocked(StreamableHTTPClientTransport).mock.calls) {
-        expect(call[1]?.requestInit?.headers).toEqual({
-          'X-Static': 'yes',
-          'X-API-Key': 'test-api-key',
+        expect(headersOf(call[1])).toEqual({
+          'x-static': 'yes',
+          'x-api-key': 'test-api-key',
         });
       }
     });
@@ -891,7 +906,7 @@ describe('MCPToolset', () => {
       await toolset.getTools();
 
       expect(toolset.getAuthConfig()).toBeUndefined();
-      expect(lastTransportHeaders()).toEqual({'X-Static': 'yes'});
+      expect(lastTransportHeaders()).toEqual({'x-static': 'yes'});
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('authCredential was given without authScheme'),
       );

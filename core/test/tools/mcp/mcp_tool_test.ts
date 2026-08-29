@@ -200,13 +200,12 @@ describe('MCPTool', () => {
 
     it('passes configured headers to createSession', async () => {
       const {manager, createSession: spy} = createSpiedSessionManager();
-      const tool = new MCPTool(mockTool, manager, undefined, {
-        Authorization: 'Bearer t',
-      });
+      const headers = new Headers({Authorization: 'Bearer t'});
+      const tool = new MCPTool(mockTool, manager, undefined, headers);
 
       await tool.runAsync({args: {}, toolContext: createToolContext()});
 
-      expect(spy).toHaveBeenCalledWith({Authorization: 'Bearer t'});
+      expect(spy).toHaveBeenCalledWith(headers);
     });
 
     it('calls createSession with undefined when no headers are configured', async () => {

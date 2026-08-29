@@ -9,7 +9,6 @@ import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio
 import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import {formatError} from '../../utils/error_utils.js';
-import {mergeHeaders, toHeaderRecord} from '../../utils/header_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
@@ -24,6 +23,20 @@ const MCP_SDK: OptionalPeer = {
   packageName: '@modelcontextprotocol/sdk',
   feature: 'MCPSessionManager (and the MCP tools built on it)',
 };
+
+/**
+ * Reports whether `headers` carries no entry.
+ *
+ * `Headers` exposes no size and is iterable only under the DOM.Iterable lib,
+ * which this package does not enable.
+ */
+function isEmpty(headers: Headers): boolean {
+  let empty = true;
+  headers.forEach(() => {
+    empty = false;
+  });
+  return empty;
+}
 
 /** Surfaces a background transport error that would otherwise be dropped. */
 function logTransportError(err: unknown): void {
@@ -101,7 +114,7 @@ export class MCPSessionManager {
    *     for this session only; on key conflict these win. Ignored for stdio
    *     connections, which have no headers.
    */
-  async createSession(extraHeaders?: Record<string, string>): Promise<Client> {
+  async createSession(extraHeaders?: Headers): Promise<Client> {
     const {Client} = await loadOptionalPeer(
       MCP_SDK,
       () => import('@modelcontextprotocol/sdk/client/index.js'),
@@ -130,22 +143,23 @@ export class MCPSessionManager {
             params.transportOptions ?? {};
 
           if (!options.requestInit && params.header !== undefined) {
-            options = {
-              ...options,
-              requestInit: {headers: params.header as Record<string, string>},
-            };
+            const headers = new Headers();
+            for (const [name, value] of Object.entries(params.header)) {
+              headers.set(name, String(value));
+            }
+            options = {...options, requestInit: {headers}};
           }
 
-          if (extraHeaders && Object.keys(extraHeaders).length > 0) {
+          if (extraHeaders && !isEmpty(extraHeaders)) {
+            // `set` matches names case-insensitively, so an extra header
+            // replaces a static one of the same name rather than joining it.
+            const headers = new Headers(options.requestInit?.headers);
+            extraHeaders.forEach((value, name) => {
+              headers.set(name, value);
+            });
             options = {
               ...options,
-              requestInit: {
-                ...options.requestInit,
-                headers: mergeHeaders(
-                  toHeaderRecord(options.requestInit?.headers),
-                  extraHeaders,
-                ),
-              },
+              requestInit: {...options.requestInit, headers},
             };
           }
 

@@ -18,7 +18,6 @@ import {AuthCredential} from '../../auth/auth_credential.js';
 import {buildAuthHeaders} from '../../auth/auth_headers.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
-import {mergeHeaders} from '../../utils/header_utils.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
@@ -209,7 +208,7 @@ export class MCPToolset extends BaseToolset {
    */
   private async buildHeaders(
     context?: ReadonlyContext,
-  ): Promise<Record<string, string> | undefined> {
+  ): Promise<Headers | undefined> {
     const providerHeaders = this.headerProvider
       ? await this.headerProvider(context)
       : undefined;
@@ -221,10 +220,16 @@ export class MCPToolset extends BaseToolset {
       this.authConfig?.authScheme,
     );
 
-    if (!authHeaders) {
-      return providerHeaders;
+    if (!providerHeaders && !authHeaders) {
+      return undefined;
     }
-    return mergeHeaders(providerHeaders ?? {}, authHeaders);
+    // `set` matches names case-insensitively, so an auth header replaces a
+    // provider header of the same name rather than joining it.
+    const headers = new Headers(providerHeaders);
+    for (const [name, value] of Object.entries(authHeaders ?? {})) {
+      headers.set(name, value);
+    }
+    return headers;
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
@@ -293,9 +298,7 @@ export class MCPToolset extends BaseToolset {
   }
 
   /** Opens one session with `headers` and returns what the server advertises. */
-  private async listServerResources(
-    headers?: Record<string, string>,
-  ): Promise<Resource[]> {
+  private async listServerResources(headers?: Headers): Promise<Resource[]> {
     const session = await this.mcpSessionManager.createSession(headers);
     try {
       const result = (await session.listResources()) as ListResourcesResult;
