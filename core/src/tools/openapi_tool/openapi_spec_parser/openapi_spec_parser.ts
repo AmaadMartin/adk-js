@@ -283,7 +283,11 @@ function collectOperations(
         preservePropertyNames,
       });
 
-      const authSchemeName = parser.getAuthSchemeName() || globalSchemeName;
+      let authSchemeName: string | undefined;
+      if (operation.security && operation.security.length > 0) {
+        authSchemeName = Object.keys(operation.security[0])[0];
+      }
+      authSchemeName = authSchemeName || globalSchemeName;
 
       const authScheme = authSchemeName
         ? authSchemes[authSchemeName]
@@ -295,7 +299,6 @@ function collectOperations(
         endpoint: {baseUrl, path, method},
         operation: operation,
         parameters: parser.getParameters(),
-        returnValue: parser.getReturnValue(),
         authScheme: authScheme,
       });
     }
