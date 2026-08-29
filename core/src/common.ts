@@ -341,6 +341,12 @@ export type {
 } from './tools/retrieval/embedding_model.js';
 export {InMemoryVectorRetriever} from './tools/retrieval/in_memory_retriever.js';
 export type {IndexedChunk} from './tools/retrieval/in_memory_retriever.js';
+export {LlamaIndexRetrievalTool} from './tools/retrieval/llama_index_retrieval_tool.js';
+export type {
+  LlamaIndexNode,
+  LlamaIndexRetrievalToolParams,
+  LlamaIndexRetriever,
+} from './tools/retrieval/llama_index_retrieval_tool.js';
 export {RetrieverTool} from './tools/retrieval/retriever_tool.js';
 export type {
   RetrievedDocument,
