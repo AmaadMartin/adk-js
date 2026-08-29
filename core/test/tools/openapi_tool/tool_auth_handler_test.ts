@@ -6,11 +6,13 @@
 
 import {
   AuthCredential,
+  AuthCredentialMissingError,
   AuthCredentialTypes,
   Context,
   createSession,
   InvocationContext,
   LlmAgent,
+  OpenIdConnectWithConfig,
   PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
@@ -854,5 +856,263 @@ describe('ToolAuthHandler stored OAuth2 credential', () => {
     expect(result.authCredential?.http?.credentials.token).toBe('cached-token');
     expect(fetchStub).not.toHaveBeenCalled();
     expect(context.state.hasDelta()).toBe(false);
+  });
+});
+
+describe('ToolAuthHandler authorization request', () => {
+  const OIDC_SCHEME: OpenIdConnectWithConfig = {
+    type: 'openIdConnect',
+    openIdConnectUrl:
+      'https://provider.example.com/.well-known/openid-configuration',
+    authorizationEndpoint: 'https://provider.example.com/authorize',
+    tokenEndpoint: 'https://provider.example.com/token',
+    scopes: ['profile'],
+  };
+  const AUTHORIZATION_CODE_SCHEME: OpenAPIV3.SecuritySchemeObject = {
+    type: 'oauth2',
+    flows: {
+      authorizationCode: {
+        authorizationUrl: 'https://provider.example.com/authorize',
+        tokenUrl: 'https://provider.example.com/token',
+        scopes: {},
+      },
+    },
+  };
+
+  it('asks the client to authorize an OIDC credential that has no token', async () => {
+    const configured: AuthCredential = {
+      authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+      oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+    };
+    const context = createRequestingContext({});
+
+    const result = await new ToolAuthHandler(
+      context,
+      OIDC_SCHEME,
+      configured,
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('pending');
+    // The caller needs both to build the request it hands the end user.
+    expect(result.authScheme).toBe(OIDC_SCHEME);
+    expect(result.authCredential).toBe(configured);
+  });
+
+  it('names the scheme on a credential it did not have to request', async () => {
+    const scheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    };
+
+    const result = await new ToolAuthHandler(createContext({}), scheme, {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'static-key',
+    }).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(result.authScheme).toBe(scheme);
+  });
+
+  it('rejects an oauth2 scheme configured with no credential', async () => {
+    await expect(
+      new ToolAuthHandler(
+        createContext({}),
+        AUTHORIZATION_CODE_SCHEME,
+      ).prepareAuthCredentials(),
+    ).rejects.toThrow(
+      'authCredential is empty for scheme oauth2. Please create an AuthCredential with an oauth2 block.',
+    );
+  });
+
+  it('rejects a credential that carries no oauth2 block', async () => {
+    await expect(
+      new ToolAuthHandler(createContext({}), AUTHORIZATION_CODE_SCHEME, {
+        authType: AuthCredentialTypes.OAUTH2,
+      }).prepareAuthCredentials(),
+    ).rejects.toThrow(
+      'authCredential is empty for scheme oauth2. Please create an AuthCredential with an oauth2 block.',
+    );
+  });
+
+  it('rejects an oauth2 credential that is missing its client id', async () => {
+    const prepare = new ToolAuthHandler(
+      createContext({}),
+      AUTHORIZATION_CODE_SCHEME,
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientSecret: 'client-secret'},
+      },
+    ).prepareAuthCredentials();
+
+    await expect(prepare).rejects.toBeInstanceOf(AuthCredentialMissingError);
+    await expect(prepare).rejects.toThrow(
+      'OAuth2 credentials client_id is missing.',
+    );
+  });
+
+  it('rejects an oauth2 credential that is missing its client secret', async () => {
+    const prepare = new ToolAuthHandler(
+      createContext({}),
+      AUTHORIZATION_CODE_SCHEME,
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id'},
+      },
+    ).prepareAuthCredentials();
+
+    await expect(prepare).rejects.toBeInstanceOf(AuthCredentialMissingError);
+    await expect(prepare).rejects.toThrow(
+      'OAuth2 credentials client_secret is missing.',
+    );
+  });
+
+  it('asks the client to authorize again when the cached credential has no token', async () => {
+    // A slot an earlier release filled, or a provider answer that carried no
+    // token. Serving it would send the tool at the API unauthenticated.
+    const sessionState: Record<string, unknown> = {
+      my_tool_tokens: {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      } satisfies AuthCredential,
+    };
+    const context = createRequestingContext(sessionState);
+
+    const result = await new ToolAuthHandler(
+      context,
+      AUTHORIZATION_CODE_SCHEME,
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      },
+      'my_tool_tokens',
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('pending');
+    expect(requestedCredentialKey(context)).toBe('my_tool_tokens');
+  });
+
+  it('serves a cached credential that carries a token without asking again', async () => {
+    const sessionState: Record<string, unknown> = {
+      my_tool_tokens: {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          accessToken: 'granted-token',
+        },
+      } satisfies AuthCredential,
+    };
+    const context = createRequestingContext(sessionState);
+
+    const result = await new ToolAuthHandler(
+      context,
+      AUTHORIZATION_CODE_SCHEME,
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      },
+      'my_tool_tokens',
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(result.authCredential?.oauth2?.accessToken).toBe('granted-token');
+    expect(context.eventActions.requestedAuthConfigs).toEqual({});
+  });
+});
+
+describe('ToolAuthHandler credential key property', () => {
+  const SCHEME: OpenAPIV3.SecuritySchemeObject = {
+    type: 'apiKey',
+    name: 'X-API-Key',
+    in: 'header',
+  };
+  const CREDENTIAL: AuthCredential = {
+    authType: AuthCredentialTypes.API_KEY,
+    apiKey: 'static-key',
+  };
+
+  it('takes the slot from a credential_key on the credential', async () => {
+    const sessionState: Record<string, unknown> = {};
+    const credential = {...CREDENTIAL, credential_key: 'named_by_credential'};
+
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      SCHEME,
+      credential,
+    ).prepareAuthCredentials();
+
+    expect(Object.keys(sessionState)).toEqual(['named_by_credential']);
+  });
+
+  it('takes the slot from a credentialKey on the credential', async () => {
+    const sessionState: Record<string, unknown> = {};
+    const credential = {...CREDENTIAL, credentialKey: 'named_by_camel_case'};
+
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      SCHEME,
+      credential,
+    ).prepareAuthCredentials();
+
+    expect(Object.keys(sessionState)).toEqual(['named_by_camel_case']);
+  });
+
+  it('takes the slot from a credential_key on the scheme', async () => {
+    const sessionState: Record<string, unknown> = {};
+    const scheme = {...SCHEME, credential_key: 'named_by_scheme'};
+
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      scheme,
+      CREDENTIAL,
+    ).prepareAuthCredentials();
+
+    expect(Object.keys(sessionState)).toEqual(['named_by_scheme']);
+  });
+
+  it('lets the constructor option beat a property on the credential', async () => {
+    const sessionState: Record<string, unknown> = {};
+    const credential = {...CREDENTIAL, credential_key: 'named_by_credential'};
+
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      SCHEME,
+      credential,
+      'named_by_the_caller',
+    ).prepareAuthCredentials();
+
+    expect(Object.keys(sessionState)).toEqual(['named_by_the_caller']);
+  });
+
+  it('lets a property on the credential beat one on the scheme', async () => {
+    const sessionState: Record<string, unknown> = {};
+    const credential = {...CREDENTIAL, credential_key: 'named_by_credential'};
+    const scheme = {...SCHEME, credential_key: 'named_by_scheme'};
+
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      scheme,
+      credential,
+    ).prepareAuthCredentials();
+
+    expect(Object.keys(sessionState)).toEqual(['named_by_credential']);
+  });
+
+  it('falls back to the derived slot when the property names nothing', async () => {
+    const sessionState: Record<string, unknown> = {};
+    // An empty string and a number name no slot, so the scheme and the
+    // credential still do.
+    const credential = {...CREDENTIAL, credential_key: '', credentialKey: 7};
+
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      SCHEME,
+      credential,
+    ).prepareAuthCredentials();
+
+    expect(cachedCredentialKeys(sessionState)).toEqual(
+      Object.keys(sessionState),
+    );
   });
 });
