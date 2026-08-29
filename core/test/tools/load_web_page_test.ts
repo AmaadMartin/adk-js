@@ -205,6 +205,27 @@ describe('loadWebPage', () => {
       expect(result).toBe('Failed to fetch url: http://api.localhost./');
       expectNoRequest();
     });
+
+    it.each(['http://example.com:0/', 'http://example.com:000/'])(
+      'rejects the unconnectable port in %s',
+      async (url) => {
+        const result = await loadWebPage(url);
+
+        expect(result).toBe(`Failed to fetch url: ${url}`);
+        expectNoRequest();
+        expect(lookupMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it('keeps a port the parser accepts', async () => {
+      resolveTo('93.184.216.34');
+      respondWith('<p>This line has enough words</p>');
+
+      const result = await loadWebPage('http://example.com:8080/');
+
+      expect(result).toBe('This line has enough words');
+      expect(sentRequests).toHaveLength(1);
+    });
   });
 
   describe('SSRF IP rejection', () => {

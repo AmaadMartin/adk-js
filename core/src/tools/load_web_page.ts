@@ -65,14 +65,21 @@ function failedToFetchMessage(url: string): string {
 }
 
 /**
- * Validates the URL's scheme up front (before any network access). Throws for
- * malformed URLs and disallowed schemes. An `http`/`https` URL always carries a
- * hostname: the WHATWG parser rejects the scheme without one.
+ * Validates the URL up front (before any network access). Throws for malformed
+ * URLs, disallowed schemes and an unconnectable port. An `http`/`https` URL
+ * always carries a hostname: the WHATWG parser rejects the scheme without one.
+ *
+ * The parser also rejects a port that is not a number or is above 65535, so
+ * port `0` is the only value left to reject here. Node reads it as "any free
+ * port" and dials a port the caller never asked for.
  */
 function parseRequestTarget(url: string): URL {
   const parsed = new URL(url);
   if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
     throw new Error(`Unsupported url scheme: ${url}`);
+  }
+  if (parsed.port === '0') {
+    throw new Error(`Invalid url port: ${url}`);
   }
   return parsed;
 }
