@@ -21,6 +21,9 @@ export function toCamelCase(
 /**
  * Converts an object with camelCase keys to snake_case keys.
  *
+ * To convert a single identifier, use `toSnakeCaseIdentifier` from
+ * `case_utils.js`.
+ *
  * @param obj The object to convert.
  * @param preserveKeys Keys to preserve in their original form.
  * @returns The object with snake_case keys.

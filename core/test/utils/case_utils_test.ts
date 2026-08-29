@@ -5,7 +5,10 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys} from '../../src/utils/case_utils.js';
+import {
+  camelCaseKeys,
+  toSnakeCaseIdentifier,
+} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
   describe('camelCaseKeys', () => {
@@ -89,6 +92,28 @@ describe('case_utils', () => {
       expect(camelCaseKeys(123)).toBe(123);
       expect(camelCaseKeys('hello')).toBe('hello');
       expect(camelCaseKeys(true)).toBe(true);
+    });
+  });
+
+  describe('toSnakeCaseIdentifier', () => {
+    it.each([
+      ['calendar.events.list', 'calendar_events_list'],
+      ['youtube.liveBroadcasts.list', 'youtube_live_broadcasts_list'],
+      ['user-id', 'user_id'],
+      ['space separated', 'space_separated'],
+      ['camelCase', 'camel_case'],
+      ['UpperCamelCase', 'upper_camel_case'],
+      ['RESTApi', 'rest_api'],
+      ['REST API', 'rest_api'],
+      ['v3Beta1', 'v3_beta1'],
+      ['already_snake', 'already_snake'],
+      ['get__test', 'get_test'],
+      ['_leading', 'leading'],
+      ['trailing_', 'trailing'],
+      ['...', ''],
+      ['', ''],
+    ])('converts %j to %j', (input, expected) => {
+      expect(toSnakeCaseIdentifier(input)).toBe(expected);
     });
   });
 });
