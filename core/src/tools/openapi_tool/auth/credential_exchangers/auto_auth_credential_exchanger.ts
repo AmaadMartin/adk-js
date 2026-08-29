@@ -25,28 +25,24 @@ import {ServiceAccountCredentialExchanger} from './service_account_exchanger.js'
  * {@link OAuth2CredentialExchanger}, and `SERVICE_ACCOUNT` to
  * {@link ServiceAccountCredentialExchanger}. A credential of any other type
  * comes back unchanged.
- *
- * @example
- * ```ts
- * // Add an exchanger for a type that has no built-in.
- * const exchanger = new AutoAuthCredentialExchanger(
- *   new Map([[AuthCredentialTypes.API_KEY, myApiKeyExchanger]]),
- * );
- * ```
  */
 @experimental
 export class AutoAuthCredentialExchanger implements BaseCredentialExchanger {
   /**
-   * The exchanger for each credential type. Public so a caller can inspect an
-   * entry, or replace one after construction.
+   * The exchanger for each credential type.
+   *
+   * This is configuration, not internal state: adk-python publishes the same
+   * `exchangers` attribute, and a caller replaces an entry on a live instance
+   * to route one credential type elsewhere. `readonly` fixes the map itself,
+   * not its entries.
    */
   readonly exchangers = new Map<AuthCredentialTypes, BaseCredentialExchanger>();
 
   /**
    * @param customExchangers - Exchangers merged over the built-ins. An entry
    *   for a type that has no built-in adds it; an entry for a type that has
-   *   one replaces it. The constructor copies the entries, so a later change
-   *   to this map does not reach the instance.
+   *   one replaces it. The constructor copies the entries, so mutating the
+   *   caller's map afterwards does not reach the instance.
    */
   constructor(
     customExchangers?: ReadonlyMap<
@@ -67,6 +63,10 @@ export class AutoAuthCredentialExchanger implements BaseCredentialExchanger {
     }
   }
 
+  // A definite credential yields a definite result, which is what
+  // `BaseCredentialExchanger` promises and what the call site in
+  // `tool_auth_handler.ts` relies on. Only a caller that may hold no
+  // credential sees the `| null`, so no existing caller grows a dead branch.
   exchange(params: {
     authScheme?: AuthScheme;
     authCredential: AuthCredential;
