@@ -112,8 +112,10 @@ export function googleOidcAuthScheme(
  */
 @experimental
 export class GoogleApiToolset extends BaseToolset {
-  private readonly apiName: string;
-  private readonly apiVersion: string;
+  /** The Discovery API id this toolset wraps. */
+  readonly apiName: string;
+  /** The version of the API this toolset wraps. */
+  readonly apiVersion: string;
   private readonly additionalHeaders?: Record<string, string>;
   private readonly additionalScopes?: string[];
   private readonly discoveryUrl?: string;
@@ -204,8 +206,15 @@ export class GoogleApiToolset extends BaseToolset {
 
   private loadOpenApiToolset(): Promise<OpenAPIToolset> {
     // The promise, not the resolved toolset, is memoised so concurrent
-    // getTools calls share a single discovery fetch.
-    this.openApiToolsetPromise ??= this.buildOpenApiToolset();
+    // getTools calls share a single discovery fetch. A failed load is
+    // forgotten, so a later call retries instead of replaying the error for
+    // the lifetime of the toolset.
+    this.openApiToolsetPromise ??= this.buildOpenApiToolset().catch(
+      (error: unknown) => {
+        this.openApiToolsetPromise = undefined;
+        throw error;
+      },
+    );
     return this.openApiToolsetPromise;
   }
 
