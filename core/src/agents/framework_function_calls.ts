@@ -37,6 +37,19 @@ const RESERVED_FUNCTION_CALL_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Names reserved for the framework's own tool dispatch.
+ *
+ * Kept beside {@link RESERVED_FUNCTION_CALL_NAMES} so the two lists are read
+ * together. They answer different questions — that set refuses a call a client
+ * wrote, this one refuses a tool an external server advertises — but a new
+ * control-plane call belongs in both.
+ */
+export const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  ...RESERVED_FUNCTION_CALL_NAMES,
+  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
+]);
+
+/**
  * The first reserved function call in `content`, if it carries one.
  *
  * Used to keep client input out of the framework's own control plane. Function

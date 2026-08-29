@@ -394,7 +394,7 @@ describe('MCPTool auth headers', () => {
       });
 
       await expect(promise).rejects.toThrow(
-        `McpTool only supports header-based API key authentication. Configured location: ${location}`,
+        `API key authentication is only supported in a header. Configured location: ${location}`,
       );
     },
   );
@@ -406,7 +406,7 @@ describe('MCPTool auth headers', () => {
     });
 
     await expect(promise).rejects.toThrow(
-      'McpTool only supports header-based API key authentication. Configured location: undefined',
+      'API key authentication is only supported in a header. Configured location: undefined',
     );
   });
 
@@ -435,7 +435,7 @@ describe('MCPTool auth headers', () => {
 
     expect(headers).toBeUndefined();
     expect(warnSpy).toHaveBeenCalledWith(
-      'Service account credentials should be exchanged before MCP session creation',
+      'Service account credentials should be exchanged before use as a request header',
     );
     warnSpy.mockRestore();
   });

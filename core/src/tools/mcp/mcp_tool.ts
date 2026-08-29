@@ -5,42 +5,19 @@
  */
 
 import {FunctionDeclaration} from '@google/genai';
-import type {
-  CallToolRequest,
-  CallToolResult,
-  Progress,
-  Tool,
-} from '@modelcontextprotocol/sdk/types.js';
+import type {Progress, Tool} from '@modelcontextprotocol/sdk/types.js';
 
 import {Context} from '../../agents/context.js';
-import {
-  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
-  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-  REQUEST_INPUT_FUNCTION_CALL_NAME,
-  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
-} from '../../agents/framework_function_calls.js';
+import {RESERVED_TOOL_NAMES} from '../../agents/framework_function_calls.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
+import {credentialHeaders} from '../../auth/auth_header_utils.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
-import {base64Encode} from '../../utils/env_aware_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
-import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {ToolAuthHandler} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
-
-/**
- * Tool names the framework itself puts on the wire. A server advertising one of
- * these would have its tool dispatched in place of the framework's own, so the
- * name is refused at construction.
- */
-const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([
-  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
-  REQUEST_INPUT_FUNCTION_CALL_NAME,
-  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
-]);
 
 /** A progress notification from a long-running MCP tool call. */
 export type McpProgressCallback = (progress: Progress) => void | Promise<void>;
@@ -74,96 +51,6 @@ export interface McpToolOptions {
   progressCallback?: McpProgressCallback;
   /** Builds a progress callback per call. Mutually exclusive with the above. */
   progressCallbackFactory?: McpProgressCallbackFactory;
-}
-
-/**
- * Derives the request headers an MCP call must carry from a credential.
- *
- * @param credential The resolved credential, when there is one.
- * @param authScheme The scheme the tool was configured with.
- * @return The headers, or undefined when the credential implies none.
- * @throws If an API key is configured without a header-based scheme.
- */
-function authHeaders(
-  credential: AuthCredential | undefined,
-  authScheme: AuthScheme | undefined,
-): Record<string, string> | undefined {
-  if (!credential) {
-    return undefined;
-  }
-  if (credential.oauth2) {
-    return {Authorization: `Bearer ${credential.oauth2.accessToken}`};
-  }
-  if (credential.http) {
-    return httpAuthHeaders(credential.http);
-  }
-  if (credential.apiKey) {
-    return apiKeyHeaders(credential.apiKey, authScheme);
-  }
-  if (credential.serviceAccount) {
-    logger.warn(
-      'Service account credentials should be exchanged before MCP session creation',
-    );
-  }
-  return undefined;
-}
-
-/** Derives the headers for an HTTP-scheme credential. */
-function httpAuthHeaders(
-  http: NonNullable<AuthCredential['http']>,
-): Record<string, string> | undefined {
-  const {scheme, credentials, additionalHeaders} = http;
-  let headers: Record<string, string> | undefined;
-  switch (scheme.toLowerCase()) {
-    case 'bearer':
-      if (credentials.token) {
-        headers = {Authorization: `Bearer ${credentials.token}`};
-      }
-      break;
-    case 'basic':
-      if (credentials.username && credentials.password) {
-        const encoded = base64Encode(
-          `${credentials.username}:${credentials.password}`,
-        );
-        headers = {Authorization: `Basic ${encoded}`};
-      }
-      break;
-    default:
-      if (credentials.token) {
-        // The configured spelling is kept: an RFC 7235 scheme name is
-        // case-insensitive, but servers in the wild compare it literally.
-        headers = {Authorization: `${scheme} ${credentials.token}`};
-      }
-      break;
-  }
-  if (additionalHeaders) {
-    headers = {...headers, ...additionalHeaders};
-  }
-  return headers;
-}
-
-/** Derives the headers for an API key credential. */
-function apiKeyHeaders(
-  apiKey: string,
-  authScheme: AuthScheme | undefined,
-): Record<string, string> {
-  if (!authScheme) {
-    // The key itself is never named here: the message reaches logs and the
-    // model.
-    const message =
-      'Cannot find corresponding auth scheme for API key credential.';
-    logger.error(message);
-    throw new Error(message);
-  }
-  if (authScheme.type === 'apiKey' && authScheme.in === 'header') {
-    return {[authScheme.name]: apiKey};
-  }
-  const location = authScheme.type === 'apiKey' ? authScheme.in : undefined;
-  const message =
-    'McpTool only supports header-based API key authentication. ' +
-    `Configured location: ${location}`;
-  logger.error(message);
-  throw new Error(message);
 }
 
 /**
@@ -268,36 +155,6 @@ export class MCPTool extends BaseTool {
     return this.callMcpTool(request);
   }
 
-  /**
-   * Evaluates the confirmation gate. Returns `undefined` if the tool may
-   * proceed; otherwise returns the function response payload to surface instead
-   * of running.
-   */
-  private async checkConfirmation(
-    args: Record<string, unknown>,
-    toolContext: Context,
-  ): Promise<{error: string} | undefined> {
-    if (!(await this.checkRequireConfirmation(args, toolContext))) {
-      return undefined;
-    }
-    if (!toolContext.toolConfirmation) {
-      toolContext.requestConfirmation({
-        hint:
-          `Please approve or reject the tool call ${this.name}() by ` +
-          'responding with a FunctionResponse with an expected ' +
-          'ToolConfirmation payload.',
-      });
-      return {
-        error:
-          'This tool call requires confirmation, please approve or reject.',
-      };
-    }
-    if (!toolContext.toolConfirmation.confirmed) {
-      return {error: 'This tool call is rejected.'};
-    }
-    return undefined;
-  }
-
   /** Authenticates the call, opens a session, calls the tool and closes it. */
   private async callMcpTool(request: RunAsyncToolRequest): Promise<unknown> {
     const {toolContext} = request;
@@ -325,13 +182,14 @@ export class MCPTool extends BaseTool {
     const session = await this.mcpSessionManager.createSession({headers});
 
     try {
-      const callRequest: CallToolRequest = {} as CallToolRequest;
-      callRequest.params = {name: this.originalName, arguments: request.args};
-      const result = await session.callTool(callRequest.params, undefined, {
-        signal: toolContext.abortSignal,
-        ...(progressCallback ? {onprogress: progressCallback} : {}),
-      });
-      return result as CallToolResult;
+      return await session.callTool(
+        {name: this.originalName, arguments: request.args},
+        undefined,
+        {
+          signal: toolContext.abortSignal,
+          ...(progressCallback ? {onprogress: progressCallback} : {}),
+        },
+      );
     } finally {
       await this.mcpSessionManager.closeSession(session);
     }
@@ -342,7 +200,7 @@ export class MCPTool extends BaseTool {
     toolContext: Context,
     credential: AuthCredential | undefined,
   ): Promise<Record<string, string> | undefined> {
-    const fromAuth = authHeaders(credential, this.options.authScheme);
+    const fromAuth = credentialHeaders(credential, this.options.authScheme);
     const fromProvider = await this.options.headerProvider?.(
       new ReadonlyContext(toolContext.invocationContext),
     );

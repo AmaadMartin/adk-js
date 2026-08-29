@@ -29,9 +29,9 @@ function logTransportError(err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
 }
 
-/** The header shapes `fetch` accepts, as the MCP transport declares them. */
-type TransportHeaders = NonNullable<
-  NonNullable<StreamableHTTPClientTransportOptions['requestInit']>['headers']
+/** The transport's `fetch` options, as the MCP SDK declares them. */
+type TransportRequestInit = NonNullable<
+  StreamableHTTPClientTransportOptions['requestInit']
 >;
 
 /**
@@ -45,13 +45,15 @@ type TransportHeaders = NonNullable<
  * @return The merged headers.
  */
 function mergeHeaders(
-  configured: TransportHeaders | undefined,
+  configured: TransportRequestInit['headers'],
   extra: Record<string, string>,
 ): Record<string, string> {
   const headers = new Headers(configured);
   for (const [name, value] of Object.entries(extra)) {
     headers.set(name, value);
   }
+  // `Headers` is only iterable under the `DOM.Iterable` lib, which this repo
+  // does not enable, so `Object.fromEntries` is not available here.
   const merged: Record<string, string> = {};
   headers.forEach((value, name) => {
     merged[name] = value;
@@ -173,7 +175,7 @@ export class MCPSessionManager {
           // it.
           const transportOptions: StreamableHTTPClientTransportOptions = {
             ...configured,
-            ...(requestInit === undefined ? {} : {requestInit}),
+            requestInit,
           };
           if (options.headers !== undefined) {
             transportOptions.requestInit = {

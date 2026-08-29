@@ -188,10 +188,7 @@ export class FunctionTool<
     try {
       const validatedArgs = this.validateArgs(req.args);
 
-      const pending = await this.checkConfirmation(
-        validatedArgs,
-        req.toolContext,
-      );
+      const pending = await this.checkConfirmation(req.args, req.toolContext);
       if (pending !== undefined) {
         return pending;
       }
@@ -232,56 +229,5 @@ export class FunctionTool<
       return this.parameters.parse(args) as ToolExecuteArgument<TParameters>;
     }
     return args as ToolExecuteArgument<TParameters>;
-  }
-
-  /** Resolves `requireConfirmation`, which may be a flag or a predicate. */
-  private async evaluateRequireConfirmation(
-    input: ToolExecuteArgument<TParameters>,
-    toolContext?: Context,
-  ): Promise<boolean> {
-    return typeof this.requireConfirmation === 'function'
-      ? this.requireConfirmation(input, toolContext)
-      : this.requireConfirmation;
-  }
-
-  /**
-   * Evaluates the confirmation gate. Returns `undefined` if the tool may
-   * proceed; otherwise returns the function response payload to surface instead
-   * of running (a request-for-confirmation on the first pass, or a rejection
-   * once the user declined).
-   */
-  private async checkConfirmation(
-    input: ToolExecuteArgument<TParameters>,
-    toolContext?: Context,
-  ): Promise<{error: string} | undefined> {
-    const requireConfirmation = await this.evaluateRequireConfirmation(
-      input,
-      toolContext,
-    );
-    if (!requireConfirmation) {
-      return undefined;
-    }
-    if (!toolContext) {
-      throw new Error(
-        `Tool '${this.name}' requires confirmation but no tool context was provided.`,
-      );
-    }
-    if (!toolContext.toolConfirmation) {
-      toolContext.requestConfirmation({
-        hint:
-          `Please approve or reject the tool call ${this.name}() by ` +
-          'responding with a FunctionResponse with an expected ' +
-          'ToolConfirmation payload.',
-      });
-      toolContext.actions.skipSummarization = true;
-      return {
-        error:
-          'This tool call requires confirmation, please approve or reject.',
-      };
-    }
-    if (!toolContext.toolConfirmation.confirmed) {
-      return {error: 'This tool call is rejected.'};
-    }
-    return undefined;
   }
 }
