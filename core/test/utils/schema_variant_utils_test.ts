@@ -9,6 +9,7 @@ import {describe, expect, it} from 'vitest';
 
 import {
   flattenNullableAnyOf,
+  sanitizeJsonSchemaForGemini,
   stripUnsupportedGeminiFormats,
 } from '../../src/utils/schema_variant_utils.js';
 
@@ -199,5 +200,176 @@ describe('flattenNullableAnyOf', () => {
     flattenNullableAnyOf(schema);
 
     expect(name.anyOf).toHaveLength(2);
+  });
+});
+
+describe('sanitizeJsonSchemaForGemini', () => {
+  it('drops the keywords the Gemini Developer API rejects', () => {
+    const sanitized = sanitizeJsonSchemaForGemini({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      additionalProperties: false,
+      propertyNames: {pattern: '^[a-z]+$'},
+      properties: {name: {type: 'string'}},
+      required: ['name'],
+    });
+
+    expect(sanitized).toEqual({
+      type: 'object',
+      properties: {name: {type: 'string'}},
+      required: ['name'],
+    });
+  });
+
+  it('keeps int32 on an integer and drops email from a string', () => {
+    expect(
+      sanitizeJsonSchemaForGemini({type: 'integer', format: 'int32'}),
+    ).toEqual({type: 'integer', format: 'int32'});
+    expect(
+      sanitizeJsonSchemaForGemini({type: 'string', format: 'email'}),
+    ).toEqual({type: 'string'});
+  });
+
+  it('keeps date-time on a string', () => {
+    expect(
+      sanitizeJsonSchemaForGemini({type: 'string', format: 'date-time'}),
+    ).toEqual({type: 'string', format: 'date-time'});
+  });
+
+  it('widens oneOf to anyOf', () => {
+    expect(
+      sanitizeJsonSchemaForGemini({
+        oneOf: [{type: 'string'}, {type: 'integer'}],
+      }),
+    ).toEqual({anyOf: [{type: 'string'}, {type: 'integer'}]});
+  });
+
+  it('accumulates oneOf onto an existing anyOf', () => {
+    expect(
+      sanitizeJsonSchemaForGemini({
+        anyOf: [{type: 'string'}],
+        oneOf: [{type: 'integer'}],
+      }),
+    ).toEqual({anyOf: [{type: 'string'}, {type: 'integer'}]});
+  });
+
+  it('maps a boolean schema to an unconstrained object', () => {
+    expect(
+      sanitizeJsonSchemaForGemini({properties: {yes: true, no: false}}),
+    ).toEqual({
+      properties: {yes: {type: 'object'}, no: {type: 'object'}},
+    });
+  });
+
+  it('rewrites a top-level null type but preserves it in an anyOf branch', () => {
+    expect(sanitizeJsonSchemaForGemini({type: 'null'})).toEqual({
+      type: ['object', 'null'],
+    });
+    expect(
+      sanitizeJsonSchemaForGemini({
+        anyOf: [{type: 'string'}, {type: 'null'}],
+      }),
+    ).toEqual({anyOf: [{type: 'string'}, {type: 'null'}]});
+  });
+
+  it('collapses a type list to its non-null member, array first', () => {
+    expect(
+      sanitizeJsonSchemaForGemini({
+        type: ['string', 'null'],
+      }),
+    ).toEqual({type: ['string', 'null']});
+    expect(
+      sanitizeJsonSchemaForGemini({
+        type: ['string', 'array'],
+        items: {type: 'string'},
+      }),
+    ).toEqual({type: 'array', items: {type: 'string'}});
+  });
+
+  it('replaces a null-only type list with an object union', () => {
+    expect(sanitizeJsonSchemaForGemini({type: ['null']})).toEqual({
+      type: ['object', 'null'],
+    });
+  });
+
+  it('accepts a single anyOf branch that is not a list', () => {
+    expect(sanitizeJsonSchemaForGemini({anyOf: {type: 'string'}})).toEqual({
+      anyOf: [{type: 'string'}],
+    });
+  });
+
+  it('gives an array without items a string element schema', () => {
+    expect(sanitizeJsonSchemaForGemini({type: 'array'})).toEqual({
+      type: 'array',
+      items: {type: 'string'},
+    });
+  });
+
+  it('renders a non-string enum member on a string field and drops null', () => {
+    expect(
+      sanitizeJsonSchemaForGemini({type: 'string', enum: ['a', 2, null]}),
+    ).toEqual({type: 'string', enum: ['a', '2']});
+  });
+
+  it('turns an empty schema into an object schema', () => {
+    expect(sanitizeJsonSchemaForGemini({})).toEqual({type: 'object'});
+  });
+
+  it('recurses into properties, items and $defs', () => {
+    expect(
+      sanitizeJsonSchemaForGemini({
+        type: 'object',
+        $defs: {Tag: {type: 'string', format: 'email'}},
+        properties: {
+          tags: {
+            type: 'array',
+            items: {type: 'string', format: 'uuid', additionalProperties: {}},
+          },
+        },
+      }),
+    ).toEqual({
+      type: 'object',
+      $defs: {Tag: {type: 'string'}},
+      properties: {
+        tags: {type: 'array', items: {type: 'string'}},
+      },
+    });
+  });
+
+  it('copies a value it cannot read as a schema', () => {
+    expect(sanitizeJsonSchemaForGemini({type: 'array', items: 'nope'})).toEqual(
+      {type: 'array', items: 'nope'},
+    );
+  });
+
+  it('sanitizes a tuple item list element-wise', () => {
+    expect(
+      sanitizeJsonSchemaForGemini({
+        type: 'array',
+        items: [{type: 'string', format: 'email'}],
+      }),
+    ).toEqual({type: 'array', items: [{type: 'string'}]});
+  });
+
+  it('drops a format when the type is a list', () => {
+    expect(
+      sanitizeJsonSchemaForGemini({
+        type: ['string', 'null'],
+        format: 'date-time',
+      }),
+    ).toEqual({type: ['string', 'null']});
+  });
+
+  it('does not mutate its input', () => {
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {when: {type: 'string', format: 'email'}},
+    };
+    const clone = structuredClone(schema);
+
+    sanitizeJsonSchemaForGemini(schema);
+
+    expect(schema).toEqual(clone);
   });
 });

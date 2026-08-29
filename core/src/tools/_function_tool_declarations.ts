@@ -17,13 +17,15 @@
  */
 
 import {FunctionDeclaration, Schema, Type} from '@google/genai';
+import {zodToJsonSchema as toJSONSchemaV3} from 'zod-to-json-schema';
+import {toJSONSchema as toJSONSchemaV4} from 'zod/v4';
 
 import {formatError} from '../utils/error_utils.js';
 import {genaiSchemaToJsonSchema} from '../utils/genai_schema_to_json.js';
 import {logger} from '../utils/logger.js';
-import {SchemaLike, toJsonSchema} from '../utils/schema.js';
+import {SchemaLike} from '../utils/schema.js';
 import {flattenNullableAnyOf} from '../utils/schema_variant_utils.js';
-import {isZodSchema} from '../utils/simple_zod_to_json.js';
+import {isZodV3Schema, isZodV4Schema} from '../utils/simple_zod_to_json.js';
 import {getGoogleLlmVariant, GoogleLLMVariant} from '../utils/variant_utils.js';
 // Type-only, so the two modules do not depend on each other at runtime: the
 // value dependency runs from `_automatic_function_calling_util.ts` to here.
@@ -115,17 +117,15 @@ export function isNullReturnTypeName(typeName: string): boolean {
   return NULL_RETURN_TYPE_NAMES.includes(typeName.toLowerCase());
 }
 
-/** A type name split into its bare name and its type arguments. */
+/** A type name split into its bare name and its first type argument. */
 interface GenericTypeName {
   name: string;
-  args: string[];
+  argument: string;
 }
 
-/** Splits a type argument list on the commas that are not nested. */
-function splitTypeArguments(text: string): string[] {
-  const args: string[] = [];
+/** The first entry of a type argument list, ignoring nested commas. */
+function firstTypeArgument(text: string): string {
   let depth = 0;
-  let start = 0;
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index];
     if (character === '<' || character === '[') {
@@ -133,12 +133,10 @@ function splitTypeArguments(text: string): string[] {
     } else if (character === '>' || character === ']') {
       depth -= 1;
     } else if (character === ',' && depth === 0) {
-      args.push(text.slice(start, index));
-      start = index + 1;
+      return text.slice(0, index).trim();
     }
   }
-  args.push(text.slice(start));
-  return args.map((argument) => argument.trim());
+  return text.trim();
 }
 
 /**
@@ -157,7 +155,7 @@ function parseGenericTypeName(text: string): GenericTypeName | undefined {
   if (close <= open || !name) {
     return undefined;
   }
-  return {name, args: splitTypeArguments(text.slice(open + 1, close))};
+  return {name, argument: firstTypeArgument(text.slice(open + 1, close))};
 }
 
 /**
@@ -178,7 +176,7 @@ export function unwrapReturnTypeName(typeName: string): string {
     if (!RETURN_TYPE_WRAPPERS.has(generic.name)) {
       return generic.name;
     }
-    current = generic.args[0] ?? generic.name;
+    current = generic.argument;
   }
   return current;
 }
@@ -221,12 +219,22 @@ export interface BuildJsonSchemaDeclarationOptions {
   variant?: GoogleLLMVariant;
 }
 
-/** Renders a schema source as a plain JSON Schema document. */
+/**
+ * Renders a schema source as a plain JSON Schema document.
+ *
+ * A Zod schema is read in its input direction, so a property with a default is
+ * optional for the model that fills the schema in. A source with no JSON
+ * Schema form, such as a `z.date()` property, is refused here: adk-python
+ * refuses the same parameter and degrades the same return type.
+ */
 function toJsonSchemaDocument(
   source: SchemaLike | JsonSchemaNode,
 ): Record<string, unknown> {
-  if (isZodSchema(source)) {
-    return toJsonSchema(source);
+  if (isZodV4Schema(source)) {
+    return toJSONSchemaV4(source, {io: 'input'}) as Record<string, unknown>;
+  }
+  if (isZodV3Schema(source)) {
+    return toJSONSchemaV3(source) as Record<string, unknown>;
   }
   return genaiSchemaToJsonSchema(source as Schema);
 }
