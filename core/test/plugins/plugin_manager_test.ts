@@ -49,6 +49,10 @@ class TestPlugin extends BasePlugin {
       | undefined;
   }
 
+  override async close(): Promise<void> {
+    await this.handleCallback('close');
+  }
+
   override async beforeRunCallback(_params: {
     invocationContext: InvocationContext;
   }): Promise<Content | undefined> {
@@ -203,6 +207,31 @@ describe('PluginManager', () => {
     service.registerPlugin(plugin1);
     service.listPlugins().push(plugin2);
     expect(service.listPlugins()).toEqual([plugin1]);
+  });
+
+  it('should close every registered plugin in registration order', async () => {
+    service.registerPlugin(plugin1);
+    service.registerPlugin(plugin2);
+
+    await service.close();
+
+    expect(plugin1.callLog).toEqual(['close']);
+    expect(plugin2.callLog).toEqual(['close']);
+  });
+
+  it('should close no plugin when none are registered', async () => {
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it('should close the remaining plugins when one fails to close', async () => {
+    plugin1.exceptionsToRaise['close'] = new Error('socket still busy');
+    service.registerPlugin(plugin1);
+    service.registerPlugin(plugin2);
+
+    await expect(service.close()).rejects.toThrowError(
+      "Failed to close plugins: 'plugin1': socket still busy",
+    );
+    expect(plugin2.callLog).toEqual(['close']);
   });
 
   it('should throw an error when registering a duplicate plugin object', () => {
