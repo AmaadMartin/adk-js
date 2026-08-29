@@ -80,6 +80,11 @@ const lookup = tool(({id}: {id: string}) => `record ${id}`, {
 });
 ```
 
+One result is exempt. A tool that returns an object with a truthy `error`
+property keeps its result summarizable, so the model reads the error and can
+retry. An `error` property that is falsy, such as `{error: null, value: 1}`, is
+a real result and still skips summarization. This matches adk-python.
+
 ## Failure modes
 
 - The wrapped tool throws. `FunctionTool` wraps it as

@@ -98,6 +98,16 @@ function resolveParameters(tool: LangchainToolLike): Schema | undefined {
   }
 }
 
+/** Whether a result is an error payload: an object with a truthy `error`. */
+function isErrorResult(result: unknown): boolean {
+  return (
+    typeof result === 'object' &&
+    result !== null &&
+    'error' in result &&
+    Boolean(result.error)
+  );
+}
+
 /**
  * Adapter that lets an ADK agent call a LangChain JS tool.
  *
@@ -146,12 +156,13 @@ export class LangchainTool extends FunctionTool<Schema> {
    * Runs the wrapped tool and, for a `returnDirect` tool, asks the framework to
    * skip summarization.
    *
-   * A tool that fails throws instead of returning, so a run that reaches the
-   * flag produced a result.
+   * An error payload stays summarizable, because the model has to see the
+   * error to retry. A payload whose `error` is falsy is a real result and does
+   * skip summarization, which matches adk-python.
    */
   override async runAsync(req: RunAsyncToolRequest): Promise<unknown> {
     const result = await super.runAsync(req);
-    if (this.returnDirect) {
+    if (this.returnDirect && !isErrorResult(result)) {
       req.toolContext.actions.skipSummarization = true;
     }
     return result;

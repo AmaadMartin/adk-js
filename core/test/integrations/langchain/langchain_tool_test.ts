@@ -318,7 +318,7 @@ describe('LangchainTool', () => {
       expect(context.actions.skipSummarization).toBe(true);
     });
 
-    it('sets skipSummarization for a result that carries an error key', async () => {
+    it('leaves skipSummarization unset for a truthy error payload', async () => {
       const context = makeContext();
       const adkTool = new LangchainTool({
         tool: makeReturnDirectTool({error: 'boom'}),
@@ -327,6 +327,29 @@ describe('LangchainTool', () => {
       await expect(
         adkTool.runAsync({args: {}, toolContext: context}),
       ).resolves.toEqual({error: 'boom'});
+      expect(context.actions.skipSummarization).toBeUndefined();
+    });
+
+    it('sets skipSummarization for a falsy error key', async () => {
+      const context = makeContext();
+      const adkTool = new LangchainTool({
+        tool: makeReturnDirectTool({error: null, value: 1}),
+      });
+
+      await expect(
+        adkTool.runAsync({args: {}, toolContext: context}),
+      ).resolves.toEqual({error: null, value: 1});
+      expect(context.actions.skipSummarization).toBe(true);
+    });
+
+    it('sets skipSummarization for an object with no error key', async () => {
+      const context = makeContext();
+      const adkTool = new LangchainTool({
+        tool: makeReturnDirectTool({value: 1}),
+      });
+
+      await adkTool.runAsync({args: {}, toolContext: context});
+
       expect(context.actions.skipSummarization).toBe(true);
     });
 
