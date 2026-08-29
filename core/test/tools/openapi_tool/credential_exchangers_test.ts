@@ -11,10 +11,8 @@ import {
   AuthCredentialTypes,
 } from '../../../src/auth/auth_credential.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
-import {
-  resetServiceAccountTokenCache,
-  ServiceAccountCredentialExchanger,
-} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
+import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
+import {resetServiceAccountTokenCache} from '../../../src/tools/openapi_tool/auth/credential_exchangers/token_cache.js';
 
 vi.mock('google-auth-library', () => {
   return {

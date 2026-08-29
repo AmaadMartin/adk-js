@@ -23,10 +23,8 @@ import type {
   JWTOptions,
 } from 'google-auth-library';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {
-  resetServiceAccountTokenCache,
-  ServiceAccountCredentialExchanger,
-} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
+import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
+import {resetServiceAccountTokenCache} from '../../../src/tools/openapi_tool/auth/credential_exchangers/token_cache.js';
 
 interface FakeJwt {
   authorize: () => Promise<Credentials>;
