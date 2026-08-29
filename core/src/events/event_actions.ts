@@ -10,6 +10,8 @@ import {AuthConfig} from '../auth/auth_tool.js';
 import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
+import {UiWidget} from './ui_widget.js';
+
 /**
  * Represents the actions attached to an event.
  */
@@ -71,6 +73,12 @@ export interface EventActions {
    * execution for this invocation. Mirrors Python `EventActions.end_of_agent`.
    */
   endOfAgent?: boolean;
+
+  /**
+   * Widgets the host should render alongside this event, in the order the
+   * tools produced them.
+   */
+  renderUiWidgets?: UiWidget[];
 }
 
 /**
@@ -114,6 +122,7 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     isEmpty(actions.artifactDelta) &&
     isEmpty(actions.requestedAuthConfigs) &&
     isEmpty(actions.requestedToolConfirmations) &&
+    isEmpty(actions.renderUiWidgets) &&
     actions.skipSummarization === undefined &&
     actions.transferToAgent === undefined &&
     actions.escalate === undefined
@@ -132,6 +141,8 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
  *    last-writer-wins: the value from the last source that sets the field is
  *    kept.
+ * 3. **List fields** (`renderUiWidgets`) — concatenated in source order, and
+ *    left `undefined` when no source sets one.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -169,6 +180,13 @@ export function mergeEventActions(
         result.requestedToolConfirmations,
         source.requestedToolConfirmations,
       );
+    }
+
+    if (source.renderUiWidgets) {
+      result.renderUiWidgets = [
+        ...(result.renderUiWidgets ?? []),
+        ...source.renderUiWidgets,
+      ];
     }
 
     if (source.skipSummarization !== undefined) {
