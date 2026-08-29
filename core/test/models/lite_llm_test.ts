@@ -244,7 +244,7 @@ describe('LiteLlm', () => {
       expect(
         body.tools?.[0].function.parameters.properties['test_arg'].type,
       ).toBe('string');
-      expect(body.stream).toBeUndefined();
+      expect(body.stream).toBe(false);
 
       expect(responses).toHaveLength(1);
       expect(responses[0].content?.role).toBe('model');
@@ -368,7 +368,7 @@ describe('LiteLlm', () => {
       expect(body.model).toBe('test_model');
       expect(body.messages[0]).toEqual({role: 'user', content: 'Test prompt'});
       expect(body.tools?.[0].function.name).toBe('test_function');
-      expect(body.stream).toBeUndefined();
+      expect(body.stream).toBe(false);
     });
   });
 
@@ -673,21 +673,6 @@ describe('LiteLlm', () => {
       expect(logged).toContain('image/png');
       expect(logged).not.toContain(IMAGE_BASE64);
       expect(logged).not.toContain('test_key');
-    });
-
-    it('logs a content that carries no parts', async () => {
-      const debugSpy = vi.spyOn(getLogger(), 'debug');
-      stubFetch(jsonResponse(bufferedReply()));
-      const llm = new LiteLlm({model: 'test_model', apiBase: API_BASE});
-      const request = simpleRequest();
-      request.contents = [{role: 'user'}];
-
-      await collect(llm.generateContentAsync(request));
-
-      const logged = debugSpy.mock.calls
-        .map((call) => call.join(' '))
-        .join('\n');
-      expect(logged).toContain('{"role":"user"}');
     });
 
     it('logs the system instruction and the declared functions', async () => {

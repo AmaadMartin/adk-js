@@ -17,16 +17,11 @@ Anthropic's OpenAI-compatible endpoint.
 tools, then converts the reply back into `LlmResponse` objects. Tool calls
 survive the round trip, so a `FunctionTool` works the same as it does on Gemini.
 
-Provider routing lives in the endpoint, not in this class. The Python SDK's
-`LiteLlm` delegates to the `litellm` package, which owns the provider table and
-looks up each provider's credentials. JavaScript has no such library, so
-`LiteLlm` takes one base URL and one key. To reach a provider that does not
-speak the OpenAI protocol, run the LiteLLM proxy in front of it
-(`litellm --model anthropic/claude-sonnet-4`) and point `apiBase` at the proxy.
-
-`LiteLlm` is never registered in `LLMRegistry`. A base URL is always required,
-so a bare model name such as `gpt-4o` must not resolve to it. Construct an
-instance and hand it to the agent.
+To reach a provider that does not speak the OpenAI protocol, run the LiteLLM
+proxy in front of it (`litellm --model anthropic/claude-sonnet-4`) and point
+`apiBase` at the proxy. Construct the instance yourself and hand it to the
+agent: a base URL is always required, so a bare model name such as `gpt-4o`
+never resolves to `LiteLlm`.
 
 ## Get started
 

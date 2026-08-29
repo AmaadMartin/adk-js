@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Part} from '@google/genai';
-
 import {isBrowser} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+import {redactInlineData} from '../utils/redact_content.js';
 import {readSseData} from '../utils/sse_utils.js';
 
 import {BaseLlm} from './base_llm.js';
@@ -30,17 +29,8 @@ const API_KEY_ENV_VARIABLE_NAME = 'LITELLM_API_KEY';
 /** Path appended to the configured base URL. */
 const CHAT_COMPLETIONS_PATH = '/chat/completions';
 
-/**
- * Request body keys the class owns. They are stripped from `additionalArgs`,
- * so a caller cannot redirect the model or replace the conversation.
- */
-const RESERVED_BODY_KEYS = ['model', 'messages', 'tools', 'stream'];
-
 /** Cap on how much of a failed response body reaches the thrown error. */
 const MAX_ERROR_BODY_LENGTH = 2048;
-
-const LOG_SEPARATOR =
-  '-----------------------------------------------------------';
 
 /** Parameters for constructing a {@link LiteLlm}. */
 export interface LiteLlmParams {
@@ -69,8 +59,9 @@ export interface LiteLlmParams {
    */
   headers?: Record<string, string>;
   /**
-   * Extra request body fields, for example `temperature` or `max_tokens`. The
-   * class-owned keys `model`, `messages`, `tools` and `stream` are dropped.
+   * Extra request body fields, for example `temperature` or `max_tokens`.
+   * These cannot override `model`, `messages`, `tools` or `stream`, which the
+   * class writes after them.
    */
   additionalArgs?: Record<string, unknown>;
 }
@@ -88,6 +79,9 @@ export interface LiteLlmParams {
  * A base URL is always required, so instances are constructed explicitly and
  * handed to an agent. `LiteLlm` is never registered in `LLMRegistry`, and a
  * bare model name never resolves to it.
+ *
+ * See `docs/guides/models/lite_llm/index.md` for configuration, streaming and
+ * failure behaviour.
  *
  * @example
  * ```ts
@@ -130,7 +124,7 @@ export class LiteLlm extends BaseLlm {
     this.url = toChatCompletionsUrl(base);
     this.apiKey = apiKey ?? readEnv(API_KEY_ENV_VARIABLE_NAME);
     this.extraHeaders = headers ?? {};
-    this.additionalArgs = withoutReservedKeys(additionalArgs ?? {});
+    this.additionalArgs = additionalArgs ?? {};
   }
 
   override async *generateContentAsync(
@@ -138,15 +132,25 @@ export class LiteLlm extends BaseLlm {
     stream = false,
     abortSignal?: AbortSignal,
   ): AsyncGenerator<LlmResponse, void> {
-    logger.debug(buildRequestLog(llmRequest));
+    logger.debug(
+      'LiteLlm request',
+      JSON.stringify({
+        model: this.model,
+        systemInstruction: extractSystemInstruction(llmRequest.config ?? {}),
+        contents: llmRequest.contents.map(redactInlineData),
+        functions: requestFunctionDeclarations(llmRequest),
+      }),
+    );
 
-    const tools = requestToTools(llmRequest);
+    // `additionalArgs` is spread first, so the keys the class owns are written
+    // after it and a caller can never redirect the model or replace the
+    // conversation.
     const body = {
+      ...this.additionalArgs,
       model: this.model,
       messages: requestToMessages(llmRequest),
-      ...(tools && {tools}),
-      ...this.additionalArgs,
-      ...(stream && {stream: true}),
+      tools: requestToTools(llmRequest),
+      stream,
     };
 
     const response = await fetch(this.url, {
@@ -212,17 +216,6 @@ function toChatCompletionsUrl(apiBase: string): string {
     : `${trimmed}${CHAT_COMPLETIONS_PATH}`;
 }
 
-/** Copies extra request arguments, minus the keys the class owns. */
-function withoutReservedKeys(
-  args: Record<string, unknown>,
-): Record<string, unknown> {
-  const copy = {...args};
-  for (const key of RESERVED_BODY_KEYS) {
-    delete copy[key];
-  }
-  return copy;
-}
-
 /**
  * Aggregates a streamed response into `LlmResponse`s.
  *
@@ -280,50 +273,4 @@ async function* streamResponses(
       }
     }
   }
-}
-
-/**
- * Renders a request for the debug log.
- *
- * Inline media bytes are dropped, so a log line stays readable and no image
- * payload is written to disk. Headers are never logged, which keeps the API
- * key out of the log.
- */
-function buildRequestLog(request: LlmRequest): string {
-  const functionLogs = requestFunctionDeclarations(request).map((declaration) =>
-    JSON.stringify(declaration),
-  );
-  const contentLogs = request.contents.map((content) =>
-    JSON.stringify(withoutInlineBytes(content)),
-  );
-
-  return [
-    'LLM Request:',
-    LOG_SEPARATOR,
-    'System Instruction:',
-    extractSystemInstruction(request.config ?? {}) ?? '',
-    LOG_SEPARATOR,
-    'Contents:',
-    ...contentLogs,
-    LOG_SEPARATOR,
-    'Functions:',
-    ...functionLogs,
-    LOG_SEPARATOR,
-  ].join('\n');
-}
-
-/** Returns the content with every inline media payload removed. */
-function withoutInlineBytes(content: Content): Content {
-  if (!content.parts) {
-    return content;
-  }
-  return {...content, parts: content.parts.map(withoutPartInlineBytes)};
-}
-
-/** Returns the part with its inline media payload removed. */
-function withoutPartInlineBytes(part: Part): Part {
-  if (!part.inlineData) {
-    return part;
-  }
-  return {...part, inlineData: {...part.inlineData, data: undefined}};
 }
