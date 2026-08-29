@@ -94,11 +94,10 @@ export class PlanReActPlanner implements BasePlanner {
 
 /** Removes every planning tag from the text. */
 function stripPlanningTags(text: string): string {
-  let stripped = text;
-  for (const tag of PLANNING_TAGS) {
-    stripped = stripped.split(tag).join('');
-  }
-  return stripped;
+  return PLANNING_TAGS.reduce(
+    (stripped, tag) => stripped.replaceAll(tag, ''),
+    text,
+  );
 }
 
 /**
