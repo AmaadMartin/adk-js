@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {AuthCredentialMissingError, CredentialExchangeError} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AuthCredential,
@@ -31,6 +32,7 @@ const authMocks = vi.hoisted(() => {
     }>
   >();
   const authorize = vi.fn<() => Promise<{access_token?: string}>>();
+  const fetchIdToken = vi.fn<(audience: string) => Promise<string>>();
   const googleAuthOptions = vi.fn<(options?: {scopes?: string[]}) => void>();
   const jwtOptions =
     vi.fn<(options: {email: string; key: string; scopes?: string[]}) => void>();
@@ -39,6 +41,7 @@ const authMocks = vi.hoisted(() => {
     getProjectId,
     getClient,
     authorize,
+    fetchIdToken,
     googleAuthOptions,
     jwtOptions,
   };
@@ -55,6 +58,7 @@ vi.mock('google-auth-library', () => ({
   },
   JWT: class {
     authorize = authMocks.authorize;
+    fetchIdToken = authMocks.fetchIdToken;
 
     constructor(options: {email: string; key: string; scopes?: string[]}) {
       authMocks.jwtOptions(options);
@@ -154,6 +158,22 @@ describe('ServiceAccountCredentialExchanger access token', () => {
     expect(result.credential.http?.credentials.token).toBe('adc-access-token');
     expect(result.credential.http?.additionalHeaders).toBeUndefined();
     expect(authMocks.getProjectId).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to the ADC project when the client reports an empty one', async () => {
+    authMocks.getClient.mockResolvedValue({
+      quotaProjectId: '',
+      getAccessToken: authMocks.getAccessToken,
+    });
+    authMocks.getProjectId.mockResolvedValue('adc-project');
+
+    const result = await exchanger.exchange({
+      authCredential: serviceAccountCredential({useDefaultCredential: true}),
+    });
+
+    expect(result.credential.http?.additionalHeaders).toEqual({
+      [QUOTA_PROJECT_HEADER]: 'adc-project',
+    });
   });
 
   it('defaults the ADC scope to cloud-platform', async () => {
@@ -258,7 +278,7 @@ describe('ServiceAccountCredentialExchanger access token', () => {
         }),
       }),
     ).rejects.toThrow(
-      'Failed to exchange service account token: invalid_grant',
+      'Failed to exchange explicit service account token: invalid_grant',
     );
   });
 
@@ -273,8 +293,8 @@ describe('ServiceAccountCredentialExchanger access token', () => {
         }),
       }),
     ).rejects.toThrow(
-      'Failed to exchange service account token: Failed to get access token ' +
-        'from explicit credentials',
+      'Failed to exchange explicit service account token: Failed to get ' +
+        'access token from explicit credentials',
     );
   });
 
@@ -286,7 +306,7 @@ describe('ServiceAccountCredentialExchanger access token', () => {
         authCredential: serviceAccountCredential({useDefaultCredential: true}),
       }),
     ).rejects.toThrow(
-      'Failed to exchange service account token: ADC not found',
+      'Failed to exchange default service account token: ADC not found',
     );
   });
 
@@ -298,8 +318,133 @@ describe('ServiceAccountCredentialExchanger access token', () => {
         authCredential: serviceAccountCredential({useDefaultCredential: true}),
       }),
     ).rejects.toThrow(
-      'Failed to exchange service account token: Failed to get access token ' +
-        'from default credentials',
+      'Failed to exchange default service account token: Failed to get ' +
+        'access token from default credentials',
     );
+  });
+});
+
+/** Returns the error the exchange rejects with. */
+async function exchangeError(authCredential: AuthCredential): Promise<unknown> {
+  return new ServiceAccountCredentialExchanger()
+    .exchange({authCredential})
+    .then(
+      () => expect.fail('the exchange resolved'),
+      (error: unknown) => error,
+    );
+}
+
+describe('ServiceAccountCredentialExchanger error types', () => {
+  const AUDIENCE = 'https://my-service.run.app';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMocks.getAccessToken.mockResolvedValue({token: 'adc-access-token'});
+    authMocks.getClient.mockResolvedValue({
+      getAccessToken: authMocks.getAccessToken,
+    });
+    authMocks.getProjectId.mockRejectedValue(
+      new Error('Unable to detect a Project Id'),
+    );
+    authMocks.authorize.mockResolvedValue({access_token: 'sa-access-token'});
+    authMocks.fetchIdToken.mockResolvedValue('an-id-token');
+  });
+
+  it('reports a credential with no service account as missing', async () => {
+    const error = await exchangeError({
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+    });
+
+    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+  });
+
+  it('reports absent key material as missing', async () => {
+    const error = await exchangeError(
+      serviceAccountCredential({
+        useDefaultCredential: false,
+        scopes: [BIGQUERY_SCOPE],
+      }),
+    );
+
+    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+  });
+
+  it('reports absent key material on the ID token path as missing', async () => {
+    const error = await exchangeError(
+      serviceAccountCredential({
+        useDefaultCredential: false,
+        useIdToken: true,
+        audience: AUDIENCE,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+  });
+
+  it('reports absent scopes as missing', async () => {
+    const error = await exchangeError(
+      serviceAccountCredential({serviceAccountCredential: SA_CREDENTIAL}),
+    );
+
+    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+  });
+
+  it('reports a failed explicit access token exchange as missing', async () => {
+    authMocks.authorize.mockRejectedValue(new Error('invalid_grant'));
+
+    const error = await exchangeError(
+      serviceAccountCredential({
+        serviceAccountCredential: SA_CREDENTIAL,
+        scopes: [BIGQUERY_SCOPE],
+      }),
+    );
+
+    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+  });
+
+  it('reports a failed ADC access token exchange as missing', async () => {
+    authMocks.getClient.mockRejectedValue(new Error('ADC not found'));
+
+    const error = await exchangeError(
+      serviceAccountCredential({useDefaultCredential: true}),
+    );
+
+    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+  });
+
+  it('reports a failed ID token exchange as missing', async () => {
+    authMocks.fetchIdToken.mockRejectedValue(new Error('invalid_grant'));
+
+    const error = await exchangeError(
+      serviceAccountCredential({
+        serviceAccountCredential: SA_CREDENTIAL,
+        useIdToken: true,
+        audience: AUDIENCE,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(AuthCredentialMissingError);
+  });
+
+  it('does not report the wrong credential type as missing', async () => {
+    const error = await exchangeError({
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'an-api-key',
+    });
+
+    expect(error).toBeInstanceOf(CredentialExchangeError);
+    expect(error).not.toBeInstanceOf(AuthCredentialMissingError);
+  });
+
+  it('does not report an absent audience as missing', async () => {
+    const error = await exchangeError(
+      serviceAccountCredential({
+        serviceAccountCredential: SA_CREDENTIAL,
+        useIdToken: true,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(CredentialExchangeError);
+    expect(error).not.toBeInstanceOf(AuthCredentialMissingError);
   });
 });

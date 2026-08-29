@@ -13,6 +13,7 @@ import {
 } from '../../../../auth/auth_credential.js';
 import {AuthScheme} from '../../../../auth/auth_schemes.js';
 import {
+  AuthCredentialMissingError,
   BaseCredentialExchanger,
   CredentialExchangeError,
   ExchangeResult,
@@ -28,9 +29,6 @@ const DEFAULT_SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
  * caller's, so the exchange states the project explicitly.
  */
 const QUOTA_PROJECT_HEADER = 'x-goog-user-project';
-
-/** Shared by the two access-token paths; the ID-token path has its own. */
-const ACCESS_TOKEN_FAILURE = 'Failed to exchange service account token';
 
 /**
  * Builds the HTTP bearer credential the exchange returns.
@@ -59,27 +57,12 @@ function requireExplicitCredential(
   saConfig: ServiceAccount,
 ): ServiceAccountCredential {
   if (!saConfig.serviceAccountCredential) {
-    throw new CredentialExchangeError(
+    throw new AuthCredentialMissingError(
       'Service account credentials are missing. serviceAccountCredential is ' +
         'required when useDefaultCredential is false.',
     );
   }
   return saConfig.serviceAccountCredential;
-}
-
-/**
- * Returns the project Application Default Credentials resolve to, or
- * `undefined` when the environment declares none. `getProjectId` rejects
- * instead of returning null, and a missing project is not a failure here.
- */
-async function resolveAdcProjectId(
-  auth: GoogleAuth,
-): Promise<string | undefined> {
-  try {
-    return await auth.getProjectId();
-  } catch {
-    return undefined;
-  }
 }
 
 async function exchangeAdcAccessToken(
@@ -96,13 +79,23 @@ async function exchangeAdcAccessToken(
       throw new Error('Failed to get access token from default credentials');
     }
 
-    const quotaProjectId =
-      client.quotaProjectId ?? (await resolveAdcProjectId(auth));
+    // `||`, not `??`: an empty quota project falls through to the ADC project,
+    // as it does in adk-python.
+    let quotaProjectId = client.quotaProjectId;
+    if (!quotaProjectId) {
+      try {
+        // getProjectId fails, rather than resolving nullish, when the
+        // environment declares no project. That is "no header", not a failure.
+        quotaProjectId = await auth.getProjectId();
+      } catch {
+        quotaProjectId = undefined;
+      }
+    }
 
     return bearerResult(token, quotaProjectId);
   } catch (error: unknown) {
-    throw new CredentialExchangeError(
-      `${ACCESS_TOKEN_FAILURE}: ${formatError(error)}`,
+    throw new AuthCredentialMissingError(
+      `Failed to exchange default service account token: ${formatError(error)}`,
     );
   }
 }
@@ -125,8 +118,10 @@ async function exchangeExplicitAccessToken(
 
     return bearerResult(token);
   } catch (error: unknown) {
-    throw new CredentialExchangeError(
-      `${ACCESS_TOKEN_FAILURE}: ${formatError(error)}`,
+    throw new AuthCredentialMissingError(
+      `Failed to exchange explicit service account token: ${formatError(
+        error,
+      )}`,
     );
   }
 }
@@ -140,7 +135,7 @@ async function exchangeForAccessToken(
 
   const creds = requireExplicitCredential(saConfig);
   if (!saConfig.scopes?.length) {
-    throw new CredentialExchangeError(
+    throw new AuthCredentialMissingError(
       'scopes are required when using explicit service account credentials ' +
         'for access token exchange.',
     );
@@ -179,7 +174,7 @@ async function exchangeForIdToken(
 
     return bearerResult(token);
   } catch (error: unknown) {
-    throw new CredentialExchangeError(
+    throw new AuthCredentialMissingError(
       `Failed to exchange service account for ID token: ${formatError(error)}`,
     );
   }
@@ -211,7 +206,7 @@ export class ServiceAccountCredentialExchanger implements BaseCredentialExchange
       );
     }
     if (!authCredential.serviceAccount) {
-      throw new CredentialExchangeError(
+      throw new AuthCredentialMissingError(
         'Service account credentials are missing. Please provide them, or set ' +
           '`useDefaultCredential = true` to use application default credential ' +
           'in a hosted service like Cloud Run.',

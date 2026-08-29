@@ -175,7 +175,7 @@ describe('ServiceAccountCredentialExchanger', () => {
         authCredential: credential as unknown as AuthCredential,
       }),
     ).rejects.toThrow(
-      'Failed to exchange service account token: Failed to get access token from explicit credentials',
+      'Failed to exchange explicit service account token: Failed to get access token from explicit credentials',
     );
   });
 
@@ -205,7 +205,9 @@ describe('ServiceAccountCredentialExchanger', () => {
       exchanger.exchange({
         authCredential: credential as unknown as AuthCredential,
       }),
-    ).rejects.toThrow('Failed to exchange service account token: Auth failed');
+    ).rejects.toThrow(
+      'Failed to exchange explicit service account token: Auth failed',
+    );
   });
 });
 
