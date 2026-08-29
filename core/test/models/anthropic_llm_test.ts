@@ -746,6 +746,96 @@ describe('Claude on Vertex AI', () => {
     expect(String(failure)).toContain('ANTHROPIC_API_KEY');
     expect(String(failure)).toContain('AnthropicLlm');
   });
+
+  it('names the project and location parameters in the error', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', '');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', '');
+    const llm = new Claude();
+
+    const failure = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    ).catch((error: unknown) => error);
+
+    expect(String(failure)).toContain('"project"');
+    expect(String(failure)).toContain('"location"');
+  });
+
+  it('prefers the project and the location parameters over the environment', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-location');
+    const llm = new Claude({
+      project: 'param-project',
+      location: 'param-location',
+    });
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    expect(vertexOptions.mock.calls[0][0]).toMatchObject({
+      projectId: 'param-project',
+      region: 'param-location',
+    });
+  });
+
+  it('targets two regions from two instances in one process', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', '');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', '');
+    const east = new Claude({project: 'p', location: 'us-east5'});
+    const west = new Claude({project: 'p', location: 'europe-west1'});
+
+    await collect(east.generateContentAsync(makeRequest(), false));
+    await collect(west.generateContentAsync(makeRequest(), false));
+
+    expect(vertexOptions.mock.calls[0][0]).toMatchObject({region: 'us-east5'});
+    expect(vertexOptions.mock.calls[1][0]).toMatchObject({
+      region: 'europe-west1',
+    });
+  });
+
+  it('falls back to the environment for the parameter left unset', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-location');
+    const llm = new Claude({location: 'param-location'});
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    expect(vertexOptions.mock.calls[0][0]).toMatchObject({
+      projectId: 'env-project',
+      region: 'param-location',
+    });
+  });
+
+  it('prefers the model resource name over the parameters', async () => {
+    const llm = new Claude({
+      model:
+        'projects/name-project/locations/name-location/publishers/anthropic/models/claude-3-5-sonnet-v2@20241022',
+      project: 'param-project',
+      location: 'param-location',
+    });
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    expect(vertexOptions.mock.calls[0][0]).toMatchObject({
+      projectId: 'name-project',
+      region: 'name-location',
+    });
+  });
+
+  it('uses the parameters in a browser, where the environment is unreadable', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-location');
+    vi.stubGlobal('window', {navigator: {userAgent: 'Mozilla/5.0'}});
+    const llm = new Claude({
+      project: 'param-project',
+      location: 'param-location',
+    });
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    expect(vertexOptions.mock.calls[0][0]).toMatchObject({
+      projectId: 'param-project',
+      region: 'param-location',
+    });
+  });
 });
 
 describe('model name resolution', () => {

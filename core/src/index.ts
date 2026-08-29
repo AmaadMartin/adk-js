@@ -29,6 +29,7 @@ export type {
   AnthropicLlmParams,
   AnthropicMessageStream,
   AnthropicMessagesClient,
+  ClaudeParams,
 } from './models/anthropic_llm.js';
 export type {
   AnthropicEffort,

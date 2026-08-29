@@ -108,6 +108,14 @@ export interface AnthropicLlmParams {
   client?: AnthropicMessagesClient;
 }
 
+/** Parameters for creating a {@link Claude}. */
+export interface ClaudeParams extends AnthropicLlmParams {
+  /** Vertex AI project. Falls back to `GOOGLE_CLOUD_PROJECT`. */
+  project?: string;
+  /** Vertex AI location. Falls back to `GOOGLE_CLOUD_LOCATION`. */
+  location?: string;
+}
+
 /** Collects the function declarations of every tool on the request. */
 function collectFunctionDeclarations(
   config?: GenerateContentConfig,
@@ -391,14 +399,26 @@ export class AnthropicLlm extends BaseLlm {
  *
  * `model` defaults to `claude-3-5-sonnet-v2@20241022`.
  *
- * The project and the location come from `GOOGLE_CLOUD_PROJECT` and
- * `GOOGLE_CLOUD_LOCATION`, or from a full `projects/.../locations/...` model
- * resource name, which takes precedence. They are read on first use, so
- * constructing the model in an unconfigured environment does not throw.
+ * The project and the location come from the `project` and `location`
+ * parameters, then from `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`. A
+ * full `projects/.../locations/...` model resource name names both inline and
+ * takes precedence over either. They are read on first use, so constructing
+ * the model in an unconfigured environment does not throw.
  */
 export class Claude extends AnthropicLlm {
-  constructor({model, maxTokens, client}: AnthropicLlmParams = {}) {
+  private readonly project?: string;
+  private readonly location?: string;
+
+  constructor({
+    model,
+    maxTokens,
+    client,
+    project,
+    location,
+  }: ClaudeParams = {}) {
     super({model: model ?? DEFAULT_CLAUDE_VERTEX_MODEL, maxTokens, client});
+    this.project = project;
+    this.location = location;
   }
 
   protected override createClient(): Promise<AnthropicMessagesClient> {
@@ -420,8 +440,8 @@ export class Claude extends AnthropicLlm {
     const env: Record<string, string | undefined> = isBrowser()
       ? {}
       : process.env;
-    let projectId = env[PROJECT_ENV_VARIABLE_NAME];
-    let region = env[LOCATION_ENV_VARIABLE_NAME];
+    let projectId = this.project ?? env[PROJECT_ENV_VARIABLE_NAME];
+    let region = this.location ?? env[LOCATION_ENV_VARIABLE_NAME];
 
     const match = VERTEX_PROJECT_AND_LOCATION.exec(this.model);
     if (match) {
@@ -433,8 +453,9 @@ export class Claude extends AnthropicLlm {
       throw new Error(
         `The model "${this.model}" resolves to Claude served from Vertex AI, ` +
           `which needs ${PROJECT_ENV_VARIABLE_NAME} and ` +
-          `${LOCATION_ENV_VARIABLE_NAME} to be set. To call the Anthropic ` +
-          `API directly instead, set ANTHROPIC_API_KEY and give the agent an ` +
+          `${LOCATION_ENV_VARIABLE_NAME} to be set, or the "project" and ` +
+          `"location" parameters to be passed. To call the Anthropic API ` +
+          `directly instead, set ANTHROPIC_API_KEY and give the agent an ` +
           `AnthropicLlm instance as its model.`,
       );
     }
