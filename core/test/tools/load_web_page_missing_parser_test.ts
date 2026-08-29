@@ -14,7 +14,16 @@ const {httpRequestMock, httpsRequestMock, lookupMock} = vi.hoisted(() => ({
 }));
 
 vi.mock('parse5', () =>
-  Promise.reject(new Error("Cannot find module 'parse5'")),
+  Promise.reject(
+    // The shape Node raises for an unresolvable specifier, so the tool's
+    // loadOptionalPeer call translates it the way a real missing install does.
+    Object.assign(
+      new Error("Cannot find package 'parse5' imported from /app"),
+      {
+        code: 'ERR_MODULE_NOT_FOUND',
+      },
+    ),
+  ),
 );
 
 vi.mock('node:dns/promises', () => ({lookup: lookupMock}));
@@ -29,6 +38,14 @@ vi.mock('node:https', async (importOriginal) => ({
   request: httpsRequestMock,
 }));
 
+/**
+ * Vitest replaces a mock factory's rejection with an error of its own, so the
+ * `ERR_MODULE_NOT_FOUND` below never reaches `loadOptionalPeer` and the
+ * translated "install parse5" message cannot be asserted here. That message is
+ * covered by `core/test/utils/optional_peer_test.ts`. What this file pins is
+ * the tool's own behaviour: a parser it cannot load is reported by throwing,
+ * before it parses the url or touches the network.
+ */
 describe('loadWebPage when parse5 cannot be loaded', () => {
   it('rejects instead of returning the failure string', async () => {
     // The reference raises ImportError outside its try/except, so a missing

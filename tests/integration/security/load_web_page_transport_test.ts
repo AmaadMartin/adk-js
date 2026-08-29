@@ -71,12 +71,14 @@ describe('loadWebPage over a real proxy', () => {
   let proxied: string[];
   /** The status the origin answers with. */
   let originStatus: number;
+  /** The body the origin answers with. */
+  let pageHtml: string;
   const savedEnv = new Map<string, string | undefined>();
 
   beforeAll(async () => {
     origin = createServer((req, res) => {
       res.writeHead(originStatus, {'content-type': 'text/html'});
-      res.end(PAGE_HTML);
+      res.end(pageHtml);
     });
     await listen(origin);
 
@@ -105,6 +107,7 @@ describe('loadWebPage over a real proxy', () => {
   beforeEach(() => {
     proxied = [];
     originStatus = 200;
+    pageHtml = PAGE_HTML;
     for (const name of PROXY_ENV_NAMES) {
       savedEnv.set(name, process.env[name]);
       delete process.env[name];
@@ -149,6 +152,20 @@ describe('loadWebPage over a real proxy', () => {
 
     expect(result).toBe('Failed to fetch url: http://origin.example/page');
     expect(proxied).toEqual(['http://origin.example/page']);
+  });
+
+  it('refuses a nesting bomb without stalling the event loop', async () => {
+    // parse5's tree construction is quadratic in nesting depth, so an
+    // unbounded parse of this page blocks the process for about 13 seconds.
+    pageHtml = '<div>'.repeat(40_000) + 'x' + '</div>'.repeat(40_000);
+    const startedAt = Date.now();
+
+    const result = await loadWebPage('http://origin.example/page', {
+      proxy: `http://127.0.0.1:${portOf(proxy)}`,
+    });
+
+    expect(result).toBe('Failed to fetch url: http://origin.example/page');
+    expect(Date.now() - startedAt).toBeLessThan(2000);
   });
 
   it('takes the direct path when no_proxy covers the host', async () => {

@@ -24,8 +24,9 @@ URL to the IP: the `Host` header and the TLS certificate check still use the
 hostname the caller wrote. Redirects are never followed, because a redirect is a
 second URL that the first one chose.
 
-The tool never throws. Every failure returns `Failed to fetch url: <url>`, so a
-model always receives a value it can act on.
+Every failure to read a page returns `Failed to fetch url: <url>`, so a model
+always receives a value it can act on. The one exception is a missing `parse5`,
+which throws; see [Text extraction](#text-extraction).
 
 ## Get started
 
@@ -103,6 +104,15 @@ configuration problem rather than a page it could not read.
 
 The body is read into memory and is capped at 10 MiB; a larger response returns
 the failure string rather than a truncated page.
+
+Markup nested deeper than 256 elements returns the failure string too. `parse5`
+builds the tree synchronously and its cost grows with the square of the nesting
+depth, so 40,000 nested elements in 430 KiB take about 13 seconds during which
+nothing else in the process runs. A page is chosen by a model, so that is a
+denial of service worth refusing. Real documents are far shallower.
+
+The whole call, including parsing and text extraction, is bounded by
+`timeoutMs`.
 
 The tool needs Node built-ins (`node:http`, `node:https`, `node:dns`), so it
 does not run in a browser bundle.

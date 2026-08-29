@@ -717,6 +717,18 @@ describe('loadWebPage', () => {
         host: 'proxy.example.test',
         path: 'http://does-not-resolve.invalid/page',
       });
+    });
+
+    it('keeps the fragment out of the target it sends to the proxy', async () => {
+      respondWith('<p>This page has enough words to keep.</p>');
+
+      await loadWebPage('http://does-not-resolve.invalid/page?q=1#secret', {
+        proxy: PROXY,
+      });
+
+      expect(sentRequests[0].options.path).toBe(
+        'http://does-not-resolve.invalid/page?q=1',
+      );
       expect(sentRequests[0].options.headers).toMatchObject({
         host: 'does-not-resolve.invalid',
       });
@@ -917,6 +929,39 @@ describe('loadWebPage', () => {
         Buffer.alloc(1024, 0x20),
       ]);
       respondWith(body);
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('This page has enough words to keep.');
+    });
+
+    it('returns the failure string for a nesting bomb, without stalling', async () => {
+      resolveTo('93.184.216.34');
+      respondWith(`<div>`.repeat(40_000) + 'x' + '</div>'.repeat(40_000));
+      const startedAt = Date.now();
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+      expect(Date.now() - startedAt).toBeLessThan(2000);
+    });
+
+    it('returns the failure string for a body in an encoding it cannot read', async () => {
+      resolveTo('93.184.216.34');
+      respondWith('<p>This page has enough words to keep.</p>', {
+        headers: {'content-encoding': 'gzip'},
+      });
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+    });
+
+    it('reads a body the server marks as identity encoded', async () => {
+      resolveTo('93.184.216.34');
+      respondWith('<p>This page has enough words to keep.</p>', {
+        headers: {'content-encoding': 'identity'},
+      });
 
       const result = await loadWebPage('https://example.com/');
 

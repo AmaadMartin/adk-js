@@ -4,13 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {parse} from 'parse5';
+import {defaultTreeAdapter, parse} from 'parse5';
 import {describe, expect, it} from 'vitest';
-import {htmlToText} from '../../src/utils/html_text_utils.js';
+import {
+  boundedTreeAdapter,
+  htmlToText,
+} from '../../src/utils/html_text_utils.js';
+
+/** The deepest nesting `boundedTreeAdapter` accepts. */
+const MAX_PARSE_DEPTH = 256;
+
+/** Parses `html` under a deadline only an explicit limit can beat. */
+function parseBounded(html: string, expiresAt = Date.now() + 600_000) {
+  const treeAdapter = boundedTreeAdapter(defaultTreeAdapter, expiresAt);
+  return parse(html, {treeAdapter});
+}
 
 /** Extracts the text of `html`, the way the tool does. */
 function extract(html: string): string {
-  return htmlToText(parse(html));
+  return htmlToText(parseBounded(html));
+}
+
+/** Wraps `text` in `depth` nested `div` elements. */
+function nest(depth: number, text: string): string {
+  return '<div>'.repeat(depth) + text + '</div>'.repeat(depth);
 }
 
 describe('htmlToText', () => {
@@ -118,5 +135,72 @@ describe('htmlToText', () => {
     it('omits the doctype', () => {
       expect(extract('<!DOCTYPE html><p>kept text</p>')).toBe('kept text');
     });
+  });
+});
+
+describe('boundedTreeAdapter', () => {
+  it('builds an ordinary document exactly as the base adapter does', () => {
+    const html = '<p>first line</p><table><tr><td>cell text</td></tr></table>';
+
+    expect(htmlToText(parseBounded(html))).toBe(
+      htmlToText(parse(html, {treeAdapter: defaultTreeAdapter})),
+    );
+  });
+
+  it('accepts markup nested up to the depth limit', () => {
+    // html > body > 253 divs is 255 elements, and the text node is the 256th.
+    const html = nest(MAX_PARSE_DEPTH - 3, 'deep text is still read');
+
+    expect(extract(html)).toBe('deep text is still read');
+  });
+
+  it('refuses markup nested past the depth limit', () => {
+    expect(() => parseBounded(nest(MAX_PARSE_DEPTH + 1, 'x'))).toThrow(
+      `Markup nests deeper than ${MAX_PARSE_DEPTH} elements`,
+    );
+  });
+
+  it('refuses a nesting bomb quickly instead of parsing it', () => {
+    // 40_000 nested elements take about 13 seconds without the limit, on the
+    // main thread, so nothing else in the process runs meanwhile.
+    const bomb = nest(40_000, 'x');
+    const startedAt = Date.now();
+
+    expect(() => parseBounded(bomb)).toThrow(/nests deeper than/);
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+  });
+
+  it('stops once the deadline has passed', () => {
+    expect(() =>
+      parseBounded('<p>anything at all</p>', Date.now() - 1),
+    ).toThrow('Request timed out');
+  });
+
+  it('reads a document that fits inside the deadline', () => {
+    expect(
+      htmlToText(parseBounded('<p>read me</p>', Date.now() + 600_000)),
+    ).toBe('read me');
+  });
+});
+
+describe('boundedTreeAdapter with foster parenting', () => {
+  // Misnested table content is moved before the table, which is the one path
+  // that reaches the adapter's insertBefore.
+  const FOSTERED = '<table><div>moved out of the table</div><tr></tr></table>';
+
+  it('reads content the parser moves out of a table', () => {
+    expect(extract(FOSTERED)).toBe('moved out of the table');
+  });
+
+  it('applies the depth limit to fostered content', () => {
+    const deep = `<table>${nest(MAX_PARSE_DEPTH + 1, 'x')}<tr></tr></table>`;
+
+    expect(() => parseBounded(deep)).toThrow(/nests deeper than/);
+  });
+
+  it('applies the deadline to fostered content', () => {
+    expect(() => parseBounded(FOSTERED, Date.now() - 1)).toThrow(
+      'Request timed out',
+    );
   });
 });

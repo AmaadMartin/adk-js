@@ -16,7 +16,7 @@ import {connect as tlsConnect} from 'node:tls';
 
 import {z} from 'zod';
 
-import {htmlToText} from '../utils/html_text_utils.js';
+import {boundedTreeAdapter, htmlToText} from '../utils/html_text_utils.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 import {selectProxy} from '../utils/proxy_utils.js';
 import {
@@ -104,6 +104,13 @@ function resolveProxy(
   }
   const selected = proxy ?? selectProxy(target, process.env);
   return selected === undefined ? null : parseProxy(selected);
+}
+
+/** Returns the absolute URL to put on the wire, without the fragment. */
+function requestTarget(url: URL): string {
+  const target = new URL(url.href);
+  target.hash = '';
+  return target.href;
 }
 
 /** Returns the port a URL addresses, filling in the scheme default. */
@@ -222,7 +229,11 @@ async function withDeadline<T>(
   }
 }
 
-/** Sends `request` and returns its body, or `null` when the status is not 200. */
+/**
+ * Sends `request` and returns its body, or `null` when the response is one
+ * this tool cannot read: a status other than 200, or a body in an encoding it
+ * did not ask for.
+ */
 function sendRequest(
   request: ClientRequest,
   expiresAt: number,
@@ -233,7 +244,11 @@ function sendRequest(
       request.once('error', reject);
       request.end();
     });
-    if (res.statusCode !== 200) {
+    const encoding = res.headers['content-encoding'];
+    if (res.statusCode !== 200 || (encoding && encoding !== 'identity')) {
+      // The request asked for an identity encoding and this tool carries no
+      // decompressor, so a compressed body would decode to noise. Report the
+      // failure rather than hand a model garbage text.
       res.destroy();
       return null;
     }
@@ -365,8 +380,10 @@ async function requestViaProxy(
         host: url.host,
       },
       host: normalizeHost(proxy.hostname),
-      // Absolute-form request target, as an HTTP proxy expects.
-      path: url.href,
+      // Absolute-form request target, as an HTTP proxy expects. The fragment
+      // stays on the client, which is what `requests` does and what keeps it
+      // out of the proxy's logs.
+      path: requestTarget(url),
       port: portOf(proxy),
     });
     return sendRequest(request, expiresAt);
@@ -421,10 +438,13 @@ async function fetchBody(
  * loopback / link-local / shared / reserved / multicast address, and redirects
  * are never followed. The connection is pinned to the address that passed
  * vetting, so a name cannot be re-resolved to a different address after the
- * check. The body is read up to 10 MiB; a larger response fails.
+ * check. The body is read up to 10 MiB; a larger response fails, as does
+ * markup nested deeper than the parser's limit. `timeoutMs` bounds the whole
+ * call, parsing and text extraction included.
  *
  * Never throws for expected failures (bad scheme, blocked host, non-200,
- * timeout, network error); returns `Failed to fetch url: <url>` instead.
+ * timeout, network error, unreadable markup); returns
+ * `Failed to fetch url: <url>` instead.
  *
  * A proxy named by {@link LoadWebPageOptions.proxy} or by the environment
  * resolves the hostname itself, so pinning does not apply and a hostname
@@ -439,7 +459,7 @@ export async function loadWebPage(
   url: string,
   options?: LoadWebPageOptions,
 ): Promise<string> {
-  const {parse} = await loadOptionalPeer(
+  const {defaultTreeAdapter, parse} = await loadOptionalPeer(
     {packageName: 'parse5', feature: 'loadWebPage'},
     () => import('parse5'),
   );
@@ -448,9 +468,11 @@ export async function loadWebPage(
     const target = parseRequestTarget(url);
     const proxy = resolveProxy(target, options?.proxy);
     const body = await fetchBody(target, proxy, expiresAt);
-    return body === null
-      ? failedToFetchMessage(url)
-      : keepProseLines(htmlToText(parse(body)));
+    if (body === null) {
+      return failedToFetchMessage(url);
+    }
+    const treeAdapter = boundedTreeAdapter(defaultTreeAdapter, expiresAt);
+    return keepProseLines(htmlToText(parse(body, {treeAdapter})));
   } catch {
     return failedToFetchMessage(url);
   }
