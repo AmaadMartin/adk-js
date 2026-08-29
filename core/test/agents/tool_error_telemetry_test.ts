@@ -182,7 +182,7 @@ describe('tool error type telemetry', () => {
     const tool = new FunctionTool({
       name: 'auth_tool',
       description: 'Needs a credential.',
-      execute: (_input: string, toolContext?: Context) => {
+      execute: (_input: Record<string, unknown>, toolContext?: Context) => {
         toolContext?.requestCredential(authConfig);
         return {error: 'credential required'};
       },

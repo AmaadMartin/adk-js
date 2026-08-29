@@ -363,6 +363,8 @@ export type {
   Retriever,
   RetrieverToolParams,
 } from './tools/retrieval/retriever_tool.js';
+export {runWithSyncCallableRunner} from './tools/sync_callable_runner.js';
+export type {SyncCallableRunner} from './tools/sync_callable_runner.js';
 export {
   IntentMismatchError,
   ToolConfirmation,
