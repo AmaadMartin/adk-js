@@ -93,4 +93,5 @@ a real result and still skips summarization. This matches adk-python.
 - The model sends arguments the tool's schema rejects. LangChain's own
   validation throws, and the same wrapping applies. ADK does not validate the
   arguments itself, so the error text comes from LangChain.
-- The object you pass has no `invoke` method. The constructor throws.
+- The object you pass has no `invoke` method, or ends up with no name. The
+  constructor throws.

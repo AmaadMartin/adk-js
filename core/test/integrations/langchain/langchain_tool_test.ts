@@ -296,6 +296,12 @@ describe('LangchainTool', () => {
         'LangchainTool requires a name: the wrapped tool has none, so pass `name`.',
       );
     });
+
+    it('reports the missing invoke before the missing name', () => {
+      expect(() => new LangchainTool({tool: {}})).toThrow(
+        "Tool must be a LangChain tool with an 'invoke' method.",
+      );
+    });
   });
 
   describe('returnDirect', () => {

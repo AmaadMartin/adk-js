@@ -1,6 +1,6 @@
 # ADK Developer Guides
 
-Deep dives on individual adk-js features, for contributors and for users who need more than the API reference. Product documentation lives at [adk.dev](https://adk.dev/), and the API reference is generated from the source by typedoc. This directory mirrors the `docs/guides` tree in adk-python.
+This directory contains specific developer guides for the ADK JavaScript implementation. For the official ADK documentation, visit [adk.dev](https://adk.dev/). The API reference is generated from the source by typedoc.
 
 ## Index
 

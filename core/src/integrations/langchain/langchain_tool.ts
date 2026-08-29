@@ -118,36 +118,20 @@ function isErrorResult(result: unknown): boolean {
  * `@langchain/core` is an optional peer dependency. This module never imports
  * it, so an install that does not use LangChain pays nothing for this class.
  *
- * @example
- * ```ts
- * import {LangchainTool, LlmAgent} from '@google/adk';
- * import {tool} from '@langchain/core/tools';
- * import {z} from 'zod';
- *
- * const add = tool(({x, y}: {x: number; y: number}) => x + y, {
- *   name: 'add',
- *   description: 'Adds two numbers',
- *   schema: z.object({x: z.number(), y: z.number()}),
- * });
- *
- * const agent = new LlmAgent({
- *   name: 'calculator',
- *   model: 'gemini-2.5-flash',
- *   tools: [new LangchainTool({tool: add})],
- * });
- * ```
+ * See `docs/guides/tools/langchain_tool/index.md` for a worked example.
  */
 export class LangchainTool extends FunctionTool<Schema> {
   /** Whether the tool's result reaches the user unsummarized. */
   private readonly returnDirect: boolean;
 
   constructor(options: LangchainToolOptions) {
-    const entryPoint = resolveEntryPoint(options.tool);
     super({
+      // Resolved first so that a value which is not a LangChain tool reports
+      // the missing `invoke` rather than a missing name.
+      execute: resolveEntryPoint(options.tool),
       name: resolveName(options),
       description: options.description ?? options.tool.description ?? '',
       parameters: resolveParameters(options.tool),
-      execute: (input) => entryPoint(input),
     });
     this.returnDirect = options.tool.returnDirect ?? false;
   }
