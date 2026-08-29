@@ -264,6 +264,26 @@ describe('VertexAiExampleStore', () => {
     expect(example.output).toEqual([{role: 'model', parts: []}]);
   });
 
+  it('drops a part whose text is empty', async () => {
+    const store = storeWith({
+      results: [
+        similarExample({
+          similarityScore: 0.9,
+          searchKey: 'say something',
+          expectedContents: [
+            {role: 'model', parts: [{text: ''}, {text: 'Something.'}]},
+          ],
+        }),
+      ],
+    });
+
+    const [example] = await store.getExamples('say something');
+
+    expect(example.output).toEqual([
+      {role: 'model', parts: [{text: 'Something.'}]},
+    ]);
+  });
+
   it('maps a content without parts to an empty parts list', async () => {
     const store = storeWith({
       results: [
