@@ -6,30 +6,7 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 
-import {BaseTool} from './base_tool.js';
-
-/**
- * A unique symbol to identify ADK retrieval tool classes.
- * Defined once and shared by all BaseRetrievalTool instances.
- */
-const BASE_RETRIEVAL_TOOL_SIGNATURE_SYMBOL = Symbol.for(
-  'google.adk.baseRetrievalTool',
-);
-
-/**
- * Type guard to check if an object is an instance of BaseRetrievalTool.
- * @param obj The object to check.
- * @returns True if the object is an instance of BaseRetrievalTool, false
- *     otherwise.
- */
-export function isBaseRetrievalTool(obj: unknown): obj is BaseRetrievalTool {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    BASE_RETRIEVAL_TOOL_SIGNATURE_SYMBOL in obj &&
-    obj[BASE_RETRIEVAL_TOOL_SIGNATURE_SYMBOL] === true
-  );
-}
+import {BaseTool} from '../base_tool.js';
 
 /**
  * The base class for a tool that retrieves data for a natural-language query.
@@ -42,9 +19,6 @@ export function isBaseRetrievalTool(obj: unknown): obj is BaseRetrievalTool {
  * says so, so the model can act on it and continue the turn. Do not throw.
  */
 export abstract class BaseRetrievalTool extends BaseTool {
-  /** A unique symbol to identify ADK retrieval tool class. */
-  readonly [BASE_RETRIEVAL_TOOL_SIGNATURE_SYMBOL] = true;
-
   override _getDeclaration(): FunctionDeclaration {
     return {
       name: this.name,

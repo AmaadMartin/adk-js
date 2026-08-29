@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseRetrievalTool} from '../base_retrieval_tool.js';
 import {RunAsyncToolRequest} from '../base_tool.js';
+import {BaseRetrievalTool} from './base_retrieval_tool.js';
 
 /**
  * The metadata mode that makes a node return its raw text.

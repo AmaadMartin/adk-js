@@ -7,9 +7,6 @@
 import {
   BaseRetrievalTool,
   Context,
-  FunctionTool,
-  isBaseRetrievalTool,
-  isBaseTool,
   LlmRequest,
   RunAsyncToolRequest,
 } from '@google/adk';
@@ -120,53 +117,5 @@ describe('BaseRetrievalTool', () => {
     await expect(
       tool.processLlmRequest({llmRequest, toolContext}),
     ).rejects.toThrow('Duplicate tool name: test_retrieval');
-  });
-});
-
-describe('isBaseRetrievalTool', () => {
-  it('recognises a retrieval tool', () => {
-    expect(isBaseRetrievalTool(new TestRetrievalTool())).toBe(true);
-  });
-
-  it('keeps the tool a BaseTool, because the brand is additive', () => {
-    expect(isBaseTool(new TestRetrievalTool())).toBe(true);
-  });
-
-  it('rejects a tool that does not retrieve', () => {
-    const tool = new FunctionTool({
-      name: 'plain_tool',
-      description: 'A tool that retrieves nothing.',
-      execute: async () => 'result',
-    });
-
-    expect(isBaseRetrievalTool(tool)).toBe(false);
-  });
-
-  it('recognises a tool branded by a second copy of the package', () => {
-    // A `Symbol.for` brand lives in the global registry, so an instance built
-    // by another copy of adk-js in the same runtime carries the same key.
-    const fromOtherCopy = {
-      [Symbol.for('google.adk.baseRetrievalTool')]: true,
-    };
-
-    expect(isBaseRetrievalTool(fromOtherCopy)).toBe(true);
-  });
-
-  it('rejects a value that carries the brand with the wrong value', () => {
-    const impostor = {
-      [Symbol.for('google.adk.baseRetrievalTool')]: 'yes',
-    };
-
-    expect(isBaseRetrievalTool(impostor)).toBe(false);
-  });
-
-  it.each([
-    ['null', null],
-    ['undefined', undefined],
-    ['a string', 'test_retrieval'],
-    ['a number', 7],
-    ['a plain object', {}],
-  ])('rejects %s without throwing', (_name, value) => {
-    expect(isBaseRetrievalTool(value)).toBe(false);
   });
 });

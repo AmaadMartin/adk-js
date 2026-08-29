@@ -277,10 +277,6 @@ export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
-export {
-  BaseRetrievalTool,
-  isBaseRetrievalTool,
-} from './tools/base_retrieval_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
 export type {
   BaseToolParams,
@@ -328,6 +324,7 @@ export {
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
+export {BaseRetrievalTool} from './tools/retrieval/base_retrieval_tool.js';
 export {LlamaIndexRetrievalTool} from './tools/retrieval/llama_index_retrieval_tool.js';
 export type {
   LlamaIndexNode,
