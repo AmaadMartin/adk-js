@@ -5,10 +5,21 @@
  */
 
 import {describe, expect, it} from 'vitest';
+import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {
   createEventActions,
+  EventActions,
+  isDefaultEventActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
+import {ToolConfirmation} from '../../src/tools/tool_confirmation.js';
+
+function createTestAuthConfig(credentialKey: string): AuthConfig {
+  return {
+    authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},
+    credentialKey,
+  };
+}
 
 describe('createEventActions', () => {
   it('creates an EventActions with empty dicts and no scalar fields', () => {
@@ -40,7 +51,7 @@ describe('createEventActions', () => {
   });
 
   it('applies requestedAuthConfigs override', () => {
-    const authConfig = {scheme: 'oauth2'};
+    const authConfig = createTestAuthConfig('key-1');
     const actions = createEventActions({
       requestedAuthConfigs: {'call-1': authConfig},
     });
@@ -56,6 +67,44 @@ describe('createEventActions', () => {
     expect(actions.requestedToolConfirmations).toEqual({
       'call-1': confirmation,
     });
+  });
+});
+
+describe('isDefaultEventActions', () => {
+  it('returns true for freshly created actions', () => {
+    expect(isDefaultEventActions(createEventActions())).toBe(true);
+  });
+
+  const nonDefaults: Array<[string, Partial<EventActions>]> = [
+    ['stateDelta has an entry', {stateDelta: {jobStarted: true}}],
+    ['artifactDelta has an entry', {artifactDelta: {'report.pdf': 1}}],
+    [
+      'requestedAuthConfigs has an entry',
+      {
+        requestedAuthConfigs: {
+          'call-1': {
+            authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+            credentialKey: 'call-1-key',
+          },
+        },
+      },
+    ],
+    [
+      'requestedToolConfirmations has an entry',
+      {
+        requestedToolConfirmations: {
+          'call-1': new ToolConfirmation({hint: 'ok?', confirmed: false}),
+        },
+      },
+    ],
+    ['skipSummarization is true', {skipSummarization: true}],
+    ['skipSummarization is explicitly false', {skipSummarization: false}],
+    ['transferToAgent is set', {transferToAgent: 'other_agent'}],
+    ['escalate is set', {escalate: true}],
+  ];
+
+  it.each(nonDefaults)('returns false when %s', (_label, overrides) => {
+    expect(isDefaultEventActions(createEventActions(overrides))).toBe(false);
   });
 });
 
@@ -108,23 +157,25 @@ describe('mergeEventActions', () => {
   });
 
   it('merges requestedAuthConfigs from multiple sources', () => {
+    const authConfig1 = createTestAuthConfig('key-1');
+    const authConfig2 = createTestAuthConfig('key-2');
     const result = mergeEventActions([
       {
         stateDelta: {},
         artifactDelta: {},
-        requestedAuthConfigs: {'call-1': {scheme: 'oauth2'}},
+        requestedAuthConfigs: {'call-1': authConfig1},
         requestedToolConfirmations: {},
       },
       {
         stateDelta: {},
         artifactDelta: {},
-        requestedAuthConfigs: {'call-2': {scheme: 'apiKey'}},
+        requestedAuthConfigs: {'call-2': authConfig2},
         requestedToolConfirmations: {},
       },
     ]);
     expect(result.requestedAuthConfigs).toEqual({
-      'call-1': {scheme: 'oauth2'},
-      'call-2': {scheme: 'apiKey'},
+      'call-1': authConfig1,
+      'call-2': authConfig2,
     });
   });
 

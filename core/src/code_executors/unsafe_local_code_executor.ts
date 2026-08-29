@@ -39,6 +39,14 @@ const POWERSHELL_BASE_ARGS = [
 const CMD_BASE_ARGS = ['/D', '/c'] as const;
 
 /**
+ * Whether `commandPath` names Windows PowerShell (`powershell`) or PowerShell
+ * 7+ (`pwsh`). `path.win32` splits on both separators on every platform.
+ */
+function isPowerShellCommand(commandPath: string): boolean {
+  return /^(powershell|pwsh)(\.exe)?$/i.test(path.win32.basename(commandPath));
+}
+
+/**
  * Options for UnsafeLocalCodeExecutor.
  */
 export interface UnsafeLocalCodeExecutorOptions {
@@ -56,6 +64,10 @@ export interface UnsafeLocalCodeExecutorOptions {
   pythonCommandPath?: string;
   /**
    * The command to run Shell code. Default is `bash`.
+   *
+   * When it names `powershell` or `pwsh` (with or without `.exe`) the script
+   * is written as `.ps1` and run through PowerShell rather than as a bare
+   * shell script.
    */
   shellCommandPath?: string;
 }
@@ -65,12 +77,10 @@ async function createTempScriptFile(
   language: CodeExecutionLanguage,
   shellCommandPath?: string,
 ): Promise<{filePath: string; tempDir: string}> {
-  const tempDir = path.join(
-    os.tmpdir(),
-    'adk_js_unsafe_code_executor',
-    Date.now().toString() + '_' + Math.random().toString(36).slice(2),
+  // mkdtemp names the directory itself and creates it exclusively at 0o700.
+  const tempDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'adk_js_unsafe_code_executor_'),
   );
-  await fs.mkdir(tempDir, {recursive: true});
 
   const ext = getExtensionForLanguage(language, shellCommandPath) || '.js';
   const filePath = path.join(tempDir, `script${ext}`);
@@ -100,6 +110,9 @@ function getExtensionForLanguage(
   }
 
   if (language === CodeExecutionLanguage.SHELL) {
+    if (shellCommandPath && isPowerShellCommand(shellCommandPath)) {
+      return '.ps1';
+    }
     if (IS_WINDOWS) {
       if (shellCommandPath && shellCommandPath.toLowerCase().includes('cmd')) {
         return '.bat';
@@ -189,7 +202,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         command = this.pythonCommandPath;
       } else if (language === CodeExecutionLanguage.SHELL) {
         command = this.shellCommandPath;
-        if (this.shellCommandPath.toLowerCase().includes('powershell')) {
+        if (isPowerShellCommand(this.shellCommandPath)) {
           args = [...POWERSHELL_BASE_ARGS, filePath];
         } else if (this.shellCommandPath.toLowerCase().includes('cmd')) {
           args = [...CMD_BASE_ARGS, filePath];
@@ -217,14 +230,25 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         stderr: string;
         exitCode: number | null;
       }>((resolve) => {
-        const child = spawn(command, args, {
-          timeout: this.timeoutSeconds * 1000,
-          killSignal: 'SIGKILL',
-          cwd: tempDir,
-        });
+        const child = spawn(command, args, {cwd: tempDir});
 
         let stdout = '';
         let stderr = '';
+        let timedOut = false;
+
+        // `spawn`'s own `timeout` option kills the interpreter and then leaves
+        // us waiting on 'close', which only fires once every stdio stream is
+        // closed. An interpreter that forked rather than exec'd leaves a
+        // survivor holding those pipes, so 'close' never arrives and this
+        // promise never settles -- no timeout value bounds that wait. Run the
+        // timer here instead and release the read ends along with the kill, so
+        // the timeout is actually enforced. Mirrors LocalEnvironment.execute.
+        const timer = setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGKILL');
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+        }, this.timeoutSeconds * 1000);
 
         if (child.stdout) {
           child.stdout.on('data', (data) => {
@@ -243,7 +267,11 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         });
 
         child.on('close', (exitCode, signal) => {
-          if (signal === 'SIGKILL' || signal === 'SIGTERM') {
+          clearTimeout(timer);
+          // Prefer the flag over the signal: Windows does not report a
+          // terminating signal the way POSIX does, so a killed child can close
+          // with signal `null` there.
+          if (timedOut || signal === 'SIGKILL' || signal === 'SIGTERM') {
             stderr += `\nCode execution timed out after ${this.timeoutSeconds} seconds.`;
           } else if (exitCode !== 0 && exitCode !== null) {
             if (!stderr) {

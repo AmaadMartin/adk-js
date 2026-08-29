@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {isEmpty} from 'lodash-es';
+
 import {AuthConfig} from '../auth/auth_tool.js';
+import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
 /**
@@ -56,6 +59,18 @@ export interface EventActions {
    * call id.
    */
   requestedToolConfirmations: {[key: string]: ToolConfirmation};
+
+  /**
+   * Workflow: a serialized node/agent state snapshot used for resumable
+   * checkpointing. Mirrors Python `EventActions.agent_state`.
+   */
+  agentState?: Record<string, unknown>;
+
+  /**
+   * Workflow: marks that the emitting agent/workflow has reached the end of its
+   * execution for this invocation. Mirrors Python `EventActions.end_of_agent`.
+   */
+  endOfAgent?: boolean;
 }
 
 /**
@@ -79,6 +94,30 @@ export function createEventActions(
     requestedToolConfirmations: {},
     ...state,
   };
+}
+
+/**
+ * Returns whether the given {@link EventActions} still holds only its default
+ * values, i.e. the event carries no state, artifact, auth, confirmation,
+ * transfer, escalation or summarization signal.
+ *
+ * An actions object is considered non-default when any dictionary field has at
+ * least one entry, or when any scalar field has been explicitly set (including
+ * being set to `false`).
+ *
+ * @param actions - The actions to inspect.
+ * @returns `true` when every field is at its default value.
+ */
+export function isDefaultEventActions(actions: EventActions): boolean {
+  return (
+    isEmpty(actions.stateDelta) &&
+    isEmpty(actions.artifactDelta) &&
+    isEmpty(actions.requestedAuthConfigs) &&
+    isEmpty(actions.requestedToolConfirmations) &&
+    actions.skipSummarization === undefined &&
+    actions.transferToAgent === undefined &&
+    actions.escalate === undefined
+  );
 }
 
 /**
@@ -115,6 +154,9 @@ export function mergeEventActions(
 
     if (source.stateDelta) {
       Object.assign(result.stateDelta, source.stateDelta);
+      // The merged map is a new object; carry the write order with the entries
+      // so a late commit can still tell it has been superseded.
+      carryDeltaStamps(source.stateDelta, result.stateDelta);
     }
     if (source.artifactDelta) {
       Object.assign(result.artifactDelta, source.artifactDelta);

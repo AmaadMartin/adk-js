@@ -15,11 +15,10 @@ import {
 } from '@google/adk';
 import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
-import * as path from 'path';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
-import {getTempDir} from '../utils/file_utils.js';
+import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
@@ -45,14 +44,12 @@ function getLogLevelFromOptions(options: {
   }
 
   if (typeof options.log_level === 'string') {
-    return LOG_LEVEL_MAP[options.log_level.toLowerCase()] || LogLevel.INFO;
+    // `??`, not `||`: LogLevel.DEBUG is 0, so `||` fell through to INFO and
+    // made `--log_level debug` a silent no-op.
+    return LOG_LEVEL_MAP[options.log_level.toLowerCase()] ?? LogLevel.INFO;
   }
 
   return LogLevel.INFO;
-}
-
-function getAbsolutePath(p: string): string {
-  return path.isAbsolute(p) ? p : path.join(process.cwd(), p);
 }
 
 function getSessionServiceFromOptions(options: {
@@ -95,9 +92,26 @@ function getBoolean(option?: string | boolean): boolean {
   return false;
 }
 
+/**
+ * Splits the comma-separated --allowed_hosts value into a list, dropping
+ * empty/whitespace-only entries. An unset or empty option yields undefined
+ * rather than [], so it composes with ServerOptions.allowedHosts?: string[]
+ * without callers needing to special-case "no value provided".
+ */
+function getAllowedHosts(option?: string): string[] | undefined {
+  if (!option) {
+    return undefined;
+  }
+  const hosts = option
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean);
+  return hosts.length > 0 ? hosts : undefined;
+}
+
 const AGENT_DIR_ARGUMENT = new Argument(
   '[agents_dir]',
-  'Agent file or directory of agents to serve. For directory the internal structure should be agents_dir/{agentName}.js or agents_dir/{agentName}/agent.js. Agent file should has export of the rootAgent as instance of BaseAgent (e.g LlmAgent)',
+  'Agent file or directory of agents to serve. For directory the internal structure should be agents_dir/{agentName}.js or agents_dir/{agentName}/agent.js. Agent file should has export of the rootAgent as instance of BaseAgent (e.g LlmAgent) or a Workflow',
 ).default(process.cwd());
 const HOST_OPTION = new Option(
   '-h, --host <string>',
@@ -111,9 +125,16 @@ const ORIGINS_OPTION = new Option(
   '--allow_origins <string>',
   'Optional. The allow origins of the server',
 ).default('');
+const ALLOWED_HOSTS_OPTION = new Option(
+  '--allowed_hosts <string>',
+  'Optional. Comma-separated list of additional Host header values the ' +
+    'DNS-rebinding guard accepts, independent of --allow_origins. Use ' +
+    'this to widen the guard for a reverse proxy in front of a ' +
+    'loopback-bound server without opening --allow_origins to "*".',
+).default('');
 const VERBOSE_OPTION = new Option(
-  '-v, --verbose [boolean]',
-  'Optional. The verbose level of the server',
+  '-v, --verbose',
+  'Optional. Log at debug level. Shorthand for --log_level debug',
 ).default(false);
 const LOG_LEVEL_OPTION = new Option(
   '--log_level <string>',
@@ -137,7 +158,8 @@ const COMPILE_AGENT_FILE = new Option(
 ).default(true);
 const BUNDLE_AGENT_FILE = new Option(
   '--bundle [boolean]',
-  'Optional. Whether to compile ts agent file to js before execution',
+  'Optional. Whether to inline the agent file dependencies into a single ' +
+    'bundle before execution. Bundling also minifies the result.',
 ).default(true);
 const A2A_OPTION = new Option(
   '--a2a [boolean]',
@@ -217,6 +239,7 @@ export function createProgram(): Command {
     .addOption(HOST_OPTION)
     .addOption(PORT_OPTION)
     .addOption(ORIGINS_OPTION)
+    .addOption(ALLOWED_HOSTS_OPTION)
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
@@ -240,6 +263,7 @@ export function createProgram(): Command {
           port: parseInt(options['port'], 10),
           serveDebugUI: true,
           allowOrigins: options['allow_origins'],
+          allowedHosts: getAllowedHosts(options['allowed_hosts']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
@@ -263,6 +287,7 @@ export function createProgram(): Command {
     .addOption(HOST_OPTION)
     .addOption(PORT_OPTION)
     .addOption(ORIGINS_OPTION)
+    .addOption(ALLOWED_HOSTS_OPTION)
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
@@ -286,6 +311,7 @@ export function createProgram(): Command {
           port: parseInt(options['port'], 10),
           serveDebugUI: false,
           allowOrigins: options['allow_origins'],
+          allowedHosts: getAllowedHosts(options['allowed_hosts']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
@@ -387,6 +413,7 @@ export function createProgram(): Command {
         });
       } catch (error) {
         logger.error('Error running agent:', (error as Error).message);
+        process.exit(1);
       }
     });
 
@@ -410,8 +437,7 @@ export function createProgram(): Command {
     )
     .option(
       '--temp_folder [string]',
-      'Optional. Temp folder for the generated Cloud Run source files (default: a timestamped folder in the system temp directory).',
-      getTempDir('cloud_run_deploy_src'),
+      'Optional. Temp folder for the generated Cloud Run source files (default: a private directory created in the system temp directory).',
     )
     .addOption(ADK_VERSION_OPTION)
     .addOption(WITH_UI_OPTION)
@@ -475,8 +501,7 @@ export function createProgram(): Command {
       .addOption(REPOSITORY_DEPLOY_OPTION)
       .option(
         '--temp_folder [string]',
-        'Optional. Temp folder for the generated source files (default: a timestamped folder in the system temp directory).',
-        getTempDir('agent_engine_deploy_src'),
+        'Optional. Temp folder for the generated source files (default: a private directory created in the system temp directory).',
       )
       .addOption(ADK_VERSION_OPTION)
       .addOption(WITH_UI_OPTION)
