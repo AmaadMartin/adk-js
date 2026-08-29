@@ -188,6 +188,12 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {CrewaiTool} from './integrations/crewai/crewai_tool.js';
+export type {
+  CrewaiBaseTool,
+  CrewaiToolArgsSchema,
+  CrewaiToolOptions,
+} from './integrations/crewai/crewai_tool.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
