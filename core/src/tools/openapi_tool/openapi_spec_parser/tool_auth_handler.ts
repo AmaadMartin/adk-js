@@ -12,21 +12,14 @@ import {
 } from '../../../auth/auth_credential.js';
 import {AuthScheme, OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
-import {
-  AuthCredentialMissingError,
-  ExchangeResult,
-} from '../../../auth/exchanger/base_credential_exchanger.js';
 import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {stableDigest} from '../../../utils/hash_utils.js';
-import {logger} from '../../../utils/logger.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
 export interface AuthPreparationResult {
   state: 'pending' | 'done';
-  /** The scheme the credential authenticates, when the tool declares one. */
-  authScheme?: AuthScheme;
   authCredential?: AuthCredential;
 }
 
@@ -34,12 +27,6 @@ export interface AuthPreparationResult {
 const USER_AUTHORIZED_SCHEME_TYPES: readonly string[] = [
   'oauth2',
   'openIdConnect',
-];
-
-/** Property names a caller can set to name a credential slot themselves. */
-const CREDENTIAL_KEY_PROPERTIES: readonly string[] = [
-  'credential_key',
-  'credentialKey',
 ];
 
 /**
@@ -163,41 +150,6 @@ async function refreshIfExpired(
   return refreshed;
 }
 
-/** Reads a slot name a caller set on a credential or on a scheme. */
-function readCredentialKeyProperty(source?: object): string | undefined {
-  if (!source) {
-    return undefined;
-  }
-
-  for (const name of CREDENTIAL_KEY_PROPERTIES) {
-    if (!(name in source)) {
-      continue;
-    }
-    const value = (source as Record<string, unknown>)[name];
-    if (typeof value === 'string' && value) {
-      return value;
-    }
-  }
-  return undefined;
-}
-
-/**
- * The slot the caller named, from the constructor option or from a
- * `credential_key` property carried on the credential or on the scheme.
- * Undefined when the caller named none, so the derived slot is used.
- */
-function credentialKeyOverride(
-  explicitKey: string | undefined,
-  authCredential: AuthCredential | undefined,
-  authScheme: AuthScheme,
-): string | undefined {
-  return (
-    explicitKey ||
-    readCredentialKeyProperty(authCredential) ||
-    readCredentialKeyProperty(authScheme)
-  );
-}
-
 /**
  * True when `credential` cannot authenticate a call until the end user
  * authorizes it.
@@ -242,37 +194,10 @@ function validateAuthorizationRequest(
     );
   }
   if (!authCredential.oauth2.clientId) {
-    throw new AuthCredentialMissingError(
-      'OAuth2 credentials client_id is missing.',
-    );
+    throw new Error('OAuth2 credentials client_id is missing.');
   }
   if (!authCredential.oauth2.clientSecret) {
-    throw new AuthCredentialMissingError(
-      'OAuth2 credentials client_secret is missing.',
-    );
-  }
-}
-
-/**
- * Exchanges `credential`, or returns undefined when the exchange failed.
- *
- * An exchange fails for environmental reasons: expired application default
- * credentials, an unreachable metadata server, a token endpoint that refused
- * the request. The tool then calls the API without a credential and reports
- * what the API says, where rejecting would abort the whole invocation.
- */
-async function exchangeCredential(
-  authScheme: AuthScheme,
-  credential: AuthCredential,
-): Promise<ExchangeResult | undefined> {
-  try {
-    return await new AutoAuthCredentialExchanger().exchange({
-      authScheme,
-      authCredential: credential,
-    });
-  } catch (error: unknown) {
-    logger.error('Failed to exchange credential:', error);
-    return undefined;
+    throw new Error('OAuth2 credentials client_secret is missing.');
   }
 }
 
@@ -310,12 +235,10 @@ export class ToolAuthHandler {
       this.authScheme,
       this.authCredential,
     );
-    const keyOverride = credentialKeyOverride(
+    const store = new ToolContextCredentialStore(
+      this.context,
       this.credentialKey,
-      this.authCredential,
-      this.authScheme,
     );
-    const store = new ToolContextCredentialStore(this.context, keyOverride);
     const cacheKey = store.getCredentialKey(identity);
     const storedCredential = store.getCredential(cacheKey);
 
@@ -331,11 +254,7 @@ export class ToolAuthHandler {
       // as it is. One that carries no token cannot authenticate a call, so
       // the handler asks the client to authorize a new one instead.
       if (!needsUserAuthorization(this.authScheme, current)) {
-        return {
-          state: 'done',
-          authScheme: this.authScheme,
-          authCredential: current,
-        };
+        return {state: 'done', authCredential: current};
       }
     }
 
@@ -344,7 +263,7 @@ export class ToolAuthHandler {
       rawAuthCredential: this.authCredential,
       // The auth response lands in `temp:<credentialKey>`, so a key shared by
       // every OpenAPI tool lets one tool consume another tool's response.
-      credentialKey: keyOverride || `adk_${identity}`,
+      credentialKey: this.credentialKey || `adk_${identity}`,
     };
 
     // A credential returned by an auth response was supplied interactively by
@@ -359,11 +278,7 @@ export class ToolAuthHandler {
       validateAuthorizationRequest(this.authScheme, this.authCredential);
       this.context.requestCredential(authConfig);
 
-      return {
-        state: 'pending',
-        authScheme: this.authScheme,
-        authCredential: this.authCredential,
-      };
+      return {state: 'pending'};
     }
 
     // Only cache what cannot cheaply be obtained again: an auth response is
@@ -378,15 +293,14 @@ export class ToolAuthHandler {
       store.storeCredential(cacheKey, authResponseCredential);
     }
 
-    const result = await exchangeCredential(this.authScheme, credential);
-    if (result?.wasExchanged) {
+    const result = await new AutoAuthCredentialExchanger().exchange({
+      authScheme: this.authScheme,
+      authCredential: credential,
+    });
+    if (result.wasExchanged) {
       store.storeCredential(cacheKey, result.credential);
     }
 
-    return {
-      state: 'done',
-      authScheme: this.authScheme,
-      authCredential: result?.credential,
-    };
+    return {state: 'done', authCredential: result.credential};
   }
 }
