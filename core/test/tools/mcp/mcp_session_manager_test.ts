@@ -298,4 +298,65 @@ describe('MCPSessionManager', () => {
       errorSpy.mockRestore();
     });
   });
+
+  describe('per-session extra headers', () => {
+    it('merges them over the transport option headers', async () => {
+      const connectionParams: MCPConnectionParams = {
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {headers: {'x-static': 'static', 'x-shared': 'base'}},
+        },
+      };
+      const manager = new MCPSessionManager(connectionParams);
+
+      await manager.createSession({'x-shared': 'override', 'x-extra': 'extra'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        new URL('http://test-url'),
+        {
+          requestInit: {
+            headers: {
+              'x-static': 'static',
+              'x-shared': 'override',
+              'x-extra': 'extra',
+            },
+          },
+        },
+      );
+      // The stored params are shared by every session, so they must not change.
+      expect(connectionParams.transportOptions?.requestInit?.headers).toEqual({
+        'x-static': 'static',
+        'x-shared': 'base',
+      });
+    });
+
+    it('merges them over the deprecated header field', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        header: {'x-legacy': 'legacy'},
+      });
+
+      await manager.createSession({'x-extra': 'extra'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        new URL('http://test-url'),
+        {requestInit: {headers: {'x-legacy': 'legacy', 'x-extra': 'extra'}}},
+      );
+    });
+
+    it('ignores them for a stdio connection, which has no headers', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+
+      await manager.createSession({'x-extra': 'extra'});
+
+      expect(StdioClientTransport).toHaveBeenLastCalledWith({
+        command: 'test-command',
+      });
+    });
+  });
 });

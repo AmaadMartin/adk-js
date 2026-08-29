@@ -63,11 +63,8 @@ export class TtlLruCache<T> {
     this.entries.set(key, {value, expiresAt: Date.now() + this.ttlMillis});
 
     while (this.entries.size > this.maxEntries) {
-      const leastRecentlyUsed = this.entries.keys().next();
-      if (leastRecentlyUsed.done) {
-        return;
-      }
-      this.entries.delete(leastRecentlyUsed.value);
+      const [leastRecentlyUsed] = this.entries.keys();
+      this.entries.delete(leastRecentlyUsed);
     }
   }
 

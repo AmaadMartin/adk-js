@@ -162,4 +162,33 @@ describe('MCPTool', () => {
     // Assert that closeSession was still called despite the error
     expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
   });
+
+  describe('positional constructor', () => {
+    it('rejects a call that names no session manager', () => {
+      const mcpTool: Tool = {
+        name: 'test-tool',
+        description: 'A test tool',
+        inputSchema: {type: 'object', properties: {}},
+      };
+
+      expect(
+        () => new MCPTool(mcpTool, undefined as unknown as MCPSessionManager),
+      ).toThrow(/Missing session manager/);
+    });
+
+    it('exposes the declaration built from the MCP schema', () => {
+      const mcpTool: Tool = {
+        name: 'test-tool',
+        description: 'A test tool',
+        inputSchema: {type: 'object', properties: {city: {type: 'string'}}},
+      };
+      const tool = new MCPTool(mcpTool, {} as MCPSessionManager);
+
+      const declaration = tool._getDeclaration();
+
+      expect(declaration.name).toBe('test-tool');
+      expect(declaration.description).toBe('A test tool');
+      expect(declaration.parameters?.properties).toHaveProperty('city');
+    });
+  });
 });
