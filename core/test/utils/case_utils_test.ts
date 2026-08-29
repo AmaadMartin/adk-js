@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys} from '../../src/utils/case_utils.js';
+import {camelCaseKeys, snakeCase} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
   describe('camelCaseKeys', () => {
@@ -89,6 +89,38 @@ describe('case_utils', () => {
       expect(camelCaseKeys(123)).toBe(123);
       expect(camelCaseKeys('hello')).toBe('hello');
       expect(camelCaseKeys(true)).toBe(true);
+    });
+  });
+
+  describe('snakeCase', () => {
+    it('should split lowerCamelCase', () => {
+      expect(snakeCase('camelCase')).toBe('camel_case');
+    });
+
+    it('should split UpperCamelCase', () => {
+      expect(snakeCase('UpperCamelCase')).toBe('upper_camel_case');
+    });
+
+    it('should replace spaces', () => {
+      expect(snakeCase('space separated')).toBe('space_separated');
+    });
+
+    it('should split an acronym from the word that follows it', () => {
+      expect(snakeCase('REST API')).toBe('rest_api');
+      expect(snakeCase('RESTApi')).toBe('rest_api');
+    });
+
+    it('should convert the spec titles the toolset derives its name from', () => {
+      expect(snakeCase('Mock API')).toBe('mock_api');
+      expect(snakeCase('Empty Description API')).toBe('empty_description_api');
+    });
+
+    it('should collapse and trim runs of separators', () => {
+      expect(snakeCase('!!weird--input!!')).toBe('weird_input');
+    });
+
+    it('should return an empty string for an empty input', () => {
+      expect(snakeCase('')).toBe('');
     });
   });
 });
