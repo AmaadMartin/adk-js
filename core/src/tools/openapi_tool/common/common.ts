@@ -6,6 +6,7 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {toSnakeCaseIdentifier} from '../../../utils/case_utils.js';
+import {isRecord} from '../../../utils/object_notation_utils.js';
 
 /** Prefix that keeps a generated parameter name off a reserved word. */
 const RESERVED_WORD_PREFIX = 'param_';
@@ -128,31 +129,34 @@ export interface ApiParameterInit {
   /**
    * The schema as the document holds it.
    *
-   * A resolved schema object, an unresolved reference, a JSON string holding
-   * a schema, or a boolean JSON schema. A reference and a `false` schema are
-   * both rejected; see {@link schemaFromOpenApi}.
+   * An unresolved reference is rejected; see {@link schemaFromOpenApi}.
    */
-  paramSchema?:
-    | OpenAPIV3.SchemaObject
-    | OpenAPIV3.ReferenceObject
-    | string
-    | boolean;
+  paramSchema?: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject;
   description?: string;
   /** Overrides the derived name when provided. */
   name?: string;
   required?: boolean;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+/**
+ * Reads a record field, treating any other shape as an empty record.
+ *
+ * A document written in YAML leaves `null` wherever a key has no value, so a
+ * block the typings declare as an object arrives missing or null.
+ */
+function recordField(
+  value: Record<string, unknown>,
+  field: string,
+): Record<string, unknown> {
+  const read = value[field];
+  return isRecord(read) ? read : {};
 }
 
 /**
  * Reads a string field, treating any other shape as absent.
  *
- * A document written in YAML leaves `null` wherever a key has no value, so a
- * field the typings declare as a string arrives missing, null, or holding
- * something else entirely.
+ * The same YAML rule applies: a field the typings declare as a string arrives
+ * missing, null, or holding something else entirely.
  */
 function stringField(value: unknown, field: string): string {
   if (!isRecord(value)) {
@@ -162,24 +166,15 @@ function stringField(value: unknown, field: string): string {
   return typeof read === 'string' ? read : '';
 }
 
-function parseSchemaJson(value: string, context: string): unknown {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    throw new Error(`${context} is not valid JSON`);
-  }
-}
-
 /**
  * Normalizes a schema-bearing OpenAPI value into a schema object.
  *
  * A document is parsed from user-supplied JSON or YAML, so a schema field
- * arrives in shapes the typings do not promise: absent, a boolean, an
- * unresolved `$ref`, a JSON string, or a value that is not an object at all.
- * This accepts the usable shapes and rejects the rest with a message that
- * names the offending field, instead of letting a `TypeError` escape from
- * deeper in. The message quotes only the `$ref` and the `typeof`, never the
- * document.
+ * arrives in shapes the typings do not promise: absent, a boolean JSON schema,
+ * an unresolved `$ref`, or a value that is not an object at all. This accepts
+ * the usable shapes and rejects the rest with a message that names the
+ * offending field, instead of letting a `TypeError` escape from deeper in. The
+ * message quotes only the `$ref` and the `typeof`, never the document.
  *
  * @param value The value to normalize.
  * @param context A phrase naming the field, used verbatim in every message.
@@ -195,9 +190,6 @@ export function schemaFromOpenApi(
   }
   if (value === false) {
     throw new Error(`${context} uses an unsatisfiable false schema`);
-  }
-  if (typeof value === 'string') {
-    return schemaFromOpenApi(parseSchemaJson(value, context), context);
   }
   if (Array.isArray(value)) {
     throw new Error(`${context} must be an OpenAPI schema, got array`);
@@ -218,14 +210,10 @@ export function schemaFromOpenApi(
  * Prefixes a name that collides with a TypeScript reserved word.
  *
  * @param name The name to check.
- * @param prefix The prefix to add to a reserved word.
  * @returns The prefixed name, or the name unchanged.
  */
-export function renameReservedWords(
-  name: string,
-  prefix = RESERVED_WORD_PREFIX,
-): string {
-  return RESERVED_WORDS.has(name) ? prefix + name : name;
+export function renameReservedWords(name: string): string {
+  return RESERVED_WORDS.has(name) ? RESERVED_WORD_PREFIX + name : name;
 }
 
 /**
@@ -352,12 +340,6 @@ export function generateParamDoc(param: ApiParameter): string {
   );
 }
 
-/** A 2xx response that carries at least one content type. */
-interface SuccessResponse {
-  description: string;
-  content: Record<string, unknown>;
-}
-
 /**
  * Orders a response key: numeric keys ascend and sort before the rest.
  *
@@ -371,20 +353,19 @@ function statusOrder(status: string): number {
 /** Picks the lowest 2xx response that carries content, else nothing. */
 function pickSuccessResponse(
   responses: OpenAPIV3.ResponsesObject,
-): SuccessResponse | undefined {
-  let picked: SuccessResponse | undefined;
+): Record<string, unknown> | undefined {
+  let picked: Record<string, unknown> | undefined;
   let pickedOrder = Infinity;
   for (const [status, response] of Object.entries(responses)) {
     if (!status.startsWith('2') || !isRecord(response) || '$ref' in response) {
       continue;
     }
-    const content = response['content'];
-    if (!isRecord(content) || Object.keys(content).length === 0) {
+    if (Object.keys(recordField(response, 'content')).length === 0) {
       continue;
     }
     const order = statusOrder(status);
     if (picked === undefined || order < pickedOrder) {
-      picked = {description: stringField(response, 'description'), content};
+      picked = response;
       pickedOrder = order;
     }
   }
@@ -404,13 +385,13 @@ export function generateReturnDoc(
   if (response === undefined) {
     return '';
   }
-  const mediaType =
-    response.content['application/json'] ?? Object.values(response.content)[0];
+  const content = recordField(response, 'content');
+  const mediaType = content['application/json'] ?? Object.values(content)[0];
   if (!isRecord(mediaType)) {
     return '';
   }
   const schema = schemaFromOpenApi(mediaType['schema'], 'response body');
-  const description = response.description.trim();
+  const description = stringField(response, 'description').trim();
   return (
     `Returns (${getTypeHint(schema)}): ${description}` +
     renderObjectProperties(schema, RETURN_PROPERTY_INDENT)

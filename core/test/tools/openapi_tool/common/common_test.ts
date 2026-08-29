@@ -32,10 +32,6 @@ describe('renameReservedWords', () => {
     expect(renameReservedWords(input)).toBe(expected);
   });
 
-  it('should use a caller-supplied prefix', () => {
-    expect(renameReservedWords('in', 'arg_')).toBe('arg_in');
-  });
-
   it('should rename a word reserved only in TypeScript', () => {
     expect(renameReservedWords('function')).toBe('param_function');
   });
@@ -50,7 +46,6 @@ describe('schemaFromOpenApi', () => {
     ['undefined', undefined],
     ['null', null],
     ['true', true],
-    ['the string "true"', 'true'],
   ])('should treat %s as an unconstrained schema', (_label, value) => {
     expect(schemaFromOpenApi(value, 'response body')).toEqual({});
   });
@@ -58,30 +53,6 @@ describe('schemaFromOpenApi', () => {
   it('should reject a false schema', () => {
     expect(() => schemaFromOpenApi(false, 'response body')).toThrow(
       'response body uses an unsatisfiable false schema',
-    );
-  });
-
-  it('should reject a false schema held as a string', () => {
-    expect(() => schemaFromOpenApi('false', 'response body')).toThrow(
-      'response body uses an unsatisfiable false schema',
-    );
-  });
-
-  it('should parse a schema held as a JSON string', () => {
-    expect(schemaFromOpenApi('{"type":"string"}', 'response body')).toEqual({
-      type: 'string',
-    });
-  });
-
-  it('should reject a string that is not valid JSON', () => {
-    expect(() => schemaFromOpenApi('{', 'response body')).toThrow(
-      'response body is not valid JSON',
-    );
-  });
-
-  it('should reject a JSON string holding a number', () => {
-    expect(() => schemaFromOpenApi('42', 'response body')).toThrow(
-      'response body must be an OpenAPI schema, got number',
     );
   });
 
@@ -95,6 +66,12 @@ describe('schemaFromOpenApi', () => {
     expect(() => schemaFromOpenApi(42, 'response body')).toThrow(
       'response body must be an OpenAPI schema, got number',
     );
+  });
+
+  it('should reject a string', () => {
+    expect(() =>
+      schemaFromOpenApi('{"type":"string"}', 'response body'),
+    ).toThrow('response body must be an OpenAPI schema, got string');
   });
 
   it('should reject an unresolved reference and name it', () => {
@@ -207,17 +184,6 @@ describe('createApiParameter', () => {
     expect(param.description).toBe('');
   });
 
-  it('should parse a schema supplied as a JSON string', () => {
-    const param = createApiParameter({
-      originalName: 'testParam',
-      paramLocation: 'query',
-      paramSchema: '{"type":"integer","description":"Parsed"}',
-    });
-
-    expect(param.paramSchema).toEqual({type: 'integer', description: 'Parsed'});
-    expect(param.description).toBe('Parsed');
-  });
-
   it('should name the parameter in a schema error', () => {
     expect(() =>
       createApiParameter({
@@ -312,6 +278,10 @@ describe('getTypeHint', () => {
 
   it('should hint a missing schema as unknown', () => {
     expect(getTypeHint(null)).toBe('unknown');
+  });
+
+  it('should hint an array as unknown', () => {
+    expect(getTypeHint([])).toBe('unknown');
   });
 });
 
