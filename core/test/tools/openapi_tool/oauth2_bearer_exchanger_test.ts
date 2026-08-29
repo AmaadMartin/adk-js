@@ -34,6 +34,18 @@ const apiKeyScheme = {
   name: 'X-Api-Key',
 } satisfies OpenAPIV3.ApiKeySecurityScheme;
 
+/** An OAuth2 scheme whose flows resolve to an acquisition grant type. */
+const authorizationCodeScheme = {
+  type: 'oauth2',
+  flows: {
+    authorizationCode: {
+      authorizationUrl: 'https://example.com/auth',
+      tokenUrl: TOKEN_ENDPOINT,
+      scopes: {},
+    },
+  },
+} satisfies OpenAPIV3.OAuth2SecurityScheme;
+
 /** Builds an OAuth2 credential, overriding the fields a case cares about. */
 function oauth2Credential(
   oauth2: AuthCredential['oauth2'] = {},
@@ -156,6 +168,21 @@ describe('OAuth2RefreshingBearerExchanger', () => {
     };
 
     const result = await exchange(authScheme, authCredential);
+
+    expect(result.wasExchanged).toBe(false);
+    expect(result.credential).toEqual(authCredential);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('passes an http credential through a scheme that declares flows', async () => {
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.HTTP,
+      http: {scheme: 'bearer', credentials: {token: 'existing_token'}},
+    };
+
+    // A scheme with flows resolves to a grant type, so the acquisition
+    // delegate rejects this credential for the OAuth2 client it does not hold.
+    const result = await exchange(authorizationCodeScheme, authCredential);
 
     expect(result.wasExchanged).toBe(false);
     expect(result.credential).toEqual(authCredential);

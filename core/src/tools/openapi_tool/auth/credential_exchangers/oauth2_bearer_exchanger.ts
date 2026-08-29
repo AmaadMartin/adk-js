@@ -56,6 +56,14 @@ export class OAuth2RefreshingBearerExchanger implements BaseCredentialExchanger 
       );
     }
 
+    // A credential holding only an `http` block already carries the bearer
+    // token the request needs. It has nothing to acquire and nothing to
+    // refresh, and the acquisition delegate rejects it for the OAuth2 client
+    // it does not hold, so it passes straight through.
+    if (!authCredential.oauth2) {
+      return {credential: authCredential, wasExchanged: false};
+    }
+
     const acquired = await this.tokenExchanger.exchange(params);
     // `OAuth2CredentialRefresher.refresh` warns when the credential carries no
     // refresh token, and most tool calls carry none. It runs every other check
@@ -69,8 +77,7 @@ export class OAuth2RefreshingBearerExchanger implements BaseCredentialExchanger 
 
     // A refreshed credential carries both blocks, so the OAuth2 access token
     // wins over an `http` block holding the token it replaced. A credential
-    // with no access token is either already an HTTP one or has nothing to
-    // wrap.
+    // that reaches here without an access token has nothing to wrap.
     const token = refreshed.oauth2?.accessToken;
 
     return {
