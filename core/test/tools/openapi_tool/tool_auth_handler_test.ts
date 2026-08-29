@@ -112,7 +112,11 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    });
 
     const result = await handler.prepareAuthCredentials();
 
@@ -129,7 +133,11 @@ describe('ToolAuthHandler', () => {
       requestCredential: vi.fn(),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    });
 
     const result = await handler.prepareAuthCredentials();
 
@@ -171,7 +179,11 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    });
 
     const result = await handler.prepareAuthCredentials();
 
@@ -201,6 +213,8 @@ describe('ToolAuthHandler', () => {
     } as unknown as Context;
     await new ToolAuthHandler(firstContext, {
       type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
     }).prepareAuthCredentials();
 
     // Each tool call gets a fresh Context whose State is rebuilt from the
@@ -213,6 +227,8 @@ describe('ToolAuthHandler', () => {
     } as unknown as Context;
     const result = await new ToolAuthHandler(secondContext, {
       type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
     }).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
@@ -379,6 +395,9 @@ describe('ToolAuthHandler', () => {
     expect(cachedCredentialKeys(sessionState)).toHaveLength(2);
   });
 
+  // Both credentials carry the granted access token. An authorization-code
+  // credential without one goes back to the client for consent, so it never
+  // reaches the cache this test is about.
   it('reuses the cached credential when only the redirect URI differs', async () => {
     const scheme: OpenAPIV3.SecuritySchemeObject = {
       type: 'oauth2',
@@ -397,6 +416,7 @@ describe('ToolAuthHandler', () => {
       oauth2: {
         clientId: 'client',
         clientSecret: 'secret',
+        accessToken: 'granted-token',
         redirectUri: 'http://localhost:8001/oauth2callback',
       },
     }).prepareAuthCredentials();
@@ -412,6 +432,7 @@ describe('ToolAuthHandler', () => {
         oauth2: {
           clientId: 'client',
           clientSecret: 'secret',
+          accessToken: 'granted-token',
           redirectUri: 'https://deployed.example.com/oauth2callback',
           codeVerifier: 'verifier-from-the-second-round-trip',
           state: 'state-from-the-second-round-trip',
