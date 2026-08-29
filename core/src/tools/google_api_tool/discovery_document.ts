@@ -161,16 +161,14 @@ function getJson(
     };
 
     const isPlainHttp = new URL(url).protocol === 'http:';
-    const transport = isPlainHttp ? http : https;
-    const request = transport.request(
-      url,
-      {
-        headers: JSON_HEADERS,
-        timeout: DISCOVERY_REQUEST_TIMEOUT_MS,
-        agent: certs && !isPlainHttp ? new https.Agent(certs) : undefined,
-      },
-      collect,
-    );
+    const options = {
+      headers: JSON_HEADERS,
+      timeout: DISCOVERY_REQUEST_TIMEOUT_MS,
+      agent: certs && !isPlainHttp ? new https.Agent(certs) : undefined,
+    };
+    const request = isPlainHttp
+      ? http.request(url, options, collect)
+      : https.request(url, options, collect);
 
     // A timeout only fires the event; the request stays open until destroyed.
     request.on('timeout', () => {
