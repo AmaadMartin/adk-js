@@ -1,9 +1,0 @@
-# ADK Developer Guides
-
-This directory contains specific developer guides for the ADK TypeScript implementation. For the official ADK documentation, visit [adk.dev](https://adk.dev/).
-
-## Index
-
-### Evaluation
-
-- [TrajectoryEvaluator](evaluation/trajectory_evaluator/index.md) - Scoring an agent's tool calls against a golden trajectory, and the `Evaluator` seam every metric sits behind.

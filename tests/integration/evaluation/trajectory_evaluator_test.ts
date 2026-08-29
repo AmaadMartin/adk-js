@@ -84,7 +84,7 @@ async function runAgent(): Promise<Invocation> {
 
   return {
     userContent: newMessage,
-    intermediateData: {toolUses: finished.events.flatMap(getFunctionCalls)},
+    toolUses: finished.events.flatMap(getFunctionCalls),
   };
 }
 
@@ -93,14 +93,14 @@ describe('TrajectoryEvaluator against a real agent run', () => {
     const actual = await runAgent();
     const expected: Invocation = {
       userContent: createUserContent(PROMPT),
-      intermediateData: {toolUses: [{name: 'roll_die', args: {sides: 16}}]},
+      toolUses: [{name: 'roll_die', args: {sides: 16}}],
     };
 
     const result = await new TrajectoryEvaluator({
       threshold: 1.0,
     }).evaluateInvocations([actual], [expected]);
 
-    expect(actual.intermediateData?.toolUses).toHaveLength(1);
+    expect(actual.toolUses).toHaveLength(1);
     expect(result.overallScore).toBe(1.0);
     expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
   });
@@ -109,7 +109,7 @@ describe('TrajectoryEvaluator against a real agent run', () => {
     const actual = await runAgent();
     const expected: Invocation = {
       userContent: createUserContent(PROMPT),
-      intermediateData: {toolUses: [{name: 'roll_die', args: {sides: 6}}]},
+      toolUses: [{name: 'roll_die', args: {sides: 6}}],
     };
 
     const result = await new TrajectoryEvaluator({

@@ -4,7 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Invocation} from './eval_case.js';
+import type {Content, FunctionCall} from '@google/genai';
+
+/** A single user turn and what the agent did with it. */
+export interface Invocation {
+  /** Content provided by the user in this invocation. */
+  userContent: Content;
+
+  /** Tool use trajectory, in chronological order. */
+  toolUses?: FunctionCall[];
+}
 
 /** The verdict a metric returns for an invocation, or for a whole eval case. */
 export enum EvalStatus {
@@ -21,8 +30,8 @@ export interface PerInvocationResult {
   /** The golden invocation the actual one was scored against. */
   expectedInvocation?: Invocation;
 
-  /** The score the metric awarded. Absent when nothing was evaluated. */
-  score?: number;
+  /** The score the metric awarded. */
+  score: number;
 
   /** The status of this invocation. */
   evalStatus: EvalStatus;

@@ -26,7 +26,7 @@ const T4: FunctionCall = {name: 'tool_4', args: {d: 4}};
 function invocation(toolUses: FunctionCall[]): Invocation {
   return {
     userContent: {role: 'user', parts: [{text: 'do the thing'}]},
-    intermediateData: {toolUses},
+    toolUses,
   };
 }
 
@@ -113,14 +113,14 @@ describe('TrajectoryEvaluator with EXACT match', () => {
     expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
   });
 
-  it('treats a missing intermediateData as no tool calls', async () => {
-    const withoutIntermediateData: Invocation = {
+  it('treats a missing toolUses as no tool calls', async () => {
+    const withoutToolUses: Invocation = {
       userContent: {role: 'user', parts: [{text: 'do the thing'}]},
     };
 
     const result = await evaluator.evaluateInvocations(
-      [withoutIntermediateData],
-      [withoutIntermediateData],
+      [withoutToolUses],
+      [withoutToolUses],
     );
 
     expect(result.overallScore).toBe(1.0);
@@ -260,8 +260,8 @@ describe('TrajectoryEvaluator with ANY_ORDER match', () => {
 
     await evaluator.evaluateInvocations([actual], [expected]);
 
-    expect(actual.intermediateData?.toolUses).toEqual([T1, T2, T3, T1]);
-    expect(expected.intermediateData?.toolUses).toEqual([T1, T2, T1]);
+    expect(actual.toolUses).toEqual([T1, T2, T3, T1]);
+    expect(expected.toolUses).toEqual([T1, T2, T1]);
   });
 });
 

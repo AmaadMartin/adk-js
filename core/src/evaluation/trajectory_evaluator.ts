@@ -7,11 +7,11 @@
 import {FunctionCall} from '@google/genai';
 import {isEqual} from 'lodash-es';
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {Invocation} from './eval_case.js';
 import {
   EvalStatus,
   EvaluationResult,
   Evaluator,
+  Invocation,
   PerInvocationResult,
 } from './evaluator.js';
 
@@ -146,19 +146,19 @@ export class TrajectoryEvaluator implements Evaluator {
       );
     }
 
-    const scores = actualInvocations.map((actual, index) =>
-      this.scoreInvocation(actual, expectedInvocations[index]),
-    );
     const perInvocationResults: PerInvocationResult[] = actualInvocations.map(
-      (actual, index) => ({
-        actualInvocation: actual,
-        expectedInvocation: expectedInvocations[index],
-        score: scores[index],
-        evalStatus: this.getEvalStatus(scores[index]),
-      }),
+      (actual, index) => {
+        const score = this.scoreInvocation(actual, expectedInvocations[index]);
+        return {
+          actualInvocation: actual,
+          expectedInvocation: expectedInvocations[index],
+          score,
+          evalStatus: this.getEvalStatus(score),
+        };
+      },
     );
 
-    if (scores.length === 0) {
+    if (perInvocationResults.length === 0) {
       return {
         overallEvalStatus: EvalStatus.NOT_EVALUATED,
         perInvocationResults,
@@ -166,7 +166,8 @@ export class TrajectoryEvaluator implements Evaluator {
     }
 
     const overallScore =
-      scores.reduce((total, score) => total + score, 0) / scores.length;
+      perInvocationResults.reduce((total, result) => total + result.score, 0) /
+      perInvocationResults.length;
 
     return {
       overallScore,
@@ -177,8 +178,8 @@ export class TrajectoryEvaluator implements Evaluator {
 
   private scoreInvocation(actual: Invocation, expected: Invocation): number {
     const matches = TOOL_TRAJECTORY_MATCHERS[this.matchType](
-      actual.intermediateData?.toolUses ?? [],
-      expected.intermediateData?.toolUses ?? [],
+      actual.toolUses ?? [],
+      expected.toolUses ?? [],
     );
 
     return matches ? 1.0 : 0.0;

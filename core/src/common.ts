@@ -155,11 +155,11 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
-export type {IntermediateData, Invocation} from './evaluation/eval_case.js';
 export {EvalStatus} from './evaluation/evaluator.js';
 export type {
   EvaluationResult,
   Evaluator,
+  Invocation,
   PerInvocationResult,
 } from './evaluation/evaluator.js';
 export {
