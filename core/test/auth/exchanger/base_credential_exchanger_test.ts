@@ -67,7 +67,8 @@ describe('AuthCredentialMissingError', () => {
 
 describe('BaseAuthCredentialExchanger', () => {
   it('accepts the scheme alone, without a credential', async () => {
-    const exchanger = new MockAuthCredentialExchanger();
+    const exchanger: BaseAuthCredentialExchanger =
+      new MockAuthCredentialExchanger();
 
     await expect(exchanger.exchangeCredential(AUTH_SCHEME)).resolves.toBe(
       EXCHANGED_CREDENTIAL,
