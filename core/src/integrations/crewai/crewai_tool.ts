@@ -10,13 +10,7 @@ import {Context} from '../../agents/context.js';
 import {FunctionTool} from '../../tools/function_tool.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 
-/**
- * The argument keys reserved for the ADK context. A model can hallucinate
- * either spelling, so both are stripped before the wrapped tool runs. The
- * context reaches the tool as `run`'s second parameter, never as an argument.
- * A CrewAI schema ported from Python names the parameter `tool_context`; a
- * TypeScript one names it `toolContext`.
- */
+/** Argument keys stripped before `run`, which receives the context separately. */
 const RESERVED_CONTEXT_ARGS = ['tool_context', 'toolContext'];
 
 /**
@@ -24,12 +18,7 @@ const RESERVED_CONTEXT_ARGS = ['tool_context', 'toolContext'];
  * analogue of the Python tool's `args_schema.model_json_schema()`.
  */
 export interface CrewaiToolArgsSchema {
-  /**
-   * Widened to `string` on purpose. A literal `'object'` would force every
-   * caller to annotate the tool object, because TypeScript widens the property
-   * of an unannotated literal to `string`. A tool built by a CrewAI port
-   * carries that library's own typing and could not be annotated at all.
-   */
+  /** Widened from the literal `'object'` so an unannotated literal assigns. */
   type?: string;
   properties?: Record<string, unknown>;
   required?: string[];
@@ -109,14 +98,7 @@ function missingArgsError(
   };
 }
 
-/**
- * Narrows the value `FunctionTool` passes to `execute` to the model's argument
- * record.
- *
- * `FunctionTool` types that parameter from its schema type, and this class
- * declares no `parameters`, so the static type is `unknown`. `BaseTool` types
- * the arguments as a record, so the guard always holds at run time.
- */
+/** Narrows `execute`'s argument, which this class's schema type leaves `unknown`. */
 function isArgsRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === 'object' && input !== null;
 }
@@ -186,9 +168,10 @@ export class CrewaiTool extends FunctionTool<Schema> {
   }
 
   /**
-   * `FunctionTool` builds its declaration from the `parameters` option, which
-   * this class does not use. The declaration comes from the wrapped tool's own
-   * schema instead.
+   * Overridden to leave `parameters` unset for a tool with no properties,
+   * where the base class emits an empty object schema. adk-python does the
+   * same: `build_function_declaration_util` sets `parameters=... if properties
+   * else None`.
    */
   override _getDeclaration(): FunctionDeclaration {
     const argsSchema = this.tool.argsSchema;
