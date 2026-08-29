@@ -398,6 +398,28 @@ describe('loadWebPage', () => {
       expect(result).not.toContain('comment');
     });
 
+    it('keeps text that follows an attribute value containing a bracket', async () => {
+      resolveTo('93.184.216.34');
+      respondWith('<a title="a > b">This link text must survive</a>');
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('This link text must survive');
+    });
+
+    it('leaves out a style block the page never closes', async () => {
+      resolveTo('93.184.216.34');
+      respondWith(
+        '<p>This line has enough words</p>' +
+          '<style>.a { background: red none repeat scroll 0 0; }',
+      );
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('This line has enough words');
+      expect(result).not.toContain('background');
+    });
+
     it('allows a global IPv6 literal target', async () => {
       respondWith('<p>The quick brown fox jumped over here</p>');
 
@@ -803,22 +825,22 @@ describe('loadWebPage', () => {
       expect(result).toBe('The markup uses &lt; for a tag');
     });
 
-    it('leaves a named entity outside the table alone', async () => {
+    it('decodes a named entity outside the basic set', async () => {
       resolveTo('93.184.216.34');
       respondWith('<p>An em dash &mdash; stays as written here</p>');
 
       const result = await loadWebPage('https://example.com/');
 
-      expect(result).toBe('An em dash &mdash; stays as written here');
+      expect(result).toBe('An em dash — stays as written here');
     });
 
-    it('leaves an unknown or out-of-range entity alone', async () => {
+    it('resolves an unknown or out-of-range entity as a browser does', async () => {
       resolveTo('93.184.216.34');
-      respondWith('<p>Both &notanentity; and &#1114112; stay put</p>');
+      respondWith('<p>Both &notanentity; and &#1114112; are read</p>');
 
       const result = await loadWebPage('https://example.com/');
 
-      expect(result).toBe('Both &notanentity; and &#1114112; stay put');
+      expect(result).toBe('Both ¬anentity; and \ufffd are read');
     });
 
     it('decodes the body with the charset the response declares', async () => {

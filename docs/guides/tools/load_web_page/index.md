@@ -72,12 +72,19 @@ An `http` target goes to the proxy in absolute form. An `https` target opens a
 `LOAD_WEB_PAGE`, the tool the model calls, takes no options, so a model-chosen
 URL always follows the vetted direct path.
 
+## What the extraction keeps
+
+The body is parsed as HTML, so the result is the text a reader sees. Each text
+run is trimmed, and the runs are joined with a newline. Comments and the
+contents of `<script>` and `<style>` are left out. Character references are
+decoded the way a browser decodes them, so `&mdash;` reads as `—`. Lines of
+three words or fewer are then dropped, which removes navigation labels and
+other short fragments. Python's `load_web_page` applies the same word filter.
+
 ## Limits
 
 The body is read into memory and is capped at 10 MiB; a larger response returns
-the failure string rather than a truncated page. Entity decoding covers `&amp;`,
-`&apos;`, `&gt;`, `&lt;`, `&nbsp;`, `&quot;` and the numeric forms (`&#8212;`,
-`&#x2014;`); other named entities are left as written.
+the failure string rather than a truncated page.
 
 The tool needs Node built-ins (`node:http`, `node:https`, `node:dns`), so it
 does not run in a browser bundle.

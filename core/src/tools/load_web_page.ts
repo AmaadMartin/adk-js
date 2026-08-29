@@ -16,6 +16,7 @@ import {connect as tlsConnect} from 'node:tls';
 
 import {z} from 'zod';
 
+import {extractText} from '../utils/html_utils.js';
 import {
   isBlockedAddress,
   isBlockedHostname,
@@ -55,15 +56,8 @@ const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
  */
 const IDENTITY_ENCODING = {'accept-encoding': 'identity'};
 
-/** HTML entities that survive tag stripping, decoded by name. */
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  apos: "'",
-  gt: '>',
-  lt: '<',
-  nbsp: ' ',
-  quot: '"',
-};
+/** Shortest line kept in the extracted text, in words. */
+const MIN_WORDS_PER_LINE = 3;
 
 /** Builds the parity failure message for a URL. */
 function failedToFetchMessage(url: string): string {
@@ -359,38 +353,17 @@ async function requestViaProxy(
   return requestThroughTunnel(url, socket, expiresAt);
 }
 
-/** Decodes HTML entities: the named set above plus decimal and hex forms. */
-function decodeHtmlEntities(text: string): string {
-  return text.replace(
-    /&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);/g,
-    (match: string, entity: string) => {
-      if (!entity.startsWith('#')) {
-        return NAMED_ENTITIES[entity.toLowerCase()] ?? match;
-      }
-      const codePoint =
-        entity[1] === 'x' || entity[1] === 'X'
-          ? parseInt(entity.slice(2), 16)
-          : Number(entity.slice(1));
-      return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : match;
-    },
-  );
-}
-
 /**
- * Extracts readable text from an HTML document. Removes `<script>`/`<style>`
- * blocks and comments, strips remaining tags, decodes entities, and keeps only
- * lines with more than three words (parity with the Python tool).
+ * Extracts readable text from an HTML document and keeps only the lines with
+ * more than {@link MIN_WORDS_PER_LINE} words, which drops navigation labels and
+ * other short fragments (parity with the Python tool).
  */
 function htmlToText(html: string): string {
-  const withoutCode = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ');
-  const text = decodeHtmlEntities(withoutCode.replace(/<[^>]+>/g, '\n'));
-  return text
+  return extractText(html)
     .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.split(/\s+/).filter(Boolean).length > 3)
+    .filter(
+      (line) => line.split(/\s+/).filter(Boolean).length > MIN_WORDS_PER_LINE,
+    )
     .join('\n');
 }
 
