@@ -155,6 +155,16 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {
+  ROUGE_1_METRIC,
+  ResponseCriterion,
+  evaluateResponses,
+} from './evaluation/response_evaluator.js';
+export type {
+  EvalTurn,
+  ResponseEvaluationSummary,
+  ToolUse,
+} from './evaluation/response_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
