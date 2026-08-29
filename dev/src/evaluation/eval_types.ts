@@ -111,10 +111,10 @@ export interface EvalResult {
   sessionId: string;
 }
 
-/** The one metric this command scores. */
+/** Scores the tool calls the agent made against the recorded ones. */
 export const TOOL_TRAJECTORY_SCORE_KEY = 'tool_trajectory_avg_score';
 
-/** Scored by adk-python with ROUGE, which adk-js has no counterpart for. */
+/** Scores the agent's final response against the recorded `reference`. */
 export const RESPONSE_MATCH_SCORE_KEY = 'response_match_score';
 
 /** Prefix of every session an eval case runs in. */
