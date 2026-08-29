@@ -12,6 +12,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {getAbsolutePath} from '../../src/utils/file_utils.js';
 import {logToTmpFolder} from '../../src/utils/log_to_tmp_folder.js';
 import {resetFileLogTarget} from '../../src/utils/logger.js';
 
@@ -22,10 +23,14 @@ const {LOG_FILE_PATH, LATEST_LOG_PATH} = vi.hoisted(() => ({
   LATEST_LOG_PATH: '/tmp/agents_log/agent.latest.log',
 }));
 
+// One shared `start`, so that a case can make the next server fail to start
+// without rebuilding the constructor mock.
+const {serverStart} = vi.hoisted(() => ({serverStart: vi.fn()}));
+
 vi.mock('../../src/server/adk_api_server', () => {
   return {
     AdkApiServer: vi.fn(() => ({
-      start: vi.fn(),
+      start: serverStart,
     })),
   };
 });
@@ -316,7 +321,7 @@ describe('CLI Entrypoint', () => {
     it('sends the run logs to the temp folder and prints where', async () => {
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-      await parse(['run', 'agent.ts']);
+      await parse(['run', '--log_to_tmp', 'agent.ts']);
 
       expect(logToTmpFolder).toHaveBeenCalledTimes(1);
       expect(logSpy).toHaveBeenCalledWith(
@@ -333,7 +338,7 @@ describe('CLI Entrypoint', () => {
         logFilePath: LOG_FILE_PATH,
       });
 
-      await parse(['run', 'agent.ts']);
+      await parse(['run', '--log_to_tmp', 'agent.ts']);
 
       expect(logSpy).toHaveBeenCalledWith(
         `To access latest log: tail -F ${LOG_FILE_PATH}`,
@@ -348,13 +353,119 @@ describe('CLI Entrypoint', () => {
       });
       (runAgent as Mock).mockRejectedValueOnce(new Error('boom'));
 
-      await expect(parse(['run', 'agent.ts'])).rejects.toThrow('exit');
+      await expect(parse(['run', '--log_to_tmp', 'agent.ts'])).rejects.toThrow(
+        'exit',
+      );
 
       expect(errorSpy).toHaveBeenCalledWith(
         `Error running agent: boom (see ${LOG_FILE_PATH})`,
       );
       // The mocked exit throws, so this call can only have run before it.
       expect(resetFileLogTarget).toHaveBeenCalled();
+    });
+
+    it('leaves the run transcript logging to the console', async () => {
+      await parse(['run', 'agent.ts']);
+
+      expect(logToTmpFolder).not.toHaveBeenCalled();
+    });
+
+    it('keeps --verbose on the console when the flag is absent', async () => {
+      await parse(['run', 'agent.ts', '--verbose']);
+
+      expect(logToTmpFolder).not.toHaveBeenCalled();
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+    });
+
+    it('applies --verbose to the run logs it sends to the file', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await parse(['run', 'agent.ts', '--log_to_tmp', '--verbose']);
+
+      expect(logToTmpFolder).toHaveBeenCalledTimes(1);
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+    });
+
+    it('reports a failing run through the console logger', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      (runAgent as Mock).mockRejectedValueOnce(new Error('boom'));
+
+      await expect(parse(['run', 'agent.ts'])).rejects.toThrow('exit');
+
+      // There is no log file to name, so the error stays with the console
+      // logger and nothing is flushed.
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(resetFileLogTarget).not.toHaveBeenCalled();
+      expect(exit).toHaveBeenCalledWith(1);
+    });
+
+    it('runs the agent anyway when the log folder cannot be opened', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.mocked(logToTmpFolder).mockImplementationOnce(() => {
+        throw Object.assign(
+          new Error("EEXIST: file already exists, mkdir '/tmp/agents_log'"),
+          {code: 'EEXIST'},
+        );
+      });
+
+      await parse(['run', '--log_to_tmp', 'agent.ts']);
+
+      expect(runAgent).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Cannot log to the system temp folder: EEXIST: file already exists, mkdir '/tmp/agents_log'",
+      );
+      expect(warnSpy).toHaveBeenCalledWith('Logging to the console instead.');
+    });
+
+    it('reports a failing run on the console when the log folder is unusable', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      vi.mocked(logToTmpFolder).mockImplementationOnce(() => {
+        throw new Error('EACCES: permission denied');
+      });
+      (runAgent as Mock).mockRejectedValueOnce(new Error('boom'));
+
+      await expect(parse(['run', '--log_to_tmp', 'agent.ts'])).rejects.toThrow(
+        'exit',
+      );
+
+      // The setup threw, so there is no log file to name and nothing to flush.
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(resetFileLogTarget).not.toHaveBeenCalled();
+      expect(exit).toHaveBeenCalledWith(1);
+    });
+
+    it('starts the web server anyway when the log folder cannot be opened', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.mocked(logToTmpFolder).mockImplementationOnce(() => {
+        throw new Error('ELOOP: too many symbolic links');
+      });
+
+      await parse(['web', '--log_to_tmp']);
+
+      expect(AdkApiServer).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Cannot log to the system temp folder: ELOOP: too many symbolic links',
+      );
+    });
+
+    it('reports a thrown non-Error from the log setup', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.mocked(logToTmpFolder).mockImplementationOnce(() => {
+        throw 'a bare string';
+      });
+
+      await parse(['api_server', '--log_to_tmp']);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Cannot log to the system temp folder: a bare string',
+      );
     });
 
     it('leaves the web server logging to the console', async () => {
@@ -367,6 +478,118 @@ describe('CLI Entrypoint', () => {
       await parse(['api_server']);
 
       expect(logToTmpFolder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('option: --log_to_tmp', () => {
+    /** Makes the next server the CLI builds fail to start. */
+    const failNextStart = (message: string) => {
+      serverStart.mockRejectedValueOnce(new Error(message));
+    };
+
+    it('sends the web server logs to the temp folder and prints where', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await parse(['web', '--log_to_tmp']);
+
+      expect(logToTmpFolder).toHaveBeenCalledTimes(1);
+      expect(logSpy).toHaveBeenCalledWith(
+        `Log setup complete: ${LOG_FILE_PATH}`,
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        `To access latest log: tail -F ${LATEST_LOG_PATH}`,
+      );
+    });
+
+    it('sends the api server logs to the temp folder', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await parse(['api_server', '--log_to_tmp']);
+
+      expect(logToTmpFolder).toHaveBeenCalledTimes(1);
+    });
+
+    it('still starts the server it was asked for', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await parse(['api_server', '--log_to_tmp', '--port', '9091']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args).toMatchObject({port: 9091, serveDebugUI: false});
+    });
+
+    it('leaves the agents directory that follows it alone', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await parse(['api_server', '--log_to_tmp', './agents']);
+
+      expect(logToTmpFolder).toHaveBeenCalledTimes(1);
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(getAbsolutePath('./agents'));
+    });
+
+    it('reports a thrown non-Error rather than the word undefined', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      serverStart.mockRejectedValueOnce('a bare string');
+
+      await expect(parse(['web', '--log_to_tmp'])).rejects.toThrow('exit');
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        `Error starting web server: a bare string (see ${LOG_FILE_PATH})`,
+      );
+    });
+
+    it('names the log file on the terminal when the web server fails', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      failNextStart('port in use');
+
+      await expect(parse(['web', '--log_to_tmp'])).rejects.toThrow('exit');
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        `Error starting web server: port in use (see ${LOG_FILE_PATH})`,
+      );
+      // The mocked exit throws, so this call can only have run before it.
+      expect(resetFileLogTarget).toHaveBeenCalled();
+    });
+
+    it('names the log file on the terminal when the api server fails', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      failNextStart('port in use');
+
+      await expect(parse(['api_server', '--log_to_tmp'])).rejects.toThrow(
+        'exit',
+      );
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        `Error starting API server: port in use (see ${LOG_FILE_PATH})`,
+      );
+      expect(resetFileLogTarget).toHaveBeenCalled();
+    });
+
+    it('leaves a failing web server reporting through the console logger', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      failNextStart('port in use');
+
+      await expect(parse(['web'])).rejects.toThrow('exit');
+
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(resetFileLogTarget).not.toHaveBeenCalled();
+      expect(exit).toHaveBeenCalledWith(1);
     });
   });
 

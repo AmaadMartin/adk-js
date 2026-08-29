@@ -19,7 +19,12 @@ const WINSTON_LEVELS: Record<string, LogLevel> = {
   'error': LogLevel.ERROR,
 };
 
-const PASS_THROUGH_LEVEL = 'error';
+/**
+ * Owner-only permissions for the log file. An agent log carries model prompts
+ * and responses, and it sits at a predictable path inside a world-traversable
+ * temp folder, so no other local user may read it.
+ */
+export const LOG_FILE_MODE = 0o600;
 
 /**
  * Re-points one live logger at `transport`, or back at the console when
@@ -65,7 +70,9 @@ export function setFileLogTarget(filePath: string): void {
   fileTransport?.end();
   fileTransport = new winston.transports.File({
     filename: filePath,
-    options: {flags: 'w'},
+    // The transport reopens the path, so it repeats the mode. Without it the
+    // stream would create the file 0644 whenever the eager one is missing.
+    options: {flags: 'w', mode: LOG_FILE_MODE},
   });
   for (const swap of transportSwaps) {
     swap(fileTransport);
@@ -88,6 +95,10 @@ export function resetFileLogTarget(): Promise<void> {
   }
   return new Promise((resolve) => {
     transport.once('finish', () => resolve());
+    // A stream that fails emits `error` and never `finish`. This sits on the
+    // path to `process.exit`, so waiting for a `finish` that cannot arrive
+    // would hang the command instead of exiting.
+    transport.once('error', () => resolve());
     transport.end();
   });
 }
@@ -149,17 +160,12 @@ export class AdkLogger implements Logger {
     }
 
     this.consoleFormat = winston.format.combine(...formats);
-    this.logger = winston.createLogger({
-      levels: WINSTON_LEVELS,
-      level: PASS_THROUGH_LEVEL,
-      format: this.consoleFormat,
-      transports: [new winston.transports.Console()],
-    });
-
+    this.logger = winston.createLogger();
+    // `applyTransport` is the one place that configures the logger, and
+    // `undefined` already means the console, so this covers construction
+    // before and after a file target is set.
+    this.applyTransport(fileTransport);
     transportSwaps.add((transport) => this.applyTransport(transport));
-    if (fileTransport) {
-      this.applyTransport(fileTransport);
-    }
   }
 
   private applyTransport(
@@ -167,7 +173,7 @@ export class AdkLogger implements Logger {
   ): void {
     this.logger.configure({
       levels: WINSTON_LEVELS,
-      level: PASS_THROUGH_LEVEL,
+      level: 'error',
       format: transport ? fileLogFormat(this.label) : this.consoleFormat,
       transports: [transport ?? new winston.transports.Console()],
     });
