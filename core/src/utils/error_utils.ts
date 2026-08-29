@@ -14,12 +14,14 @@
 /**
  * Maximum number of characters of an HTTP response body surfaced by
  * {@link formatError} before it is truncated. Bounds both log volume and the
- * exposure of potentially sensitive response payloads.
+ * exposure of potentially sensitive response payloads. Shared, so that a body
+ * reported through an error and the same body captured for debugging are cut
+ * at the same point.
  */
-const MAX_RESPONSE_BODY_LENGTH = 1000;
+export const MAX_RESPONSE_BODY_LENGTH = 1000;
 
-/** Marker appended to a response body that exceeds {@link MAX_RESPONSE_BODY_LENGTH}. */
-const TRUNCATION_MARKER = '... [truncated]';
+/** Marker appended to a body that exceeds {@link MAX_RESPONSE_BODY_LENGTH}. */
+export const TRUNCATION_MARKER = '... [truncated]';
 
 /** Returned by {@link formatError} when the input carries no usable message. */
 const UNKNOWN_ERROR = 'Unknown error';

@@ -127,6 +127,30 @@ describe('http debug capture', () => {
     expect(exchanges[0].requestBody).toBeUndefined();
   });
 
+  it('redacts a credential carried in the URL', async () => {
+    const exchanges: HttpExchange[] = [];
+
+    await runWithHttpDebugCapture(exchanges, async () => {
+      recordHttpExchange(
+        exchange({url: 'https://mcp.example.com/mcp?access_token=abc123'}),
+      );
+    });
+
+    expect(exchanges[0].url).toBe(
+      'https://mcp.example.com/mcp?access_token=***',
+    );
+  });
+
+  it('leaves a URL with no credential alone', async () => {
+    const exchanges: HttpExchange[] = [];
+
+    await runWithHttpDebugCapture(exchanges, async () => {
+      recordHttpExchange({...exchange(), url: 'https://mcp.example.com/mcp'});
+    });
+
+    expect(exchanges[0].url).toBe('https://mcp.example.com/mcp');
+  });
+
   it('redacts every credential-bearing header, whatever its case', async () => {
     const exchanges: HttpExchange[] = [];
 

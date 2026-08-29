@@ -6,14 +6,18 @@
 
 import {AsyncLocalStorage} from 'node:async_hooks';
 
+import {MAX_RESPONSE_BODY_LENGTH, TRUNCATION_MARKER} from './error_utils.js';
+import {redactUriPassword} from './redact_uri.js';
+
 /**
  * Capture of the HTTP exchanges behind an operation, for an operator who has
  * to see what actually went over the wire.
  *
  * A capture is installed for the duration of one call and is scoped to that
  * call's async context, so two concurrent captures never see each other's
- * entries. Credentials are removed and bodies are truncated as each exchange
- * is recorded, because a capture is written to session storage.
+ * entries. A credential in the URL or the headers is removed, and bodies are
+ * truncated, as each exchange is recorded, because a capture is written to
+ * session storage.
  */
 
 /** Maximum number of exchanges one capture keeps. Further ones are dropped. */
@@ -21,12 +25,6 @@ export const MAX_CAPTURED_EXCHANGES = 100;
 
 /** Key under which a capture reaches an invocation's custom metadata. */
 const HTTP_DEBUG_INFO_KEY = 'http_debug_info';
-
-/** Maximum number of characters kept from a request or response body. */
-const MAX_BODY_LENGTH = 1000;
-
-/** Marker appended to a body that exceeds {@link MAX_BODY_LENGTH}. */
-const TRUNCATION_MARKER = '... [truncated]';
 
 /** Replaces the value of a header that carries a credential. */
 const REDACTED = '<redacted>';
@@ -68,10 +66,10 @@ export interface HttpExchange {
 
 const httpDebugStorage = new AsyncLocalStorage<HttpExchange[]>();
 
-/** Truncates a body to {@link MAX_BODY_LENGTH} characters. */
+/** Truncates a body to {@link MAX_RESPONSE_BODY_LENGTH} characters. */
 function truncateBody(body: string): string {
-  return body.length > MAX_BODY_LENGTH
-    ? body.slice(0, MAX_BODY_LENGTH) + TRUNCATION_MARKER
+  return body.length > MAX_RESPONSE_BODY_LENGTH
+    ? body.slice(0, MAX_RESPONSE_BODY_LENGTH) + TRUNCATION_MARKER
     : body;
 }
 
@@ -130,9 +128,9 @@ export function isCapturingHttpDebug(): boolean {
 }
 
 /**
- * Appends an exchange to the installed capture, redacting its headers and
- * truncating its bodies first. Does nothing when no capture is installed, or
- * when this capture already holds {@link MAX_CAPTURED_EXCHANGES} entries.
+ * Appends an exchange to the installed capture, redacting its URL and headers
+ * and truncating its bodies first. Does nothing when no capture is installed,
+ * or when this capture already holds {@link MAX_CAPTURED_EXCHANGES} entries.
  *
  * @param exchange The exchange to record.
  */
@@ -143,6 +141,7 @@ export function recordHttpExchange(exchange: HttpExchange): void {
   }
   exchanges.push({
     ...exchange,
+    url: redactUriPassword(exchange.url),
     requestHeaders: redactHeaders(exchange.requestHeaders),
     responseHeaders: redactHeaders(exchange.responseHeaders),
     requestBody:

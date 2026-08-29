@@ -18,7 +18,8 @@ with it, and the message names the MCP operation. The original error stays on
 The `errlog` option answers "what did the server say". A stdio MCP server is a
 child process that writes to its own stderr, and background transport errors
 reach no caller at all. Both go to the stream you supply, instead of to the
-parent process's stderr and the ADK logger.
+parent process's stderr and the ADK logger. The option covers every session
+the toolset opens, including the ones its tools open to run a tool call.
 
 The HTTP debug capture answers "what went over the wire". With debug logging
 on, the HTTP exchanges behind a call are recorded on the invocation, headers
@@ -61,7 +62,9 @@ so you can still tell "the caller gave up" apart from "the server broke".
 ## Capturing the server's output
 
 Pass any writable stream as `errlog`. The toolset then asks a stdio server to
-pipe its stderr, and forwards every chunk to your stream.
+pipe its stderr, and forwards every chunk to your stream. The option lives on
+the session manager the toolset builds, so tool discovery, resource reads and
+tool calls are all covered.
 
 ```ts
 import {MCPToolset} from '@google/adk';
@@ -122,7 +125,10 @@ What the capture guarantees:
 - **Credentials are removed.** The value of `authorization`, `cookie`,
   `set-cookie`, `proxy-authorization`, `api-key`, `x-api-key` and
   `x-goog-api-key` is replaced with `<redacted>` as each exchange is recorded,
-  not when it is read. The record can safely be written to session storage.
+  not when it is read. The URL goes through `redactUriPassword`, which masks a
+  password in the userinfo and a secret query parameter such as
+  `access_token`. Bodies are not scanned, so a credential a server echoes in a
+  response body still reaches the record.
 - **Bodies are bounded.** A body over 1000 characters is truncated with a
   `... [truncated]` marker.
 - **The list is bounded.** One invocation keeps at most 100 exchanges. Later
