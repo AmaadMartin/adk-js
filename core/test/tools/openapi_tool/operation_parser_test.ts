@@ -641,4 +641,59 @@ describe('OperationParser parity with adk-python', () => {
       expect(params[0].description).toBe('');
     });
   });
+
+  describe('JSON string operation', () => {
+    const operation: OpenAPIV3.OperationObject = {
+      operationId: 'getUser',
+      parameters: [
+        {
+          name: 'X-Api-Key',
+          in: 'header',
+          required: true,
+          schema: {type: 'string'},
+        },
+      ],
+      responses: {
+        '200': {
+          description: 'ok',
+          content: {'application/json': {schema: {type: 'string'}}},
+        },
+      },
+    };
+
+    it('should parse a JSON string the same as the equivalent object', () => {
+      const fromJson = new OperationParser(JSON.stringify(operation));
+      const fromObject = new OperationParser(operation);
+
+      expect(fromJson.getParameters()).toEqual(fromObject.getParameters());
+      expect(fromJson.getReturnValue()).toEqual(fromObject.getReturnValue());
+      expect(fromJson.getFunctionName()).toBe(fromObject.getFunctionName());
+      expect(fromJson.getParameters()[0].name).toBe('x_api_key');
+    });
+
+    it('should honour the options when the operation is a JSON string', () => {
+      const parser = new OperationParser(JSON.stringify(operation), {
+        preservePropertyNames: true,
+      });
+
+      expect(parser.getParameters()[0].name).toBe('X-Api-Key');
+    });
+
+    it('should throw when the string is not JSON', () => {
+      expect(() => new OperationParser('{not json')).toThrow(
+        /Operation is not valid JSON/,
+      );
+    });
+
+    it.each([
+      ['an array', '[]'],
+      ['null', 'null'],
+      ['a string', '"x"'],
+      ['a number', '7'],
+    ])('should throw when the JSON is %s', (_label, json) => {
+      expect(() => new OperationParser(json)).toThrow(
+        'Operation must be a JSON object',
+      );
+    });
+  });
 });

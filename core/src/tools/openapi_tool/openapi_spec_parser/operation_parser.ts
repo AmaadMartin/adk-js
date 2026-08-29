@@ -18,6 +18,15 @@ export interface ApiParameter {
   required: boolean;
 }
 
+/** Options that change how an operation's arguments are named. */
+export interface OperationParserOptions {
+  /**
+   * Keeps each argument under the name the OpenAPI document gives it, instead
+   * of converting it to snake_case.
+   */
+  preservePropertyNames?: boolean;
+}
+
 /** The length a generated tool function name is cut down to. */
 const MAX_FUNCTION_NAME_LENGTH = 60;
 
@@ -60,6 +69,40 @@ function bodyArgumentName(schema: OpenAPIV3.SchemaObject): string {
   return schema.type ? '' : 'body';
 }
 
+/**
+ * Reports whether a decoded JSON value can be read as an operation.
+ *
+ * The check stops at object-ness. adk-python validates the operation's shape
+ * through pydantic, which has no TypeScript counterpart: every member this
+ * parser reads is optional at runtime, and `OpenAPIV3.OperationObject` already
+ * describes the object form structurally.
+ */
+function isOperationObject(value: unknown): value is OpenAPIV3.OperationObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Reads an operation supplied as JSON text.
+ *
+ * @param json The operation as JSON text.
+ * @throws {Error} If the text is not JSON, or is JSON that does not describe
+ *   an object.
+ * @returns The parsed operation.
+ */
+function parseOperationJson(json: string): OpenAPIV3.OperationObject {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Operation is not valid JSON: ${reason}`);
+  }
+  if (!isOperationObject(parsed)) {
+    throw new Error('Operation must be a JSON object');
+  }
+  return parsed;
+}
+
 /** Builds the return value that carries a response schema. */
 function returnValueOf(paramSchema: OpenAPIV3.SchemaObject): ApiParameter {
   return {
@@ -82,11 +125,14 @@ export class OperationParser {
   private params: ApiParameter[] = [];
   private returnValue: ApiParameter = returnValueOf({});
   private preservePropertyNames: boolean;
+  private readonly operation: OpenAPIV3.OperationObject;
 
   constructor(
-    private readonly operation: OpenAPIV3.OperationObject,
-    options: {preservePropertyNames?: boolean} = {},
+    operation: OpenAPIV3.OperationObject | string,
+    options: OperationParserOptions = {},
   ) {
+    this.operation =
+      typeof operation === 'string' ? parseOperationJson(operation) : operation;
     this.preservePropertyNames = options.preservePropertyNames ?? false;
     this.processOperationParameters();
     this.processRequestBody();
