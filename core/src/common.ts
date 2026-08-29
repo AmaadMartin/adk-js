@@ -379,6 +379,8 @@ export type {
   ConnectionsClientOptions,
   EntitySchemaAndOperations,
 } from './tools/application_integration_tool/clients/connections_client.js';
+export {IntegrationClient} from './tools/application_integration_tool/clients/integration_client.js';
+export type {IntegrationClientOptions} from './tools/application_integration_tool/clients/integration_client.js';
 export * from './tools/base_tool.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
