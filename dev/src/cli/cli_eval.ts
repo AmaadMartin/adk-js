@@ -166,8 +166,20 @@ export function printEvalSummary(evalResults: EvalResult[]): void {
   }
 }
 
-/** Loads the agent, runs every selected eval case, and prints the summary. */
-export async function evalAgent(options: EvalAgentOptions): Promise<void> {
+/** Whether any eval case failed, which is what makes the command exit 1. */
+export function hasFailure(evalResults: EvalResult[]): boolean {
+  return evalResults.some(
+    (evalResult) => evalResult.finalEvalStatus === EvalStatus.FAILED,
+  );
+}
+
+/**
+ * Loads the agent, runs every selected eval case, prints the summary, and
+ * returns one result per case so the caller can set the exit code.
+ */
+export async function evalAgent(
+  options: EvalAgentOptions,
+): Promise<EvalResult[]> {
   const evaluationCriteria = await getEvaluationCriteriaOrDefault(
     options.configFilePath,
   );
@@ -198,4 +210,5 @@ export async function evalAgent(options: EvalAgentOptions): Promise<void> {
   });
 
   printEvalSummary(evalResults);
+  return evalResults;
 }
