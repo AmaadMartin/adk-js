@@ -73,7 +73,34 @@ describe('AutoAuthCredentialExchanger', () => {
       authCredential: credential,
     });
 
-    expect(result.credential.authType).toBe(AuthCredentialTypes.HTTP);
+    expect(result.credential.http?.credentials.token).toBe(
+      'oauth2-access-token',
+    );
+  });
+
+  it('keeps the oauth2 data on the credential it returns', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+    const authScheme = {
+      type: 'openIdConnect',
+      openIdConnectUrl: 'https://example.com/.well-known/openid-configuration',
+      authorizationEndpoint: 'https://example.com/auth',
+      tokenEndpoint: 'https://example.com/token',
+    } satisfies OpenIdConnectWithConfig;
+
+    const result = await exchanger.exchange({
+      authScheme,
+      authCredential: {
+        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+        oauth2: {
+          accessToken: 'oauth2-access-token',
+          refreshToken: 'oauth2-refresh-token',
+        },
+      },
+    });
+
+    // The caller stores this credential. A bearer credential on its own holds
+    // no refresh token, so a later call could never renew the access token.
+    expect(result.credential.oauth2?.refreshToken).toBe('oauth2-refresh-token');
     expect(result.credential.http?.credentials.token).toBe(
       'oauth2-access-token',
     );

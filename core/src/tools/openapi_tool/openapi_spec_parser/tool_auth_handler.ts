@@ -114,13 +114,6 @@ export class ToolAuthHandler {
       authCredential: credential,
     });
 
-    // An OAuth2 credential that holds an access token is the durable one: it
-    // also carries the refresh token and the expiry that a later call needs,
-    // while the bearer credential derived from it carries neither.
-    const credentialToStore = credential.oauth2?.accessToken
-      ? credential
-      : result.credential;
-
     // Only cache what cannot cheaply be obtained again: an auth response is
     // readable once, and an exchange costs a round trip. A statically
     // configured credential that needed no exchange is already available on
@@ -128,7 +121,7 @@ export class ToolAuthHandler {
     // secret into the session store for nothing.
     if (authResponseCredential || result.wasExchanged) {
       const key = store.getCredentialKey(this.authScheme);
-      store.storeCredential(key, credentialToStore);
+      store.storeCredential(key, result.credential);
     }
 
     return {state: 'done', authCredential: result.credential};
@@ -150,28 +143,26 @@ export class ToolAuthHandler {
       return storedCredential;
     }
 
-    let credential = storedCredential;
     const refresher = new OAuth2CredentialRefresher();
-
-    if (await refresher.isRefreshNeeded(credential)) {
-      credential = await refresher.refresh(credential, this.authScheme);
-      // A provider that rotates the refresh token invalidates the previous
-      // one, so the refreshed credential replaces the stored one. The
-      // refresher hands back the credential it was given, by reference, when
-      // it cannot refresh, and rewriting that one would add a state delta to
-      // every tool call.
-      if (credential !== storedCredential) {
-        store.storeCredential(
-          store.getCredentialKey(this.authScheme),
-          credential,
-        );
-      }
-    }
+    const credential = (await refresher.isRefreshNeeded(storedCredential))
+      ? await refresher.refresh(storedCredential, this.authScheme)
+      : storedCredential;
 
     const result = await new AutoAuthCredentialExchanger().exchange({
       authScheme: this.authScheme,
       authCredential: credential,
     });
+
+    // A provider that rotates the refresh token invalidates the previous one,
+    // so a refreshed credential replaces the stored one. The refresher hands
+    // back the credential it was given, by reference, when it cannot refresh,
+    // and rewriting that one would add a state delta to every tool call.
+    if (credential !== storedCredential) {
+      store.storeCredential(
+        store.getCredentialKey(this.authScheme),
+        result.credential,
+      );
+    }
 
     return result.credential;
   }

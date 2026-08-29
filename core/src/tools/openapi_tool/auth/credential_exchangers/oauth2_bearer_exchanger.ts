@@ -14,16 +14,9 @@ import {
   CredentialExchangeError,
   ExchangeResult,
 } from '../../../../auth/exchanger/base_credential_exchanger.js';
-import {OAuth2CredentialRefresher} from '../../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../../utils/experimental.js';
 
 const OAUTH2_SCHEME_TYPES = ['oauth2', 'openIdConnect'];
-
-/** A scheme and credential pair that passed {@link checkSchemeCredentialType}. */
-interface ValidatedOAuth2Params {
-  authScheme: AuthScheme;
-  authCredential: AuthCredential;
-}
 
 /**
  * Validates that the pair can produce a bearer token.
@@ -36,7 +29,7 @@ interface ValidatedOAuth2Params {
 export function checkSchemeCredentialType(params: {
   authScheme?: AuthScheme;
   authCredential?: AuthCredential;
-}): asserts params is ValidatedOAuth2Params {
+}): void {
   const {authScheme, authCredential} = params;
 
   if (!authCredential) {
@@ -84,8 +77,9 @@ export class OAuth2BearerCredentialExchanger implements BaseCredentialExchanger 
   /**
    * Converts the credential into an HTTP bearer credential.
    *
-   * A credential that already carries an HTTP credential, and one with no
-   * access token to wrap, both come back unchanged and not exchanged.
+   * Keeping the token fresh belongs to the caller: `ToolAuthHandler` refreshes
+   * an expired credential and stores the result, which this exchanger cannot
+   * do because it returns only the credential a request carries.
    *
    * @param params.authScheme The OAuth2 or OpenID Connect scheme.
    * @param params.authCredential The credential to convert.
@@ -98,29 +92,15 @@ export class OAuth2BearerCredentialExchanger implements BaseCredentialExchanger 
   }): Promise<ExchangeResult> {
     checkSchemeCredentialType(params);
 
-    // An HTTP credential is already in the form the header needs.
-    if (params.authCredential.http) {
-      return {credential: params.authCredential, wasExchanged: false};
-    }
-
     const {oauth2} = params.authCredential;
     if (!oauth2?.accessToken) {
+      // An HTTP credential is already in the form the header needs, and a
+      // credential with no access token has nothing to wrap.
       return {credential: params.authCredential, wasExchanged: false};
     }
 
-    // The refresher checks expiry itself, but it warns when no refresh token is
-    // present, so only call it when a refresh can actually happen.
-    const refreshed = oauth2.refreshToken
-      ? await new OAuth2CredentialRefresher().refresh(
-          params.authCredential,
-          params.authScheme,
-        )
-      : undefined;
-
     return {
-      credential: generateAuthToken(
-        refreshed?.oauth2?.accessToken ?? oauth2.accessToken,
-      ),
+      credential: generateAuthToken(oauth2.accessToken),
       wasExchanged: true,
     };
   }

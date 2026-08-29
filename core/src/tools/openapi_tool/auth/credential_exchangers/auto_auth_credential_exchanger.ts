@@ -19,12 +19,8 @@ import {OAuth2BearerCredentialExchanger} from './oauth2_bearer_exchanger.js';
 import {ServiceAccountCredentialExchanger} from './service_account_exchanger.js';
 
 /**
- * Builds an exchanger that obtains an OAuth2 access token, then converts it
- * into the HTTP bearer credential that the OpenAPI layer sends in the
- * Authorization header.
- *
- * The two exchangers are built once per caller rather than at module load, so
- * importing this file does not emit their experimental warnings.
+ * Builds an exchanger that obtains an OAuth2 access token, then wraps it as the
+ * HTTP bearer credential the OpenAPI layer sends in the Authorization header.
  */
 function createOAuth2Exchanger(): BaseCredentialExchanger {
   const tokenExchanger = new OAuth2CredentialExchanger();
@@ -39,7 +35,10 @@ function createOAuth2Exchanger(): BaseCredentialExchanger {
       });
 
       return {
-        credential: converted.credential,
+        // The bearer credential holds neither the refresh token nor the
+        // expiry, so the OAuth2 data stays on the credential the caller
+        // stores. A later call reads it back and refreshes the token.
+        credential: {...acquired.credential, http: converted.credential.http},
         wasExchanged: acquired.wasExchanged || converted.wasExchanged,
       };
     },

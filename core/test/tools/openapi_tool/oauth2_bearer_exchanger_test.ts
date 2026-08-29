@@ -20,7 +20,6 @@ import {
   generateAuthToken,
   OAuth2BearerCredentialExchanger,
 } from '../../../src/tools/openapi_tool/auth/credential_exchangers/oauth2_bearer_exchanger.js';
-import {logger} from '../../../src/utils/logger.js';
 
 const TOKEN_ENDPOINT = 'https://example.com/token';
 const ONE_HOUR_MS = 3600_000;
@@ -38,12 +37,6 @@ const apiKeyScheme = {
   in: 'header',
   name: 'X-Api-Key',
 } satisfies OpenAPIV3.ApiKeySecurityScheme;
-
-/** An oauth2 scheme whose flows declare no token URL. */
-const endpointlessScheme = {
-  type: 'oauth2',
-  flows: {},
-} satisfies OpenAPIV3.OAuth2SecurityScheme;
 
 /** Builds an OAuth2 credential, overriding the fields a case cares about. */
 function oauth2Credential(
@@ -69,10 +62,6 @@ function expiredCredential(
     expiresAt: Date.now() - ONE_HOUR_MS,
     ...oauth2,
   });
-}
-
-function tokenResponse(body: Record<string, unknown>): Response {
-  return new Response(JSON.stringify(body), {status: 200});
 }
 
 describe('checkSchemeCredentialType', () => {
@@ -219,152 +208,21 @@ describe('OAuth2BearerCredentialExchanger', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('refreshes an expired access token before wrapping it', async () => {
-    fetchMock.mockResolvedValue(
-      tokenResponse({access_token: 'refreshed_access_token', expires_in: 3600}),
-    );
-
+  it('does not contact the token endpoint, even for an expired credential', async () => {
     const result = await exchange(authScheme, expiredCredential());
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(TOKEN_ENDPOINT);
-    const body = new URLSearchParams(String(init?.body));
-    expect(body.get('grant_type')).toBe('refresh_token');
-    expect(body.get('refresh_token')).toBe('test_refresh_token');
-    expect(body.get('client_id')).toBe('test-client-id');
-    expect(result.credential.http?.credentials.token).toBe(
-      'refreshed_access_token',
-    );
-  });
-
-  it('keeps the stale token when the token request rejects', async () => {
-    fetchMock.mockRejectedValue(new Error('network down'));
-
-    const result = await exchange(authScheme, expiredCredential());
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('keeps the stale token when the token endpoint returns an error status', async () => {
-    fetchMock.mockResolvedValue(new Response('{}', {status: 500}));
-
-    const result = await exchange(authScheme, expiredCredential());
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('keeps the stale token when the token request rejects with a non-error', async () => {
-    fetchMock.mockRejectedValue('refresh unavailable');
-
-    const result = await exchange(authScheme, expiredCredential());
-
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('keeps the stale token when the refresh response omits the access token', async () => {
-    fetchMock.mockResolvedValue(tokenResponse({expires_in: 3600}));
-
-    const result = await exchange(authScheme, expiredCredential());
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('does not refresh a token that is still valid', async () => {
-    const result = await exchange(
-      authScheme,
-      expiredCredential({
-        accessToken: 'valid_access_token',
-        expiresAt: Date.now() + ONE_HOUR_MS,
-      }),
-    );
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.credential.http?.credentials.token).toBe(
-      'valid_access_token',
-    );
-  });
-
-  it('does not refresh an expired token without a refresh token', async () => {
-    const result = await exchange(
-      authScheme,
-      oauth2Credential({
-        accessToken: 'stale_access_token',
-        expiresAt: Date.now() - ONE_HOUR_MS,
-      }),
-    );
-
+    // Refreshing belongs to ToolAuthHandler, which stores the refreshed
+    // credential. This exchanger only wraps the token it is given.
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.credential.http?.credentials.token).toBe(
       'stale_access_token',
     );
-  });
-
-  it('does not refresh when the scheme declares no token endpoint', async () => {
-    const result = await exchange(endpointlessScheme, expiredCredential());
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('does not refresh without a client id', async () => {
-    const result = await exchange(
-      authScheme,
-      expiredCredential({clientId: undefined}),
-    );
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('does not refresh without a client secret', async () => {
-    const result = await exchange(
-      authScheme,
-      expiredCredential({clientSecret: undefined}),
-    );
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('does not warn about a missing refresh token on a healthy call', async () => {
-    const warn = vi.spyOn(logger, 'warn');
-
-    await exchange(
-      authScheme,
-      oauth2Credential({accessToken: 'valid_access_token'}),
-    );
-
-    expect(warn).not.toHaveBeenCalledWith(
-      'No refresh token available to refresh credential',
-    );
-    warn.mockRestore();
   });
 
   it('does not mutate the credential it is given', async () => {
     const authCredential = expiredCredential({
       accessToken: 'test_access_token',
     });
-    fetchMock.mockResolvedValue(
-      tokenResponse({access_token: 'refreshed_access_token'}),
-    );
 
     await exchange(authScheme, authCredential);
 

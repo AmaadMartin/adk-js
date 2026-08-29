@@ -107,7 +107,6 @@ describe('ToolAuthHandler OAuth2 credentials', () => {
     ).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
-    expect(result.authCredential?.authType).toBe(AuthCredentialTypes.HTTP);
     expect(result.authCredential?.http?.scheme).toBe('bearer');
     expect(result.authCredential?.http?.credentials.token).toBe(
       'stored-access-token',
@@ -156,7 +155,8 @@ describe('ToolAuthHandler OAuth2 credentials', () => {
   });
 
   it('keeps the stale token when the refresh request fails', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network')));
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network'));
+    vi.stubGlobal('fetch', fetchMock);
     const context = createContext({[STORE_KEY]: expiredCredential()});
 
     const result = await new ToolAuthHandler(
@@ -169,12 +169,14 @@ describe('ToolAuthHandler OAuth2 credentials', () => {
     );
     const stored = context.state.get<AuthCredential>(STORE_KEY);
     expect(stored?.oauth2?.refreshToken).toBe('stale-refresh-token');
+    // The handler owns the refresh, so one failed call costs one request.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     // The refresher returned the stored credential unchanged, so rewriting it
     // would add a state delta to every tool call.
     expect(context.state.hasDelta()).toBe(false);
   });
 
-  it('stores the OAuth2 credential from an auth response, not the bearer credential', async () => {
+  it('stores an auth response credential with its refresh token', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const context = createContext({[AUTH_RESPONSE_KEY]: freshCredential()});
@@ -187,15 +189,16 @@ describe('ToolAuthHandler OAuth2 credentials', () => {
     expect(result.authCredential?.http?.credentials.token).toBe(
       'stored-access-token',
     );
-    // The bearer credential carries neither the refresh token nor the expiry,
-    // so storing it would strand the session on a token it cannot renew.
+    // A bearer credential on its own holds neither the refresh token nor the
+    // expiry, so storing it would strand the session on a token it cannot
+    // renew.
     const stored = context.state.get<AuthCredential>(STORE_KEY);
     expect(stored?.oauth2?.refreshToken).toBe('stored-refresh-token');
-    expect(stored?.http).toBeUndefined();
+    expect(stored?.http?.credentials.token).toBe('stored-access-token');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('stores the exchange result when the credential carries no access token', async () => {
+  it('stores the refresh token a client-credentials grant returns', async () => {
     stubTokenEndpoint('granted-token', 'granted-refresh-token');
     const context = createContext();
 
@@ -211,9 +214,10 @@ describe('ToolAuthHandler OAuth2 credentials', () => {
     expect(result.authCredential?.http?.credentials.token).toBe(
       'granted-token',
     );
-    // There is no durable credential to keep, so the exchange result is cached
-    // as it was before this change.
+    // The configured credential holds no token, so the grant produces the only
+    // refresh token this session will ever have.
     const stored = context.state.get<AuthCredential>(STORE_KEY);
+    expect(stored?.oauth2?.refreshToken).toBe('granted-refresh-token');
     expect(stored?.http?.credentials.token).toBe('granted-token');
   });
 });
