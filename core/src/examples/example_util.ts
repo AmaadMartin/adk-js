@@ -113,17 +113,25 @@ export function convertExamplesToText(
  * @throws {Error} When `examples` is neither an array nor a
  *   {@link BaseExampleProvider}.
  */
-export async function buildExampleSi(
+export function buildExampleSi(
   examples: Example[] | BaseExampleProvider,
   query: string,
   model?: string,
 ): Promise<string> {
   if (Array.isArray(examples)) {
-    return convertExamplesToText(examples, model);
+    return Promise.resolve(convertExamplesToText(examples, model));
   }
   if (isBaseExampleProvider(examples)) {
-    return convertExamplesToText(await examples.getExamples(query), model);
+    return renderProviderExamples(examples, query, model);
   }
 
   throw new Error('Invalid example configuration');
+}
+
+async function renderProviderExamples(
+  provider: BaseExampleProvider,
+  query: string,
+  model?: string,
+): Promise<string> {
+  return convertExamplesToText(await provider.getExamples(query), model);
 }

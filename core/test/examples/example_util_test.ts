@@ -146,9 +146,9 @@ describe('buildExampleSi', () => {
     expect(result).toContain('```tool_code');
   });
 
-  it('throws an error for invalid input', async () => {
+  it('throws an error for invalid input', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await expect(buildExampleSi({} as any, 'query')).rejects.toThrow(
+    expect(() => buildExampleSi({} as any, 'query')).toThrow(
       'Invalid example configuration',
     );
   });
