@@ -9,7 +9,12 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
+import {
+  FeatureName,
+  isFeatureEnabled,
+} from '../../features/feature_registry.js';
 import {experimental} from '../../utils/experimental.js';
+import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {logger} from '../../utils/logger.js';
 import {
   DispatcherRequestInit,
@@ -18,7 +23,7 @@ import {
 } from '../../utils/ssl_utils.js';
 import {version} from '../../version.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {applyCredential} from './auth/auth_helpers.js';
+import {applyCredential, validateAuthScheme} from './auth/auth_helpers.js';
 import {
   ApiParameter,
   OperationParser,
@@ -77,6 +82,9 @@ export class RestApiTool extends BaseTool {
     options: RestApiToolOptions = {},
   ) {
     super({name: name.slice(0, MAX_TOOL_NAME_LENGTH), description});
+    if (authScheme !== undefined) {
+      validateAuthScheme(authScheme);
+    }
     this.authScheme = authScheme;
     this.authCredential = authCredential;
     this.headerProvider = options.headerProvider;
@@ -88,6 +96,7 @@ export class RestApiTool extends BaseTool {
 
   @experimental
   public configureAuthScheme(authScheme: OpenAPIV3.SecuritySchemeObject) {
+    validateAuthScheme(authScheme);
     this.authScheme = authScheme;
   }
 
@@ -128,10 +137,17 @@ export class RestApiTool extends BaseTool {
   @experimental
   override _getDeclaration(): FunctionDeclaration {
     const schema = this.operationParser.getJsonSchema();
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.name,
+        description: this.description,
+        parametersJsonSchema: schema,
+      };
+    }
     return {
       name: this.name,
       description: this.description,
-      parameters: schema,
+      parameters: toGeminiSchema(schema),
     };
   }
 
@@ -244,11 +260,16 @@ export class RestApiTool extends BaseTool {
         };
       }
 
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        return await response.json();
+      // The body is read once: a `fetch` body is a single-use stream. The
+      // parse needs its own catch, or a plain-text 200 reaches the outer
+      // catch and is reported as a transport failure. A non-JSON body still
+      // comes back wrapped in a `text` field.
+      const bodyText = await response.text();
+      try {
+        return JSON.parse(bodyText);
+      } catch {
+        return {text: bodyText};
       }
-      return {text: await response.text()};
     } catch (error) {
       return {
         error: `Failed to execute API call: ${(error as Error).message}`,

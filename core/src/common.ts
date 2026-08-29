@@ -437,6 +437,7 @@ export {OperationParser} from './tools/openapi_tool/openapi_spec_parser/operatio
 export type {
   ApiParameter,
   OperationParserOptions,
+  ToolArgumentsSchema,
 } from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
 export {
   DEFAULT_OPENAPI_CREDENTIAL_KEY,
