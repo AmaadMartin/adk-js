@@ -20,7 +20,7 @@ import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
-import {logToTmpFolder} from '../utils/log_to_tmp_folder.js';
+import {TmpFolderLog, logToTmpFolder} from '../utils/log_to_tmp_folder.js';
 import {AdkLogger, resetFileLogTarget} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
@@ -98,9 +98,24 @@ function getBoolean(option?: string | boolean): boolean {
  * Sends the ADK logs to a file in the system temp folder and names that file
  * on the terminal. Returns the path of the file, which the caller needs to
  * point the user at it once the logs have left the console.
+ *
+ * Returns undefined and leaves the logs on the console when the file cannot be
+ * opened: a stale file or another user's folder occupies the fixed path, or
+ * the temp folder refuses the write. Where the logs go must not decide whether
+ * the command runs, so this reports the reason and continues.
  */
-function startTmpFolderLogging(): string {
-  const {logFilePath, latestLogPath} = logToTmpFolder();
+function startTmpFolderLogging(): string | undefined {
+  let destination: TmpFolderLog;
+  try {
+    destination = logToTmpFolder();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`Cannot log to the system temp folder: ${message}`);
+    console.warn('Logging to the console instead.');
+    return undefined;
+  }
+
+  const {logFilePath, latestLogPath} = destination;
   // `setLogger` runs before `setAdkCoreLogLevel`, which proxies to whichever
   // logger is current.
   setLogger(new AdkLogger({label: 'ADK'}));
@@ -421,7 +436,6 @@ export function createProgram(): Command {
     )
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
-    .addOption(LOG_TO_TMP_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
@@ -430,13 +444,11 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
-      // The flag is opt-in here as well. `adk run` paints a chat transcript on
-      // stdout and its logs interleave with it, but redirecting them by
-      // default would take `-v` and `--log_level` away from everyone already
-      // running the command.
-      const logFilePath = getBoolean(options['log_to_tmp'])
-        ? startTmpFolderLogging()
-        : undefined;
+      // No flag here, matching adk-python's `cli_run`. This command paints a
+      // chat transcript on stdout, and a log record landing between the prompt
+      // and the answer is what the temp folder exists to prevent. `-v` and
+      // `--log_level` keep working: they set the level of the file logger.
+      const logFilePath = startTmpFolderLogging();
       setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
       try {

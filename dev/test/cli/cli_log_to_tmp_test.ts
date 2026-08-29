@@ -16,6 +16,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
+import {AdkApiServer} from '../../src/server/adk_api_server.js';
 import {resetFileLogTarget} from '../../src/utils/logger.js';
 
 vi.mock('../../src/server/adk_api_server', () => ({
@@ -136,4 +137,42 @@ describe('adk web and api_server with --log_to_tmp', () => {
       false,
     );
   });
+
+  it('starts the server anyway when a stale file occupies the log folder path', async () => {
+    // A leftover file, or another user's, at the fixed folder name. `mkdir`
+    // fails with EEXIST, and the command has to survive it.
+    await fs.writeFile(logDir, 'not a folder');
+    const warned: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      warned.push(args.map(String).join(' '));
+    });
+
+    await runCli(['api_server', '--log_to_tmp']);
+
+    expect(vi.mocked(AdkApiServer)).toHaveBeenCalledTimes(1);
+    expect(warned.some((line) => line.includes('EEXIST'))).toBe(true);
+    expect(printed.some((line) => line.startsWith(SETUP_LINE_PREFIX))).toBe(
+      false,
+    );
+    expect(await fs.readFile(logDir, 'utf8')).toBe('not a folder');
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'starts the server anyway when the log folder refuses the write',
+    async () => {
+      await fs.mkdir(logDir, {mode: 0o500});
+      const warned: string[] = [];
+      vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+        warned.push(args.map(String).join(' '));
+      });
+
+      await runCli(['api_server', '--log_to_tmp']);
+
+      expect(vi.mocked(AdkApiServer)).toHaveBeenCalledTimes(1);
+      expect(warned.some((line) => line.includes('EACCES'))).toBe(true);
+      expect(await fs.readdir(logDir)).toEqual([]);
+      // Let afterEach delete it.
+      await fs.chmod(logDir, 0o700);
+    },
+  );
 });
