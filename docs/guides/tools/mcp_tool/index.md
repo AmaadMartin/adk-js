@@ -14,10 +14,8 @@ agent, under the server's own permissions, so two questions arise that a local
 `McpToolOptions` answers both. `authScheme` and `authCredential` name the
 credential and let ADK resolve it, the same pair `RestApiTool` takes; the
 resolved credential becomes a request header on the session that carries the
-call. `requireConfirmation` gates the call on a human, the same gate
-`FunctionTool` offers. `headerProvider` adds headers that only the running
-invocation knows, such as a tenant identifier. `progressCallback` receives the
-notifications a long-running server tool sends.
+call. `requireConfirmation` gates the call on a human, through the same
+`BaseTool` gate `FunctionTool` uses.
 
 An `MCPToolset` builds its tools itself and does not forward these options yet,
 so configure an `MCPTool` directly when you need them.
@@ -67,58 +65,38 @@ headers:
 | `apiKey` with an `apiKey` scheme in the header        | `<scheme name>: <key>`            |
 | `serviceAccount`                                      | none, and ADK logs a warning      |
 
-An API key is only supported in a header. A scheme that puts it in the query
-string or in a cookie is refused, and so is an API key with no scheme at all.
-Neither error message repeats the key.
-
 When the credential needs the user to authorize it first, `runAsync` returns
 `{pending: true, message: 'Needs your authorization to access your data.'}` and
 opens no session. The runner surfaces that as a credential request, and the next
 turn resumes the call.
 
-## Human approval
+## The remaining options
 
 ```ts
 const tool = new MCPTool(mcpToolDefinition, sessionManager, undefined, {
   requireConfirmation: (args) => args['force'] === true,
-});
-```
-
-`requireConfirmation` takes a boolean or a predicate over the call arguments. A
-gated call returns
-`{error: 'This tool call requires confirmation, please approve or reject.'}` on
-the first pass and opens no session. Once the user answers, an approval runs the
-call and a rejection returns
-`{error: 'This tool call is rejected.'}`.
-
-## Per-call headers
-
-```ts
-const tool = new MCPTool(mcpToolDefinition, sessionManager, undefined, {
   headerProvider: async (context) => ({
     'X-Tenant-ID': await tenantFor(context),
   }),
-});
-```
-
-The provider may be synchronous or asynchronous, and runs once per call. Its
-headers are applied on top of the authentication headers, so it wins a name
-collision. With no credential and no provider, ADK sends no headers and the
-transport keeps the ones it was configured with.
-
-## Progress notifications
-
-```ts
-const tool = new MCPTool(mcpToolDefinition, sessionManager, undefined, {
   progressCallback: ({progress, total, message}) =>
     report(progress, total, message),
 });
 ```
 
-Use `progressCallbackFactory` instead when the callback needs the runtime
-context. ADK calls the factory once per invocation with the tool name and
-`{callbackContext}`, and a factory that returns nothing disables progress for
-that call. Configuring both a callback and a factory is refused at construction.
+A gated call returns
+`{error: 'This tool call requires confirmation, please approve or reject.'}` on
+the first pass and opens no session; once the user answers, an approval runs the
+call and a rejection returns `{error: 'This tool call is rejected.'}`.
+
+`headerProvider` may be synchronous or asynchronous and runs once per call. Its
+headers are applied on top of the authentication headers, so it wins a name
+collision. With no credential and no provider, ADK sends no headers and the
+transport keeps the ones it was configured with.
+
+Use `progressCallbackFactory` in place of `progressCallback` when the callback
+needs the runtime context: ADK calls the factory once per invocation with the
+tool name and `{callbackContext}`. A factory that returns nothing disables
+progress for that call, and configuring both is refused at construction.
 
 ## Failure modes
 
@@ -128,5 +106,5 @@ that call. Configuring both a callback and a factory is refused at construction.
   place of ADK's own.
 - Each call opens one session and closes it again, on the error path too. A
   failed call is never retried, so the server never sees it twice.
-- An API key configured for the query string or a cookie is refused. Only a
-  header-based key reaches the transport. Neither error names the key value.
+- An API key configured for the query string or a cookie is refused, and so is
+  an API key with no scheme at all. Neither error names the key value.
