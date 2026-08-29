@@ -9,22 +9,25 @@ import {
   actionRequest,
   actionResponse,
   convertJsonSchemaToOpenApiSchema,
-  createOperation,
-  createOperationRequest,
-  deleteOperation,
-  deleteOperationRequest,
+  ENTITY_OPERATIONS,
   executeCustomQueryRequest,
   getActionOperation,
   getConnectorBaseSpec,
-  getOperation,
-  getOperationRequest,
-  listOperation,
-  listOperationRequest,
-  updateOperation,
-  updateOperationRequest,
 } from '../../../../src/tools/application_integration_tool/clients/connector_spec_builders.js';
 
 const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
+
+/**
+ * Resolves an entity operation builder the way `IntegrationClient` does, so
+ * these tests drive the surface the package actually uses.
+ */
+function entityOperation(name: string) {
+  const builder = ENTITY_OPERATIONS.get(name);
+  if (builder === undefined) {
+    expect.fail(`ENTITY_OPERATIONS has no entry for ${name}`);
+  }
+  return builder;
+}
 
 describe('getConnectorBaseSpec', () => {
   it('describes the ExecuteConnection integration', () => {
@@ -171,7 +174,7 @@ describe('getActionOperation', () => {
 
 describe('entity operations', () => {
   it('describes a list operation, keeping the reference wording', () => {
-    const item = listOperation({
+    const item = entityOperation('list').operation({
       entity: 'Issues',
       schemaAsString: '{"type": "object"}',
       toolName: 'test_tool',
@@ -205,7 +208,7 @@ describe('entity operations', () => {
   });
 
   it('describes a get operation', () => {
-    const item = getOperation({
+    const item = entityOperation('get').operation({
       entity: 'Issues',
       schemaAsString: '{"type": "object"}',
       toolName: 'test_tool',
@@ -227,7 +230,7 @@ describe('entity operations', () => {
   });
 
   it('describes a create operation', () => {
-    const item = createOperation({
+    const item = entityOperation('create').operation({
       entity: 'Issues',
       schemaAsString: '',
       toolName: 'test_tool',
@@ -250,7 +253,7 @@ describe('entity operations', () => {
   });
 
   it('describes an update operation', () => {
-    const item = updateOperation({
+    const item = entityOperation('update').operation({
       entity: 'Issues',
       schemaAsString: '',
       toolName: 'test_tool',
@@ -264,7 +267,7 @@ describe('entity operations', () => {
   });
 
   it('describes a delete operation', () => {
-    const item = deleteOperation({
+    const item = entityOperation('delete').operation({
       entity: 'Issues',
       schemaAsString: '',
       toolName: 'test_tool',
@@ -280,7 +283,7 @@ describe('entity operations', () => {
 
 describe('request schemas', () => {
   it('requires the payload and the connection identity to create', () => {
-    expect(createOperationRequest('Issues')).toEqual({
+    expect(entityOperation('create').request('Issues')).toEqual({
       type: 'object',
       required: [
         'connectorInputPayload',
@@ -305,7 +308,7 @@ describe('request schemas', () => {
   });
 
   it('adds the entity id and the filter clause to update', () => {
-    const schema = updateOperationRequest('Issues');
+    const schema = entityOperation('update').request('Issues');
 
     expect(schema.required).toEqual([
       'connectorInputPayload',
@@ -325,7 +328,7 @@ describe('request schemas', () => {
   });
 
   it('requires the entity id to get', () => {
-    const schema = getOperationRequest();
+    const schema = entityOperation('get').request('Issues');
 
     expect(schema.required).toEqual([
       'entityId',
@@ -339,7 +342,7 @@ describe('request schemas', () => {
   });
 
   it('adds the filter clause to delete', () => {
-    const schema = deleteOperationRequest();
+    const schema = entityOperation('delete').request('Issues');
 
     expect(schema.required).toEqual([
       'entityId',
@@ -355,7 +358,7 @@ describe('request schemas', () => {
   });
 
   it('offers paging and sorting to list', () => {
-    const schema = listOperationRequest();
+    const schema = entityOperation('list').request('Issues');
 
     expect(schema.required).toEqual([
       'operation',
@@ -467,16 +470,13 @@ describe('convertJsonSchemaToOpenApiSchema', () => {
     });
   });
 
-  it('offers a tuple items list as oneOf', () => {
+  it('leaves a positional items list unconstrained', () => {
     expect(
       convertJsonSchemaToOpenApiSchema({
         type: 'array',
         items: [{type: 'string'}, {type: 'integer'}],
       }),
-    ).toEqual({
-      type: 'array',
-      items: {oneOf: [{type: 'string'}, {type: 'integer'}]},
-    });
+    ).toEqual({type: 'array', items: {}});
   });
 
   it('replaces a property schema that is not an object', () => {
@@ -486,15 +486,6 @@ describe('convertJsonSchemaToOpenApiSchema', () => {
         properties: {input: 'nonsense'},
       }),
     ).toEqual({type: 'object', properties: {input: {}}});
-  });
-
-  it('replaces a tuple entry that is not an object', () => {
-    expect(
-      convertJsonSchemaToOpenApiSchema({type: 'array', items: ['nonsense']}),
-    ).toEqual({
-      type: 'array',
-      items: {oneOf: [{}]},
-    });
   });
 
   it('replaces an items schema that is not an object', () => {

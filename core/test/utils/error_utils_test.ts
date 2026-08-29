@@ -143,6 +143,18 @@ describe('formatError', () => {
     expect(formatError(err)).toContain('403');
   });
 
+  it('reads the HTTP details off an array-shaped thrown value', () => {
+    const err = Object.assign([1, 2], {status: 503, statusText: 'Unavailable'});
+    const result = formatError(err);
+    expect(result).toContain('503');
+    expect(result).toContain('Unavailable');
+  });
+
+  it('follows the cause of an array-shaped thrown value', () => {
+    const err = Object.assign([1, 2], {cause: new Error('root cause')});
+    expect(formatError(err)).toContain('root cause');
+  });
+
   it('surfaces a response body even when no status is available', () => {
     const err = Object.assign(new Error('boom'), {
       response: {data: 'body without status'},

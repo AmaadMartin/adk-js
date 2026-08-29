@@ -5,11 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {
-  asJsonObject,
-  asRecord,
-  readString,
-} from '../../src/utils/json_utils.js';
+import {asJsonObject, readString} from '../../src/utils/json_utils.js';
 
 describe('asJsonObject', () => {
   it('returns a plain object unchanged', () => {
@@ -21,19 +17,6 @@ describe('asJsonObject', () => {
     expect(asJsonObject([1, 2])).toBeUndefined();
     expect(asJsonObject('text')).toBeUndefined();
     expect(asJsonObject(undefined)).toBeUndefined();
-  });
-});
-
-describe('asRecord', () => {
-  it('accepts an array, unlike asJsonObject', () => {
-    expect(asRecord([1, 2])).toEqual([1, 2]);
-    expect(asRecord({a: 1})).toEqual({a: 1});
-  });
-
-  it('rejects null and a primitive', () => {
-    expect(asRecord(null)).toBeUndefined();
-    expect(asRecord('text')).toBeUndefined();
-    expect(asRecord(undefined)).toBeUndefined();
   });
 });
 

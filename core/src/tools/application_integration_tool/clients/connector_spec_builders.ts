@@ -231,7 +231,7 @@ export function getActionOperation(
 }
 
 /** What an entity path-item builder reads. */
-export interface EntityOperationContext {
+interface EntityOperationContext {
   entity: string;
   /** The entity's JSON schema, quoted in a read operation's description. */
   schemaAsString: string;
@@ -240,7 +240,7 @@ export interface EntityOperationContext {
 }
 
 /** Builds the path item that lists the records of an entity. */
-export function listOperation({
+function listOperation({
   entity,
   schemaAsString,
   toolName,
@@ -263,7 +263,7 @@ export function listOperation({
 }
 
 /** Builds the path item that reads a single record of an entity. */
-export function getOperation({
+function getOperation({
   entity,
   schemaAsString,
   toolName,
@@ -280,7 +280,7 @@ export function getOperation({
 }
 
 /** Builds the path item that creates a record of an entity. */
-export function createOperation({
+function createOperation({
   entity,
   toolName,
   toolInstructions,
@@ -295,7 +295,7 @@ export function createOperation({
 }
 
 /** Builds the path item that updates a record of an entity. */
-export function updateOperation({
+function updateOperation({
   entity,
   toolName,
   toolInstructions,
@@ -310,7 +310,7 @@ export function updateOperation({
 }
 
 /** Builds the path item that deletes a record of an entity. */
-export function deleteOperation({
+function deleteOperation({
   entity,
   toolName,
   toolInstructions,
@@ -325,7 +325,7 @@ export function deleteOperation({
 }
 
 /** Builds the request schema of a create-entity call. */
-export function createOperationRequest(entity: string): OpenAPIV3.SchemaObject {
+function createOperationRequest(entity: string): OpenAPIV3.SchemaObject {
   return {
     type: 'object',
     required: [
@@ -345,7 +345,7 @@ export function createOperationRequest(entity: string): OpenAPIV3.SchemaObject {
 }
 
 /** Builds the request schema of an update-entity call. */
-export function updateOperationRequest(entity: string): OpenAPIV3.SchemaObject {
+function updateOperationRequest(entity: string): OpenAPIV3.SchemaObject {
   return {
     type: 'object',
     required: [
@@ -368,7 +368,7 @@ export function updateOperationRequest(entity: string): OpenAPIV3.SchemaObject {
 }
 
 /** Builds the request schema of a get-entity call. */
-export function getOperationRequest(): OpenAPIV3.SchemaObject {
+function getOperationRequest(): OpenAPIV3.SchemaObject {
   return {
     type: 'object',
     required: ['entityId', ...CONNECTION_IDENTITY_REQUIRED, 'entity'],
@@ -382,7 +382,7 @@ export function getOperationRequest(): OpenAPIV3.SchemaObject {
 }
 
 /** Builds the request schema of a delete-entity call, a get plus a filter. */
-export function deleteOperationRequest(): OpenAPIV3.SchemaObject {
+function deleteOperationRequest(): OpenAPIV3.SchemaObject {
   const base = getOperationRequest();
   return {
     ...base,
@@ -394,7 +394,7 @@ export function deleteOperationRequest(): OpenAPIV3.SchemaObject {
 }
 
 /** Builds the request schema of a list-entities call. */
-export function listOperationRequest(): OpenAPIV3.SchemaObject {
+function listOperationRequest(): OpenAPIV3.SchemaObject {
   return {
     type: 'object',
     required: [...CONNECTION_IDENTITY_REQUIRED, 'entity'],
@@ -411,7 +411,7 @@ export function listOperationRequest(): OpenAPIV3.SchemaObject {
 }
 
 /** Builds the request schema and the path item of one entity operation. */
-export interface EntityOperationBuilder {
+interface EntityOperationBuilder {
   request(entity: string): OpenAPIV3.SchemaObject;
   operation(context: EntityOperationContext): ConnectorPathItem;
 }
@@ -503,7 +503,13 @@ export function convertJsonSchemaToOpenApiSchema(
   }
 
   if (type === 'array') {
-    return {...base, type, items: convertItems(jsonSchema['items'])};
+    return {
+      ...base,
+      type,
+      items: convertJsonSchemaToOpenApiSchema(
+        asJsonObject(jsonSchema['items']) ?? {},
+      ),
+    };
   }
   const properties = asJsonObject(jsonSchema['properties']);
   if (type === 'object' && properties) {
@@ -541,24 +547,6 @@ function resolveSchemaType(value: unknown): {
   return isSchemaObjectType(named)
     ? {nullable: true, type: named}
     : {nullable: true};
-}
-
-/**
- * Converts the `items` keyword of a connector array schema.
- *
- * A connector schema may list `items` positionally, as a tuple. OpenAPI 3.0
- * has no tuple form, so the positions become an `oneOf` of the same schemas:
- * every entry stays, and each element may take any of their shapes.
- */
-function convertItems(items: unknown): OpenAPIV3.SchemaObject {
-  if (Array.isArray(items)) {
-    return {
-      oneOf: items.map((item) =>
-        convertJsonSchemaToOpenApiSchema(asJsonObject(item) ?? {}),
-      ),
-    };
-  }
-  return convertJsonSchemaToOpenApiSchema(asJsonObject(items) ?? {});
 }
 
 /** Narrows a connector `type` name to one OpenAPI 3.0 can express. */

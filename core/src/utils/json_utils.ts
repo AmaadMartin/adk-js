@@ -7,11 +7,6 @@
 /**
  * Readers for decoded JSON, used wherever this package inspects a value that
  * came off the wire and therefore has no compile-time shape.
- *
- * {@link asJsonObject} and {@link asRecord} differ only in how they treat an
- * array. A JSON object never is one, so `asJsonObject` rejects it. A duck-typed
- * value such as an `AggregateError` style `errors` array is still worth
- * inspecting, so `asRecord` accepts it.
  */
 
 /**
@@ -22,17 +17,6 @@ export function asJsonObject(
   value: unknown,
 ): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-/**
- * Narrows an arbitrary value to an indexable record, or `undefined` when it is
- * not a non-null object. Inspects a duck-typed shape without resorting to
- * `any`.
- */
-export function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : undefined;
 }

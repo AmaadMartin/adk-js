@@ -10,7 +10,17 @@
  * reduced to an empty or generic string when they are reported.
  */
 
-import {asRecord} from './json_utils.js';
+/**
+ * Narrows an arbitrary value to an indexable record, or `undefined` when it is
+ * not a non-null object. Reads a duck-typed error shape without resorting to
+ * `any`. An array passes, because an `AggregateError` style `errors` array
+ * still carries fields worth reading.
+ */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
 
 /**
  * Maximum number of characters of an HTTP response body surfaced by
