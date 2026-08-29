@@ -18,6 +18,7 @@ export enum FeatureName {
    * exception, so one failed call cannot end the agent turn.
    */
   MCP_GRACEFUL_ERROR_HANDLING = 'MCP_GRACEFUL_ERROR_HANDLING',
+  JSON_SCHEMA_FOR_FUNC_DECL = 'JSON_SCHEMA_FOR_FUNC_DECL',
 }
 
 /**
@@ -48,6 +49,10 @@ const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
     defaultOn: false,
   },
   [FeatureName.MCP_GRACEFUL_ERROR_HANDLING]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: false,
+  },
+  [FeatureName.JSON_SCHEMA_FOR_FUNC_DECL]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,
   },

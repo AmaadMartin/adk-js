@@ -8,11 +8,16 @@ import type {FunctionDeclaration, Part} from '@google/genai';
 import {Type} from '@google/genai';
 
 import type {Context} from '../agents/context.js';
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import type {LlmRequest} from '../models/llm_request.js';
 import {appendInstructions} from '../models/llm_request.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
 import {BaseTool} from './base_tool.js';
+
+/** Model-facing description of the tool's only parameter. */
+const ARTIFACT_NAMES_DESCRIPTION = 'The names of the artifacts to load.';
 
 const GEMINI_SUPPORTED_INLINE_MIME_PREFIXES = ['image/', 'audio/', 'video/'];
 const GEMINI_SUPPORTED_INLINE_MIME_TYPES = new Set(['application/pdf']);
@@ -41,7 +46,17 @@ function isInlineMimeTypeSupported(mimeType?: string): boolean {
   );
 }
 
-function asSafePartForLlm(artifact: Part, artifactName: string): Part {
+/**
+ * Converts an artifact into a `Part` that is safe to send to Gemini.
+ *
+ * A `processArtifact` callback can call this to fall back to the default
+ * conversion for an artifact it does not want to handle itself.
+ *
+ * @param artifact The artifact to convert.
+ * @param artifactName The name the artifact was loaded under.
+ * @return A part that is safe to send to Gemini.
+ */
+export function asSafePartForLlm(artifact: Part, artifactName: string): Part {
   const inlineData = artifact.inlineData;
   if (!inlineData) {
     return artifact;
@@ -80,17 +95,60 @@ function asSafePartForLlm(artifact: Part, artifactName: string): Part {
 }
 
 /**
+ * Customizes or filters an artifact before it is added to the LLM request.
+ *
+ * @param artifact The artifact as it was loaded, unconverted.
+ * @param artifactName The name the artifact was loaded under, without the
+ *     `user:` prefix even when the artifact was found under that prefix.
+ * @return The part to add, or `undefined` to leave the artifact out.
+ */
+export type ProcessArtifactCallback = (
+  artifact: Part,
+  artifactName: string,
+) => Part | undefined | Promise<Part | undefined>;
+
+/** Parameters for {@link LoadArtifactsTool}. */
+export interface LoadArtifactsToolParams {
+  /**
+   * Called for each artifact in place of the built-in safety conversion, so
+   * supplying it bypasses {@link asSafePartForLlm} entirely. Returning
+   * `undefined` leaves that artifact out of the request. If it throws, the
+   * tool logs the error and leaves the artifact out.
+   */
+  processArtifact?: ProcessArtifactCallback;
+}
+
+/**
  * A tool that loads the artifacts and adds them to the session.
  */
 export class LoadArtifactsTool extends BaseTool {
-  constructor() {
+  private readonly processArtifact?: ProcessArtifactCallback;
+
+  constructor(params: LoadArtifactsToolParams = {}) {
     super({
       name: 'load_artifacts',
       description: `Loads artifacts into the session for this request.\n\nNOTE: Call when you need access to artifacts (for example, uploads saved by the web UI).`,
     });
+    this.processArtifact = params.processArtifact;
   }
 
   override _getDeclaration(): FunctionDeclaration | undefined {
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.name,
+        description: this.description,
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            artifact_names: {
+              type: 'array',
+              items: {type: 'string'},
+              description: ARTIFACT_NAMES_DESCRIPTION,
+            },
+          },
+        },
+      };
+    }
     return {
       name: this.name,
       description: this.description,
@@ -102,7 +160,7 @@ export class LoadArtifactsTool extends BaseTool {
             items: {
               type: Type.STRING,
             },
-            description: 'The names of the artifacts to load.',
+            description: ARTIFACT_NAMES_DESCRIPTION,
           },
         },
       },
@@ -128,6 +186,15 @@ export class LoadArtifactsTool extends BaseTool {
     );
   }
 
+  /**
+   * Appends every artifact the current turn asked for to the request.
+   *
+   * This scans all `load_artifacts` function responses in the current turn.
+   * adk-python reads only the first part of the last content, so it misses a
+   * response that shares a turn with another tool. Keep the scan: it is what
+   * fixes google/adk-js#632 for parallel and sequential tool calls. Each
+   * artifact name loads once, however often the turn names it.
+   */
   private async appendArtifactsToLlmRequest(
     toolContext: Context,
     llmRequest: LlmRequest,
@@ -208,7 +275,28 @@ export class LoadArtifactsTool extends BaseTool {
         continue;
       }
 
-      const artifactPart = asSafePartForLlm(artifact, artifactName);
+      let artifactPart: Part | undefined;
+      if (this.processArtifact) {
+        try {
+          artifactPart = await this.processArtifact(artifact, artifactName);
+        } catch (err: unknown) {
+          logger.error(
+            `Failed to process artifact "${artifactName}", skipping: ${formatError(err)}`,
+          );
+          continue;
+        }
+      } else {
+        artifactPart = asSafePartForLlm(artifact, artifactName);
+      }
+
+      if (!artifactPart) {
+        continue;
+      }
+      if (artifactPart !== artifact) {
+        logger.debug(
+          `Transformed artifact "${artifactName}" (mimeType=${artifact.inlineData?.mimeType}) to Part`,
+        );
+      }
 
       llmRequest.contents.push({
         role: 'user',
