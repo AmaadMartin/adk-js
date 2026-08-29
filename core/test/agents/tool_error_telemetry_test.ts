@@ -175,9 +175,10 @@ describe('tool error type telemetry', () => {
   });
 
   it('records nothing while the tool waits for credentials', async () => {
-    const authConfig = {
+    const authConfig: AuthConfig = {
       authScheme: {type: 'apiKey', in: 'header', name: 'X-Key'},
-    } as AuthConfig;
+      credentialKey: 'test-key',
+    };
     const tool = new FunctionTool({
       name: 'auth_tool',
       description: 'Needs a credential.',
