@@ -112,6 +112,12 @@ The refresher needs a refresh token, a token endpoint on the scheme, and the
 client id and secret. When any of them is missing it logs and hands back the
 credential it was given, so the tool still runs with the token it has.
 
+One limit is worth knowing before you rely on this. `applyCredential` reads
+`credential.apiKey` and `credential.http.credentials.token`, and no exchanger
+turns an OAuth2 credential into an HTTP bearer one, so a tool holding an
+`oauth2` credential sends its request with no `Authorization` header. Give the
+tool an `AuthCredentialTypes.HTTP` credential when you already hold the token.
+
 ## Failure modes
 
 `prepareAuthCredentials()` throws when a tool asks the end user to authorize an
@@ -132,3 +138,8 @@ returns `pending`.
 A client-credentials flow is exempt from the consent round trip.
 `OAuth2CredentialExchanger` mints that token from the client id and secret, so
 the tool goes straight to `done`.
+
+An exchange that fails does not reject. The handler logs the error and answers
+`done` with no credential, so the tool calls the API and reports what the API
+says. The client's answer is stored before the exchange runs, so a failure does
+not send the user back through consent.
