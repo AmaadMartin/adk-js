@@ -243,4 +243,24 @@ describe('OAuth2RefreshingBearerExchanger', () => {
     expect(result.wasExchanged).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(TOKEN_ENDPOINT, expect.anything());
   });
+
+  it('reports an exchange when a refresh rotates only the refresh token', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: 'stale_access_token',
+        refresh_token: 'rotated_refresh_token',
+        expires_in: 3600,
+      }),
+    } as Response);
+
+    const result = await exchange(authScheme, expiredCredential());
+
+    // The caller persists on this flag. Without it the session keeps the
+    // refresh token the provider has just invalidated.
+    expect(result.wasExchanged).toBe(true);
+    expect(result.credential.oauth2?.refreshToken).toBe(
+      'rotated_refresh_token',
+    );
+  });
 });

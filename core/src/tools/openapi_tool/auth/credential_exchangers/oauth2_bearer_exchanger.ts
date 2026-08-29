@@ -15,25 +15,13 @@ import {OAuth2CredentialExchanger} from '../../../../auth/oauth2/oauth2_credenti
 import {OAuth2CredentialRefresher} from '../../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../../utils/experimental.js';
 
-const OAUTH2_SCHEME_TYPES = ['oauth2', 'openIdConnect'];
-
 /**
- * Obtains an OAuth2 access token, renews it once it has expired, then wraps it
- * as the HTTP bearer credential the OpenAPI layer sends in the Authorization
- * header.
+ * Obtains an OAuth2 access token, renews an expired one, then wraps it as the
+ * HTTP bearer credential the OpenAPI layer sends in the Authorization header.
  */
 @experimental
 export class OAuth2RefreshingBearerExchanger implements BaseCredentialExchanger {
-  private readonly tokenExchanger = new OAuth2CredentialExchanger();
-
   /**
-   * Produces the bearer credential a request carries.
-   *
-   * Every OAuth2 credential reaches the request through here, so this covers
-   * the first call of a session as well as a stored credential.
-   *
-   * @param params.authScheme The OAuth2 or OpenID Connect scheme.
-   * @param params.authCredential The credential to exchange.
    * @throws CredentialExchangeError If the scheme is neither OAuth2 nor OpenID
    *   Connect, or the credential configures neither oauth2 nor http.
    */
@@ -44,53 +32,39 @@ export class OAuth2RefreshingBearerExchanger implements BaseCredentialExchanger 
   }): Promise<ExchangeResult> {
     const {authScheme, authCredential} = params;
 
-    if (!authScheme || !OAUTH2_SCHEME_TYPES.includes(authScheme.type)) {
+    if (authScheme?.type !== 'oauth2' && authScheme?.type !== 'openIdConnect') {
       throw new CredentialExchangeError(
         `Invalid security scheme, expect openIdConnect or oauth2 auth scheme, but got ${authScheme?.type}`,
       );
     }
 
-    if (!authCredential.oauth2 && !authCredential.http) {
-      throw new CredentialExchangeError(
-        'auth_credential is not configured with oauth2. Please create AuthCredential and set OAuth2Auth.',
-      );
-    }
-
-    // A tool configured with an OAuth2 scheme and a bearer token its owner
-    // already holds reaches here as an OAuth2-typed credential carrying only
-    // an `http` block. It has nothing to acquire and nothing to refresh, and
-    // the acquisition delegate rejects it for the OAuth2 client it does not
-    // hold, so it passes straight through.
     if (!authCredential.oauth2) {
+      if (!authCredential.http) {
+        throw new CredentialExchangeError(
+          'auth_credential is not configured with oauth2. Please create AuthCredential and set OAuth2Auth.',
+        );
+      }
+      // A bearer token the tool's owner already holds has nothing to acquire,
+      // and the acquisition delegate rejects it for the client it lacks.
       return {credential: authCredential, wasExchanged: false};
     }
 
-    const acquired = await this.tokenExchanger.exchange(params);
+    const acquired = await new OAuth2CredentialExchanger().exchange(params);
     const refreshed = await new OAuth2CredentialRefresher().refresh(
       acquired.credential,
       authScheme,
     );
-
-    // A refreshed credential carries both blocks, so the OAuth2 access token
-    // wins over an `http` block holding the token it replaced. A credential
-    // that reaches here without an access token has nothing to wrap.
     const token = refreshed.oauth2?.accessToken;
 
     return {
-      // The bearer credential holds neither the refresh token nor the expiry,
-      // so the OAuth2 data stays on the credential the caller stores. A later
-      // call reads it back and refreshes the token.
+      // The OAuth2 data stays on the credential the caller stores, so a later
+      // call can refresh the token the bearer block does not carry.
       credential: {
         ...refreshed,
         http: token ? {scheme: 'bearer', credentials: {token}} : refreshed.http,
       },
-      // A new access token is the one signal that the token endpoint answered.
-      // `ToolAuthHandler` persists on this flag, so wrapping a token the
-      // credential already held must not copy a client secret into the session.
-      wasExchanged:
-        acquired.wasExchanged ||
-        refreshed.oauth2?.accessToken !==
-          acquired.credential.oauth2?.accessToken,
+      // refresh() returns its input by reference unless the endpoint answered.
+      wasExchanged: acquired.wasExchanged || refreshed !== acquired.credential,
     };
   }
 }
