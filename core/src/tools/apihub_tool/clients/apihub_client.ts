@@ -175,20 +175,6 @@ export class APIHubClient implements BaseAPIHubClient {
   }
 
   /**
-   * Lists the APIs of a project and location.
-   *
-   * @param project The Google Cloud project.
-   * @param location The location of the API Hub resources.
-   * @returns The APIs, or an empty list when the project has none.
-   */
-  async listApis(project: string, location: string): Promise<ApiHubApi[]> {
-    const response = await this.get<{apis?: ApiHubApi[]}>(
-      `${APIHUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
-    );
-    return response.apis ?? [];
-  }
-
-  /**
    * Gets an API.
    *
    * @param apiResourceName `projects/p/locations/l/apis/a`.

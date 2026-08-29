@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {APIHubClient, extractResourceName} from '@google/adk';
+import {APIHubClient} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {extractResourceName} from '../../../../src/tools/apihub_tool/clients/apihub_client.js';
 
 const {googleAuthMock, getAccessTokenMock} = vi.hoisted(() => {
   const getAccessTokenMock = vi.fn<() => Promise<string | null>>();
@@ -67,54 +68,6 @@ describe('APIHubClient', () => {
     return new APIHubClient({accessToken: 'mocked_token'});
   }
 
-  describe('listApis', () => {
-    it('should request the APIs of a project and location', async () => {
-      const apis = [{name: `${API_NAME}`}, {name: 'api2'}];
-      respondWith({apis});
-
-      expect(await client().listApis('test-project', 'us-central1')).toEqual(
-        apis,
-      );
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(fetchMock.mock.calls[0][0]).toBe(
-        `${ROOT}/projects/test-project/locations/us-central1/apis`,
-      );
-      expect(fetchInit(0).headers).toEqual(EXPECTED_HEADERS);
-    });
-
-    it('should bound the request with a timeout signal', async () => {
-      respondWith({apis: []});
-
-      await client().listApis('test-project', 'us-central1');
-
-      expect(fetchInit(0).signal).toBeInstanceOf(AbortSignal);
-    });
-
-    it('should return an empty list when the response has an empty array', async () => {
-      respondWith({apis: []});
-
-      expect(await client().listApis('test-project', 'us-central1')).toEqual(
-        [],
-      );
-    });
-
-    it('should return an empty list when the response has no apis field', async () => {
-      respondWith({});
-
-      expect(await client().listApis('test-project', 'us-central1')).toEqual(
-        [],
-      );
-    });
-
-    it('should reject on a non-2xx response', async () => {
-      fetchMock.mockResolvedValueOnce(new Response('denied', {status: 403}));
-
-      await expect(
-        client().listApis('test-project', 'us-central1'),
-      ).rejects.toThrow('API Hub request failed with status 403: denied');
-    });
-  });
-
   describe('getApi', () => {
     it('should request the API resource', async () => {
       const api = {name: API_NAME, versions: [VERSION_NAME]};
@@ -123,6 +76,14 @@ describe('APIHubClient', () => {
       expect(await client().getApi(API_NAME)).toEqual(api);
       expect(fetchMock.mock.calls[0][0]).toBe(`${ROOT}/${API_NAME}`);
       expect(fetchInit(0).headers).toEqual(EXPECTED_HEADERS);
+    });
+
+    it('should bound the request with a timeout signal', async () => {
+      respondWith({name: API_NAME});
+
+      await client().getApi(API_NAME);
+
+      expect(fetchInit(0).signal).toBeInstanceOf(AbortSignal);
     });
 
     it('should reject on a non-2xx response', async () => {
