@@ -328,6 +328,12 @@ export {
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
+export {LlamaIndexRetrievalTool} from './tools/retrieval/llama_index_retrieval_tool.js';
+export type {
+  LlamaIndexNode,
+  LlamaIndexRetrievalToolParams,
+  LlamaIndexRetriever,
+} from './tools/retrieval/llama_index_retrieval_tool.js';
 export {
   IntentMismatchError,
   ToolConfirmation,
