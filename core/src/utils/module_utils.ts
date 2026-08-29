@@ -67,10 +67,6 @@ function invalidName(name: string, cause: unknown): InputValidationError {
  * built-ins are refused so that a configuration file cannot reach
  * `node:child_process`.
  *
- * Unlike `optional_peer.ts`, which keeps its specifiers literal so that
- * bundlers can see them, the specifier here is user configuration and is known
- * only at run time.
- *
  * @param name The fully-qualified name to resolve.
  * @param baseFilePath Absolute path of the file the name came from. A relative
  *   specifier resolves against its directory and needs it. Bare and absolute

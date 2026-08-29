@@ -12,7 +12,7 @@ import {
   BaseExampleProvider,
   isBaseExampleProvider,
 } from '../examples/base_example_provider.js';
-import {Example} from '../examples/example.js';
+import {Example, isExampleArray} from '../examples/example.js';
 import {buildExampleSi} from '../examples/example_util.js';
 import {appendInstructions} from '../models/llm_request.js';
 import {resolveFullyQualifiedName} from '../utils/module_utils.js';
@@ -39,24 +39,6 @@ export interface ExampleToolConfig {
   examples: Example[] | string;
 }
 
-/** Returns true when the value has the shape of an {@link Example}. */
-function isExample(value: unknown): value is Example {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'input' in value &&
-    typeof value.input === 'object' &&
-    value.input !== null &&
-    'output' in value &&
-    Array.isArray(value.output)
-  );
-}
-
-/** Returns true when the value is a list of {@link Example}s. */
-function isExampleArray(value: unknown): value is Example[] {
-  return Array.isArray(value) && value.every(isExample);
-}
-
 /**
  * A tool that adds (few-shot) examples to the LLM request.
  *
@@ -76,10 +58,6 @@ export class ExampleTool extends BaseTool {
 
   /**
    * Builds a tool from its declarative configuration.
-   *
-   * The method is asynchronous because JavaScript loads a module
-   * asynchronously. The adk-python counterpart is synchronous only because
-   * `importlib` is.
    *
    * @param config The tool configuration read from an agent config file.
    * @param configAbsPath Absolute path of that config file. A relative module
