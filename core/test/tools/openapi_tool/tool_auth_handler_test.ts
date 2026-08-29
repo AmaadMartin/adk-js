@@ -8,6 +8,8 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  OAuth2Auth,
+  OpenIdConnectWithConfig,
   ToolAuthHandler,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
@@ -31,6 +33,25 @@ vi.mock(
     };
   },
 );
+
+/** An OpenID Connect scheme whose only grant needs the user to consent. */
+const AUTH_CODE_SCHEME: OpenIdConnectWithConfig = {
+  type: 'openIdConnect',
+  openIdConnectUrl:
+    'https://accounts.google.com/.well-known/openid-configuration',
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  grantTypesSupported: ['authorization_code'],
+  scopes: ['https://www.googleapis.com/auth/calendar'],
+};
+
+function createUnauthenticatedContext(): Context {
+  return {
+    state: new State(),
+    getAuthResponse: vi.fn().mockReturnValue(undefined),
+    requestCredential: vi.fn(),
+  } as unknown as Context;
+}
 
 describe('ToolAuthHandler', () => {
   it('should return done if no auth scheme', async () => {
@@ -210,6 +231,64 @@ describe('ToolAuthHandler', () => {
     expect(state.get('apiKey_existing_exchanged_credential')).toBeUndefined();
     expect(state.hasDelta()).toBe(false);
   });
+
+  it('asks the user to consent to a configured authorization code credential', async () => {
+    const mockContext = createUnauthenticatedContext();
+
+    const result = await new ToolAuthHandler(mockContext, AUTH_CODE_SCHEME, {
+      authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+      oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+    }).prepareAuthCredentials();
+
+    // A client id pair alone cannot buy a token under the authorization code
+    // grant, so exchanging it here would throw instead of starting consent.
+    expect(result.state).toBe('pending');
+    expect(mockContext.requestCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authScheme: AUTH_CODE_SCHEME,
+        rawAuthCredential: expect.objectContaining({
+          authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+        }),
+      }),
+    );
+  });
+
+  it('asks the user to consent to a credential that carries no oauth2 details', async () => {
+    const mockContext = createUnauthenticatedContext();
+
+    const result = await new ToolAuthHandler(mockContext, AUTH_CODE_SCHEME, {
+      authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+    }).prepareAuthCredentials();
+
+    expect(result.state).toBe('pending');
+    expect(mockContext.requestCredential).toHaveBeenCalled();
+  });
+
+  it.each<[string, OAuth2Auth]>([
+    ['an access token', {accessToken: 'access-token'}],
+    ['an authorization code', {authCode: 'auth-code'}],
+    [
+      'an authorization response URI',
+      {authResponseUri: 'https://app.example.com/cb?code=auth-code'},
+    ],
+  ])(
+    'exchanges a configured credential that already carries %s',
+    async (_label, oauth2) => {
+      const mockContext = createUnauthenticatedContext();
+
+      const result = await new ToolAuthHandler(mockContext, AUTH_CODE_SCHEME, {
+        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          ...oauth2,
+        },
+      }).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(mockContext.requestCredential).not.toHaveBeenCalled();
+    },
+  );
 
   it('caches a static credential that did require an exchange', async () => {
     const state = new State();

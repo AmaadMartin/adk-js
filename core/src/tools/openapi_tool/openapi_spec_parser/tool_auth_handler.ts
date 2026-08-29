@@ -6,14 +6,53 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
-import {AuthCredential} from '../../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+} from '../../../auth/auth_credential.js';
+import {OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
+
+const OAUTH_CREDENTIAL_TYPES: readonly AuthCredentialTypes[] = [
+  AuthCredentialTypes.OAUTH2,
+  AuthCredentialTypes.OPEN_ID_CONNECT,
+];
 
 export interface AuthPreparationResult {
   state: 'pending' | 'done';
   authCredential?: AuthCredential;
+}
+
+/**
+ * Reports whether the user must authorize a credential before it can be
+ * exchanged for a token.
+ *
+ * The authorization code grant needs the user to consent in a browser, so a
+ * credential carrying only a client id and secret is not exchangeable yet. An
+ * api key, a service account and the client credentials grant need no
+ * interaction, and neither does a credential that already holds the user's
+ * token, code or authorization response.
+ *
+ * @param authScheme The scheme the tool authenticates with.
+ * @param credential The credential the tool was configured with.
+ * @return True when the user has still to authorize the credential.
+ */
+function needsUserAuthorization(
+  authScheme: OpenAPIV3.SecuritySchemeObject,
+  credential?: AuthCredential,
+): boolean {
+  if (!credential || !OAUTH_CREDENTIAL_TYPES.includes(credential.authType)) {
+    return false;
+  }
+  if (determineGrantType(authScheme) !== OAuthGrantType.AUTHORIZATION_CODE) {
+    return false;
+  }
+
+  const {accessToken, authCode, authResponseUri} = credential.oauth2 ?? {};
+  return !accessToken && !authCode && !authResponseUri;
 }
 
 class ToolContextCredentialStore {
@@ -88,11 +127,18 @@ export class ToolAuthHandler {
 
     // A credential returned by an auth response was supplied interactively by
     // the client. Otherwise fall back to the credential the tool was
-    // configured with: schemes such as `apiKey`, `http` and `serviceAccount`
-    // need no user interaction, so requesting one would strand the tool in
-    // `pending` forever.
+    // configured with, as long as it can be exchanged without the user:
+    // schemes such as `apiKey`, `http` and `serviceAccount` need no
+    // interaction, so requesting one would strand the tool in `pending`
+    // forever.
     const authResponseCredential = this.context.getAuthResponse(authConfig);
-    const credential = authResponseCredential ?? this.authCredential;
+    const configuredCredential = needsUserAuthorization(
+      this.authScheme,
+      this.authCredential,
+    )
+      ? undefined
+      : this.authCredential;
+    const credential = authResponseCredential ?? configuredCredential;
 
     if (!credential) {
       // No credential to work with, so ask the client for one.
