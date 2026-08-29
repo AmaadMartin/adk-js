@@ -47,30 +47,37 @@ const agent = new LlmAgent({
 ## Choosing between the two vetting paths
 
 Address vetting needs a local DNS resolution, and a proxy resolves the name
-remotely instead. The two cannot both hold, so the choice is explicit:
+remotely instead. The two cannot both hold, so the path decides what is vetted:
 
-|                   | Direct (default)    | With `proxy`                      |
+|                   | Direct              | Through a proxy                   |
 | ----------------- | ------------------- | --------------------------------- |
 | Hostname target   | resolved and vetted | not vetted; the proxy resolves it |
 | IP-literal target | vetted              | vetted                            |
 | `localhost` names | rejected            | rejected                          |
 
-`loadWebPage` never reads `http_proxy`, `https_proxy` or `no_proxy`. An
-environment variable is machine-wide, and a machine-wide setting must not be
-able to switch vetting off for every caller on the host. Pass the proxy per
-call, and only for a call whose URL you trust:
-
-```ts
-await loadWebPage('https://internal.example/', {
-  proxy: process.env['HTTPS_PROXY'],
-});
-```
+The environment picks the path, as it does for the Python tool. `no_proxy` is
+read first and wins. Otherwise `https_proxy` or `http_proxy` applies for the
+URL's scheme, and `all_proxy` is the fallback. Lowercase and uppercase names
+both count.
 
 An `http` target goes to the proxy in absolute form. An `https` target opens a
 `CONNECT` tunnel and runs TLS inside it. A `socks5://` proxy is not supported.
 
+Set `proxy` per call to override the environment. Pass `null` to force the
+direct, vetted path for a host you do not want a proxy to resolve:
+
+```ts
+// Route this one call through a proxy, whatever the environment says.
+await loadWebPage('https://internal.example/', {
+  proxy: 'http://proxy.example.test:8080',
+});
+
+// Resolve and vet this one call locally, whatever the environment says.
+await loadWebPage('https://untrusted.example/', {proxy: null});
+```
+
 `LOAD_WEB_PAGE`, the tool the model calls, takes no options, so a model-chosen
-URL always follows the vetted direct path.
+URL follows whichever path the environment selects.
 
 ## Limits
 

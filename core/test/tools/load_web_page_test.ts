@@ -47,6 +47,21 @@ vi.mock('node:tls', async (importOriginal) => ({
 const PROXY_USER = 'agent';
 const PROXY_SECRET = 'not-a-real-password';
 
+/**
+ * Proxy variables the tool consults. They are cleared before every test so a
+ * developer's own environment cannot change what the tool does here.
+ */
+const PROXY_ENV_NAMES = [
+  'all_proxy',
+  'ALL_PROXY',
+  'http_proxy',
+  'HTTP_PROXY',
+  'https_proxy',
+  'HTTPS_PROXY',
+  'no_proxy',
+  'NO_PROXY',
+];
+
 /** A stand-in for a TCP or TLS socket. */
 class FakeSocket extends EventEmitter {
   readonly destroy = vi.fn();
@@ -167,6 +182,9 @@ describe('loadWebPage', () => {
     httpsRequestMock.mockImplementation(createFakeRequest);
     tlsConnectMock.mockImplementation(() => new FakeSocket());
     lookupMock.mockReset();
+    for (const name of PROXY_ENV_NAMES) {
+      vi.stubEnv(name, undefined);
+    }
   });
 
   afterEach(() => {
@@ -595,16 +613,16 @@ describe('loadWebPage', () => {
       );
     });
 
-    it('ignores the proxy environment variables', async () => {
-      // An ambient proxy must not switch address vetting off, so a hostname
-      // still takes the resolved-and-vetted path.
+    it('ignores the proxy environment variables for proxy: null', async () => {
       vi.stubEnv('https_proxy', PROXY);
       vi.stubEnv('HTTPS_PROXY', PROXY);
       vi.stubEnv('all_proxy', PROXY);
       resolveTo('169.254.169.254');
       respondThroughTunnel('<p>This body must never be returned.</p>');
 
-      const result = await loadWebPage('https://metadata.example/');
+      const result = await loadWebPage('https://metadata.example/', {
+        proxy: null,
+      });
 
       expect(result).toBe('Failed to fetch url: https://metadata.example/');
       expect(lookupMock).toHaveBeenCalledWith('metadata.example', {all: true});
@@ -737,6 +755,95 @@ describe('loadWebPage', () => {
 
       expect(result).toBe('Failed to fetch url: http://169.254.169.254/');
       expectNoRequest();
+    });
+  });
+
+  describe('proxy environment', () => {
+    const PROXY = 'http://proxy.example.test:8080';
+    const OTHER_PROXY = 'http://other-proxy.example.test:3128';
+
+    it('reaches a hostname through HTTPS_PROXY without a local lookup', async () => {
+      vi.stubEnv('HTTPS_PROXY', PROXY);
+      lookupMock.mockRejectedValue(new Error('unexpected local DNS lookup'));
+      respondThroughTunnel('<p>This page has enough words to keep.</p>');
+
+      const result = await loadWebPage('https://does-not-resolve.invalid/');
+
+      expect(result).toBe('This page has enough words to keep.');
+      expect(lookupMock).not.toHaveBeenCalled();
+      expect(sentRequests[0].options).toMatchObject({
+        host: 'proxy.example.test',
+        method: 'CONNECT',
+        port: 8080,
+      });
+    });
+
+    it('reaches an http hostname through http_proxy in absolute form', async () => {
+      vi.stubEnv('http_proxy', PROXY);
+      lookupMock.mockRejectedValue(new Error('unexpected local DNS lookup'));
+      respondWith('<p>This page has enough words to keep.</p>');
+
+      const result = await loadWebPage('http://does-not-resolve.invalid/page');
+
+      expect(result).toBe('This page has enough words to keep.');
+      expect(lookupMock).not.toHaveBeenCalled();
+      expect(sentRequests[0].options).toMatchObject({
+        host: 'proxy.example.test',
+        path: 'http://does-not-resolve.invalid/page',
+      });
+    });
+
+    it('takes the direct, vetted path when no_proxy covers the host', async () => {
+      vi.stubEnv('HTTPS_PROXY', PROXY);
+      vi.stubEnv('no_proxy', 'metadata.example');
+      resolveTo('169.254.169.254');
+      respondThroughTunnel('<p>This body must never be returned.</p>');
+
+      const result = await loadWebPage('https://metadata.example/');
+
+      expect(result).toBe('Failed to fetch url: https://metadata.example/');
+      expect(lookupMock).toHaveBeenCalledWith('metadata.example', {all: true});
+      expectNoRequest();
+    });
+
+    it('lets the proxy option override the environment', async () => {
+      vi.stubEnv('HTTPS_PROXY', OTHER_PROXY);
+      respondThroughTunnel('<p>This page has enough words to keep.</p>');
+
+      await loadWebPage('https://does-not-resolve.invalid/', {proxy: PROXY});
+
+      expect(sentRequests[0].options).toMatchObject({
+        host: 'proxy.example.test',
+        port: 8080,
+      });
+    });
+
+    it('still vets an IP literal when the environment names a proxy', async () => {
+      vi.stubEnv('HTTP_PROXY', PROXY);
+
+      const result = await loadWebPage('http://169.254.169.254/');
+
+      expect(result).toBe('Failed to fetch url: http://169.254.169.254/');
+      expectNoRequest();
+    });
+
+    it('still rejects a localhost name when the environment names a proxy', async () => {
+      vi.stubEnv('HTTP_PROXY', PROXY);
+
+      const result = await loadWebPage('http://localhost:8080/');
+
+      expect(result).toBe('Failed to fetch url: http://localhost:8080/');
+      expectNoRequest();
+    });
+
+    it('returns the failure string for an unusable proxy in the environment', async () => {
+      vi.stubEnv('HTTPS_PROXY', 'socks5://proxy.example.test:1080');
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+      expectNoRequest();
+      expect(lookupMock).not.toHaveBeenCalled();
     });
   });
 

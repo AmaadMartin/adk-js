@@ -16,6 +16,7 @@ import {connect as tlsConnect} from 'node:tls';
 
 import {z} from 'zod';
 
+import {selectProxy} from '../utils/proxy_utils.js';
 import {
   isBlockedAddress,
   isBlockedHostname,
@@ -32,12 +33,16 @@ export interface LoadWebPageOptions {
    * `http://proxy.example.test:8080`. Credentials in the URL are sent as
    * `Proxy-Authorization: Basic`.
    *
+   * This overrides the environment. Omit it to let the environment decide
+   * (`no_proxy` first, then `https_proxy` or `http_proxy` for the URL's
+   * scheme, then `all_proxy`), or pass `null` to force a direct request even
+   * when the environment names a proxy.
+   *
    * A proxy resolves the target hostname itself, so a hostname target is not
-   * vetted on this path; an IP-literal target still is. The proxy is therefore
-   * never read from the environment: an ambient `https_proxy` must not be able
-   * to turn address vetting off for every caller on the machine.
+   * address-vetted on this path. An IP-literal target still is, and a
+   * `localhost`-style name is still rejected.
    */
-  proxy?: string;
+  proxy?: string | null;
 }
 
 /** URL schemes that are allowed to be fetched (WHATWG `URL.protocol` form). */
@@ -92,6 +97,21 @@ function parseProxy(proxy: string): URL {
     throw new Error(`Unsupported proxy scheme: ${proxy}`);
   }
   return parsed;
+}
+
+/**
+ * Returns the proxy for `target`, or `null` for a direct request. The caller's
+ * option wins over the environment, and `null` disables the proxy outright.
+ */
+function resolveProxy(
+  target: URL,
+  proxy: string | null | undefined,
+): URL | null {
+  if (proxy === null) {
+    return null;
+  }
+  const selected = proxy ?? selectProxy(target, process.env);
+  return selected === undefined ? null : parseProxy(selected);
 }
 
 /** Returns the port a URL addresses, filling in the scheme default. */
@@ -438,9 +458,10 @@ async function fetchBody(
  * Never throws for expected failures (bad scheme, blocked host, non-200,
  * timeout, network error); returns `Failed to fetch url: <url>` instead.
  *
- * Passing {@link LoadWebPageOptions.proxy} routes the request through a proxy,
- * which resolves the hostname itself. A hostname target is not vetted on that
- * path, so it is opt-in per call and is never read from the environment.
+ * A proxy named by {@link LoadWebPageOptions.proxy} or by the environment
+ * resolves the hostname itself, so pinning does not apply and a hostname
+ * target is not address-vetted on that path. An IP-literal target still is.
+ * Pass `proxy: null` to force the direct, vetted path.
  */
 export async function loadWebPage(
   url: string,
@@ -448,9 +469,9 @@ export async function loadWebPage(
 ): Promise<string> {
   const expiresAt = Date.now() + (options?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
-    const proxy =
-      options?.proxy === undefined ? null : parseProxy(options.proxy);
-    const body = await fetchBody(parseRequestTarget(url), proxy, expiresAt);
+    const target = parseRequestTarget(url);
+    const proxy = resolveProxy(target, options?.proxy);
+    const body = await fetchBody(target, proxy, expiresAt);
     return body === null ? failedToFetchMessage(url) : htmlToText(body);
   } catch {
     return failedToFetchMessage(url);
