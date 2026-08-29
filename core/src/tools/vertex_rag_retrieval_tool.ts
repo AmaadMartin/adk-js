@@ -63,7 +63,7 @@ export interface VertexRagRetrievalToolParams extends VertexRagStore {
 export class VertexRagRetrievalTool extends BaseRetrievalTool {
   private readonly vertexRagStore: VertexRagStore;
 
-  constructor(params: VertexRagRetrievalToolParams = {}) {
+  constructor(params: VertexRagRetrievalToolParams) {
     const {
       name = DEFAULT_TOOL_NAME,
       description = DEFAULT_TOOL_DESCRIPTION,

@@ -22,10 +22,7 @@ const RAG_CORPUS_PATTERN =
 
 /** One retrieved chunk, mirroring the REST `Context` message. */
 export interface RagContext {
-  sourceUri?: string;
-  sourceDisplayName?: string;
   text?: string;
-  score?: number;
 }
 
 /** The parameters for {@link retrieveRagContexts}. */
@@ -38,7 +35,7 @@ interface RetrieveContextsResponse {
   contexts?: {contexts?: RagContext[]};
 }
 
-let sharedAuth: GoogleAuth | undefined;
+const sharedAuth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
 
 /**
  * Returns the rag resources the store names.
@@ -166,7 +163,6 @@ export async function retrieveRagContexts({
 }
 
 async function getAuthHeaders(url: string): Promise<Headers> {
-  sharedAuth ??= new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
   const client = await sharedAuth.getClient();
   const headers = await client.getRequestHeaders(url);
   headers.set('Content-Type', 'application/json');
