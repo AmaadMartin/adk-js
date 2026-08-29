@@ -138,3 +138,16 @@ const declaration = await withTemporaryFeatureOverride(
 
 The feature is off by default and also reads the
 `ADK_ENABLE_JSON_SCHEMA_FOR_FUNC_DECL` environment variable.
+
+## Which artifacts a turn loads
+
+The tool scans the whole current turn for `load_artifacts` function responses.
+A turn starts at the last plain user message or the last model message that
+carries no function call. Every `load_artifacts` response inside that range
+contributes its names, so the tool still loads the artifacts when the model
+calls `load_artifacts` beside another tool, or before another tool in the same
+turn. A name that the turn repeats loads once.
+
+adk-python reads only the first part of the last content, so it misses both
+cases. adk-js keeps the wider scan on purpose: it is the fix for
+[google/adk-js#632](https://github.com/google/adk-js/issues/632).
