@@ -9,9 +9,14 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
+import {
+  FeatureName,
+  isFeatureEnabled,
+} from '../../features/feature_registry.js';
 import {experimental} from '../../utils/experimental.js';
+import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {applyCredential} from './auth/auth_helpers.js';
+import {applyCredential, parseAuthScheme} from './auth/auth_helpers.js';
 import {
   ApiParameter,
   OperationParser,
@@ -20,20 +25,30 @@ import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
 import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
 
+/**
+ * The error type reported for a tool response that carries an `error` key.
+ * The value is observable telemetry and matches adk-python exactly.
+ */
+const HTTP_ERROR_TYPE = 'HTTP_ERROR';
+
 @experimental
 export class RestApiTool extends BaseTool {
   private operationParser: OperationParser;
 
+  private readonly endpoint: OperationEndpoint;
+  private readonly operation: OpenAPIV3.OperationObject;
+  private authScheme?: OpenAPIV3.SecuritySchemeObject;
+  private authCredential?: AuthCredential;
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
 
   constructor(
     name: string,
     description: string,
-    private readonly endpoint: OperationEndpoint,
-    private readonly operation: OpenAPIV3.OperationObject,
-    private authScheme?: OpenAPIV3.SecuritySchemeObject,
-    private authCredential?: AuthCredential,
+    endpoint: OperationEndpoint | string,
+    operation: OpenAPIV3.OperationObject | string,
+    authScheme?: OpenAPIV3.SecuritySchemeObject | string,
+    authCredential?: AuthCredential | string,
     options: {
       preservePropertyNames?: boolean;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
@@ -41,21 +56,27 @@ export class RestApiTool extends BaseTool {
     } = {},
   ) {
     super({name, description});
-    this.authScheme = authScheme;
-    this.authCredential = authCredential;
+    this.endpoint = parseEndpoint(endpoint);
+    this.operation = parseOperation(operation);
+    if (authScheme !== undefined) {
+      this.configureAuthScheme(authScheme);
+    }
+    this.configureAuthCredential(authCredential);
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
-    this.operationParser = new OperationParser(operation, options);
+    this.operationParser = new OperationParser(this.operation, options);
   }
 
   @experimental
-  public configureAuthScheme(authScheme: OpenAPIV3.SecuritySchemeObject) {
-    this.authScheme = authScheme;
+  public configureAuthScheme(
+    authScheme: OpenAPIV3.SecuritySchemeObject | string,
+  ) {
+    this.authScheme = parseAuthScheme(authScheme);
   }
 
   @experimental
-  public configureAuthCredential(authCredential: AuthCredential) {
-    this.authCredential = authCredential;
+  public configureAuthCredential(authCredential?: AuthCredential | string) {
+    this.authCredential = parseAuthCredential(authCredential);
   }
 
   @experimental
@@ -66,15 +87,73 @@ export class RestApiTool extends BaseTool {
   @experimental
   override _getDeclaration(): FunctionDeclaration {
     const schema = this.operationParser.getJsonSchema();
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.name,
+        description: this.description,
+        parametersJsonSchema: schema,
+      };
+    }
     return {
       name: this.name,
       description: this.description,
-      parameters: schema,
+      parameters: toGeminiSchema(schema),
     };
+  }
+
+  /**
+   * Classifies a response this tool returned as a failure, for telemetry.
+   *
+   * The tool reports a transport failure in-band, as an object carrying an
+   * `error` key, so the span of a failed call is otherwise indistinguishable
+   * from a successful one.
+   *
+   * @param response The value this tool resolved with.
+   * @returns `'HTTP_ERROR'` for a failure response, `undefined` otherwise.
+   */
+  @experimental
+  public detectErrorInResponse(response: unknown): string | undefined {
+    if (
+      typeof response === 'object' &&
+      response !== null &&
+      !Array.isArray(response) &&
+      'error' in response &&
+      response.error
+    ) {
+      return HTTP_ERROR_TYPE;
+    }
+    return undefined;
+  }
+
+  /**
+   * Renders the tool for a developer, including the operation and the auth
+   * scheme. The credential is never rendered.
+   *
+   * @returns The rendered tool.
+   */
+  @experimental
+  public toRepr(): string {
+    return (
+      `RestApiTool(name="${this.name}", description="${this.description}", ` +
+      `endpoint="${JSON.stringify(this.endpoint)}", ` +
+      `operation="${JSON.stringify(this.operation)}", ` +
+      `authScheme="${JSON.stringify(this.authScheme)}")`
+    );
   }
 
   @experimental
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
+    return this.call(request);
+  }
+
+  /**
+   * Executes the REST API call.
+   *
+   * @param request The tool request carrying the operation arguments.
+   * @returns The parsed API response.
+   */
+  @experimental
+  public async call(request: RunAsyncToolRequest): Promise<unknown> {
     const context = request.toolContext as Context;
     const args = request.args;
 
@@ -138,11 +217,11 @@ export class RestApiTool extends BaseTool {
         body: body as BodyInit,
       });
 
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        return await response.json();
-      } else {
-        return await response.text();
+      const bodyText = await response.text();
+      try {
+        return JSON.parse(bodyText);
+      } catch {
+        return {text: bodyText};
       }
     } catch (error) {
       return {
@@ -150,6 +229,81 @@ export class RestApiTool extends BaseTool {
       };
     }
   }
+}
+
+/**
+ * Parses an endpoint supplied as an object or as JSON text.
+ *
+ * @param value The endpoint, or the JSON text of one.
+ * @throws {Error} If `baseUrl`, `path` or `method` is missing or not a string.
+ * @returns The validated endpoint.
+ */
+export function parseEndpoint(
+  value: OperationEndpoint | string,
+): OperationEndpoint {
+  const endpoint: OperationEndpoint =
+    typeof value === 'string'
+      ? (JSON.parse(value) as OperationEndpoint)
+      : value;
+
+  for (const field of ['baseUrl', 'path', 'method'] as const) {
+    if (typeof endpoint?.[field] !== 'string') {
+      throw new Error(`Invalid endpoint: '${field}' must be a string.`);
+    }
+  }
+  return endpoint;
+}
+
+/**
+ * Parses an OpenAPI operation supplied as an object or as JSON text.
+ *
+ * @param value The operation, or the JSON text of one.
+ * @throws {Error} If the value is not an object.
+ * @returns The validated operation.
+ */
+export function parseOperation(
+  value: OpenAPIV3.OperationObject | string,
+): OpenAPIV3.OperationObject {
+  const operation: OpenAPIV3.OperationObject =
+    typeof value === 'string'
+      ? (JSON.parse(value) as OpenAPIV3.OperationObject)
+      : value;
+
+  if (
+    typeof operation !== 'object' ||
+    operation === null ||
+    Array.isArray(operation)
+  ) {
+    throw new Error('Invalid operation: must be an object.');
+  }
+  return operation;
+}
+
+/**
+ * Parses an auth credential supplied as an object or as JSON text.
+ *
+ * @param value The credential, the JSON text of one, or nothing to clear it.
+ * @throws {Error} If the value is not an object carrying a string `authType`.
+ * @returns The validated credential, or undefined.
+ */
+export function parseAuthCredential(
+  value: AuthCredential | string | undefined,
+): AuthCredential | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const credential: AuthCredential =
+    typeof value === 'string' ? (JSON.parse(value) as AuthCredential) : value;
+
+  if (
+    typeof credential !== 'object' ||
+    credential === null ||
+    Array.isArray(credential) ||
+    typeof credential.authType !== 'string'
+  ) {
+    throw new Error("Invalid auth credential: 'authType' must be a string.");
+  }
+  return credential;
 }
 
 export interface PreparedParams {
