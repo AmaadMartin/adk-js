@@ -27,10 +27,11 @@ import {LoadMcpResourceTool} from './load_mcp_resource_tool.js';
 import {
   ElicitationFn,
   MCPConnectionParams,
+  MCPHeaderProvider,
   MCPSessionManager,
   SamplingFn,
 } from './mcp_session_manager.js';
-import {MCPTool, ProgressCallbackFactory, ProgressFn} from './mcp_tool.js';
+import {MCPTool, ProgressFn} from './mcp_tool.js';
 import {
   McpToolsetConfig,
   resolveConfigConnectionParams,
@@ -60,8 +61,6 @@ export interface MCPToolsetOptions {
   headerProvider?: MCPHeaderProvider;
   /** Receives progress notifications for every tool call. */
   progressCallback?: ProgressFn;
-  /** Builds a per-call progress callback. Mutually exclusive with the above. */
-  progressCallbackFactory?: ProgressCallbackFactory;
   /**
    * Adds {@link LoadMcpResourceTool} to the tool list, so the model can read
    * the resources the MCP server advertises. Defaults to false.
@@ -76,17 +75,6 @@ export interface MCPToolsetOptions {
 }
 
 /**
- * Resolves request headers immediately before an MCP session is created.
- *
- * It runs once per `getTools()` call, so a short-lived credential is freshly
- * minted each time. Headers only apply to an HTTP transport; a stdio
- * connection ignores them.
- */
-export type MCPHeaderProvider = (
-  context?: ReadonlyContext,
-) => Record<string, string> | Promise<Record<string, string>>;
-
-/**
  * The cap on cached tool lists, so a `headerProvider` that mints a fresh value
  * per request cannot grow the cache without bound while entries are still live.
  */
@@ -98,8 +86,9 @@ const MAX_TOOL_LIST_CACHE_ENTRIES = 64;
  * The forms are told apart by `connectionParams`: {@link MCPToolsetOptions}
  * always carries it and no `MCPConnectionParams` member does.
  *
- * @throws If the connection params are missing, if the cache lifetime is not
- *     positive, or if both progress options are set.
+ * @throws If the connection params are missing, or if the cache lifetime is
+ *     not positive. TypeScript already rejects a call with no connection
+ *     params, so that guard is for an untyped JavaScript caller.
  */
 function normalizeToolsetOptions(
   optionsOrConnectionParams: MCPToolsetOptions | MCPConnectionParams,
@@ -120,11 +109,6 @@ function normalizeToolsetOptions(
   ) {
     throw new Error(
       'toolListCacheTtlSeconds must be positive. Omit it to disable caching.',
-    );
-  }
-  if (options.progressCallback && options.progressCallbackFactory) {
-    throw new Error(
-      'Set progressCallback or progressCallbackFactory, not both.',
     );
   }
   return options;
@@ -206,7 +190,6 @@ export class MCPToolset extends BaseToolset {
   private readonly headerProvider?: MCPHeaderProvider;
   private readonly requireConfirmation: boolean | RequireConfirmationPredicate;
   private readonly progressCallback?: ProgressFn;
-  private readonly progressCallbackFactory?: ProgressCallbackFactory;
   private readonly toolListCache?: TtlLruCache<Tool[]>;
 
   constructor(options: MCPToolsetOptions);
@@ -235,7 +218,6 @@ export class MCPToolset extends BaseToolset {
     this.headerProvider = options.headerProvider;
     this.requireConfirmation = options.requireConfirmation ?? false;
     this.progressCallback = options.progressCallback;
-    this.progressCallbackFactory = options.progressCallbackFactory;
     this.toolListCache = options.toolListCacheTtlSeconds
       ? new TtlLruCache<Tool[]>(
           options.toolListCacheTtlSeconds,
@@ -249,8 +231,8 @@ export class MCPToolset extends BaseToolset {
    *
    * @param config The MCP server declaration.
    * @throws If `config` does not name exactly one connection param, or names a
-   *     stdio server the application has not opted in to. See
-   *     {@link setAllowConfigStdioMcpServers}.
+   *     stdio server the application has not opted in to through
+   *     {@link ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR}.
    */
   static fromConfig(config: McpToolsetConfig): MCPToolset {
     return new MCPToolset({
@@ -289,7 +271,7 @@ export class MCPToolset extends BaseToolset {
           originalName: descriptor.name,
           requireConfirmation: this.requireConfirmation,
           progressCallback: this.progressCallback,
-          progressCallbackFactory: this.progressCallbackFactory,
+          headerProvider: this.headerProvider,
         }),
       );
     }
@@ -323,9 +305,10 @@ export class MCPToolset extends BaseToolset {
   private async listToolDescriptors(
     headers: Record<string, string>,
   ): Promise<Tool[]> {
-    const cacheKey = this.toolListCache ? toolListCacheKey(headers) : undefined;
-    if (this.toolListCache && cacheKey !== undefined) {
-      const cached = this.toolListCache.get(cacheKey);
+    const cache = this.toolListCache;
+    const cacheKey = cache && toolListCacheKey(headers);
+    if (cache && cacheKey) {
+      const cached = cache.get(cacheKey);
       if (cached) {
         return cached;
       }
@@ -343,8 +326,8 @@ export class MCPToolset extends BaseToolset {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    if (this.toolListCache && cacheKey !== undefined) {
-      this.toolListCache.set(cacheKey, listResult.tools);
+    if (cache && cacheKey) {
+      cache.set(cacheKey, listResult.tools);
     }
     return listResult.tools;
   }

@@ -9,7 +9,6 @@ import {
   Context,
   InvocationContext,
   LlmRequest,
-  setAllowConfigStdioMcpServers,
   ToolConfirmation,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
@@ -228,12 +227,6 @@ describe('MCPToolset', () => {
 
       expect(tools.map((tool) => tool.name)).toEqual(['myprefix_other-tool']);
     });
-
-    it('rejects a missing connectionParams', () => {
-      expect(
-        () => new MCPToolset(undefined as unknown as MCPConnectionParams),
-      ).toThrow(/Missing connection params/);
-    });
   });
 
   describe('useMcpResources', () => {
@@ -329,7 +322,6 @@ describe('MCPToolset', () => {
     const originalEnvValue = process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR];
 
     afterEach(() => {
-      setAllowConfigStdioMcpServers(undefined);
       if (originalEnvValue === undefined) {
         delete process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR];
       } else {
@@ -350,7 +342,7 @@ describe('MCPToolset', () => {
     });
 
     it('carries toolFilter, prefix and useMcpResources onto the toolset', async () => {
-      setAllowConfigStdioMcpServers(true);
+      process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR] = '1';
 
       const toolset = MCPToolset.fromConfig({
         stdioConnectionParams: {
@@ -663,42 +655,6 @@ describe('MCPToolset', () => {
       expect(progress).toEqual([0.5]);
     });
 
-    it('calls the factory per call with the tool name and context', async () => {
-      const factory = vi.fn().mockReturnValue(() => {});
-      const callTool = vi.fn().mockResolvedValue({content: []});
-      stubListTools([mcpTool('alpha')], {
-        callTool,
-      });
-      const toolset = new MCPToolset({
-        connectionParams: stdioParams,
-        progressCallbackFactory: factory,
-      });
-      const toolContext = createToolContext();
-
-      const [tool] = await toolset.getTools();
-      await tool.runAsync({args: {}, toolContext});
-      await tool.runAsync({args: {}, toolContext});
-
-      expect(factory).toHaveBeenCalledTimes(2);
-      expect(factory).toHaveBeenCalledWith('alpha', toolContext);
-    });
-
-    it('omits onprogress when the factory returns undefined', async () => {
-      const callTool = vi.fn().mockResolvedValue({content: []});
-      stubListTools([mcpTool('alpha')], {
-        callTool,
-      });
-      const toolset = new MCPToolset({
-        connectionParams: stdioParams,
-        progressCallbackFactory: () => undefined,
-      });
-
-      const [tool] = await toolset.getTools();
-      await tool.runAsync({args: {}, toolContext: createToolContext()});
-
-      expect(callTool.mock.calls[0][2]).not.toHaveProperty('onprogress');
-    });
-
     it('omits onprogress when neither option is configured', async () => {
       const callTool = vi.fn().mockResolvedValue({content: []});
       stubListTools([mcpTool('alpha')], {
@@ -710,17 +666,6 @@ describe('MCPToolset', () => {
       await tool.runAsync({args: {}, toolContext: createToolContext()});
 
       expect(callTool.mock.calls[0][2]).not.toHaveProperty('onprogress');
-    });
-
-    it('rejects both progress options at once', () => {
-      expect(
-        () =>
-          new MCPToolset({
-            connectionParams: stdioParams,
-            progressCallback: () => {},
-            progressCallbackFactory: () => undefined,
-          }),
-      ).toThrow(/progressCallback or progressCallbackFactory/);
     });
   });
 

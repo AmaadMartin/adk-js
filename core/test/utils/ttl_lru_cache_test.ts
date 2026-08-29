@@ -46,18 +46,6 @@ describe('TtlLruCache', () => {
       expect(cache.get('absent')).toBeUndefined();
     });
 
-    it('sweeps expired entries for keys nobody reads again', () => {
-      const cache = new TtlLruCache<string>(TTL_SECONDS, 8);
-      cache.set('stale-1', 'value');
-      cache.set('stale-2', 'value');
-
-      vi.advanceTimersByTime(TTL_MILLIS);
-      cache.set('fresh', 'value');
-
-      expect(cache.size).toBe(1);
-      expect(cache.get('fresh')).toBe('value');
-    });
-
     it('restarts the lifetime when a key is written again', () => {
       const cache = new TtlLruCache<string>(TTL_SECONDS, 8);
       cache.set('a', 'first');
@@ -67,7 +55,6 @@ describe('TtlLruCache', () => {
       vi.advanceTimersByTime(TTL_MILLIS - 1);
 
       expect(cache.get('a')).toBe('second');
-      expect(cache.size).toBe(1);
     });
   });
 

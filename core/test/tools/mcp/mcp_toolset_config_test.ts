@@ -10,7 +10,6 @@ import {
   ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR,
   McpToolsetConfig,
   resolveConfigConnectionParams,
-  setAllowConfigStdioMcpServers,
   StdioConnectionParams,
   StreamableHTTPConnectionParams,
 } from '@google/adk';
@@ -33,7 +32,6 @@ describe('resolveConfigConnectionParams', () => {
   });
 
   afterEach(() => {
-    setAllowConfigStdioMcpServers(undefined);
     if (originalEnvValue === undefined) {
       delete process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR];
     } else {
@@ -53,6 +51,16 @@ describe('resolveConfigConnectionParams', () => {
         stdioConnectionParams,
         streamableHttpConnectionParams,
       };
+
+      expect(() => resolveConfigConnectionParams(config)).toThrow(
+        /Exactly one of/,
+      );
+    });
+
+    it('treats an explicit null the way JSON means it: absent', () => {
+      const config = JSON.parse(
+        '{"stdioConnectionParams": null}',
+      ) as McpToolsetConfig;
 
       expect(() => resolveConfigConnectionParams(config)).toThrow(
         /Exactly one of/,
@@ -87,31 +95,20 @@ describe('resolveConfigConnectionParams', () => {
       );
     });
 
-    it('allows a stdio server when the override is true', () => {
-      setAllowConfigStdioMcpServers(true);
+    it('allows a stdio server when the environment variable is true', () => {
+      process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR] = 'true';
 
       expect(resolveConfigConnectionParams({stdioConnectionParams})).toBe(
         stdioConnectionParams,
       );
     });
 
-    it('lets an override of false beat an environment variable of 1', () => {
-      process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR] = '1';
-      setAllowConfigStdioMcpServers(false);
+    it('rejects a stdio server when the environment variable is 0', () => {
+      process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR] = '0';
 
       expect(() =>
         resolveConfigConnectionParams({stdioConnectionParams}),
       ).toThrow(/not allowed in agent configs/);
-    });
-
-    it('defers to the environment again after the override is cleared', () => {
-      process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR] = '1';
-      setAllowConfigStdioMcpServers(false);
-      setAllowConfigStdioMcpServers(undefined);
-
-      expect(resolveConfigConnectionParams({stdioConnectionParams})).toBe(
-        stdioConnectionParams,
-      );
     });
   });
 });

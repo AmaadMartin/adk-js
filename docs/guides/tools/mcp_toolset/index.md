@@ -111,29 +111,24 @@ const toolset = new MCPToolset({
 });
 ```
 
-Use `progressCallbackFactory` instead when the callback needs the live context,
-for example to write progress into session state:
+The callback applies to every tool the toolset returns. Without one the client
+sends no progress token, so the server reports nothing.
+
+## Authenticate with a fresh credential
+
+`headerProvider` runs before every session the toolset opens, for discovery and
+for each tool call, so a short-lived token is minted when it is needed rather
+than once at startup:
 
 ```ts
 const toolset = new MCPToolset({
   connectionParams,
-  progressCallbackFactory: (toolName, toolContext) => {
-    if (toolName !== 'slow_tool') {
-      return undefined;
-    }
-    return ({progress}) => {
-      toolContext.actions.stateDelta = {progress};
-    };
-  },
+  headerProvider: async () => ({authorization: `Bearer ${await mintToken()}`}),
 });
 ```
 
-The factory runs once per call, so it sees that call's context. Returning
-`undefined` asks for no progress on that call. Setting both options throws:
-silent precedence between them would be worse than a construction error.
-
-Python takes one `progress_callback` and tells the two shapes apart at runtime.
-TypeScript has no sound equivalent, so they are separate options here.
+Headers only apply to an HTTP transport; a stdio connection ignores them. They
+also key the tools-list cache, so two identities never share an entry.
 
 ## Answer the server's requests
 
@@ -207,14 +202,6 @@ as a local process, so `fromConfig` refuses one until the application opts in.
 export ADK_ALLOW_CONFIG_STDIO_MCP_SERVERS=1
 ```
 
-```ts
-import {setAllowConfigStdioMcpServers} from '@google/adk';
-
-// Call this at startup, before any configuration is loaded.
-setAllowConfigStdioMcpServers(true);
-```
-
-The in-process setting wins over the environment variable. Pass `false` to deny
-a stdio server even where the variable says yes, and `undefined` to go back to
-reading the variable. Constructing an `MCPToolset` directly is never gated: your
-own code already decides what runs.
+The variable is read on every call, so an application that loads only trusted
+configurations can set `process.env` at startup instead. Constructing an
+`MCPToolset` directly is never gated: your own code already decides what runs.

@@ -41,35 +41,6 @@ export interface McpToolsetConfig {
 }
 
 /**
- * In-process override for {@link ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR}.
- * `undefined` means "not set, defer to the environment variable".
- */
-let allowConfigStdioServers: boolean | undefined;
-
-/**
- * Overrides whether a configuration object may declare a stdio MCP server.
- *
- * An application that embeds ADK and loads only configurations it trusts can
- * call this at startup instead of setting the environment variable.
- *
- * @param value True to allow, false to deny, undefined to defer to
- *     {@link ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR}.
- */
-export function setAllowConfigStdioMcpServers(
-  value: boolean | undefined,
-): void {
-  allowConfigStdioServers = value;
-}
-
-/** Returns whether a configuration object may declare a stdio MCP server. */
-function allowConfigStdioServersEnabled(): boolean {
-  return (
-    allowConfigStdioServers ??
-    getBooleanEnvVar(ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR)
-  );
-}
-
-/**
  * Returns the single connection param `config` declares.
  *
  * @throws If the number of populated connection-param fields is not one, or if
@@ -92,7 +63,10 @@ export function resolveConfigConnectionParams(
     );
   }
 
-  if (config.stdioConnectionParams && !allowConfigStdioServersEnabled()) {
+  if (
+    config.stdioConnectionParams &&
+    !getBooleanEnvVar(ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR)
+  ) {
     throw new Error(
       'Stdio MCP servers are not allowed in agent configs: the ' +
         "config-supplied 'command' is launched as a local process when the " +

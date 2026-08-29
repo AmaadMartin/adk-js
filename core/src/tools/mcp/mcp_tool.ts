@@ -21,21 +21,10 @@ import {
   RequireConfirmationPredicate,
 } from '../tool_confirmation.js';
 
-import {MCPSessionManager} from './mcp_session_manager.js';
+import {MCPHeaderProvider, MCPSessionManager} from './mcp_session_manager.js';
 
 /** Receives a progress notification the MCP server sends during a call. */
 export type ProgressFn = (progress: Progress) => void | Promise<void>;
-
-/**
- * Builds the progress callback for one call.
- *
- * It runs at call time, not at construction, so it sees the live context.
- * Return undefined to ask for no progress notifications on that call.
- */
-export type ProgressCallbackFactory = (
-  toolName: string,
-  toolContext: Context,
-) => ProgressFn | undefined;
 
 /** Configures an {@link MCPTool}. */
 export interface MCPToolOptions {
@@ -49,8 +38,8 @@ export interface MCPToolOptions {
   requireConfirmation?: boolean | RequireConfirmationPredicate;
   /** Receives progress notifications for every call. */
   progressCallback?: ProgressFn;
-  /** Builds a per-call progress callback. Mutually exclusive with the above. */
-  progressCallbackFactory?: ProgressCallbackFactory;
+  /** Resolves extra request headers before each call opens its session. */
+  headerProvider?: MCPHeaderProvider;
 }
 
 /**
@@ -59,7 +48,8 @@ export interface MCPToolOptions {
  * The forms are told apart by `mcpTool`: {@link MCPToolOptions} always carries
  * it and an MCP `Tool` never does.
  *
- * @throws If the positional form names no session manager.
+ * @throws If the positional form names no session manager. TypeScript already
+ *     rejects that call, so the guard is for an untyped JavaScript caller.
  */
 function normalizeToolOptions(
   optionsOrMcpTool: MCPToolOptions | Tool,
@@ -100,7 +90,7 @@ export class MCPTool extends BaseTool {
   private readonly originalName: string;
   private readonly requireConfirmation: boolean | RequireConfirmationPredicate;
   private readonly progressCallback?: ProgressFn;
-  private readonly progressCallbackFactory?: ProgressCallbackFactory;
+  private readonly headerProvider?: MCPHeaderProvider;
 
   constructor(options: MCPToolOptions);
   constructor(
@@ -127,7 +117,7 @@ export class MCPTool extends BaseTool {
     this.originalName = options.originalName || options.mcpTool.name;
     this.requireConfirmation = options.requireConfirmation ?? false;
     this.progressCallback = options.progressCallback;
-    this.progressCallbackFactory = options.progressCallbackFactory;
+    this.headerProvider = options.headerProvider;
   }
 
   /**
@@ -170,7 +160,10 @@ export class MCPTool extends BaseTool {
       return gate;
     }
 
-    const session = await this.mcpSessionManager.createSession();
+    // Headers are resolved per call, not per discovery, so a short-lived
+    // credential is still valid when the call runs.
+    const headers = await this.headerProvider?.(request.toolContext);
+    const session = await this.mcpSessionManager.createSession(headers);
 
     try {
       const callRequest: CallToolRequest = {} as CallToolRequest;
@@ -189,14 +182,12 @@ export class MCPTool extends BaseTool {
   /**
    * Builds the per-call SDK request options.
    *
-   * `onprogress` is left off entirely when no callback applies: the SDK only
-   * sends a progress token, and so the server only reports progress, when the
-   * key is present.
+   * `onprogress` is left off entirely when no callback is configured: the SDK
+   * only sends a progress token, and so the server only reports progress, when
+   * the key is present.
    */
   private buildRequestOptions(request: RunAsyncToolRequest): RequestOptions {
-    const onprogress =
-      this.progressCallbackFactory?.(this.name, request.toolContext) ??
-      this.progressCallback;
+    const onprogress = this.progressCallback;
 
     return {
       signal: request.toolContext.abortSignal,

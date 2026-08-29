@@ -56,9 +56,8 @@ export class TtlLruCache<T> {
     return entry.value;
   }
 
-  /** Stores `value` under `key`, then reclaims space. */
+  /** Stores `value` under `key`, evicting the least recently used when full. */
   set(key: string, value: T): void {
-    this.sweepExpired();
     this.entries.delete(key);
     this.entries.set(key, {value, expiresAt: Date.now() + this.ttlMillis});
 
@@ -71,20 +70,5 @@ export class TtlLruCache<T> {
   /** Empties the cache. */
   clear(): void {
     this.entries.clear();
-  }
-
-  /**
-   * Drops every expired entry.
-   *
-   * A key that is never read again is never reclaimed by {@link get}, so the
-   * sweep runs on write instead.
-   */
-  private sweepExpired(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.entries) {
-      if (entry.expiresAt <= now) {
-        this.entries.delete(key);
-      }
-    }
   }
 }

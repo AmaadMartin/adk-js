@@ -15,6 +15,7 @@ import type {
   ElicitResult,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
@@ -80,6 +81,17 @@ export type MCPConnectionParams =
   | StreamableHTTPConnectionParams;
 
 /**
+ * Resolves extra request headers immediately before a session is opened.
+ *
+ * It runs for every session, so a short-lived credential is freshly minted each
+ * time. Headers only apply to an HTTP transport; a stdio connection ignores
+ * them.
+ */
+export type MCPHeaderProvider = (
+  context?: ReadonlyContext,
+) => Record<string, string> | Promise<Record<string, string>>;
+
+/**
  * Answers a server's `sampling/createMessage` request, which asks the client to
  * run a model on the server's behalf.
  */
@@ -127,7 +139,8 @@ function buildClientCapabilities(
 }
 
 /**
- * Returns `connectionParams` with `extraHeaders` merged over its own headers.
+ * Returns `connectionParams` with `extraHeaders` merged over its own headers,
+ * folding in the deprecated `header` field.
  *
  * The stored params are never mutated: one manager serves many sessions and
  * each may carry different headers. Stdio has no headers, so it comes back
@@ -137,26 +150,27 @@ function withExtraHeaders(
   connectionParams: MCPConnectionParams,
   extraHeaders?: Record<string, string>,
 ): MCPConnectionParams {
-  if (
-    connectionParams.type !== 'StreamableHTTPConnectionParams' ||
-    !extraHeaders
-  ) {
+  if (connectionParams.type !== 'StreamableHTTPConnectionParams') {
     return connectionParams;
   }
 
   const transportOptions = connectionParams.transportOptions;
-  const baseHeaders =
-    transportOptions?.requestInit?.headers ??
-    (connectionParams.header as Record<string, string> | undefined);
+  // The deprecated `header` field is ignored whenever transportOptions is set,
+  // even when it names no headers.
+  const baseHeaders = transportOptions
+    ? transportOptions.requestInit?.headers
+    : (connectionParams.header as Record<string, string> | undefined);
+  const headers = {...baseHeaders, ...extraHeaders};
+
+  if (Object.keys(headers).length === 0) {
+    return connectionParams;
+  }
 
   return {
     ...connectionParams,
     transportOptions: {
       ...transportOptions,
-      requestInit: {
-        ...transportOptions?.requestInit,
-        headers: {...baseHeaders, ...extraHeaders},
-      },
+      requestInit: {...transportOptions?.requestInit, headers},
     },
   };
 }
@@ -228,13 +242,8 @@ export class MCPSessionManager {
           break;
         }
         case 'StreamableHTTPConnectionParams': {
+          // withExtraHeaders already folded the deprecated `header` field in.
           const options = connectionParams.transportOptions ?? {};
-
-          if (!options.requestInit && connectionParams.header !== undefined) {
-            options.requestInit = {
-              headers: connectionParams.header as Record<string, string>,
-            };
-          }
 
           const {StreamableHTTPClientTransport} = await loadOptionalPeer(
             MCP_SDK,

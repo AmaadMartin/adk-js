@@ -5,12 +5,12 @@
  */
 
 import {
+  ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR,
   Context,
   InvocationContext,
   LlmRequest,
   LoadMcpResourceTool,
   MCPToolset,
-  setAllowConfigStdioMcpServers,
   StdioConnectionParams,
 } from '@google/adk';
 import {fileURLToPath} from 'node:url';
@@ -123,7 +123,7 @@ describe('MCPToolset useMcpResources (e2e, real MCP server over stdio)', () => {
   let toolset: MCPToolset;
 
   afterEach(async () => {
-    setAllowConfigStdioMcpServers(undefined);
+    delete process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR];
     await toolset?.close();
   });
 
@@ -163,7 +163,7 @@ describe('MCPToolset useMcpResources (e2e, real MCP server over stdio)', () => {
   });
 
   it('builds the same toolset through fromConfig once stdio is allowed', async () => {
-    setAllowConfigStdioMcpServers(true);
+    process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR] = '1';
     toolset = MCPToolset.fromConfig({
       stdioConnectionParams,
       useMcpResources: true,
@@ -175,7 +175,7 @@ describe('MCPToolset useMcpResources (e2e, real MCP server over stdio)', () => {
   });
 
   it('refuses the same config while stdio is not allowed', () => {
-    setAllowConfigStdioMcpServers(false);
+    delete process.env[ALLOW_CONFIG_STDIO_SERVERS_ENV_VAR];
 
     expect(() => MCPToolset.fromConfig({stdioConnectionParams})).toThrow(
       /not allowed in agent configs/,
