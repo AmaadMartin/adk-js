@@ -345,6 +345,35 @@ describe('OpenApiSpecParser', () => {
     });
   });
 
+  it('should ignore an operation scheme the spec also makes optional', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Optional Auth API', version: '1.0.0'},
+      security: [{ApiKeyAuth: []}],
+      paths: {
+        '/items': {
+          get: {
+            operationId: 'listItems',
+            // An empty requirement allows anonymous access, so this operation
+            // makes no scheme mandatory and inherits the global one.
+            security: [{OAuth2Auth: []}, {}],
+            responses: {},
+          },
+        },
+      },
+      components: {
+        securitySchemes: {
+          ApiKeyAuth: {type: 'apiKey', in: 'header', name: 'X-API-KEY'},
+          OAuth2Auth: {type: 'oauth2', flows: {}},
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed[0].authScheme?.type).toBe('apiKey');
+  });
+
   it('should carry the return value of each operation', () => {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',

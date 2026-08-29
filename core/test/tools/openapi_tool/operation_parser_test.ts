@@ -5,7 +5,6 @@
  */
 
 import {OperationParser} from '@google/adk';
-import {Type} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 
@@ -272,39 +271,6 @@ describe('OperationParser parity with adk-python', () => {
       ]);
     });
 
-    it('should keep the caller-supplied parameters and return value', () => {
-      const parameters = [
-        {
-          originalName: 'renamed',
-          paramLocation: 'query',
-          paramSchema: {type: 'string'} as OpenAPIV3.SchemaObject,
-          name: 'renamed',
-          required: true,
-        },
-      ];
-      const returnValue = {
-        originalName: '',
-        paramLocation: '',
-        paramSchema: {type: 'boolean'} as OpenAPIV3.SchemaObject,
-        name: 'return',
-        required: true,
-      };
-
-      const parser = new OperationParser(sampleOperation(), {
-        parameters,
-        returnValue,
-      });
-
-      expect(parser.getParameters()).toEqual(parameters);
-      expect(parser.getReturnValue()).toBe(returnValue);
-    });
-
-    it('should keep an empty return value when the caller supplies none', () => {
-      const parser = new OperationParser(sampleOperation(), {parameters: []});
-
-      expect(parser.getReturnValue().paramSchema).toEqual({});
-    });
-
     it('should parse a plain object that matches an operation', () => {
       const parser = new OperationParser({
         operationId: 'get_thing',
@@ -316,37 +282,40 @@ describe('OperationParser parity with adk-python', () => {
   });
 
   describe('return value', () => {
-    function parserWithResponses(
+    function returnSchemaOf(
       responses: OpenAPIV3.ResponsesObject,
-    ): OperationParser {
-      return new OperationParser({operationId: 'testOp', responses});
+    ): OpenAPIV3.SchemaObject {
+      return new OperationParser({
+        operationId: 'testOp',
+        responses,
+      }).getReturnValue().paramSchema;
     }
 
     it('should take the schema of the 200 response', () => {
       expect(
-        parserWithResponses({
+        returnSchemaOf({
           '200': {
             description: 'Success',
             content: {'application/json': {schema: {type: 'string'}}},
           },
-        }).getReturnTypeHint(),
-      ).toBe('string');
+        }),
+      ).toEqual({type: 'string'});
     });
 
-    it('should return unknown when no response is a 2xx', () => {
+    it('should stay empty when no response is a 2xx', () => {
       expect(
-        parserWithResponses({
+        returnSchemaOf({
           '400': {
             description: 'Bad request',
             content: {'application/json': {schema: {type: 'string'}}},
           },
-        }).getReturnTypeHint(),
-      ).toBe('unknown');
+        }),
+      ).toEqual({});
     });
 
     it('should take the smallest 2xx response', () => {
       expect(
-        parserWithResponses({
+        returnSchemaOf({
           '202': {
             description: 'Accepted',
             content: {'application/json': {schema: {type: 'string'}}},
@@ -359,66 +328,51 @@ describe('OperationParser parity with adk-python', () => {
             description: 'Created',
             content: {'application/json': {schema: {type: 'integer'}}},
           },
-        }).getReturnTypeHint(),
-      ).toBe('boolean');
+        }),
+      ).toEqual({type: 'boolean'});
     });
 
-    it('should return unknown when the response carries no content', () => {
+    it('should stay empty when the response carries no content', () => {
       expect(
-        parserWithResponses({
-          '200': {description: 'Success', content: {}},
-        }).getReturnTypeHint(),
-      ).toBe('unknown');
+        returnSchemaOf({'200': {description: 'Success', content: {}}}),
+      ).toEqual({});
     });
 
-    it('should return unknown when the media type carries no schema', () => {
+    it('should stay empty when the media type carries no schema', () => {
       expect(
-        parserWithResponses({
+        returnSchemaOf({
           '200': {description: 'Success', content: {'application/json': {}}},
-        }).getReturnTypeHint(),
-      ).toBe('unknown');
+        }),
+      ).toEqual({});
     });
 
-    it('should return unknown when the response is a reference', () => {
+    it('should stay empty when the response is a reference', () => {
       expect(
-        parserWithResponses({
-          '200': {$ref: '#/components/responses/Ok'},
-        }).getReturnTypeHint(),
-      ).toBe('unknown');
+        returnSchemaOf({'200': {$ref: '#/components/responses/Ok'}}),
+      ).toEqual({});
     });
 
-    it('should return unknown when the media type schema is a reference', () => {
+    it('should stay empty when the media type schema is a reference', () => {
       expect(
-        parserWithResponses({
+        returnSchemaOf({
           '200': {
             description: 'Success',
             content: {
               'application/json': {schema: {$ref: '#/components/schemas/Pet'}},
             },
           },
-        }).getReturnTypeHint(),
-      ).toBe('unknown');
+        }),
+      ).toEqual({});
     });
 
-    it('should carry the response schema on the return value', () => {
+    it('should name the return value and mark it required', () => {
       const returnValue = new OperationParser(
         sampleOperation(),
       ).getReturnValue();
 
       expect(returnValue.paramSchema).toEqual({type: 'string'});
       expect(returnValue.name).toBe('return');
-    });
-
-    it('should map the return schema onto a Gemini type', () => {
-      expect(new OperationParser(sampleOperation()).getReturnTypeValue()).toBe(
-        Type.STRING,
-      );
-    });
-
-    it('should map an absent return type onto TYPE_UNSPECIFIED', () => {
-      expect(parserWithResponses({}).getReturnTypeValue()).toBe(
-        Type.TYPE_UNSPECIFIED,
-      );
+      expect(returnValue.required).toBe(true);
     });
   });
 
@@ -483,67 +437,21 @@ describe('OperationParser parity with adk-python', () => {
     });
   });
 
-  describe('documentation', () => {
-    it('should document the summary, the arguments and the return', () => {
-      const doc = new OperationParser(sampleOperation()).getDocString();
-
-      expect(doc).toContain('Test Summary');
-      expect(doc).toContain('Args:');
-      expect(doc).toContain('param1 (string): Parameter 1');
-      expect(doc).toContain('prop1 (string): Property 1');
-      expect(doc).toContain('Returns (string): Success');
-    });
-
-    it('should prefer the summary over the description', () => {
-      const doc = new OperationParser({
-        operationId: 'testOp',
-        summary: 'The summary',
-        description: 'The description',
-        responses: {},
-      }).getDocString();
-
-      expect(doc.startsWith('The summary\n')).toBe(true);
-    });
-
-    it('should fall back to the description when there is no summary', () => {
-      const doc = new OperationParser({
-        operationId: 'testOp',
-        description: 'The description',
-        responses: {},
-      }).getDocString();
-
-      expect(doc.startsWith('The description\n')).toBe(true);
-    });
-
-    it('should document an operation that declares no responses', () => {
-      const doc = new OperationParser(
-        '{"operationId": "testOp", "summary": "The summary"}',
-      ).getDocString();
-
-      expect(doc).toBe('The summary\n\nArgs:\n\n\n');
-    });
-
-    it('should document an operation with neither summary nor description', () => {
-      const doc = new OperationParser({
-        operationId: 'testOp',
-        responses: {},
-      }).getDocString();
-
-      expect(doc).toBe('\n\nArgs:\n\n\n');
-    });
-
-    it('should document a response that carries no description', () => {
-      const doc = new OperationParser(
-        '{"operationId": "testOp", "summary": "S", "responses": {"200": {"content": {"application/json": {"schema": {"type": "string"}}}}}}',
-      ).getDocString();
-
-      expect(doc).toContain('Returns (string): ');
-    });
-
-    it('should prefer the description over the summary in getDescription', () => {
+  describe('description', () => {
+    it('should prefer the description over the summary', () => {
       expect(new OperationParser(sampleOperation()).getDescription()).toBe(
         'Test Description',
       );
+    });
+
+    it('should fall back to the summary when there is no description', () => {
+      expect(
+        new OperationParser({
+          operationId: 'testOp',
+          summary: 'The summary',
+          responses: {},
+        }).getDescription(),
+      ).toBe('The summary');
     });
   });
 
@@ -612,38 +520,6 @@ describe('OperationParser parity with adk-python', () => {
     });
   });
 
-  describe('operation supplied as JSON', () => {
-    it('should parse a JSON operation', () => {
-      const parser = new OperationParser(
-        '{"operationId": "get_thing", "responses": {}}',
-      );
-
-      expect(parser.getFunctionName()).toBe('get_thing');
-    });
-
-    it('should reject JSON holding an array', () => {
-      expect(() => new OperationParser('[]')).toThrow(
-        'Operation must be a JSON object',
-      );
-    });
-
-    it('should reject JSON holding a string', () => {
-      expect(() => new OperationParser('"x"')).toThrow(
-        'Operation must be a JSON object',
-      );
-    });
-
-    it('should reject JSON holding null', () => {
-      expect(() => new OperationParser('null')).toThrow(
-        'Operation must be a JSON object',
-      );
-    });
-
-    it('should let malformed JSON raise a SyntaxError', () => {
-      expect(() => new OperationParser('{')).toThrow(SyntaxError);
-    });
-  });
-
   describe('request body edge cases', () => {
     it('should add no parameter for a referenced request body', () => {
       const params = new OperationParser({
@@ -661,14 +537,6 @@ describe('OperationParser parity with adk-python', () => {
         requestBody: {content: {}},
         responses: {},
       }).getParameters();
-
-      expect(params.length).toBe(0);
-    });
-
-    it('should add no parameter for a request body that omits content', () => {
-      const params = new OperationParser(
-        '{"operationId": "testOp", "requestBody": {}, "responses": {}}',
-      ).getParameters();
 
       expect(params.length).toBe(0);
     });
@@ -718,6 +586,20 @@ describe('OperationParser parity with adk-python', () => {
 
       expect(params[0].originalName).toBe('body');
       expect(params[0].description).toBe('Anything');
+    });
+
+    it('should require a body the spec marks required', () => {
+      const params = new OperationParser({
+        operationId: 'testOp',
+        requestBody: {
+          required: true,
+          content: {'application/json': {schema: {type: 'string'}}},
+        },
+        responses: {},
+      }).getParameters();
+
+      expect(params[0].name).toBe('body');
+      expect(params[0].required).toBe(true);
     });
 
     it('should describe a body from the request body description', () => {

@@ -4,12 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Type} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
 import {toSnakeCaseName} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
-import {toGeminiType} from '../../../utils/gemini_schema_util.js';
-import {generateParamDoc, generateReturnDoc, typeHint} from './doc_strings.js';
 import {deriveParameterName} from './parameter_names.js';
 
 export interface ApiParameter {
@@ -19,18 +16,6 @@ export interface ApiParameter {
   description?: string;
   name: string; // The name used in the generated tool schema (may be snake_cased)
   required: boolean;
-}
-
-/** Options accepted by `OperationParser`. */
-export interface OperationParserOptions {
-  preservePropertyNames?: boolean;
-  /**
-   * Parameters that are already parsed. When a caller sets them the operation
-   * is not read, so a name the caller renamed or de-duplicated survives.
-   */
-  parameters?: ApiParameter[];
-  /** The return value that goes with `parameters`. */
-  returnValue?: ApiParameter;
 }
 
 /** The length a generated tool function name is cut down to. */
@@ -55,19 +40,6 @@ export function requiredSchemeName(
     return '';
   }
   return Object.keys(security[0])[0];
-}
-
-/**
- * Reads an operation supplied as a JSON string.
- *
- * @throws {Error} If the JSON holds anything other than an object.
- */
-function parseOperationJson(operation: string): OpenAPIV3.OperationObject {
-  const parsed: unknown = JSON.parse(operation);
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error('Operation must be a JSON object');
-  }
-  return parsed as OpenAPIV3.OperationObject;
 }
 
 /**
@@ -107,23 +79,15 @@ function returnValueOf(paramSchema: OpenAPIV3.SchemaObject): ApiParameter {
  */
 @experimental
 export class OperationParser {
-  private readonly operation: OpenAPIV3.OperationObject;
   private params: ApiParameter[] = [];
   private returnValue: ApiParameter = returnValueOf({});
   private preservePropertyNames: boolean;
 
   constructor(
-    operation: OpenAPIV3.OperationObject | string,
-    options: OperationParserOptions = {},
+    private readonly operation: OpenAPIV3.OperationObject,
+    options: {preservePropertyNames?: boolean} = {},
   ) {
-    this.operation =
-      typeof operation === 'string' ? parseOperationJson(operation) : operation;
     this.preservePropertyNames = options.preservePropertyNames ?? false;
-    if (options.parameters) {
-      this.params = options.parameters;
-      this.returnValue = options.returnValue ?? this.returnValue;
-      return;
-    }
     this.processOperationParameters();
     this.processRequestBody();
     this.processReturnValue();
@@ -202,7 +166,7 @@ export class OperationParser {
       paramLocation: 'body',
       paramSchema: schema,
       description: requestBody.description || schema.description || '',
-      required: false,
+      required: requestBody.required ?? false,
       name: this.getParamName(originalName, 'body'),
     });
   }
@@ -235,13 +199,11 @@ export class OperationParser {
     const nameCounts = new Map<string, number>();
     for (const param of this.params) {
       const name = param.name;
-      const seen = nameCounts.get(name);
-      if (seen === undefined) {
-        nameCounts.set(name, 0);
-        continue;
+      const seen = (nameCounts.get(name) ?? -1) + 1;
+      nameCounts.set(name, seen);
+      if (seen > 0) {
+        param.name = `${name}_${seen - 1}`;
       }
-      nameCounts.set(name, seen + 1);
-      param.name = `${name}_${seen}`;
     }
   }
 
@@ -267,28 +229,6 @@ export class OperationParser {
   }
 
   /**
-   * Gets the TypeScript type name that describes what the operation returns.
-   *
-   * @returns A type name such as `string`, or `unknown` when the response
-   *   declares no type.
-   */
-  @experimental
-  public getReturnTypeHint(): string {
-    return typeHint(this.returnValue.paramSchema);
-  }
-
-  /**
-   * Gets the Gemini type of what the operation returns.
-   *
-   * @returns The matching `Type`, or `Type.TYPE_UNSPECIFIED` when the response
-   *   declares no type.
-   */
-  @experimental
-  public getReturnTypeValue(): Type {
-    return toGeminiType(this.returnValue.paramSchema.type);
-  }
-
-  /**
    * Gets the name of the security scheme this operation requires.
    *
    * @returns The scheme name, or an empty string when the operation needs no
@@ -310,7 +250,7 @@ export class OperationParser {
     const required: string[] = [];
 
     for (const param of this.params) {
-      properties[param.name] = JSON.parse(JSON.stringify(param.paramSchema));
+      properties[param.name] = structuredClone(param.paramSchema);
       if (param.required) {
         required.push(param.name);
       }
@@ -347,21 +287,5 @@ export class OperationParser {
   @experimental
   public getDescription(): string {
     return this.operation.description || this.operation.summary || '';
-  }
-
-  /**
-   * Gets the documentation the model reads: the summary, one line for each
-   * argument, and what the operation returns.
-   *
-   * @returns The documentation string.
-   */
-  @experimental
-  public getDocString(): string {
-    const summary = this.operation.summary || this.operation.description || '';
-    const args = this.params
-      .map((param) => `    ${generateParamDoc(param)}`)
-      .join('\n');
-    const returnDoc = generateReturnDoc(this.operation.responses ?? {});
-    return `${summary}\n\nArgs:\n${args}\n\n${returnDoc}`;
   }
 }
