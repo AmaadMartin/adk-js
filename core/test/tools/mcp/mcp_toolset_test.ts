@@ -547,25 +547,22 @@ describe('MCPToolset', () => {
     async function clientRecording(count: number): Promise<void> {
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listTools: vi.fn().mockImplementation(async () => {
-              for (let i = 0; i < count; i++) {
-                recordHttpExchange({
-                  url: `https://mcp.example.com/${i}`,
-                  method: 'POST',
-                  statusCode: 200,
-                  requestHeaders: {authorization: 'Bearer super-secret'},
-                  responseHeaders: {},
-                  responseBody: 'ok',
-                });
-              }
-              return {tools: []};
-            }),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        stubClient({
+          listTools: vi.fn().mockImplementation(async () => {
+            for (let i = 0; i < count; i++) {
+              recordHttpExchange({
+                url: `https://mcp.example.com/${i}`,
+                method: 'POST',
+                statusCode: 200,
+                requestHeaders: {authorization: 'Bearer super-secret'},
+                responseHeaders: {},
+                responseBody: 'ok',
+              });
+            }
+            return {tools: []};
+          }),
+        }),
       );
     }
 
@@ -661,23 +658,20 @@ describe('MCPToolset', () => {
     it('drains the exchanges captured before a failure', async () => {
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listTools: vi.fn().mockImplementation(async () => {
-              recordHttpExchange({
-                url: 'https://mcp.example.com/failing',
-                method: 'POST',
-                statusCode: 500,
-                requestHeaders: {},
-                responseHeaders: {},
-                responseBody: 'server error',
-              });
-              throw new Error('list boom');
-            }),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        stubClient({
+          listTools: vi.fn().mockImplementation(async () => {
+            recordHttpExchange({
+              url: 'https://mcp.example.com/failing',
+              method: 'POST',
+              statusCode: 500,
+              requestHeaders: {},
+              responseHeaders: {},
+              responseBody: 'server error',
+            });
+            throw new Error('list boom');
+          }),
+        }),
       );
       const context = createReadonlyContext();
       const toolset = new MCPToolset(stdioParams);
@@ -694,23 +688,20 @@ describe('MCPToolset', () => {
     it('records a listResources call against the context', async () => {
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listResources: vi.fn().mockImplementation(async () => {
-              recordHttpExchange({
-                url: 'https://mcp.example.com/resources',
-                method: 'POST',
-                statusCode: 200,
-                requestHeaders: {},
-                responseHeaders: {},
-                responseBody: 'ok',
-              });
-              return {resources: [{uri: 'file:///res1', name: 'res1'}]};
-            }),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        stubClient({
+          listResources: vi.fn().mockImplementation(async () => {
+            recordHttpExchange({
+              url: 'https://mcp.example.com/resources',
+              method: 'POST',
+              statusCode: 200,
+              requestHeaders: {},
+              responseHeaders: {},
+              responseBody: 'ok',
+            });
+            return {resources: [{uri: 'file:///res1', name: 'res1'}]};
+          }),
+        }),
       );
       const context = createReadonlyContext();
       const toolset = new MCPToolset(stdioParams);
@@ -728,23 +719,20 @@ describe('MCPToolset', () => {
     it('records a getResourceInfo call against the context', async () => {
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listResources: vi.fn().mockImplementation(async () => {
-              recordHttpExchange({
-                url: 'https://mcp.example.com/info',
-                method: 'POST',
-                statusCode: 200,
-                requestHeaders: {},
-                responseHeaders: {},
-                responseBody: 'ok',
-              });
-              return {resources: [{uri: 'file:///res1', name: 'res1'}]};
-            }),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        stubClient({
+          listResources: vi.fn().mockImplementation(async () => {
+            recordHttpExchange({
+              url: 'https://mcp.example.com/info',
+              method: 'POST',
+              statusCode: 200,
+              requestHeaders: {},
+              responseHeaders: {},
+              responseBody: 'ok',
+            });
+            return {resources: [{uri: 'file:///res1', name: 'res1'}]};
+          }),
+        }),
       );
       const context = createReadonlyContext();
       const toolset = new MCPToolset(stdioParams);
@@ -763,41 +751,35 @@ describe('MCPToolset', () => {
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
       vi.mocked(Client)
-        .mockImplementationOnce(
-          () =>
-            ({
-              connect: noop(),
-              close: noop(),
-              listResources: vi.fn().mockImplementation(async () => {
-                recordHttpExchange({
-                  url: 'https://mcp.example.com/list',
-                  method: 'POST',
-                  statusCode: 200,
-                  requestHeaders: {},
-                  responseHeaders: {},
-                  responseBody: 'ok',
-                });
-                return {resources: [{uri: 'file:///res1', name: 'res1'}]};
-              }),
-            }) as unknown as Client,
+        .mockImplementationOnce(() =>
+          stubClient({
+            listResources: vi.fn().mockImplementation(async () => {
+              recordHttpExchange({
+                url: 'https://mcp.example.com/list',
+                method: 'POST',
+                statusCode: 200,
+                requestHeaders: {},
+                responseHeaders: {},
+                responseBody: 'ok',
+              });
+              return {resources: [{uri: 'file:///res1', name: 'res1'}]};
+            }),
+          }),
         )
-        .mockImplementationOnce(
-          () =>
-            ({
-              connect: noop(),
-              close: noop(),
-              readResource: vi.fn().mockImplementation(async () => {
-                recordHttpExchange({
-                  url: 'https://mcp.example.com/read',
-                  method: 'POST',
-                  statusCode: 200,
-                  requestHeaders: {},
-                  responseHeaders: {},
-                  responseBody: 'ok',
-                });
-                return {contents: [{uri: 'file:///res1', text: 'hello'}]};
-              }),
-            }) as unknown as Client,
+        .mockImplementationOnce(() =>
+          stubClient({
+            readResource: vi.fn().mockImplementation(async () => {
+              recordHttpExchange({
+                url: 'https://mcp.example.com/read',
+                method: 'POST',
+                statusCode: 200,
+                requestHeaders: {},
+                responseHeaders: {},
+                responseBody: 'ok',
+              });
+              return {contents: [{uri: 'file:///res1', text: 'hello'}]};
+            }),
+          }),
         );
       const context = createReadonlyContext();
       const toolset = new MCPToolset(stdioParams);
