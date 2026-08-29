@@ -329,6 +329,46 @@ describe('runEvals', () => {
     ]);
   });
 
+  it('warns about an unsupported metric before it runs a case', async () => {
+    const evalSetFile = await writeEvalSet('warn_first.evalset.json', [
+      {name: 'case_1', data: [{query: 'a'}]},
+    ]);
+    stubGeneratorTurns([matchingTurn()]);
+    const order: string[] = [];
+    vi.spyOn(AdkLogger.prototype, 'warn').mockImplementation(() => {
+      order.push('warn');
+      return undefined;
+    });
+    logSpy.mockImplementation(() => {
+      order.push('log');
+    });
+
+    await runEvals({
+      evalSetToEvals: new Map([[evalSetFile, []]]),
+      rootAgent,
+      evalMetrics: [{metricName: 'safety_v1', threshold: 0.8}],
+    });
+
+    expect(order[0]).toBe('warn');
+    expect(order).toContain('log');
+  });
+
+  it('warns about an unsupported metric when the selectors match no case', async () => {
+    const evalSetFile = await writeEvalSet('warn_none.evalset.json', [
+      {name: 'case_1', data: [{query: 'a'}]},
+    ]);
+    const warnSpy = vi.spyOn(AdkLogger.prototype, 'warn');
+
+    const results = await runEvals({
+      evalSetToEvals: new Map([[evalSetFile, ['absent_case']]]),
+      rootAgent,
+      evalMetrics: [{metricName: 'safety_v1', threshold: 0.8}],
+    });
+
+    expect(results).toEqual([]);
+    expect(warnSpy.mock.calls).toEqual([['`safety_v1` is not supported.']]);
+  });
+
   it('folds a passed and an unevaluated metric to passed', async () => {
     const evalSetFile = await writeEvalSet('mixed.evalset.json', [
       {name: 'case_1', data: [{query: 'a'}]},
