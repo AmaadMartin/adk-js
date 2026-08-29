@@ -164,17 +164,18 @@ export class ConnectionsClient {
   ): Promise<Record<string, unknown>> {
     const url = `${CONNECTORS_URL}/v1/${operationName}`;
     const deadline = Date.now() + POLL_TIMEOUT_MS;
-    let operation = await this.get(url);
-    while (operation['done'] !== true) {
+    for (;;) {
+      const operation = await this.get(url);
+      if (operation['done'] === true) {
+        return operation;
+      }
       if (Date.now() >= deadline) {
         throw new Error(
           `Operation ${operationName} did not complete within ${POLL_TIMEOUT_MS}ms`,
         );
       }
       await sleep(POLL_INTERVAL_MS);
-      operation = await this.get(url);
     }
-    return operation;
   }
 
   private get(url: string): Promise<Record<string, unknown>> {

@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InputValidationError} from '@google/adk';
+import {ConnectionsClient, InputValidationError} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {ConnectionsClient} from '../../../../src/tools/application_integration_tool/clients/connections_client.js';
 
 const getAccessToken = vi.fn();
 const getProjectId = vi.fn();

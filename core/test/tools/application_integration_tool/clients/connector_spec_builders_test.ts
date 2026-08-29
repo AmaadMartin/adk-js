@@ -171,12 +171,12 @@ describe('getActionOperation', () => {
 
 describe('entity operations', () => {
   it('describes a list operation, keeping the reference wording', () => {
-    const item = listOperation(
-      'Issues',
-      '{"type": "object"}',
-      'test_tool',
-      'extra',
-    );
+    const item = listOperation({
+      entity: 'Issues',
+      schemaAsString: '{"type": "object"}',
+      toolName: 'test_tool',
+      toolInstructions: 'extra',
+    });
 
     expect(item.post?.summary).toBe('List Issues');
     expect(item.post?.operationId).toBe('test_tool_list_Issues');
@@ -205,7 +205,12 @@ describe('entity operations', () => {
   });
 
   it('describes a get operation', () => {
-    const item = getOperation('Issues', '{"type": "object"}', 'test_tool', '');
+    const item = getOperation({
+      entity: 'Issues',
+      schemaAsString: '{"type": "object"}',
+      toolName: 'test_tool',
+      toolInstructions: '',
+    });
 
     expect(item.post?.summary).toBe('Get Issues');
     expect(item.post?.operationId).toBe('test_tool_get_Issues');
@@ -222,7 +227,12 @@ describe('entity operations', () => {
   });
 
   it('describes a create operation', () => {
-    const item = createOperation('Issues', 'test_tool', 'extra');
+    const item = createOperation({
+      entity: 'Issues',
+      schemaAsString: '',
+      toolName: 'test_tool',
+      toolInstructions: 'extra',
+    });
 
     expect(item.post?.summary).toBe('Creates a new Issues');
     expect(item.post?.description).toBe('Creates a new Issues. extra');
@@ -240,7 +250,12 @@ describe('entity operations', () => {
   });
 
   it('describes an update operation', () => {
-    const item = updateOperation('Issues', 'test_tool', '');
+    const item = updateOperation({
+      entity: 'Issues',
+      schemaAsString: '',
+      toolName: 'test_tool',
+      toolInstructions: '',
+    });
 
     expect(item.post?.summary).toBe('Updates the Issues');
     expect(item.post?.description).toBe('Updates the Issues. ');
@@ -249,7 +264,12 @@ describe('entity operations', () => {
   });
 
   it('describes a delete operation', () => {
-    const item = deleteOperation('Issues', 'test_tool', '');
+    const item = deleteOperation({
+      entity: 'Issues',
+      schemaAsString: '',
+      toolName: 'test_tool',
+      toolInstructions: '',
+    });
 
     expect(item.post?.summary).toBe('Delete the Issues');
     expect(item.post?.description).toBe('Deletes the Issues. ');

@@ -36,12 +36,9 @@ const CONNECTION_IDENTITY_PROPERTIES = {
 } as const;
 
 /** The {@link CONNECTION_IDENTITY_PROPERTIES} names, every one of them required. */
-const CONNECTION_IDENTITY_REQUIRED = [
-  'operation',
-  'connectionName',
-  'serviceName',
-  'host',
-] as const;
+const CONNECTION_IDENTITY_REQUIRED = Object.keys(
+  CONNECTION_IDENTITY_PROPERTIES,
+);
 
 /** Reference to the schema holding the dynamic end-user credential. */
 const DYNAMIC_AUTH_CONFIG_PROPERTY = {
@@ -233,13 +230,22 @@ export function getActionOperation(
   });
 }
 
+/** What an entity path-item builder reads. */
+export interface EntityOperationContext {
+  entity: string;
+  /** The entity's JSON schema, quoted in a read operation's description. */
+  schemaAsString: string;
+  toolName: string;
+  toolInstructions: string;
+}
+
 /** Builds the path item that lists the records of an entity. */
-export function listOperation(
-  entity: string,
-  schemaAsString: string,
-  toolName: string,
-  toolInstructions: string,
-): ConnectorPathItem {
+export function listOperation({
+  entity,
+  schemaAsString,
+  toolName,
+  toolInstructions,
+}: EntityOperationContext): ConnectorPathItem {
   return connectorOperation({
     summary: `List ${entity}`,
     description:
@@ -257,12 +263,12 @@ export function listOperation(
 }
 
 /** Builds the path item that reads a single record of an entity. */
-export function getOperation(
-  entity: string,
-  schemaAsString: string,
-  toolName: string,
-  toolInstructions: string,
-): ConnectorPathItem {
+export function getOperation({
+  entity,
+  schemaAsString,
+  toolName,
+  toolInstructions,
+}: EntityOperationContext): ConnectorPathItem {
   return connectorOperation({
     summary: `Get ${entity}`,
     description: `Returns the details of the ${entity}. ${toolInstructions}`,
@@ -274,11 +280,11 @@ export function getOperation(
 }
 
 /** Builds the path item that creates a record of an entity. */
-export function createOperation(
-  entity: string,
-  toolName: string,
-  toolInstructions: string,
-): ConnectorPathItem {
+export function createOperation({
+  entity,
+  toolName,
+  toolInstructions,
+}: EntityOperationContext): ConnectorPathItem {
   return connectorOperation({
     summary: `Creates a new ${entity}`,
     description: `Creates a new ${entity}. ${toolInstructions}`,
@@ -289,11 +295,11 @@ export function createOperation(
 }
 
 /** Builds the path item that updates a record of an entity. */
-export function updateOperation(
-  entity: string,
-  toolName: string,
-  toolInstructions: string,
-): ConnectorPathItem {
+export function updateOperation({
+  entity,
+  toolName,
+  toolInstructions,
+}: EntityOperationContext): ConnectorPathItem {
   return connectorOperation({
     summary: `Updates the ${entity}`,
     description: `Updates the ${entity}. ${toolInstructions}`,
@@ -304,11 +310,11 @@ export function updateOperation(
 }
 
 /** Builds the path item that deletes a record of an entity. */
-export function deleteOperation(
-  entity: string,
-  toolName: string,
-  toolInstructions: string,
-): ConnectorPathItem {
+export function deleteOperation({
+  entity,
+  toolName,
+  toolInstructions,
+}: EntityOperationContext): ConnectorPathItem {
   return connectorOperation({
     summary: `Delete the ${entity}`,
     description: `Deletes the ${entity}. ${toolInstructions}`,
@@ -404,15 +410,6 @@ export function listOperationRequest(): OpenAPIV3.SchemaObject {
   };
 }
 
-/** What an entity path-item builder reads. */
-export interface EntityOperationContext {
-  entity: string;
-  /** The entity's JSON schema, quoted in a read operation's description. */
-  schemaAsString: string;
-  toolName: string;
-  toolInstructions: string;
-}
-
 /** Builds the request schema and the path item of one entity operation. */
 export interface EntityOperationBuilder {
   request(entity: string): OpenAPIV3.SchemaObject;
@@ -426,46 +423,11 @@ export interface EntityOperationBuilder {
  */
 export const ENTITY_OPERATIONS: ReadonlyMap<string, EntityOperationBuilder> =
   new Map<string, EntityOperationBuilder>([
-    [
-      'create',
-      {
-        request: createOperationRequest,
-        operation: ({entity, toolName, toolInstructions}) =>
-          createOperation(entity, toolName, toolInstructions),
-      },
-    ],
-    [
-      'update',
-      {
-        request: updateOperationRequest,
-        operation: ({entity, toolName, toolInstructions}) =>
-          updateOperation(entity, toolName, toolInstructions),
-      },
-    ],
-    [
-      'delete',
-      {
-        request: deleteOperationRequest,
-        operation: ({entity, toolName, toolInstructions}) =>
-          deleteOperation(entity, toolName, toolInstructions),
-      },
-    ],
-    [
-      'list',
-      {
-        request: listOperationRequest,
-        operation: ({entity, schemaAsString, toolName, toolInstructions}) =>
-          listOperation(entity, schemaAsString, toolName, toolInstructions),
-      },
-    ],
-    [
-      'get',
-      {
-        request: getOperationRequest,
-        operation: ({entity, schemaAsString, toolName, toolInstructions}) =>
-          getOperation(entity, schemaAsString, toolName, toolInstructions),
-      },
-    ],
+    ['create', {request: createOperationRequest, operation: createOperation}],
+    ['update', {request: updateOperationRequest, operation: updateOperation}],
+    ['delete', {request: deleteOperationRequest, operation: deleteOperation}],
+    ['list', {request: listOperationRequest, operation: listOperation}],
+    ['get', {request: getOperationRequest, operation: getOperation}],
   ]);
 
 /** Builds the request schema of a generic action call. */
