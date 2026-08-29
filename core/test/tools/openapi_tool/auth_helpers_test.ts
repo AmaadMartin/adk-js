@@ -114,6 +114,56 @@ describe('auth_helpers', () => {
       expect(result).toBe(url);
       expect(headers['Authorization']).toBe('Bearer my_token');
     });
+
+    it('should apply additional headers next to the bearer token', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.HTTP,
+        http: {
+          scheme: 'bearer',
+          credentials: {token: 'my_token'},
+          additionalHeaders: {'x-goog-user-project': 'billing-project'},
+        },
+      };
+
+      applyCredential(url, headers, credential);
+
+      expect(headers).toEqual({
+        'Authorization': 'Bearer my_token',
+        'x-goog-user-project': 'billing-project',
+      });
+    });
+
+    it('should apply additional headers when there is no token', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.HTTP,
+        http: {
+          scheme: 'bearer',
+          credentials: {},
+          additionalHeaders: {'x-goog-user-project': 'billing-project'},
+        },
+      };
+
+      applyCredential(url, headers, credential);
+
+      expect(headers).toEqual({'x-goog-user-project': 'billing-project'});
+    });
+
+    it('should leave the headers alone when there are no additional headers', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.HTTP,
+        http: {scheme: 'bearer', credentials: {token: 'my_token'}},
+      };
+
+      applyCredential(url, headers, credential);
+
+      expect(headers).toEqual({'Authorization': 'Bearer my_token'});
+    });
   });
 
   describe('createApiKeyScheme', () => {

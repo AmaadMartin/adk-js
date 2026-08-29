@@ -13,6 +13,7 @@ import {
 } from '../../../../auth/auth_credential.js';
 import {AuthScheme} from '../../../../auth/auth_schemes.js';
 import {
+  AuthCredentialMissingError,
   BaseCredentialExchanger,
   CredentialExchangeError,
   ExchangeResult,
@@ -28,9 +29,6 @@ const DEFAULT_SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
  * caller's, so the exchange states the project explicitly.
  */
 const QUOTA_PROJECT_HEADER = 'x-goog-user-project';
-
-/** Shared by the two access-token paths; the ID-token path has its own. */
-const ACCESS_TOKEN_FAILURE = 'Failed to exchange service account token';
 
 /**
  * Builds the HTTP bearer credential the exchange returns.
@@ -59,7 +57,7 @@ function requireExplicitCredential(
   saConfig: ServiceAccount,
 ): ServiceAccountCredential {
   if (!saConfig.serviceAccountCredential) {
-    throw new CredentialExchangeError(
+    throw new AuthCredentialMissingError(
       'Service account credentials are missing. serviceAccountCredential is ' +
         'required when useDefaultCredential is false.',
     );
@@ -69,12 +67,12 @@ function requireExplicitCredential(
 
 /**
  * Returns the project Application Default Credentials resolve to, or
- * `undefined` when the environment declares none. `getProjectId` rejects
- * instead of returning null, and a missing project is not a failure here.
+ * `undefined` when the environment declares none.
+ *
+ * `getProjectId` can throw synchronously, so the `try` wraps the call rather
+ * than the promise it returns. A missing project is not an exchange failure.
  */
-async function resolveAdcProjectId(
-  auth: GoogleAuth,
-): Promise<string | undefined> {
+async function adcProjectId(auth: GoogleAuth): Promise<string | undefined> {
   try {
     return await auth.getProjectId();
   } catch {
@@ -96,13 +94,14 @@ async function exchangeAdcAccessToken(
       throw new Error('Failed to get access token from default credentials');
     }
 
-    const quotaProjectId =
-      client.quotaProjectId ?? (await resolveAdcProjectId(auth));
+    // `||`, not `??`: an empty quota project falls through to the ADC project,
+    // as it does in adk-python.
+    const quotaProjectId = client.quotaProjectId || (await adcProjectId(auth));
 
     return bearerResult(token, quotaProjectId);
   } catch (error: unknown) {
     throw new CredentialExchangeError(
-      `${ACCESS_TOKEN_FAILURE}: ${formatError(error)}`,
+      `Failed to exchange default service account token: ${formatError(error)}`,
     );
   }
 }
@@ -126,7 +125,9 @@ async function exchangeExplicitAccessToken(
     return bearerResult(token);
   } catch (error: unknown) {
     throw new CredentialExchangeError(
-      `${ACCESS_TOKEN_FAILURE}: ${formatError(error)}`,
+      `Failed to exchange explicit service account token: ${formatError(
+        error,
+      )}`,
     );
   }
 }
@@ -140,7 +141,7 @@ async function exchangeForAccessToken(
 
   const creds = requireExplicitCredential(saConfig);
   if (!saConfig.scopes?.length) {
-    throw new CredentialExchangeError(
+    throw new AuthCredentialMissingError(
       'scopes are required when using explicit service account credentials ' +
         'for access token exchange.',
     );
@@ -159,7 +160,7 @@ async function exchangeForIdToken(
 ): Promise<ExchangeResult> {
   const {audience} = saConfig;
   if (!audience) {
-    throw new CredentialExchangeError(
+    throw new AuthCredentialMissingError(
       'audience is required when useIdToken is true. Set it to the URL of ' +
         'the target service (e.g. https://my-service.run.app).',
     );
@@ -211,7 +212,7 @@ export class ServiceAccountCredentialExchanger implements BaseCredentialExchange
       );
     }
     if (!authCredential.serviceAccount) {
-      throw new CredentialExchangeError(
+      throw new AuthCredentialMissingError(
         'Service account credentials are missing. Please provide them, or set ' +
           '`useDefaultCredential = true` to use application default credential ' +
           'in a hosted service like Cloud Run.',
