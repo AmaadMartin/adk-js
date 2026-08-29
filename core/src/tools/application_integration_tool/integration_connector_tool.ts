@@ -33,11 +33,10 @@ const EXCLUDE_FIELDS = [
 ];
 
 /**
- * Argument names the connector defaults, so the model may omit them. Copied
- * verbatim from adk-python `integration_connector_tool.py`, because the list
- * decides which arguments the model must supply.
+ * Argument names the connector defaults, so the model may omit them.
+ * `executeCustomQueryRequest` is the only builder that marks one required.
  */
-const OPTIONAL_FIELDS = ['page_size', 'page_token', 'filter', 'sortByColumns'];
+const OPTIONAL_FIELDS = ['page_size'];
 
 /** Key the connector reads the end-user access token from. */
 const DYNAMIC_AUTH_TOKEN_KEY = 'oauth2_auth_code_flow.access_token';

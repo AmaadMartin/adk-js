@@ -54,9 +54,9 @@ const OPERATION: OpenAPIV3.OperationObject = {
 };
 
 /**
- * The fixture from adk-python `test_integration_connector_tool.py`. It names a
- * required argument `filter`, which the generated connector spec never does, so
- * it is the only shape that tells the two `OPTIONAL_FIELDS` lists apart.
+ * The fixture from adk-python `test_integration_connector_tool.py`. It marks
+ * `pageSize` required, which only `executeCustomQueryRequest` does, and pairs
+ * it with a `filter` argument no builder generates.
  */
 const PYTHON_FIXTURE_OPERATION: OpenAPIV3.OperationObject = {
   operationId: 'list_issues',
@@ -187,7 +187,7 @@ describe('IntegrationConnectorTool', () => {
 
       const declaration = createTool({restApiTool})._getDeclaration();
 
-      expect(declaration?.parameters?.required).toEqual(['user_id']);
+      expect(declaration?.parameters?.required).toEqual(['user_id', 'filter']);
       expect(Object.keys(declaration?.parameters?.properties ?? {})).toEqual([
         'user_id',
         'page_size',
