@@ -365,12 +365,19 @@ describe('OpenApiSpecParser', () => {
         components: {
           securitySchemes: {
             ApiKeyAuth: {type: 'apiKey', in: 'header', name: 'X-API-KEY'},
+            OAuth2Auth: {type: 'oauth2', flows: {}},
           },
         },
       };
 
       return new OpenApiSpecParser().parse(spec)[0].authScheme;
     }
+
+    it('should use the scheme the operation declares', () => {
+      expect(
+        parseSecuritySpec([{ApiKeyAuth: []}], [{OAuth2Auth: []}])?.type,
+      ).toBe('oauth2');
+    });
 
     it('should require no scheme when the operation makes auth optional', () => {
       expect(parseSecuritySpec([{ApiKeyAuth: []}], [{}])).toBeUndefined();
@@ -380,8 +387,24 @@ describe('OpenApiSpecParser', () => {
       expect(parseSecuritySpec([{ApiKeyAuth: []}], [])).toBeUndefined();
     });
 
+    it('should require no scheme when the operation lists the optional requirement first', () => {
+      expect(
+        parseSecuritySpec([{ApiKeyAuth: []}], [{}, {OAuth2Auth: []}]),
+      ).toBeUndefined();
+    });
+
+    it('should require no scheme when the operation lists the optional requirement last', () => {
+      expect(
+        parseSecuritySpec([{ApiKeyAuth: []}], [{OAuth2Auth: []}, {}]),
+      ).toBeUndefined();
+    });
+
     it('should require no scheme when the global list makes auth optional', () => {
       expect(parseSecuritySpec([{}, {ApiKeyAuth: []}])).toBeUndefined();
+    });
+
+    it('should require no scheme when the spec declares no security at all', () => {
+      expect(parseSecuritySpec([])).toBeUndefined();
     });
 
     it('should inherit the global scheme when the operation declares none', () => {

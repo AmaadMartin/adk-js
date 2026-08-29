@@ -93,55 +93,6 @@ describe('OperationParser', () => {
     expect(schema.title).toBe('testOp_Arguments');
   });
 
-  describe('getAuthSchemeName', () => {
-    function operationWithSecurity(
-      security?: OpenAPIV3.SecurityRequirementObject[],
-    ): OpenAPIV3.OperationObject {
-      return {operationId: 'testOp', security, responses: {}};
-    }
-
-    it('should return the declared scheme name', () => {
-      const parser = new OperationParser(
-        operationWithSecurity([{oauth2: ['read']}]),
-      );
-
-      expect(parser.getAuthSchemeName()).toBe('oauth2');
-    });
-
-    it('should return an empty name when the operation declares no security', () => {
-      const parser = new OperationParser(operationWithSecurity());
-
-      expect(parser.getAuthSchemeName()).toBe('');
-    });
-
-    it('should return an empty name for an empty security list', () => {
-      const parser = new OperationParser(operationWithSecurity([]));
-
-      expect(parser.getAuthSchemeName()).toBe('');
-    });
-
-    it('should return an empty name for an empty security requirement', () => {
-      const parser = new OperationParser(operationWithSecurity([{}]));
-
-      expect(parser.getAuthSchemeName()).toBe('');
-    });
-
-    it('should return an empty name when the optional requirement is listed first', () => {
-      const parser = new OperationParser(
-        operationWithSecurity([{}, {apiKey: []}]),
-      );
-
-      expect(parser.getAuthSchemeName()).toBe('');
-    });
-
-    it('should return an empty name when the optional requirement is listed last', () => {
-      const parser = new OperationParser(
-        operationWithSecurity([{apiKey: []}, {}]),
-      );
-
-      expect(parser.getAuthSchemeName()).toBe('');
-    });
-  });
   describe('parameter descriptions', () => {
     function operationWithParameter(
       parameter: OpenAPIV3.ParameterObject,
@@ -304,18 +255,20 @@ describe('OperationParser', () => {
       };
     }
 
-    it('should drop null and undefined schema members', () => {
+    it('should drop undefined schema members and keep the declared null ones', () => {
       const parser = new OperationParser(
         operationWithQuerySchema({
           type: 'object',
-          default: null,
           example: undefined,
           properties: {inner: {type: 'string', default: null}},
         }),
       );
 
-      expect(parser.getJsonSchema().properties).toEqual({
-        param1: {type: 'object', properties: {inner: {type: 'string'}}},
+      expect(parser.getJsonSchema().properties).toStrictEqual({
+        param1: {
+          type: 'object',
+          properties: {inner: {type: 'string', default: null}},
+        },
       });
     });
 

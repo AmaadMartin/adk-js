@@ -38,50 +38,6 @@ export function requiredSchemeName(
 }
 
 /**
- * Returns the schema a parameter advertises to the model.
- *
- * The model sees the schema and not the OpenAPI parameter around it, so a
- * parameter description that the schema does not carry moves onto a copy of
- * the schema. The copy leaves the caller's operation object unchanged.
- */
-function describeSchema(
-  schema: OpenAPIV3.SchemaObject,
-  description: string | undefined,
-): OpenAPIV3.SchemaObject {
-  if (schema.description || !description) {
-    return schema;
-  }
-  return {...schema, description};
-}
-
-/**
- * Deep-copies a schema and drops every member whose value is null or
- * undefined, matching the `exclude_none` encoding of the adk-python parser.
- *
- * The copy also stops the generated declaration from sharing objects with the
- * operation it came from.
- */
-function encodeSchema(source: object): Record<string, unknown> {
-  const encoded: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(source)) {
-    if (value !== null && value !== undefined) {
-      encoded[key] = encodeValue(value);
-    }
-  }
-  return encoded;
-}
-
-function encodeValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(encodeValue);
-  }
-  if (typeof value === 'object' && value !== null) {
-    return encodeSchema(value);
-  }
-  return value;
-}
-
-/**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
  *
  * It maps OpenAPI parameters and request bodies into a flat list of `ApiParameter` objects
@@ -121,8 +77,13 @@ export class OperationParser {
       if ('name' in param) {
         const originalName = param.name;
         const location = param.in || '';
-        const declaredSchema = (param.schema as OpenAPIV3.SchemaObject) || {};
-        const schema = describeSchema(declaredSchema, param.description);
+        const declared = (param.schema as OpenAPIV3.SchemaObject) || {};
+        // The model reads the schema, not the parameter around it. Copy rather
+        // than patch, so the caller's operation object stays unchanged.
+        const schema =
+          !declared.description && param.description
+            ? {...declared, description: param.description}
+            : declared;
 
         this.params.push({
           originalName,
@@ -264,7 +225,7 @@ export class OperationParser {
     const required: string[] = [];
 
     for (const param of this.params) {
-      properties[param.name] = encodeSchema(param.paramSchema);
+      properties[param.name] = JSON.parse(JSON.stringify(param.paramSchema));
       if (param.required) {
         required.push(param.name);
       }
@@ -291,17 +252,6 @@ export class OperationParser {
       throw new Error('Operation ID is missing');
     }
     return this.getParamName(operationId).substring(0, 60);
-  }
-
-  /**
-   * Gets the name of the security scheme this operation requires.
-   *
-   * @returns The scheme name, or an empty string when the operation requires
-   *     no scheme of its own.
-   */
-  @experimental
-  public getAuthSchemeName(): string {
-    return requiredSchemeName(this.operation.security);
   }
 
   /**

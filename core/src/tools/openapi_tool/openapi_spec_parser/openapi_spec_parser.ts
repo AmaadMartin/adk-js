@@ -288,7 +288,7 @@ function collectOperations(
       const authSchemeName =
         operation.security === undefined
           ? globalSchemeName
-          : parser.getAuthSchemeName();
+          : requiredSchemeName(operation.security);
 
       const authScheme = authSchemeName
         ? authSchemes[authSchemeName]
