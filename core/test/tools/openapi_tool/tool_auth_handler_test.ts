@@ -237,19 +237,18 @@ describe('ToolAuthHandler', () => {
       name: 'X-API-Key',
       in: 'header',
     };
-    const state = new State();
-    const mockContext = {state} as unknown as Context;
+    const context = createContext();
     // Derive the key instead of hardcoding it, so this pins the caching
     // behaviour rather than the key format.
-    const key = await new ToolContextCredentialStore(
-      mockContext,
-    ).getCredentialKey(scheme);
-    state.set(key, {
+    const key = await new ToolContextCredentialStore(context).getCredentialKey(
+      scheme,
+    );
+    context.state.set(key, {
       authType: AuthCredentialTypes.HTTP,
       http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
     });
 
-    const handler = new ToolAuthHandler(mockContext, scheme);
+    const handler = new ToolAuthHandler(context, scheme);
 
     const result = await handler.prepareAuthCredentials();
 
