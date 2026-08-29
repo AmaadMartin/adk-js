@@ -5,9 +5,14 @@
  */
 
 import {Schema, Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import {z as z3} from 'zod/v3';
 import {z} from 'zod/v4';
 
+import {
+  FeatureName,
+  overrideFeatureEnabled,
+} from '../../src/features/feature_registry.js';
 import {
   buildFunctionDeclaration,
   buildFunctionDeclarationFromProperties,
@@ -15,6 +20,7 @@ import {
   buildFunctionDeclarationUtil,
   JsonSchemaNode,
 } from '../../src/tools/_automatic_function_calling_util.js';
+import {logger} from '../../src/utils/logger.js';
 import {GoogleLLMVariant} from '../../src/utils/variant_utils.js';
 
 /** The property fixture a wrapper hands over, still carrying pydantic keywords. */
@@ -607,5 +613,370 @@ describe('input handling', () => {
     });
 
     expect(schema).toEqual(clone);
+  });
+});
+
+describe('context parameters', () => {
+  it('drops a toolContext property without being asked', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'lookup',
+      parameters: z.object({query: z.string(), toolContext: z.unknown()}),
+    });
+
+    const properties = propertiesOf(declaration.parameters);
+    expect(Object.keys(properties)).toEqual(['query']);
+  });
+
+  it('drops a tool_context property without being asked', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'lookup',
+      parameters: {
+        properties: {query: {type: 'string'}, tool_context: {type: 'object'}},
+      },
+    });
+
+    expect(Object.keys(propertiesOf(declaration.parameters))).toEqual([
+      'query',
+    ]);
+  });
+
+  it('leaves the dropped name out of required', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'lookup',
+      parameters: {
+        properties: {query: {type: 'string'}, toolContext: {type: 'object'}},
+        required: ['query', 'toolContext'],
+      },
+    });
+
+    expect(declaration.parameters?.required).toEqual(['query']);
+  });
+
+  it('omits parameters when the context is the only property', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'onlyContext',
+      parameters: {properties: {toolContext: {type: 'object'}}},
+    });
+
+    expect(declaration.parameters).toBeUndefined();
+  });
+
+  it('honours ignoreParams on top of the context names', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'lookup',
+      parameters: {
+        properties: {
+          query: {type: 'string'},
+          toolContext: {type: 'object'},
+          secret: {type: 'string'},
+        },
+      },
+      ignoreParams: ['secret'],
+    });
+
+    expect(Object.keys(propertiesOf(declaration.parameters))).toEqual([
+      'query',
+    ]);
+  });
+});
+
+describe('streaming return types', () => {
+  const parameters: JsonSchemaNode = {properties: {path: {type: 'string'}}};
+
+  it('declares the yield type of an async generator', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'streamLines',
+      parameters,
+      returnType: 'AsyncGenerator<string, void>',
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(declaration.response?.type).toBe(Type.STRING);
+  });
+
+  it('declares the yield type of a python generator', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'streamCounts',
+      parameters,
+      returnType: 'Generator[int, None, None]',
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(declaration.response?.type).toBe(Type.INTEGER);
+  });
+
+  it('resolves a complex yield type by its bare name', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'streamRows',
+      parameters,
+      returnType: 'AsyncGenerator<Dict[str, str], None>',
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(declaration.response?.type).toBe(Type.OBJECT);
+  });
+
+  it('unwraps a promise', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'lookup',
+      parameters,
+      returnType: 'Promise<string>',
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(declaration.response?.type).toBe(Type.STRING);
+  });
+
+  it('still omits the response for GEMINI_API', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'streamLines',
+      parameters,
+      returnType: 'AsyncGenerator<string>',
+      variant: GoogleLLMVariant.GEMINI_API,
+    });
+
+    expect(declaration.response).toBeUndefined();
+  });
+
+  it('leaves a non-generic return type alone', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'lookup',
+      parameters,
+      returnType: 'str',
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(declaration.response?.type).toBe(Type.STRING);
+  });
+});
+
+describe('parameter schema fallback', () => {
+  it('builds a declaration for a parameter Zod cannot render strictly', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'schedule',
+      parameters: z.object({when: z.date(), label: z.string()}),
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    const properties = propertiesOf(declaration.parameters);
+    expect(properties['label'].type).toBe(Type.STRING);
+    expect(properties['when'].type).toBeUndefined();
+  });
+
+  it('types an unrenderable parameter as an object for GEMINI_API', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'schedule',
+      parameters: z.object({when: z.date(), label: z.string()}),
+      variant: GoogleLLMVariant.GEMINI_API,
+    });
+
+    // The Gemini sanitizer gives an empty schema a type, as adk-python does.
+    expect(propertiesOf(declaration.parameters)['when'].type).toBe(Type.OBJECT);
+  });
+
+  it('keeps a defaulted parameter out of required in the fallback', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'schedule',
+      parameters: z.object({
+        when: z.date(),
+        label: z.string(),
+        retries: z.number().default(2),
+      }),
+    });
+
+    expect(declaration.parameters?.required).toEqual(['when', 'label']);
+  });
+
+  it('keeps a format for VERTEX_AI and drops it for GEMINI_API', () => {
+    const parameters = z.object({when: z.date(), contact: z.email()});
+
+    const vertex = buildFunctionDeclaration({
+      name: 'schedule',
+      parameters,
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+    const gemini = buildFunctionDeclaration({
+      name: 'schedule',
+      parameters,
+      variant: GoogleLLMVariant.GEMINI_API,
+    });
+
+    expect(propertiesOf(vertex.parameters)['contact'].format).toBe('email');
+    expect(propertiesOf(gemini.parameters)['contact'].format).toBeUndefined();
+  });
+
+  it('keeps a bound in the genai string form in the fallback', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'schedule',
+      parameters: z.object({
+        when: z.date(),
+        tags: z.array(z.string()).min(1).max(3),
+      }),
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    const tags = propertiesOf(declaration.parameters)['tags'];
+    expect(tags.minItems).toBe('1');
+    expect(tags.maxItems).toBe('3');
+  });
+
+  it('never lets $schema reach the declaration', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'schedule',
+      parameters: z.object({when: z.date(), label: z.string()}),
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(JSON.stringify(declaration)).not.toContain('$schema');
+  });
+
+  it('throws an error naming the tool when no converter can render the parameters', () => {
+    const cyclic: JsonSchemaNode = {type: 'object', properties: {}};
+    cyclic.properties!['self'] = cyclic;
+
+    expect(() =>
+      buildFunctionDeclaration({name: 'recurse', parameters: cyclic}),
+    ).toThrowError(/Failed to parse the parameters of function recurse/);
+  });
+});
+
+describe('response schema degradation', () => {
+  /** A schema node that refers to itself, which no converter can render. */
+  function cyclicSchemaNode(): JsonSchemaNode {
+    const node: JsonSchemaNode = {type: 'object', properties: {}};
+    node.properties!['self'] = node;
+    return node;
+  }
+
+  it('keeps the parameters and omits the response', () => {
+    vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const declaration = buildFunctionDeclaration({
+      name: 'recurse',
+      parameters: {properties: {path: {type: 'string'}}},
+      returnSchema: cyclicSchemaNode(),
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(propertiesOf(declaration.parameters)['path'].type).toBe(Type.STRING);
+    expect(declaration.response).toBeUndefined();
+  });
+
+  it('warns once, naming the tool and both errors', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    buildFunctionDeclaration({
+      name: 'recurse',
+      parameters: {properties: {path: {type: 'string'}}},
+      returnSchema: cyclicSchemaNode(),
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = String(warn.mock.calls[0][0]);
+    expect(message).toContain('recurse');
+    expect(message).toContain('Fallback error:');
+    expect(message).toContain('Original error:');
+  });
+
+  it('builds a response from a convertible return schema', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'lookup',
+      parameters: {properties: {path: {type: 'string'}}},
+      returnSchema: z.object({city: z.string()}),
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(declaration.response?.type).toBe(Type.OBJECT);
+  });
+
+  it('renders a return schema the strict converter refuses', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'lookup',
+      parameters: {properties: {path: {type: 'string'}}},
+      returnSchema: z.array(z.string()),
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(declaration.response?.type).toBe(Type.ARRAY);
+  });
+
+  it('renders a Zod v3 tuple return schema leniently', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'lookup',
+      parameters: {properties: {path: {type: 'string'}}},
+      returnSchema: z3.tuple([z3.string(), z3.number()]),
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    // `zod-to-json-schema` renders a tuple's `items` as a list, which the
+    // genai `Schema` cannot express, so the element schema is dropped.
+    expect(declaration.response?.type).toBe(Type.ARRAY);
+    expect(declaration.response?.items).toEqual({});
+  });
+
+  it('prefers the return schema over the return type name', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'lookup',
+      parameters: {properties: {path: {type: 'string'}}},
+      returnSchema: z.object({city: z.string()}),
+      returnType: 'str',
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+
+    expect(declaration.response?.type).toBe(Type.OBJECT);
+  });
+});
+
+describe('JSON_SCHEMA_FOR_FUNC_DECL', () => {
+  afterEach(() => {
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, undefined);
+    vi.restoreAllMocks();
+  });
+
+  it('declares the parameters as a JSON schema when the flag is on', () => {
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, true);
+
+    const declaration = buildFunctionDeclaration({
+      name: 'getData',
+      parameters: z.object({query: z.string()}),
+    });
+
+    expect(declaration.parameters).toBeUndefined();
+    expect(declaration.parametersJsonSchema).toEqual({
+      type: 'object',
+      properties: {query: {type: 'string'}},
+      required: ['query'],
+    });
+  });
+
+  it('keeps responseJsonSchema for VERTEX_AI and drops the key for GEMINI_API', () => {
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, true);
+
+    const vertex = buildFunctionDeclaration({
+      name: 'getData',
+      returnType: 'Dict',
+      variant: GoogleLLMVariant.VERTEX_AI,
+    });
+    const gemini = buildFunctionDeclaration({
+      name: 'getData',
+      returnType: 'Dict',
+      variant: GoogleLLMVariant.GEMINI_API,
+    });
+
+    expect(vertex.responseJsonSchema).toEqual({type: 'object'});
+    expect('responseJsonSchema' in gemini).toBe(false);
+  });
+
+  it('leaves the genai Schema output unchanged when the flag is off', () => {
+    const parameters = z.object({query: z.string()});
+    const withFlagOff = buildFunctionDeclaration({name: 'getData', parameters});
+
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, false);
+
+    expect(buildFunctionDeclaration({name: 'getData', parameters})).toEqual(
+      withFlagOff,
+    );
+    expect(withFlagOff.parameters).toBeDefined();
   });
 });
