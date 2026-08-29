@@ -203,6 +203,30 @@ describe('FunctionTool declaration shape', () => {
     expect(tool._getDeclaration().description).toBe('');
   });
 
+  it('advertises the execute function name when no name is given', () => {
+    const tool = new FunctionTool({
+      description: 'Samples something.',
+      execute: function sample_tool() {
+        return 'ok';
+      },
+    });
+
+    expect(tool.name).toBe('sample_tool');
+    expect(tool._getDeclaration().name).toBe('sample_tool');
+  });
+
+  it('falls back to the property name for an inline arrow function', () => {
+    const tool = new FunctionTool({execute: () => 'ok'});
+
+    expect(tool._getDeclaration().name).toBe('execute');
+  });
+
+  it('refuses a name that resolves to nothing', () => {
+    expect(() => new FunctionTool({name: '', execute: () => 'ok'})).toThrow(
+      'Tool name cannot be empty',
+    );
+  });
+
   it('keeps a supplied description', () => {
     expect(sampleTool().description).toBe('Samples something.');
     expect(sampleTool()._getDeclaration().description).toBe(
