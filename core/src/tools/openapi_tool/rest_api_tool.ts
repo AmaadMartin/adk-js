@@ -28,6 +28,7 @@ import type {ApiParameter} from './common/common.js';
 import {
   OperationParser,
   OperationParserOptions,
+  ToolArgumentsSchema,
 } from './openapi_spec_parser/operation_parser.js';
 import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
@@ -134,9 +135,20 @@ export class RestApiTool extends BaseTool {
     this.sslVerify = sslVerify;
   }
 
+  /**
+   * Returns the JSON schema of the arguments this tool accepts.
+   *
+   * A tool that wraps this one reads the schema through here, so that
+   * `operationParser` stays private.
+   */
+  @experimental
+  public getJsonSchema(): ToolArgumentsSchema {
+    return this.operationParser.getJsonSchema();
+  }
+
   @experimental
   override _getDeclaration(): FunctionDeclaration {
-    const schema = this.operationParser.getJsonSchema();
+    const schema = this.getJsonSchema();
     if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
       return {
         name: this.name,
@@ -426,7 +438,9 @@ export function prepareRequestParams(
   let url = `${endpoint.baseUrl.replace(/\/$/, '')}${resolvedPath}`;
 
   // A fragment is never sent to the server, and it may itself contain a `?`,
-  // so it goes before the query string is read.
+  // so it goes before the query string is read. The generated connector spec
+  // appends `#<operation>_<entity>` to keep two operations on one path
+  // distinct, and leaving it here folds it into the last query value.
   url = url.split('#')[0];
 
   const queryStart = url.indexOf('?');

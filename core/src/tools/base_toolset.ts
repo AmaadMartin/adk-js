@@ -77,7 +77,9 @@ export abstract class BaseToolset {
    *
    * @param tool The tool to check.
    * @param context Context used to filter tools available to the agent. It is
-   *     absent when a caller lists the tools outside an invocation.
+   *     absent when a caller lists the tools outside an invocation, so a
+   *     predicate filter must handle an absent context; a name-list filter
+   *     applies either way.
    * @return Whether the tool should be exposed to LLM.
    */
   protected isToolSelected(tool: BaseTool, context?: ReadonlyContext): boolean {

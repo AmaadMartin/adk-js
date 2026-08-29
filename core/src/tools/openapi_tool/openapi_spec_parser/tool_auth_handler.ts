@@ -25,15 +25,28 @@ export const DEFAULT_OPENAPI_CREDENTIAL_KEY = 'default_openapi_key';
 class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
 
-  getCredentialKey(authScheme?: OpenAPIV3.SecuritySchemeObject): string {
+  /**
+   * Names the session-state slot that caches the exchanged credential.
+   *
+   * The credential key qualifies the slot, because two tools can share a
+   * scheme type and still speak for different identities. A tool that names no
+   * key keeps the unqualified slot, so a credential cached by an earlier
+   * release is still read back.
+   */
+  getCredentialKey(
+    authScheme?: OpenAPIV3.SecuritySchemeObject,
+    credentialKey?: string,
+  ): string {
     const schemeName = authScheme?.type || 'default';
-    return `${schemeName}_existing_exchanged_credential`;
+    const qualifier = credentialKey ? `_${credentialKey}` : '';
+    return `${schemeName}${qualifier}_existing_exchanged_credential`;
   }
 
   getCredential(
     authScheme?: OpenAPIV3.SecuritySchemeObject,
+    credentialKey?: string,
   ): AuthCredential | undefined {
-    const key = this.getCredentialKey(authScheme);
+    const key = this.getCredentialKey(authScheme, credentialKey);
     // Read through the State API so we see values persisted from previous
     // tool calls. `context.state` is a `State` instance, not a plain object;
     // bracket access would bypass its value/delta store and always miss.
@@ -80,7 +93,10 @@ export class ToolAuthHandler {
     }
 
     const store = new ToolContextCredentialStore(this.context);
-    const existingCredential = store.getCredential(this.authScheme);
+    const existingCredential = store.getCredential(
+      this.authScheme,
+      this.credentialKey,
+    );
 
     if (existingCredential) {
       return {state: 'done', authCredential: existingCredential};
@@ -119,7 +135,7 @@ export class ToolAuthHandler {
     // every invocation, so persisting it to session state would only copy a
     // secret into the session store for nothing.
     if (authResponseCredential || result.wasExchanged) {
-      const key = store.getCredentialKey(this.authScheme);
+      const key = store.getCredentialKey(this.authScheme, this.credentialKey);
       store.storeCredential(key, result.credential);
     }
 

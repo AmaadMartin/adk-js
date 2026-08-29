@@ -424,6 +424,8 @@ export type {
   ApiHubApi,
   ApiHubApiVersion,
 } from './tools/apihub_tool/clients/apihub_client.js';
+export {ApplicationIntegrationToolset} from './tools/application_integration_tool/application_integration_toolset.js';
+export type {ApplicationIntegrationToolsetOptions} from './tools/application_integration_tool/application_integration_toolset.js';
 export {ConnectionsClient} from './tools/application_integration_tool/clients/connections_client.js';
 export type {
   ActionSchema,
@@ -433,6 +435,8 @@ export type {
 } from './tools/application_integration_tool/clients/connections_client.js';
 export {IntegrationClient} from './tools/application_integration_tool/clients/integration_client.js';
 export type {IntegrationClientOptions} from './tools/application_integration_tool/clients/integration_client.js';
+export {IntegrationConnectorTool} from './tools/application_integration_tool/integration_connector_tool.js';
+export type {IntegrationConnectorToolOptions} from './tools/application_integration_tool/integration_connector_tool.js';
 export * from './tools/base_tool.js';
 export {
   createApiParameter,
