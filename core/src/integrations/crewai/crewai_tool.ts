@@ -4,17 +4,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration} from '@google/genai';
+import {FunctionDeclaration, Schema} from '@google/genai';
 
 import {Context} from '../../agents/context.js';
-import {BaseTool, RunAsyncToolRequest} from '../../tools/base_tool.js';
+import {FunctionTool} from '../../tools/function_tool.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 
+/** Argument keys stripped before `run`, which receives the context separately. */
+const RESERVED_CONTEXT_ARGS = ['tool_context', 'toolContext'];
+
 /**
- * The argument key reserved for the ADK context. A model can hallucinate it,
- * so it is stripped from the arguments before the wrapped tool runs.
+ * The JSON Schema a CrewAI tool publishes for its arguments. This is the
+ * analogue of the Python tool's `args_schema.model_json_schema()`.
  */
-const RESERVED_CONTEXT_ARG = 'tool_context';
+export interface CrewaiToolArgsSchema {
+  /** Widened from the literal `'object'` so an unannotated literal assigns. */
+  type?: string;
+  properties?: Record<string, unknown>;
+  required?: string[];
+}
 
 /**
  * The structural shape of a CrewAI tool.
@@ -30,15 +38,8 @@ export interface CrewaiBaseTool {
 
   readonly description: string;
 
-  /**
-   * JSON Schema for the tool's arguments. This is the analogue of the Python
-   * tool's `args_schema.model_json_schema()`.
-   */
-  readonly argsSchema?: {
-    type: 'object';
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
+  /** JSON Schema for the tool's arguments. */
+  readonly argsSchema?: CrewaiToolArgsSchema;
 
   run(
     args: Record<string, unknown>,
@@ -72,12 +73,70 @@ function resolveName(tool: CrewaiBaseTool, options: CrewaiToolOptions): string {
 }
 
 /**
+ * Reports the arguments the schema requires but the call omitted.
+ *
+ * Returns the payload to hand back to the model instead of running the tool,
+ * or `undefined` when every required argument is present. The model is told
+ * what is missing so that it can retry, which is why this is a value and not a
+ * thrown error. The wording matches adk-python so that a model tuned on one
+ * SDK reads the same hint from the other.
+ */
+function missingArgsError(
+  toolName: string,
+  required: readonly string[],
+  args: Record<string, unknown>,
+): {error: string} | undefined {
+  const missing = required.filter((name) => !(name in args));
+  if (missing.length === 0) {
+    return undefined;
+  }
+  return {
+    error:
+      `Invoking \`${toolName}()\` failed as the following mandatory input parameters are not present:\n` +
+      `${missing.join('\n')}\n` +
+      'You could retry calling this tool, but it is IMPORTANT for you to provide all the mandatory parameters.',
+  };
+}
+
+/** Narrows `execute`'s argument, which this class's schema type leaves `unknown`. */
+function isArgsRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === 'object' && input !== null;
+}
+
+/**
+ * Calls the wrapped tool the way CrewAI expects.
+ *
+ * Every model-supplied argument is forwarded except the reserved context keys.
+ * The ADK context is supplied separately, as `run`'s second parameter.
+ */
+function runCrewaiTool(
+  tool: CrewaiBaseTool,
+  toolName: string,
+  args: Record<string, unknown>,
+  toolContext?: Context,
+): unknown | Promise<unknown> {
+  const cleanedArgs = {...args};
+  for (const reservedArg of RESERVED_CONTEXT_ARGS) {
+    delete cleanedArgs[reservedArg];
+  }
+
+  return (
+    missingArgsError(toolName, tool.argsSchema?.required ?? [], cleanedArgs) ??
+    tool.run(cleanedArgs, toolContext)
+  );
+}
+
+/**
  * Wraps a CrewAI tool so an ADK agent can call it.
  *
  * The adapter derives the function declaration from the wrapped tool's name,
  * description and argument schema, and delegates execution to its `run`
  * method. Override the name or the description when the CrewAI ones do not
  * suit the model.
+ *
+ * When a call omits an argument the schema lists in `required`, the adapter
+ * returns an `{error}` payload naming the missing arguments instead of running
+ * the tool, so that the model can retry with them.
  *
  * @example
  * ```ts
@@ -88,34 +147,45 @@ function resolveName(tool: CrewaiBaseTool, options: CrewaiToolOptions): string {
  * });
  * ```
  */
-export class CrewaiTool extends BaseTool {
+export class CrewaiTool extends FunctionTool<Schema> {
   /** The wrapped CrewAI tool. */
   readonly tool: CrewaiBaseTool;
 
   constructor(tool: CrewaiBaseTool, options: CrewaiToolOptions = {}) {
+    const name = resolveName(tool, options);
     super({
-      name: resolveName(tool, options),
+      name,
       description: options.description || tool.description || '',
+      execute: (input, toolContext) =>
+        runCrewaiTool(
+          tool,
+          name,
+          isArgsRecord(input) ? input : {},
+          toolContext,
+        ),
     });
     this.tool = tool;
   }
 
+  /**
+   * Overridden to leave `parameters` unset for a tool with no properties,
+   * where the base class emits an empty object schema. adk-python does the
+   * same: `build_function_declaration_util` sets `parameters=... if properties
+   * else None`.
+   */
   override _getDeclaration(): FunctionDeclaration {
     const argsSchema = this.tool.argsSchema;
     const hasProperties = Object.keys(argsSchema?.properties ?? {}).length > 0;
     return {
       name: this.name,
       description: this.description,
-      parameters: hasProperties ? toGeminiSchema(argsSchema) : undefined,
+      parameters: hasProperties
+        ? toGeminiSchema({
+            type: 'object',
+            properties: argsSchema?.properties,
+            required: argsSchema?.required,
+          })
+        : undefined,
     };
-  }
-
-  override async runAsync({
-    args,
-    toolContext,
-  }: RunAsyncToolRequest): Promise<unknown> {
-    const cleanedArgs = {...args};
-    delete cleanedArgs[RESERVED_CONTEXT_ARG];
-    return await this.tool.run(cleanedArgs, toolContext);
   }
 }
