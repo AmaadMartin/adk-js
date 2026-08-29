@@ -88,6 +88,16 @@ export class PluginManager {
   }
 
   /**
+   * The registered plugins, in registration order.
+   *
+   * Lets a caller hand this manager's plugins to another runner — an
+   * `AgentTool` lends them to the runner it builds for the wrapped agent.
+   */
+  listPlugins(): BasePlugin[] {
+    return Array.from(this.plugins);
+  }
+
+  /**
    * Runs the same callback for all plugins. This is a utility method to reduce
    * duplication below.
    *
