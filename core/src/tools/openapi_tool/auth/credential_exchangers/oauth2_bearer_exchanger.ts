@@ -84,27 +84,28 @@ export class OAuth2BearerCredentialExchanger implements BaseCredentialExchanger 
   /**
    * Converts the credential into an HTTP bearer credential.
    *
-   * @param authScheme The OAuth2 or OpenID Connect scheme.
-   * @param authCredential The credential to convert.
-   * @returns The bearer credential, the input credential when it already
-   *   carries an HTTP credential, or undefined when it has no access token.
+   * A credential that already carries an HTTP credential, and one with no
+   * access token to wrap, both come back unchanged and not exchanged.
+   *
+   * @param params.authScheme The OAuth2 or OpenID Connect scheme.
+   * @param params.authCredential The credential to convert.
    * @throws CredentialExchangeError If the scheme or the credential is invalid.
    */
-  async exchangeCredential(
-    authScheme?: AuthScheme,
-    authCredential?: AuthCredential,
-  ): Promise<AuthCredential | undefined> {
-    const params = {authScheme, authCredential};
+  @experimental
+  async exchange(params: {
+    authScheme?: AuthScheme;
+    authCredential: AuthCredential;
+  }): Promise<ExchangeResult> {
     checkSchemeCredentialType(params);
 
     // An HTTP credential is already in the form the header needs.
     if (params.authCredential.http) {
-      return params.authCredential;
+      return {credential: params.authCredential, wasExchanged: false};
     }
 
     const {oauth2} = params.authCredential;
     if (!oauth2?.accessToken) {
-      return undefined;
+      return {credential: params.authCredential, wasExchanged: false};
     }
 
     // The refresher checks expiry itself, but it warns when no refresh token is
@@ -116,25 +117,11 @@ export class OAuth2BearerCredentialExchanger implements BaseCredentialExchanger 
         )
       : undefined;
 
-    return generateAuthToken(
-      refreshed?.oauth2?.accessToken ?? oauth2.accessToken,
-    );
-  }
-
-  @experimental
-  async exchange(params: {
-    authScheme?: AuthScheme;
-    authCredential: AuthCredential;
-  }): Promise<ExchangeResult> {
-    const credential = await this.exchangeCredential(
-      params.authScheme,
-      params.authCredential,
-    );
-
-    if (!credential || credential === params.authCredential) {
-      return {credential: params.authCredential, wasExchanged: false};
-    }
-
-    return {credential, wasExchanged: true};
+    return {
+      credential: generateAuthToken(
+        refreshed?.oauth2?.accessToken ?? oauth2.accessToken,
+      ),
+      wasExchanged: true,
+    };
   }
 }
