@@ -8,8 +8,8 @@ import {
   DiscoveryDocument,
   DiscoveryParameter,
   DiscoverySchema,
-  GoogleApiToOpenApiConverter,
   convertDiscoveryDocument,
+  fetchAndConvertGoogleApi,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -687,7 +687,7 @@ describe('convertDiscoveryDocument', () => {
   });
 });
 
-describe('GoogleApiToOpenApiConverter', () => {
+describe('fetchAndConvertGoogleApi', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -703,10 +703,7 @@ describe('GoogleApiToOpenApiConverter', () => {
   it('fetches and converts the discovery document', async () => {
     const fetchMock = stubDiscoveryFetch(CALENDAR_DISCOVERY_DOCUMENT);
 
-    const spec = await new GoogleApiToOpenApiConverter(
-      'calendar',
-      'v3',
-    ).convert();
+    const spec = await fetchAndConvertGoogleApi('calendar', 'v3');
 
     expect(spec.info.title).toBe('Google Calendar API');
     expect(fetchMock).toHaveBeenCalledWith(
@@ -718,9 +715,9 @@ describe('GoogleApiToOpenApiConverter', () => {
   it('honours a custom discovery URL template', async () => {
     const fetchMock = stubDiscoveryFetch(CALENDAR_DISCOVERY_DOCUMENT);
 
-    await new GoogleApiToOpenApiConverter('calendar', 'v3', {
+    await fetchAndConvertGoogleApi('calendar', 'v3', {
       discoveryUrl: 'https://private.example.com/{api}/{apiVersion}',
-    }).convert();
+    });
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://private.example.com/calendar/v3',
@@ -733,8 +730,8 @@ describe('GoogleApiToOpenApiConverter', () => {
       .fn()
       .mockResolvedValue({ok: false, status: 500, json: async () => ({})});
 
-    await expect(
-      new GoogleApiToOpenApiConverter('calendar', 'v3').convert(),
-    ).rejects.toThrow('HTTP 500');
+    await expect(fetchAndConvertGoogleApi('calendar', 'v3')).rejects.toThrow(
+      'HTTP 500',
+    );
   });
 });

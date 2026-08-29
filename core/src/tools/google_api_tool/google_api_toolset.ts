@@ -6,14 +6,18 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
-import {ServiceAccount} from '../../auth/auth_credential.js';
+import {
+  AuthCredentialTypes,
+  ServiceAccount,
+} from '../../auth/auth_credential.js';
 import {OpenIdConnectWithConfig} from '../../auth/auth_schemes.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
+import {serviceAccountSchemeCredential} from '../openapi_tool/auth/auth_helpers.js';
 import {OpenAPIToolset} from '../openapi_tool/openapi_toolset.js';
-import {GoogleApiTool} from './google_api_tool.js';
-import {GoogleApiToOpenApiConverter} from './googleapi_to_openapi_converter.js';
+import {RestApiTool} from '../openapi_tool/rest_api_tool.js';
+import {fetchAndConvertGoogleApi} from './googleapi_to_openapi_converter.js';
 
 const OPENID_CONFIGURATION_URL =
   'https://accounts.google.com/.well-known/openid-configuration';
@@ -131,7 +135,7 @@ export class GoogleApiToolset extends BaseToolset {
   }
 
   @experimental
-  override async getTools(context?: ReadonlyContext): Promise<GoogleApiTool[]> {
+  override async getTools(context?: ReadonlyContext): Promise<RestApiTool[]> {
     if (!context && typeof this.toolFilter === 'function') {
       logger.warn(
         'GoogleApiToolset: a ToolPredicate toolFilter was provided but ' +
@@ -143,15 +147,12 @@ export class GoogleApiToolset extends BaseToolset {
     const openApiToolset = await this.loadOpenApiToolset();
     const tools = await openApiToolset.getTools(context);
 
-    return tools.map(
-      (tool) =>
-        new GoogleApiTool(tool, {
-          clientId: this.clientId,
-          clientSecret: this.clientSecret,
-          serviceAccount: this.serviceAccount,
-          additionalHeaders: this.additionalHeaders,
-        }),
-    );
+    // Credentials are applied per call, so a configureAuth after a getTools
+    // takes effect on the next one.
+    for (const tool of tools) {
+      this.applyCredentials(tool);
+    }
+    return tools;
   }
 
   /** Authenticates through the OAuth2 user consent flow. */
@@ -177,6 +178,30 @@ export class GoogleApiToolset extends BaseToolset {
     await openApiToolset?.close();
   }
 
+  /**
+   * Installs the toolset's headers and credentials on one of its tools.
+   *
+   * A service account takes precedence over a client id pair, and neither is
+   * applied when absent, so a tool keeps whatever it already carries.
+   */
+  private applyCredentials(tool: RestApiTool): void {
+    if (this.additionalHeaders) {
+      tool.setDefaultHeaders(this.additionalHeaders);
+    }
+    if (this.serviceAccount) {
+      const {authScheme, authCredential} = serviceAccountSchemeCredential(
+        this.serviceAccount,
+      );
+      tool.configureAuthScheme(authScheme);
+      tool.configureAuthCredential(authCredential);
+    } else if (this.clientId && this.clientSecret) {
+      tool.configureAuthCredential({
+        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+        oauth2: {clientId: this.clientId, clientSecret: this.clientSecret},
+      });
+    }
+  }
+
   private loadOpenApiToolset(): Promise<OpenAPIToolset> {
     // The promise, not the resolved toolset, is memoised so concurrent
     // getTools calls share a single discovery fetch.
@@ -185,11 +210,9 @@ export class GoogleApiToolset extends BaseToolset {
   }
 
   private async buildOpenApiToolset(): Promise<OpenAPIToolset> {
-    const spec = await new GoogleApiToOpenApiConverter(
-      this.apiName,
-      this.apiVersion,
-      {discoveryUrl: this.discoveryUrl},
-    ).convert();
+    const spec = await fetchAndConvertGoogleApi(this.apiName, this.apiVersion, {
+      discoveryUrl: this.discoveryUrl,
+    });
 
     return new OpenAPIToolset({
       specDict: spec,

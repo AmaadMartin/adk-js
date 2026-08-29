@@ -10,7 +10,6 @@ import {
   BaseTool,
   Context,
   createSession,
-  GoogleApiTool,
   GoogleApiToolset,
   InvocationContext,
   LlmAgent,
@@ -182,12 +181,12 @@ describe('GoogleApiToolset', () => {
     });
   }
 
-  it('exposes one GoogleApiTool per discovery operation', async () => {
+  it('exposes one tool per discovery operation', async () => {
     const tools = await createToolset().getTools();
 
     expect(tools.map((tool) => tool.name).sort()).toEqual(CALENDAR_TOOL_NAMES);
     for (const tool of tools) {
-      expect(tool).toBeInstanceOf(GoogleApiTool);
+      expect(tool).toBeInstanceOf(RestApiTool);
     }
     expect(fetchMock).toHaveBeenCalledWith(
       'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
@@ -315,6 +314,80 @@ describe('GoogleApiToolset', () => {
       authType: 'serviceAccount',
       serviceAccount: SERVICE_ACCOUNT,
     });
+  });
+
+  it('configures the bearer scheme alongside a service account credential', async () => {
+    const configureAuthScheme = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthScheme',
+    );
+    const configureAuthCredential = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthCredential',
+    );
+
+    await createToolset({serviceAccount: SERVICE_ACCOUNT}).getTools();
+
+    expect(configureAuthScheme).toHaveBeenLastCalledWith({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+    });
+    expect(configureAuthCredential).toHaveBeenCalledWith({
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: SERVICE_ACCOUNT,
+    });
+  });
+
+  it('prefers the service account over a client id pair', async () => {
+    const configureAuthCredential = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthCredential',
+    );
+
+    await createToolset({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      serviceAccount: SERVICE_ACCOUNT,
+    }).getTools();
+
+    expect(configureAuthCredential).toHaveBeenCalledTimes(3);
+    for (const [credential] of configureAuthCredential.mock.calls) {
+      expect(credential).toEqual({
+        authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+        serviceAccount: SERVICE_ACCOUNT,
+      });
+    }
+  });
+
+  it('configures no credential when only half the client id pair is given', async () => {
+    const configureAuthScheme = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthScheme',
+    );
+    const configureAuthCredential = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthCredential',
+    );
+
+    await createToolset({clientId: 'client-id'}).getTools();
+    await createToolset({clientSecret: 'client-secret'}).getTools();
+
+    expect(configureAuthCredential).not.toHaveBeenCalled();
+    expect(configureAuthScheme).not.toHaveBeenCalledWith(
+      expect.objectContaining({scheme: 'bearer'}),
+    );
+  });
+
+  it('sets no default headers when none are configured', async () => {
+    const setDefaultHeaders = vi.spyOn(
+      RestApiTool.prototype,
+      'setDefaultHeaders',
+    );
+
+    await createToolset().getTools();
+
+    expect(setDefaultHeaders).not.toHaveBeenCalled();
   });
 
   it('sends the additional headers on the outbound request', async () => {

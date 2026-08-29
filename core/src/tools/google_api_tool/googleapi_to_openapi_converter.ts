@@ -5,7 +5,6 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
-import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {
   DiscoveryDocument,
@@ -90,9 +89,7 @@ function toHttpMethod(method: string): HttpMethod | undefined {
 function toComponentsRef(ref: string): string {
   // Concatenation rather than String.replace, so a `$` in the reference
   // cannot be expanded as a replacement pattern.
-  return ref.startsWith('#')
-    ? SCHEMA_REF_PREFIX + ref.slice(1)
-    : SCHEMA_REF_PREFIX + ref;
+  return SCHEMA_REF_PREFIX + (ref.startsWith('#') ? ref.slice(1) : ref);
 }
 
 /**
@@ -485,38 +482,28 @@ export function convertDiscoveryDocument(
 }
 
 /**
- * Converts a Google API Discovery document to an OpenAPI 3.0 document.
+ * Fetches a Google API's Discovery document and converts it to OpenAPI 3.0.
+ *
+ * @param apiName The Discovery API id, e.g. `calendar`.
+ * @param apiVersion The API version, e.g. `v3`.
+ * @param options.discoveryUrl An alternative Discovery URL template.
+ * @return The equivalent OpenAPI 3.0 document.
+ * @throws If the Discovery service responds with a non-2xx status.
  *
  * @example
  * ```ts
- * const spec = await new GoogleApiToOpenApiConverter('calendar', 'v3').convert();
+ * const spec = await fetchAndConvertGoogleApi('calendar', 'v3');
  * ```
  */
-@experimental
-export class GoogleApiToOpenApiConverter {
-  private readonly discoveryUrl?: string;
-
-  /**
-   * @param apiName The Discovery API id, e.g. `calendar`.
-   * @param apiVersion The API version, e.g. `v3`.
-   * @param options.discoveryUrl An alternative Discovery URL template.
-   */
-  constructor(
-    private readonly apiName: string,
-    private readonly apiVersion: string,
-    options: {discoveryUrl?: string} = {},
-  ) {
-    this.discoveryUrl = options.discoveryUrl;
-  }
-
-  /** Fetches the Discovery document and converts it to OpenAPI 3.0. */
-  @experimental
-  async convert(): Promise<OpenAPIV3.Document> {
-    const doc = await fetchDiscoveryDocument(
-      this.apiName,
-      this.apiVersion,
-      this.discoveryUrl,
-    );
-    return convertDiscoveryDocument(doc, this.apiName, this.apiVersion);
-  }
+export async function fetchAndConvertGoogleApi(
+  apiName: string,
+  apiVersion: string,
+  options: {discoveryUrl?: string} = {},
+): Promise<OpenAPIV3.Document> {
+  const doc = await fetchDiscoveryDocument(
+    apiName,
+    apiVersion,
+    options.discoveryUrl,
+  );
+  return convertDiscoveryDocument(doc, apiName, apiVersion);
 }
