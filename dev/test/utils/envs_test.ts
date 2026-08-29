@@ -21,8 +21,8 @@ const DISABLE_FLAG = 'ADK_DISABLE_LOAD_DOTENV';
 const TEST_TIMEOUT_MS = 30000;
 
 /**
- * Re-imports the module so it snapshots the environment the test set up, the
- * way it snapshots the shell environment in a fresh process.
+ * Re-imports the module so it forgets which keys a `.env` supplied, the way a
+ * fresh process starts with none.
  */
 async function importEnvs() {
   vi.resetModules();
@@ -86,16 +86,16 @@ describe('envs', {timeout: TEST_TIMEOUT_MS}, () => {
     expect(process.env[DOTENV_KEY]).toBe('two');
   });
 
-  it('overrides a variable set after the process started', async () => {
+  it('lets an agent .env override the working directory one', async () => {
+    await writeEnvFile(tmpDir, `${DOTENV_KEY}=from_working_directory\n`);
     await writeEnvFile(agentDir, `${DOTENV_KEY}=from_agent\n`);
     const {loadDotenvForAgent} = await importEnvs();
-    // What `cli.ts` does at startup: it applies the working directory .env
-    // after this module is evaluated. Only the shell counts as explicit, so
-    // the agent's own file still wins.
-    process.env[DOTENV_KEY] = 'from_working_directory';
+
+    // The calls `cli.ts` and `AgentLoader` make, in that order.
+    loadDotenvForAgent(tmpDir);
+    expect(process.env[DOTENV_KEY]).toBe('from_working_directory');
 
     loadDotenvForAgent(agentDir);
-
     expect(process.env[DOTENV_KEY]).toBe('from_agent');
   });
 

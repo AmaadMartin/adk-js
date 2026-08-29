@@ -12,7 +12,6 @@ vi.mock('../../src/utils/envs.js', () => ({
   loadDotenvForAgent: (agentPath: string) => {
     startupLoads.push(agentPath);
   },
-  withAgentDotenv: (_agentPath: string, load: () => Promise<unknown>) => load(),
 }));
 
 describe('CLI startup .env loading', () => {

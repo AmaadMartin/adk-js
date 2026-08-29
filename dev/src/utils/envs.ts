@@ -12,18 +12,12 @@ import * as path from 'node:path';
 const ADK_DISABLE_LOAD_DOTENV_ENV_VAR = 'ADK_DISABLE_LOAD_DOTENV';
 
 /**
- * The environment variable keys the process started with.
- *
- * Captured while this module is evaluated. Every `.env` the CLI reads goes
- * through this module, and under ESM a module runs before the code that
- * imports it, so these are the keys the user set and nothing else. Capturing
- * them at the first load instead would count the working directory `.env` that
- * `cli.ts` applies at startup, and that file would then outrank every agent's
- * own `.env`.
+ * The keys a `.env` supplied. Every other key in `process.env` belongs to the
+ * user, so a `.env` may replace one of these and nothing else. The working
+ * directory `.env` is loaded through this module too, which is why an agent's
+ * own file can still override it.
  */
-const EXPLICIT_ENV_KEYS: ReadonlySet<string> = new Set(
-  Object.keys(process.env),
-);
+const dotenvKeys = new Set<string>();
 
 /**
  * Returns the path of the nearest `.env` at or above `startPath`, or
@@ -81,43 +75,11 @@ export function loadDotenvForAgent(agentPath: string): void {
 
   const parsed = dotenv.parse(fs.readFileSync(dotenvPath));
   for (const [key, value] of Object.entries(parsed)) {
-    // A key the caller has since deleted is no longer set explicitly, so the
-    // file supplies it again.
-    if (!EXPLICIT_ENV_KEYS.has(key) || process.env[key] === undefined) {
+    if (!(key in process.env) || dotenvKeys.has(key)) {
       process.env[key] = value;
+      dotenvKeys.add(key);
     }
   }
 
   getLogger().debug(`Loaded .env file for ${agentName} at ${dotenvPath}`);
-}
-
-/** The loads already queued, so a new one waits for them. */
-let queuedLoads: Promise<unknown> = Promise.resolve();
-
-/**
- * Applies an agent's `.env`, then runs `load` before any other agent's `.env`
- * can be applied.
- *
- * `process.env` holds one agent's values at a time, and an agent module reads
- * them while it is imported. A caller that loads several agents at once must
- * therefore not interleave them: the second agent's `.env` would land while
- * the first agent is still being imported, and both agents would read the
- * second file. Loads run one after another to keep each agent on its own
- * `.env`.
- *
- * @param agentPath The agent's folder or file.
- * @param load Imports the agent. It runs with the agent's `.env` applied.
- */
-export function withAgentDotenv<T>(
-  agentPath: string,
-  load: () => Promise<T>,
-): Promise<T> {
-  const loaded = queuedLoads.then(() => {
-    loadDotenvForAgent(agentPath);
-    return load();
-  });
-  // The caller owns this failure. Swallow it here so one agent that fails to
-  // load does not reject every agent queued behind it.
-  queuedLoads = loaded.catch(() => {});
-  return loaded;
 }

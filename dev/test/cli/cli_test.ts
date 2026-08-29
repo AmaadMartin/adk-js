@@ -46,7 +46,6 @@ vi.mock('../../src/version', () => ({
 // process. `cli_dotenv_test.ts` covers the startup call itself.
 vi.mock('../../src/utils/envs', () => ({
   loadDotenvForAgent: vi.fn(),
-  withAgentDotenv: (_agentPath: string, load: () => Promise<unknown>) => load(),
 }));
 
 vi.mock('@google/adk', async (importOriginal) => {
