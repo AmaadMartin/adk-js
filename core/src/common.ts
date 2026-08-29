@@ -324,6 +324,8 @@ export {
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
+export {runWithSyncCallableRunner} from './tools/sync_callable_runner.js';
+export type {SyncCallableRunner} from './tools/sync_callable_runner.js';
 export {
   IntentMismatchError,
   ToolConfirmation,
