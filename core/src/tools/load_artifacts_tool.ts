@@ -7,15 +7,19 @@
 import {FunctionDeclaration, Part, Type} from '@google/genai';
 
 import {Context} from '../agents/context.js';
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {appendInstructions, LlmRequest} from '../models/llm_request.js';
 import {maybeBase64ToBytes} from '../utils/base64_utils.js';
 import {extractDocxText} from '../utils/document_text_utils.js';
+import {formatError} from '../utils/error_utils.js';
 import {getLogger} from '../utils/logger.js';
 import {
   isGeminiInlineMimeTypeSupported,
+  isSpreadsheetMimeType,
   isTextLikeMimeType,
   normalizeMimeType,
 } from '../utils/mime_utils.js';
+import {spreadsheetToMarkdown} from '../utils/spreadsheet_utils.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
@@ -34,6 +38,9 @@ const OCTET_STREAM_MIME_TYPE = 'application/octet-stream';
 /** Filename suffixes whose content is text whatever the MIME type says. */
 const TEXT_FILE_SUFFIXES = ['.csv', '.txt', '.json', '.xml'];
 
+/** Filename suffixes of a spreadsheet workbook. */
+const SPREADSHEET_FILE_SUFFIXES = ['.xlsx', '.xls'];
+
 /**
  * Converts an artifact into a `Part` that is safe to send to Gemini.
  *
@@ -45,11 +52,14 @@ const TEXT_FILE_SUFFIXES = ['.csv', '.txt', '.json', '.xml'];
  *
  * @param artifact The artifact to convert.
  * @param artifactName The name the artifact was loaded under.
+ * @param enableSpreadsheetParsing Whether to render a spreadsheet workbook as
+ *     a markdown table instead of a placeholder.
  * @return A part that is safe to send to Gemini.
  */
 export async function asSafePartForLlm(
   artifact: Part,
   artifactName: string,
+  enableSpreadsheetParsing = false,
 ): Promise<Part> {
   const inlineData = artifact.inlineData;
   if (!inlineData) {
@@ -93,6 +103,14 @@ export async function asSafePartForLlm(
     return {text: bytes.toString('utf8')};
   }
 
+  if (
+    enableSpreadsheetParsing &&
+    (isSpreadsheetMimeType(mimeType) ||
+      SPREADSHEET_FILE_SUFFIXES.some((suffix) => loweredName.endsWith(suffix)))
+  ) {
+    return {text: spreadsheetToMarkdown(bytes)};
+  }
+
   const sizeKb = bytes.length / 1024;
   return {
     text: `[Binary artifact: ${artifactName}, type: ${mimeType}, size: ${sizeKb.toFixed(1)} KB. Content cannot be displayed inline.]`,
@@ -100,17 +118,68 @@ export async function asSafePartForLlm(
 }
 
 /**
+ * Customizes or filters an artifact before it is added to the LLM request.
+ *
+ * @param artifact The artifact as it was loaded, unconverted.
+ * @param artifactName The name the artifact was loaded under, without the
+ *     `user:` prefix even when the artifact was found under that prefix.
+ * @return The part to add, or `undefined` to leave the artifact out.
+ */
+export type ProcessArtifactCallback = (
+  artifact: Part,
+  artifactName: string,
+) => Part | undefined | Promise<Part | undefined>;
+
+/** Options for {@link LoadArtifactsTool}. */
+export interface LoadArtifactsToolOptions {
+  /**
+   * Called for each artifact in place of the built-in safety conversion, so
+   * supplying it bypasses {@link asSafePartForLlm} entirely. Returning
+   * `undefined` leaves that artifact out of the request. If it throws, the
+   * tool logs the error and leaves the artifact out.
+   */
+  processArtifact?: ProcessArtifactCallback;
+  /**
+   * Renders an XLSX artifact as a markdown table instead of a placeholder.
+   * Defaults to `false`.
+   *
+   * Two limitations are worth knowing before you turn this on. The legacy
+   * binary `.xls` format is not a zip, so it reports an invalid format. Cells
+   * are rendered from their stored values, so a date held as a serial number
+   * renders as that number.
+   */
+  enableSpreadsheetParsing?: boolean;
+}
+
+/**
  * A tool that loads the artifacts and adds them to the session.
  */
 export class LoadArtifactsTool extends BaseTool {
-  constructor() {
+  private readonly processArtifact?: ProcessArtifactCallback;
+  private readonly enableSpreadsheetParsing: boolean;
+
+  constructor(options: LoadArtifactsToolOptions = {}) {
     super({
       name: 'load_artifacts',
       description: `Loads artifacts into the session for this request.\n\nNOTE: Call when you need access to artifacts (for example, uploads saved by the web UI).`,
     });
+    this.processArtifact = options.processArtifact;
+    this.enableSpreadsheetParsing = options.enableSpreadsheetParsing ?? false;
   }
 
   override _getDeclaration(): FunctionDeclaration | undefined {
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.name,
+        description: this.description,
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            artifact_names: {type: 'array', items: {type: 'string'}},
+          },
+        },
+      };
+    }
     return {
       name: this.name,
       description: this.description,
@@ -228,7 +297,27 @@ export class LoadArtifactsTool extends BaseTool {
         continue;
       }
 
-      const artifactPart = await asSafePartForLlm(artifact, artifactName);
+      let artifactPart: Part | undefined;
+      if (this.processArtifact) {
+        try {
+          artifactPart = await this.processArtifact(artifact, artifactName);
+        } catch (err: unknown) {
+          logger.error(
+            `Failed to process artifact "${artifactName}", skipping: ${formatError(err)}`,
+          );
+          continue;
+        }
+      } else {
+        artifactPart = await asSafePartForLlm(
+          artifact,
+          artifactName,
+          this.enableSpreadsheetParsing,
+        );
+      }
+
+      if (!artifactPart) {
+        continue;
+      }
       if (artifactPart !== artifact) {
         logger.debug(
           `Transformed artifact "${artifactName}" (mimeType=${artifact.inlineData?.mimeType}) to Part`,

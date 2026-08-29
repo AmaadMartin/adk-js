@@ -32,12 +32,17 @@ const DEFAULT_WORDPROCESSINGML_PREFIX = 'w';
  * A member whose archive declares more than {@link MAX_XML_BYTES} of
  * uncompressed data is never inflated, so a zip bomb cannot claim that memory.
  *
+ * Shared with the spreadsheet reader, which faces the same untrusted input.
+ *
  * @param zip The archive to read from.
  * @param entryName The member to read.
  * @return The member's text, or `undefined` when the member is absent or is
  *     larger than the cap.
  */
-function readXmlEntry(zip: AdmZip, entryName: string): string | undefined {
+export function readXmlEntry(
+  zip: AdmZip,
+  entryName: string,
+): string | undefined {
   const entry = zip.getEntry(entryName);
   if (!entry || entry.header.size > MAX_XML_BYTES) {
     return undefined;
