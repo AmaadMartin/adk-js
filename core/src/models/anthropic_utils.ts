@@ -70,20 +70,6 @@ const GENAI_FINISH_REASONS: Record<StopReason, FinishReason> = {
   model_context_window_exceeded: FinishReason.FINISH_REASON_UNSPECIFIED,
 };
 
-/**
- * The Anthropic token counters ADK reads.
- *
- * A complete message and a streamed `message_delta` both report them, so both
- * paths share one mapping. A stream leaves a counter `null` until it knows it.
- */
-export type AnthropicUsageCounts = Pick<
-  Usage,
-  | 'cache_creation_input_tokens'
-  | 'cache_read_input_tokens'
-  | 'output_tokens'
-  | 'output_tokens_details'
-> & {input_tokens: number | null};
-
 /** The Anthropic request blocks a genai `Part` can convert to. */
 export type AnthropicMessageBlock =
   | TextBlockParam
@@ -437,25 +423,6 @@ export function contentBlockToPart(block: ContentBlock): Part {
 }
 
 /**
- * Parses the JSON arguments Claude streams for one `tool_use` block.
- *
- * @param argsJson The accumulated `input_json_delta` text, possibly empty.
- * @throws If the arguments parse to something other than an object.
- */
-export function parseToolUseArgs(argsJson: string): Record<string, unknown> {
-  if (!argsJson) {
-    return {};
-  }
-  const parsed: unknown = JSON.parse(argsJson);
-  if (!isRecord(parsed)) {
-    throw new Error(
-      `Claude streamed tool arguments that are not an object: ${argsJson}`,
-    );
-  }
-  return parsed;
-}
-
-/**
  * Maps an Anthropic stop reason onto the genai finish reason.
  *
  * @param stopReason The stop reason Claude reported, if any.
@@ -476,13 +443,13 @@ export function toGenaiFinishReason(
  * `output_tokens`, while genai keeps thought and candidate counts disjoint, so
  * the thinking tokens are subtracted back out.
  *
- * @param usage The counters the message or the stream reported.
+ * @param usage The counters the message reported.
  */
 export function toUsageMetadata(
-  usage: AnthropicUsageCounts,
+  usage: Usage,
 ): GenerateContentResponseUsageMetadata {
   const promptTokenCount =
-    (usage.input_tokens ?? 0) +
+    usage.input_tokens +
     (usage.cache_read_input_tokens ?? 0) +
     (usage.cache_creation_input_tokens ?? 0);
   const outputTokens = usage.output_tokens;

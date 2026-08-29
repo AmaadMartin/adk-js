@@ -27,6 +27,7 @@ export type {LocalEnvironmentOptions} from './environment/local_environment.js';
 export {AnthropicLlm, Claude} from './models/anthropic_llm.js';
 export type {
   AnthropicLlmParams,
+  AnthropicMessageStream,
   AnthropicMessagesClient,
 } from './models/anthropic_llm.js';
 export type {

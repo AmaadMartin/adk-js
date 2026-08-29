@@ -26,7 +26,6 @@ import {
   functionDeclarationToToolParam,
   inlineMediaKind,
   messageToLlmResponse,
-  parseToolUseArgs,
   partToMessageBlock,
   systemInstructionToText,
   toClaudeRole,
@@ -491,20 +490,6 @@ describe('contentBlockToPart', () => {
         file_id: 'f',
       }),
     ).toThrow(/Unsupported Claude content block type: container_upload/);
-  });
-});
-
-describe('parseToolUseArgs', () => {
-  it('returns an empty object for empty JSON', () => {
-    expect(parseToolUseArgs('')).toEqual({});
-  });
-
-  it('parses an object', () => {
-    expect(parseToolUseArgs('{"city":"Paris"}')).toEqual({city: 'Paris'});
-  });
-
-  it('rejects arguments that are not an object', () => {
-    expect(() => parseToolUseArgs('[1,2]')).toThrow(/not an object/);
   });
 });
 
@@ -1167,16 +1152,8 @@ describe('toUsageMetadata', () => {
     expect(metadata.thoughtsTokenCount).toBe(20);
   });
 
-  it('treats an unreported input count as zero', () => {
-    expect(
-      toUsageMetadata({
-        input_tokens: null,
-        cache_creation_input_tokens: null,
-        cache_read_input_tokens: null,
-        output_tokens: 4,
-        output_tokens_details: null,
-      }),
-    ).toEqual({
+  it('counts a zero input as zero prompt tokens', () => {
+    expect(toUsageMetadata(anthropicUsage(0, 4))).toEqual({
       promptTokenCount: 0,
       candidatesTokenCount: 4,
       totalTokenCount: 4,

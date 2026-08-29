@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {MessageStream} from '@anthropic-ai/sdk/lib/MessageStream.js';
 import type {
   ContentBlock,
   Message,
@@ -14,6 +15,7 @@ import type {
   StopReason,
   Usage,
 } from '@anthropic-ai/sdk/resources/messages';
+import type {AnthropicMessageStream} from '@google/adk';
 
 /**
  * Builds an Anthropic `Usage`.
@@ -126,11 +128,37 @@ export function messageStopEvent(): RawMessageStreamEvent {
   return {type: 'message_stop'};
 }
 
-/** Wraps stream events in the async iterable the Anthropic SDK returns. */
-export async function* asStream(
-  events: RawMessageStreamEvent[],
-): AsyncGenerator<RawMessageStreamEvent, void> {
-  for (const event of events) {
-    yield event;
-  }
+/** A stream that yields one event and then fails, as a dropped request does. */
+export function failingStream(error: unknown): AnthropicMessageStream {
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield messageStartEvent(1);
+      throw error;
+    },
+    finalMessage: () => Promise.reject(error),
+  };
+}
+
+/**
+ * Wraps stream events in the accumulator `messages.stream()` returns.
+ *
+ * Build it inside the `messages.stream` mock, not before it: the accumulator
+ * starts reading as soon as it exists. The tests replace the SDK's root entry
+ * point, so the real class comes from its own subpath, and
+ * `fromReadableStream` reads one JSON event per line.
+ */
+export function asStream(events: RawMessageStreamEvent[]): MessageStream {
+  const body = events.map((event) => `${JSON.stringify(event)}\n`).join('');
+  return MessageStream.fromReadableStream(
+    new ReadableStream({
+      async pull(controller) {
+        // `MessageStream` replays nothing to an iterator that attaches late,
+        // so the events wait for a later task than the one that calls
+        // `messages.stream()`.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        controller.enqueue(new TextEncoder().encode(body));
+        controller.close();
+      },
+    }),
+  );
 }

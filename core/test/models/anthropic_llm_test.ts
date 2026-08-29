@@ -20,6 +20,7 @@ import {
   version,
 } from '@google/adk';
 import {FinishReason} from '@google/genai';
+import type {Mock} from 'vitest';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
@@ -35,13 +36,14 @@ import {
   blockDeltaEvent,
   blockStartEvent,
   blockStopEvent,
+  failingStream,
   messageDeltaEvent,
   messageStartEvent,
   messageStopEvent,
 } from './anthropic_test_utils.js';
 
-const {create, anthropicOptions, vertexOptions, credentialFields} = vi.hoisted(
-  () => {
+const {create, stream, anthropicOptions, vertexOptions, credentialFields} =
+  vi.hoisted(() => {
     const credentialFields: {
       apiKey: string | null;
       authToken: string | null;
@@ -49,12 +51,12 @@ const {create, anthropicOptions, vertexOptions, credentialFields} = vi.hoisted(
     } = {apiKey: 'test-key', authToken: null, credentials: null};
     return {
       create: vi.fn(),
+      stream: vi.fn(),
       anthropicOptions: vi.fn(),
       vertexOptions: vi.fn(),
       credentialFields,
     };
-  },
-);
+  });
 
 /** Restores the credential the mocked SDK reports by default. */
 function resetCredentials(): void {
@@ -65,7 +67,7 @@ function resetCredentials(): void {
 
 vi.mock('@anthropic-ai/sdk', () => ({
   Anthropic: class {
-    messages = {create};
+    messages = {create, stream};
     apiKey = credentialFields.apiKey;
     authToken = credentialFields.authToken;
     credentials = credentialFields.credentials;
@@ -77,7 +79,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 
 vi.mock('@anthropic-ai/vertex-sdk', () => ({
   AnthropicVertex: class {
-    messages = {create};
+    messages = {create, stream};
     constructor(options?: unknown) {
       vertexOptions(options);
     }
@@ -113,10 +115,19 @@ async function collect(
 
 /** Returns the request body of the single `messages.create` call. */
 function createdParams(): MessageCreateParams {
-  expect(create).toHaveBeenCalledOnce();
-  const params: unknown = create.mock.calls[0][0];
+  return sentParams(create, 'messages.create');
+}
+
+/** Returns the request body of the single `messages.stream` call. */
+function streamedParams(): MessageCreateParams {
+  return sentParams(stream, 'messages.stream');
+}
+
+function sentParams(method: Mock, name: string): MessageCreateParams {
+  expect(method).toHaveBeenCalledOnce();
+  const params: unknown = method.mock.calls[0][0];
   if (!isMessageCreateParams(params)) {
-    return expect.fail('messages.create did not receive a request body.');
+    return expect.fail(`${name} did not receive a request body.`);
   }
   return params;
 }
@@ -323,7 +334,7 @@ describe('thinking', () => {
 
 describe('streaming generation', () => {
   it('yields a partial per text delta then one aggregated response', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(10),
         blockStartEvent(0, {type: 'text', text: '', citations: null}),
@@ -356,11 +367,14 @@ describe('streaming generation', () => {
       candidatesTokenCount: 5,
       totalTokenCount: 15,
     });
-    expect(createdParams().stream).toBe(true);
+    expect(create).not.toHaveBeenCalled();
+    expect(streamedParams().messages).toEqual([
+      {role: 'user', content: [{type: 'text', text: 'Hi'}]},
+    ]);
   });
 
   it('accumulates streamed tool call arguments', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(20),
         blockStartEvent(0, {type: 'text', text: '', citations: null}),
@@ -406,7 +420,7 @@ describe('streaming generation', () => {
   });
 
   it('defaults tool call arguments to an empty object', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(1),
         blockStartEvent(0, {
@@ -431,43 +445,8 @@ describe('streaming generation', () => {
     ]);
   });
 
-  it('starts a text block from a delta alone', async () => {
-    create.mockResolvedValue(
-      asStream([
-        messageStartEvent(1),
-        blockDeltaEvent(0, {type: 'text_delta', text: 'lone text'}),
-        messageStopEvent(),
-      ]),
-    );
-    const llm = new AnthropicLlm();
-
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
-    );
-
-    expect(responses[1].content?.parts).toEqual([{text: 'lone text'}]);
-  });
-
-  it('ignores an argument delta for an unknown block index', async () => {
-    create.mockResolvedValue(
-      asStream([
-        messageStartEvent(1),
-        blockDeltaEvent(7, {type: 'input_json_delta', partial_json: '{}'}),
-        messageStopEvent(),
-      ]),
-    );
-    const llm = new AnthropicLlm();
-
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
-    );
-
-    expect(responses).toHaveLength(1);
-    expect(responses[0].content?.parts).toEqual([]);
-  });
-
   it('ignores a signature delta', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(1),
         blockStartEvent(0, {type: 'text', text: 'x', citations: null}),
@@ -486,7 +465,7 @@ describe('streaming generation', () => {
   });
 
   it('aggregates thinking deltas and keeps the signature', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(15),
         blockStartEvent(0, {type: 'thinking', thinking: '', signature: 'sig'}),
@@ -522,27 +501,8 @@ describe('streaming generation', () => {
     expect(responses[3].usageMetadata?.candidatesTokenCount).toBe(10);
   });
 
-  it('starts a thinking block from a delta alone', async () => {
-    create.mockResolvedValue(
-      asStream([
-        messageStartEvent(1),
-        blockDeltaEvent(0, {type: 'thinking_delta', thinking: 'lone'}),
-        messageStopEvent(),
-      ]),
-    );
-    const llm = new AnthropicLlm();
-
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
-    );
-
-    expect(responses[1].content?.parts).toEqual([
-      {text: 'lone', thought: true},
-    ]);
-  });
-
   it('keeps a redacted thinking block in the final response', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(8),
         blockStartEvent(0, {
@@ -569,32 +529,8 @@ describe('streaming generation', () => {
     ]);
   });
 
-  it('orders the final parts by block index, not by arrival', async () => {
-    create.mockResolvedValue(
-      asStream([
-        messageStartEvent(3),
-        blockStartEvent(1, {type: 'text', text: 'second', citations: null}),
-        blockStopEvent(1),
-        blockStartEvent(0, {type: 'text', text: 'first', citations: null}),
-        blockStopEvent(0),
-        messageDeltaEvent(2),
-        messageStopEvent(),
-      ]),
-    );
-    const llm = new AnthropicLlm();
-
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
-    );
-
-    expect(responses[0].content?.parts).toEqual([
-      {text: 'first'},
-      {text: 'second'},
-    ]);
-  });
-
-  it('ignores a content block type it has no part for', async () => {
-    create.mockResolvedValue(
+  it('rejects a content block type it has no part for', async () => {
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(1),
         blockStartEvent(0, {type: 'container_upload', file_id: 'f'}),
@@ -604,11 +540,11 @@ describe('streaming generation', () => {
     );
     const llm = new AnthropicLlm();
 
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
+    await expect(
+      collect(llm.generateContentAsync(makeRequest(), true)),
+    ).rejects.toThrow(
+      /Unsupported Claude content block type: container_upload/,
     );
-
-    expect(responses[0].content?.parts).toEqual([]);
   });
 });
 
@@ -992,7 +928,7 @@ describe('finish reason', () => {
   });
 
   it('takes the streamed stop reason from the message delta', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(5),
         blockStartEvent(0, {type: 'text', text: '', citations: null}),
@@ -1012,7 +948,7 @@ describe('finish reason', () => {
   });
 
   it('omits the finish reason when the stream reports none', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(5),
         blockStartEvent(0, {type: 'text', text: '', citations: null}),
@@ -1034,7 +970,7 @@ describe('finish reason', () => {
 
 describe('streamed usage metadata', () => {
   it('folds the cache tokens the stream reports into the prompt count', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         {
           type: 'message_start',
@@ -1062,7 +998,7 @@ describe('streamed usage metadata', () => {
   });
 
   it('splits the thinking tokens the message delta reports', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(10),
         messageDeltaEvent(20, 'end_turn', {
@@ -1086,7 +1022,7 @@ describe('streamed usage metadata', () => {
   });
 
   it('keeps the prompt count the message start reported', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(11),
         messageDeltaEvent(7),
@@ -1127,11 +1063,8 @@ describe('rate limiting', () => {
   });
 
   it('adds the mitigation link to a 429 raised mid-stream', async () => {
-    create.mockResolvedValue(
-      (async function* () {
-        yield messageStartEvent(1);
-        throw Object.assign(new Error('Slow down'), {status: 429});
-      })(),
+    stream.mockReturnValue(
+      failingStream(Object.assign(new Error('Slow down'), {status: 429})),
     );
     const llm = new AnthropicLlm();
 
@@ -1210,7 +1143,7 @@ describe('Anthropic API credentials', () => {
 
   it('skips credential resolution for an injected client', async () => {
     credentialFields.apiKey = null;
-    const llm = new AnthropicLlm({client: {messages: {create}}});
+    const llm = new AnthropicLlm({client: {messages: {create, stream}}});
 
     const responses = await collect(
       llm.generateContentAsync(makeRequest(), false),
@@ -1223,7 +1156,7 @@ describe('Anthropic API credentials', () => {
   it('lets Claude take an injected client without Vertex configuration', async () => {
     vi.stubEnv('GOOGLE_CLOUD_PROJECT', '');
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', '');
-    const llm = new Claude({client: {messages: {create}}});
+    const llm = new Claude({client: {messages: {create, stream}}});
 
     const responses = await collect(
       llm.generateContentAsync(makeRequest(), false),
@@ -1260,7 +1193,7 @@ describe('streamed thinking signature', () => {
   }
 
   it('keeps a signature that arrives as a delta, not in the block start', async () => {
-    create.mockResolvedValue(signedThinkingStream('sig_from_delta'));
+    stream.mockImplementation(() => signedThinkingStream('sig_from_delta'));
     const llm = new AnthropicLlm();
 
     const responses = await collect(
@@ -1276,21 +1209,8 @@ describe('streamed thinking signature', () => {
     ]);
   });
 
-  it('joins a signature split across several deltas', async () => {
-    create.mockResolvedValue(signedThinkingStream('sig_', 'from_', 'three'));
-    const llm = new AnthropicLlm();
-
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
-    );
-
-    expect(responses.at(-1)?.content?.parts?.[0].thoughtSignature).toBe(
-      'sig_from_three',
-    );
-  });
-
   it('emits no partial for the signature delta', async () => {
-    create.mockResolvedValue(signedThinkingStream('sig_from_delta'));
+    stream.mockImplementation(() => signedThinkingStream('sig_from_delta'));
     const llm = new AnthropicLlm();
 
     const responses = await collect(
@@ -1305,7 +1225,7 @@ describe('streamed thinking signature', () => {
   });
 
   it('round-trips the streamed thinking block back to Claude', async () => {
-    create.mockResolvedValue(signedThinkingStream('sig_from_delta'));
+    stream.mockImplementation(() => signedThinkingStream('sig_from_delta'));
     const llm = new AnthropicLlm();
     const responses = await collect(
       llm.generateContentAsync(makeRequest(), true),
@@ -1324,12 +1244,11 @@ describe('streamed thinking signature', () => {
 });
 
 describe('streamed stop reason', () => {
-  it('keeps the reported reason when a later delta omits it', async () => {
-    create.mockResolvedValue(
+  it('maps the reason the closing delta reports', async () => {
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(5),
         messageDeltaEvent(3, 'max_tokens'),
-        messageDeltaEvent(4, null),
         messageStopEvent(),
       ]),
     );
@@ -1358,7 +1277,7 @@ describe('system instruction', () => {
 
 describe('streamed citations', () => {
   it('ignores a citations delta', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(1),
         blockStartEvent(0, {type: 'text', text: 'x', citations: null}),

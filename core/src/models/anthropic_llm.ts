@@ -6,14 +6,11 @@
 
 import type {Anthropic} from '@anthropic-ai/sdk';
 import type {
+  Message,
+  MessageCreateParamsBase,
   MessageCreateParamsNonStreaming,
-  RawContentBlockDeltaEvent,
-  RawContentBlockStartEvent,
+  RawContentBlockDelta,
   RawMessageStreamEvent,
-  RedactedThinkingBlock,
-  StopReason,
-  TextBlock,
-  ThinkingBlock,
 } from '@anthropic-ai/sdk/resources/messages';
 import type {
   FunctionDeclaration,
@@ -25,19 +22,14 @@ import {isBrowser} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
-import type {AnthropicUsageCounts} from './anthropic_utils.js';
 import {
   buildEffortParam,
   buildThinkingParam,
-  contentBlockToPart,
   contentToMessageParam,
   functionDeclarationToToolParam,
   messageToLlmResponse,
-  parseToolUseArgs,
   systemInstructionToText,
-  toGenaiFinishReason,
   ToolUseIdSanitizer,
-  toUsageMetadata,
 } from './anthropic_utils.js';
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
@@ -73,15 +65,6 @@ const RATE_LIMIT_POSSIBLE_FIX_MESSAGE =
   'On how to mitigate this issue, please refer to:\n\n' +
   'https://docs.anthropic.com/en/api/errors#http-errors';
 
-/** The token counters a stream reports before it has seen any of them. */
-const EMPTY_USAGE_COUNTS: AnthropicUsageCounts = {
-  input_tokens: null,
-  cache_creation_input_tokens: null,
-  cache_read_input_tokens: null,
-  output_tokens: 0,
-  output_tokens_details: null,
-};
-
 /**
  * The part of the Anthropic client this provider drives.
  *
@@ -89,7 +72,23 @@ const EMPTY_USAGE_COUNTS: AnthropicUsageCounts = {
  * serves the direct API and Vertex AI.
  */
 export interface AnthropicMessagesClient {
-  messages: Pick<Anthropic['messages'], 'create'>;
+  messages: Pick<Anthropic['messages'], 'create'> & {
+    stream(
+      params: MessageCreateParamsBase,
+      options?: {signal?: AbortSignal},
+    ): AnthropicMessageStream;
+  };
+}
+
+/**
+ * The part of the SDK's `MessageStream` this provider consumes.
+ *
+ * `MessageStream` declares a private field, so it is nominally typed and no
+ * test double can stand in for it. Naming the two members used here keeps an
+ * injected client testable, and a real `MessageStream` still satisfies it.
+ */
+export interface AnthropicMessageStream extends AsyncIterable<RawMessageStreamEvent> {
+  finalMessage(): Promise<Message>;
 }
 
 /** Parameters for creating an {@link AnthropicLlm}. */
@@ -104,200 +103,6 @@ export interface AnthropicLlmParams {
    * Supplying one skips loading the SDK and resolving a credential.
    */
   client?: AnthropicMessagesClient;
-}
-
-/**
- * A `tool_use` block being streamed.
- *
- * Its arguments arrive as JSON fragments, so they cannot be held in
- * `ToolUseBlock.input` until the stream ends.
- */
-interface StreamedToolUse {
-  type: 'tool_use';
-  id: string;
-  name: string;
-  argsJson: string;
-}
-
-/** One content block of a streamed message, as far as it has arrived. */
-type StreamedBlock =
-  | TextBlock
-  | ThinkingBlock
-  | RedactedThinkingBlock
-  | StreamedToolUse;
-
-/**
- * Collects the content blocks of one streamed Claude message.
- *
- * Claude streams a message as indexed blocks, each arriving as a start event
- * followed by deltas. The accumulator keeps one entry per index so the final
- * aggregated response carries the same parts, in the same order, that the
- * equivalent non-streaming response would.
- */
-class StreamedMessage {
-  private readonly blocks = new Map<number, StreamedBlock>();
-  private usage: AnthropicUsageCounts = EMPTY_USAGE_COUNTS;
-  private stopReason: StopReason | null = null;
-
-  /**
-   * Merges the token counters a stream event reported.
-   *
-   * Every counter is cumulative, but a `message_delta` leaves the ones it has
-   * nothing new to say about `null`, so those keep their earlier value.
-   */
-  setUsage(usage: AnthropicUsageCounts): void {
-    this.usage = {
-      input_tokens: usage.input_tokens ?? this.usage.input_tokens,
-      cache_creation_input_tokens:
-        usage.cache_creation_input_tokens ??
-        this.usage.cache_creation_input_tokens,
-      cache_read_input_tokens:
-        usage.cache_read_input_tokens ?? this.usage.cache_read_input_tokens,
-      output_tokens: usage.output_tokens,
-      output_tokens_details:
-        usage.output_tokens_details ?? this.usage.output_tokens_details,
-    };
-  }
-
-  /** Records a stop reason, keeping an earlier one a later event omits. */
-  setStopReason(stopReason: StopReason | null): void {
-    if (stopReason) {
-      this.stopReason = stopReason;
-    }
-  }
-
-  startBlock(event: RawContentBlockStartEvent): void {
-    const block = event.content_block;
-    switch (block.type) {
-      case 'thinking':
-      case 'redacted_thinking':
-      case 'text':
-        this.blocks.set(event.index, block);
-        break;
-      case 'tool_use':
-        this.blocks.set(event.index, {
-          type: 'tool_use',
-          id: block.id,
-          name: block.name,
-          argsJson: '',
-        });
-        break;
-      default:
-        break;
-    }
-  }
-
-  /**
-   * Applies one delta event.
-   *
-   * A delta that carries the block's own payload seeds the block when no
-   * start event arrived; one that only annotates a block already there is
-   * skipped instead, because seeding from it would replace whichever block
-   * the annotation belongs to.
-   *
-   * @return The partial response to emit, or `undefined` when the delta only
-   *   accumulates state.
-   */
-  applyDelta(event: RawContentBlockDeltaEvent): LlmResponse | undefined {
-    const delta = event.delta;
-    switch (delta.type) {
-      case 'thinking_delta':
-        this.thinkingBlockAt(event.index).thinking += delta.thinking;
-        return {
-          content: {
-            role: 'model',
-            parts: [{text: delta.thinking, thought: true}],
-          },
-          partial: true,
-        };
-      case 'text_delta':
-        this.textBlockAt(event.index).text += delta.text;
-        return {
-          content: {role: 'model', parts: [{text: delta.text}]},
-          partial: true,
-        };
-      case 'signature_delta': {
-        // Claude sends the signature here, never in content_block_start.
-        // Without it the thinking block cannot be echoed back on the next
-        // turn, which extended thinking with tool use requires. It is opaque,
-        // so no partial is emitted for it.
-        const block = this.blocks.get(event.index);
-        if (block?.type === 'thinking') {
-          block.signature += delta.signature;
-        }
-        return undefined;
-      }
-      case 'input_json_delta': {
-        const block = this.blocks.get(event.index);
-        if (block?.type === 'tool_use') {
-          block.argsJson += delta.partial_json;
-        }
-        return undefined;
-      }
-      default:
-        return undefined;
-    }
-  }
-
-  /** Builds the single aggregated response that closes the stream. */
-  finalResponse(): LlmResponse {
-    const parts: Part[] = [...this.blocks]
-      .sort(([left], [right]) => left - right)
-      .map(([, block]) =>
-        block.type === 'tool_use'
-          ? toolUsePart(block)
-          : contentBlockToPart(block),
-      );
-    const response: LlmResponse = {
-      content: {role: 'model', parts},
-      usageMetadata: toUsageMetadata(this.usage),
-      partial: false,
-    };
-    const finishReason = toGenaiFinishReason(this.stopReason);
-    if (finishReason !== undefined) {
-      response.finishReason = finishReason;
-    }
-    return response;
-  }
-
-  /**
-   * Returns the text block at `index`, seeding an empty one when a delta
-   * arrives before the matching start event.
-   */
-  private textBlockAt(index: number): TextBlock {
-    const block = this.blocks.get(index);
-    if (block?.type === 'text') {
-      return block;
-    }
-    const seeded: TextBlock = {type: 'text', text: '', citations: null};
-    this.blocks.set(index, seeded);
-    return seeded;
-  }
-
-  /** The thinking counterpart of {@link StreamedMessage.textBlockAt}. */
-  private thinkingBlockAt(index: number): ThinkingBlock {
-    const block = this.blocks.get(index);
-    if (block?.type === 'thinking') {
-      return block;
-    }
-    const seeded: ThinkingBlock = {
-      type: 'thinking',
-      thinking: '',
-      signature: '',
-    };
-    this.blocks.set(index, seeded);
-    return seeded;
-  }
-}
-
-function toolUsePart(block: StreamedToolUse): Part {
-  return {
-    functionCall: {
-      id: block.id,
-      name: block.name,
-      args: parseToolUseArgs(block.argsJson),
-    },
-  };
 }
 
 /** Collects the function declarations of every tool on the request. */
@@ -426,34 +231,36 @@ function withRateLimitHelp(error: unknown): unknown {
   });
 }
 
-async function* streamResponses(
+/**
+ * The text one streamed delta adds.
+ *
+ * @return The part to emit, or `undefined` for a delta that carries no text a
+ *   reader can show, such as a thinking signature or a tool argument fragment.
+ */
+function deltaToPart(delta: RawContentBlockDelta): Part | undefined {
+  switch (delta.type) {
+    case 'text_delta':
+      return {text: delta.text};
+    case 'thinking_delta':
+      return {text: delta.thinking, thought: true};
+    default:
+      return undefined;
+  }
+}
+
+/** Yields one partial response per streamed delta that carries text. */
+async function* streamPartials(
   events: AsyncIterable<RawMessageStreamEvent>,
 ): AsyncGenerator<LlmResponse, void> {
-  const message = new StreamedMessage();
   for await (const event of events) {
-    switch (event.type) {
-      case 'message_start':
-        message.setUsage(event.message.usage);
-        break;
-      case 'content_block_start':
-        message.startBlock(event);
-        break;
-      case 'content_block_delta': {
-        const partial = message.applyDelta(event);
-        if (partial) {
-          yield partial;
-        }
-        break;
-      }
-      case 'message_delta':
-        message.setUsage(event.usage);
-        message.setStopReason(event.delta.stop_reason);
-        break;
-      default:
-        break;
+    const part =
+      event.type === 'content_block_delta'
+        ? deltaToPart(event.delta)
+        : undefined;
+    if (part) {
+      yield {content: {role: 'model', parts: [part]}, partial: true};
     }
   }
-  yield message.finalResponse();
 }
 
 /**
@@ -499,11 +306,15 @@ export class AnthropicLlm extends BaseLlm {
         return;
       }
 
-      const events = await client.messages.create(
-        {...params, stream: true},
-        {signal: abortSignal},
-      );
-      yield* streamResponses(events);
+      // `stream()` returns the SDK's own accumulator, so the aggregated
+      // message it reports is assembled by the same code the non-streaming
+      // path relies on.
+      const events = client.messages.stream(params, {signal: abortSignal});
+      yield* streamPartials(events);
+      yield {
+        ...messageToLlmResponse(await events.finalMessage()),
+        partial: false,
+      };
     } catch (error: unknown) {
       throw withRateLimitHelp(error);
     }
