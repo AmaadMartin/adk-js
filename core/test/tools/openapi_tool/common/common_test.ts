@@ -471,21 +471,6 @@ describe('generateReturnDoc', () => {
     expect(generateReturnDoc(responses)).toBe('Returns (string): 200 response');
   });
 
-  it('should keep the lowest 2xx status code when it comes first', () => {
-    const responses: OpenAPIV3.ResponsesObject = {
-      '200': {
-        description: '200 response',
-        content: {'application/json': {schema: {type: 'string'}}},
-      },
-      '201': {
-        description: '201 response',
-        content: {'application/json': {schema: {type: 'integer'}}},
-      },
-    };
-
-    expect(generateReturnDoc(responses)).toBe('Returns (string): 200 response');
-  });
-
   it('should skip a 2xx response that has no content', () => {
     const responses: OpenAPIV3.ResponsesObject = {
       '200': {description: 'No content response'},
@@ -554,6 +539,23 @@ describe('generateReturnDoc', () => {
 
     expect(generateReturnDoc(responses)).toBe(
       'Returns (string): Success range',
+    );
+  });
+
+  it('should prefer a numeric status code over a success range', () => {
+    const responses: OpenAPIV3.ResponsesObject = {
+      '2XX': {
+        description: 'Success range',
+        content: {'application/json': {schema: {type: 'object'}}},
+      },
+      '200': {
+        description: 'Successful response',
+        content: {'application/json': {schema: {type: 'string'}}},
+      },
+    };
+
+    expect(generateReturnDoc(responses)).toBe(
+      'Returns (string): Successful response',
     );
   });
 
