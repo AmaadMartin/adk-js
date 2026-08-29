@@ -148,15 +148,16 @@ describe('OpenAPIToolset Integration', () => {
       }),
     );
 
-    const mockContext = {
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-      requestCredential: vi.fn(),
-      state: {},
-    };
-
     const result = await getProfileTool.runAsync({
       args: {id: 'user1', service: 'myservice'},
-      toolContext: mockContext as unknown as Context,
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
     });
 
     expect(result).toEqual({status: 'success'});
