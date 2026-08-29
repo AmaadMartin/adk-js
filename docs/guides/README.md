@@ -6,6 +6,12 @@ implementation. For the official ADK documentation, visit
 
 ## Index
 
+### Auth
+
+- [BaseAuthCredentialExchanger](auth/credential_exchanger/index.md) - The
+  OpenAPI tool auth layer's exchange contract, and the error that reports a
+  missing credential.
+
 ### Tools
 
 - [adkToMcpToolType and geminiToJsonSchema](tools/mcp_conversion_utils/index.md) - Convert an ADK tool into an MCP tool descriptor so an MCP server can advertise it.

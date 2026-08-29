@@ -12,6 +12,7 @@ import {
 } from '../../../../auth/auth_credential.js';
 import {AuthScheme} from '../../../../auth/auth_schemes.js';
 import {
+  AuthCredentialMissingError,
   BaseCredentialExchanger,
   CredentialExchangeError,
   ExchangeResult,
@@ -88,7 +89,7 @@ export class ServiceAccountCredentialExchanger implements BaseCredentialExchange
   ): Promise<ExchangeResult> {
     const creds = saConfig.serviceAccountCredential;
     if (!creds) {
-      throw new CredentialExchangeError(
+      throw new AuthCredentialMissingError(
         'Service account credentials are missing.',
       );
     }
