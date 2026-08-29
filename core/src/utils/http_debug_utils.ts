@@ -19,6 +19,9 @@ import {AsyncLocalStorage} from 'node:async_hooks';
 /** Maximum number of exchanges one capture keeps. Further ones are dropped. */
 export const MAX_CAPTURED_EXCHANGES = 100;
 
+/** Key under which a capture reaches an invocation's custom metadata. */
+const HTTP_DEBUG_INFO_KEY = 'http_debug_info';
+
 /** Maximum number of characters kept from a request or response body. */
 const MAX_BODY_LENGTH = 1000;
 
@@ -183,4 +186,41 @@ export async function describeHttpExchange(
     requestBody: request.body,
     responseBody: await readResponseBody(response),
   };
+}
+
+/**
+ * Reads the exchanges recorded against an invocation, newest call last.
+ *
+ * The key and its shape live here rather than at each call site, so nobody
+ * has to cast their way out of the metadata record's `unknown` values.
+ *
+ * @param customMetadata The invocation's metadata record.
+ * @return The recorded exchanges, or an empty array when none were recorded.
+ */
+export function getHttpDebugInfo(
+  customMetadata: Record<string, unknown>,
+): HttpExchange[] {
+  const recorded = customMetadata[HTTP_DEBUG_INFO_KEY];
+  return Array.isArray(recorded) ? (recorded as HttpExchange[]) : [];
+}
+
+/**
+ * Appends `exchanges` to the invocation's recorded list, creating it on the
+ * first write. Later calls in the same invocation extend the list rather than
+ * replacing it, and the list is capped so that a long invocation cannot grow
+ * it without bound.
+ *
+ * @param customMetadata The invocation's metadata record, written in place.
+ * @param exchanges The exchanges captured during one operation.
+ */
+export function appendHttpDebugInfo(
+  customMetadata: Record<string, unknown>,
+  exchanges: HttpExchange[],
+): void {
+  if (exchanges.length === 0) {
+    return;
+  }
+  customMetadata[HTTP_DEBUG_INFO_KEY] = getHttpDebugInfo(customMetadata)
+    .concat(exchanges)
+    .slice(0, MAX_CAPTURED_EXCHANGES);
 }

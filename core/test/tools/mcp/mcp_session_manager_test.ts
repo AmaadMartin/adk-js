@@ -7,9 +7,15 @@
 import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {FetchLike} from '@modelcontextprotocol/sdk/shared/transport.js';
 import {PassThrough, Writable} from 'node:stream';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import {
+  HttpExchange,
+  runWithHttpDebugCapture,
+} from '../../../src/utils/http_debug_utils.js';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {logger} from '../../../src/utils/logger.js';
@@ -87,6 +93,7 @@ describe('MCPSessionManager', () => {
         requestInit: {
           headers: {'x-test-header': 'test-value'},
         },
+        fetch: expect.any(Function),
       },
     );
     expect(client.connect).toHaveBeenCalled();
@@ -109,6 +116,7 @@ describe('MCPSessionManager', () => {
         requestInit: {
           headers: {'x-test-header': 'test-value'},
         },
+        fetch: expect.any(Function),
       },
     );
   });
@@ -137,6 +145,7 @@ describe('MCPSessionManager', () => {
         requestInit: {
           headers: {'x-priority': 'headers'},
         },
+        fetch: expect.any(Function),
       },
     );
   });
@@ -159,6 +168,7 @@ describe('MCPSessionManager', () => {
       expect.any(URL),
       {
         requestInit: {},
+        fetch: expect.any(Function),
       },
     );
   });
@@ -438,6 +448,96 @@ describe('MCPSessionManager', () => {
       expect(errorSpy).not.toHaveBeenCalled();
 
       errorSpy.mockRestore();
+    });
+  });
+
+  describe('http debug capture', () => {
+    /** The fetch the manager installed on the last HTTP transport it built. */
+    function installedFetch(): FetchLike {
+      const options = vi
+        .mocked(StreamableHTTPClientTransport)
+        .mock.calls.at(-1)?.[1];
+      if (options?.fetch === undefined) {
+        expect.fail('the manager installed no fetch on the transport');
+      }
+      return options.fetch;
+    }
+
+    function httpManager(
+      transportOptions?: StreamableHTTPClientTransportOptions,
+    ): MCPSessionManager {
+      return new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions,
+      });
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('records an exchange while a capture is installed', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(new Response('{}', {status: 200})),
+      );
+      await httpManager().createSession();
+      const exchanges: HttpExchange[] = [];
+
+      await runWithHttpDebugCapture(exchanges, async () => {
+        await installedFetch()('http://test-url/mcp', {
+          method: 'POST',
+          headers: {authorization: 'Bearer super-secret'},
+          body: '{"method":"tools/list"}',
+        });
+      });
+
+      expect(exchanges).toHaveLength(1);
+      expect(exchanges[0].url).toBe('http://test-url/mcp');
+      expect(exchanges[0].method).toBe('POST');
+      expect(exchanges[0].requestHeaders['authorization']).toBe('<redacted>');
+      expect(exchanges[0].requestBody).toBe('{"method":"tools/list"}');
+    });
+
+    it('records nothing when no capture is installed', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(new Response('{}', {status: 200})),
+      );
+      await httpManager().createSession();
+      const exchanges: HttpExchange[] = [];
+
+      const response = await installedFetch()('http://test-url/mcp');
+
+      expect(response.status).toBe(200);
+      expect(exchanges).toHaveLength(0);
+    });
+
+    it('calls a caller-supplied fetch rather than replacing it', async () => {
+      const callerFetch = vi
+        .fn()
+        .mockResolvedValue(new Response('from caller', {status: 201}));
+      await httpManager({fetch: callerFetch}).createSession();
+      const exchanges: HttpExchange[] = [];
+
+      const response = await runWithHttpDebugCapture(exchanges, () =>
+        installedFetch()('http://test-url/mcp'),
+      );
+
+      expect(callerFetch).toHaveBeenCalledOnce();
+      expect(await response.text()).toBe('from caller');
+      expect(exchanges[0].statusCode).toBe(201);
+    });
+
+    it('leaves the caller transport options unwrapped between sessions', async () => {
+      const transportOptions: StreamableHTTPClientTransportOptions = {};
+      const manager = httpManager(transportOptions);
+
+      await manager.createSession();
+      await manager.createSession();
+
+      expect(transportOptions.fetch).toBeUndefined();
     });
   });
 });
