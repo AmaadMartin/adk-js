@@ -103,6 +103,152 @@ function parseOperationJson(json: string): OpenAPIV3.OperationObject {
   return parsed;
 }
 
+/** The TypeScript type name each OpenAPI scalar type maps onto. */
+const SCALAR_TYPE_HINTS = new Map([
+  ['string', 'string'],
+  ['integer', 'number'],
+  ['number', 'number'],
+  ['boolean', 'boolean'],
+  ['object', 'Record<string, unknown>'],
+]);
+
+/** The type name used for a schema this mapping does not cover. */
+const UNKNOWN_TYPE_HINT = 'unknown';
+
+/** Indent of an argument line in the `Args:` section. */
+const ARG_INDENT = ' '.repeat(8);
+
+/** Indent of an object property line inside an argument's documentation. */
+const PARAM_PROPERTY_INDENT = ' '.repeat(7);
+
+/** Indent of an object property line inside the return documentation. */
+const RETURN_PROPERTY_INDENT = ' '.repeat(8);
+
+/**
+ * Returns the single type name a schema declares.
+ *
+ * OpenAPI 3.1 allows a list of types. A list that names one type besides
+ * `null` describes that type; any other list is ambiguous and names nothing.
+ */
+function schemaTypeName(schema: OpenAPIV3.SchemaObject): string {
+  const declared: unknown = schema.type;
+  if (Array.isArray(declared)) {
+    const named = declared.filter((entry) => entry !== 'null');
+    return named.length === 1 && typeof named[0] === 'string' ? named[0] : '';
+  }
+  return typeof declared === 'string' ? declared : '';
+}
+
+/**
+ * Replaces a `$ref` with an empty schema. The operation reaches this parser
+ * already resolved, so an unresolved reference carries no type to describe.
+ */
+function schemaOrEmpty(
+  schema: OpenAPIV3.ReferenceObject | OpenAPIV3.SchemaObject | undefined,
+): OpenAPIV3.SchemaObject {
+  return !schema || '$ref' in schema ? {} : schema;
+}
+
+/**
+ * Returns the TypeScript type name that describes an OpenAPI schema.
+ *
+ * @param schema The schema to describe.
+ * @returns A TypeScript type name, or `unknown` when the schema declares no
+ *   type this mapping covers.
+ */
+function typeHint(schema: OpenAPIV3.SchemaObject): string {
+  const typeName = schemaTypeName(schema);
+  if (typeName === 'array') {
+    const items = 'items' in schema ? schemaOrEmpty(schema.items) : {};
+    const itemHint =
+      SCALAR_TYPE_HINTS.get(schemaTypeName(items)) ?? UNKNOWN_TYPE_HINT;
+    return `${itemHint}[]`;
+  }
+  return SCALAR_TYPE_HINTS.get(typeName) ?? UNKNOWN_TYPE_HINT;
+}
+
+/**
+ * Documents the properties of an object schema, one indented line each.
+ * Returns an empty string for any other schema.
+ */
+function objectPropertiesDoc(
+  schema: OpenAPIV3.SchemaObject,
+  indent: string,
+): string {
+  const properties =
+    schemaTypeName(schema) === 'object' ? (schema.properties ?? {}) : {};
+  const names = Object.keys(properties);
+  if (names.length === 0) {
+    return '';
+  }
+  let doc = ' Object properties:\n';
+  for (const name of names) {
+    const property = schemaOrEmpty(properties[name]);
+    doc += `${indent}${name} (${typeHint(property)}): ${property.description ?? ''}\n`;
+  }
+  return doc;
+}
+
+/**
+ * Documents one tool argument, so the model learns its name, type and purpose.
+ *
+ * @param param The parsed parameter to document.
+ * @returns The documentation line, plus a property block for an object schema.
+ */
+function parameterDoc(param: ApiParameter): string {
+  const description = (param.description ?? '').trim();
+  const doc = `${param.name} (${typeHint(param.paramSchema)}): ${description}`;
+  return doc + objectPropertiesDoc(param.paramSchema, PARAM_PROPERTY_INDENT);
+}
+
+/**
+ * The order a response status sorts in. Numeric statuses sort ascending and
+ * before the non-numeric ones OpenAPI also allows, such as `default` and
+ * `2XX`.
+ */
+function statusOrder(status: string): number {
+  return /^\d+$/.test(status) ? Number(status) : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Documents what an operation returns, taking the 2xx response with the
+ * smallest status code that carries content.
+ *
+ * This selection is stricter than the one `processReturnValue` makes: the
+ * documentation needs a response that describes something, while the return
+ * value tracks the lowest 2xx response whether or not it has content.
+ *
+ * @param responses The responses the operation declares.
+ * @returns The return documentation, or an empty string when no 2xx response
+ *   carries a schema.
+ */
+function returnDoc(responses: OpenAPIV3.ResponsesObject): string {
+  const sorted = Object.entries(responses).sort(
+    ([left], [right]) => statusOrder(left) - statusOrder(right),
+  );
+
+  for (const [status, response] of sorted) {
+    if (!status.startsWith('2') || '$ref' in response) {
+      continue;
+    }
+    const content = response.content ?? {};
+    const mediaType = content['application/json'] ?? Object.values(content)[0];
+    if (!mediaType) {
+      continue;
+    }
+    if (!mediaType.schema) {
+      return '';
+    }
+    const schema = schemaOrEmpty(mediaType.schema);
+    const description = (response.description ?? '').trim();
+    return (
+      `Returns (${typeHint(schema)}): ${description}` +
+      objectPropertiesDoc(schema, RETURN_PROPERTY_INDENT)
+    );
+  }
+  return '';
+}
+
 /** Builds the return value that carries a response schema. */
 function returnValueOf(paramSchema: OpenAPIV3.SchemaObject): ApiParameter {
   return {
@@ -287,6 +433,32 @@ export class OperationParser {
   @experimental
   public getAuthSchemeName(): string {
     return requiredSchemeName(this.operation.security);
+  }
+
+  /**
+   * Documents the operation: a heading, every argument, and what it returns.
+   *
+   * This is adk-python's `get_pydoc_string` without the triple quotes, which
+   * only exist because Python generates source text from it. The heading
+   * prefers the summary, while `getDescription()` prefers the description;
+   * adk-python orders the two the same opposite way.
+   *
+   * @returns The documentation text. The `Returns` section is absent when no
+   *   2xx response carries a schema.
+   */
+  @experimental
+  public getDocString(): string {
+    const heading = this.operation.summary || this.operation.description || '';
+    const args = this.params
+      .map((param) => `${ARG_INDENT}${parameterDoc(param)}`)
+      .join('\n');
+    const returns = returnDoc(this.operation.responses || {});
+
+    const sections = [heading, args ? `Args:\n${args}` : 'Args:'];
+    if (returns) {
+      sections.push(returns);
+    }
+    return sections.join('\n\n').trim();
   }
 
   /**

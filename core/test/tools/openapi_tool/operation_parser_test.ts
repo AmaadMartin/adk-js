@@ -642,6 +642,263 @@ describe('OperationParser parity with adk-python', () => {
     });
   });
 
+  describe('doc string', () => {
+    const documented: OpenAPIV3.OperationObject = {
+      operationId: 'createThing',
+      summary: 'Creates a thing.',
+      description: 'A longer description.',
+      parameters: [
+        {
+          name: 'param1',
+          in: 'query',
+          description: 'Parameter 1',
+          schema: {type: 'string'},
+        },
+        {
+          name: 'param2',
+          in: 'query',
+          description: 'Parameter 2',
+          schema: {type: 'integer'},
+        },
+      ],
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                prop1: {type: 'string', description: 'Property 1'},
+                prop2: {type: 'boolean', description: 'Property 2'},
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        '200': {
+          description: 'The created thing.',
+          content: {'application/json': {schema: {type: 'string'}}},
+        },
+      },
+    };
+
+    it('should document the heading, every argument and the return', () => {
+      const doc = new OperationParser(documented).getDocString();
+
+      expect(doc).toContain('Creates a thing.');
+      expect(doc).toContain('Args:');
+      expect(doc).toContain('param1 (string): Parameter 1');
+      expect(doc).toContain('param2 (number): Parameter 2');
+      expect(doc).toContain('prop1 (string): Property 1');
+      expect(doc).toContain('prop2 (boolean): Property 2');
+      expect(doc).toContain('Returns (string): The created thing.');
+    });
+
+    it('should prefer the summary while getDescription prefers the description', () => {
+      const parser = new OperationParser(documented);
+
+      expect(parser.getDocString().startsWith('Creates a thing.')).toBe(true);
+      expect(parser.getDescription()).toBe('A longer description.');
+    });
+
+    it('should fall back to the description when there is no summary', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        description: 'Only a description.',
+        responses: {},
+      }).getDocString();
+
+      expect(doc.startsWith('Only a description.')).toBe(true);
+    });
+
+    it('should use an empty heading when there is neither', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        responses: {},
+      }).getDocString();
+
+      expect(doc).toBe('Args:');
+    });
+
+    it('should omit the Returns section when no 2xx response qualifies', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        summary: 'No content.',
+        responses: {'404': {description: 'missing'}},
+      }).getDocString();
+
+      expect(doc).not.toContain('Returns');
+    });
+
+    it('should omit the Returns section when the 2xx response has no content', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        responses: {'204': {description: 'no content'}},
+      }).getDocString();
+
+      expect(doc).not.toContain('Returns');
+    });
+
+    it('should omit the Returns section when the media type has no schema', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        responses: {
+          '200': {description: 'ok', content: {'application/json': {}}},
+        },
+      }).getDocString();
+
+      expect(doc).not.toContain('Returns');
+    });
+
+    it('should render the property block of an object-typed parameter', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        parameters: [
+          {
+            name: 'filter',
+            in: 'query',
+            description: 'A filter',
+            schema: {
+              type: 'object',
+              properties: {since: {type: 'string', description: 'Lower bound'}},
+            },
+          },
+        ],
+        responses: {},
+      }).getDocString();
+
+      expect(doc).toContain(
+        'filter (Record<string, unknown>): A filter Object properties:',
+      );
+      expect(doc).toContain('since (string): Lower bound');
+    });
+
+    it('should render the property block of an object-typed response', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        responses: {
+          '200': {
+            description: 'A thing.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {id: {type: 'integer', description: 'The id'}},
+                },
+              },
+            },
+          },
+        },
+      }).getDocString();
+
+      expect(doc).toContain(
+        'Returns (Record<string, unknown>): A thing. Object properties:',
+      );
+      expect(doc).toContain('id (number): The id');
+    });
+
+    it('should prefer application/json over another media type', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        responses: {
+          '200': {
+            description: 'ok',
+            content: {
+              'text/plain': {schema: {type: 'boolean'}},
+              'application/json': {schema: {type: 'string'}},
+            },
+          },
+        },
+      }).getDocString();
+
+      expect(doc).toContain('Returns (string): ok');
+    });
+
+    it('should use the first media type when there is no application/json', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        responses: {
+          '200': {
+            description: 'ok',
+            content: {'text/plain': {schema: {type: 'boolean'}}},
+          },
+        },
+      }).getDocString();
+
+      expect(doc).toContain('Returns (boolean): ok');
+    });
+
+    it('should sort a numeric status before 2XX', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        responses: {
+          '2XX': {
+            description: 'range',
+            content: {'application/json': {schema: {type: 'boolean'}}},
+          },
+          '201': {
+            description: 'created',
+            content: {'application/json': {schema: {type: 'string'}}},
+          },
+        },
+      }).getDocString();
+
+      expect(doc).toContain('Returns (string): created');
+    });
+
+    it('should skip a referenced response', () => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        responses: {
+          '200': {$ref: '#/components/responses/Thing'},
+          '201': {
+            description: 'created',
+            content: {'application/json': {schema: {type: 'string'}}},
+          },
+        },
+      }).getDocString();
+
+      expect(doc).toContain('Returns (string): created');
+    });
+
+    it.each([
+      ['a string', {type: 'string'}, 'string'],
+      ['an integer', {type: 'integer'}, 'number'],
+      ['a number', {type: 'number'}, 'number'],
+      ['a boolean', {type: 'boolean'}, 'boolean'],
+      ['an object', {type: 'object'}, 'Record<string, unknown>'],
+      [
+        'an array of strings',
+        {type: 'array', items: {type: 'string'}},
+        'string[]',
+      ],
+      [
+        'an array of objects',
+        {type: 'array', items: {type: 'object'}},
+        'Record<string, unknown>[]',
+      ],
+      ['an array with no items', {type: 'array'}, 'unknown[]'],
+      [
+        'an array of arrays',
+        {type: 'array', items: {type: 'array', items: {type: 'string'}}},
+        'unknown[]',
+      ],
+      ['a nullable string', {type: ['string', 'null']}, 'string'],
+      ['an ambiguous union', {type: ['string', 'integer']}, 'unknown'],
+      ['a typeless schema', {}, 'unknown'],
+    ])('should type-hint %s', (_label, schema, hint) => {
+      const doc = new OperationParser({
+        operationId: 'testOp',
+        parameters: [
+          {name: 'v', in: 'query', schema: schema as OpenAPIV3.SchemaObject},
+        ],
+        responses: {},
+      }).getDocString();
+
+      expect(doc).toContain(`v (${hint}):`);
+    });
+  });
+
   describe('JSON string operation', () => {
     const operation: OpenAPIV3.OperationObject = {
       operationId: 'getUser',
