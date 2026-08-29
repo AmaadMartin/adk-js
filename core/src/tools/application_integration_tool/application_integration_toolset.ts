@@ -11,7 +11,6 @@ import {
   AuthCredentialTypes,
 } from '../../auth/auth_credential.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
-import {AuthConfig} from '../../auth/auth_tool.js';
 import {InputValidationError} from '../../errors/input_validation_error.js';
 import {experimental} from '../../utils/experimental.js';
 import {asJsonObject} from '../../utils/json_utils.js';
@@ -120,18 +119,6 @@ export interface ApplicationIntegrationToolsetOptions {
  */
 @experimental
 export class ApplicationIntegrationToolset extends BaseToolset {
-  /**
-   * End-user auth this toolset asks the framework to prepare, present only
-   * when the caller supplied an `authScheme`.
-   *
-   * The framework writes `exchangedAuthCredential` onto this object in place,
-   * and the next `getTools` call hands that credential to the generated tools.
-   * adk-python keeps the equivalent field private and its test reaches into
-   * it; adk-js forbids a test from reaching into a private member, so the
-   * field is public here.
-   */
-  readonly authConfig?: AuthConfig;
-
   private readonly options: ApplicationIntegrationToolsetOptions;
   private readonly integrationClient: IntegrationClient;
   /** Scheme and credential every generated tool calls the API with. */
@@ -142,11 +129,6 @@ export class ApplicationIntegrationToolset extends BaseToolset {
   private initialization?: Promise<void>;
   private openapiToolset?: OpenAPIToolset;
   private tools: IntegrationConnectorTool[] = [];
-  /** End-user auth the connection accepted, resolved during initialization. */
-  private endUserAuth: {
-    authScheme?: AuthScheme;
-    authCredential?: AuthCredential;
-  } = {};
 
   /**
    * @throws {InputValidationError} If neither an integration nor a connection
@@ -181,13 +163,6 @@ export class ApplicationIntegrationToolset extends BaseToolset {
     };
     this.options = options;
     this.integrationClient = new IntegrationClient(options);
-    if (options.authScheme) {
-      this.authConfig = {
-        authScheme: options.authScheme,
-        rawAuthCredential: options.authCredential,
-        credentialKey: options.credentialKey ?? '',
-      };
-    }
   }
 
   @experimental
@@ -198,16 +173,7 @@ export class ApplicationIntegrationToolset extends BaseToolset {
       return this.openapiToolset.getTools(context);
     }
 
-    const selected = this.tools.filter((tool) =>
-      this.isToolSelected(tool, context),
-    );
-    const exchanged = this.authConfig?.exchangedAuthCredential;
-    if (!exchanged || !this.endUserAuth.authScheme) {
-      return selected;
-    }
-    // The built tools keep the raw credential, so a later exchange starts from
-    // it again instead of from a token that has since expired.
-    return selected.map((tool) => tool.withAuthCredential(exchanged));
+    return this.tools.filter((tool) => this.isToolSelected(tool, context));
   }
 
   /**
@@ -258,7 +224,7 @@ export class ApplicationIntegrationToolset extends BaseToolset {
       this.options.toolInstructions ?? '',
     );
 
-    this.endUserAuth = this.resolveEndUserAuth(connectionDetails);
+    const endUserAuth = this.resolveEndUserAuth(connectionDetails);
     this.tools = new OpenApiSpecParser().parse(spec).map((parsed) => {
       const restApiTool = createRestApiTool(parsed, {
         credentialKey: serviceIdentityCredentialKey(this.options.credentialKey),
@@ -276,8 +242,8 @@ export class ApplicationIntegrationToolset extends BaseToolset {
         operation:
           readOperationExtension(parsed.operation, 'x-operation') ?? '',
         restApiTool,
-        authScheme: this.endUserAuth.authScheme,
-        authCredential: this.endUserAuth.authCredential,
+        authScheme: endUserAuth.authScheme,
+        authCredential: endUserAuth.authCredential,
         credentialKey: this.options.credentialKey,
       });
     });

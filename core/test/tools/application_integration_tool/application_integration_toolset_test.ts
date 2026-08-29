@@ -18,7 +18,6 @@ import {
   InvocationContext,
   OpenAPIToolset,
   PluginManager,
-  ReadonlyContext,
   RestApiTool,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
@@ -376,7 +375,7 @@ describe('ApplicationIntegrationToolset', () => {
         toolFilter: (tool) => tool.name === 'run_first_trigger',
       });
 
-      const tools = await toolset.getTools({} as ReadonlyContext);
+      const tools = await toolset.getTools(createContext());
 
       expect(tools.map((tool) => tool.name)).toEqual(['run_first_trigger']);
     });
@@ -597,58 +596,6 @@ describe('ApplicationIntegrationToolset', () => {
         'Authentication schema and credentials are not used because' +
           ' authOverrideEnabled is not enabled in the connection.',
       );
-    });
-
-    it('serves an exchanged credential from a copy of the built tool', async () => {
-      getConnectionDetails.mockResolvedValue({
-        ...CONNECTION_DETAILS,
-        authOverrideEnabled: true,
-      });
-      const toolset = createToolset({
-        authScheme: END_USER_SCHEME,
-        authCredential: END_USER_CREDENTIAL,
-      });
-      const [original] = await toolset.getTools();
-
-      if (!toolset.authConfig) {
-        expect.fail('the toolset published no auth config');
-      }
-      toolset.authConfig.exchangedAuthCredential = bearer('exchanged-token');
-      const [resolved] = await toolset.getTools();
-
-      expect(resolved).not.toBe(original);
-      expect(
-        (await runAndCaptureArgs(asConnectorTool(resolved)))[
-          'dynamic_auth_config'
-        ],
-      ).toEqual({'oauth2_auth_code_flow.access_token': 'exchanged-token'});
-      // The built tool keeps the raw credential, so a later exchange starts
-      // from it rather than from a token that has since expired.
-      expect(
-        (await runAndCaptureArgs(asConnectorTool(original)))[
-          'dynamic_auth_config'
-        ],
-      ).toEqual({'oauth2_auth_code_flow.access_token': 'raw-user-token'});
-    });
-
-    it('publishes no auth config when the caller supplied no scheme', async () => {
-      expect(createToolset().authConfig).toBeUndefined();
-    });
-
-    it('serves the built tools when the override dropped the scheme', async () => {
-      const toolset = createToolset({
-        authScheme: END_USER_SCHEME,
-        authCredential: END_USER_CREDENTIAL,
-      });
-      vi.spyOn(logger, 'warn').mockImplementation(() => {});
-      const [original] = await toolset.getTools();
-
-      if (!toolset.authConfig) {
-        expect.fail('the toolset published no auth config');
-      }
-      toolset.authConfig.exchangedAuthCredential = bearer('exchanged-token');
-
-      expect((await toolset.getTools())[0]).toBe(original);
     });
   });
 

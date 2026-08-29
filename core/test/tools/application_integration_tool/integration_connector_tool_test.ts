@@ -276,35 +276,4 @@ describe('IntegrationConnectorTool', () => {
       expect(parameters?.required).toBeUndefined();
     });
   });
-
-  describe('withAuthCredential', () => {
-    it('returns a copy that uses the given credential', async () => {
-      const restApiTool = createWrappedTool();
-      const delegated = vi.fn().mockResolvedValue({ok: true});
-      restApiTool.runAsync = delegated;
-      const {tool} = createTool({
-        restApiTool,
-        authScheme: BEARER_SCHEME,
-        authCredential: {
-          authType: AuthCredentialTypes.HTTP,
-          http: {scheme: 'bearer', credentials: {token: 'raw-token'}},
-        },
-      });
-
-      const exchanged = tool.withAuthCredential({
-        authType: AuthCredentialTypes.HTTP,
-        http: {scheme: 'bearer', credentials: {token: 'exchanged-token'}},
-      });
-      await exchanged.runAsync({args: {}, toolContext: createContext()});
-
-      expect(exchanged).not.toBe(tool);
-      expect(exchanged.name).toBe(tool.name);
-      const [{args}] = delegated.mock.calls[0] as [
-        {args: Record<string, unknown>},
-      ];
-      expect(args['dynamic_auth_config']).toEqual({
-        'oauth2_auth_code_flow.access_token': 'exchanged-token',
-      });
-    });
-  });
 });

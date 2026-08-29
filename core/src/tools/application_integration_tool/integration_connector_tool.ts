@@ -85,18 +85,6 @@ export class IntegrationConnectorTool extends BaseTool {
     this.options = options;
   }
 
-  /**
-   * Returns a copy of this tool that calls with `authCredential` instead of
-   * the credential it was built with.
-   *
-   * The toolset calls this once the framework exchanges the end-user
-   * credential, so that this tool keeps the raw one.
-   */
-  @experimental
-  withAuthCredential(authCredential: AuthCredential): IntegrationConnectorTool {
-    return new IntegrationConnectorTool({...this.options, authCredential});
-  }
-
   @experimental
   override _getDeclaration(): FunctionDeclaration {
     const schema = this.options.restApiTool.getJsonSchema();
