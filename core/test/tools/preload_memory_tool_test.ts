@@ -93,7 +93,7 @@ describe('PreloadMemoryTool', () => {
     expect(llmRequest.config?.systemInstruction).toBeUndefined();
   });
 
-  it('appends system instructions with formatted memory if memories found', async () => {
+  it('inserts formatted memory into contents if memories found', async () => {
     const toolContext = new StubToolContext([
       {
         content: {role: 'user', parts: [{text: 'My dog is Fido.'}]},
@@ -115,14 +115,15 @@ describe('PreloadMemoryTool', () => {
     const tool = new PreloadMemoryTool();
     await tool.processLlmRequest({toolContext, llmRequest});
 
-    const instructions = llmRequest.config?.systemInstruction;
-    expect(instructions).toBeDefined();
+    expect(llmRequest.config?.systemInstruction).toBeUndefined();
+    expect(llmRequest.contents).toHaveLength(1);
 
     // Verify it contains the formatted lines
-    expect(instructions).toContain('Time: 2023-01-01T12:00:00Z');
-    expect(instructions).toContain('user: My dog is Fido.');
-    expect(instructions).toContain('model: I will remember that.');
-    expect(instructions).toContain('<PAST_CONVERSATIONS>');
+    const memoryText = llmRequest.contents[0].parts?.[0]?.text;
+    expect(memoryText).toContain('Time: 2023-01-01T12:00:00Z');
+    expect(memoryText).toContain('user: My dog is Fido.');
+    expect(memoryText).toContain('model: I will remember that.');
+    expect(memoryText).toContain('<PAST_CONVERSATIONS>');
   });
 
   it('handles searchMemory throwing an error gracefully', async () => {
