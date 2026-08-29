@@ -41,3 +41,42 @@ export interface BaseCredentialExchanger {
     authCredential: AuthCredential;
   }): Promise<ExchangeResult>;
 }
+
+/**
+ * Error raised when a required authentication credential is missing.
+ *
+ * This error is separate from {@link CredentialExchangeError}: a caller that
+ * catches an exchange failure does not catch a missing credential.
+ */
+export class AuthCredentialMissingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthCredentialMissingError';
+  }
+}
+
+/**
+ * Base class for authentication credential exchangers.
+ *
+ * A subclass turns the credential an OpenAPI tool was configured with into a
+ * credential the request can send.
+ */
+export abstract class BaseAuthCredentialExchanger {
+  /**
+   * Exchanges the provided authentication credential for a usable
+   * token/credential.
+   *
+   * @param _authScheme The security scheme.
+   * @param _authCredential The authentication credential.
+   * @returns The exchanged credential, the original credential when the scheme
+   *     needs no exchange, or `undefined` when no request-ready credential
+   *     exists yet.
+   * @throws {Error} If a subclass does not implement this method.
+   */
+  async exchangeCredential(
+    _authScheme: AuthScheme,
+    _authCredential?: AuthCredential,
+  ): Promise<AuthCredential | undefined> {
+    throw new Error('Subclasses must implement exchangeCredential.');
+  }
+}
