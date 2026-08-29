@@ -1182,6 +1182,9 @@ const API_KEY_CREDENTIAL: AuthCredential = {
   apiKey: 'sk-live-secret-api-key-12345',
 };
 
+/** An array is not an error result, even when it carries an `error` key. */
+const ERROR_ARRAY: string[] = Object.assign([], {error: 'boom'});
+
 /** Stubs `fetch` with a response whose body is `body`. */
 function stubFetch(body: string, contentType = 'application/json'): void {
   globalThis.fetch = vi.fn().mockResolvedValue({
@@ -1330,6 +1333,7 @@ describe('RestApiTool.detectErrorInResponse', () => {
     ['an empty error', {error: ''}, undefined],
     ['a success object', {result: 'ok'}, undefined],
     ['a string', 'a string', undefined],
+    ['an array carrying an error property', ERROR_ARRAY, undefined],
     ['null', null, undefined],
     ['undefined', undefined, undefined],
     ['an array', ['error'], undefined],
