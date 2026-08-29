@@ -9,6 +9,7 @@
  * barrel. Also re-exported from `@google/adk`.
  */
 
+export * from './conversion_utils.js';
 export * from './load_mcp_resource_tool.js';
 export * from './mcp_session_manager.js';
 export * from './mcp_tool.js';
