@@ -5,8 +5,9 @@
  */
 
 import type {BaseExampleProvider} from '../examples/base_example_provider.js';
+import {isBaseExampleProvider} from '../examples/base_example_provider.js';
 import type {Example} from '../examples/example.js';
-import {buildExampleSi} from '../examples/example_util.js';
+import {buildExampleSi, validateExamples} from '../examples/example_util.js';
 import {appendInstructions} from '../models/llm_request.js';
 
 import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
@@ -38,18 +39,34 @@ export function isExampleTool(obj: unknown): obj is ExampleTool {
  * This tool is executed for each LLM request and is never called by the model;
  * it only mutates the outgoing request by appending few-shot instructions built
  * from the latest user query.
+ *
+ * The constructor checks `examples` at runtime, so a malformed value fails
+ * where it is supplied rather than on every later LLM request.
  */
 export class ExampleTool extends BaseTool {
   /** A unique symbol to identify ADK example tool class. */
   readonly [EXAMPLE_TOOL_SIGNATURE_SYMBOL] = true;
 
-  constructor(readonly examples: Example[] | BaseExampleProvider) {
+  /** The examples to add to the LLM request. */
+  readonly examples: Example[] | BaseExampleProvider;
+
+  /**
+   * @param examples - A list of {@link Example}s, or a
+   *   {@link BaseExampleProvider} that returns them for a query.
+   * @throws {InputValidationError} When `examples` is neither a
+   *   {@link BaseExampleProvider} nor a list of well-formed examples.
+   */
+  constructor(examples: Example[] | BaseExampleProvider) {
     super({
       // Name and description are not used because this tool only changes
       // llmRequest.
       name: 'example_tool',
       description: 'example tool',
     });
+    if (!isBaseExampleProvider(examples)) {
+      validateExamples(examples);
+    }
+    this.examples = examples;
   }
 
   override async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
