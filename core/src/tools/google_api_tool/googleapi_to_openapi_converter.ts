@@ -510,31 +510,28 @@ export function convertDiscoveryDocument(
   return document;
 }
 
-/** The document a converter holds before it has fetched anything. */
-function emptyOpenApiDocument(): OpenAPIV3.Document {
-  return {
-    openapi: '3.0.0',
-    info: {title: '', version: ''},
-    servers: [],
-    paths: {},
-    components: {schemas: {}, securitySchemes: {}},
-  };
-}
-
 /**
  * Converts a Google API Discovery document to an OpenAPI 3.0 document.
  *
+ * The document is fetched once, on the first `convert()` or `saveOpenApiSpec()`.
+ *
  * @example
  * ```ts
- * const spec = await new GoogleApiToOpenApiConverter('calendar', 'v3').convert();
+ * const converter = new GoogleApiToOpenApiConverter('calendar', 'v3');
+ * const spec = await converter.convert();
+ * await converter.saveOpenApiSpec('calendar_openapi.json');
  * ```
+ *
+ * Set `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` to present the SecureConnect
+ * client certificate. The converter then reads the discovery document from
+ * `www.mtls.googleapis.com` and prefers the document's `mtlsRootUrl` server.
  */
 @experimental
 export class GoogleApiToOpenApiConverter {
   private readonly discoveryUrl?: string;
   private readonly useClientCert: boolean;
   private googleApiSpec?: DiscoveryDocument;
-  private openApiSpec: OpenAPIV3.Document = emptyOpenApiDocument();
+  private openApiSpec?: OpenAPIV3.Document;
 
   /**
    * @param apiName The Discovery API id, e.g. `calendar`.
@@ -552,12 +549,6 @@ export class GoogleApiToOpenApiConverter {
     this.useClientCert = useClientCertEffective();
   }
 
-  /** Fetches the Discovery document and stores it on the instance. */
-  @experimental
-  async fetchGoogleApiSpec(): Promise<void> {
-    this.googleApiSpec = await this.fetchDocument();
-  }
-
   /** Fetches the Discovery document if needed, and converts it. */
   @experimental
   async convert(): Promise<OpenAPIV3.Document> {
@@ -573,18 +564,13 @@ export class GoogleApiToOpenApiConverter {
   }
 
   /**
-   * Writes the OpenAPI document the converter holds to `outputPath` as JSON.
-   *
-   * It writes what is there now, so call {@link convert} first. Before that it
-   * writes the empty OpenAPI 3.0 skeleton.
+   * Writes the OpenAPI document to `outputPath` as JSON, indented by two
+   * spaces. It converts first when {@link convert} has not run yet.
    */
   @experimental
   async saveOpenApiSpec(outputPath: string): Promise<void> {
-    await fs.writeFile(
-      outputPath,
-      JSON.stringify(this.openApiSpec, null, 2),
-      'utf-8',
-    );
+    const spec = this.openApiSpec ?? (await this.convert());
+    await fs.writeFile(outputPath, JSON.stringify(spec, null, 2), 'utf-8');
     logger.debug(`OpenAPI specification saved to ${outputPath}`);
   }
 

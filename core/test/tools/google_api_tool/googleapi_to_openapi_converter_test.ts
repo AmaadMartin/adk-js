@@ -833,14 +833,14 @@ describe('GoogleApiToOpenApiConverter', () => {
     expect(requestMock).toHaveBeenCalledTimes(1);
   });
 
-  it('converts a document fetched by fetchGoogleApiSpec', async () => {
+  it('leaves no document behind when the fetch fails', async () => {
+    respondWith(requestMock, {statusCode: 500, body: '{}'});
     const converter = new GoogleApiToOpenApiConverter('calendar', 'v3');
 
-    await converter.fetchGoogleApiSpec();
-    const spec = await converter.convert();
+    await expect(converter.convert()).rejects.toThrow('HTTP 500');
 
-    expect(requestMock).toHaveBeenCalledTimes(1);
-    expect(spec.info.title).toBe('Google Calendar API');
+    stubDiscoveryResponse(CALENDAR_DISCOVERY_DOCUMENT);
+    expect((await converter.convert()).info.title).toBe('Google Calendar API');
   });
 
   describe('with a client certificate', () => {
@@ -951,20 +951,29 @@ describe('GoogleApiToOpenApiConverter', () => {
       expect(written).toBe(JSON.stringify(spec, null, 2));
     });
 
-    it('writes the empty skeleton before anything is converted', async () => {
-      const outputPath = path.join(outputDir, 'empty.json');
+    it('converts on demand when saving before converting', async () => {
+      const outputPath = path.join(outputDir, 'lazy.json');
 
       await new GoogleApiToOpenApiConverter('calendar', 'v3').saveOpenApiSpec(
         outputPath,
       );
 
-      expect(JSON.parse(await fs.readFile(outputPath, 'utf-8'))).toEqual({
-        openapi: '3.0.0',
-        info: {title: '', version: ''},
-        servers: [],
-        paths: {},
-        components: {schemas: {}, securitySchemes: {}},
-      });
+      const written = JSON.parse(await fs.readFile(outputPath, 'utf-8'));
+      expect(written.info.title).toBe('Google Calendar API');
+      expect(Object.keys(written.paths).length).toBeGreaterThan(0);
+    });
+
+    it('writes the document convert returned, not a fresh conversion', async () => {
+      const outputPath = path.join(outputDir, 'held.json');
+      const converter = new GoogleApiToOpenApiConverter('calendar', 'v3');
+      const spec = await converter.convert();
+      spec.info.title = 'Edited in place';
+
+      await converter.saveOpenApiSpec(outputPath);
+
+      const written = JSON.parse(await fs.readFile(outputPath, 'utf-8'));
+      expect(written.info.title).toBe('Edited in place');
+      expect(requestMock).toHaveBeenCalledTimes(1);
     });
   });
 });

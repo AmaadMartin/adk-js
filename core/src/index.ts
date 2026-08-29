@@ -51,12 +51,6 @@ export {
   validateSkillDir,
 } from './skills/loader.js';
 export {
-  DEFAULT_DISCOVERY_URL,
-  MTLS_DISCOVERY_URL,
-  fetchDiscoveryDocument,
-  resolveDiscoveryUrl,
-} from './tools/google_api_tool/discovery_document.js';
-export {
   GoogleApiToOpenApiConverter,
   convertDiscoveryDocument,
 } from './tools/google_api_tool/googleapi_to_openapi_converter.js';
@@ -65,11 +59,6 @@ export {
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
-export {
-  loadDefaultClientCerts,
-  useClientCertEffective,
-} from './utils/mtls_utils.js';
-export type {MtlsClientCerts} from './utils/mtls_utils.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/google_cloud.js';
