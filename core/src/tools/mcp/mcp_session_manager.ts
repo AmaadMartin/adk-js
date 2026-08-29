@@ -24,20 +24,6 @@ const MCP_SDK: OptionalPeer = {
   feature: 'MCPSessionManager (and the MCP tools built on it)',
 };
 
-/**
- * Reports whether `headers` carries no entry.
- *
- * `Headers` exposes no size and is iterable only under the DOM.Iterable lib,
- * which this package does not enable.
- */
-function isEmpty(headers: Headers): boolean {
-  let empty = true;
-  headers.forEach(() => {
-    empty = false;
-  });
-  return empty;
-}
-
 /** Surfaces a background transport error that would otherwise be dropped. */
 function logTransportError(err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
@@ -150,7 +136,7 @@ export class MCPSessionManager {
             options = {...options, requestInit: {headers}};
           }
 
-          if (extraHeaders && !isEmpty(extraHeaders)) {
+          if (extraHeaders) {
             // `set` matches names case-insensitively, so an extra header
             // replaces a static one of the same name rather than joining it.
             const headers = new Headers(options.requestInit?.headers);

@@ -426,7 +426,7 @@ describe('MCPSessionManager', () => {
       });
     });
 
-    it('leaves transport options untouched for an empty extraHeaders record', async () => {
+    it('keeps the static headers for an empty extraHeaders record', async () => {
       const manager = new MCPSessionManager({
         type: 'StreamableHTTPConnectionParams',
         url: 'http://test-url',
@@ -435,12 +435,10 @@ describe('MCPSessionManager', () => {
 
       await manager.createSession(new Headers({}));
 
-      expect(lastTransportOptions()).toEqual({
-        requestInit: {headers: {'x-static': 'yes'}},
-      });
+      expect(lastHeaders()).toEqual({'x-static': 'yes'});
     });
 
-    it('adds no requestInit at all for an empty extraHeaders record', async () => {
+    it('sends no header for an empty extraHeaders record', async () => {
       const manager = new MCPSessionManager({
         type: 'StreamableHTTPConnectionParams',
         url: 'http://test-url',
@@ -448,7 +446,7 @@ describe('MCPSessionManager', () => {
 
       await manager.createSession(new Headers({}));
 
-      expect(lastTransportOptions()).toEqual({});
+      expect(lastHeaders()).toEqual({});
     });
 
     it('does not mutate the callers connectionParams', async () => {

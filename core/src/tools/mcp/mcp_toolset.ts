@@ -220,7 +220,12 @@ export class MCPToolset extends BaseToolset {
       this.authConfig?.authScheme,
     );
 
-    if (!providerHeaders && !authHeaders) {
+    // A provider that returns no header must leave the connection's own
+    // transport options untouched, so nothing is built for an empty result.
+    const count =
+      Object.keys(providerHeaders ?? {}).length +
+      Object.keys(authHeaders ?? {}).length;
+    if (count === 0) {
       return undefined;
     }
     // `set` matches names case-insensitively, so an auth header replaces a
