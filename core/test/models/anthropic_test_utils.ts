@@ -4,19 +4,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {MessageStream} from '@anthropic-ai/sdk/lib/MessageStream.js';
 import type {
   ContentBlock,
   Message,
+  MessageDeltaUsage,
   RawContentBlockDelta,
   RawContentBlockStartEvent,
   RawMessageStreamEvent,
+  StopReason,
   Usage,
 } from '@anthropic-ai/sdk/resources/messages';
+import type {AnthropicMessageStream} from '@google/adk';
 
-/** Builds an Anthropic `Usage` with the two counts ADK reads. */
+/**
+ * Builds an Anthropic `Usage`.
+ *
+ * @param extra The cache and thinking counters, which default to unreported.
+ */
 export function anthropicUsage(
   inputTokens: number,
   outputTokens: number,
+  extra: Partial<Usage> = {},
 ): Usage {
   return {
     input_tokens: inputTokens,
@@ -28,6 +37,7 @@ export function anthropicUsage(
     output_tokens_details: null,
     server_tool_use: null,
     service_tier: null,
+    ...extra,
   };
 }
 
@@ -35,6 +45,7 @@ export function anthropicUsage(
 export function anthropicMessage(
   content: ContentBlock[],
   usage: Usage = anthropicUsage(0, 0),
+  stopReason: StopReason | null = 'end_turn',
 ): Message {
   return {
     id: 'msg_test',
@@ -43,7 +54,7 @@ export function anthropicMessage(
     model: 'claude-sonnet-4-20250514',
     role: 'assistant',
     stop_details: null,
-    stop_reason: 'end_turn',
+    stop_reason: stopReason,
     stop_sequence: null,
     type: 'message',
     usage,
@@ -82,14 +93,22 @@ export function blockStopEvent(index: number): RawMessageStreamEvent {
   return {type: 'content_block_stop', index};
 }
 
-/** Builds the `message_delta` event carrying the final output token count. */
-export function messageDeltaEvent(outputTokens: number): RawMessageStreamEvent {
+/**
+ * Builds the `message_delta` event carrying the final counts.
+ *
+ * @param extra The cumulative counters the delta refreshes, if any.
+ */
+export function messageDeltaEvent(
+  outputTokens: number,
+  stopReason: StopReason | null = 'end_turn',
+  extra: Partial<MessageDeltaUsage> = {},
+): RawMessageStreamEvent {
   return {
     type: 'message_delta',
     delta: {
       container: null,
       stop_details: null,
-      stop_reason: 'end_turn',
+      stop_reason: stopReason,
       stop_sequence: null,
     },
     usage: {
@@ -99,6 +118,7 @@ export function messageDeltaEvent(outputTokens: number): RawMessageStreamEvent {
       output_tokens: outputTokens,
       output_tokens_details: null,
       server_tool_use: null,
+      ...extra,
     },
   };
 }
@@ -108,11 +128,37 @@ export function messageStopEvent(): RawMessageStreamEvent {
   return {type: 'message_stop'};
 }
 
-/** Wraps stream events in the async iterable the Anthropic SDK returns. */
-export async function* asStream(
-  events: RawMessageStreamEvent[],
-): AsyncGenerator<RawMessageStreamEvent, void> {
-  for (const event of events) {
-    yield event;
-  }
+/** A stream that yields one event and then fails, as a dropped request does. */
+export function failingStream(error: unknown): AnthropicMessageStream {
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield messageStartEvent(1);
+      throw error;
+    },
+    finalMessage: () => Promise.reject(error),
+  };
+}
+
+/**
+ * Wraps stream events in the accumulator `messages.stream()` returns.
+ *
+ * Build it inside the `messages.stream` mock, not before it: the accumulator
+ * starts reading as soon as it exists. The tests replace the SDK's root entry
+ * point, so the real class comes from its own subpath, and
+ * `fromReadableStream` reads one JSON event per line.
+ */
+export function asStream(events: RawMessageStreamEvent[]): MessageStream {
+  const body = events.map((event) => `${JSON.stringify(event)}\n`).join('');
+  return MessageStream.fromReadableStream(
+    new ReadableStream({
+      async pull(controller) {
+        // `MessageStream` replays nothing to an iterator that attaches late,
+        // so the events wait for a later task than the one that calls
+        // `messages.stream()`.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        controller.enqueue(new TextEncoder().encode(body));
+        controller.close();
+      },
+    }),
+  );
 }

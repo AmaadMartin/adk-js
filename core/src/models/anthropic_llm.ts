@@ -6,26 +6,28 @@
 
 import type {Anthropic} from '@anthropic-ai/sdk';
 import type {
+  Message,
+  MessageCreateParamsBase,
   MessageCreateParamsNonStreaming,
-  RawContentBlockDeltaEvent,
-  RawContentBlockStartEvent,
+  RawContentBlockDelta,
   RawMessageStreamEvent,
-  RedactedThinkingBlock,
-  TextBlock,
-  ThinkingBlock,
 } from '@anthropic-ai/sdk/resources/messages';
-import type {Part} from '@google/genai';
+import type {
+  FunctionDeclaration,
+  GenerateContentConfig,
+  Part,
+} from '@google/genai';
 
 import {isBrowser} from '../utils/env_aware_utils.js';
+import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
 import {
+  buildEffortParam,
   buildThinkingParam,
-  contentBlockToPart,
   contentToMessageParam,
   functionDeclarationToToolParam,
   messageToLlmResponse,
-  parseToolUseArgs,
   systemInstructionToText,
   ToolUseIdSanitizer,
 } from './anthropic_utils.js';
@@ -53,6 +55,19 @@ const VERTEX_PROJECT_AND_LOCATION = /^projects\/([^/]+)\/locations\/([^/]+)\//;
 const PROJECT_ENV_VARIABLE_NAME = 'GOOGLE_CLOUD_PROJECT';
 const LOCATION_ENV_VARIABLE_NAME = 'GOOGLE_CLOUD_LOCATION';
 
+const MISSING_ANTHROPIC_CREDENTIAL_MESSAGE =
+  'No Anthropic credential was found for calling Claude through the ' +
+  'Anthropic API. Set ANTHROPIC_API_KEY to a key from the Anthropic Console, ' +
+  'e.g. `export ANTHROPIC_API_KEY=<your-key>`, or configure any other ' +
+  'credential the Anthropic SDK can discover.';
+
+const RATE_LIMIT_POSSIBLE_FIX_MESSAGE =
+  'On how to mitigate this issue, please refer to:\n\n' +
+  'https://docs.anthropic.com/en/api/errors#http-errors';
+
+/** The HTTP status Anthropic returns when the caller exceeds a rate limit. */
+const HTTP_TOO_MANY_REQUESTS = 429;
+
 /**
  * The part of the Anthropic client this provider drives.
  *
@@ -60,7 +75,24 @@ const LOCATION_ENV_VARIABLE_NAME = 'GOOGLE_CLOUD_LOCATION';
  * serves the direct API and Vertex AI.
  */
 export interface AnthropicMessagesClient {
-  messages: Pick<Anthropic['messages'], 'create'>;
+  messages: Pick<Anthropic['messages'], 'create'> & {
+    stream(
+      params: MessageCreateParamsBase,
+      options?: {signal?: AbortSignal},
+    ): AnthropicMessageStream;
+  };
+}
+
+/**
+ * The part of the SDK's `MessageStream` this provider consumes.
+ *
+ * `MessageStream` declares a private field, so it is nominally typed and no
+ * test double can stand in for it. Naming the two members used here keeps an
+ * injected client testable, and a real `MessageStream` still satisfies it.
+ */
+export interface AnthropicMessageStream {
+  [Symbol.asyncIterator](): AsyncIterator<RawMessageStreamEvent>;
+  finalMessage(): Promise<Message>;
 }
 
 /** Parameters for creating an {@link AnthropicLlm}. */
@@ -69,164 +101,69 @@ export interface AnthropicLlmParams {
   model?: string;
   /** The maximum number of tokens to generate. Defaults to 8192. */
   maxTokens?: number;
-}
-
-/**
- * A `tool_use` block being streamed.
- *
- * Its arguments arrive as JSON fragments, so they cannot be held in
- * `ToolUseBlock.input` until the stream ends.
- */
-interface StreamedToolUse {
-  type: 'tool_use';
-  id: string;
-  name: string;
-  argsJson: string;
-}
-
-/** One content block of a streamed message, as far as it has arrived. */
-type StreamedBlock =
-  | TextBlock
-  | ThinkingBlock
-  | RedactedThinkingBlock
-  | StreamedToolUse;
-
-/**
- * Collects the content blocks of one streamed Claude message.
- *
- * Claude streams a message as indexed blocks, each arriving as a start event
- * followed by deltas. The accumulator keeps one entry per index so the final
- * aggregated response carries the same parts, in the same order, that the
- * equivalent non-streaming response would.
- */
-class StreamedMessage {
-  private readonly blocks = new Map<number, StreamedBlock>();
-  private inputTokens = 0;
-  private outputTokens = 0;
-
-  setPromptTokens(count: number): void {
-    this.inputTokens = count;
-  }
-
-  setOutputTokens(count: number): void {
-    this.outputTokens = count;
-  }
-
-  startBlock(event: RawContentBlockStartEvent): void {
-    const block = event.content_block;
-    switch (block.type) {
-      case 'thinking':
-      case 'redacted_thinking':
-      case 'text':
-        this.blocks.set(event.index, block);
-        break;
-      case 'tool_use':
-        this.blocks.set(event.index, {
-          type: 'tool_use',
-          id: block.id,
-          name: block.name,
-          argsJson: '',
-        });
-        break;
-      default:
-        break;
-    }
-  }
-
   /**
-   * Applies one delta event.
+   * A ready client, for a custom base URL, a proxy, or a test double.
    *
-   * @return The partial response to emit, or `undefined` when the delta only
-   *   accumulates state.
+   * Supplying one skips loading the SDK and resolving a credential.
    */
-  applyDelta(event: RawContentBlockDeltaEvent): LlmResponse | undefined {
-    const delta = event.delta;
-    switch (delta.type) {
-      case 'thinking_delta':
-        this.thinkingBlockAt(event.index).thinking += delta.thinking;
-        return {
-          content: {
-            role: 'model',
-            parts: [{text: delta.thinking, thought: true}],
-          },
-          partial: true,
-        };
-      case 'text_delta':
-        this.textBlockAt(event.index).text += delta.text;
-        return {
-          content: {role: 'model', parts: [{text: delta.text}]},
-          partial: true,
-        };
-      case 'input_json_delta': {
-        const block = this.blocks.get(event.index);
-        if (block?.type === 'tool_use') {
-          block.argsJson += delta.partial_json;
-        }
-        return undefined;
-      }
-      default:
-        return undefined;
-    }
-  }
-
-  /** Builds the single aggregated response that closes the stream. */
-  finalResponse(): LlmResponse {
-    const parts: Part[] = [...this.blocks]
-      .sort(([left], [right]) => left - right)
-      .map(([, block]) =>
-        block.type === 'tool_use'
-          ? toolUsePart(block)
-          : contentBlockToPart(block),
-      );
-    return {
-      content: {role: 'model', parts},
-      usageMetadata: {
-        promptTokenCount: this.inputTokens,
-        candidatesTokenCount: this.outputTokens,
-        totalTokenCount: this.inputTokens + this.outputTokens,
-      },
-      partial: false,
-    };
-  }
-
-  /**
-   * Returns the text block at `index`, seeding an empty one when a delta
-   * arrives before the matching start event.
-   */
-  private textBlockAt(index: number): TextBlock {
-    const block = this.blocks.get(index);
-    if (block?.type === 'text') {
-      return block;
-    }
-    const seeded: TextBlock = {type: 'text', text: '', citations: null};
-    this.blocks.set(index, seeded);
-    return seeded;
-  }
-
-  /** The thinking counterpart of {@link StreamedMessage.textBlockAt}. */
-  private thinkingBlockAt(index: number): ThinkingBlock {
-    const block = this.blocks.get(index);
-    if (block?.type === 'thinking') {
-      return block;
-    }
-    const seeded: ThinkingBlock = {
-      type: 'thinking',
-      thinking: '',
-      signature: '',
-    };
-    this.blocks.set(index, seeded);
-    return seeded;
-  }
+  client?: AnthropicMessagesClient;
 }
 
-function toolUsePart(block: StreamedToolUse): Part {
-  return {
-    functionCall: {
-      id: block.id,
-      name: block.name,
-      args: parseToolUseArgs(block.argsJson),
-    },
-  };
+/** Parameters for creating a {@link Claude}. */
+export interface ClaudeParams extends AnthropicLlmParams {
+  /** Vertex AI project. Falls back to `GOOGLE_CLOUD_PROJECT`. */
+  project?: string;
+  /** Vertex AI location. Falls back to `GOOGLE_CLOUD_LOCATION`. */
+  location?: string;
+}
+
+/** Collects the function declarations of every tool on the request. */
+function collectFunctionDeclarations(
+  config?: GenerateContentConfig,
+): FunctionDeclaration[] {
+  const declarations: FunctionDeclaration[] = [];
+  for (const tool of config?.tools ?? []) {
+    if ('functionDeclarations' in tool && tool.functionDeclarations) {
+      declarations.push(...tool.functionDeclarations);
+    }
+  }
+  return declarations;
+}
+
+/**
+ * Copies the sampling parameters onto the request.
+ *
+ * Claude rejects `temperature`, `top_p` and `top_k` alongside extended
+ * thinking or a reasoning effort, so they are dropped with a warning whenever
+ * either is in force.
+ *
+ * @param excluded Whether thinking or a reasoning effort is in force.
+ */
+function applySamplingParams(
+  params: MessageCreateParamsNonStreaming,
+  config: GenerateContentConfig | undefined,
+  excluded: boolean,
+): void {
+  const {temperature, topP, topK} = config ?? {};
+  if (temperature === undefined && topP === undefined && topK === undefined) {
+    return;
+  }
+  if (excluded) {
+    logger.warn(
+      'Sampling parameters (temperature, top_p, top_k) are ignored because ' +
+        'thinking or a reasoning effort is enabled.',
+    );
+    return;
+  }
+  if (temperature !== undefined) {
+    params.temperature = temperature;
+  }
+  if (topP !== undefined) {
+    params.top_p = topP;
+  }
+  if (topK !== undefined) {
+    params.top_k = Math.trunc(topK);
+  }
 }
 
 /**
@@ -240,69 +177,119 @@ function buildMessageCreateParams(
   model: string,
   maxTokens: number,
 ): MessageCreateParamsNonStreaming {
+  const config = llmRequest.config;
   const sanitizer = new ToolUseIdSanitizer();
   const params: MessageCreateParamsNonStreaming = {
     model,
-    max_tokens: maxTokens,
+    max_tokens: config?.maxOutputTokens ?? maxTokens,
     messages: llmRequest.contents.map((content) =>
       contentToMessageParam(content, sanitizer),
     ),
   };
 
-  const system = systemInstructionToText(llmRequest.config?.systemInstruction);
-  if (system !== undefined) {
+  const system = systemInstructionToText(config?.systemInstruction);
+  if (system) {
     params.system = system;
   }
 
-  const firstTool = llmRequest.config?.tools?.[0];
-  const declarations =
-    firstTool && 'functionDeclarations' in firstTool
-      ? firstTool.functionDeclarations
-      : undefined;
-  if (declarations && declarations.length > 0) {
+  // Gated on the declarations, not on `toolsDict`: a plugin can register a
+  // tool there without declaring it, and Anthropic rejects a `tool_choice`
+  // sent without `tools`.
+  const declarations = collectFunctionDeclarations(config);
+  if (declarations.length > 0) {
     params.tools = declarations.map(functionDeclarationToToolParam);
-  }
-
-  if (Object.keys(llmRequest.toolsDict).length > 0) {
     params.tool_choice = {type: 'auto'};
   }
 
-  const thinking = buildThinkingParam(llmRequest.config);
+  if (config?.stopSequences && config.stopSequences.length > 0) {
+    params.stop_sequences = [...config.stopSequences];
+  }
+
+  const thinking = buildThinkingParam(config);
   if (thinking) {
     params.thinking = thinking;
   }
 
+  const effort = buildEffortParam(config);
+  if (effort !== undefined) {
+    params.output_config = {effort};
+  }
+
+  const thinkingEnabled =
+    thinking?.type === 'enabled' || thinking?.type === 'adaptive';
+  applySamplingParams(params, config, thinkingEnabled || effort !== undefined);
+
   return params;
 }
 
-async function* streamResponses(
+/** The shape of the rate-limit error this provider annotates. */
+interface RateLimitedError {
+  status: number;
+  message: string;
+}
+
+/**
+ * Reports whether an error is an Anthropic rate-limit error.
+ *
+ * The status is read structurally rather than with `instanceof
+ * RateLimitError`, which would need a value import of the optional SDK.
+ */
+function isRateLimited(error: unknown): error is RateLimitedError {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    error.status === HTTP_TOO_MANY_REQUESTS &&
+    'message' in error &&
+    typeof error.message === 'string'
+  );
+}
+
+/**
+ * Adds the documented mitigation to an Anthropic rate-limit error.
+ *
+ * The message is rewritten in place so the SDK's own error reaches the caller
+ * with `status`, `headers` and the `retry-after` value a backoff reads.
+ *
+ * @return The error to throw, unchanged unless it reports HTTP 429.
+ */
+function withRateLimitHelp(error: unknown): unknown {
+  if (isRateLimited(error)) {
+    error.message = `${RATE_LIMIT_POSSIBLE_FIX_MESSAGE}\n\n${error.message}`;
+  }
+  return error;
+}
+
+/**
+ * The text one streamed delta adds.
+ *
+ * @return The part to emit, or `undefined` for a delta that carries no text a
+ *   reader can show, such as a thinking signature or a tool argument fragment.
+ */
+function deltaToPart(delta: RawContentBlockDelta): Part | undefined {
+  switch (delta.type) {
+    case 'text_delta':
+      return {text: delta.text};
+    case 'thinking_delta':
+      return {text: delta.thinking, thought: true};
+    default:
+      return undefined;
+  }
+}
+
+/** Yields one partial response per streamed delta that carries text. */
+async function* streamPartials(
   events: AsyncIterable<RawMessageStreamEvent>,
 ): AsyncGenerator<LlmResponse, void> {
-  const message = new StreamedMessage();
   for await (const event of events) {
-    switch (event.type) {
-      case 'message_start':
-        message.setPromptTokens(event.message.usage.input_tokens);
-        message.setOutputTokens(event.message.usage.output_tokens);
-        break;
-      case 'content_block_start':
-        message.startBlock(event);
-        break;
-      case 'content_block_delta': {
-        const partial = message.applyDelta(event);
-        if (partial) {
-          yield partial;
-        }
-        break;
-      }
-      case 'message_delta':
-        message.setOutputTokens(event.usage.output_tokens);
-        break;
-      default:
-        break;
+    const part =
+      event.type === 'content_block_delta'
+        ? deltaToPart(event.delta)
+        : undefined;
+    if (part) {
+      yield {content: {role: 'model', parts: [part]}, partial: true};
     }
   }
-  yield message.finalResponse();
 }
 
 /**
@@ -313,17 +300,19 @@ async function* streamResponses(
  */
 export class AnthropicLlm extends BaseLlm {
   static override readonly supportedModels: Array<string | RegExp> = [
-    /claude-3-.*/,
-    /claude-.*-4.*/,
+    /claude-.*/,
   ];
 
   protected readonly maxTokens: number;
 
   private clientPromise?: Promise<AnthropicMessagesClient>;
 
-  constructor({model, maxTokens}: AnthropicLlmParams = {}) {
+  constructor({model, maxTokens, client}: AnthropicLlmParams = {}) {
     super({model: model ?? DEFAULT_ANTHROPIC_MODEL});
     this.maxTokens = maxTokens ?? DEFAULT_MAX_TOKENS;
+    if (client) {
+      this.clientPromise = Promise.resolve(client);
+    }
   }
 
   override async *generateContentAsync(
@@ -336,21 +325,28 @@ export class AnthropicLlm extends BaseLlm {
       this.resolveModelName(llmRequest.model),
       this.maxTokens,
     );
-    const client = await this.getClient();
+    try {
+      const client = await this.getClient();
+      if (!stream) {
+        const message = await client.messages.create(params, {
+          signal: abortSignal,
+        });
+        yield messageToLlmResponse(message);
+        return;
+      }
 
-    if (!stream) {
-      const message = await client.messages.create(params, {
-        signal: abortSignal,
-      });
-      yield messageToLlmResponse(message);
-      return;
+      // `stream()` returns the SDK's own accumulator, so the aggregated
+      // message it reports is assembled by the same code the non-streaming
+      // path relies on.
+      const events = client.messages.stream(params, {signal: abortSignal});
+      yield* streamPartials(events);
+      yield {
+        ...messageToLlmResponse(await events.finalMessage()),
+        partial: false,
+      };
+    } catch (error: unknown) {
+      throw withRateLimitHelp(error);
     }
-
-    const events = await client.messages.create(
-      {...params, stream: true},
-      {signal: abortSignal},
-    );
-    yield* streamResponses(events);
   }
 
   override async connect(): Promise<BaseLlmConnection> {
@@ -365,11 +361,25 @@ export class AnthropicLlm extends BaseLlm {
     return this.clientPromise;
   }
 
+  /**
+   * Builds the client, letting the SDK resolve its own credential.
+   *
+   * The SDK reads more credential sources than the environment variable, so
+   * the constructed client is asked what it found rather than the sources
+   * being enumerated here. Only the presence of a credential is read, never
+   * its value.
+   */
   protected createClient(): Promise<AnthropicMessagesClient> {
     return loadOptionalPeer(
       {packageName: '@anthropic-ai/sdk', feature: 'AnthropicLlm'},
       () => import('@anthropic-ai/sdk'),
-    ).then(({Anthropic}) => new Anthropic());
+    ).then(({Anthropic}) => {
+      const client = new Anthropic();
+      if (!client.apiKey && !client.authToken && !client.credentials) {
+        throw new Error(MISSING_ANTHROPIC_CREDENTIAL_MESSAGE);
+      }
+      return client;
+    });
   }
 
   /**
@@ -390,14 +400,26 @@ export class AnthropicLlm extends BaseLlm {
  *
  * `model` defaults to `claude-3-5-sonnet-v2@20241022`.
  *
- * The project and the location come from `GOOGLE_CLOUD_PROJECT` and
- * `GOOGLE_CLOUD_LOCATION`, or from a full `projects/.../locations/...` model
- * resource name, which takes precedence. They are read on first use, so
- * constructing the model in an unconfigured environment does not throw.
+ * The project and the location come from the `project` and `location`
+ * parameters, then from `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`. A
+ * full `projects/.../locations/...` model resource name names both inline and
+ * takes precedence over either. They are read on first use, so constructing
+ * the model in an unconfigured environment does not throw.
  */
 export class Claude extends AnthropicLlm {
-  constructor({model, maxTokens}: AnthropicLlmParams = {}) {
-    super({model: model ?? DEFAULT_CLAUDE_VERTEX_MODEL, maxTokens});
+  private readonly project?: string;
+  private readonly location?: string;
+
+  constructor({
+    model,
+    maxTokens,
+    client,
+    project,
+    location,
+  }: ClaudeParams = {}) {
+    super({model: model ?? DEFAULT_CLAUDE_VERTEX_MODEL, maxTokens, client});
+    this.project = project;
+    this.location = location;
   }
 
   protected override createClient(): Promise<AnthropicMessagesClient> {
@@ -419,8 +441,8 @@ export class Claude extends AnthropicLlm {
     const env: Record<string, string | undefined> = isBrowser()
       ? {}
       : process.env;
-    let projectId = env[PROJECT_ENV_VARIABLE_NAME];
-    let region = env[LOCATION_ENV_VARIABLE_NAME];
+    let projectId = this.project ?? env[PROJECT_ENV_VARIABLE_NAME];
+    let region = this.location ?? env[LOCATION_ENV_VARIABLE_NAME];
 
     const match = VERTEX_PROJECT_AND_LOCATION.exec(this.model);
     if (match) {
@@ -430,8 +452,12 @@ export class Claude extends AnthropicLlm {
 
     if (!projectId || !region) {
       throw new Error(
-        `${PROJECT_ENV_VARIABLE_NAME} and ${LOCATION_ENV_VARIABLE_NAME} must ` +
-          `be set for using Anthropic on Vertex.`,
+        `The model "${this.model}" resolves to Claude served from Vertex AI, ` +
+          `which needs ${PROJECT_ENV_VARIABLE_NAME} and ` +
+          `${LOCATION_ENV_VARIABLE_NAME} to be set, or the "project" and ` +
+          `"location" parameters to be passed. To call the Anthropic API ` +
+          `directly instead, set ANTHROPIC_API_KEY and give the agent an ` +
+          `AnthropicLlm instance as its model.`,
       );
     }
     return {projectId, region};

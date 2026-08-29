@@ -10,6 +10,7 @@ import type {
   ToolResultBlockParam,
   ToolUseBlockParam,
 } from '@anthropic-ai/sdk/resources/messages';
+import type {AnthropicGenerateContentConfig} from '@google/adk';
 import {
   AnthropicLlm,
   Claude,
@@ -18,7 +19,15 @@ import {
   LlmResponse,
   version,
 } from '@google/adk';
+import {FinishReason} from '@google/genai';
+import type {Mock} from 'vitest';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+
+import {
+  partToMessageBlock,
+  ToolUseIdSanitizer,
+} from '../../src/models/anthropic_utils.js';
+import {logger} from '../../src/utils/logger.js';
 
 import {
   anthropicMessage,
@@ -27,20 +36,41 @@ import {
   blockDeltaEvent,
   blockStartEvent,
   blockStopEvent,
+  failingStream,
   messageDeltaEvent,
   messageStartEvent,
   messageStopEvent,
 } from './anthropic_test_utils.js';
 
-const {create, anthropicOptions, vertexOptions} = vi.hoisted(() => ({
-  create: vi.fn(),
-  anthropicOptions: vi.fn(),
-  vertexOptions: vi.fn(),
-}));
+const {create, stream, anthropicOptions, vertexOptions, credentialFields} =
+  vi.hoisted(() => {
+    const credentialFields: {
+      apiKey: string | null;
+      authToken: string | null;
+      credentials: object | null;
+    } = {apiKey: 'test-key', authToken: null, credentials: null};
+    return {
+      create: vi.fn(),
+      stream: vi.fn(),
+      anthropicOptions: vi.fn(),
+      vertexOptions: vi.fn(),
+      credentialFields,
+    };
+  });
+
+/** Restores the credential the mocked SDK reports by default. */
+function resetCredentials(): void {
+  credentialFields.apiKey = 'test-key';
+  credentialFields.authToken = null;
+  credentialFields.credentials = null;
+}
 
 vi.mock('@anthropic-ai/sdk', () => ({
   Anthropic: class {
-    messages = {create};
+    messages = {create, stream};
+    apiKey = credentialFields.apiKey;
+    authToken = credentialFields.authToken;
+    credentials = credentialFields.credentials;
     constructor(options?: unknown) {
       anthropicOptions(options);
     }
@@ -49,7 +79,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 
 vi.mock('@anthropic-ai/vertex-sdk', () => ({
   AnthropicVertex: class {
-    messages = {create};
+    messages = {create, stream};
     constructor(options?: unknown) {
       vertexOptions(options);
     }
@@ -85,10 +115,19 @@ async function collect(
 
 /** Returns the request body of the single `messages.create` call. */
 function createdParams(): MessageCreateParams {
-  expect(create).toHaveBeenCalledOnce();
-  const params: unknown = create.mock.calls[0][0];
+  return sentParams(create, 'messages.create');
+}
+
+/** Returns the request body of the single `messages.stream` call. */
+function streamedParams(): MessageCreateParams {
+  return sentParams(stream, 'messages.stream');
+}
+
+function sentParams(method: Mock, name: string): MessageCreateParams {
+  expect(method).toHaveBeenCalledOnce();
+  const params: unknown = method.mock.calls[0][0];
   if (!isMessageCreateParams(params)) {
-    return expect.fail('messages.create did not receive a request body.');
+    return expect.fail(`${name} did not receive a request body.`);
   }
   return params;
 }
@@ -123,6 +162,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  resetCredentials();
   create.mockResolvedValue(
     anthropicMessage(
       [{type: 'text', text: 'Hello, how can I help you?', citations: null}],
@@ -132,11 +172,8 @@ beforeEach(() => {
 });
 
 describe('supportedModels', () => {
-  it('matches the adk-python patterns', () => {
-    expect(AnthropicLlm.supportedModels).toEqual([
-      /claude-3-.*/,
-      /claude-.*-4.*/,
-    ]);
+  it('matches the adk-python pattern', () => {
+    expect(AnthropicLlm.supportedModels).toEqual([/claude-.*/]);
   });
 
   it('is inherited by Claude', () => {
@@ -258,6 +295,17 @@ describe('tools', () => {
     expect(params).not.toHaveProperty('tool_choice');
   });
 
+  it('omits tool_choice when toolsDict holds an undeclared tool', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({toolsDict: {get_time: getTimeTool}});
+
+    await collect(llm.generateContentAsync(request, false));
+
+    const params = createdParams();
+    expect(params).not.toHaveProperty('tools');
+    expect(params).not.toHaveProperty('tool_choice');
+  });
+
   it('omits tools when the first entry declares no functions', async () => {
     const llm = new AnthropicLlm();
     const request = makeRequest({
@@ -297,7 +345,7 @@ describe('thinking', () => {
 
 describe('streaming generation', () => {
   it('yields a partial per text delta then one aggregated response', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(10),
         blockStartEvent(0, {type: 'text', text: '', citations: null}),
@@ -330,11 +378,14 @@ describe('streaming generation', () => {
       candidatesTokenCount: 5,
       totalTokenCount: 15,
     });
-    expect(createdParams().stream).toBe(true);
+    expect(create).not.toHaveBeenCalled();
+    expect(streamedParams().messages).toEqual([
+      {role: 'user', content: [{type: 'text', text: 'Hi'}]},
+    ]);
   });
 
   it('accumulates streamed tool call arguments', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(20),
         blockStartEvent(0, {type: 'text', text: '', citations: null}),
@@ -380,7 +431,7 @@ describe('streaming generation', () => {
   });
 
   it('defaults tool call arguments to an empty object', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(1),
         blockStartEvent(0, {
@@ -405,43 +456,8 @@ describe('streaming generation', () => {
     ]);
   });
 
-  it('starts a text block from a delta alone', async () => {
-    create.mockResolvedValue(
-      asStream([
-        messageStartEvent(1),
-        blockDeltaEvent(0, {type: 'text_delta', text: 'lone text'}),
-        messageStopEvent(),
-      ]),
-    );
-    const llm = new AnthropicLlm();
-
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
-    );
-
-    expect(responses[1].content?.parts).toEqual([{text: 'lone text'}]);
-  });
-
-  it('ignores an argument delta for an unknown block index', async () => {
-    create.mockResolvedValue(
-      asStream([
-        messageStartEvent(1),
-        blockDeltaEvent(7, {type: 'input_json_delta', partial_json: '{}'}),
-        messageStopEvent(),
-      ]),
-    );
-    const llm = new AnthropicLlm();
-
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
-    );
-
-    expect(responses).toHaveLength(1);
-    expect(responses[0].content?.parts).toEqual([]);
-  });
-
   it('ignores a signature delta', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(1),
         blockStartEvent(0, {type: 'text', text: 'x', citations: null}),
@@ -460,7 +476,7 @@ describe('streaming generation', () => {
   });
 
   it('aggregates thinking deltas and keeps the signature', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(15),
         blockStartEvent(0, {type: 'thinking', thinking: '', signature: 'sig'}),
@@ -496,27 +512,8 @@ describe('streaming generation', () => {
     expect(responses[3].usageMetadata?.candidatesTokenCount).toBe(10);
   });
 
-  it('starts a thinking block from a delta alone', async () => {
-    create.mockResolvedValue(
-      asStream([
-        messageStartEvent(1),
-        blockDeltaEvent(0, {type: 'thinking_delta', thinking: 'lone'}),
-        messageStopEvent(),
-      ]),
-    );
-    const llm = new AnthropicLlm();
-
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
-    );
-
-    expect(responses[1].content?.parts).toEqual([
-      {text: 'lone', thought: true},
-    ]);
-  });
-
   it('keeps a redacted thinking block in the final response', async () => {
-    create.mockResolvedValue(
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(8),
         blockStartEvent(0, {
@@ -543,32 +540,8 @@ describe('streaming generation', () => {
     ]);
   });
 
-  it('orders the final parts by block index, not by arrival', async () => {
-    create.mockResolvedValue(
-      asStream([
-        messageStartEvent(3),
-        blockStartEvent(1, {type: 'text', text: 'second', citations: null}),
-        blockStopEvent(1),
-        blockStartEvent(0, {type: 'text', text: 'first', citations: null}),
-        blockStopEvent(0),
-        messageDeltaEvent(2),
-        messageStopEvent(),
-      ]),
-    );
-    const llm = new AnthropicLlm();
-
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
-    );
-
-    expect(responses[0].content?.parts).toEqual([
-      {text: 'first'},
-      {text: 'second'},
-    ]);
-  });
-
-  it('ignores a content block type it has no part for', async () => {
-    create.mockResolvedValue(
+  it('rejects a content block type it has no part for', async () => {
+    stream.mockImplementation(() =>
       asStream([
         messageStartEvent(1),
         blockStartEvent(0, {type: 'container_upload', file_id: 'f'}),
@@ -578,11 +551,11 @@ describe('streaming generation', () => {
     );
     const llm = new AnthropicLlm();
 
-    const responses = await collect(
-      llm.generateContentAsync(makeRequest(), true),
+    await expect(
+      collect(llm.generateContentAsync(makeRequest(), true)),
+    ).rejects.toThrow(
+      /Unsupported Claude content block type: container_upload/,
     );
-
-    expect(responses[0].content?.parts).toEqual([]);
   });
 });
 
@@ -744,7 +717,7 @@ describe('Claude on Vertex AI', () => {
 
     await expect(
       collect(llm.generateContentAsync(makeRequest(), false)),
-    ).rejects.toThrow(/must be set for using Anthropic on Vertex/);
+    ).rejects.toThrow(/GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION/);
   });
 
   it('rejects generation without Vertex configuration', async () => {
@@ -755,8 +728,113 @@ describe('Claude on Vertex AI', () => {
     await expect(
       collect(llm.generateContentAsync(makeRequest(), false)),
     ).rejects.toThrow(
-      'GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION must be set for using Anthropic on Vertex.',
+      /needs GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION to be set/,
     );
+  });
+
+  it('names the model and the direct API alternative in the error', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', '');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', '');
+    const llm = new Claude({model: 'claude-3-5-sonnet-v2@20241022'});
+
+    const failure = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    ).catch((error: unknown) => error);
+
+    expect(String(failure)).toContain('claude-3-5-sonnet-v2@20241022');
+    expect(String(failure)).toContain('Vertex AI');
+    expect(String(failure)).toContain('ANTHROPIC_API_KEY');
+    expect(String(failure)).toContain('AnthropicLlm');
+  });
+
+  it('names the project and location parameters in the error', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', '');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', '');
+    const llm = new Claude();
+
+    const failure = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    ).catch((error: unknown) => error);
+
+    expect(String(failure)).toContain('"project"');
+    expect(String(failure)).toContain('"location"');
+  });
+
+  it('prefers the project and the location parameters over the environment', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-location');
+    const llm = new Claude({
+      project: 'param-project',
+      location: 'param-location',
+    });
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    expect(vertexOptions.mock.calls[0][0]).toMatchObject({
+      projectId: 'param-project',
+      region: 'param-location',
+    });
+  });
+
+  it('targets two regions from two instances in one process', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', '');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', '');
+    const east = new Claude({project: 'p', location: 'us-east5'});
+    const west = new Claude({project: 'p', location: 'europe-west1'});
+
+    await collect(east.generateContentAsync(makeRequest(), false));
+    await collect(west.generateContentAsync(makeRequest(), false));
+
+    expect(vertexOptions.mock.calls[0][0]).toMatchObject({region: 'us-east5'});
+    expect(vertexOptions.mock.calls[1][0]).toMatchObject({
+      region: 'europe-west1',
+    });
+  });
+
+  it('falls back to the environment for the parameter left unset', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-location');
+    const llm = new Claude({location: 'param-location'});
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    expect(vertexOptions.mock.calls[0][0]).toMatchObject({
+      projectId: 'env-project',
+      region: 'param-location',
+    });
+  });
+
+  it('prefers the model resource name over the parameters', async () => {
+    const llm = new Claude({
+      model:
+        'projects/name-project/locations/name-location/publishers/anthropic/models/claude-3-5-sonnet-v2@20241022',
+      project: 'param-project',
+      location: 'param-location',
+    });
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    expect(vertexOptions.mock.calls[0][0]).toMatchObject({
+      projectId: 'name-project',
+      region: 'name-location',
+    });
+  });
+
+  it('uses the parameters in a browser, where the environment is unreadable', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-location');
+    vi.stubGlobal('window', {navigator: {userAgent: 'Mozilla/5.0'}});
+    const llm = new Claude({
+      project: 'param-project',
+      location: 'param-location',
+    });
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    expect(vertexOptions.mock.calls[0][0]).toMatchObject({
+      projectId: 'param-project',
+      region: 'param-location',
+    });
   });
 });
 
@@ -790,5 +868,561 @@ describe('connect', () => {
     await expect(new AnthropicLlm().connect()).rejects.toThrow(
       /Live connections are not supported/,
     );
+  });
+});
+
+describe('generation config', () => {
+  it('prefers maxOutputTokens over the constructor budget', async () => {
+    const llm = new AnthropicLlm({maxTokens: 8192});
+    const request = makeRequest({config: {maxOutputTokens: 512}});
+
+    await collect(llm.generateContentAsync(request, false));
+
+    expect(createdParams().max_tokens).toBe(512);
+  });
+
+  it('sends the stop sequences', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({config: {stopSequences: ['STOP', 'HALT']}});
+
+    await collect(llm.generateContentAsync(request, false));
+
+    expect(createdParams().stop_sequences).toEqual(['STOP', 'HALT']);
+  });
+
+  it('omits the stop sequences when the list is empty', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({config: {stopSequences: []}});
+
+    await collect(llm.generateContentAsync(request, false));
+
+    expect(createdParams()).not.toHaveProperty('stop_sequences');
+  });
+
+  it('forwards the sampling parameters and truncates top_k', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({
+      config: {temperature: 0.3, topP: 0.9, topK: 40.7},
+    });
+
+    await collect(llm.generateContentAsync(request, false));
+
+    const params = createdParams();
+    expect(params.temperature).toBe(0.3);
+    expect(params.top_p).toBe(0.9);
+    expect(params.top_k).toBe(40);
+  });
+
+  it('omits the sampling parameters when none are set', async () => {
+    const llm = new AnthropicLlm();
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    const params = createdParams();
+    expect(params).not.toHaveProperty('temperature');
+    expect(params).not.toHaveProperty('top_p');
+    expect(params).not.toHaveProperty('top_k');
+  });
+
+  it('drops the sampling parameters when thinking is enabled', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const llm = new AnthropicLlm();
+    const request = makeRequest({
+      config: {temperature: 0.3, thinkingConfig: {thinkingBudget: 2048}},
+    });
+
+    await collect(llm.generateContentAsync(request, false));
+
+    expect(createdParams()).not.toHaveProperty('temperature');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Sampling parameters'),
+    );
+  });
+
+  it('keeps the sampling parameters when thinking is disabled', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({
+      config: {temperature: 0.3, thinkingConfig: {thinkingBudget: 0}},
+    });
+
+    await collect(llm.generateContentAsync(request, false));
+
+    expect(createdParams().temperature).toBe(0.3);
+  });
+
+  it('drops the sampling parameters when an effort is set', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const llm = new AnthropicLlm();
+    const config: AnthropicGenerateContentConfig = {effort: 'xhigh', topP: 0.9};
+
+    await collect(llm.generateContentAsync(makeRequest({config}), false));
+
+    const params = createdParams();
+    expect(params).not.toHaveProperty('top_p');
+    expect(params.output_config).toEqual({effort: 'xhigh'});
+    expect(params).not.toHaveProperty('thinking');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Sampling parameters'),
+    );
+  });
+
+  it('omits output_config when no effort is set', async () => {
+    const llm = new AnthropicLlm();
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    expect(createdParams()).not.toHaveProperty('output_config');
+  });
+
+  it('sends adaptive thinking for a negative budget', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({
+      config: {thinkingConfig: {thinkingBudget: -1}},
+    });
+
+    await collect(llm.generateContentAsync(request, false));
+
+    const params = createdParams();
+    expect(params.thinking).toEqual({type: 'adaptive'});
+    expect(params).not.toHaveProperty('output_config');
+  });
+});
+
+describe('tools from every entry', () => {
+  it('collects the declarations of all the tool entries', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({
+      config: {
+        tools: [
+          {googleSearch: {}},
+          {functionDeclarations: [{name: 'first', description: 'One.'}]},
+          {functionDeclarations: [{name: 'second', description: 'Two.'}]},
+        ],
+      },
+    });
+
+    await collect(llm.generateContentAsync(request, false));
+
+    const names = (createdParams().tools ?? []).map((tool) =>
+      'name' in tool ? tool.name : undefined,
+    );
+    expect(names).toEqual(['first', 'second']);
+  });
+});
+
+describe('finish reason', () => {
+  it('maps the stop reason of a complete message', async () => {
+    create.mockResolvedValue(
+      anthropicMessage(
+        [{type: 'text', text: 'Cut short.', citations: null}],
+        anthropicUsage(1, 1),
+        'max_tokens',
+      ),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    );
+
+    expect(responses[0].finishReason).toBe(FinishReason.MAX_TOKENS);
+  });
+
+  it('takes the streamed stop reason from the message delta', async () => {
+    stream.mockImplementation(() =>
+      asStream([
+        messageStartEvent(5),
+        blockStartEvent(0, {type: 'text', text: '', citations: null}),
+        blockDeltaEvent(0, {type: 'text_delta', text: 'Hi'}),
+        blockStopEvent(0),
+        messageDeltaEvent(3, 'refusal'),
+        messageStopEvent(),
+      ]),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses.at(-1)?.finishReason).toBe(FinishReason.SAFETY);
+  });
+
+  it('omits the finish reason when the stream reports none', async () => {
+    stream.mockImplementation(() =>
+      asStream([
+        messageStartEvent(5),
+        blockStartEvent(0, {type: 'text', text: '', citations: null}),
+        blockDeltaEvent(0, {type: 'text_delta', text: 'Hi'}),
+        blockStopEvent(0),
+        messageDeltaEvent(3, null),
+        messageStopEvent(),
+      ]),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses.at(-1)?.finishReason).toBeUndefined();
+  });
+});
+
+describe('streamed usage metadata', () => {
+  it('folds the cache tokens the stream reports into the prompt count', async () => {
+    stream.mockImplementation(() =>
+      asStream([
+        {
+          type: 'message_start',
+          message: anthropicMessage(
+            [],
+            anthropicUsage(10, 0, {cache_read_input_tokens: 4}),
+          ),
+        },
+        messageDeltaEvent(6),
+        messageStopEvent(),
+      ]),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses.at(-1)?.usageMetadata).toEqual({
+      promptTokenCount: 14,
+      candidatesTokenCount: 6,
+      totalTokenCount: 20,
+      cachedContentTokenCount: 4,
+    });
+  });
+
+  it('splits the thinking tokens the message delta reports', async () => {
+    stream.mockImplementation(() =>
+      asStream([
+        messageStartEvent(10),
+        messageDeltaEvent(20, 'end_turn', {
+          output_tokens_details: {thinking_tokens: 8},
+        }),
+        messageStopEvent(),
+      ]),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses.at(-1)?.usageMetadata).toEqual({
+      promptTokenCount: 10,
+      candidatesTokenCount: 12,
+      totalTokenCount: 30,
+      thoughtsTokenCount: 8,
+    });
+  });
+
+  it('keeps the prompt count the message start reported', async () => {
+    stream.mockImplementation(() =>
+      asStream([
+        messageStartEvent(11),
+        messageDeltaEvent(7),
+        messageStopEvent(),
+      ]),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses.at(-1)?.usageMetadata?.promptTokenCount).toBe(11);
+  });
+});
+
+describe('rate limiting', () => {
+  it('adds the mitigation link to a 429 on the non-streaming path', async () => {
+    const original = Object.assign(new Error('Too many requests'), {
+      status: 429,
+    });
+    create.mockRejectedValue(original);
+    const llm = new AnthropicLlm();
+
+    const failure = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    if (!(failure instanceof Error)) {
+      return expect.fail('generation did not reject.');
+    }
+    expect(failure.message).toContain(
+      'https://docs.anthropic.com/en/api/errors#http-errors',
+    );
+    expect(failure.message).toContain('Too many requests');
+    expect(failure).toBe(original);
+  });
+
+  it('keeps the retry fields the SDK error carries on a 429', async () => {
+    const original = Object.assign(new Error('Too many requests'), {
+      status: 429,
+      headers: {'retry-after': '30'},
+    });
+    create.mockRejectedValue(original);
+    const llm = new AnthropicLlm();
+
+    const failure = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    ).catch((error: unknown) => error);
+
+    if (!(failure instanceof Error) || !('status' in failure)) {
+      return expect.fail('the rate-limit error lost its status.');
+    }
+    expect(failure.status).toBe(429);
+    expect(failure).toHaveProperty('headers', {'retry-after': '30'});
+  });
+
+  it('adds the mitigation link to a 429 raised mid-stream', async () => {
+    stream.mockReturnValue(
+      failingStream(Object.assign(new Error('Slow down'), {status: 429})),
+    );
+    const llm = new AnthropicLlm();
+
+    const failure = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    ).catch((error: unknown) => error);
+
+    expect(String(failure)).toContain(
+      'https://docs.anthropic.com/en/api/errors#http-errors',
+    );
+  });
+
+  it('propagates a non-429 error unchanged', async () => {
+    const original = Object.assign(new Error('Server error'), {status: 500});
+    create.mockRejectedValue(original);
+    const llm = new AnthropicLlm();
+
+    const failure = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBe(original);
+  });
+
+  it('describes a rejection that is not an object', async () => {
+    create.mockRejectedValue('plain failure');
+    const llm = new AnthropicLlm();
+
+    const failure = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBe('plain failure');
+  });
+
+  it('describes a 429 that carries no message', async () => {
+    create.mockRejectedValue({status: 429});
+    const llm = new AnthropicLlm();
+
+    const failure = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    ).catch((error: unknown) => error);
+
+    expect(String(failure)).toContain('[object Object]');
+  });
+});
+
+describe('Anthropic API credentials', () => {
+  it('rejects when the SDK resolves no credential', async () => {
+    credentialFields.apiKey = null;
+    const llm = new AnthropicLlm();
+
+    await expect(
+      collect(llm.generateContentAsync(makeRequest(), false)),
+    ).rejects.toThrow(/export ANTHROPIC_API_KEY=/);
+  });
+
+  it.each(['authToken', 'credentials'] as const)(
+    'accepts a client that resolved only %s',
+    async (field) => {
+      credentialFields.apiKey = null;
+      if (field === 'authToken') {
+        credentialFields.authToken = 'token';
+      } else {
+        credentialFields.credentials = {};
+      }
+      const llm = new AnthropicLlm();
+
+      const responses = await collect(
+        llm.generateContentAsync(makeRequest(), false),
+      );
+
+      expect(responses).toHaveLength(1);
+    },
+  );
+
+  it('skips credential resolution for an injected client', async () => {
+    credentialFields.apiKey = null;
+    const llm = new AnthropicLlm({client: {messages: {create, stream}}});
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    );
+
+    expect(responses).toHaveLength(1);
+    expect(anthropicOptions).not.toHaveBeenCalled();
+  });
+
+  it('lets Claude take an injected client without Vertex configuration', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', '');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', '');
+    const llm = new Claude({client: {messages: {create, stream}}});
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), false),
+    );
+
+    expect(responses).toHaveLength(1);
+    expect(vertexOptions).not.toHaveBeenCalled();
+  });
+
+  it('builds the client only when a request is sent', async () => {
+    const llm = new AnthropicLlm();
+    expect(anthropicOptions).not.toHaveBeenCalled();
+
+    await collect(llm.generateContentAsync(makeRequest(), false));
+
+    expect(anthropicOptions).toHaveBeenCalledOnce();
+  });
+});
+
+describe('streamed thinking signature', () => {
+  /** Builds the event sequence Claude really sends for a signed thinking block. */
+  function signedThinkingStream(...signatures: string[]) {
+    return asStream([
+      messageStartEvent(5),
+      blockStartEvent(0, {type: 'thinking', thinking: '', signature: ''}),
+      blockDeltaEvent(0, {type: 'thinking_delta', thinking: 'Weighing it.'}),
+      ...signatures.map((signature) =>
+        blockDeltaEvent(0, {type: 'signature_delta', signature}),
+      ),
+      blockStopEvent(0),
+      messageDeltaEvent(4),
+      messageStopEvent(),
+    ]);
+  }
+
+  it('keeps a signature that arrives as a delta, not in the block start', async () => {
+    stream.mockImplementation(() => signedThinkingStream('sig_from_delta'));
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses.at(-1)?.content?.parts).toEqual([
+      {
+        text: 'Weighing it.',
+        thought: true,
+        thoughtSignature: 'sig_from_delta',
+      },
+    ]);
+  });
+
+  it('emits no partial for the signature delta', async () => {
+    stream.mockImplementation(() => signedThinkingStream('sig_from_delta'));
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    const partials = responses.filter((response) => response.partial);
+    expect(partials).toHaveLength(1);
+    expect(partials[0].content?.parts).toEqual([
+      {text: 'Weighing it.', thought: true},
+    ]);
+  });
+
+  it('round-trips the streamed thinking block back to Claude', async () => {
+    stream.mockImplementation(() => signedThinkingStream('sig_from_delta'));
+    const llm = new AnthropicLlm();
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+    const thought = responses.at(-1)?.content?.parts?.[0];
+    if (thought === undefined) {
+      return expect.fail('the stream produced no thinking part.');
+    }
+
+    expect(partToMessageBlock(thought, new ToolUseIdSanitizer())).toEqual({
+      type: 'thinking',
+      thinking: 'Weighing it.',
+      signature: 'sig_from_delta',
+    });
+  });
+});
+
+describe('streamed stop reason', () => {
+  it('maps the reason the closing delta reports', async () => {
+    stream.mockImplementation(() =>
+      asStream([
+        messageStartEvent(5),
+        messageDeltaEvent(3, 'max_tokens'),
+        messageStopEvent(),
+      ]),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses.at(-1)?.finishReason).toBe(FinishReason.MAX_TOKENS);
+  });
+});
+
+describe('system instruction', () => {
+  it('omits system when the instruction flattens to nothing', async () => {
+    const llm = new AnthropicLlm();
+    const request = makeRequest({
+      config: {systemInstruction: {role: 'user', parts: []}},
+    });
+
+    await collect(llm.generateContentAsync(request, false));
+
+    expect(createdParams()).not.toHaveProperty('system');
+  });
+});
+
+describe('streamed citations', () => {
+  it('ignores a citations delta', async () => {
+    stream.mockImplementation(() =>
+      asStream([
+        messageStartEvent(1),
+        blockStartEvent(0, {type: 'text', text: 'x', citations: null}),
+        blockDeltaEvent(0, {
+          type: 'citations_delta',
+          citation: {
+            type: 'char_location',
+            cited_text: 'quoted',
+            document_index: 0,
+            document_title: null,
+            file_id: null,
+            start_char_index: 0,
+            end_char_index: 6,
+          },
+        }),
+        messageStopEvent(),
+      ]),
+    );
+    const llm = new AnthropicLlm();
+
+    const responses = await collect(
+      llm.generateContentAsync(makeRequest(), true),
+    );
+
+    expect(responses).toHaveLength(1);
+    expect(responses[0].content?.parts).toEqual([{text: 'x'}]);
   });
 });

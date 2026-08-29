@@ -11,25 +11,64 @@ import type {
   ImageBlockParam,
   Message,
   MessageParam,
+  OutputConfig,
   RedactedThinkingBlockParam,
+  StopReason,
   TextBlockParam,
   ThinkingBlockParam,
   ThinkingConfigParam,
   Tool,
   ToolResultBlockParam,
   ToolUseBlockParam,
+  Usage,
 } from '@anthropic-ai/sdk/resources/messages';
 import type {
   Content,
   ContentUnion,
   FunctionDeclaration,
+  FunctionResponse,
+  FunctionResponsePart,
   GenerateContentConfig,
+  GenerateContentResponseUsageMetadata,
   Part,
 } from '@google/genai';
+import {FinishReason} from '@google/genai';
 
+import {genaiSchemaToJsonSchema} from '../utils/genai_schema_to_json.js';
 import {logger} from '../utils/logger.js';
+import {baseMimeType} from '../utils/mime_utils.js';
 
 import {LlmResponse} from './llm_response.js';
+
+/** A reasoning effort level Anthropic accepts. */
+export type AnthropicEffort = NonNullable<OutputConfig['effort']>;
+
+/**
+ * A generate-content config extended with Anthropic's reasoning effort.
+ *
+ * `effort` replaces `thinkingConfig.thinkingLevel`, which Claude does not
+ * accept. Setting both is an error.
+ */
+export interface AnthropicGenerateContentConfig extends GenerateContentConfig {
+  /** How much reasoning effort Claude should spend on the turn. */
+  effort?: AnthropicEffort | null;
+}
+
+/**
+ * Maps every Anthropic stop reason onto its genai counterpart.
+ *
+ * The map is exhaustive on purpose: when the SDK adds a stop reason, this
+ * fails to compile rather than silently reporting the wrong finish reason.
+ */
+const GENAI_FINISH_REASONS: Record<StopReason, FinishReason> = {
+  end_turn: FinishReason.STOP,
+  stop_sequence: FinishReason.STOP,
+  tool_use: FinishReason.STOP,
+  pause_turn: FinishReason.STOP,
+  max_tokens: FinishReason.MAX_TOKENS,
+  refusal: FinishReason.SAFETY,
+  model_context_window_exceeded: FinishReason.FINISH_REASON_UNSPECIFIED,
+};
 
 /** The Anthropic request blocks a genai `Part` can convert to. */
 export type AnthropicMessageBlock =
@@ -56,47 +95,11 @@ const PDF_MIME_TYPE = 'application/pdf';
 /** The kinds of inline media Claude accepts, on a user turn only. */
 export type InlineMediaKind = 'image' | 'pdf';
 
-/** How each media kind is named in the warning Claude users see. */
-const MEDIA_KIND_LABELS: Record<InlineMediaKind, string> = {
-  image: 'Image',
-  pdf: 'PDF',
-};
-
 /** An Anthropic tool_use id must match this, or the API rejects the request. */
 const VALID_TOOL_USE_ID = /^[a-zA-Z0-9_-]+$/;
 
-/** JSON Schema keys whose value is itself a map of schemas. */
-const SCHEMA_MAP_KEYS = [
-  '$defs',
-  'dependentSchemas',
-  'patternProperties',
-  'properties',
-];
-
-/** JSON Schema keys whose value is a schema, or a list of schemas. */
-const SCHEMA_CHILD_KEYS = [
-  'additionalProperties',
-  'allOf',
-  'anyOf',
-  'contains',
-  'else',
-  'if',
-  'items',
-  'not',
-  'oneOf',
-  'prefixItems',
-  'propertyNames',
-  'then',
-  'unevaluatedProperties',
-];
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Strips the parameters from a MIME type, e.g. `text/csv; charset=utf-8`. */
-function baseMimeType(mimeType: string): string {
-  return mimeType.split(';')[0].trim();
 }
 
 /** Maps a genai content role onto the two roles Anthropic accepts. */
@@ -115,7 +118,7 @@ export function inlineMediaKind(part: Part): InlineMediaKind | undefined {
   if (mimeType === undefined) {
     return undefined;
   }
-  if (mimeType.startsWith('image')) {
+  if (mimeType.startsWith('image/')) {
     return 'image';
   }
   return baseMimeType(mimeType) === PDF_MIME_TYPE ? 'pdf' : undefined;
@@ -184,43 +187,112 @@ function toolResultContent(response?: Record<string, unknown>): string {
   return '';
 }
 
-function toImageMediaType(mimeType: string): AnthropicImageMediaType {
+/**
+ * Converts base64 media to the block Claude carries it in.
+ *
+ * `Blob.data` is already a base64 string in genai, so it is passed through
+ * unchanged; encoding it again would produce media Claude cannot read.
+ *
+ * @return The block, or `undefined` when Claude accepts no block for the
+ *   media type. The caller decides whether that is an error.
+ */
+function toMediaBlock(
+  mimeType: string,
+  data: string,
+): ImageBlockParam | DocumentBlockParam | undefined {
   const baseType = baseMimeType(mimeType);
-  const supported = ANTHROPIC_IMAGE_MEDIA_TYPES.find((it) => it === baseType);
-  if (supported === undefined) {
+  if (baseType === PDF_MIME_TYPE) {
+    return {
+      type: 'document',
+      source: {type: 'base64', media_type: PDF_MIME_TYPE, data},
+    };
+  }
+  const mediaType = ANTHROPIC_IMAGE_MEDIA_TYPES.find((it) => it === baseType);
+  return mediaType === undefined
+    ? undefined
+    : {type: 'image', source: {type: 'base64', media_type: mediaType, data}};
+}
+
+/**
+ * Converts the inline media of a conversation part.
+ *
+ * @return The block, or `undefined` when the part carries no inline media, so
+ *   that the caller can go on to the other part shapes.
+ * @throws If the part carries an image Claude cannot read. Dropping media the
+ *   user put in the conversation would change what the model is answering.
+ */
+function partToMediaBlock(
+  part: Part,
+): ImageBlockParam | DocumentBlockParam | undefined {
+  const mimeType = part.inlineData?.mimeType;
+  const data = part.inlineData?.data;
+  if (mimeType === undefined || data === undefined) {
+    return undefined;
+  }
+  const block = toMediaBlock(mimeType, data);
+  if (block === undefined && inlineMediaKind(part) === 'image') {
     throw new Error(
       `Claude does not accept the image media type "${mimeType}". ` +
         `Supported types are ${ANTHROPIC_IMAGE_MEDIA_TYPES.join(', ')}.`,
     );
   }
-  return supported;
+  return block;
 }
 
 /**
- * Converts an inline-data part to an image or document block.
+ * Converts the media a tool attached to its result.
  *
- * `Blob.data` is already a base64 string in genai, so it is passed through
- * unchanged; encoding it again would produce media Claude cannot read.
+ * Media Claude cannot carry is dropped with a warning rather than throwing:
+ * the tool that produced it is usually third-party code the caller cannot
+ * change, and losing one attachment beats losing the conversation.
  */
-function toMediaBlock(
-  part: Part,
-): ImageBlockParam | DocumentBlockParam | undefined {
-  const kind = inlineMediaKind(part);
-  const mimeType = part.inlineData?.mimeType;
-  const data = part.inlineData?.data;
-  if (kind === undefined || mimeType === undefined || data === undefined) {
-    return undefined;
+function toolResultMediaBlocks(
+  parts?: FunctionResponsePart[],
+): Array<ImageBlockParam | DocumentBlockParam> {
+  const blocks: Array<ImageBlockParam | DocumentBlockParam> = [];
+  for (const part of parts ?? []) {
+    const mimeType = part.inlineData?.mimeType;
+    const data = part.inlineData?.data;
+    if (mimeType === undefined || data === undefined) {
+      continue;
+    }
+    const block = toMediaBlock(mimeType, data);
+    if (block === undefined) {
+      logger.warn(
+        `Claude cannot carry the media type "${mimeType}" in a tool result, ` +
+          `so the attachment is dropped.`,
+      );
+      continue;
+    }
+    blocks.push(block);
   }
-  if (kind === 'image') {
-    return {
-      type: 'image',
-      source: {type: 'base64', media_type: toImageMediaType(mimeType), data},
-    };
-  }
-  return {
-    type: 'document',
-    source: {type: 'base64', media_type: PDF_MIME_TYPE, data},
+  return blocks;
+}
+
+/**
+ * Converts a genai function response to an Anthropic `tool_result` block.
+ *
+ * The result text stays a plain string unless the tool attached media, in
+ * which case it becomes the leading text block of a block list.
+ */
+function toolResultBlock(
+  functionResponse: FunctionResponse,
+  sanitizer: ToolUseIdSanitizer,
+): ToolResultBlockParam {
+  const text = toolResultContent(functionResponse.response);
+  const media = toolResultMediaBlocks(functionResponse.parts);
+  const block: ToolResultBlockParam = {
+    type: 'tool_result',
+    tool_use_id: sanitizer.sanitize(functionResponse.id),
+    content: text,
   };
+  if (media.length > 0) {
+    const blocks: Array<TextBlockParam | ImageBlockParam | DocumentBlockParam> =
+      text ? [{type: 'text', text}] : [];
+    blocks.push(...media);
+    block.content = blocks;
+  }
+  return block;
 }
 
 /**
@@ -260,14 +332,9 @@ export function partToMessageBlock(
     };
   }
   if (part.functionResponse) {
-    return {
-      type: 'tool_result',
-      tool_use_id: sanitizer.sanitize(part.functionResponse.id),
-      content: toolResultContent(part.functionResponse.response),
-      is_error: false,
-    };
+    return toolResultBlock(part.functionResponse, sanitizer);
   }
-  const media = toMediaBlock(part);
+  const media = partToMediaBlock(part);
   if (media) {
     return media;
   }
@@ -286,7 +353,20 @@ export function partToMessageBlock(
         '\n```',
     };
   }
-  throw new Error(`Claude does not support this part: ${JSON.stringify(part)}`);
+  throw new Error(unsupportedPartMessage(part));
+}
+
+/**
+ * Describes a part by its field names.
+ *
+ * A part can carry inline media bytes, so the message names the fields rather
+ * than serializing the part and writing a credential or a payload to a log.
+ */
+function unsupportedPartMessage(part: Part): string {
+  const fields = Object.keys(part);
+  return `Claude does not support this part: ${
+    fields.length > 0 ? fields.join(', ') : 'an empty part'
+  }`;
 }
 
 /**
@@ -304,11 +384,12 @@ export function contentToMessageParam(
 ): MessageParam {
   const blocks: AnthropicMessageBlock[] = [];
   for (const part of content.parts ?? []) {
-    const kind = content.role === 'user' ? undefined : inlineMediaKind(part);
+    const kind =
+      toClaudeRole(content.role) === 'user' ? undefined : inlineMediaKind(part);
     if (kind !== undefined) {
       logger.warn(
-        `${MEDIA_KIND_LABELS[kind]} data is not supported in Claude for ` +
-          `assistant turns.`,
+        `${kind === 'pdf' ? 'PDF' : 'Image'} data is not supported in Claude ` +
+          `for assistant turns.`,
       );
       continue;
     }
@@ -355,75 +436,78 @@ export function contentBlockToPart(block: ContentBlock): Part {
 }
 
 /**
- * Parses the JSON arguments Claude streams for one `tool_use` block.
+ * Maps an Anthropic stop reason onto the genai finish reason.
  *
- * @param argsJson The accumulated `input_json_delta` text, possibly empty.
- * @throws If the arguments parse to something other than an object.
+ * Anthropic ships a new stop reason before the SDK types it, so a reason the
+ * map does not know reports `FINISH_REASON_UNSPECIFIED`. A caller then sees
+ * that the turn finished, rather than an absent reason it reads as unfinished.
+ *
+ * @param stopReason The stop reason Claude reported, if any.
+ * @return The finish reason, or `undefined` when Claude reported none.
  */
-export function parseToolUseArgs(argsJson: string): Record<string, unknown> {
-  if (!argsJson) {
-    return {};
+export function toGenaiFinishReason(
+  stopReason?: string | null,
+): FinishReason | undefined {
+  if (!stopReason) {
+    return undefined;
   }
-  const parsed: unknown = JSON.parse(argsJson);
-  if (!isRecord(parsed)) {
-    throw new Error(
-      `Claude streamed tool arguments that are not an object: ${argsJson}`,
-    );
+  const known: Partial<Record<string, FinishReason>> = GENAI_FINISH_REASONS;
+  return known[stopReason] ?? FinishReason.FINISH_REASON_UNSPECIFIED;
+}
+
+/**
+ * Maps Anthropic's token counters onto genai usage metadata.
+ *
+ * Anthropic reports cached input tokens in fields disjoint from
+ * `input_tokens`, while genai expects one prompt count with the cached portion
+ * folded in, so the three are summed. It counts thinking tokens inside
+ * `output_tokens`, while genai keeps thought and candidate counts disjoint, so
+ * the thinking tokens are subtracted back out.
+ *
+ * @param usage The counters the message reported.
+ */
+export function toUsageMetadata(
+  usage: Usage,
+): GenerateContentResponseUsageMetadata {
+  const promptTokenCount =
+    usage.input_tokens +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0);
+  const outputTokens = usage.output_tokens;
+  const thinkingTokens = usage.output_tokens_details?.thinking_tokens;
+  // Clamped so a re-tokenized thinking count above output_tokens cannot drive
+  // the candidate count negative.
+  const thoughtsTokenCount =
+    thinkingTokens === undefined
+      ? undefined
+      : Math.min(thinkingTokens, outputTokens);
+
+  const metadata: GenerateContentResponseUsageMetadata = {
+    promptTokenCount,
+    candidatesTokenCount: outputTokens - (thoughtsTokenCount ?? 0),
+    totalTokenCount: promptTokenCount + outputTokens,
+  };
+  if (usage.cache_read_input_tokens != null) {
+    metadata.cachedContentTokenCount = usage.cache_read_input_tokens;
   }
-  return parsed;
+  if (thoughtsTokenCount !== undefined) {
+    metadata.thoughtsTokenCount = thoughtsTokenCount;
+  }
+  return metadata;
 }
 
 /** Converts a complete Anthropic message to an ADK response. */
 export function messageToLlmResponse(message: Message): LlmResponse {
   logger.debug('Received response from Claude.');
-  const inputTokens = message.usage.input_tokens;
-  const outputTokens = message.usage.output_tokens;
-  return {
+  const response: LlmResponse = {
     content: {role: 'model', parts: message.content.map(contentBlockToPart)},
-    usageMetadata: {
-      promptTokenCount: inputTokens,
-      candidatesTokenCount: outputTokens,
-      totalTokenCount: inputTokens + outputTokens,
-    },
+    usageMetadata: toUsageMetadata(message.usage),
   };
-}
-
-/**
- * Lowercases every string `type` in a JSON Schema, in place.
- *
- * genai spells schema types in upper case (`OBJECT`, `STRING`); Anthropic
- * accepts only the lower-case JSON Schema spelling.
- */
-function lowercaseSchemaTypes(value: unknown): void {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      lowercaseSchemaTypes(item);
-    }
-    return;
+  const finishReason = toGenaiFinishReason(message.stop_reason);
+  if (finishReason !== undefined) {
+    response.finishReason = finishReason;
   }
-  if (!isRecord(value)) {
-    return;
-  }
-  const schemaType = value['type'];
-  if (typeof schemaType === 'string') {
-    value['type'] = schemaType.toLowerCase();
-  }
-  for (const key of SCHEMA_MAP_KEYS) {
-    const child = value[key];
-    if (isRecord(child)) {
-      for (const grandChild of Object.values(child)) {
-        lowercaseSchemaTypes(grandChild);
-      }
-    }
-  }
-  for (const key of SCHEMA_CHILD_KEYS) {
-    lowercaseSchemaTypes(value[key]);
-  }
-}
-
-/** Deep-copies a value to plain JSON, dropping `undefined` properties. */
-function toPlainJson(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value));
+  return response;
 }
 
 function toInputSchema(value: unknown, toolName: string): Tool.InputSchema {
@@ -444,30 +528,22 @@ export function functionDeclarationToToolParam(
     throw new Error('A function declaration sent to Claude must have a name.');
   }
 
-  let inputSchema: Tool.InputSchema;
+  // `parametersJsonSchema` is standard JSON Schema by definition, so it passes
+  // through; `parameters` is the genai/OpenAPI dialect, which spells types in
+  // upper case and stringifies bounds, so the shared converter translates it.
+  let schema: unknown;
   if (declaration.parametersJsonSchema) {
-    const schema = toPlainJson(declaration.parametersJsonSchema);
-    lowercaseSchemaTypes(schema);
-    inputSchema = toInputSchema(schema, name);
+    schema = declaration.parametersJsonSchema;
+  } else if (declaration.parameters) {
+    schema = genaiSchemaToJsonSchema(declaration.parameters);
   } else {
-    const properties: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(
-      declaration.parameters?.properties ?? {},
-    )) {
-      properties[key] = toPlainJson(value);
-    }
-    inputSchema = {type: 'object', properties};
-    const required = declaration.parameters?.required;
-    if (required && required.length > 0) {
-      inputSchema.required = [...required];
-    }
-    lowercaseSchemaTypes(inputSchema);
+    schema = {type: 'object', properties: {}};
   }
 
   return {
     name,
     description: declaration.description ?? '',
-    input_schema: inputSchema,
+    input_schema: toInputSchema(schema, name),
   };
 }
 
@@ -508,28 +584,60 @@ export function buildThinkingParam(
 }
 
 /**
+ * Reads Anthropic's reasoning effort from the config.
+ *
+ * genai's own `thinkingConfig.thinkingLevel` has no Anthropic equivalent, so
+ * it is ignored with a warning, and combining the two is an error rather than
+ * a silent choice between them.
+ *
+ * @param config The generate-content config, if any.
+ * @return The effort level, or `undefined` to leave `output_config` unset.
+ * @throws If both `effort` and `thinkingConfig.thinkingLevel` are set.
+ */
+export function buildEffortParam(
+  config?: AnthropicGenerateContentConfig,
+): AnthropicEffort | undefined {
+  const effort = config?.effort ?? undefined;
+  const thinkingLevel = config?.thinkingConfig?.thinkingLevel;
+  if (effort !== undefined) {
+    if (thinkingLevel) {
+      throw new Error(
+        'thinking_level is not supported in AnthropicGenerateContentConfig. ' +
+          'Use the `effort` field directly to configure reasoning effort.',
+      );
+    }
+    return effort;
+  }
+  if (thinkingLevel) {
+    logger.warn(
+      'Standard thinking_config.thinking_level is not supported for ' +
+        'Anthropic models and will be ignored. Use ' +
+        'AnthropicGenerateContentConfig and set the `effort` field directly ' +
+        'to configure reasoning effort.',
+    );
+  }
+  return undefined;
+}
+
+/**
  * Flattens a genai system instruction into the plain text Anthropic accepts.
  *
  * @param instruction The system instruction, if any.
- * @return The instruction text, or `undefined` to leave `system` unset.
+ * @return The instruction text, empty when there is nothing to say. The
+ *   caller omits Anthropic's `system` field for an empty string.
  */
-export function systemInstructionToText(
-  instruction?: ContentUnion,
-): string | undefined {
-  return instruction === undefined
-    ? undefined
-    : flattenContentUnion(instruction);
-}
-
-function flattenContentUnion(instruction: ContentUnion): string {
+export function systemInstructionToText(instruction?: ContentUnion): string {
+  if (instruction === undefined) {
+    return '';
+  }
   if (typeof instruction === 'string') {
     return instruction;
   }
   if (Array.isArray(instruction)) {
-    return instruction.map(flattenContentUnion).join('\n');
+    return instruction.map(systemInstructionToText).join('\n');
   }
   if ('parts' in instruction) {
-    return (instruction.parts ?? []).map(flattenContentUnion).join('\n');
+    return (instruction.parts ?? []).map(systemInstructionToText).join('\n');
   }
   return 'text' in instruction ? (instruction.text ?? '') : '';
 }

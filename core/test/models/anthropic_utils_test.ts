@@ -4,23 +4,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Tool} from '@anthropic-ai/sdk/resources/messages';
-import type {Content, FunctionDeclaration, Part} from '@google/genai';
-import {Type} from '@google/genai';
+import type {StopReason, Tool} from '@anthropic-ai/sdk/resources/messages';
+import type {
+  Content,
+  FunctionDeclaration,
+  FunctionResponsePart,
+  Part,
+} from '@google/genai';
+import {FinishReason, ThinkingLevel, Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
+import type {
+  AnthropicEffort,
+  AnthropicGenerateContentConfig,
+} from '../../src/models/anthropic_utils.js';
 import {
+  buildEffortParam,
   buildThinkingParam,
   contentBlockToPart,
   contentToMessageParam,
   functionDeclarationToToolParam,
   inlineMediaKind,
   messageToLlmResponse,
-  parseToolUseArgs,
   partToMessageBlock,
   systemInstructionToText,
   toClaudeRole,
+  toGenaiFinishReason,
   ToolUseIdSanitizer,
+  toUsageMetadata,
 } from '../../src/models/anthropic_utils.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -35,6 +46,19 @@ function functionResponsePart(
   response: Record<string, unknown>,
 ): Part {
   return {functionResponse: {id, name: 'some_tool', response}};
+}
+
+/** Runs `run`, and returns the `Error` it throws. */
+function expectThrown(run: () => unknown): Error {
+  try {
+    run();
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      return error;
+    }
+    expect.fail(`expected an Error, got ${typeof error}`);
+  }
+  expect.fail('expected a throw');
 }
 
 afterEach(() => {
@@ -125,7 +149,6 @@ describe('partToMessageBlock function responses', () => {
       type: 'tool_result',
       tool_use_id: 'test_id_123',
       content: json,
-      is_error: false,
     });
   });
 
@@ -269,6 +292,15 @@ describe('partToMessageBlock media', () => {
     ).toThrow(/does not support this part/);
   });
 
+  it('names the fields of an unsupported part without its bytes', () => {
+    const failure = expectThrown(() =>
+      block({inlineData: {mimeType: 'audio/mpeg', data: 'c3VwZXItc2VjcmV0'}}),
+    );
+
+    expect(failure.message).toContain('inlineData');
+    expect(failure.message).not.toContain('c3VwZXItc2VjcmV0');
+  });
+
   it('rejects an inline part that carries no data', () => {
     expect(() => block({inlineData: {mimeType: 'image/png'}})).toThrow(
       /does not support this part/,
@@ -399,6 +431,20 @@ describe('contentToMessageParam', () => {
     },
   );
 
+  it.each([
+    ['a role-less content', undefined],
+    ['a tool turn', 'tool'],
+  ])('keeps the media %s sends as a user turn', (_name, role) => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const content: Content = {role, parts: [{text: 'hi'}, imagePart]};
+
+    const result = contentToMessageParam(content, new ToolUseIdSanitizer());
+
+    expect(result.role).toBe('user');
+    expect(result.content).toHaveLength(2);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it('handles a content with no parts', () => {
     expect(
       contentToMessageParam({role: 'user'}, new ToolUseIdSanitizer()),
@@ -479,20 +525,6 @@ describe('contentBlockToPart', () => {
         file_id: 'f',
       }),
     ).toThrow(/Unsupported Claude content block type: container_upload/);
-  });
-});
-
-describe('parseToolUseArgs', () => {
-  it('returns an empty object for empty JSON', () => {
-    expect(parseToolUseArgs('')).toEqual({});
-  });
-
-  it('parses an object', () => {
-    expect(parseToolUseArgs('{"city":"Paris"}')).toEqual({city: 'Paris'});
-  });
-
-  it('rejects arguments that are not an object', () => {
-    expect(() => parseToolUseArgs('[1,2]')).toThrow(/not an object/);
   });
 });
 
@@ -773,17 +805,57 @@ describe('functionDeclarationToToolParam', () => {
       },
     ],
     [
+      'a genai Schema using nullable, stringified bounds and genai-only keys',
+      {
+        name: 'filter_rows',
+        description: 'Filters rows by label.',
+        parameters: {
+          type: Type.OBJECT,
+          propertyOrdering: ['label', 'tags', 'code'],
+          properties: {
+            label: {type: Type.STRING, nullable: true, example: 'north'},
+            tags: {
+              type: Type.ARRAY,
+              minItems: '1',
+              maxItems: '5',
+              items: {type: Type.STRING},
+            },
+            code: {type: Type.INTEGER, format: 'enum', enum: ['101', '201']},
+          },
+          required: ['tags'],
+        },
+      },
+      {
+        name: 'filter_rows',
+        description: 'Filters rows by label.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            label: {type: ['string', 'null']},
+            tags: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 5,
+              items: {type: 'string'},
+            },
+            code: {type: 'integer', enum: [101, 201]},
+          },
+          required: ['tags'],
+        },
+      },
+    ],
+    [
       'a JSON Schema with additionalProperties',
       {
         name: 'store_metadata',
         description: 'Stores arbitrary key-value metadata.',
         parametersJsonSchema: {
-          type: 'OBJECT',
+          type: 'object',
           properties: {
             metadata: {
-              type: 'OBJECT',
+              type: 'object',
               description: 'Arbitrary metadata',
-              additionalProperties: {type: 'STRING'},
+              additionalProperties: {type: 'string'},
             },
           },
           required: ['metadata'],
@@ -811,26 +883,26 @@ describe('functionDeclarationToToolParam', () => {
         name: 'validate_payload',
         description: 'Validates a payload with schema combinators.',
         parametersJsonSchema: {
-          type: 'OBJECT',
+          type: 'object',
           properties: {
-            choice: {oneOf: [{type: 'STRING'}, {type: 'INTEGER'}]},
+            choice: {oneOf: [{type: 'string'}, {type: 'integer'}]},
             config: {
               allOf: [
-                {type: 'OBJECT', properties: {enabled: {type: 'BOOLEAN'}}},
+                {type: 'object', properties: {enabled: {type: 'boolean'}}},
               ],
             },
-            blocked: {not: {type: 'NULL'}},
+            blocked: {not: {type: 'null'}},
             tuple_value: {
-              type: 'ARRAY',
-              items: [{type: 'STRING'}, {type: 'INTEGER'}],
+              type: 'array',
+              items: [{type: 'string'}, {type: 'integer'}],
             },
-            named: {$defs: {inner: {type: 'STRING'}}},
+            named: {$defs: {inner: {type: 'string'}}},
             conditional: {
-              if: {type: 'STRING'},
-              then: {type: 'STRING'},
-              else: {type: 'INTEGER'},
+              if: {type: 'string'},
+              then: {type: 'string'},
+              else: {type: 'integer'},
             },
-            listed: {type: 'ARRAY', prefixItems: [{type: 'BOOLEAN'}]},
+            listed: {type: 'array', prefixItems: [{type: 'boolean'}]},
           },
           required: ['choice'],
         },
@@ -870,13 +942,13 @@ describe('functionDeclarationToToolParam', () => {
         name: 'validate_shape',
         description: 'Validates a shape.',
         parametersJsonSchema: {
-          type: 'OBJECT',
-          dependentSchemas: {a: {type: 'STRING'}},
-          patternProperties: {'^x-': {type: 'INTEGER'}},
-          propertyNames: {type: 'STRING'},
-          unevaluatedProperties: {type: 'BOOLEAN'},
+          type: 'object',
+          dependentSchemas: {a: {type: 'string'}},
+          patternProperties: {'^x-': {type: 'integer'}},
+          propertyNames: {type: 'string'},
+          unevaluatedProperties: {type: 'boolean'},
           properties: {
-            tags: {type: 'ARRAY', contains: {type: 'STRING'}},
+            tags: {type: 'array', contains: {type: 'string'}},
           },
         },
       },
@@ -928,12 +1000,16 @@ describe('functionDeclarationToToolParam', () => {
     expect(functionDeclarationToToolParam(declaration)).toEqual(expected);
   });
 
-  it('omits required when the parameter list is empty', () => {
+  it('passes an empty required list through and defaults the description', () => {
     const tool = functionDeclarationToToolParam({
       name: 'noop',
       parameters: {type: Type.OBJECT, properties: {}, required: []},
     });
-    expect(tool.input_schema).toEqual({type: 'object', properties: {}});
+    expect(tool.input_schema).toEqual({
+      type: 'object',
+      properties: {},
+      required: [],
+    });
     expect(tool.description).toBe('');
   });
 
@@ -947,7 +1023,18 @@ describe('functionDeclarationToToolParam', () => {
     expect(() =>
       functionDeclarationToToolParam({
         name: 'bad',
-        parametersJsonSchema: {type: 'STRING'},
+        parametersJsonSchema: {type: 'string'},
+      }),
+    ).toThrow(/must describe an object/);
+  });
+
+  // `parametersJsonSchema` is standard JSON Schema, whose type names are lower
+  // case. A genai-dialect schema belongs in `parameters`, which is converted.
+  it('rejects a parametersJsonSchema written in the genai dialect', () => {
+    expect(() =>
+      functionDeclarationToToolParam({
+        name: 'bad',
+        parametersJsonSchema: {type: 'OBJECT', properties: {}},
       }),
     ).toThrow(/must describe an object/);
   });
@@ -988,8 +1075,8 @@ describe('buildThinkingParam', () => {
 });
 
 describe('systemInstructionToText', () => {
-  it('returns undefined when no instruction is set', () => {
-    expect(systemInstructionToText()).toBeUndefined();
+  it('returns an empty string when no instruction is set', () => {
+    expect(systemInstructionToText()).toBe('');
   });
 
   it('passes a string through', () => {
@@ -1024,5 +1111,310 @@ describe('systemInstructionToText', () => {
     expect(
       systemInstructionToText({inlineData: {mimeType: 'image/png', data: 'x'}}),
     ).toBe('');
+  });
+});
+
+describe('toGenaiFinishReason', () => {
+  it.each([
+    ['end_turn', FinishReason.STOP],
+    ['stop_sequence', FinishReason.STOP],
+    ['tool_use', FinishReason.STOP],
+    ['pause_turn', FinishReason.STOP],
+    ['max_tokens', FinishReason.MAX_TOKENS],
+    ['refusal', FinishReason.SAFETY],
+    ['model_context_window_exceeded', FinishReason.FINISH_REASON_UNSPECIFIED],
+  ] as Array<[StopReason, FinishReason]>)(
+    'maps %s to %s',
+    (stopReason, expected) => {
+      expect(toGenaiFinishReason(stopReason)).toBe(expected);
+    },
+  );
+
+  it.each([undefined, null])('maps %s to undefined', (stopReason) => {
+    expect(toGenaiFinishReason(stopReason)).toBeUndefined();
+  });
+
+  it('maps a stop reason the SDK does not type yet to unspecified', () => {
+    expect(toGenaiFinishReason('a_reason_shipped_after_this_sdk')).toBe(
+      FinishReason.FINISH_REASON_UNSPECIFIED,
+    );
+  });
+});
+
+describe('toUsageMetadata', () => {
+  it('folds the cache read tokens into the prompt count', () => {
+    expect(
+      toUsageMetadata(anthropicUsage(10, 20, {cache_read_input_tokens: 7})),
+    ).toEqual({
+      promptTokenCount: 17,
+      candidatesTokenCount: 20,
+      totalTokenCount: 37,
+      cachedContentTokenCount: 7,
+    });
+  });
+
+  it('folds the cache creation tokens into the prompt count', () => {
+    expect(
+      toUsageMetadata(anthropicUsage(10, 20, {cache_creation_input_tokens: 5})),
+    ).toEqual({
+      promptTokenCount: 15,
+      candidatesTokenCount: 20,
+      totalTokenCount: 35,
+    });
+  });
+
+  it('omits the cached count when Claude reports no cache read', () => {
+    expect(toUsageMetadata(anthropicUsage(10, 20))).toEqual({
+      promptTokenCount: 10,
+      candidatesTokenCount: 20,
+      totalTokenCount: 30,
+    });
+  });
+
+  it('splits the thinking tokens out of the candidate count', () => {
+    expect(
+      toUsageMetadata(
+        anthropicUsage(10, 20, {output_tokens_details: {thinking_tokens: 8}}),
+      ),
+    ).toEqual({
+      promptTokenCount: 10,
+      candidatesTokenCount: 12,
+      totalTokenCount: 30,
+      thoughtsTokenCount: 8,
+    });
+  });
+
+  it('clamps a thinking count above the output count', () => {
+    const metadata = toUsageMetadata(
+      anthropicUsage(10, 20, {output_tokens_details: {thinking_tokens: 25}}),
+    );
+
+    expect(metadata.candidatesTokenCount).toBe(0);
+    expect(metadata.thoughtsTokenCount).toBe(20);
+  });
+
+  it('counts a zero input as zero prompt tokens', () => {
+    expect(toUsageMetadata(anthropicUsage(0, 4))).toEqual({
+      promptTokenCount: 0,
+      candidatesTokenCount: 4,
+      totalTokenCount: 4,
+    });
+  });
+});
+
+describe('messageToLlmResponse finish reason', () => {
+  it('maps the stop reason onto the finish reason', () => {
+    const response = messageToLlmResponse(
+      anthropicMessage([], anthropicUsage(1, 1), 'max_tokens'),
+    );
+
+    expect(response.finishReason).toBe(FinishReason.MAX_TOKENS);
+  });
+
+  it('omits the finish reason when Claude reports no stop reason', () => {
+    const response = messageToLlmResponse(
+      anthropicMessage([], anthropicUsage(1, 1), null),
+    );
+
+    expect(response.finishReason).toBeUndefined();
+  });
+});
+
+describe('buildEffortParam', () => {
+  it('returns undefined without a config', () => {
+    expect(buildEffortParam()).toBeUndefined();
+  });
+
+  it('returns undefined for a config that states no effort', () => {
+    expect(buildEffortParam({systemInstruction: 'test'})).toBeUndefined();
+  });
+
+  it.each(['low', 'medium', 'high', 'xhigh', 'max'] as AnthropicEffort[])(
+    'returns the effort %s',
+    (effort) => {
+      const config: AnthropicGenerateContentConfig = {effort};
+      expect(buildEffortParam(config)).toBe(effort);
+    },
+  );
+
+  it.each([undefined, null])('treats an effort of %s as unset', (effort) => {
+    const config: AnthropicGenerateContentConfig = {effort};
+    expect(buildEffortParam(config)).toBeUndefined();
+  });
+
+  it('rejects an effort combined with a thinking level', () => {
+    const config: AnthropicGenerateContentConfig = {
+      effort: 'high',
+      thinkingConfig: {thinkingLevel: ThinkingLevel.HIGH},
+    };
+
+    expect(() => buildEffortParam(config)).toThrow(
+      /thinking_level is not supported/,
+    );
+  });
+
+  it('warns and ignores a thinking level set on its own', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    expect(
+      buildEffortParam({thinkingConfig: {thinkingLevel: ThinkingLevel.HIGH}}),
+    ).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('thinking_level is not supported'),
+    );
+  });
+
+  it('does not warn for a thinking budget without a thinking level', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    expect(buildEffortParam({thinkingConfig: {thinkingBudget: 1024}})).toBe(
+      undefined,
+    );
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('tool result media', () => {
+  const png = 'aW1hZ2VieXRlcw==';
+
+  function toolResult(
+    response: Record<string, unknown>,
+    parts: FunctionResponsePart[],
+  ) {
+    return block({
+      functionResponse: {id: 'toolu_1', name: 'shot', response, parts},
+    });
+  }
+
+  it('puts the result text before the image the tool attached', () => {
+    expect(
+      toolResult({result: 'captured'}, [
+        {inlineData: {mimeType: 'image/png', data: png}},
+      ]),
+    ).toEqual({
+      type: 'tool_result',
+      tool_use_id: 'toolu_1',
+      content: [
+        {type: 'text', text: 'captured'},
+        {
+          type: 'image',
+          source: {type: 'base64', media_type: 'image/png', data: png},
+        },
+      ],
+    });
+  });
+
+  it('emits no empty text block when the result is only media', () => {
+    const converted = toolResult({}, [
+      {inlineData: {mimeType: 'image/png', data: png}},
+    ]);
+
+    expect(converted).toMatchObject({
+      content: [
+        {
+          type: 'image',
+          source: {type: 'base64', media_type: 'image/png', data: png},
+        },
+      ],
+    });
+  });
+
+  it('carries an attached PDF as a document block', () => {
+    expect(
+      toolResult({}, [{inlineData: {mimeType: 'application/pdf', data: png}}]),
+    ).toMatchObject({
+      content: [
+        {
+          type: 'document',
+          source: {type: 'base64', media_type: 'application/pdf', data: png},
+        },
+      ],
+    });
+  });
+
+  it('drops media Claude cannot carry and keeps the result text', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const converted = toolResult({result: 'recorded'}, [
+      {inlineData: {mimeType: 'audio/wav', data: 'YXVkaW8='}},
+    ]);
+
+    expect(converted).toMatchObject({content: 'recorded'});
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('audio/wav'));
+  });
+
+  it('keeps the plain string when the tool attached no media', () => {
+    expect(toolResult({result: 'plain'}, [])).toMatchObject({
+      content: 'plain',
+    });
+  });
+
+  it('ignores an attached part that carries no inline data', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    expect(
+      toolResult({result: 'plain'}, [
+        {fileData: {fileUri: 'gs://bucket/x', mimeType: 'image/png'}},
+        {inlineData: {mimeType: 'image/png'}},
+      ]),
+    ).toMatchObject({content: 'plain'});
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('keeps the plain string when the response has no parts', () => {
+    expect(
+      block({functionResponse: {id: 'toolu_1', response: {result: 'plain'}}}),
+    ).toMatchObject({content: 'plain'});
+  });
+});
+
+describe('inlineMediaKind media type prefix', () => {
+  it('does not treat an imagemap type as an image', () => {
+    expect(inlineMediaKind({inlineData: {mimeType: 'imagemap/x'}})).toBe(
+      undefined,
+    );
+  });
+
+  it('rejects an imagemap part as an unconvertible part', () => {
+    expect(() =>
+      block({inlineData: {mimeType: 'imagemap/x', data: 'eA=='}}),
+    ).toThrow(/does not support this part/);
+  });
+});
+
+describe('functionDeclarationToToolParam input safety', () => {
+  it('leaves the declared JSON Schema unmodified', () => {
+    const declaration: FunctionDeclaration = {
+      name: 'lookup',
+      description: 'Looks something up.',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {id: {type: 'string'}},
+      },
+    };
+
+    functionDeclarationToToolParam(declaration);
+
+    expect(declaration.parametersJsonSchema).toEqual({
+      type: 'object',
+      properties: {id: {type: 'string'}},
+    });
+  });
+
+  it('leaves the declared parameters unmodified', () => {
+    const declaration: FunctionDeclaration = {
+      name: 'lookup',
+      description: 'Looks something up.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {id: {type: Type.STRING}},
+      },
+    };
+
+    functionDeclarationToToolParam(declaration);
+
+    expect(declaration.parameters?.properties).toEqual({
+      id: {type: Type.STRING},
+    });
   });
 });
