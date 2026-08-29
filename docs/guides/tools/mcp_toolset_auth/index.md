@@ -96,6 +96,11 @@ with a client id but no access token yet is the normal case before the exchange
 runs, and the toolset sends the request unauthenticated rather than sending
 `Bearer undefined`. An API key whose scheme puts it in the query string or a
 cookie sends nothing and logs a warning: only the header location is supported.
+A scheme that names a header but omits `in` is read as a header, which is what
+an OpenAPI document that leaves the field out means.
+
+The auth scheme is what builds the config, so an `authCredential` passed
+without an `authScheme` sends no header. The toolset warns when you do that.
 
 `credentialKey` names the slot the exchanged credential is stored under, and
 defaults to `default_mcp_key`. Give each toolset its own key when one agent
