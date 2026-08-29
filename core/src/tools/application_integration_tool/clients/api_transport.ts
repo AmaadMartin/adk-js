@@ -5,10 +5,10 @@
  */
 
 import {AuthClient, GoogleAuth, JWT} from 'google-auth-library';
+import {ServiceAccountCredential} from '../../../auth/auth_credential.js';
 import {InputValidationError} from '../../../errors/input_validation_error.js';
 import {formatError} from '../../../utils/error_utils.js';
 import {asJsonObject} from '../../../utils/json_utils.js';
-import {parseServiceAccountCredential} from '../../../utils/service_account_utils.js';
 
 /** OAuth scope every Application Integration and Connectors call is made with. */
 export const CLOUD_PLATFORM_SCOPE =
@@ -47,20 +47,26 @@ export class ApiTransport {
   private quotaProject?: string;
 
   /**
-   * @param serviceAccountJson Raw service account key file contents. Falls
-   *     back to Application Default Credentials when omitted.
+   * @param serviceAccount Key the requests are signed with. Falls back to
+   *     Application Default Credentials when omitted.
    */
-  constructor(private readonly serviceAccountJson?: string) {}
+  constructor(private readonly serviceAccount?: ServiceAccountCredential) {}
 
   /**
-   * Resolves the credentials and returns their quota project. Always
-   * `undefined` when an explicit service account key is used.
+   * Header that bills the request to the caller's own project. Application
+   * Default Credentials need it; a service account key does not, because the
+   * key already names its project.
    *
-   * @throws {Error} If the credentials cannot be resolved or yield no token.
+   * @throws {Error} If the credentials cannot be resolved.
    */
-  async getQuotaProjectId(): Promise<string | undefined> {
-    await this.getAccessToken();
-    return this.quotaProject;
+  async quotaProjectHeaders(
+    fallbackProject: string,
+  ): Promise<Record<string, string>> {
+    if (this.serviceAccount) {
+      return {};
+    }
+    await this.resolveClient();
+    return {'x-goog-user-project': this.quotaProject ?? fallbackProject};
   }
 
   /**
@@ -69,12 +75,12 @@ export class ApiTransport {
    * @throws {Error} If the credentials cannot be resolved or yield no token.
    */
   async getAccessToken(): Promise<string> {
+    const client = await this.resolveClient();
     let token: string | null | undefined;
     try {
-      const client = await this.resolveClient();
       token = (await client.getAccessToken()).token;
     } catch (error: unknown) {
-      throw new Error(`Credentials error: ${formatError(error)}`);
+      throw credentialsError(error);
     }
     if (!token) {
       throw new Error(NO_CREDENTIALS_MESSAGE);
@@ -129,21 +135,29 @@ export class ApiTransport {
     if (this.client) {
       return this.client;
     }
-    if (this.serviceAccountJson) {
-      const key = parseServiceAccountCredential(this.serviceAccountJson);
+    if (this.serviceAccount) {
       this.client = new JWT({
-        email: key.clientEmail,
-        key: key.privateKey,
+        email: this.serviceAccount.clientEmail,
+        key: this.serviceAccount.privateKey,
         scopes: [CLOUD_PLATFORM_SCOPE],
       });
       return this.client;
     }
-    const auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
-    const client = await auth.getClient();
-    this.quotaProject =
-      client.quotaProjectId ??
-      (await auth.getProjectId().catch(() => undefined));
-    this.client = client;
-    return client;
+    try {
+      const auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
+      const client = await auth.getClient();
+      this.quotaProject =
+        client.quotaProjectId ??
+        (await auth.getProjectId().catch(() => undefined));
+      this.client = client;
+      return client;
+    } catch (error: unknown) {
+      throw credentialsError(error);
+    }
   }
+}
+
+/** Reports a credentials failure with adk-python's message. */
+function credentialsError(error: unknown): Error {
+  return new Error(`Credentials error: ${formatError(error)}`);
 }

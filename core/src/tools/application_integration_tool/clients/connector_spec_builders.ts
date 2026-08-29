@@ -239,14 +239,31 @@ interface EntityOperationContext {
   toolInstructions: string;
 }
 
-/** Builds the path item that lists the records of an entity. */
-function listOperation({
-  entity,
-  schemaAsString,
-  toolName,
-  toolInstructions,
-}: EntityOperationContext): ConnectorPathItem {
+/**
+ * Builds the path item of one entity operation. Every operation names itself
+ * `<tool>_<verb>_<entity>`, carries the entity, and reads the request schema
+ * of the same name, so only the prose differs between them.
+ */
+function entityOperation(
+  verb: string,
+  operation: string,
+  context: EntityOperationContext,
+  prose: {summary: string; description: string; responseDescription?: string},
+): ConnectorPathItem {
   return connectorOperation({
+    summary: prose.summary,
+    description: `${prose.description} ${context.toolInstructions}`,
+    operationId: `${context.toolName}_${verb}_${context.entity}`,
+    extensions: {'x-operation': operation, 'x-entity': context.entity},
+    requestRef: `#/components/schemas/${verb}_${context.entity}_Request`,
+    responseDescription: prose.responseDescription,
+  });
+}
+
+/** Builds the path item that lists the records of an entity. */
+function listOperation(context: EntityOperationContext): ConnectorPathItem {
+  const {entity, schemaAsString} = context;
+  return entityOperation('list', 'LIST_ENTITIES', context, {
     summary: `List ${entity}`,
     description:
       `Returns the list of ${entity} data. If the page token was available` +
@@ -254,73 +271,45 @@ function listOperation({
       ' Ask if the user wants to fetch the next page of results. When' +
       ' passing filter use the\n                following format:' +
       " `field_name1='value1' AND field_name2='value2'\n" +
-      `                \`. ${toolInstructions}`,
-    operationId: `${toolName}_list_${entity}`,
-    extensions: {'x-operation': 'LIST_ENTITIES', 'x-entity': entity},
-    requestRef: `#/components/schemas/list_${entity}_Request`,
+      '                `.',
     responseDescription: `Returns a list of ${entity} of json schema: ${schemaAsString}`,
   });
 }
 
 /** Builds the path item that reads a single record of an entity. */
-function getOperation({
-  entity,
-  schemaAsString,
-  toolName,
-  toolInstructions,
-}: EntityOperationContext): ConnectorPathItem {
-  return connectorOperation({
+function getOperation(context: EntityOperationContext): ConnectorPathItem {
+  const {entity, schemaAsString} = context;
+  return entityOperation('get', 'GET_ENTITY', context, {
     summary: `Get ${entity}`,
-    description: `Returns the details of the ${entity}. ${toolInstructions}`,
-    operationId: `${toolName}_get_${entity}`,
-    extensions: {'x-operation': 'GET_ENTITY', 'x-entity': entity},
-    requestRef: `#/components/schemas/get_${entity}_Request`,
+    description: `Returns the details of the ${entity}.`,
     responseDescription: `Returns ${entity} of json schema: ${schemaAsString}`,
   });
 }
 
 /** Builds the path item that creates a record of an entity. */
-function createOperation({
-  entity,
-  toolName,
-  toolInstructions,
-}: EntityOperationContext): ConnectorPathItem {
-  return connectorOperation({
+function createOperation(context: EntityOperationContext): ConnectorPathItem {
+  const {entity} = context;
+  return entityOperation('create', 'CREATE_ENTITY', context, {
     summary: `Creates a new ${entity}`,
-    description: `Creates a new ${entity}. ${toolInstructions}`,
-    operationId: `${toolName}_create_${entity}`,
-    extensions: {'x-operation': 'CREATE_ENTITY', 'x-entity': entity},
-    requestRef: `#/components/schemas/create_${entity}_Request`,
+    description: `Creates a new ${entity}.`,
   });
 }
 
 /** Builds the path item that updates a record of an entity. */
-function updateOperation({
-  entity,
-  toolName,
-  toolInstructions,
-}: EntityOperationContext): ConnectorPathItem {
-  return connectorOperation({
+function updateOperation(context: EntityOperationContext): ConnectorPathItem {
+  const {entity} = context;
+  return entityOperation('update', 'UPDATE_ENTITY', context, {
     summary: `Updates the ${entity}`,
-    description: `Updates the ${entity}. ${toolInstructions}`,
-    operationId: `${toolName}_update_${entity}`,
-    extensions: {'x-operation': 'UPDATE_ENTITY', 'x-entity': entity},
-    requestRef: `#/components/schemas/update_${entity}_Request`,
+    description: `Updates the ${entity}.`,
   });
 }
 
 /** Builds the path item that deletes a record of an entity. */
-function deleteOperation({
-  entity,
-  toolName,
-  toolInstructions,
-}: EntityOperationContext): ConnectorPathItem {
-  return connectorOperation({
+function deleteOperation(context: EntityOperationContext): ConnectorPathItem {
+  const {entity} = context;
+  return entityOperation('delete', 'DELETE_ENTITY', context, {
     summary: `Delete the ${entity}`,
-    description: `Deletes the ${entity}. ${toolInstructions}`,
-    operationId: `${toolName}_delete_${entity}`,
-    extensions: {'x-operation': 'DELETE_ENTITY', 'x-entity': entity},
-    requestRef: `#/components/schemas/delete_${entity}_Request`,
+    description: `Deletes the ${entity}.`,
   });
 }
 

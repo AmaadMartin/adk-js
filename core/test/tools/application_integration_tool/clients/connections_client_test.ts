@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ConnectionsClient, InputValidationError} from '@google/adk';
+import {InputValidationError} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {ApiTransport} from '../../../../src/tools/application_integration_tool/clients/api_transport.js';
+import {ConnectionsClient} from '../../../../src/tools/application_integration_tool/clients/connections_client.js';
+import {parseServiceAccountCredential} from '../../../../src/utils/service_account_utils.js';
 
 const getAccessToken = vi.fn();
 const getProjectId = vi.fn();
@@ -60,12 +63,18 @@ function jsonResponse(body: unknown, init: {status?: number} = {}) {
 }
 
 function createClient(serviceAccountJson?: string): ConnectionsClient {
-  return new ConnectionsClient({
-    project: 'test-project',
-    location: 'us-central1',
-    connection: 'test-connection',
-    serviceAccountJson,
-  });
+  return new ConnectionsClient(
+    {
+      project: 'test-project',
+      location: 'us-central1',
+      connection: 'test-connection',
+    },
+    new ApiTransport(
+      serviceAccountJson === undefined
+        ? undefined
+        : parseServiceAccountCredential(serviceAccountJson),
+    ),
+  );
 }
 
 describe('ConnectionsClient', () => {
@@ -425,17 +434,6 @@ describe('ConnectionsClient', () => {
         key: 'test-key',
         scopes: ['https://www.googleapis.com/auth/cloud-platform'],
       });
-    });
-
-    it('rejects a service account key that is not a JSON object', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({}));
-
-      await expect(
-        createClient('"a string"').getConnectionDetails(),
-      ).rejects.toThrow(
-        'Credentials error: Service account key must be a JSON object.',
-      );
-      expect(jwtConstructor).not.toHaveBeenCalled();
     });
 
     it('resolves the credentials once and reuses the client', async () => {

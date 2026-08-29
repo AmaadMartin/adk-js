@@ -54,11 +54,6 @@ export interface ConnectionsClientOptions {
   location: string;
   /** Connection name. */
   connection: string;
-  /**
-   * Raw service account key file contents. Falls back to Application Default
-   * Credentials when omitted.
-   */
-  serviceAccountJson?: string;
 }
 
 /**
@@ -67,11 +62,10 @@ export interface ConnectionsClientOptions {
  */
 @experimental
 export class ConnectionsClient {
-  private readonly transport: ApiTransport;
-
-  constructor(private readonly options: ConnectionsClientOptions) {
-    this.transport = new ApiTransport(options.serviceAccountJson);
-  }
+  constructor(
+    private readonly options: ConnectionsClientOptions,
+    private readonly transport: ApiTransport,
+  ) {}
 
   /**
    * Retrieves the service name, host and auth-override flag of the connection.
