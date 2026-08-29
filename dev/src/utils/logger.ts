@@ -19,8 +19,6 @@ const WINSTON_LEVELS: Record<string, LogLevel> = {
   'error': LogLevel.ERROR,
 };
 
-const PASS_THROUGH_LEVEL = 'error';
-
 /**
  * Owner-only permissions for the log file. An agent log carries model prompts
  * and responses, and it sits at a predictable path inside a world-traversable
@@ -175,7 +173,7 @@ export class AdkLogger implements Logger {
   ): void {
     this.logger.configure({
       levels: WINSTON_LEVELS,
-      level: PASS_THROUGH_LEVEL,
+      level: 'error',
       format: transport ? fileLogFormat(this.label) : this.consoleFormat,
       transports: [transport ?? new winston.transports.Console()],
     });

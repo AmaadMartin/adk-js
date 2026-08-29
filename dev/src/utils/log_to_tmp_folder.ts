@@ -31,7 +31,11 @@ export interface TmpFolderLog {
   latestLogPath?: string;
 }
 
-/** Mirrors the keyword arguments of adk-python's `log_to_tmp_folder`. */
+/**
+ * Test seam. No production caller passes these. The tests override them so
+ * that the suite writes to a folder of its own and never to the developer's
+ * real `<temp>/agents_log`.
+ */
 export interface LogToTmpFolderOptions {
   /** Directory under the system temp root. Default `'agents_log'`. */
   subFolder?: string;

@@ -129,6 +129,28 @@ describe('adk web and api_server with --log_to_tmp', () => {
     });
   });
 
+  it('writes every level to the file, not only the low ones', async () => {
+    // The winston level map runs the other way round from winston's own
+    // convention: DEBUG is 0, so `error` is the highest number and the only
+    // pass-through value that lets a warn or an error record reach the file.
+    await runCli(['api_server', '--log_to_tmp', '--log_level', 'debug']);
+    const logFilePath = printedPath(SETUP_LINE_PREFIX);
+    const logger = getLogger();
+
+    logger.debug('a debug record');
+    logger.info('an info record');
+    logger.warn('a warn record');
+    logger.error('an error record');
+
+    await vi.waitFor(() => {
+      const content = readFileSync(logFilePath, 'utf8');
+      expect(content).toContain(' - DEBUG - ADK - a debug record');
+      expect(content).toContain(' - INFO - ADK - an info record');
+      expect(content).toContain(' - WARN - ADK - a warn record');
+      expect(content).toContain(' - ERROR - ADK - an error record');
+    });
+  });
+
   it('creates no log folder when the flag is absent', async () => {
     await runCli(['api_server']);
 
