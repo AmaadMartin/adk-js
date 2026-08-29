@@ -7,7 +7,7 @@
 import {ServiceAccountCredential} from '../auth/auth_credential.js';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {camelCaseKeys} from './case_utils.js';
-import {asJsonObject} from './json_utils.js';
+import {asJsonObject, readString} from './json_utils.js';
 
 /** Value the `type` field of a service account key file carries. */
 const SERVICE_ACCOUNT_TYPE = 'service_account';
@@ -16,12 +16,13 @@ const SERVICE_ACCOUNT_TYPE = 'service_account';
  * Parses the contents of a Google Cloud service account key file.
  *
  * A key file names its fields in snake_case, so they are converted to the
- * camelCase {@link ServiceAccountCredential} shape. Every field is checked
- * here because an incomplete key otherwise fails much later, during the
- * credential exchange of the first tool call.
+ * camelCase {@link ServiceAccountCredential} shape. Only the credential
+ * exchange reads `privateKey` and `clientEmail`, so those two are checked. The
+ * rest fill the non-optional members of the shape and default to empty, which
+ * keeps a key file that predates a field readable.
  *
  * @throws {InputValidationError} If the text is not a JSON object, names
- *     another type, or leaves a required field empty.
+ *     another type, or leaves the private key or the client email empty.
  */
 export function parseServiceAccountCredential(
   serviceAccountJson: string,
@@ -35,16 +36,16 @@ export function parseServiceAccountCredential(
   }
   return {
     type: SERVICE_ACCOUNT_TYPE,
-    projectId: requiredString(key, 'projectId'),
-    privateKeyId: requiredString(key, 'privateKeyId'),
+    projectId: readString(key, 'projectId'),
+    privateKeyId: readString(key, 'privateKeyId'),
     privateKey: requiredString(key, 'privateKey'),
     clientEmail: requiredString(key, 'clientEmail'),
-    clientId: requiredString(key, 'clientId'),
-    authUri: requiredString(key, 'authUri'),
-    tokenUri: requiredString(key, 'tokenUri'),
-    authProviderX509CertUrl: requiredString(key, 'authProviderX509CertUrl'),
-    clientX509CertUrl: requiredString(key, 'clientX509CertUrl'),
-    universeDomain: requiredString(key, 'universeDomain'),
+    clientId: readString(key, 'clientId'),
+    authUri: readString(key, 'authUri'),
+    tokenUri: readString(key, 'tokenUri'),
+    authProviderX509CertUrl: readString(key, 'authProviderX509CertUrl'),
+    clientX509CertUrl: readString(key, 'clientX509CertUrl'),
+    universeDomain: readString(key, 'universeDomain'),
   };
 }
 

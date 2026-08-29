@@ -64,16 +64,8 @@ describe('parseServiceAccountCredential', () => {
 
   it.each([
     ['type', 'type'],
-    ['project_id', 'projectId'],
-    ['private_key_id', 'privateKeyId'],
     ['private_key', 'privateKey'],
     ['client_email', 'clientEmail'],
-    ['client_id', 'clientId'],
-    ['auth_uri', 'authUri'],
-    ['token_uri', 'tokenUri'],
-    ['auth_provider_x509_cert_url', 'authProviderX509CertUrl'],
-    ['client_x509_cert_url', 'clientX509CertUrl'],
-    ['universe_domain', 'universeDomain'],
   ])('rejects a key with no %s', (omitted, reported) => {
     expect(() => parseServiceAccountCredential(keyFile(omitted))).toThrow(
       new InputValidationError(
@@ -91,11 +83,38 @@ describe('parseServiceAccountCredential', () => {
   });
 
   it('rejects a field that is not a string', () => {
-    const wrongType = JSON.stringify({...KEY_FIELDS, project_id: 42});
+    const wrongType = JSON.stringify({...KEY_FIELDS, private_key: 42});
 
     expect(() => parseServiceAccountCredential(wrongType)).toThrow(
-      'Service account key is missing the required field "projectId".',
+      'Service account key is missing the required field "privateKey".',
     );
+  });
+
+  it('accepts a key that omits the fields the exchange never reads', () => {
+    const trimmed = keyFile(
+      'project_id',
+      'private_key_id',
+      'client_id',
+      'auth_uri',
+      'token_uri',
+      'auth_provider_x509_cert_url',
+      'client_x509_cert_url',
+      'universe_domain',
+    );
+
+    expect(parseServiceAccountCredential(trimmed)).toEqual({
+      type: 'service_account',
+      projectId: '',
+      privateKeyId: '',
+      privateKey: PRIVATE_KEY,
+      clientEmail: 'test@example.com',
+      clientId: '',
+      authUri: '',
+      tokenUri: '',
+      authProviderX509CertUrl: '',
+      clientX509CertUrl: '',
+      universeDomain: '',
+    });
   });
 
   it('rejects a key naming another credential type', () => {
