@@ -128,12 +128,17 @@ export class APIHubToolset extends BaseToolset {
     const specStr = await this.apihubClient.getSpecContent(
       this.apihubResourceName,
     );
-    const spec = yaml.load(specStr) as OpenAPIV3.Document | undefined;
-    // YAML parses plain text to a scalar, which carries no `info` block. Treat
-    // it like an empty spec rather than naming the toolset from nothing.
-    if (!spec || typeof spec !== 'object') {
+    const parsed: unknown = yaml.load(specStr);
+    // API Hub returns empty contents for a spec that holds no document.
+    if (!parsed) {
       return;
     }
+    if (typeof parsed !== 'object') {
+      throw new Error(
+        `API Hub resource '${this.apihubResourceName}' is not an OpenAPI document.`,
+      );
+    }
+    const spec = parsed as OpenAPIV3.Document;
 
     // A spec is remote content, so its `info` block may be absent, and YAML
     // parses an unquoted `title: 1.0` as a number.

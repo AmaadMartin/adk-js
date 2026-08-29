@@ -53,28 +53,21 @@ export function extractResourceName(urlOrPath: string): APIHubResourceNames {
   const project = segmentAfter(segments, 'projects') ?? queryProject;
   if (!project) {
     throw new Error(
-      'Project ID not found in URL or path in APIHubClient. Input path is' +
-        ` '${urlOrPath}'. Please make sure there is either` +
-        " '/projects/PROJECT_ID' in the path or 'project=PROJECT_ID' query" +
-        ' param in the input.',
+      `Project ID not found in URL or path in APIHubClient. Input path is '${urlOrPath}'. Please make sure there is either '/projects/PROJECT_ID' in the path or 'project=PROJECT_ID' query param in the input.`,
     );
   }
 
   const location = segmentAfter(segments, 'locations');
   if (!location) {
     throw new Error(
-      'Location not found in URL or path in APIHubClient. Input path is' +
-        ` '${urlOrPath}'. Please make sure there is either` +
-        " '/location/LOCATION_ID' in the path.",
+      `Location not found in URL or path in APIHubClient. Input path is '${urlOrPath}'. Please make sure there is either '/locations/LOCATION_ID' in the path.`,
     );
   }
 
   const apiId = segmentAfter(segments, 'apis');
   if (!apiId) {
     throw new Error(
-      'API id not found in URL or path in APIHubClient. Input path is' +
-        ` '${urlOrPath}'. Please make sure there is either '/apis/API_ID' in` +
-        ' the path.',
+      `API id not found in URL or path in APIHubClient. Input path is '${urlOrPath}'. Please make sure there is either '/apis/API_ID' in the path.`,
     );
   }
 

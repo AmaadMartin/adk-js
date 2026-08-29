@@ -139,4 +139,10 @@ describe('extractResourceName', () => {
   ])('rejects %s', (urlOrPath, expectedMessage) => {
     expect(() => extractResourceName(urlOrPath)).toThrow(expectedMessage);
   });
+
+  it('names the path segment the parser reads for the location', () => {
+    expect(() => extractResourceName('projects/test-project')).toThrow(
+      "'/locations/LOCATION_ID' in the path",
+    );
+  });
 });

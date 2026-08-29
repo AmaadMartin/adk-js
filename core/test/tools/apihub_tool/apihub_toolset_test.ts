@@ -256,16 +256,16 @@ describe('APIHubToolset', () => {
     expect(await toolset.getTools()).toEqual([]);
   });
 
-  it('leaves the name unset when the spec parses to a scalar', async () => {
+  it('rejects when the spec parses to a scalar', async () => {
     const toolset = new APIHubToolset({
       apihubResourceName: 'test_resource',
       apihubClient: new MockAPIHubClient('spec content'),
       lazyLoadSpec: true,
     });
 
-    expect(await toolset.getTools()).toEqual([]);
-    expect(toolset.name).toBe('');
-    expect(toolset.description).toBe('');
+    await expect(toolset.getTools()).rejects.toThrow(
+      "API Hub resource 'test_resource' is not an OpenAPI document.",
+    );
   });
 
   it('rejects when the spec is not valid YAML', async () => {
