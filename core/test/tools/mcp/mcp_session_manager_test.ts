@@ -8,7 +8,15 @@ import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {logger} from '../../../src/utils/logger.js';
@@ -380,6 +388,137 @@ describe('MCPSessionManager', () => {
         command: 'test-command',
       });
       expect(client.connect).toHaveBeenCalled();
+    });
+  });
+
+  describe('runGuarded', () => {
+    let errorSpy: MockInstance<typeof logger.error>;
+
+    beforeEach(() => {
+      // Every transport failure below logs; keep it out of the test output.
+      errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
+
+    /** A manager whose newest transport the test can fail on demand. */
+    async function guardedSession() {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+      const client = await manager.createSession();
+      const transport = vi
+        .mocked(StreamableHTTPClientTransport)
+        .mock.instances.at(-1);
+
+      return {
+        manager,
+        client,
+        failTransport(message: string) {
+          transport?.onerror?.(new Error(message));
+        },
+      };
+    }
+
+    it('returns what the call returned', async () => {
+      const {manager, client} = await guardedSession();
+
+      await expect(
+        manager.runGuarded(client, Promise.resolve('tool output')),
+      ).resolves.toBe('tool output');
+    });
+
+    it('propagates the call\u2019s own error unwrapped', async () => {
+      const {manager, client} = await guardedSession();
+
+      await expect(
+        manager.runGuarded(client, Promise.reject(new Error('tool exploded'))),
+      ).rejects.toThrow('tool exploded');
+    });
+
+    it('rejects a pending call when the transport fails', async () => {
+      const {manager, client, failTransport} = await guardedSession();
+      // A call the SDK would leave pending until its 60s request timeout.
+      const guarded = manager.runGuarded(client, new Promise<string>(() => {}));
+
+      failTransport('Error POSTing to endpoint: Forbidden');
+
+      await expect(guarded).rejects.toThrow(
+        /MCP session connection lost:.*Forbidden/,
+      );
+    });
+
+    it('keeps the transport error as the cause', async () => {
+      const {manager, client, failTransport} = await guardedSession();
+      const guarded = manager.runGuarded(client, new Promise<string>(() => {}));
+
+      failTransport('stream died');
+
+      const error = await guarded.catch((e: unknown) => e);
+      expect((error as Error).cause).toBeInstanceOf(Error);
+      expect(((error as Error).cause as Error).message).toBe('stream died');
+    });
+
+    it('rejects at once when the transport already failed', async () => {
+      const {manager, client, failTransport} = await guardedSession();
+      failTransport('died before the call');
+
+      await expect(
+        manager.runGuarded(client, new Promise<string>(() => {})),
+      ).rejects.toThrow(/MCP session connection lost:.*died before the call/);
+    });
+
+    it('reports only the first transport error', async () => {
+      const {manager, client, failTransport} = await guardedSession();
+      failTransport('first');
+      failTransport('second');
+
+      await expect(
+        manager.runGuarded(client, new Promise<string>(() => {})),
+      ).rejects.toThrow(/first/);
+    });
+
+    it('runs unguarded once the session is closed', async () => {
+      const {manager, client, failTransport} = await guardedSession();
+      await manager.closeSession(client);
+
+      failTransport('after close');
+
+      await expect(
+        manager.runGuarded(client, Promise.resolve('still fine')),
+      ).resolves.toBe('still fine');
+    });
+
+    it('runs unguarded for a session it did not open', async () => {
+      const {manager} = await guardedSession();
+      const foreign = new Client({name: 'other', version: '1.0.0'});
+
+      await expect(
+        manager.runGuarded(foreign, Promise.resolve('unguarded')),
+      ).resolves.toBe('unguarded');
+    });
+
+    it('observes the abandoned call so it cannot go unhandled', async () => {
+      const {manager, client, failTransport} = await guardedSession();
+      const unhandled = vi.fn();
+      process.on('unhandledRejection', unhandled);
+      let rejectCall = (_: Error) => {};
+      const call = new Promise<string>((_, reject) => {
+        rejectCall = reject;
+      });
+
+      const guarded = manager.runGuarded(client, call);
+      failTransport('gateway closed the stream');
+      await expect(guarded).rejects.toThrow('MCP session connection lost');
+      // What closing the session does to the request the guard abandoned.
+      rejectCall(new Error('Connection closed'));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      process.off('unhandledRejection', unhandled);
+      expect(unhandled).not.toHaveBeenCalled();
     });
   });
 });
