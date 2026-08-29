@@ -10,7 +10,10 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -19,6 +22,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   applyCredential,
   createApiKeyScheme,
+  createBearerScheme,
 } from '../../../src/tools/openapi_tool/auth/auth_helpers.js';
 import {
   prepareRequestBody,
@@ -527,6 +531,59 @@ describe('RestApiTool', () => {
       expect.anything(),
       expect.objectContaining({
         headers: expect.objectContaining({'X-API-Key': 'secret_key'}),
+      }),
+    );
+  });
+
+  it('should send the additional headers of an exchanged credential', async () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/test',
+      method: 'GET',
+    };
+    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      createBearerScheme(),
+    );
+    tool.configureAuthCredential({
+      authType: AuthCredentialTypes.HTTP,
+      http: {
+        scheme: 'bearer',
+        credentials: {token: 'adc-access-token'},
+        additionalHeaders: {'x-goog-user-project': 'billing-project'},
+      },
+    });
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    // The real ToolAuthHandler runs here: an HTTP credential has no exchanger,
+    // so it reaches applyCredential exactly as the exchange left it.
+    await tool.runAsync({
+      args: {},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'inv-1',
+          session: createSession({id: 'session-1', appName: 'app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Authorization': 'Bearer adc-access-token',
+          'x-goog-user-project': 'billing-project',
+        }),
       }),
     );
   });

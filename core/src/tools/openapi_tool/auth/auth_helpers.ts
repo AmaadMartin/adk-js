@@ -51,6 +51,12 @@ export function applyCredential(
     headers['Authorization'] = `Bearer ${credential.http.credentials.token}`;
   }
 
+  // Carries the exchange's own headers, such as the quota project of an
+  // Application Default Credentials token. Merged last, as adk-python does.
+  if (credential.http?.additionalHeaders) {
+    Object.assign(headers, credential.http.additionalHeaders);
+  }
+
   return url;
 }
 
