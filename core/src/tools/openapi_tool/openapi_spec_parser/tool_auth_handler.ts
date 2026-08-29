@@ -16,7 +16,7 @@ export interface AuthPreparationResult {
   authCredential?: AuthCredential;
 }
 
-/** Slot shared by every tool that names no credential key of its own. */
+/** Credential key recorded on the auth config when the caller names none. */
 const DEFAULT_CREDENTIAL_KEY = 'default_openapi_key';
 
 class ToolContextCredentialStore {
@@ -25,17 +25,20 @@ class ToolContextCredentialStore {
   /**
    * Names the session-state slot that caches an exchanged credential.
    *
-   * The credential key is part of the name because the scheme type alone does
-   * not identify a credential. One session can prepare two credentials of the
-   * same scheme type for two identities, and the caller keeps them apart by
-   * giving each one its own credential key.
+   * A supplied credential key is part of the name, because the scheme type
+   * alone does not identify a credential. One session can prepare two
+   * credentials of the same scheme type for two identities, and the caller
+   * keeps them apart by giving each one its own credential key. A tool that
+   * names no key keeps the unqualified slot, so a credential cached by an
+   * earlier release is still read back after an upgrade.
    */
   getCredentialKey(
     authScheme?: OpenAPIV3.SecuritySchemeObject,
-    credentialKey: string = DEFAULT_CREDENTIAL_KEY,
+    credentialKey?: string,
   ): string {
     const schemeName = authScheme?.type || 'default';
-    return `${schemeName}_${credentialKey}_existing_exchanged_credential`;
+    const qualifier = credentialKey ? `_${credentialKey}` : '';
+    return `${schemeName}${qualifier}_existing_exchanged_credential`;
   }
 
   getCredential(

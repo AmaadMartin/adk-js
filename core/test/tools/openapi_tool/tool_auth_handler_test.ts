@@ -33,6 +33,14 @@ vi.mock(
   },
 );
 
+/**
+ * Builds a {@link Context} for a test from the members the test actually sets.
+ * The cast lives here alone, so a test does not restate it.
+ */
+function createMockContext(partial: Partial<Context>): Context {
+  return partial as Context;
+}
+
 describe('ToolAuthHandler', () => {
   it('should return done if no auth scheme', async () => {
     const mockContext = {} as unknown as Context;
@@ -89,7 +97,7 @@ describe('ToolAuthHandler', () => {
   it('should return cached credential if available', async () => {
     const mockContext = {
       state: new State({
-        'apiKey_default_openapi_key_existing_exchanged_credential': {
+        'apiKey_existing_exchanged_credential': {
           authType: AuthCredentialTypes.HTTP,
           http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
         },
@@ -129,7 +137,7 @@ describe('ToolAuthHandler', () => {
     expect(result.state).toBe('done');
     // Stored via the State API so it is readable back through State.get...
     const stored = state.get<{http?: {credentials: {token: string}}}>(
-      'apiKey_default_openapi_key_existing_exchanged_credential',
+      'apiKey_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
     // ...and recorded in the delta so it is persisted to the session (rather
@@ -228,9 +236,7 @@ describe('ToolAuthHandler', () => {
     expect(result.authCredential?.apiKey).toBe('static-key');
     // It is readable from the tool on every invocation, so persisting it would
     // only write the secret into the session store for nothing.
-    expect(
-      state.get('apiKey_default_openapi_key_existing_exchanged_credential'),
-    ).toBeUndefined();
+    expect(state.get('apiKey_existing_exchanged_credential')).toBeUndefined();
     expect(state.hasDelta()).toBe(false);
   });
 
@@ -262,20 +268,20 @@ describe('ToolAuthHandler', () => {
     expect(result.state).toBe('done');
     // An exchange costs a round trip, so its result is worth persisting.
     const stored = state.get<{http?: {credentials: {token: string}}}>(
-      'oauth2_default_openapi_key_existing_exchanged_credential',
+      'oauth2_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
   });
 
   it('gives two credential keys two slots under one scheme type', async () => {
     const state = new State();
-    const mockContext = {
+    const mockContext = createMockContext({
       state,
       getAuthResponse: vi.fn().mockReturnValue({
         authType: AuthCredentialTypes.API_KEY,
         apiKey: 'key',
       }),
-    } as unknown as Context;
+    });
     const scheme: OpenAPIV3.SecuritySchemeObject = {
       type: 'apiKey',
       name: 'X-API-Key',
@@ -304,11 +310,11 @@ describe('ToolAuthHandler', () => {
         http: {scheme: 'bearer', credentials: {token: 'first-token'}},
       },
     });
-    const mockContext = {
+    const mockContext = createMockContext({
       state,
       getAuthResponse: vi.fn().mockReturnValue(undefined),
       requestCredential: vi.fn(),
-    } as unknown as Context;
+    });
     const scheme: OpenAPIV3.SecuritySchemeObject = {
       type: 'apiKey',
       name: 'X-API-Key',
@@ -332,5 +338,11 @@ describe('ToolAuthHandler', () => {
     ).toMatchObject({
       http: {credentials: {token: 'first-token'}},
     });
+    // It caches into its own slot, not into the unqualified one a keyless
+    // tool owns.
+    expect(
+      state.get('apiKey_second_existing_exchanged_credential'),
+    ).toBeDefined();
+    expect(state.get('apiKey_existing_exchanged_credential')).toBeUndefined();
   });
 });
