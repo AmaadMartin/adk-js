@@ -144,10 +144,10 @@ export interface ApiParameterInit {
  * A document written in YAML leaves `null` wherever a key has no value, so a
  * block the typings declare as an object arrives missing or null.
  */
-function recordField(
-  value: Record<string, unknown>,
-  field: string,
-): Record<string, unknown> {
+function recordField(value: unknown, field: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    return {};
+  }
   const read = value[field];
   return isRecord(read) ? read : {};
 }
@@ -350,11 +350,20 @@ function statusOrder(status: string): number {
   return /^\d+$/.test(status) ? Number(status) : Infinity;
 }
 
-/** Picks the lowest 2xx response that carries content, else nothing. */
-function pickSuccessResponse(
+/**
+ * Finds the response a generated tool returns.
+ *
+ * That is the 2xx response with the lowest numeric status code that carries
+ * content. A `$ref` entry is skipped, because it names a response this module
+ * cannot read.
+ *
+ * @param responses The responses of an OpenAPI operation.
+ * @returns The response, or nothing when no 2xx response carries content.
+ */
+export function findSuccessResponse(
   responses: OpenAPIV3.ResponsesObject,
-): Record<string, unknown> | undefined {
-  let picked: Record<string, unknown> | undefined;
+): OpenAPIV3.ResponseObject | undefined {
+  let picked: OpenAPIV3.ResponseObject | undefined;
   let pickedOrder = Infinity;
   for (const [status, response] of Object.entries(responses)) {
     if (!status.startsWith('2') || !isRecord(response) || '$ref' in response) {
@@ -373,6 +382,20 @@ function pickSuccessResponse(
 }
 
 /**
+ * Picks the media type a generated tool reads, preferring JSON.
+ *
+ * @param response The response to read.
+ * @returns The media type, or nothing when the response declares none usable.
+ */
+export function findResponseMediaType(
+  response: OpenAPIV3.ResponseObject,
+): OpenAPIV3.MediaTypeObject | undefined {
+  const content = recordField(response, 'content');
+  const mediaType = content['application/json'] ?? Object.values(content)[0];
+  return isRecord(mediaType) ? mediaType : undefined;
+}
+
+/**
  * Documents the value a generated tool returns.
  *
  * @param responses The responses of an OpenAPI operation.
@@ -381,16 +404,12 @@ function pickSuccessResponse(
 export function generateReturnDoc(
   responses: OpenAPIV3.ResponsesObject,
 ): string {
-  const response = pickSuccessResponse(responses);
-  if (response === undefined) {
+  const response = findSuccessResponse(responses);
+  const mediaType = response && findResponseMediaType(response);
+  if (!response || !mediaType) {
     return '';
   }
-  const content = recordField(response, 'content');
-  const mediaType = content['application/json'] ?? Object.values(content)[0];
-  if (!isRecord(mediaType)) {
-    return '';
-  }
-  const schema = schemaFromOpenApi(mediaType['schema'], 'response body');
+  const schema = schemaFromOpenApi(mediaType.schema, 'response body');
   const description = stringField(response, 'description').trim();
   return (
     `Returns (${getTypeHint(schema)}): ${description}` +
