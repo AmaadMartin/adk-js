@@ -7,7 +7,10 @@
 import {Schema, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
-import {stripUnsupportedGeminiFormats} from '../../src/utils/schema_variant_utils.js';
+import {
+  flattenNullableAnyOf,
+  stripUnsupportedGeminiFormats,
+} from '../../src/utils/schema_variant_utils.js';
 
 describe('stripUnsupportedGeminiFormats', () => {
   it('keeps int32 and int64 on an integer', () => {
@@ -95,5 +98,106 @@ describe('stripUnsupportedGeminiFormats', () => {
     stripUnsupportedGeminiFormats(schema);
 
     expect(items.format).toBe('uri');
+  });
+});
+
+describe('flattenNullableAnyOf', () => {
+  it('rewrites a nullable branch pair as the branch plus nullable', () => {
+    expect(
+      flattenNullableAnyOf({
+        anyOf: [{type: 'string', minLength: 2}, {type: 'null'}],
+      }),
+    ).toEqual({type: 'string', minLength: 2, nullable: true});
+  });
+
+  it('leaves a union with no null branch alone', () => {
+    const schema = {anyOf: [{type: 'string'}, {type: 'integer'}]};
+
+    expect(flattenNullableAnyOf(schema)).toEqual(schema);
+  });
+
+  it('keeps a multi-branch union and adds nullable', () => {
+    expect(
+      flattenNullableAnyOf({
+        anyOf: [{type: 'string'}, {type: 'integer'}, {type: 'null'}],
+      }),
+    ).toEqual({
+      anyOf: [{type: 'string'}, {type: 'integer'}],
+      nullable: true,
+    });
+  });
+
+  it('drops a union whose only branch is null', () => {
+    expect(flattenNullableAnyOf({anyOf: [{type: 'null'}]})).toEqual({
+      nullable: true,
+    });
+  });
+
+  it('leaves a schema that declares no anyOf untouched', () => {
+    const schema = {type: 'object', properties: {name: {type: 'string'}}};
+
+    expect(flattenNullableAnyOf(schema)).toEqual(schema);
+  });
+
+  it('recurses into properties, items and surviving branches', () => {
+    expect(
+      flattenNullableAnyOf({
+        type: 'object',
+        properties: {
+          name: {anyOf: [{type: 'string'}, {type: 'null'}]},
+          tags: {
+            type: 'array',
+            items: {anyOf: [{type: 'string'}, {type: 'null'}]},
+          },
+        },
+      }),
+    ).toEqual({
+      type: 'object',
+      properties: {
+        name: {type: 'string', nullable: true},
+        tags: {
+          type: 'array',
+          items: {type: 'string', nullable: true},
+        },
+      },
+    });
+  });
+
+  it('flattens a nullable branch nested inside a surviving union', () => {
+    expect(
+      flattenNullableAnyOf({
+        anyOf: [{type: 'integer'}, {anyOf: [{type: 'string'}, {type: 'null'}]}],
+      }),
+    ).toEqual({
+      anyOf: [{type: 'integer'}, {type: 'string', nullable: true}],
+    });
+  });
+
+  it('copies a branch it cannot interpret through unchanged', () => {
+    expect(flattenNullableAnyOf({anyOf: [true, {type: 'null'}]})).toEqual({
+      anyOf: [true],
+      nullable: true,
+    });
+    expect(flattenNullableAnyOf({anyOf: 'not-a-list'})).toEqual({
+      anyOf: 'not-a-list',
+    });
+  });
+
+  it('copies a property it cannot interpret through unchanged', () => {
+    const schema = {
+      type: 'object',
+      properties: {anything: true, note: {type: 'string'}},
+    };
+
+    expect(flattenNullableAnyOf(schema)).toEqual(schema);
+  });
+
+  it('does not modify the input', () => {
+    const name = {anyOf: [{type: 'string'}, {type: 'null'}]};
+    const schema = {type: 'object', properties: {name}};
+
+    flattenNullableAnyOf(schema);
+
+    expect(name.anyOf).toHaveLength(2);
   });
 });

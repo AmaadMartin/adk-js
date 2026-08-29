@@ -11,7 +11,10 @@ import {z as z4} from 'zod/v4';
 
 import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {toJsonSchema} from '../utils/schema.js';
-import {stripUnsupportedGeminiFormats} from '../utils/schema_variant_utils.js';
+import {
+  flattenNullableAnyOf,
+  stripUnsupportedGeminiFormats,
+} from '../utils/schema_variant_utils.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
@@ -161,10 +164,14 @@ function buildDeclaration(
   {variant, jsonSchema}: DeclarationContext,
 ): FunctionDeclaration {
   if (jsonSchema) {
+    const rendered = toJsonSchema(parameters ?? emptyObjectSchema());
     return {
       name,
       description,
-      parametersJsonSchema: toJsonSchema(parameters ?? emptyObjectSchema()),
+      parametersJsonSchema:
+        variant === GoogleLLMVariant.VERTEX_AI
+          ? flattenNullableAnyOf(rendered)
+          : rendered,
     };
   }
   const schema = cloneDeep(toSchema(parameters));

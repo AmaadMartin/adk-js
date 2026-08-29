@@ -108,6 +108,10 @@ const monitorPrice = new FunctionTool({
 The lookup uses the tool's registered name, so one tool cannot be handed
 another tool's queue.
 
+Write the `undefined` branch. No agent in adk-js fills
+`InvocationContext.activeStreamingTools` yet, so `inputStream` is `undefined`
+in every run today. Only code that fills that map itself receives a queue.
+
 ## Declaration caching
 
 Building a declaration converts your schema, which an agent would otherwise
@@ -132,3 +136,9 @@ overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, true);
 ```
 
 `ADK_ENABLE_JSON_SCHEMA_FOR_FUNC_DECL=true` does the same from the environment.
+
+On Vertex AI the JSON schema is rewritten first. Zod renders a nullable field
+as `anyOf: [{type: 'string'}, {type: 'null'}]`, and Vertex rejects a subschema
+that declares no top-level `type`. That pair becomes `{type: 'string', nullable:
+true}`. A union with two or more non-null branches stays a union and only gains
+`nullable`.

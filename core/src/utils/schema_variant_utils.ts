@@ -61,3 +61,66 @@ export function stripUnsupportedGeminiFormats(schema: Schema): Schema {
   }
   return sanitized;
 }
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNullBranch(branch: unknown): boolean {
+  return isJsonObject(branch) && branch['type'] === 'null';
+}
+
+/**
+ * Rewrites `anyOf: [X, {type: 'null'}]` as `X` plus `nullable: true`, recursing
+ * into `properties`, `items` and the surviving branches.
+ *
+ * Vertex AI rejects a subschema that declares no top-level `type`, and that is
+ * the form Zod emits for a nullable field. A union that keeps more than one
+ * non-null branch stays a union and only gains `nullable`; a union with no null
+ * branch is left alone. Mirrors adk-python's `_annotate_nullable_fields`.
+ *
+ * Total by construction: a value it cannot interpret is copied through rather
+ * than rejected, so a declaration can never fail to build here.
+ */
+export function flattenNullableAnyOf(
+  jsonSchema: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {...jsonSchema};
+
+  if (isJsonObject(out['items'])) {
+    out['items'] = flattenNullableAnyOf(out['items']);
+  }
+  if (isJsonObject(out['properties'])) {
+    out['properties'] = Object.fromEntries(
+      Object.entries(out['properties']).map(([name, property]) => [
+        name,
+        isJsonObject(property) ? flattenNullableAnyOf(property) : property,
+      ]),
+    );
+  }
+  if (!Array.isArray(out['anyOf'])) {
+    return out;
+  }
+
+  const branches: unknown[] = out['anyOf'].map((branch) =>
+    isJsonObject(branch) ? flattenNullableAnyOf(branch) : branch,
+  );
+  const nonNull = branches.filter((branch) => !isNullBranch(branch));
+  if (nonNull.length === branches.length) {
+    out['anyOf'] = branches;
+    return out;
+  }
+
+  // Only an object branch can be merged upwards; a boolean branch has no keys
+  // to carry, so the union is kept rather than dropping what it allowed.
+  const [survivor] = nonNull;
+  if (nonNull.length === 1 && isJsonObject(survivor)) {
+    delete out['anyOf'];
+    return {...out, ...survivor, nullable: true};
+  }
+  if (nonNull.length === 0) {
+    delete out['anyOf'];
+    return {...out, nullable: true};
+  }
+  return {...out, anyOf: nonNull, nullable: true};
+}

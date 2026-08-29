@@ -13,6 +13,7 @@ import {
 import {Schema, Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod/v3';
+import {z as z4} from 'zod/v4';
 
 /** A schema object the test can mutate, to observe whether a build re-reads it. */
 function mutableSchema(): Schema {
@@ -151,6 +152,35 @@ describe('FunctionTool declaration shape', () => {
     expect(declaration.parametersJsonSchema).toMatchObject({
       type: 'object',
       properties: {query: {type: 'string'}},
+    });
+  });
+
+  it('flattens a nullable field on Vertex AI when the feature is on', () => {
+    vi.stubEnv('GOOGLE_GENAI_USE_ENTERPRISE', 'true');
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, true);
+    const tool = new FunctionTool({
+      name: 'sample_tool',
+      description: 'Samples something.',
+      parameters: z4.object({note: z4.string().nullable()}),
+      execute: () => 'ok',
+    });
+
+    expect(tool._getDeclaration().parametersJsonSchema).toMatchObject({
+      properties: {note: {type: 'string', nullable: true}},
+    });
+  });
+
+  it('keeps the nullable union on the Gemini Developer API', () => {
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, true);
+    const tool = new FunctionTool({
+      name: 'sample_tool',
+      description: 'Samples something.',
+      parameters: z4.object({note: z4.string().nullable()}),
+      execute: () => 'ok',
+    });
+
+    expect(tool._getDeclaration().parametersJsonSchema).toMatchObject({
+      properties: {note: {anyOf: [{type: 'string'}, {type: 'null'}]}},
     });
   });
 
