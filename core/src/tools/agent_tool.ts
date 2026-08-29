@@ -16,6 +16,7 @@ import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
 
+import {buildFunctionDeclaration} from './_automatic_function_calling_util.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 import {ForwardingArtifactService} from './forwarding_artifact_service.js';
 
@@ -84,14 +85,12 @@ export class AgentTool extends BaseTool {
     let declaration: FunctionDeclaration;
 
     if (isLlmAgent(this.agent) && this.agent.inputSchema) {
-      declaration = {
+      declaration = buildFunctionDeclaration({
         name: this.name,
         description: this.description,
-        // TODO(b/425992518): We should not use the agent's input schema as is.
-        // It should be validated and possibly transformed. Consider similar
-        // logic to one we have in Python ADK.
         parameters: this.agent.inputSchema,
-      };
+        variant: this.apiVariant,
+      });
     } else {
       declaration = {
         name: this.name,
