@@ -24,9 +24,58 @@ const MCP_SDK: OptionalPeer = {
   feature: 'MCPSessionManager (and the MCP tools built on it)',
 };
 
-/** Surfaces a background transport error that would otherwise be dropped. */
-function logTransportError(err: unknown): void {
-  logger.error('MCP transport error: ' + formatError(err));
+/**
+ * What the MCP SDK reports once it stops trying to resume a dropped stream.
+ *
+ * Nearly every transport error a session survives arrives on the same channel:
+ * a standalone event stream the server does not offer, one unparseable event,
+ * a stream drop the SDK goes on to resume. Treating those as fatal would break
+ * servers that work. This message is the exception. The SDK raises it from
+ * `_scheduleReconnection`, having given up, and then does nothing further — so
+ * the response never arrives and the request waits out its timeout.
+ *
+ * The other errors that do end a session need no help here: the SDK rethrows a
+ * failed send to the caller, and rejects every in-flight request on close.
+ */
+const RECONNECTION_EXHAUSTED = 'Maximum reconnection attempts';
+
+/** What the manager knows about the transport behind one session. */
+interface TransportState {
+  /** Rejects once the transport can no longer deliver a response. */
+  readonly lost: Promise<never>;
+  /** Rejects {@link TransportState.lost}. Called at most once. */
+  readonly reportLost: (failure: Error) => void;
+}
+
+/** Tracks a session's transport, so a request can stop waiting on a dead one. */
+function createTransportState(): TransportState {
+  // The executor runs synchronously, so the rejecter is collected before the
+  // promise is returned.
+  const rejecters: Array<(failure: Error) => void> = [];
+  const lost = new Promise<never>((_, reject) => rejecters.push(reject));
+  // Most sessions never lose their transport, and a rejection nobody observed
+  // would warn.
+  lost.catch(() => {});
+  const [reportLost] = rejecters;
+  return {lost, reportLost};
+}
+
+/**
+ * Logs a transport error, and ends the session if the transport cannot recover.
+ *
+ * Every error is logged, because a transport reports errors that no request is
+ * waiting for and those would otherwise be dropped.
+ */
+function handleTransportError(state: TransportState, err: unknown): void {
+  const description = formatError(err);
+  logger.error('MCP transport error: ' + description);
+  if (!description.includes(RECONNECTION_EXHAUSTED)) {
+    return;
+  }
+
+  state.reportLost(
+    new Error('MCP session connection lost: ' + description, {cause: err}),
+  );
 }
 
 /**
@@ -126,6 +175,7 @@ export type MCPConnectionParams =
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
   private readonly activeSessions = new Set<Client>();
+  private readonly transportStates = new Map<Client, TransportState>();
 
   constructor(connectionParams: MCPConnectionParams) {
     this.connectionParams = connectionParams;
@@ -147,6 +197,10 @@ export class MCPSessionManager {
       () => import('@modelcontextprotocol/sdk/client/index.js'),
     );
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
+    const transportState = createTransportState();
+    const onerror = (err: unknown) => {
+      handleTransportError(transportState, err);
+    };
 
     try {
       switch (this.connectionParams.type) {
@@ -158,7 +212,7 @@ export class MCPSessionManager {
           const transport = new StdioClientTransport(
             this.connectionParams.serverParams,
           );
-          transport.onerror = logTransportError;
+          transport.onerror = onerror;
           await client.connect(transport);
           break;
         }
@@ -176,7 +230,7 @@ export class MCPSessionManager {
             new URL(this.connectionParams.url),
             transportOptions,
           );
-          transport.onerror = logTransportError;
+          transport.onerror = onerror;
           await client.connect(transport);
           break;
         }
@@ -193,12 +247,40 @@ export class MCPSessionManager {
     }
 
     this.activeSessions.add(client);
+    this.transportStates.set(client, transportState);
     return client;
+  }
+
+  /**
+   * Runs a request on a session and abandons it if the transport dies first.
+   *
+   * The SDK covers most of this already: it rethrows a failed send, and
+   * rejects every in-flight request when the transport closes. It does not
+   * cover a dropped event stream it has stopped trying to resume — nothing
+   * closes, so the request waits out the SDK's 60-second request timeout. That
+   * one case is what this guards. A transport error the session survives is
+   * left alone, because failing on one would break a server that works.
+   *
+   * A session this manager did not open, or one already closed, runs
+   * unguarded: the manager holds no transport state for it.
+   *
+   * @param client The session the request runs on.
+   * @param call The request, already in flight.
+   * @return What the request returned.
+   * @throws `MCP session connection lost: <error>` when the transport dies
+   *     before the request settles, or has already died.
+   */
+  async runGuarded<T>(client: Client, call: Promise<T>): Promise<T> {
+    const state = this.transportStates.get(client);
+    // `race` subscribes to both, so the loser's later rejection is observed:
+    // closing the session rejects a call the transport already gave up on.
+    return state ? Promise.race([call, state.lost]) : call;
   }
 
   async closeSession(client: Client): Promise<void> {
     if (this.activeSessions.has(client)) {
       this.activeSessions.delete(client);
+      this.transportStates.delete(client);
       await client.close();
     }
   }

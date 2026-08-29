@@ -12,6 +12,7 @@ import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
+import {UiWidget} from '../../src/events/ui_widget.js';
 import {ToolConfirmation} from '../../src/tools/tool_confirmation.js';
 
 function createTestAuthConfig(credentialKey: string): AuthConfig {
@@ -251,5 +252,49 @@ describe('mergeEventActions', () => {
       createEventActions({stateDelta: {x: 1}}),
     ]);
     expect(result.stateDelta).toEqual({x: 1});
+  });
+});
+
+describe('renderUiWidgets', () => {
+  const widget = (id: string): UiWidget => ({
+    id,
+    provider: 'mcp',
+    payload: {resource_uri: `ui://${id}`},
+  });
+
+  it('leaves the field undefined when no source sets one', () => {
+    const result = mergeEventActions([createEventActions()]);
+    expect(result.renderUiWidgets).toBeUndefined();
+  });
+
+  it('concatenates widgets from two sources in source order', () => {
+    const result = mergeEventActions([
+      createEventActions({renderUiWidgets: [widget('first')]}),
+      createEventActions({renderUiWidgets: [widget('second')]}),
+    ]);
+    expect(result.renderUiWidgets?.map((w) => w.id)).toEqual([
+      'first',
+      'second',
+    ]);
+  });
+
+  it('keeps the target widgets ahead of the source widgets', () => {
+    const target = createEventActions({renderUiWidgets: [widget('base')]});
+    const result = mergeEventActions(
+      [createEventActions({renderUiWidgets: [widget('added')]})],
+      target,
+    );
+    expect(result.renderUiWidgets?.map((w) => w.id)).toEqual(['base', 'added']);
+    expect(target.renderUiWidgets?.map((w) => w.id)).toEqual(['base']);
+  });
+
+  it('treats an actions object with a widget as non-default', () => {
+    const actions = createEventActions({renderUiWidgets: [widget('one')]});
+    expect(isDefaultEventActions(actions)).toBe(false);
+  });
+
+  it('treats an empty widget list as default', () => {
+    const actions = createEventActions({renderUiWidgets: []});
+    expect(isDefaultEventActions(actions)).toBe(true);
   });
 });

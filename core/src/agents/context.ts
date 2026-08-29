@@ -10,6 +10,7 @@ import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthHandler} from '../auth/auth_handler.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {createEventActions, EventActions} from '../events/event_actions.js';
+import {UiWidget} from '../events/ui_widget.js';
 import {SearchMemoryResponse} from '../memory/base_memory_service.js';
 import {State} from '../sessions/state.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
@@ -181,5 +182,20 @@ export class Context extends ReadonlyContext {
         confirmed: false,
         payload: payload,
       });
+  }
+
+  /**
+   * Adds a widget for the host to render alongside this event.
+   *
+   * @param widget The widget to render.
+   * @throws If a widget with the same id is already attached, which would make
+   *     the host render one component twice.
+   */
+  renderUiWidget(widget: UiWidget): void {
+    const widgets = (this.eventActions.renderUiWidgets ??= []);
+    if (widgets.some((existing) => existing.id === widget.id)) {
+      throw new Error(`UI widget '${widget.id}' is already attached.`);
+    }
+    widgets.push(widget);
   }
 }

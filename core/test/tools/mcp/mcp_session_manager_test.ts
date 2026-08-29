@@ -8,7 +8,15 @@ import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {logger} from '../../../src/utils/logger.js';
@@ -380,6 +388,204 @@ describe('MCPSessionManager', () => {
         command: 'test-command',
       });
       expect(client.connect).toHaveBeenCalled();
+    });
+  });
+
+  describe('runGuarded', () => {
+    let errorSpy: MockInstance<typeof logger.error>;
+
+    beforeEach(() => {
+      // Every transport failure below logs; keep it out of the test output.
+      errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
+
+    /** A manager whose newest transport the test can fail on demand. */
+    async function guardedSession() {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+      const client = await manager.createSession();
+      const transport = vi
+        .mocked(StreamableHTTPClientTransport)
+        .mock.instances.at(-1);
+
+      return {
+        manager,
+        client,
+        /** What the SDK reports once it stops trying to resume the stream. */
+        loseTransport(detail = 'the stream is gone') {
+          transport?.onerror?.(
+            new Error(`Maximum reconnection attempts (2) exceeded. ${detail}`),
+          );
+        },
+        /** A transport error the SDK reports but the session survives. */
+        reportSurvivableError(message: string) {
+          transport?.onerror?.(new Error(message));
+        },
+      };
+    }
+
+    it('returns what the call returned', async () => {
+      const {manager, client} = await guardedSession();
+
+      await expect(
+        manager.runGuarded(client, Promise.resolve('tool output')),
+      ).resolves.toBe('tool output');
+    });
+
+    it('propagates the call\u2019s own error unwrapped', async () => {
+      const {manager, client} = await guardedSession();
+
+      await expect(
+        manager.runGuarded(client, Promise.reject(new Error('tool exploded'))),
+      ).rejects.toThrow('tool exploded');
+    });
+
+    it('rejects a pending call once the transport is beyond resuming', async () => {
+      const {manager, client, loseTransport} = await guardedSession();
+      // A call the SDK would leave pending until its 60s request timeout.
+      const guarded = manager.runGuarded(client, new Promise<string>(() => {}));
+
+      loseTransport('the stream is gone');
+
+      await expect(guarded).rejects.toThrow(
+        /MCP session connection lost:.*Maximum reconnection attempts/,
+      );
+    });
+
+    it('keeps the transport error as the cause', async () => {
+      const {manager, client, loseTransport} = await guardedSession();
+      const guarded = manager.runGuarded(client, new Promise<string>(() => {}));
+
+      loseTransport('stream died');
+
+      const error = await guarded.catch((e: unknown) => e);
+      expect((error as Error).cause).toBeInstanceOf(Error);
+      expect(((error as Error).cause as Error).message).toContain(
+        'stream died',
+      );
+    });
+
+    it('rejects at once when the transport already failed', async () => {
+      const {manager, client, loseTransport} = await guardedSession();
+      loseTransport('died before the call');
+
+      await expect(
+        manager.runGuarded(client, new Promise<string>(() => {})),
+      ).rejects.toThrow(/MCP session connection lost:.*died before the call/);
+    });
+
+    it('reports only the first transport error', async () => {
+      const {manager, client, loseTransport} = await guardedSession();
+      loseTransport('first');
+      loseTransport('second');
+
+      await expect(
+        manager.runGuarded(client, new Promise<string>(() => {})),
+      ).rejects.toThrow(/first/);
+    });
+
+    it('forgets a closed session, so its transport cannot reject later', async () => {
+      const {manager, client, loseTransport} = await guardedSession();
+      await manager.closeSession(client);
+      loseTransport('after close');
+      // The call has to settle later than the transport did. A call that is
+      // already resolved wins the race whether or not the state leaked.
+      const call = new Promise<string>((resolve) => {
+        setTimeout(() => resolve('still fine'), 0);
+      });
+
+      await expect(manager.runGuarded(client, call)).resolves.toBe(
+        'still fine',
+      );
+    });
+
+    it('runs unguarded for a session it did not open', async () => {
+      const {manager} = await guardedSession();
+      const foreign = new Client({name: 'other', version: '1.0.0'});
+
+      await expect(
+        manager.runGuarded(foreign, Promise.resolve('unguarded')),
+      ).resolves.toBe('unguarded');
+    });
+
+    it('observes the abandoned call so it cannot go unhandled', async () => {
+      const {manager, client, loseTransport} = await guardedSession();
+      const unhandled = vi.fn();
+      process.on('unhandledRejection', unhandled);
+      let rejectCall = (_: Error) => {};
+      const call = new Promise<string>((_, reject) => {
+        rejectCall = reject;
+      });
+
+      const guarded = manager.runGuarded(client, call);
+      loseTransport('gateway closed the stream');
+      await expect(guarded).rejects.toThrow('MCP session connection lost');
+      // What closing the session does to the request the guard abandoned.
+      rejectCall(new Error('Connection closed'));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      process.off('unhandledRejection', unhandled);
+      expect(unhandled).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The transport errors below are the ones the MCP SDK reports for
+     * conditions a session survives. Treating any of them as fatal breaks
+     * servers that work: a POST-only gateway answering the optional GET
+     * stream with 404 is a supported deployment, not a dead session.
+     */
+    const SURVIVABLE_ERRORS = [
+      'Streamable HTTP error: Failed to open SSE stream: Not Found (HTTP 404)',
+      'SSE stream disconnected: TypeError: terminated',
+      'Failed to reconnect SSE stream: fetch failed',
+      'Error POSTing to endpoint: Forbidden',
+      'Unknown message type: {}',
+    ];
+
+    it.each(SURVIVABLE_ERRORS)(
+      'lets a call finish after a survivable error: %s',
+      async (message) => {
+        const {manager, client, reportSurvivableError} = await guardedSession();
+        let resolveCall = (_: string) => {};
+        const call = new Promise<string>((resolve) => {
+          resolveCall = resolve;
+        });
+        const guarded = manager.runGuarded(client, call);
+
+        reportSurvivableError(message);
+        resolveCall('tool output');
+
+        await expect(guarded).resolves.toBe('tool output');
+      },
+    );
+
+    it.each(SURVIVABLE_ERRORS)(
+      'does not poison the next call after a survivable error: %s',
+      async (message) => {
+        const {manager, client, reportSurvivableError} = await guardedSession();
+
+        reportSurvivableError(message);
+
+        await expect(
+          manager.runGuarded(client, Promise.resolve('tool output')),
+        ).resolves.toBe('tool output');
+      },
+    );
+
+    it('still logs a survivable transport error', async () => {
+      const {reportSurvivableError} = await guardedSession();
+
+      reportSurvivableError('SSE stream disconnected: TypeError: terminated');
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('MCP transport error'),
+      );
     });
   });
 });

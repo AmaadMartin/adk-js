@@ -8,4 +8,4 @@ implementation. For the official ADK documentation, visit
 
 ### Tools
 
-- [MCP tools](tools/mcp_tool/index.md) - Authenticating to an MCP server, per-invocation headers, and progress.
+- [MCP tools](tools/mcp_tool/index.md) - Authenticating to an MCP server, per-invocation headers, losing the transport, and the widgets an MCP App declares.

@@ -5,10 +5,11 @@
  */
 
 /**
- * A minimal, real MCP server exposing two MCP-App tools over stdio. `echo`
- * declares a `_meta.ui` block, so the metadata accessors run against a real
- * listing. `crash` exits the process without answering, so the client sees a
- * real transport crash. Neither test mocks anything.
+ * A minimal, real MCP server exposing three tools over stdio. `echo` declares
+ * a `_meta.ui` block, so the metadata accessors and the MCP-App widget run
+ * against a real listing. `plain` declares none. `crash` exits the process
+ * without answering, so the client sees a real transport crash. No test
+ * against this server mocks anything.
  */
 
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -27,6 +28,15 @@ server.registerTool(
         resourceUri: 'ui://widget/echo',
       },
     },
+  },
+  async ({message}) => ({content: [{type: 'text', text: message}]}),
+);
+
+server.registerTool(
+  'plain',
+  {
+    description: 'Echoes the message back, declaring no UI resource.',
+    inputSchema: {message: z.string()},
   },
   async ({message}) => ({content: [{type: 'text', text: message}]}),
 );

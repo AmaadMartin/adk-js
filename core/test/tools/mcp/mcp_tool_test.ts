@@ -30,6 +30,7 @@ describe('MCPTool', () => {
     const mockSessionManager = {
       createSession: vi.fn().mockResolvedValue(mockClient),
       closeSession: vi.fn().mockResolvedValue(undefined),
+      runGuarded: vi.fn((_client: Client, call: Promise<unknown>) => call),
     } as unknown as MCPSessionManager;
 
     const tool = new MCPTool(mockTool, mockSessionManager);
@@ -68,6 +69,7 @@ describe('MCPTool', () => {
     const mockSessionManager = {
       createSession: vi.fn().mockResolvedValue(mockClient),
       closeSession: vi.fn().mockResolvedValue(undefined),
+      runGuarded: vi.fn((_client: Client, call: Promise<unknown>) => call),
     } as unknown as MCPSessionManager;
 
     const tool = new MCPTool(mockTool, mockSessionManager, 'test-tool');
@@ -110,6 +112,7 @@ describe('MCPTool', () => {
     const mockSessionManager = {
       createSession: vi.fn().mockResolvedValue(mockClient),
       closeSession: vi.fn().mockResolvedValue(undefined),
+      runGuarded: vi.fn((_client: Client, call: Promise<unknown>) => call),
     } as unknown as MCPSessionManager;
 
     const tool = new MCPTool(mockTool, mockSessionManager);
@@ -144,6 +147,7 @@ describe('MCPTool', () => {
     const mockSessionManager = {
       createSession: vi.fn().mockResolvedValue(mockClient),
       closeSession: vi.fn().mockResolvedValue(undefined),
+      runGuarded: vi.fn((_client: Client, call: Promise<unknown>) => call),
     } as unknown as MCPSessionManager;
 
     const tool = new MCPTool(mockTool, mockSessionManager);
