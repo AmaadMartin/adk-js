@@ -105,7 +105,7 @@ function toExample(result: SimilarExample): Example {
  *
  * Pass the provider to an {@link ExampleTool} to prepend the fetched examples
  * to the agent's system instruction. The search runs with Application Default
- * Credentials and needs the `aiplatform.exampleStores.search` permission.
+ * Credentials and needs the `aiplatform.exampleStores.readExample` permission.
  *
  * @example
  * ```ts
