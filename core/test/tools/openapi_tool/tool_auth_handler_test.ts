@@ -1128,15 +1128,13 @@ describe('ToolAuthHandler failed exchange', () => {
 
   /** Replaces the next exchanger with one whose round trip fails. */
   function failNextExchange(): void {
+    const exchanger = new AutoAuthCredentialExchanger();
+    exchanger.exchange = () =>
+      Promise.reject(
+        new CredentialExchangeError('token endpoint refused the request'),
+      );
     vi.mocked(AutoAuthCredentialExchanger).mockImplementationOnce(
-      () =>
-        ({
-          exchange: vi
-            .fn()
-            .mockRejectedValue(
-              new CredentialExchangeError('token endpoint refused the request'),
-            ),
-        }) as unknown as AutoAuthCredentialExchanger,
+      () => exchanger,
     );
   }
 
