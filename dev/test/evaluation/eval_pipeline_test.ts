@@ -26,6 +26,7 @@ import {runEvals} from '../../src/evaluation/eval_runner.js';
 import {
   EvalResult,
   EvalStatus,
+  RESPONSE_MATCH_SCORE_KEY,
   TOOL_TRAJECTORY_SCORE_KEY,
 } from '../../src/evaluation/eval_types.js';
 
@@ -224,6 +225,82 @@ describe('adk eval over a real agent', () => {
     expect(result.evalMetricResults[0][1]).toEqual({
       score: 0,
       evalStatus: EvalStatus.FAILED,
+    });
+  });
+
+  /**
+   * Runs one case whose recorded answer is `reference`, scored on the response
+   * metric alone. The model answers `You rolled a 4.` for this trajectory.
+   */
+  async function scoreResponseAgainst(
+    reference: string,
+  ): Promise<EvalResult[]> {
+    const evalSetFile = path.join(tempDir, 'reference.evalset.json');
+    await fs.writeFile(
+      evalSetFile,
+      JSON.stringify([
+        {
+          name: 'referenced_case',
+          data: [
+            {
+              query: 'Roll a die.',
+              expected_tool_use: [
+                {
+                  tool_name: 'roll_die',
+                  tool_input: {sides: ROLLED_SIDES},
+                  mock_tool_output: 4,
+                },
+              ],
+              reference,
+            },
+          ],
+        },
+      ]),
+    );
+
+    return runEvals({
+      evalSetToEvals: parseAndGetEvalsToRun([evalSetFile]),
+      rootAgent: buildAgent(),
+      evalMetrics: [{metricName: RESPONSE_MATCH_SCORE_KEY, threshold: 0.8}],
+      sessionService: new InMemorySessionService(),
+    });
+  }
+
+  it('scores the response the agent actually produced', async () => {
+    const [result] = await scoreResponseAgainst('You rolled a 4.');
+
+    expect(result.evalMetricResults[0][1]).toEqual({
+      score: 1,
+      evalStatus: EvalStatus.PASSED,
+    });
+    expect(result.finalEvalStatus).toBe(EvalStatus.PASSED);
+  });
+
+  it('fails the response metric when the answer diverges', async () => {
+    const [result] = await scoreResponseAgainst('The weather is fine today.');
+
+    expect(result.evalMetricResults[0][1]).toEqual({
+      score: 0,
+      evalStatus: EvalStatus.FAILED,
+    });
+    expect(result.finalEvalStatus).toBe(EvalStatus.FAILED);
+  });
+
+  it('leaves the response metric unevaluated when no reference exists', async () => {
+    const criteria = {[RESPONSE_MATCH_SCORE_KEY]: 0.8};
+
+    const results = await runEvals({
+      evalSetToEvals: parseAndGetEvalsToRun([`${evalSetPath}:passing_case`]),
+      rootAgent: buildAgent(),
+      evalMetrics: Object.entries(criteria).map(([metricName, threshold]) => ({
+        metricName,
+        threshold,
+      })),
+      sessionService: new InMemorySessionService(),
+    });
+
+    expect(results[0].evalMetricResults[0][1]).toEqual({
+      evalStatus: EvalStatus.NOT_EVALUATED,
     });
   });
 
