@@ -165,9 +165,12 @@ const OTEL_TO_CLOUD_OPTION = new Option(
   '--otel_to_cloud [boolean]',
   'Optional. Whether to send otel traces to cloud.',
 ).default(false);
+// A switch, not a `[boolean]` like its neighbours: commander hands an optional
+// value the next token, so `--log_to_tmp ./agents` would read the directory as
+// the value and then serve the working directory instead.
 const LOG_TO_TMP_OPTION = new Option(
-  '--log_to_tmp [boolean]',
-  'Optional. Whether to write the logs to a file in the system temp folder instead of the console. This is useful for local debugging. Default: false',
+  '--log_to_tmp',
+  'Optional. Write the logs to a file in the system temp folder instead of the console. This is useful for local debugging. Default: false',
 ).default(false);
 const COMPILE_AGENT_FILE = new Option(
   '--compile [boolean]',

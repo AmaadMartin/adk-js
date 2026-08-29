@@ -12,6 +12,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {getAbsolutePath} from '../../src/utils/file_utils.js';
 import {logToTmpFolder} from '../../src/utils/log_to_tmp_folder.js';
 import {resetFileLogTarget} from '../../src/utils/logger.js';
 
@@ -409,10 +410,14 @@ describe('CLI Entrypoint', () => {
       expect(args).toMatchObject({port: 9091, serveDebugUI: false});
     });
 
-    it('ignores an explicit --log_to_tmp false', async () => {
-      await parse(['web', '--log_to_tmp', 'false']);
+    it('leaves the agents directory that follows it alone', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
 
-      expect(logToTmpFolder).not.toHaveBeenCalled();
+      await parse(['api_server', '--log_to_tmp', './agents']);
+
+      expect(logToTmpFolder).toHaveBeenCalledTimes(1);
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.agentsDir).toBe(getAbsolutePath('./agents'));
     });
 
     it('names the log file on the terminal when the web server fails', async () => {
