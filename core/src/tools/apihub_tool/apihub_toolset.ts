@@ -80,7 +80,6 @@ export class APIHubToolset extends BaseToolset {
   description: string;
   private readonly apihubClient: BaseAPIHubClient;
   private readonly apihubResourceName: string;
-  private readonly lazyLoadSpec: boolean;
   private readonly authScheme?: AuthScheme;
   private readonly authCredential?: AuthCredential;
   private openapiToolset?: OpenAPIToolset;
@@ -91,7 +90,6 @@ export class APIHubToolset extends BaseToolset {
     this.name = options.name ?? '';
     this.description = options.description ?? '';
     this.apihubResourceName = options.apihubResourceName;
-    this.lazyLoadSpec = options.lazyLoadSpec ?? false;
     this.authScheme = options.authScheme;
     this.authCredential = options.authCredential;
     this.apihubClient =
@@ -101,7 +99,7 @@ export class APIHubToolset extends BaseToolset {
         serviceAccountJson: options.serviceAccountJson,
       });
 
-    if (!this.lazyLoadSpec) {
+    if (!options.lazyLoadSpec) {
       this.prepared = this.prepareToolset();
       // Nothing awaits this promise yet. getTools() still reports the failure.
       this.prepared.catch(() => {});
