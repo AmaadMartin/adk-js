@@ -23,10 +23,14 @@ const {LOG_FILE_PATH, LATEST_LOG_PATH} = vi.hoisted(() => ({
   LATEST_LOG_PATH: '/tmp/agents_log/agent.latest.log',
 }));
 
+// One shared `start`, so that a case can make the next server fail to start
+// without rebuilding the constructor mock.
+const {serverStart} = vi.hoisted(() => ({serverStart: vi.fn()}));
+
 vi.mock('../../src/server/adk_api_server', () => {
   return {
     AdkApiServer: vi.fn(() => ({
-      start: vi.fn(),
+      start: serverStart,
     })),
   };
 });
@@ -374,9 +378,7 @@ describe('CLI Entrypoint', () => {
   describe('option: --log_to_tmp', () => {
     /** Makes the next server the CLI builds fail to start. */
     const failNextStart = (message: string) => {
-      (AdkApiServer as unknown as Mock).mockImplementationOnce(() => ({
-        start: vi.fn().mockRejectedValue(new Error(message)),
-      }));
+      serverStart.mockRejectedValueOnce(new Error(message));
     };
 
     it('sends the web server logs to the temp folder and prints where', async () => {
@@ -406,7 +408,7 @@ describe('CLI Entrypoint', () => {
 
       await parse(['api_server', '--log_to_tmp', '--port', '9091']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args).toMatchObject({port: 9091, serveDebugUI: false});
     });
 
@@ -416,7 +418,7 @@ describe('CLI Entrypoint', () => {
       await parse(['api_server', '--log_to_tmp', './agents']);
 
       expect(logToTmpFolder).toHaveBeenCalledTimes(1);
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.agentsDir).toBe(getAbsolutePath('./agents'));
     });
 
@@ -457,12 +459,12 @@ describe('CLI Entrypoint', () => {
 
     it('leaves a failing web server reporting through the console logger', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const exit = vi
-        .spyOn(process, 'exit')
-        .mockImplementation((() => undefined) as never);
+      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
       failNextStart('port in use');
 
-      await parse(['web']);
+      await expect(parse(['web'])).rejects.toThrow('exit');
 
       expect(errorSpy).not.toHaveBeenCalled();
       expect(resetFileLogTarget).not.toHaveBeenCalled();
