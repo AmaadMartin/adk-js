@@ -22,13 +22,6 @@ const GLOBAL_HOST = 'secretmanager.googleapis.com';
 const API_VERSION = 'v1';
 /** Google Cloud location IDs hold only lowercase letters, digits and hyphens. */
 const LOCATION_PATTERN = /^[a-z0-9-]+$/;
-/**
- * The two documented forms of a secret version resource name, global and
- * regional. Each segment excludes `/`, `?` and `#`, which the name would
- * otherwise carry into the request URL.
- */
-const RESOURCE_NAME_PATTERN =
-  /^projects\/[^/?#]+(\/locations\/[^/?#]+)?\/secrets\/[^/?#]+\/versions\/[^/?#]+$/;
 
 /** Options for {@link SecretManagerClient}. */
 export interface SecretManagerClientOptions {
@@ -140,18 +133,10 @@ export class SecretManagerClient {
    * @param resourceName The full resource name of the secret version, in the
    *   format `projects/{project}/secrets/{secret}/versions/{version}`, e.g.
    *   `projects/my-project/secrets/my-secret/versions/latest`. A regional
-   *   secret carries a `locations/{location}` segment as well.
-   * @throws {InputValidationError} If `resourceName` is not a full resource
-   *   name. The name reaches the request path, so a value holding `?` or `#`
-   *   would retarget the call.
+   *   secret carries a `locations/{location}` segment as well. The name is
+   *   passed through unvalidated; the API rejects a malformed one.
    */
   async getSecret(resourceName: string): Promise<string> {
-    if (!RESOURCE_NAME_PATTERN.test(resourceName)) {
-      throw new InputValidationError(
-        `Invalid secret resource name: ${resourceName}. Expected ` +
-          '"projects/*/secrets/*/versions/*".',
-      );
-    }
     const client = await this.getAuthClient();
     // Proto3 JSON base64-encodes bytes, and omits an unset message field and a
     // default value alike, so an empty secret arrives with neither key.

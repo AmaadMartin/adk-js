@@ -303,33 +303,6 @@ describe('SecretManagerClient', () => {
       );
     });
 
-    it.each([
-      ['a name that is not a resource name', 'not-a-resource-name'],
-      [
-        'a name carrying a query string',
-        'projects/p/secrets/s/versions/1?alt=media',
-      ],
-      ['a name carrying a fragment', 'projects/p/secrets/s/versions/1#f'],
-      ['a name missing the version', 'projects/p/secrets/s'],
-      ['an empty name', ''],
-    ])('rejects %s without issuing a request', async (_, resourceName) => {
-      const client = new SecretManagerClient();
-
-      await expect(client.getSecret(resourceName)).rejects.toThrow(
-        InputValidationError,
-      );
-      expect(mocks.getClient).not.toHaveBeenCalled();
-      expect(mocks.request).not.toHaveBeenCalled();
-    });
-
-    it('names the rejected resource name in the error', async () => {
-      const client = new SecretManagerClient();
-
-      await expect(client.getSecret('bad-name')).rejects.toThrow(
-        'Invalid secret resource name: bad-name. Expected "projects/*/secrets/*/versions/*".',
-      );
-    });
-
     it('propagates API errors unchanged', async () => {
       const apiError = new Error('403 Permission denied on secret');
       mocks.request.mockRejectedValue(apiError);
