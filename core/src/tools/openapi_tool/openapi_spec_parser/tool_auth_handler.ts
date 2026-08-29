@@ -156,11 +156,16 @@ export class ToolAuthHandler {
     if (await refresher.isRefreshNeeded(credential)) {
       credential = await refresher.refresh(credential, this.authScheme);
       // A provider that rotates the refresh token invalidates the previous
-      // one, so the refreshed credential replaces the stored one.
-      store.storeCredential(
-        store.getCredentialKey(this.authScheme),
-        credential,
-      );
+      // one, so the refreshed credential replaces the stored one. The
+      // refresher hands back the credential it was given, by reference, when
+      // it cannot refresh, and rewriting that one would add a state delta to
+      // every tool call.
+      if (credential !== storedCredential) {
+        store.storeCredential(
+          store.getCredentialKey(this.authScheme),
+          credential,
+        );
+      }
     }
 
     const result = await new AutoAuthCredentialExchanger().exchange({

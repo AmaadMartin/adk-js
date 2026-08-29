@@ -169,6 +169,9 @@ describe('ToolAuthHandler OAuth2 credentials', () => {
     );
     const stored = context.state.get<AuthCredential>(STORE_KEY);
     expect(stored?.oauth2?.refreshToken).toBe('stale-refresh-token');
+    // The refresher returned the stored credential unchanged, so rewriting it
+    // would add a state delta to every tool call.
+    expect(context.state.hasDelta()).toBe(false);
   });
 
   it('stores the OAuth2 credential from an auth response, not the bearer credential', async () => {
