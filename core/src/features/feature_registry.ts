@@ -12,6 +12,10 @@ import {logger} from '../utils/logger.js';
  */
 export enum FeatureName {
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
+  /**
+   * Declares a function tool's parameters as a raw JSON schema
+   * (`parametersJsonSchema`) instead of a genai `Schema` (`parameters`).
+   */
   JSON_SCHEMA_FOR_FUNC_DECL = 'JSON_SCHEMA_FOR_FUNC_DECL',
   /**
    * Reports a failed MCP tool call as an `{error}` result instead of a thrown
