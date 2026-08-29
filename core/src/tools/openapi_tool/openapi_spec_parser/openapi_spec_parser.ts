@@ -32,13 +32,12 @@ export interface ParsedOperation {
   operation: OpenAPIV3.OperationObject;
   parameters: ApiParameter[];
   returnValue?: ApiParameter;
+  authScheme?: OpenAPIV3.SecuritySchemeObject;
   /**
-   * A passthrough bag the parser seeds empty for callers to populate. It
-   * mirrors `additional_context` on adk-python's `ParsedOperation`, so an
-   * operation stays portable between the two SDKs. Nothing in adk-js reads it.
+   * Context a caller attaches to the operation before it builds a tool. The
+   * parser initialises it empty.
    */
   additionalContext?: Record<string, unknown>;
-  authScheme?: OpenAPIV3.SecuritySchemeObject;
 }
 
 @experimental
@@ -325,8 +324,8 @@ function collectOperations(
         operation: operation,
         parameters: parser.getParameters(),
         returnValue: parser.getReturnValue(),
-        additionalContext: {},
         authScheme: authScheme,
+        additionalContext: {},
       });
     }
   }
