@@ -169,7 +169,7 @@ function scoreMetric(
 ): number | undefined {
   switch (metricName) {
     case TOOL_TRAJECTORY_SCORE_KEY:
-      return evaluateTrajectory([turns], {
+      return evaluateTrajectory(turns, {
         printDetailedResults: options.printDetailedResults,
       });
     case RESPONSE_MATCH_SCORE_KEY:

@@ -152,6 +152,13 @@ describe('parseAndGetEvalsToRun', () => {
     ]);
   });
 
+  it('lets a later selector narrow an eval set listed with none', () => {
+    // adk-python extends the same list, so an unselected entry is not sticky.
+    expect([...parseAndGetEvalsToRun(['set.json', 'set.json:a'])]).toEqual([
+      ['set.json', ['a']],
+    ]);
+  });
+
   it('drops a whitespace-only selector', () => {
     expect([...parseAndGetEvalsToRun(['set.json:a, ,b'])]).toEqual([
       ['set.json', ['a', 'b']],

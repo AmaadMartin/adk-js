@@ -14,8 +14,9 @@ tool calls a good run makes, and the command tells you whether a later run still
 makes them.
 
 The command scores the **tool trajectory** — the sequence of tool names and
-arguments. It does not judge the agent's prose. A run passes when its recorded
-tool calls match the expected ones exactly, in order.
+arguments. A turn passes it when its recorded tool calls match the expected
+ones exactly, in order. Give a turn a `reference` and the command also scores
+the agent's text against it.
 
 Two neighbouring pieces do different jobs. `adk run` starts one interactive
 conversation and prints it; it scores nothing. The integration harness under
