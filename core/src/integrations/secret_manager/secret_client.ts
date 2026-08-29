@@ -30,16 +30,6 @@ const LOCATION_PATTERN = /^[a-z0-9-]+$/;
 const RESOURCE_NAME_PATTERN =
   /^projects\/[^/?#]+(\/locations\/[^/?#]+)?\/secrets\/[^/?#]+\/versions\/[^/?#]+$/;
 
-/** The fields of `AccessSecretVersionResponse` this client reads. */
-interface AccessSecretVersionResponse {
-  /**
-   * Payload `data` is base64-encoded, as proto3 JSON encodes bytes. Both
-   * `payload` and its `data` are absent for an empty secret, because proto3
-   * JSON omits an unset message field and a default value alike.
-   */
-  payload?: {data?: string};
-}
-
 /** Options for {@link SecretManagerClient}. */
 export interface SecretManagerClientOptions {
   /**
@@ -59,11 +49,6 @@ export interface SecretManagerClientOptions {
   location?: string;
 }
 
-/** Narrows parsed JSON to the credentials shape `GoogleAuth` accepts. */
-function isJwtInput(value: unknown): value is JWTInput {
-  return typeof value === 'object' && value !== null;
-}
-
 function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
   let parsed: unknown;
   try {
@@ -73,7 +58,7 @@ function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
       `Invalid service account JSON: ${formatError(e)}`,
     );
   }
-  if (!isJwtInput(parsed)) {
+  if (typeof parsed !== 'object' || parsed === null) {
     throw new InputValidationError(
       'Invalid service account JSON: expected a JSON object.',
     );
@@ -168,7 +153,9 @@ export class SecretManagerClient {
       );
     }
     const client = await this.getAuthClient();
-    const response = await client.request<AccessSecretVersionResponse>({
+    // Proto3 JSON base64-encodes bytes, and omits an unset message field and a
+    // default value alike, so an empty secret arrives with neither key.
+    const response = await client.request<{payload?: {data?: string}}>({
       url: `https://${this.host}/${API_VERSION}/${resourceName}:access`,
       headers: getTrackingHeaders(),
     });
