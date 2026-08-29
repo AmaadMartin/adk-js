@@ -5,6 +5,7 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
 import {ApiParameter, OperationParser} from './operation_parser.js';
 
@@ -60,8 +61,19 @@ export class OpenApiSpecParser {
 
 /**
  * Resolves all internal $ref references in the OpenAPI spec document.
+ *
+ * The cache holds one resolved subtree per reference and hands out a copy of
+ * it, so the returned document is a tree. No `parse` caller can observe that
+ * copy today: `sanitizeSchemaTypes` runs straight afterwards and deep copies
+ * the whole document. The copy holds the invariant at this function's own
+ * boundary, and matches adk-python.
+ *
+ * This is exported for its own unit tests. It is not public API and
+ * `index.ts` does not re-export it.
  */
-function resolveReferences(spec: OpenAPIV3.Document): OpenAPIV3.Document {
+export function resolveReferences(
+  spec: OpenAPIV3.Document,
+): OpenAPIV3.Document {
   const resolvedCache = new Map<string, unknown>();
   const specCopy = JSON.parse(JSON.stringify(spec)); // Deep copy
 
@@ -92,7 +104,7 @@ function resolveReferences(spec: OpenAPIV3.Document): OpenAPIV3.Document {
       seenRefs.add(refString);
 
       if (resolvedCache.has(refString)) {
-        return resolvedCache.get(refString);
+        return structuredClone(resolvedCache.get(refString));
       }
 
       let resolvedValue = resolveRef(refString, currentDoc);
@@ -275,8 +287,7 @@ function collectOperations(
       operation.parameters = [...opParams, ...pathParams];
 
       if (!operation.operationId) {
-        // Generate operation ID if missing
-        operation.operationId = `${method}_${path.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        operation.operationId = snakeCase(`${path}_${method}`);
       }
 
       const parser = new OperationParser(operation, {
@@ -299,6 +310,7 @@ function collectOperations(
         endpoint: {baseUrl, path, method},
         operation: operation,
         parameters: parser.getParameters(),
+        returnValue: parser.getReturnValue(),
         authScheme: authScheme,
       });
     }
