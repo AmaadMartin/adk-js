@@ -38,6 +38,8 @@ export {
 } from './skills/loader.js';
 // The API Hub tools use Node-only APIs (`google-auth-library`, `Buffer`), so
 // they are exported here and not from the browser barrel `common.ts`.
+export {APIHubToolset} from './tools/apihub_tool/apihub_toolset.js';
+export type {APIHubToolsetOptions} from './tools/apihub_tool/apihub_toolset.js';
 export {
   APIHubClient,
   extractResourceName,
