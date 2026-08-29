@@ -16,7 +16,13 @@ const MCPToolSchemaObject = z.object({
 type MCPToolSchema = z.infer<typeof MCPToolSchemaObject>;
 type MCPTypeArrayItem = string | {type: string};
 
-function toGeminiType(mcpType: string | undefined): Type {
+/**
+ * Maps a JSON Schema type name onto the Gemini `Type` enum.
+ *
+ * @param mcpType The schema type name, or `undefined` when none is declared.
+ * @returns The matching `Type`, or `Type.TYPE_UNSPECIFIED`.
+ */
+export function toGeminiType(mcpType: string | undefined): Type {
   if (!mcpType) return Type.TYPE_UNSPECIFIED;
 
   switch (mcpType.toLowerCase()) {
