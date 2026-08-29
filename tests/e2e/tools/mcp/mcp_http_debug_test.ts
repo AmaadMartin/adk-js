@@ -6,6 +6,7 @@
 
 import {
   createSession,
+  getHttpDebugInfo,
   InvocationContext,
   LogLevel,
   MCPToolset,
@@ -106,17 +107,11 @@ describe('MCPToolset HTTP debug capture (e2e, real MCP server over HTTP)', () =>
     const tools = await toolset.getTools(context);
 
     expect(tools.map((tool) => tool.name)).toEqual(['echo']);
-    const recorded = context.invocationContext.customMetadata[
-      'http_debug_info'
-    ] as Array<Record<string, unknown>>;
+    const recorded = getHttpDebugInfo(context.invocationContext.customMetadata);
     expect(recorded.length).toBeGreaterThan(0);
-    expect(recorded[0]['url']).toBe(baseUrl);
-    expect(recorded[0]['method']).toBe('POST');
-    expect(
-      (recorded[0]['requestHeaders'] as Record<string, string>)[
-        'authorization'
-      ],
-    ).toBe('<redacted>');
+    expect(recorded[0].url).toBe(baseUrl);
+    expect(recorded[0].method).toBe('POST');
+    expect(recorded[0].requestHeaders['authorization']).toBe('<redacted>');
     expect(JSON.stringify(recorded)).not.toContain(BEARER_TOKEN);
   });
 

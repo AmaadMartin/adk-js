@@ -19,6 +19,7 @@ import {
 } from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
 import {
+  getHttpDebugInfo,
   isCapturingHttpDebug,
   MAX_CAPTURED_EXCHANGES,
   recordHttpExchange,
@@ -637,7 +638,7 @@ describe('MCPToolset', () => {
       await toolset.getTools(context);
 
       expect(
-        context.invocationContext.customMetadata['http_debug_info'],
+        getHttpDebugInfo(context.invocationContext.customMetadata),
       ).toHaveLength(2);
     });
 
@@ -651,7 +652,7 @@ describe('MCPToolset', () => {
       await toolset.getTools(context);
 
       expect(
-        context.invocationContext.customMetadata['http_debug_info'],
+        getHttpDebugInfo(context.invocationContext.customMetadata),
       ).toHaveLength(MAX_CAPTURED_EXCHANGES);
     });
 
@@ -679,7 +680,7 @@ describe('MCPToolset', () => {
       await expect(toolset.getTools(context)).rejects.toThrow('list boom');
 
       expect(
-        context.invocationContext.customMetadata['http_debug_info'],
+        getHttpDebugInfo(context.invocationContext.customMetadata),
       ).toEqual([
         expect.objectContaining({url: 'https://mcp.example.com/failing'}),
       ]);
@@ -710,7 +711,7 @@ describe('MCPToolset', () => {
 
       expect(names).toEqual(['res1']);
       expect(
-        context.invocationContext.customMetadata['http_debug_info'],
+        getHttpDebugInfo(context.invocationContext.customMetadata),
       ).toEqual([
         expect.objectContaining({url: 'https://mcp.example.com/resources'}),
       ]);
@@ -741,7 +742,7 @@ describe('MCPToolset', () => {
 
       expect(info.uri).toBe('file:///res1');
       expect(
-        context.invocationContext.customMetadata['http_debug_info'],
+        getHttpDebugInfo(context.invocationContext.customMetadata),
       ).toEqual([
         expect.objectContaining({url: 'https://mcp.example.com/info'}),
       ]);
@@ -786,9 +787,9 @@ describe('MCPToolset', () => {
 
       await toolset.readResource('res1', context);
 
-      const recorded = context.invocationContext.customMetadata[
-        'http_debug_info'
-      ] as Array<{url: string}>;
+      const recorded = getHttpDebugInfo(
+        context.invocationContext.customMetadata,
+      );
       expect(recorded.map((entry) => entry.url)).toEqual([
         'https://mcp.example.com/list',
         'https://mcp.example.com/read',

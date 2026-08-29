@@ -6,7 +6,9 @@
 
 import {describe, expect, it} from 'vitest';
 import {
+  appendHttpDebugInfo,
   describeHttpExchange,
+  getHttpDebugInfo,
   HttpExchange,
   isCapturingHttpDebug,
   MAX_CAPTURED_EXCHANGES,
@@ -261,5 +263,49 @@ describe('describeHttpExchange', () => {
     );
 
     expect(described.requestBody).toBeUndefined();
+  });
+});
+
+describe('http debug info on an invocation', () => {
+  it('reads back nothing when nothing was recorded', () => {
+    expect(getHttpDebugInfo({})).toEqual([]);
+  });
+
+  it('reads back nothing when the key holds a non-array', () => {
+    expect(getHttpDebugInfo({http_debug_info: 'not a list'})).toEqual([]);
+  });
+
+  it('appends to the existing list rather than replacing it', () => {
+    const customMetadata: Record<string, unknown> = {};
+
+    appendHttpDebugInfo(customMetadata, [exchange({url: 'https://a/'})]);
+    appendHttpDebugInfo(customMetadata, [exchange({url: 'https://b/'})]);
+
+    expect(getHttpDebugInfo(customMetadata).map((e) => e.url)).toEqual([
+      'https://a/',
+      'https://b/',
+    ]);
+  });
+
+  it('adds no key when there is nothing to append', () => {
+    const customMetadata: Record<string, unknown> = {};
+
+    appendHttpDebugInfo(customMetadata, []);
+
+    expect(customMetadata).toEqual({});
+  });
+
+  it('caps the accumulated list', () => {
+    const customMetadata: Record<string, unknown> = {};
+    const many = Array.from({length: MAX_CAPTURED_EXCHANGES}, (_unused, i) =>
+      exchange({url: `https://example.com/${i}`}),
+    );
+
+    appendHttpDebugInfo(customMetadata, many);
+    appendHttpDebugInfo(customMetadata, [exchange({url: 'https://over/'})]);
+
+    expect(getHttpDebugInfo(customMetadata)).toHaveLength(
+      MAX_CAPTURED_EXCHANGES,
+    );
   });
 });
