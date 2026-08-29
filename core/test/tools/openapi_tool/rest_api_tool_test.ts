@@ -14,6 +14,7 @@ import {
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
+import {Type} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -305,7 +306,7 @@ describe('RestApiTool', () => {
     expect(declaration).toEqual({
       name: 'test_tool',
       description: 'description',
-      parameters: mockSchema,
+      parameters: {type: Type.OBJECT, properties: {}},
     });
   });
 
@@ -593,6 +594,7 @@ describe('RestApiTool', () => {
           name === 'content-type' ? 'application/json' : null,
       },
       json: async () => jsonResponse,
+      text: async () => JSON.stringify(jsonResponse),
     });
 
     const result = await tool.runAsync({
@@ -622,7 +624,10 @@ describe('RestApiTool', () => {
       name: 'X-API-Key',
       in: 'header',
     } as unknown as OpenAPIV3.SecuritySchemeObject;
-    const authCredential = {apiKey: 'test-key'} as unknown as AuthCredential;
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'test-key',
+    };
 
     tool.configureAuthScheme(authScheme);
     tool.configureAuthCredential(authCredential);
