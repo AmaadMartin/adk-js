@@ -490,15 +490,19 @@ describe('MCPSessionManager', () => {
       ).rejects.toThrow(/first/);
     });
 
-    it('runs unguarded once the session is closed', async () => {
+    it('forgets a closed session, so its transport cannot reject later', async () => {
       const {manager, client, loseTransport} = await guardedSession();
       await manager.closeSession(client);
-
       loseTransport('after close');
+      // The call has to settle later than the transport did. A call that is
+      // already resolved wins the race whether or not the state leaked.
+      const call = new Promise<string>((resolve) => {
+        setTimeout(() => resolve('still fine'), 0);
+      });
 
-      await expect(
-        manager.runGuarded(client, Promise.resolve('still fine')),
-      ).resolves.toBe('still fine');
+      await expect(manager.runGuarded(client, call)).resolves.toBe(
+        'still fine',
+      );
     });
 
     it('runs unguarded for a session it did not open', async () => {
