@@ -15,11 +15,7 @@ import {
   OpenIdConnectWithConfig,
 } from '../../../src/auth/auth_schemes.js';
 import {CredentialExchangeError} from '../../../src/auth/exchanger/base_credential_exchanger.js';
-import {
-  checkSchemeCredentialType,
-  generateAuthToken,
-  OAuth2RefreshingBearerExchanger,
-} from '../../../src/tools/openapi_tool/auth/credential_exchangers/oauth2_bearer_exchanger.js';
+import {OAuth2RefreshingBearerExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/oauth2_bearer_exchanger.js';
 
 const TOKEN_ENDPOINT = 'https://example.com/token';
 const ONE_HOUR_MS = 3600_000;
@@ -63,78 +59,6 @@ function expiredCredential(
     ...oauth2,
   });
 }
-
-describe('checkSchemeCredentialType', () => {
-  it('accepts an oauth2 credential with an openIdConnect scheme', () => {
-    expect(() =>
-      checkSchemeCredentialType({
-        authScheme,
-        authCredential: oauth2Credential({accessToken: 'test_access_token'}),
-      }),
-    ).not.toThrow();
-  });
-
-  it('throws when the credential is missing', () => {
-    expect(() => checkSchemeCredentialType({authScheme})).toThrow(
-      /auth_credential is empty\. Please create AuthCredential using OAuth2Auth\./,
-    );
-    expect(() => checkSchemeCredentialType({authScheme})).toThrow(
-      CredentialExchangeError,
-    );
-  });
-
-  it('reports the missing credential before the invalid scheme', () => {
-    expect(() => checkSchemeCredentialType({authScheme: apiKeyScheme})).toThrow(
-      /auth_credential is empty/,
-    );
-  });
-
-  it('throws when the scheme type is not oauth2 or openIdConnect', () => {
-    expect(() =>
-      checkSchemeCredentialType({
-        authScheme: apiKeyScheme,
-        authCredential: oauth2Credential(),
-      }),
-    ).toThrow(
-      /Invalid security scheme, expect openIdConnect or oauth2 auth scheme, but got apiKey/,
-    );
-  });
-
-  it('throws when the scheme is missing', () => {
-    expect(() =>
-      checkSchemeCredentialType({authCredential: oauth2Credential()}),
-    ).toThrow(/Invalid security scheme/);
-  });
-
-  it('throws when the credential has neither oauth2 nor http', () => {
-    expect(() =>
-      checkSchemeCredentialType({
-        authScheme,
-        authCredential: {authType: AuthCredentialTypes.OAUTH2},
-      }),
-    ).toThrow(
-      /auth_credential is not configured with oauth2\. Please create AuthCredential and set OAuth2Auth\./,
-    );
-  });
-
-  it('reports the invalid scheme before the missing oauth2 configuration', () => {
-    expect(() =>
-      checkSchemeCredentialType({
-        authScheme: apiKeyScheme,
-        authCredential: {authType: AuthCredentialTypes.OAUTH2},
-      }),
-    ).toThrow(/Invalid security scheme/);
-  });
-});
-
-describe('generateAuthToken', () => {
-  it('wraps the access token as an http bearer credential', () => {
-    expect(generateAuthToken('test_access_token')).toEqual({
-      authType: AuthCredentialTypes.HTTP,
-      http: {scheme: 'bearer', credentials: {token: 'test_access_token'}},
-    });
-  });
-});
 
 describe('OAuth2RefreshingBearerExchanger', () => {
   const fetchMock = vi.fn<typeof fetch>();
@@ -181,8 +105,36 @@ describe('OAuth2RefreshingBearerExchanger', () => {
         apiKeyScheme,
         oauth2Credential({accessToken: 'test_access_token'}),
       ),
-    ).rejects.toThrow(/Invalid security scheme/);
+    ).rejects.toThrow(
+      /Invalid security scheme, expect openIdConnect or oauth2 auth scheme, but got apiKey/,
+    );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the scheme is missing', async () => {
+    const promise = exchange(
+      undefined,
+      oauth2Credential({accessToken: 'test_access_token'}),
+    );
+
+    await expect(promise).rejects.toThrow(CredentialExchangeError);
+    await expect(promise).rejects.toThrow(/Invalid security scheme/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a credential that carries neither oauth2 nor http', async () => {
+    await expect(
+      exchange(authScheme, {authType: AuthCredentialTypes.OAUTH2}),
+    ).rejects.toThrow(
+      /auth_credential is not configured with oauth2\. Please create AuthCredential and set OAuth2Auth\./,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports the invalid scheme before the missing oauth2 configuration', async () => {
+    await expect(
+      exchange(apiKeyScheme, {authType: AuthCredentialTypes.OAUTH2}),
+    ).rejects.toThrow(/Invalid security scheme/);
   });
 
   it('returns the original credential when there is no access token', async () => {
