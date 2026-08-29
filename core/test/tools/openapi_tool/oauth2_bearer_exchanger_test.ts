@@ -19,6 +19,7 @@ import {
   checkSchemeCredentialType,
   generateAuthToken,
   OAuth2BearerCredentialExchanger,
+  OAuth2RefreshingBearerExchanger,
 } from '../../../src/tools/openapi_tool/auth/credential_exchangers/oauth2_bearer_exchanger.js';
 
 const TOKEN_ENDPOINT = 'https://example.com/token';
@@ -231,5 +232,42 @@ describe('OAuth2BearerCredentialExchanger', () => {
     expect(authCredential.authType).toBe(AuthCredentialTypes.OAUTH2);
     expect(authCredential.oauth2?.accessToken).toBe('test_access_token');
     expect(authCredential.http).toBeUndefined();
+  });
+});
+
+describe('OAuth2RefreshingBearerExchanger', () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('refreshes an expired token before it wraps it', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: 'fresh_access_token',
+        expires_in: 3600,
+      }),
+    } as Response);
+
+    const result = await new OAuth2RefreshingBearerExchanger().exchange({
+      authScheme,
+      authCredential: expiredCredential(),
+    });
+
+    expect(result.credential.http?.credentials.token).toBe(
+      'fresh_access_token',
+    );
+    // The caller stores this credential, so it must carry the tokens the
+    // refresh returned rather than the ones it replaced.
+    expect(result.credential.oauth2?.accessToken).toBe('fresh_access_token');
+    expect(result.wasExchanged).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(TOKEN_ENDPOINT, expect.anything());
   });
 });
