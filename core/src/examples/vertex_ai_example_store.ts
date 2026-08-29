@@ -76,21 +76,15 @@ function toPart(part: Part): Part | undefined {
   return undefined;
 }
 
-function toExpectedOutput(result: SimilarExample): Content[] {
-  const {expectedContents = []} =
-    result.example.storedContentsExample.contentsExample ?? {};
-  return expectedContents.map(({content}) => ({
-    role: content.role,
-    parts: (content.parts ?? []).flatMap((part) => toPart(part) ?? []),
-  }));
-}
-
 function toExample(result: SimilarExample): Example {
+  const {searchKey = '', contentsExample} =
+    result.example.storedContentsExample;
   return {
-    input: createUserContent(
-      result.example.storedContentsExample.searchKey ?? '',
-    ),
-    output: toExpectedOutput(result),
+    input: createUserContent(searchKey),
+    output: (contentsExample?.expectedContents ?? []).map(({content}) => ({
+      role: content.role,
+      parts: (content.parts ?? []).flatMap((part) => toPart(part) ?? []),
+    })),
   };
 }
 
