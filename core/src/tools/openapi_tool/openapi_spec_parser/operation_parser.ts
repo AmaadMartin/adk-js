@@ -166,7 +166,11 @@ export class OperationParser {
       paramLocation: 'body',
       paramSchema: schema,
       description: requestBody.description || schema.description || '',
-      required: requestBody.required ?? false,
+      // adk-python builds this parameter without a `required` argument, so it
+      // takes ApiParameter's default of false even when the body is mandatory.
+      // Honouring requestBody.required here would give the two SDKs different
+      // required sets for one document.
+      required: false,
       name: this.getParamName(originalName, 'body'),
     });
   }

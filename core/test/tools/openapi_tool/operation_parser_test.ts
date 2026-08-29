@@ -588,18 +588,19 @@ describe('OperationParser parity with adk-python', () => {
       expect(params[0].description).toBe('Anything');
     });
 
-    it('should require a body the spec marks required', () => {
-      const params = new OperationParser({
+    it('should not require a body even when the spec marks it required', () => {
+      const parser = new OperationParser({
         operationId: 'testOp',
         requestBody: {
           required: true,
           content: {'application/json': {schema: {type: 'string'}}},
         },
         responses: {},
-      }).getParameters();
+      });
 
-      expect(params[0].name).toBe('body');
-      expect(params[0].required).toBe(true);
+      expect(parser.getParameters()[0].name).toBe('body');
+      expect(parser.getParameters()[0].required).toBe(false);
+      expect(parser.getJsonSchema().required).toEqual([]);
     });
 
     it('should describe a body from the request body description', () => {
