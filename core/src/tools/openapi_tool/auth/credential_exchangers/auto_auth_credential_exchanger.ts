@@ -13,32 +13,32 @@ import {
   BaseCredentialExchanger,
   ExchangeResult,
 } from '../../../../auth/exchanger/base_credential_exchanger.js';
-import {OAuth2CredentialExchanger as OAuth2TokenExchanger} from '../../../../auth/oauth2/oauth2_credential_exchanger.js';
+import {OAuth2CredentialExchanger} from '../../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {experimental} from '../../../../utils/experimental.js';
-import {OAuth2CredentialExchanger as OAuth2BearerExchanger} from './oauth2_exchanger.js';
+import {OAuth2BearerCredentialExchanger} from './oauth2_bearer_exchanger.js';
 import {ServiceAccountCredentialExchanger} from './service_account_exchanger.js';
+
+const tokenExchanger = new OAuth2CredentialExchanger();
+const bearerExchanger = new OAuth2BearerCredentialExchanger();
 
 /**
  * Obtains an OAuth2 access token, then converts it into the HTTP bearer
  * credential that the OpenAPI layer sends in the Authorization header.
  */
-async function exchangeOAuth2(params: {
-  authScheme?: AuthScheme;
-  authCredential: AuthCredential;
-}): Promise<ExchangeResult> {
-  const acquired = await new OAuth2TokenExchanger().exchange(params);
-  const converted = await new OAuth2BearerExchanger().exchange({
-    authScheme: params.authScheme,
-    authCredential: acquired.credential,
-  });
+const oauth2Exchanger: BaseCredentialExchanger = {
+  async exchange(params) {
+    const acquired = await tokenExchanger.exchange(params);
+    const converted = await bearerExchanger.exchange({
+      authScheme: params.authScheme,
+      authCredential: acquired.credential,
+    });
 
-  return {
-    credential: converted.credential,
-    wasExchanged: acquired.wasExchanged || converted.wasExchanged,
-  };
-}
-
-const oauth2Exchanger: BaseCredentialExchanger = {exchange: exchangeOAuth2};
+    return {
+      credential: converted.credential,
+      wasExchanged: acquired.wasExchanged || converted.wasExchanged,
+    };
+  },
+};
 
 /**
  * Automatically selects the appropriate credential exchanger based on the auth scheme.

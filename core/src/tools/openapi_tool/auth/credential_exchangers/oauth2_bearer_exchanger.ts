@@ -7,7 +7,6 @@
 import {
   AuthCredential,
   AuthCredentialTypes,
-  OAuth2Auth,
 } from '../../../../auth/auth_credential.js';
 import {AuthScheme} from '../../../../auth/auth_schemes.js';
 import {
@@ -15,14 +14,8 @@ import {
   CredentialExchangeError,
   ExchangeResult,
 } from '../../../../auth/exchanger/base_credential_exchanger.js';
-import {
-  createOAuth2TokenRequestBody,
-  fetchOAuth2Tokens,
-  getTokenEndpoint,
-  isTokenExpired,
-} from '../../../../auth/oauth2/oauth2_utils.js';
+import {OAuth2CredentialRefresher} from '../../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../../utils/experimental.js';
-import {logger} from '../../../../utils/logger.js';
 
 const OAUTH2_SCHEME_TYPES = ['oauth2', 'openIdConnect'];
 
@@ -82,55 +75,12 @@ export function generateAuthToken(accessToken: string): AuthCredential {
 }
 
 /**
- * Exchanges a refresh token for a new access token.
- *
- * A refresh failure is not fatal: the caller keeps the existing token.
- *
- * @param authScheme The scheme that names the token endpoint.
- * @param oauth2 The credential holding the client identity.
- * @param refreshToken The refresh token to send.
- * @returns The refreshed access token, or undefined when the refresh cannot
- *   run or fails.
- */
-async function refreshAccessToken(
-  authScheme: AuthScheme,
-  oauth2: OAuth2Auth,
-  refreshToken: string,
-): Promise<string | undefined> {
-  const tokenEndpoint = getTokenEndpoint(authScheme);
-  if (!tokenEndpoint || !oauth2.clientId || !oauth2.clientSecret) {
-    logger.warn('Could not create OAuth2 session for token refresh');
-    return undefined;
-  }
-
-  try {
-    const tokens = await fetchOAuth2Tokens(
-      tokenEndpoint,
-      createOAuth2TokenRequestBody({
-        grantType: 'refresh_token',
-        clientId: oauth2.clientId,
-        clientSecret: oauth2.clientSecret,
-        refreshToken,
-      }),
-    );
-    logger.debug('Successfully refreshed OAuth2 tokens');
-    return tokens.accessToken;
-  } catch (error: unknown) {
-    const reason = error instanceof Error ? error.message : String(error);
-    logger.warn(
-      `Failed to refresh OAuth2 tokens, falling back to existing token: ${reason}`,
-    );
-    return undefined;
-  }
-}
-
-/**
  * Converts an OAuth2 or OpenID Connect credential into an HTTP bearer
  * credential that the OpenAPI tool layer can send in the Authorization header.
  * Ported from Python implementation.
  */
 @experimental
-export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
+export class OAuth2BearerCredentialExchanger implements BaseCredentialExchanger {
   /**
    * Converts the credential into an HTTP bearer credential.
    *
@@ -157,13 +107,18 @@ export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
       return undefined;
     }
 
-    const {refreshToken} = oauth2;
-    const refreshed =
-      refreshToken && isTokenExpired(oauth2)
-        ? await refreshAccessToken(params.authScheme, oauth2, refreshToken)
-        : undefined;
+    // The refresher checks expiry itself, but it warns when no refresh token is
+    // present, so only call it when a refresh can actually happen.
+    const refreshed = oauth2.refreshToken
+      ? await new OAuth2CredentialRefresher().refresh(
+          params.authCredential,
+          params.authScheme,
+        )
+      : undefined;
 
-    return generateAuthToken(refreshed ?? oauth2.accessToken);
+    return generateAuthToken(
+      refreshed?.oauth2?.accessToken ?? oauth2.accessToken,
+    );
   }
 
   @experimental
