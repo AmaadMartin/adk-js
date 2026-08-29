@@ -116,14 +116,12 @@ export class APIHubToolset extends BaseToolset {
       this.prepared = undefined;
       throw e;
     }
-    return this.openapiToolset ? this.openapiToolset.getTools(context) : [];
+    return this.openapiToolset?.getTools(context) ?? [];
   }
 
   @experimental
   override async close(): Promise<void> {
-    if (this.openapiToolset) {
-      await this.openapiToolset.close();
-    }
+    await this.openapiToolset?.close();
   }
 
   private async prepareToolset(): Promise<void> {
@@ -131,7 +129,9 @@ export class APIHubToolset extends BaseToolset {
       this.apihubResourceName,
     );
     const spec = yaml.load(specStr) as OpenAPIV3.Document | undefined;
-    if (!spec) {
+    // YAML parses plain text to a scalar, which carries no `info` block. Treat
+    // it like an empty spec rather than naming the toolset from nothing.
+    if (!spec || typeof spec !== 'object') {
       return;
     }
 

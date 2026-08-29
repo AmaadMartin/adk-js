@@ -256,6 +256,18 @@ describe('APIHubToolset', () => {
     expect(await toolset.getTools()).toEqual([]);
   });
 
+  it('leaves the name unset when the spec parses to a scalar', async () => {
+    const toolset = new APIHubToolset({
+      apihubResourceName: 'test_resource',
+      apihubClient: new MockAPIHubClient('spec content'),
+      lazyLoadSpec: true,
+    });
+
+    expect(await toolset.getTools()).toEqual([]);
+    expect(toolset.name).toBe('');
+    expect(toolset.description).toBe('');
+  });
+
   it('rejects when the spec is not valid YAML', async () => {
     const toolset = new APIHubToolset({
       apihubResourceName: 'test_resource',
