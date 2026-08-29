@@ -876,6 +876,76 @@ describe('FunctionTool', () => {
     });
   });
 
+  describe('raw schema argument parsing', () => {
+    /** A tool that records the arguments its `execute` receives. */
+    function recordingTool(parameters: Schema) {
+      const calls: unknown[] = [];
+      const tool = new FunctionTool({
+        name: 'measure',
+        description: 'Records what it is called with.',
+        parameters,
+        execute: (input) => {
+          calls.push(input);
+          return 'ok';
+        },
+      });
+      return {tool, calls};
+    }
+
+    const countSchema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        count: {type: Type.INTEGER},
+        unit: {type: Type.STRING, default: 'items'},
+      },
+      required: ['count'],
+    };
+
+    it('applies a schema default the model did not supply', async () => {
+      const {tool, calls} = recordingTool(countSchema);
+
+      await tool.runAsync({args: {count: 3}, toolContext: emptyContext});
+
+      expect(calls).toEqual([{count: 3, unit: 'items'}]);
+    });
+
+    it('passes arguments that violate the schema through unparsed', async () => {
+      const {tool, calls} = recordingTool(countSchema);
+
+      const result = await tool.runAsync({
+        args: {count: '3'},
+        toolContext: emptyContext,
+      });
+
+      expect(result).toBe('ok');
+      expect(calls).toEqual([{count: '3'}]);
+    });
+
+    it('leaves arguments untouched when the schema has no Zod equivalent', async () => {
+      const {tool, calls} = recordingTool({type: Type.TYPE_UNSPECIFIED});
+
+      await tool.runAsync({
+        args: {count: '3', extra: true},
+        toolContext: emptyContext,
+      });
+
+      expect(calls).toEqual([{count: '3', extra: true}]);
+    });
+
+    it('still rejects arguments that violate a zod object', async () => {
+      const tool = new FunctionTool({
+        name: 'measure',
+        description: 'Counts things.',
+        parameters: z3.object({count: z3.number()}),
+        execute: () => 'ok',
+      });
+
+      await expect(
+        tool.runAsync({args: {count: '3'}, toolContext: emptyContext}),
+      ).rejects.toThrow("Error in tool 'measure'");
+    });
+  });
+
   describe('_getDeclaration copies', () => {
     it('hands each caller an independent copy', () => {
       const tool = new FunctionTool({
@@ -927,5 +997,31 @@ describe('FunctionTool', () => {
       expect(parameters.required).toEqual(['a']);
       expect(tool._getDeclaration().parameters).toEqual(parameters);
     });
+  });
+});
+
+describe('FunctionTool.detectErrorInResponse', () => {
+  const tool = new FunctionTool({
+    name: 'echo',
+    description: 'Echoes.',
+    execute: () => 'ok',
+  });
+
+  it('reports TOOL_ERROR for a response carrying a truthy error', () => {
+    expect(tool.detectErrorInResponse({error: 'missing arg'})).toBe(
+      'TOOL_ERROR',
+    );
+  });
+
+  it.each([
+    ['a clean result object', {result: 'ok'}],
+    ['an empty error message', {error: ''}],
+    ['a zero error code', {error: 0}],
+    ['a plain string', 'plain string'],
+    ['a number', 7],
+    ['null', null],
+    ['undefined', undefined],
+  ])('reports no error type for %s', (_name, response) => {
+    expect(tool.detectErrorInResponse(response)).toBeUndefined();
   });
 });

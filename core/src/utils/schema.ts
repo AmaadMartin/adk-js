@@ -17,6 +17,7 @@ import {z as z3} from 'zod/v3';
 import {toJSONSchema as toJSONSchemaV4, z as z4} from 'zod/v4';
 
 import {genaiSchemaToJsonSchema} from './genai_schema_to_json.js';
+import {logger} from './logger.js';
 import {
   isZodSchema,
   isZodV3Schema,
@@ -105,6 +106,31 @@ export function parseWithSchema<T>(
   }
   const validator = genaiSchemaValidator(schema as Schema);
   return validator ? (validator.parse(value) as T) : value;
+}
+
+/**
+ * Validates `value` against `schema`, returning `value` unchanged when it does
+ * not satisfy the schema.
+ *
+ * This is the best-effort form of {@link parseWithSchema}, for callers that
+ * must not reject data the schema disagrees with — model-supplied tool
+ * arguments, where the declaration is a hint the model may ignore and the tool
+ * itself decides what it can work with. A successful parse still applies the
+ * schema's defaults, which is the reason to attempt it.
+ */
+export function tryParseWithSchema<T>(
+  schema: SchemaLike | undefined,
+  value: T,
+): T {
+  try {
+    return parseWithSchema(schema, value);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.debug(
+      `Value does not match its schema, using it unparsed: ${reason}`,
+    );
+    return value;
+  }
 }
 
 /**

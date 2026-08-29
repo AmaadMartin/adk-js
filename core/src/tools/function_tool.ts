@@ -9,7 +9,14 @@ import {cloneDeep} from 'lodash-es';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
+import {toJsonSchema, tryParseWithSchema} from '../utils/schema.js';
+import {
+  flattenNullableAnyOf,
+  stripUnsupportedGeminiFormats,
+} from '../utils/schema_variant_utils.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
+import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
@@ -65,6 +72,10 @@ export type RequireConfirmation<TParameters extends ToolInputParameters> =
  * for tool definition generation.
  */
 export type ToolOptions<TParameters extends ToolInputParameters> = {
+  /**
+   * The name the model is told about, which is also the name the framework
+   * registers the tool under. Defaults to the `execute` function's own name.
+   */
   name?: string;
   description: string;
   parameters?: TParameters;
@@ -90,11 +101,19 @@ export type ToolOptions<TParameters extends ToolInputParameters> = {
   requireConfirmation?: RequireConfirmation<TParameters>;
 };
 
+/** The `error.type` a tool reports for a response that carries an error. */
+const TOOL_ERROR = 'TOOL_ERROR';
+
+/** The schema of a tool that declares no parameters. */
+function emptyObjectSchema(): Schema {
+  return {type: Type.OBJECT, properties: {}};
+}
+
 function toSchema<TParameters extends ToolInputParameters>(
   parameters: TParameters,
 ): Schema {
   if (parameters === undefined) {
-    return {type: Type.OBJECT, properties: {}};
+    return emptyObjectSchema();
   }
 
   if (isZodObject(parameters)) {
@@ -102,6 +121,46 @@ function toSchema<TParameters extends ToolInputParameters>(
   }
 
   return parameters;
+}
+
+/**
+ * Renders a tool as the declaration sent to the model.
+ *
+ * Exactly one of `parameters` and `parametersJsonSchema` is populated: the
+ * JSON-schema form is what the `JSON_SCHEMA_FOR_FUNC_DECL` feature selects,
+ * and the genai `Schema` form is the default. Mirrors adk-python's
+ * `build_function_declaration`.
+ *
+ * The result shares no object with `parameters`, so a caller that keeps its
+ * own `Schema` and later edits it cannot reach a cached declaration.
+ */
+function buildDeclaration(
+  name: string,
+  description: string,
+  parameters: ToolInputParameters,
+  variant: GoogleLLMVariant,
+  jsonSchema: boolean,
+): FunctionDeclaration {
+  if (jsonSchema) {
+    const rendered = toJsonSchema(parameters ?? emptyObjectSchema());
+    return {
+      name,
+      description,
+      parametersJsonSchema:
+        variant === GoogleLLMVariant.VERTEX_AI
+          ? flattenNullableAnyOf(rendered)
+          : rendered,
+    };
+  }
+  const schema = cloneDeep(toSchema(parameters));
+  return {
+    name,
+    description,
+    parameters:
+      variant === GoogleLLMVariant.GEMINI_API
+        ? stripUnsupportedGeminiFormats(schema)
+        : schema,
+  };
 }
 
 /** The declared-required keys absent from `args`, in declaration order. */
@@ -152,6 +211,8 @@ export class FunctionTool<
   private readonly parameters?: TParameters;
   // Whether the tool requires user confirmation before running.
   private readonly requireConfirmation: RequireConfirmation<TParameters>;
+  // The last built declaration, and the `variant:jsonSchema` key it is for.
+  private cache?: {key: string; declaration: FunctionDeclaration};
 
   /**
    * The constructor acts as the user-friendly factory.
@@ -178,16 +239,50 @@ export class FunctionTool<
    * Returns the function declaration derived from the tool's name, description,
    * and parameter schema.
    *
-   * Both the returned object and its `parameters` are fresh, so a caller that
-   * prefixes the name or annotates the schema — as
-   * {@link LongRunningFunctionTool} does — never mutates the tool itself.
+   * The build is cached, and rebuilds when the API variant or the
+   * `JSON_SCHEMA_FOR_FUNC_DECL` feature changes. Every call returns a fresh
+   * copy, so a caller that prefixes the name or annotates the schema — as
+   * {@link LongRunningFunctionTool} does — never mutates the cached
+   * declaration or the tool itself.
    */
   override _getDeclaration(): FunctionDeclaration {
-    return {
-      name: this.name,
-      description: this.description,
-      parameters: cloneDeep(toSchema(this.parameters)),
-    };
+    const variant = this.apiVariant;
+    const jsonSchema = isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL);
+    const key = `${variant}:${jsonSchema}`;
+    let cache = this.cache;
+    if (cache?.key !== key) {
+      cache = {
+        key,
+        declaration: buildDeclaration(
+          this.name,
+          this.description,
+          this.parameters,
+          variant,
+          jsonSchema,
+        ),
+      };
+      this.cache = cache;
+    }
+    return cloneDeep(cache.declaration);
+  }
+
+  /**
+   * The error type to record on this call's telemetry span, or `undefined`
+   * when the response is not a failure.
+   *
+   * A tool reports a failure by returning `{error: ...}` rather than by
+   * throwing, which is otherwise indistinguishable from a success in a trace.
+   */
+  detectErrorInResponse(response: unknown): string | undefined {
+    if (
+      typeof response === 'object' &&
+      response !== null &&
+      'error' in response &&
+      response.error
+    ) {
+      return TOOL_ERROR;
+    }
+    return undefined;
   }
 
   /**
@@ -278,14 +373,27 @@ export class FunctionTool<
     );
   }
 
-  /** Parses `args` against the parameter schema, when one is declared. */
+  /**
+   * Parses `args` against the parameter schema, when one is declared.
+   *
+   * A Zod object rejects arguments it disagrees with, which `runAsync` turns
+   * into an error the model can retry. A raw `Schema` is best-effort instead:
+   * it parses to pick up the schema's defaults, and keeps the model's own
+   * arguments when they do not validate. Tools declared with a `Schema` — the
+   * shape MCP and OpenAPI toolsets produce — received no validation at all
+   * before, so rejecting those calls would break working tools. This is the
+   * same leniency as adk-python's `_preprocess_args`.
+   */
   private validateArgs(
     args: Record<string, unknown>,
   ): ToolExecuteArgument<TParameters> {
     if (isZodObject(this.parameters)) {
       return this.parameters.parse(args) as ToolExecuteArgument<TParameters>;
     }
-    return args as ToolExecuteArgument<TParameters>;
+    return tryParseWithSchema(
+      this.parameters,
+      args,
+    ) as ToolExecuteArgument<TParameters>;
   }
 
   /** Resolves `requireConfirmation`, which may be a flag or a predicate. */
