@@ -174,14 +174,17 @@ describe('OAuth2RefreshingBearerExchanger', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('passes an http credential through a scheme that declares flows', async () => {
+  it('passes a tool-configured bearer token through a scheme that declares flows', async () => {
+    // The shape a tool configured with an OAuth2 scheme and a bearer token
+    // reaches this exchanger with: `AutoAuthCredentialExchanger` routes on
+    // `authType`, so the credential is OAuth2-typed and carries no oauth2
+    // block. A scheme with flows resolves to a grant type, so the acquisition
+    // delegate rejects it for the OAuth2 client it does not hold.
     const authCredential: AuthCredential = {
-      authType: AuthCredentialTypes.HTTP,
+      authType: AuthCredentialTypes.OAUTH2,
       http: {scheme: 'bearer', credentials: {token: 'existing_token'}},
     };
 
-    // A scheme with flows resolves to a grant type, so the acquisition
-    // delegate rejects this credential for the OAuth2 client it does not hold.
     const result = await exchange(authorizationCodeScheme, authCredential);
 
     expect(result.wasExchanged).toBe(false);

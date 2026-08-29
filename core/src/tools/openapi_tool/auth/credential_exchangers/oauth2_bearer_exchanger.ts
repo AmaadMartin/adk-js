@@ -56,24 +56,20 @@ export class OAuth2RefreshingBearerExchanger implements BaseCredentialExchanger 
       );
     }
 
-    // A credential holding only an `http` block already carries the bearer
-    // token the request needs. It has nothing to acquire and nothing to
-    // refresh, and the acquisition delegate rejects it for the OAuth2 client
-    // it does not hold, so it passes straight through.
+    // A tool configured with an OAuth2 scheme and a bearer token its owner
+    // already holds reaches here as an OAuth2-typed credential carrying only
+    // an `http` block. It has nothing to acquire and nothing to refresh, and
+    // the acquisition delegate rejects it for the OAuth2 client it does not
+    // hold, so it passes straight through.
     if (!authCredential.oauth2) {
       return {credential: authCredential, wasExchanged: false};
     }
 
     const acquired = await this.tokenExchanger.exchange(params);
-    // `OAuth2CredentialRefresher.refresh` warns when the credential carries no
-    // refresh token, and most tool calls carry none. It runs every other check
-    // itself, and returns its argument by reference when it skips the refresh.
-    const refreshed = acquired.credential.oauth2?.refreshToken
-      ? await new OAuth2CredentialRefresher().refresh(
-          acquired.credential,
-          authScheme,
-        )
-      : acquired.credential;
+    const refreshed = await new OAuth2CredentialRefresher().refresh(
+      acquired.credential,
+      authScheme,
+    );
 
     // A refreshed credential carries both blocks, so the OAuth2 access token
     // wins over an `http` block holding the token it replaced. A credential
@@ -88,9 +84,13 @@ export class OAuth2RefreshingBearerExchanger implements BaseCredentialExchanger 
         ...refreshed,
         http: token ? {scheme: 'bearer', credentials: {token}} : refreshed.http,
       },
-      // The refresher returns the credential it was given, by reference, when
-      // it did not reach the token endpoint.
-      wasExchanged: acquired.wasExchanged || refreshed !== acquired.credential,
+      // A new access token is the one signal that the token endpoint answered.
+      // `ToolAuthHandler` persists on this flag, so wrapping a token the
+      // credential already held must not copy a client secret into the session.
+      wasExchanged:
+        acquired.wasExchanged ||
+        refreshed.oauth2?.accessToken !==
+          acquired.credential.oauth2?.accessToken,
     };
   }
 }

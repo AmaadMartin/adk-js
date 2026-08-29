@@ -5,6 +5,7 @@
  */
 
 import {JWT} from 'google-auth-library';
+import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it, vi} from 'vitest';
 import {
   AuthCredential,
@@ -129,6 +130,34 @@ describe('AutoAuthCredentialExchanger', () => {
 
     // `ToolAuthHandler` persists on this flag, so a conversion that reached no
     // token endpoint must not report an exchange.
+    expect(result.wasExchanged).toBe(false);
+  });
+
+  it('keeps the bearer token a tool was configured with under an oauth2 scheme', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+    const authScheme = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/auth',
+          tokenUrl: 'https://example.com/token',
+          scopes: {},
+        },
+      },
+    } satisfies OpenAPIV3.OAuth2SecurityScheme;
+
+    // The dispatcher routes on `authType`, so a tool configured with an OAuth2
+    // scheme and a bearer token its owner already holds arrives here as an
+    // OAuth2-typed credential carrying no oauth2 block.
+    const result = await exchanger.exchange({
+      authScheme,
+      authCredential: {
+        authType: AuthCredentialTypes.OAUTH2,
+        http: {scheme: 'bearer', credentials: {token: 'configured-token'}},
+      },
+    });
+
+    expect(result.credential.http?.credentials.token).toBe('configured-token');
     expect(result.wasExchanged).toBe(false);
   });
 });
