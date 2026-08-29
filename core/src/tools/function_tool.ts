@@ -19,7 +19,6 @@ import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
-import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 
 /**
@@ -46,15 +45,10 @@ export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
 
 /**
  * The signature of the user-provided function executed by a {@link FunctionTool}.
- *
- * `inputStream` is the live request queue the framework owns for this tool, and
- * is set only during a bidirectional (live) run. See
- * {@link FunctionTool.runAsync}.
  */
 export type ToolExecuteFunction<TParameters extends ToolInputParameters> = (
   input: ToolExecuteArgument<TParameters>,
   toolContext?: Context,
-  inputStream?: LiveRequestQueue,
 ) => Promise<unknown> | unknown;
 
 /**
@@ -79,9 +73,8 @@ export type RequireConfirmation<TParameters extends ToolInputParameters> =
  */
 export type ToolOptions<TParameters extends ToolInputParameters> = {
   /**
-   * The name the model is told about and the framework registers the tool
-   * under. Defaults to the `execute` function's own name; the two names cannot
-   * be set apart, because a live tool's input stream is looked up by it.
+   * The name the model is told about, which is also the name the framework
+   * registers the tool under. Defaults to the `execute` function's own name.
    */
   name?: string;
   /** Defaults to an empty string, matching a Python tool with no docstring. */
@@ -301,10 +294,6 @@ export class FunctionTool<
    * telling the model to retry with the missing arguments, matching adk-python.
    * It never reaches the confirmation gate or `execute`.
    *
-   * During a live run, `execute` also receives the request queue the framework
-   * registered under this tool's name. The lookup uses the registered name, so
-   * a tool cannot be handed another tool's stream.
-   *
    * @param req The tool request containing arguments and tool context.
    * @returns A promise resolving to the function's return value.
    */
@@ -333,11 +322,7 @@ export class FunctionTool<
         return pending;
       }
 
-      return await this.execute(
-        validatedArgs,
-        req.toolContext,
-        this.inputStream(req.toolContext),
-      );
+      return await this.execute(validatedArgs, req.toolContext);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -387,18 +372,6 @@ export class FunctionTool<
     return Object.fromEntries(
       Object.entries(args).filter(([key]) => Object.hasOwn(properties, key)),
     );
-  }
-
-  /**
-   * The live request queue registered for this tool, or `undefined` outside a
-   * live run.
-   *
-   * `invocationContext` is optional-chained because the repo's tool tests pass
-   * `{} as Context`, which bypasses the constructor that would set it.
-   */
-  private inputStream(toolContext: Context): LiveRequestQueue | undefined {
-    return toolContext.invocationContext?.activeStreamingTools?.[this.name]
-      ?.stream;
   }
 
   /** Parses `args` against the parameter schema, when one is declared. */
