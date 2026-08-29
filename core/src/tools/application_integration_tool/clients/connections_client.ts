@@ -5,11 +5,7 @@
  */
 
 import {experimental} from '../../../utils/experimental.js';
-import {
-  asJsonObject,
-  readString,
-  readStringArray,
-} from '../../../utils/json_utils.js';
+import {asJsonObject, readString} from '../../../utils/json_utils.js';
 import {ApiTransport} from './api_transport.js';
 
 /** Host serving the Integration Connectors API. */
@@ -112,9 +108,12 @@ export class ConnectionsClient {
         `?entityId=${encodeURIComponent(entity)}`,
       `Failed to get entity schema and operations for entity: ${entity}`,
     );
+    const operations = response['operations'];
     return {
       schema: asJsonObject(response['jsonSchema']) ?? {},
-      operations: readStringArray(response, 'operations'),
+      operations: Array.isArray(operations)
+        ? operations.filter((op): op is string => typeof op === 'string')
+        : [],
     };
   }
 

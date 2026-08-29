@@ -7,8 +7,8 @@
 import {describe, expect, it} from 'vitest';
 import {
   asJsonObject,
+  asRecord,
   readString,
-  readStringArray,
 } from '../../src/utils/json_utils.js';
 
 describe('asJsonObject', () => {
@@ -24,6 +24,19 @@ describe('asJsonObject', () => {
   });
 });
 
+describe('asRecord', () => {
+  it('accepts an array, unlike asJsonObject', () => {
+    expect(asRecord([1, 2])).toEqual([1, 2]);
+    expect(asRecord({a: 1})).toEqual({a: 1});
+  });
+
+  it('rejects null and a primitive', () => {
+    expect(asRecord(null)).toBeUndefined();
+    expect(asRecord('text')).toBeUndefined();
+    expect(asRecord(undefined)).toBeUndefined();
+  });
+});
+
 describe('readString', () => {
   it('returns the string value of a field', () => {
     expect(readString({name: 'value'}, 'name')).toBe('value');
@@ -32,19 +45,5 @@ describe('readString', () => {
   it('returns an empty string for a missing or non-string field', () => {
     expect(readString({}, 'name')).toBe('');
     expect(readString({name: 42}, 'name')).toBe('');
-  });
-});
-
-describe('readStringArray', () => {
-  it('keeps only the string entries of an array field', () => {
-    expect(readStringArray({ops: ['LIST', 42, 'GET', null]}, 'ops')).toEqual([
-      'LIST',
-      'GET',
-    ]);
-  });
-
-  it('returns an empty array for a missing or non-array field', () => {
-    expect(readStringArray({}, 'ops')).toEqual([]);
-    expect(readStringArray({ops: 'LIST'}, 'ops')).toEqual([]);
   });
 });
