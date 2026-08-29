@@ -60,14 +60,6 @@ export interface AnthropicGenerateContentConfig extends GenerateContentConfig {
  * The map is exhaustive on purpose: when the SDK adds a stop reason, this
  * fails to compile rather than silently reporting the wrong finish reason.
  */
-/**
- * A stop reason as it arrives on the wire.
- *
- * Anthropic ships a new stop reason before the SDK types it, so the wire
- * carries values the `StopReason` union does not list yet.
- */
-export type WireStopReason = StopReason | (string & {});
-
 const GENAI_FINISH_REASONS: Record<StopReason, FinishReason> = {
   end_turn: FinishReason.STOP,
   stop_sequence: FinishReason.STOP,
@@ -454,7 +446,7 @@ export function contentBlockToPart(block: ContentBlock): Part {
  * @return The finish reason, or `undefined` when Claude reported none.
  */
 export function toGenaiFinishReason(
-  stopReason?: WireStopReason | null,
+  stopReason?: string | null,
 ): FinishReason | undefined {
   if (!stopReason) {
     return undefined;

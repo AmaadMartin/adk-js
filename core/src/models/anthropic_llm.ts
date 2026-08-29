@@ -90,7 +90,8 @@ export interface AnthropicMessagesClient {
  * test double can stand in for it. Naming the two members used here keeps an
  * injected client testable, and a real `MessageStream` still satisfies it.
  */
-export interface AnthropicMessageStream extends AsyncIterable<RawMessageStreamEvent> {
+export interface AnthropicMessageStream {
+  [Symbol.asyncIterator](): AsyncIterator<RawMessageStreamEvent>;
   finalMessage(): Promise<Message>;
 }
 
