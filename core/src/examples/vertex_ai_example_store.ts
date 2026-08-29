@@ -14,6 +14,7 @@ import {
 import {GoogleAuth} from 'google-auth-library';
 
 import {experimental} from '../utils/experimental.js';
+import {logger} from '../utils/logger.js';
 import {BaseExampleProvider} from './base_example_provider.js';
 import {Example} from './example.js';
 
@@ -23,8 +24,16 @@ const TOP_K = 10;
 /** Results scoring below this are dropped, matching adk-python. */
 const MIN_SIMILARITY_SCORE = 0.5;
 
+/**
+ * Matches a store resource name and captures its location.
+ *
+ * The location reaches the request host, so it is restricted to the characters
+ * a region name uses. Excluding `/` alone would not be enough: `?`, `#` and `@`
+ * each relocate the authority, which would send the credentialed search to
+ * another origin.
+ */
 const EXAMPLE_STORE_NAME_PATTERN =
-  /^projects\/[^/]+\/locations\/([^/]+)\/exampleStores\/[^/]+$/;
+  /^projects\/[a-zA-Z0-9_-]+\/locations\/([a-z0-9-]+)\/exampleStores\/[a-zA-Z0-9_-]+$/;
 
 const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
@@ -142,6 +151,11 @@ export class VertexAiExampleStore extends BaseExampleProvider {
   }
 
   override async getExamples(query: string): Promise<Example[]> {
+    // The query is end-user content, so only its length is logged.
+    logger.debug(
+      `Searching example store ${this.examplesStoreName} ` +
+        `with a query of ${query.length} characters`,
+    );
     // The store name is bound to the URL path, so the body leaves it out.
     const {data} = await this.auth.request<SearchExamplesResponse>({
       url: this.searchUrl,

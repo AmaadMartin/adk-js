@@ -515,6 +515,29 @@ describe('VertexAiExampleStore', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  // The location is spliced into the request host, and the search carries an
+  // ADC bearer token. A name that moves the host would send that token to
+  // another origin, so each of these must be rejected before any request.
+  it.each([
+    ['projects/p/locations/attacker.example?/exampleStores/s'],
+    ['projects/p/locations/attacker.example#/exampleStores/s'],
+    ['projects/p/locations/x@attacker.example/exampleStores/s'],
+  ])('rejects the store name %s, which would move the request host', (name) => {
+    const request = mockSearchExamples({});
+
+    expect(() => new VertexAiExampleStore(name)).toThrow('examplesStoreName');
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('accepts a region name that is not the default', () => {
+    expect(
+      () =>
+        new VertexAiExampleStore(
+          'projects/my_proj-1/locations/asia-northeast1/exampleStores/store_A-1',
+        ),
+    ).not.toThrow();
+  });
+
   it('feeds the fetched examples into an ExampleTool system instruction', async () => {
     const tool = new ExampleTool(storeWith(PASSWORD_RESET_RESPONSE));
     const llmRequest = makeLlmRequest('gemini-2.0-flash');
