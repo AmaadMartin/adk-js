@@ -434,6 +434,18 @@ export type {
 export {IntegrationClient} from './tools/application_integration_tool/clients/integration_client.js';
 export type {IntegrationClientOptions} from './tools/application_integration_tool/clients/integration_client.js';
 export * from './tools/base_tool.js';
+export {
+  createApiParameter,
+  generateParamDoc,
+  generateReturnDoc,
+  getTypeHint,
+  renameReservedWords,
+  schemaFromOpenApi,
+} from './tools/openapi_tool/common/common.js';
+export type {
+  ApiParameter,
+  ApiParameterInit,
+} from './tools/openapi_tool/common/common.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
   OperationEndpoint,
@@ -441,7 +453,6 @@ export type {
 } from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export {OperationParser} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
 export type {
-  ApiParameter,
   OperationParserOptions,
   ToolArgumentsSchema,
 } from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';

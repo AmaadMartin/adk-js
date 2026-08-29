@@ -8,11 +8,8 @@ import {OpenAPIV3} from 'openapi-types';
 import {AuthCredential} from '../../../auth/auth_credential.js';
 import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
-import {
-  ApiParameter,
-  OperationParser,
-  requiredSchemeName,
-} from './operation_parser.js';
+import type {ApiParameter} from '../common/common.js';
+import {OperationParser, requiredSchemeName} from './operation_parser.js';
 
 const VALID_SCHEMA_TYPES = new Set([
   'array',

@@ -8,6 +8,7 @@ import {describe, expect, it} from 'vitest';
 import {
   camelCaseKeys,
   snakeCase,
+  toSnakeCaseIdentifier,
   toSnakeCaseName,
 } from '../../src/utils/case_utils.js';
 
@@ -76,6 +77,23 @@ describe('case_utils', () => {
 
     it('should return an empty string for punctuation alone', () => {
       expect(toSnakeCaseName('---')).toBe('');
+    });
+  });
+
+  describe('toSnakeCaseIdentifier', () => {
+    it.each([
+      ['camelCase', 'camel_case'],
+      ['UpperCamelCase', 'upper_camel_case'],
+      ['space separated', 'space_separated'],
+      ['REST API', 'rest_api'],
+      ['HTTPResponse', 'http_response'],
+      ['user-id', 'user_id'],
+      ['a__b', 'a_b'],
+      ['__leading__', 'leading'],
+      ['', ''],
+      ['alreadysnake', 'alreadysnake'],
+    ])('should convert %s to %s', (input, expected) => {
+      expect(toSnakeCaseIdentifier(input)).toBe(expected);
     });
   });
 

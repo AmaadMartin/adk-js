@@ -9,8 +9,13 @@ import {OpenAPIV3} from 'openapi-types';
 import {toSnakeCaseName} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
 import {toGeminiType} from '../../../utils/gemini_schema_util.js';
+import type {ApiParameter} from '../common/common.js';
 import {generateParamDoc, generateReturnDoc, typeHint} from './doc_strings.js';
 import {deriveParameterName} from './parameter_names.js';
+
+// `ApiParameter` now lives in the OpenAPI common module. It is re-exported here
+// so the modules that already import it from this file keep working.
+export type {ApiParameter};
 
 /** The JSON Schema describing a tool function's arguments. */
 export interface ToolArgumentsSchema {
@@ -18,15 +23,6 @@ export interface ToolArgumentsSchema {
   properties: Record<string, unknown>;
   required?: string[];
   title: string;
-}
-
-export interface ApiParameter {
-  originalName: string;
-  paramLocation: string;
-  paramSchema: OpenAPIV3.SchemaObject;
-  description?: string;
-  name: string; // The name used in the generated tool schema (may be snake_cased)
-  required: boolean;
 }
 
 /** Options accepted by `OperationParser`. */

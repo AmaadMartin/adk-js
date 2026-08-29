@@ -24,8 +24,8 @@ import {
 import {version} from '../../version.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential, validateAuthScheme} from './auth/auth_helpers.js';
+import type {ApiParameter} from './common/common.js';
 import {
-  ApiParameter,
   OperationParser,
   OperationParserOptions,
 } from './openapi_spec_parser/operation_parser.js';
