@@ -6,12 +6,46 @@
 
 import {
   Context,
-  LOAD_ARTIFACTS,
+  FeatureName,
+  getLogger,
   LlmRequest,
+  LOAD_ARTIFACTS,
   LoadArtifactsTool,
+  withTemporaryFeatureOverride,
 } from '@google/adk';
 import {Blob, Part, Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
+
+/** Builds a request whose last turn asks the tool to load `artifactNames`. */
+function requestLoading(artifactNames: string[]): LlmRequest {
+  return {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              name: 'load_artifacts',
+              response: {artifact_names: artifactNames},
+            },
+          },
+        ],
+      },
+    ],
+    toolsDict: {},
+    liveConnectConfig: {},
+  };
+}
+
+/** Builds the tool-facing `Context` backed by `artifactsByName`. */
+function stubContext(artifactsByName: Record<string, Part>): Context {
+  return new StubToolContext(artifactsByName) as unknown as Context;
+}
+
+/** Returns the artifact part the tool appended last to `llmRequest`. */
+function appendedArtifactPart(llmRequest: LlmRequest): Part {
+  return llmRequest.contents[llmRequest.contents.length - 1].parts![1];
+}
 
 class StubToolContext {
   private artifactsByName: Record<string, Part>;
@@ -651,5 +685,219 @@ describe('LoadArtifactsTool', () => {
       c.parts?.some((p) => p.text === `Artifact ${artifactName} is:`),
     );
     expect(addedContent).toBeUndefined();
+  });
+  it('converts an artifact with the built-in conversion by default', async () => {
+    const artifactName = 'data.csv';
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {
+          data: Buffer.from('a,b').toString('base64'),
+          mimeType: 'application/csv',
+        } as Blob,
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toEqual('a,b');
+  });
+
+  it('appends the part a synchronous processArtifact returns', async () => {
+    const artifactName = 'test.txt';
+    const artifact: Part = {text: 'raw'};
+    const toolContext = stubContext({
+      [artifactName]: artifact,
+    });
+    const llmRequest = requestLoading([artifactName]);
+    const seen: Array<[Part, string]> = [];
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => {
+        seen.push([part, name]);
+        return {text: 'redacted'};
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0][0]).toBe(artifact);
+    expect(seen[0][1]).toEqual(artifactName);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('redacted');
+  });
+
+  it('awaits an asynchronous processArtifact', async () => {
+    const artifactName = 'test.txt';
+    const toolContext = stubContext({
+      [artifactName]: {text: 'raw'},
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      processArtifact: async () => ({text: 'async redacted'}),
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).text).toEqual('async redacted');
+  });
+
+  it('omits the artifact when processArtifact returns undefined', async () => {
+    const toolContext = stubContext({
+      'skip.txt': {text: 'skip me'},
+      'keep.txt': {text: 'keep me'},
+    });
+    const llmRequest = requestLoading(['skip.txt', 'keep.txt']);
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => (name === 'skip.txt' ? undefined : part),
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('keep me');
+  });
+
+  it('logs and skips the artifact when processArtifact throws', async () => {
+    const toolContext = stubContext({
+      'boom.txt': {text: 'boom'},
+      'keep.txt': {text: 'keep me'},
+    });
+    const llmRequest = requestLoading(['boom.txt', 'keep.txt']);
+    const errors = vi.spyOn(getLogger(), 'error').mockImplementation(() => {});
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => {
+        if (name === 'boom.txt') {
+          throw new Error('callback failed');
+        }
+        return part;
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(errors).toHaveBeenCalledOnce();
+    expect(errors.mock.calls[0][0]).toContain('boom.txt');
+    expect(errors.mock.calls[0][0]).toContain('callback failed');
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('keep me');
+    errors.mockRestore();
+  });
+
+  it('transforms each artifact of a multi-artifact response', async () => {
+    const toolContext = stubContext({
+      'a.txt': {text: 'a'},
+      'b.txt': {text: 'b'},
+    });
+    const llmRequest = requestLoading(['a.txt', 'b.txt']);
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => ({text: `${name}:${part.text}`}),
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents).toHaveLength(3);
+    expect(llmRequest.contents[1].parts![1].text).toEqual('a.txt:a');
+    expect(llmRequest.contents[2].parts![1].text).toEqual('b.txt:b');
+  });
+
+  it('gives processArtifact the unprefixed name of a user artifact', async () => {
+    const artifactName = 'shared.txt';
+    const artifact: Part = {text: 'shared content'};
+    const toolContext = stubContext({
+      [`user:${artifactName}`]: artifact,
+    });
+    const llmRequest = requestLoading([artifactName]);
+    const seen: Array<[Part, string]> = [];
+
+    await new LoadArtifactsTool({
+      processArtifact: (part, name) => {
+        seen.push([part, name]);
+        return part;
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0][0]).toBe(artifact);
+    expect(seen[0][1]).toEqual(artifactName);
+  });
+
+  it('bypasses the built-in conversion when processArtifact is supplied', async () => {
+    const artifactName = 'data.csv';
+    const data = Buffer.from('a,b').toString('base64');
+    const toolContext = stubContext({
+      [artifactName]: {
+        inlineData: {data, mimeType: 'application/csv'} as Blob,
+      },
+    });
+    const llmRequest = requestLoading([artifactName]);
+
+    await new LoadArtifactsTool({
+      processArtifact: (part) => part,
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(appendedArtifactPart(llmRequest).inlineData?.data).toEqual(data);
+  });
+
+  it('declares json schema parameters when the feature is enabled', async () => {
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      true,
+      () => new LoadArtifactsTool()._getDeclaration(),
+    );
+
+    expect(declaration?.parametersJsonSchema).toEqual({
+      type: 'object',
+      properties: {
+        artifact_names: {
+          type: 'array',
+          items: {type: 'string'},
+          description: 'The names of the artifacts to load.',
+        },
+      },
+    });
+    expect(declaration?.parameters).toBeUndefined();
+  });
+
+  it('keeps the schema declaration when the feature is disabled', async () => {
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      false,
+      () => new LoadArtifactsTool()._getDeclaration(),
+    );
+
+    expect(declaration?.parametersJsonSchema).toBeUndefined();
+    expect(declaration?.parameters?.type).toEqual(Type.OBJECT);
+  });
+  it('logs and skips the artifact when processArtifact rejects', async () => {
+    const toolContext = stubContext({
+      'boom.txt': {text: 'boom'},
+      'keep.txt': {text: 'keep me'},
+    });
+    const llmRequest = requestLoading(['boom.txt', 'keep.txt']);
+    const errors = vi.spyOn(getLogger(), 'error').mockImplementation(() => {});
+
+    await new LoadArtifactsTool({
+      processArtifact: async (part, name) => {
+        if (name === 'boom.txt') {
+          throw new Error('callback rejected');
+        }
+        return part;
+      },
+    }).processLlmRequest({toolContext, llmRequest});
+
+    expect(errors).toHaveBeenCalledOnce();
+    expect(errors.mock.calls[0][0]).toContain('boom.txt');
+    expect(errors.mock.calls[0][0]).toContain('callback rejected');
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('keep me');
+    errors.mockRestore();
+  });
+
+  it('loads an artifact once when the turn names it twice', async () => {
+    const artifactName = 'dup.txt';
+    const toolContext = stubContext({
+      [artifactName]: {text: 'only once'},
+    });
+    const llmRequest = requestLoading([artifactName, artifactName]);
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(appendedArtifactPart(llmRequest).text).toEqual('only once');
   });
 });
