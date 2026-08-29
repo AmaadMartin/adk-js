@@ -126,10 +126,9 @@ describe('BaseTool.processLlmRequest', () => {
       llmRequest,
     });
 
-    expect(llmRequest.config.tools![1].functionDeclarations).toStrictEqual([
-      {name: 'other'},
-      TEST_DECLARATION,
-    ]);
+    expect(llmRequest.config.tools![1]).toStrictEqual({
+      functionDeclarations: [{name: 'other'}, TEST_DECLARATION],
+    });
     expect(llmRequest.config.tools!.length).toBe(2);
   });
 
