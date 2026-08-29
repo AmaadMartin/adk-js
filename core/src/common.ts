@@ -341,6 +341,7 @@ export type {
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
+export {snakeToLowerCamel} from './utils/case_utils.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
@@ -379,7 +380,10 @@ export type {
   ParsedOperation,
 } from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export {OperationParser} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
-export type {ApiParameter} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
+export type {
+  ApiParameter,
+  ToolArgumentsSchema,
+} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
 export {ToolAuthHandler} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export type {AuthPreparationResult} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';

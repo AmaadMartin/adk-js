@@ -25,3 +25,27 @@ export function camelCaseKeys(val: unknown): unknown {
   }
   return val;
 }
+
+/**
+ * Converts a snake_case string to a lowerCamelCase string.
+ *
+ * A string with no underscore is returned unchanged, so a value that is
+ * already camelCase survives. Every other segment is lowercased before its
+ * first character is uppercased, so `TWO_WORDS` becomes `twoWords`.
+ *
+ * @param value The snake_case string.
+ * @returns The lowerCamelCase string.
+ */
+export function snakeToLowerCamel(value: string): string {
+  if (!value.includes('_')) {
+    return value;
+  }
+  return value
+    .split('_')
+    .map((segment, index) =>
+      index === 0
+        ? segment.toLowerCase()
+        : segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase(),
+    )
+    .join('');
+}

@@ -77,3 +77,65 @@ export function createBearerScheme(): OpenAPIV3.SecuritySchemeObject {
     scheme: 'bearer',
   };
 }
+
+function requireString(value: unknown, field: string): void {
+  if (typeof value !== 'string') {
+    throw new Error(
+      `Invalid security scheme data: '${field}' must be a string.`,
+    );
+  }
+}
+
+function requireObject(value: unknown, field: string): void {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(
+      `Invalid security scheme data: '${field}' must be an object.`,
+    );
+  }
+}
+
+/**
+ * Validates a security scheme supplied as an object or as JSON text.
+ *
+ * The analogue of adk-python's `dict_to_auth_scheme`. It accepts the four
+ * OpenAPI security scheme types and rejects a scheme that omits the fields its
+ * type requires, so a bad configuration fails where it is supplied rather than
+ * at the first API call.
+ *
+ * @param value The security scheme, or the JSON text of one.
+ * @throws {Error} If the scheme has no `type`, an unsupported `type`, or a
+ *     missing required field. Malformed JSON raises `JSON.parse`'s own
+ *     `SyntaxError`.
+ * @returns The validated security scheme.
+ */
+export function parseAuthScheme(
+  value: OpenAPIV3.SecuritySchemeObject | string,
+): OpenAPIV3.SecuritySchemeObject {
+  const scheme: OpenAPIV3.SecuritySchemeObject =
+    typeof value === 'string'
+      ? (JSON.parse(value) as OpenAPIV3.SecuritySchemeObject)
+      : value;
+
+  if (typeof scheme !== 'object' || scheme === null || !scheme.type) {
+    throw new Error("Missing 'type' field in security scheme.");
+  }
+  const schemeType: string = scheme.type;
+
+  switch (scheme.type) {
+    case 'apiKey':
+      requireString(scheme.name, 'name');
+      requireString(scheme.in, 'in');
+      return scheme;
+    case 'http':
+      requireString(scheme.scheme, 'scheme');
+      return scheme;
+    case 'oauth2':
+      requireObject(scheme.flows, 'flows');
+      return scheme;
+    case 'openIdConnect':
+      requireString(scheme.openIdConnectUrl, 'openIdConnectUrl');
+      return scheme;
+    default:
+      throw new Error(`Invalid security scheme type: ${schemeType}`);
+  }
+}

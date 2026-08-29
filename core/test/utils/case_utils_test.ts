@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {snakeToLowerCamel} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {camelCaseKeys} from '../../src/utils/case_utils.js';
 
@@ -89,6 +90,21 @@ describe('case_utils', () => {
       expect(camelCaseKeys(123)).toBe(123);
       expect(camelCaseKeys('hello')).toBe('hello');
       expect(camelCaseKeys(true)).toBe(true);
+    });
+  });
+
+  describe('snakeToLowerCamel', () => {
+    it.each([
+      ['single', 'single'],
+      ['two_words', 'twoWords'],
+      ['three_word_example', 'threeWordExample'],
+      ['', ''],
+      ['alreadyCamelCase', 'alreadyCamelCase'],
+      ['TWO_WORDS', 'twoWords'],
+      ['_leading', 'Leading'],
+      ['trailing_', 'trailing'],
+    ])('should convert %j to %j', (input, expected) => {
+      expect(snakeToLowerCamel(input)).toBe(expected);
     });
   });
 });

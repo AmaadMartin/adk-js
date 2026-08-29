@@ -7,6 +7,14 @@
 import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../../utils/experimental.js';
 
+/** The JSON Schema describing a tool function's arguments. */
+export interface ToolArgumentsSchema {
+  type: 'object';
+  properties: Record<string, unknown>;
+  required?: string[];
+  title: string;
+}
+
 export interface ApiParameter {
   originalName: string;
   paramLocation: string;
@@ -194,7 +202,7 @@ export class OperationParser {
    * @returns A JSON Schema object.
    */
   @experimental
-  public getJsonSchema(): Record<string, unknown> {
+  public getJsonSchema(): ToolArgumentsSchema {
     const properties: Record<string, unknown> = {};
     const required: string[] = [];
 
