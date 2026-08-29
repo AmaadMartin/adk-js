@@ -5,7 +5,6 @@
  */
 
 import {FunctionDeclaration} from '@google/genai';
-import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {
   CallToolRequest,
   CallToolResult,
@@ -23,6 +22,7 @@ import {
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
+import {base64Encode} from '../../utils/env_aware_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
@@ -41,12 +41,6 @@ const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([
   REQUEST_INPUT_FUNCTION_CALL_NAME,
   TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
 ]);
-
-/**
- * How many times session setup is attempted. Only setup is retried: nothing has
- * reached the server yet, so a second attempt cannot repeat a tool call.
- */
-const SESSION_SETUP_ATTEMPTS = 2;
 
 /** A progress notification from a long-running MCP tool call. */
 export type McpProgressCallback = (progress: Progress) => void | Promise<void>;
@@ -128,10 +122,9 @@ function httpAuthHeaders(
       break;
     case 'basic':
       if (credentials.username && credentials.password) {
-        const encoded = Buffer.from(
+        const encoded = base64Encode(
           `${credentials.username}:${credentials.password}`,
-          'utf8',
-        ).toString('base64');
+        );
         headers = {Authorization: `Basic ${encoded}`};
       }
       break;
@@ -171,50 +164,6 @@ function apiKeyHeaders(
     `Configured location: ${location}`;
   logger.error(message);
   throw new Error(message);
-}
-
-/**
- * Calls a tool, failing the moment the transport dies under it.
- *
- * A crashed transport never answers, so an unguarded call waits out the read
- * timeout — five minutes by default. The client's `onerror` and `onclose`
- * handlers are the only notice of the crash, so the call races them, and the
- * previous handlers are restored afterwards.
- *
- * @param session The connected MCP client.
- * @param params The `tools/call` parameters.
- * @param options The per-request options.
- * @return The tool result.
- */
-async function callGuarded(
-  session: Client,
-  params: CallToolRequest['params'],
-  options: {signal?: AbortSignal; onprogress?: McpProgressCallback},
-): Promise<CallToolResult> {
-  const previousOnError = session.onerror;
-  const previousOnClose = session.onclose;
-  try {
-    const crashed = new Promise<never>((_, reject) => {
-      session.onerror = (error: Error) => {
-        previousOnError?.(error);
-        reject(error);
-      };
-      session.onclose = () => {
-        previousOnClose?.();
-        reject(
-          new Error('MCP transport closed while the tool call was in flight.'),
-        );
-      };
-    });
-    const result = await Promise.race([
-      session.callTool(params, undefined, options),
-      crashed,
-    ]);
-    return result as CallToolResult;
-  } finally {
-    session.onerror = previousOnError;
-    session.onclose = previousOnClose;
-  }
 }
 
 /**
@@ -373,42 +322,19 @@ export class MCPTool extends BaseTool {
       authResult.authCredential ?? this.options.authCredential,
     );
     const progressCallback = this.resolveProgressCallback(toolContext);
-    const session = await this.openSession(toolContext, headers);
+    const session = await this.mcpSessionManager.createSession({headers});
 
     try {
-      return await callGuarded(
-        session,
-        {name: this.originalName, arguments: request.args},
-        {
-          signal: toolContext.abortSignal,
-          ...(progressCallback ? {onprogress: progressCallback} : {}),
-        },
-      );
+      const callRequest: CallToolRequest = {} as CallToolRequest;
+      callRequest.params = {name: this.originalName, arguments: request.args};
+      const result = await session.callTool(callRequest.params, undefined, {
+        signal: toolContext.abortSignal,
+        ...(progressCallback ? {onprogress: progressCallback} : {}),
+      });
+      return result as CallToolResult;
     } finally {
       await this.mcpSessionManager.closeSession(session);
     }
-  }
-
-  /**
-   * Opens a session, retrying setup once. Nothing has reached the server at
-   * this point, so a retry cannot repeat a tool call. A caller that already
-   * aborted gets its failure straight back.
-   */
-  private async openSession(
-    toolContext: Context,
-    headers: Record<string, string> | undefined,
-  ): Promise<Client> {
-    for (let attempt = 1; attempt < SESSION_SETUP_ATTEMPTS; attempt++) {
-      try {
-        return await this.mcpSessionManager.createSession({headers});
-      } catch (err: unknown) {
-        if (toolContext.abortSignal?.aborted) {
-          throw err;
-        }
-        logger.debug(`Retrying MCP session setup for ${this.name}.`);
-      }
-    }
-    return this.mcpSessionManager.createSession({headers});
   }
 
   /** Merges the auth headers with the dynamic ones, which win a collision. */

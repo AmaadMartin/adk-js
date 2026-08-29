@@ -126,9 +126,7 @@ that call. Configuring both a callback and a factory is refused at construction.
   `adk_request_confirmation`, `adk_request_input` or `transfer_to_agent` — is
   refused at construction, because the server's tool would be dispatched in
   place of ADK's own.
-- Session setup is attempted twice. Nothing has reached the server at that
-  point, so a retry cannot repeat a tool call. A failure of the call itself is
-  never retried.
-- A transport that dies while a call is in flight fails the call at once,
-  instead of waiting out the read timeout.
-- An aborted call is never retried.
+- Each call opens one session and closes it again, on the error path too. A
+  failed call is never retried, so the server never sees it twice.
+- An API key configured for the query string or a cookie is refused. Only a
+  header-based key reaches the transport. Neither error names the key value.

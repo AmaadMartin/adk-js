@@ -698,22 +698,8 @@ describe('MCPTool progress notifications', () => {
   });
 });
 
-describe('MCPTool session setup retry', () => {
-  it('retries session setup once and calls the tool once', async () => {
-    const client = createClient();
-    const manager = createSessionManager(client);
-    vi.mocked(manager.createSession)
-      .mockRejectedValueOnce(new Error('Failed to create MCP session: boom'))
-      .mockResolvedValue(client);
-    const tool = new MCPTool(TOOL_DEFINITION, manager);
-
-    await tool.runAsync({args: {}, toolContext: createContext()});
-
-    expect(manager.createSession).toHaveBeenCalledTimes(2);
-    expect(client.callTool).toHaveBeenCalledTimes(1);
-  });
-
-  it('gives up after a second setup failure', async () => {
+describe('MCPTool session lifecycle', () => {
+  it('opens one session per call and never retries setup', async () => {
     const client = createClient();
     const manager = createSessionManager(client);
     vi.mocked(manager.createSession).mockRejectedValue(
@@ -724,25 +710,8 @@ describe('MCPTool session setup retry', () => {
     await expect(
       tool.runAsync({args: {}, toolContext: createContext()}),
     ).rejects.toThrow('Failed to create MCP session: boom');
-    expect(manager.createSession).toHaveBeenCalledTimes(2);
-    expect(client.callTool).not.toHaveBeenCalled();
-  });
-
-  it('does not retry setup for an aborted call', async () => {
-    const client = createClient();
-    const manager = createSessionManager(client);
-    vi.mocked(manager.createSession).mockRejectedValue(new Error('boom'));
-    const controller = new AbortController();
-    controller.abort();
-    const tool = new MCPTool(TOOL_DEFINITION, manager);
-
-    await expect(
-      tool.runAsync({
-        args: {},
-        toolContext: createContext({signal: controller.signal}),
-      }),
-    ).rejects.toThrow('boom');
     expect(manager.createSession).toHaveBeenCalledTimes(1);
+    expect(client.callTool).not.toHaveBeenCalled();
   });
 
   it('never repeats a remote call that failed', async () => {
@@ -771,49 +740,6 @@ describe('MCPTool session setup retry', () => {
     ).rejects.toThrow('close blew up');
     expect(manager.createSession).toHaveBeenCalledTimes(1);
     expect(client.callTool).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('MCPTool transport crash', () => {
-  it('fails the call when the transport errors under it', async () => {
-    const previousOnError = vi.fn();
-    const client = createClient();
-    client.onerror = previousOnError;
-    vi.mocked(client.callTool).mockReturnValue(new Promise(() => {}));
-    const manager = createSessionManager(client);
-    const tool = new MCPTool(TOOL_DEFINITION, manager);
-
-    const promise = tool.runAsync({args: {}, toolContext: createContext()});
-    await vi.waitFor(() => {
-      expect(client.callTool).toHaveBeenCalled();
-    });
-    const crash = new Error('transport blew up');
-    client.onerror?.(crash);
-
-    await expect(promise).rejects.toThrow('transport blew up');
-    expect(previousOnError).toHaveBeenCalledWith(crash);
-    expect(client.onerror).toBe(previousOnError);
-  });
-
-  it('fails the call when the transport closes under it', async () => {
-    const previousOnClose = vi.fn();
-    const client = createClient();
-    client.onclose = previousOnClose;
-    vi.mocked(client.callTool).mockReturnValue(new Promise(() => {}));
-    const manager = createSessionManager(client);
-    const tool = new MCPTool(TOOL_DEFINITION, manager);
-
-    const promise = tool.runAsync({args: {}, toolContext: createContext()});
-    await vi.waitFor(() => {
-      expect(client.callTool).toHaveBeenCalled();
-    });
-    client.onclose?.();
-
-    await expect(promise).rejects.toThrow(
-      'MCP transport closed while the tool call was in flight.',
-    );
-    expect(previousOnClose).toHaveBeenCalled();
-    expect(client.onclose).toBe(previousOnClose);
   });
 });
 
