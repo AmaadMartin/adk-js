@@ -22,6 +22,10 @@ import {FileModuleType} from '../utils/agent_loader.js';
 import {getTempDir} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
+import {
+  DEFAULT_OUTPUT_PATH,
+  convertGoogleApi,
+} from './cli_convert_google_api.js';
 import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
@@ -389,6 +393,40 @@ export function createProgram(): Command {
         logger.error('Error running agent:', (error as Error).message);
       }
     });
+
+  program
+    .command('convert-google-api')
+    .description(
+      'Converts a Google API Discovery document to an OpenAPI v3 specification',
+    )
+    .argument('<api_name>', "Name of the Google API, e.g. 'calendar'")
+    .argument('<api_version>', "Version of the API, e.g. 'v3'")
+    .option(
+      '-o, --output <path>',
+      'Optional. Output file path for the OpenAPI specification.',
+      DEFAULT_OUTPUT_PATH,
+    )
+    .action(
+      async (
+        apiName: string,
+        apiVersion: string,
+        options: Record<string, string>,
+      ) => {
+        try {
+          await convertGoogleApi({
+            apiName,
+            apiVersion,
+            output: options['output'] ?? DEFAULT_OUTPUT_PATH,
+          });
+        } catch (error) {
+          logger.error(
+            'Error converting Google API:',
+            (error as Error).message,
+          );
+          process.exit(1);
+        }
+      },
+    );
 
   const DEPLOY_COMMAND = program
     .command('deploy')
