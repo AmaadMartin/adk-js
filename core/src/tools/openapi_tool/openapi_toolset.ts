@@ -166,9 +166,9 @@ function loadSpec(
 }
 
 /**
- * Parses an OpenAPI spec string with the parser `specType` names. With no
- * `specType`, a string that starts with a YAML document marker is read as
- * YAML and everything else as JSON.
+ * Parses an OpenAPI spec string with the parser that `specType` names. With no
+ * `specType`, a string that starts with a YAML document marker is read as YAML
+ * and everything else as JSON.
  */
 function parseSpecString(specStr: string, specType?: 'json' | 'yaml'): unknown {
   if (specType === 'yaml' || (!specType && specStr.trim().startsWith('---'))) {
