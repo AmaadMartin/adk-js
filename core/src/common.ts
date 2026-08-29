@@ -317,8 +317,6 @@ export type {
   DiscoveryResource,
   DiscoverySchema,
 } from './tools/google_api_tool/discovery_document.js';
-export {GoogleApiTool} from './tools/google_api_tool/google_api_tool.js';
-export type {GoogleApiToolOptions} from './tools/google_api_tool/google_api_tool.js';
 export {GoogleApiToolset} from './tools/google_api_tool/google_api_toolset.js';
 export type {
   GoogleApiToolsetOptions,
@@ -334,8 +332,8 @@ export {
   YoutubeToolset,
 } from './tools/google_api_tool/google_api_toolsets.js';
 export {
-  GoogleApiToOpenApiConverter,
   convertDiscoveryDocument,
+  fetchAndConvertGoogleApi,
 } from './tools/google_api_tool/googleapi_to_openapi_converter.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {

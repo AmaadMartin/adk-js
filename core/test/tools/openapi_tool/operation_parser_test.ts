@@ -92,4 +92,60 @@ describe('OperationParser', () => {
     expect(schema).toBeTruthy();
     expect(schema.title).toBe('testOp_Arguments');
   });
+
+  it.each([
+    ['calendar.events.list', 'calendar_events_list'],
+    ['youtube.liveBroadcasts.list', 'youtube_live_broadcasts_list'],
+    ['get__test', 'get_test'],
+  ])('names the function %j as %j', (operationId, expected) => {
+    const op: OpenAPIV3.OperationObject = {operationId, responses: {}};
+
+    expect(new OperationParser(op).getFunctionName()).toBe(expected);
+  });
+
+  it('truncates a normalized function name to 60 characters', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId:
+        'calendar.events.instances.list.with.a.very.long.trailing.suffix',
+      responses: {},
+    };
+
+    const name = new OperationParser(op).getFunctionName();
+
+    expect(name).toBe(
+      'calendar_events_instances_list_with_a_very_long_trailing_suf',
+    );
+    expect(name).toHaveLength(60);
+  });
+
+  it('normalizes a separated parameter name', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [
+        {name: 'user-id', in: 'path', required: true, schema: {type: 'string'}},
+      ],
+      responses: {},
+    };
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(params[0].name).toBe('user_id');
+    expect(params[0].originalName).toBe('user-id');
+  });
+
+  it('preserves a separated parameter name when asked to', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [
+        {name: 'user-id', in: 'path', required: true, schema: {type: 'string'}},
+      ],
+      responses: {},
+    };
+
+    const params = new OperationParser(op, {
+      preservePropertyNames: true,
+    }).getParameters();
+
+    expect(params[0].name).toBe('user-id');
+  });
 });

@@ -10,7 +10,6 @@ import {
   BaseTool,
   Context,
   createSession,
-  GoogleApiTool,
   GoogleApiToolset,
   InvocationContext,
   LlmAgent,
@@ -25,9 +24,9 @@ import {googleOidcAuthScheme} from '../../../src/tools/google_api_tool/google_ap
 import {CALENDAR_DISCOVERY_DOCUMENT} from './discovery_fixtures.js';
 
 const CALENDAR_TOOL_NAMES = [
-  'calendar.calendars.get',
-  'calendar.calendars.insert',
-  'calendar.events.list',
+  'calendar_calendars_get',
+  'calendar_calendars_insert',
+  'calendar_events_list',
 ];
 
 const SERVICE_ACCOUNT: ServiceAccount = {
@@ -182,12 +181,12 @@ describe('GoogleApiToolset', () => {
     });
   }
 
-  it('exposes one GoogleApiTool per discovery operation', async () => {
+  it('exposes one tool per discovery operation', async () => {
     const tools = await createToolset().getTools();
 
     expect(tools.map((tool) => tool.name).sort()).toEqual(CALENDAR_TOOL_NAMES);
     for (const tool of tools) {
-      expect(tool).toBeInstanceOf(GoogleApiTool);
+      expect(tool).toBeInstanceOf(RestApiTool);
     }
     expect(fetchMock).toHaveBeenCalledWith(
       'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
@@ -227,26 +226,26 @@ describe('GoogleApiToolset', () => {
   });
 
   it('applies a string filter with and without a context', async () => {
-    const toolset = createToolset({toolFilter: ['calendar.events.list']});
+    const toolset = createToolset({toolFilter: ['calendar_events_list']});
 
     expect((await toolset.getTools()).map((tool) => tool.name)).toEqual([
-      'calendar.events.list',
+      'calendar_events_list',
     ]);
     expect(
       (await toolset.getTools(createReadonlyContext())).map(
         (tool) => tool.name,
       ),
-    ).toEqual(['calendar.events.list']);
+    ).toEqual(['calendar_events_list']);
   });
 
   it('applies a predicate filter when a context is available', async () => {
     const toolset = createToolset({
-      toolFilter: (tool: BaseTool) => tool.name.endsWith('.get'),
+      toolFilter: (tool: BaseTool) => tool.name.endsWith('_get'),
     });
 
     const tools = await toolset.getTools(createReadonlyContext());
 
-    expect(tools.map((tool) => tool.name)).toEqual(['calendar.calendars.get']);
+    expect(tools.map((tool) => tool.name)).toEqual(['calendar_calendars_get']);
   });
 
   it('skips a predicate filter when no context is available', async () => {
@@ -267,10 +266,10 @@ describe('GoogleApiToolset', () => {
 
     const filtered = await createToolset({
       prefix: 'cal',
-      toolFilter: ['cal_calendar.events.list'],
+      toolFilter: ['cal_calendar_events_list'],
     }).getTools();
     expect(filtered.map((tool) => tool.name)).toEqual([
-      'cal_calendar.events.list',
+      'cal_calendar_events_list',
     ]);
   });
 
@@ -317,11 +316,85 @@ describe('GoogleApiToolset', () => {
     });
   });
 
+  it('configures the bearer scheme alongside a service account credential', async () => {
+    const configureAuthScheme = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthScheme',
+    );
+    const configureAuthCredential = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthCredential',
+    );
+
+    await createToolset({serviceAccount: SERVICE_ACCOUNT}).getTools();
+
+    expect(configureAuthScheme).toHaveBeenLastCalledWith({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+    });
+    expect(configureAuthCredential).toHaveBeenCalledWith({
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: SERVICE_ACCOUNT,
+    });
+  });
+
+  it('prefers the service account over a client id pair', async () => {
+    const configureAuthCredential = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthCredential',
+    );
+
+    await createToolset({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      serviceAccount: SERVICE_ACCOUNT,
+    }).getTools();
+
+    expect(configureAuthCredential).toHaveBeenCalledTimes(3);
+    for (const [credential] of configureAuthCredential.mock.calls) {
+      expect(credential).toEqual({
+        authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+        serviceAccount: SERVICE_ACCOUNT,
+      });
+    }
+  });
+
+  it('configures no credential when only half the client id pair is given', async () => {
+    const configureAuthScheme = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthScheme',
+    );
+    const configureAuthCredential = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthCredential',
+    );
+
+    await createToolset({clientId: 'client-id'}).getTools();
+    await createToolset({clientSecret: 'client-secret'}).getTools();
+
+    expect(configureAuthCredential).not.toHaveBeenCalled();
+    expect(configureAuthScheme).not.toHaveBeenCalledWith(
+      expect.objectContaining({scheme: 'bearer'}),
+    );
+  });
+
+  it('sets no default headers when none are configured', async () => {
+    const setDefaultHeaders = vi.spyOn(
+      RestApiTool.prototype,
+      'setDefaultHeaders',
+    );
+
+    await createToolset().getTools();
+
+    expect(setDefaultHeaders).not.toHaveBeenCalled();
+  });
+
   it('sends the additional headers on the outbound request', async () => {
     const tools = await createToolset({
       additionalHeaders: {'x-goog-user-project': 'my-project'},
     }).getTools();
-    const tool = tools.find((t) => t.name === 'calendar.calendars.get');
+    const tool = tools.find((t) => t.name === 'calendar_calendars_get');
     if (!tool) {
       return expect.fail('expected the calendars.get tool');
     }
@@ -346,6 +419,68 @@ describe('GoogleApiToolset', () => {
           'x-goog-user-project': 'my-project',
         },
       }),
+    );
+  });
+
+  it('asks the user to consent when the client id pair has bought no token yet', async () => {
+    const tools = await createToolset({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+    }).getTools();
+    const tool = tools.find((t) => t.name === 'calendar_events_list');
+    if (!tool) {
+      return expect.fail('expected the events.list tool');
+    }
+    const toolContext = new Context({
+      invocationContext: createInvocationContext(),
+      functionCallId: 'call-1',
+    });
+
+    const result = await tool.runAsync({
+      args: {calendar_id: 'primary'},
+      toolContext,
+    });
+
+    expect(result).toEqual({
+      pending: true,
+      message: 'Needs your authorization to access your data.',
+    });
+    // The consent URL sends the user to Google, carrying the client id and
+    // the scope the discovery document declared.
+    const authUri =
+      toolContext.eventActions.requestedAuthConfigs['call-1']
+        ?.exchangedAuthCredential?.oauth2?.authUri;
+    expect(authUri).toContain(
+      'https://accounts.google.com/o/oauth2/v2/auth?client_id=client-id',
+    );
+    expect(authUri).toContain(
+      encodeURIComponent('https://www.googleapis.com/auth/calendar'),
+    );
+    // Only the discovery document was fetched; no call reached the API.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries the discovery fetch after a failed load', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+    });
+    const toolset = createToolset();
+
+    await expect(toolset.getTools()).rejects.toThrow('HTTP 503');
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name).sort()).toEqual(CALENDAR_TOOL_NAMES);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('escapes an api name that would otherwise redirect the fetch', async () => {
+    await createToolset({apiName: '../../evil'}).getTools();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://www.googleapis.com/discovery/v1/apis/..%2F..%2Fevil/v3/rest',
+      expect.anything(),
     );
   });
 

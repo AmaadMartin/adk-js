@@ -104,7 +104,7 @@ describe('pre-built Google API toolsets', () => {
 
   it.each(PRESETS)('$name forwards its options', async ({create}) => {
     const toolset = create({
-      toolFilter: ['pre_calendar.events.list'],
+      toolFilter: ['pre_calendar_events_list'],
       prefix: 'pre',
       discoveryUrl: 'https://private.example.com/{api}/{apiVersion}',
     });
@@ -112,7 +112,7 @@ describe('pre-built Google API toolsets', () => {
     const tools = await toolset.getTools();
 
     expect(tools.map((tool) => tool.name)).toEqual([
-      'pre_calendar.events.list',
+      'pre_calendar_events_list',
     ]);
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('https://private.example.com/'),

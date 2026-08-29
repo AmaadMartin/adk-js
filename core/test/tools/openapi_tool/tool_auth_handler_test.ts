@@ -8,6 +8,12 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  OAuth2Auth,
+  OpenIdConnectWithConfig,
+  PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
@@ -31,6 +37,43 @@ vi.mock(
     };
   },
 );
+
+/** An OpenID Connect scheme whose only grant needs the user to consent. */
+const AUTH_CODE_SCHEME: OpenIdConnectWithConfig = {
+  type: 'openIdConnect',
+  openIdConnectUrl:
+    'https://accounts.google.com/.well-known/openid-configuration',
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  grantTypesSupported: ['authorization_code'],
+  scopes: ['https://www.googleapis.com/auth/calendar'],
+};
+
+const FUNCTION_CALL_ID = 'call-1';
+
+/** Builds a real context whose session carries no credential. */
+function createUnauthenticatedContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent', model: 'gemini-2.5-flash'}),
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+        state: {},
+      }),
+      pluginManager: new PluginManager(),
+    }),
+    functionCallId: FUNCTION_CALL_ID,
+  });
+}
+
+/** Reads back the auth request a handler asked the client for, if any. */
+function requestedAuthConfig(context: Context) {
+  return context.eventActions.requestedAuthConfigs[FUNCTION_CALL_ID];
+}
 
 describe('ToolAuthHandler', () => {
   it('should return done if no auth scheme', async () => {
@@ -210,6 +253,62 @@ describe('ToolAuthHandler', () => {
     expect(state.get('apiKey_existing_exchanged_credential')).toBeUndefined();
     expect(state.hasDelta()).toBe(false);
   });
+
+  it('asks the user to consent to a configured authorization code credential', async () => {
+    const context = createUnauthenticatedContext();
+
+    const result = await new ToolAuthHandler(context, AUTH_CODE_SCHEME, {
+      authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+      oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+    }).prepareAuthCredentials();
+
+    // A client id pair alone cannot buy a token under the authorization code
+    // grant, so exchanging it here would throw instead of starting consent.
+    expect(result.state).toBe('pending');
+    expect(
+      requestedAuthConfig(context)?.exchangedAuthCredential?.oauth2?.authUri,
+    ).toContain(
+      'https://accounts.google.com/o/oauth2/v2/auth?client_id=client-id',
+    );
+  });
+
+  it('rejects a credential that carries no oauth2 details', async () => {
+    const context = createUnauthenticatedContext();
+
+    // The handler routes to the auth request rather than to the exchanger,
+    // which reports the missing oauth2 details instead of a missing auth code.
+    await expect(
+      new ToolAuthHandler(context, AUTH_CODE_SCHEME, {
+        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+      }).prepareAuthCredentials(),
+    ).rejects.toThrow('requires oauth2 in authCredential');
+  });
+
+  it.each<[string, OAuth2Auth]>([
+    ['an access token', {accessToken: 'access-token'}],
+    ['an authorization code', {authCode: 'auth-code'}],
+    [
+      'an authorization response URI',
+      {authResponseUri: 'https://app.example.com/cb?code=auth-code'},
+    ],
+  ])(
+    'exchanges a configured credential that already carries %s',
+    async (_label, oauth2) => {
+      const context = createUnauthenticatedContext();
+
+      const result = await new ToolAuthHandler(context, AUTH_CODE_SCHEME, {
+        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          ...oauth2,
+        },
+      }).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(requestedAuthConfig(context)).toBeUndefined();
+    },
+  );
 
   it('caches a static credential that did require an exchange', async () => {
     const state = new State();
