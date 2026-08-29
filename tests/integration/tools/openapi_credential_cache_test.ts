@@ -87,6 +87,23 @@ async function buildTool(options: {
   return tool as RestApiTool;
 }
 
+/** The InvocationContext a single tool call runs under. */
+function createInvocationContext(
+  sessionState: Record<string, unknown>,
+): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'invocation-1',
+    agent: new LlmAgent({name: 'openapi_credential_cache_agent'}),
+    session: createSession({
+      id: 'session-1',
+      appName: 'app',
+      userId: 'user',
+      state: sessionState,
+    }),
+    pluginManager: new PluginManager(),
+  });
+}
+
 /**
  * A tool call sees the session state through a fresh Context, exactly as the
  * runner builds one per call. `sessionState` is the object the session holds,
@@ -94,10 +111,7 @@ async function buildTool(options: {
  */
 function createContext(sessionState: Record<string, unknown>): Context {
   return new Context({
-    invocationContext: {
-      session: {state: sessionState},
-      agent: {name: 'openapi-credential-cache-agent'},
-    } as unknown as InvocationContext,
+    invocationContext: createInvocationContext(sessionState),
   });
 }
 
@@ -112,17 +126,7 @@ function createRequestingContext(
   sessionState: Record<string, unknown>,
 ): Context {
   return new Context({
-    invocationContext: new InvocationContext({
-      invocationId: 'invocation-1',
-      agent: new LlmAgent({name: 'openapi_credential_cache_agent'}),
-      session: createSession({
-        id: 'session-1',
-        appName: 'app',
-        userId: 'user',
-        state: sessionState,
-      }),
-      pluginManager: new PluginManager(),
-    }),
+    invocationContext: createInvocationContext(sessionState),
     functionCallId: FUNCTION_CALL_ID,
   });
 }

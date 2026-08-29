@@ -11,11 +11,13 @@ import {
   createSession,
   InvocationContext,
   LlmAgent,
+  OpenIdConnectWithConfig,
   PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {CredentialExchangeError} from '../../../src/auth/exchanger/base_credential_exchanger.js';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -41,16 +43,30 @@ vi.mock(
 const IDENTITY_KEY_PATTERN =
   /^[a-zA-Z0-9]+_[0-9a-f]{16}_([a-zA-Z0-9]+_[0-9a-f]{16})?_existing_exchanged_credential$/;
 
+/** The InvocationContext a single tool call runs under. */
+function createInvocationContext(
+  sessionState: Record<string, unknown>,
+): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'invocation-1',
+    agent: new LlmAgent({name: 'tool_auth_handler_agent'}),
+    session: createSession({
+      id: 'session-1',
+      appName: 'app',
+      userId: 'user',
+      state: sessionState,
+    }),
+    pluginManager: new PluginManager(),
+  });
+}
+
 /**
  * Builds the Context a single tool call gets. `sessionState` is the record the
  * session holds, so a credential cached by one call is visible to the next.
  */
 function createContext(sessionState: Record<string, unknown>): Context {
   return new Context({
-    invocationContext: {
-      session: {state: sessionState},
-      agent: {name: 'tool-auth-handler-agent'},
-    } as unknown as InvocationContext,
+    invocationContext: createInvocationContext(sessionState),
   });
 }
 
@@ -71,17 +87,7 @@ function createRequestingContext(
   sessionState: Record<string, unknown>,
 ): Context {
   return new Context({
-    invocationContext: new InvocationContext({
-      invocationId: 'invocation-1',
-      agent: new LlmAgent({name: 'tool_auth_handler_agent'}),
-      session: createSession({
-        id: 'session-1',
-        appName: 'app',
-        userId: 'user',
-        state: sessionState,
-      }),
-      pluginManager: new PluginManager(),
-    }),
+    invocationContext: createInvocationContext(sessionState),
     functionCallId: FUNCTION_CALL_ID,
   });
 }
@@ -112,7 +118,11 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    });
 
     const result = await handler.prepareAuthCredentials();
 
@@ -129,7 +139,11 @@ describe('ToolAuthHandler', () => {
       requestCredential: vi.fn(),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    });
 
     const result = await handler.prepareAuthCredentials();
 
@@ -171,7 +185,11 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    });
 
     const result = await handler.prepareAuthCredentials();
 
@@ -201,6 +219,8 @@ describe('ToolAuthHandler', () => {
     } as unknown as Context;
     await new ToolAuthHandler(firstContext, {
       type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
     }).prepareAuthCredentials();
 
     // Each tool call gets a fresh Context whose State is rebuilt from the
@@ -213,6 +233,8 @@ describe('ToolAuthHandler', () => {
     } as unknown as Context;
     const result = await new ToolAuthHandler(secondContext, {
       type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
     }).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
@@ -379,6 +401,9 @@ describe('ToolAuthHandler', () => {
     expect(cachedCredentialKeys(sessionState)).toHaveLength(2);
   });
 
+  // Both credentials carry the granted access token. An authorization-code
+  // credential without one goes back to the client for consent, so it never
+  // reaches the cache this test is about.
   it('reuses the cached credential when only the redirect URI differs', async () => {
     const scheme: OpenAPIV3.SecuritySchemeObject = {
       type: 'oauth2',
@@ -397,6 +422,7 @@ describe('ToolAuthHandler', () => {
       oauth2: {
         clientId: 'client',
         clientSecret: 'secret',
+        accessToken: 'granted-token',
         redirectUri: 'http://localhost:8001/oauth2callback',
       },
     }).prepareAuthCredentials();
@@ -412,6 +438,7 @@ describe('ToolAuthHandler', () => {
         oauth2: {
           clientId: 'client',
           clientSecret: 'secret',
+          accessToken: 'granted-token',
           redirectUri: 'https://deployed.example.com/oauth2callback',
           codeVerifier: 'verifier-from-the-second-round-trip',
           state: 'state-from-the-second-round-trip',
@@ -833,5 +860,191 @@ describe('ToolAuthHandler stored OAuth2 credential', () => {
     expect(result.authCredential?.http?.credentials.token).toBe('cached-token');
     expect(fetchStub).not.toHaveBeenCalled();
     expect(context.state.hasDelta()).toBe(false);
+  });
+});
+
+describe('ToolAuthHandler authorization request', () => {
+  const OIDC_SCHEME: OpenIdConnectWithConfig = {
+    type: 'openIdConnect',
+    openIdConnectUrl:
+      'https://provider.example.com/.well-known/openid-configuration',
+    authorizationEndpoint: 'https://provider.example.com/authorize',
+    tokenEndpoint: 'https://provider.example.com/token',
+    scopes: ['profile'],
+  };
+  const AUTHORIZATION_CODE_SCHEME: OpenAPIV3.SecuritySchemeObject = {
+    type: 'oauth2',
+    flows: {
+      authorizationCode: {
+        authorizationUrl: 'https://provider.example.com/authorize',
+        tokenUrl: 'https://provider.example.com/token',
+        scopes: {},
+      },
+    },
+  };
+
+  it('asks the client to authorize an OIDC credential that has no token', async () => {
+    const context = createRequestingContext({});
+
+    const result = await new ToolAuthHandler(context, OIDC_SCHEME, {
+      authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+      oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+    }).prepareAuthCredentials();
+
+    // A credential with no access token is not usable until the end user
+    // grants one, so the tool asks rather than calling the API without it.
+    expect(result.state).toBe('pending');
+    expect(requestedCredentialKey(context)).toMatch(/^adk_openIdConnect_/);
+  });
+
+  it('rejects an oauth2 scheme configured with no credential', async () => {
+    await expect(
+      new ToolAuthHandler(
+        createContext({}),
+        AUTHORIZATION_CODE_SCHEME,
+      ).prepareAuthCredentials(),
+    ).rejects.toThrow(
+      'authCredential is empty for scheme oauth2. Please create an AuthCredential with an oauth2 block.',
+    );
+  });
+
+  it('rejects a credential that carries no oauth2 block', async () => {
+    await expect(
+      new ToolAuthHandler(createContext({}), AUTHORIZATION_CODE_SCHEME, {
+        authType: AuthCredentialTypes.OAUTH2,
+      }).prepareAuthCredentials(),
+    ).rejects.toThrow(
+      'authCredential is empty for scheme oauth2. Please create an AuthCredential with an oauth2 block.',
+    );
+  });
+
+  it('rejects an oauth2 credential that is missing its client id', async () => {
+    await expect(
+      new ToolAuthHandler(createContext({}), AUTHORIZATION_CODE_SCHEME, {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientSecret: 'client-secret'},
+      }).prepareAuthCredentials(),
+    ).rejects.toThrow('OAuth2 credentials client_id is missing.');
+  });
+
+  it('rejects an oauth2 credential that is missing its client secret', async () => {
+    await expect(
+      new ToolAuthHandler(createContext({}), AUTHORIZATION_CODE_SCHEME, {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id'},
+      }).prepareAuthCredentials(),
+    ).rejects.toThrow('OAuth2 credentials client_secret is missing.');
+  });
+
+  it('asks the client to authorize again when the cached credential has no token', async () => {
+    // A slot an earlier release filled, or a provider answer that carried no
+    // token. Serving it would send the tool at the API unauthenticated.
+    const sessionState: Record<string, unknown> = {
+      my_tool_tokens: {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      } satisfies AuthCredential,
+    };
+    const context = createRequestingContext(sessionState);
+
+    const result = await new ToolAuthHandler(
+      context,
+      AUTHORIZATION_CODE_SCHEME,
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      },
+      'my_tool_tokens',
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('pending');
+    expect(requestedCredentialKey(context)).toBe('my_tool_tokens');
+  });
+
+  it('serves a cached credential that carries a token without asking again', async () => {
+    const sessionState: Record<string, unknown> = {
+      my_tool_tokens: {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          accessToken: 'granted-token',
+        },
+      } satisfies AuthCredential,
+    };
+    const context = createRequestingContext(sessionState);
+
+    const result = await new ToolAuthHandler(
+      context,
+      AUTHORIZATION_CODE_SCHEME,
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      },
+      'my_tool_tokens',
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(result.authCredential?.oauth2?.accessToken).toBe('granted-token');
+    expect(context.eventActions.requestedAuthConfigs).toEqual({});
+  });
+});
+
+describe('ToolAuthHandler failed exchange', () => {
+  const SCHEME: OpenAPIV3.SecuritySchemeObject = {
+    type: 'apiKey',
+    name: 'X-API-Key',
+    in: 'header',
+  };
+  const EXCHANGE_ERROR = 'token endpoint refused the request';
+
+  /** Replaces the next exchanger with one whose round trip fails. */
+  function failNextExchange(): void {
+    const exchanger = new AutoAuthCredentialExchanger();
+    exchanger.exchange = () =>
+      Promise.reject(new CredentialExchangeError(EXCHANGE_ERROR));
+    vi.mocked(AutoAuthCredentialExchanger).mockImplementationOnce(
+      () => exchanger,
+    );
+  }
+
+  it('reports the failure instead of calling the API unauthenticated', async () => {
+    failNextExchange();
+
+    // Swallowing this would send the tool at a real API with no
+    // Authorization header. The flow turns the rejection into a function
+    // response error, so the invocation continues and the model sees it.
+    await expect(
+      new ToolAuthHandler(createContext({}), SCHEME, {
+        authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+        serviceAccount: {useDefaultCredential: true},
+      }).prepareAuthCredentials(),
+    ).rejects.toThrow(EXCHANGE_ERROR);
+  });
+
+  it('keeps the client answer so the user is not asked to authorize twice', async () => {
+    const answer: AuthCredential = {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: {useDefaultCredential: true},
+    };
+    const sessionState: Record<string, unknown> = {
+      'temp:my_tool_tokens': answer,
+    };
+    const context = createContext(sessionState);
+    failNextExchange();
+
+    await expect(
+      new ToolAuthHandler(
+        context,
+        SCHEME,
+        undefined,
+        'my_tool_tokens',
+      ).prepareAuthCredentials(),
+    ).rejects.toThrow(EXCHANGE_ERROR);
+
+    // The answer is written before the exchange runs, and the flow puts the
+    // tool call's state delta on the error event, so the next call exchanges
+    // it again rather than sending the user back through consent.
+    expect(context.state.get('my_tool_tokens')).toEqual(answer);
   });
 });

@@ -4,10 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
-import {AuthCredential, OAuth2Auth} from '../../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+  OAuth2Auth,
+} from '../../../auth/auth_credential.js';
+import {AuthScheme, OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {stableDigest} from '../../../utils/hash_utils.js';
@@ -17,6 +22,12 @@ export interface AuthPreparationResult {
   state: 'pending' | 'done';
   authCredential?: AuthCredential;
 }
+
+/** Scheme types whose credential only an end user can grant. */
+const USER_AUTHORIZED_SCHEME_TYPES: readonly string[] = [
+  'oauth2',
+  'openIdConnect',
+];
 
 /**
  * OAuth2 fields that a consent round trip produces, or that change per
@@ -58,7 +69,7 @@ function withoutRoundTripOAuth2Fields(
  * request slot are built from this, so a tool always reads back what it wrote.
  */
 async function credentialIdentity(
-  authScheme: OpenAPIV3.SecuritySchemeObject,
+  authScheme: AuthScheme,
   authCredential?: AuthCredential,
 ): Promise<string> {
   const schemeName = `${authScheme.type}_${await stableDigest(authScheme)}`;
@@ -122,7 +133,7 @@ class ToolContextCredentialStore {
 async function refreshIfExpired(
   store: ToolContextCredentialStore,
   cacheKey: string,
-  authScheme: OpenAPIV3.SecuritySchemeObject,
+  authScheme: AuthScheme,
   stored: AuthCredential,
 ): Promise<AuthCredential> {
   const refresher = new OAuth2CredentialRefresher();
@@ -139,11 +150,62 @@ async function refreshIfExpired(
   return refreshed;
 }
 
+/**
+ * True when `credential` cannot authenticate a call until the end user
+ * authorizes it.
+ *
+ * An OAuth2 or OpenID Connect credential holding no access token has to come
+ * back from a consent round trip. The exception is the client-credentials
+ * grant, which `OAuth2CredentialExchanger` mints from the client id and secret
+ * with no user involved: asking the client to authorize one would leave the
+ * tool in `pending` forever.
+ */
+function needsUserAuthorization(
+  authScheme: AuthScheme,
+  credential: AuthCredential,
+): boolean {
+  if (
+    credential.authType !== AuthCredentialTypes.OAUTH2 &&
+    credential.authType !== AuthCredentialTypes.OPEN_ID_CONNECT
+  ) {
+    return false;
+  }
+  if (credential.oauth2?.accessToken) {
+    return false;
+  }
+  return determineGrantType(authScheme) !== OAuthGrantType.CLIENT_CREDENTIALS;
+}
+
+/**
+ * Throws when the tool cannot raise an authorization request the client is
+ * able to answer. The client builds the authorization URL from the OAuth2
+ * client id and secret, so a request raised without them strands the tool.
+ */
+function validateAuthorizationRequest(
+  authScheme: AuthScheme,
+  authCredential?: AuthCredential,
+): void {
+  if (!USER_AUTHORIZED_SCHEME_TYPES.includes(authScheme.type)) {
+    return;
+  }
+  if (!authCredential?.oauth2) {
+    throw new Error(
+      `authCredential is empty for scheme ${authScheme.type}. Please create an AuthCredential with an oauth2 block.`,
+    );
+  }
+  if (!authCredential.oauth2.clientId) {
+    throw new Error('OAuth2 credentials client_id is missing.');
+  }
+  if (!authCredential.oauth2.clientSecret) {
+    throw new Error('OAuth2 credentials client_secret is missing.');
+  }
+}
+
 @experimental
 export class ToolAuthHandler {
   constructor(
     private readonly context: Context,
-    private readonly authScheme?: OpenAPIV3.SecuritySchemeObject,
+    private readonly authScheme?: AuthScheme,
     private readonly authCredential?: AuthCredential,
     private readonly credentialKey?: string,
   ) {}
@@ -151,7 +213,7 @@ export class ToolAuthHandler {
   @experimental
   public static fromToolContext(
     context: Context,
-    authScheme?: OpenAPIV3.SecuritySchemeObject,
+    authScheme?: AuthScheme,
     authCredential?: AuthCredential,
     options: {credentialKey?: string} = {},
   ): ToolAuthHandler {
@@ -181,15 +243,19 @@ export class ToolAuthHandler {
     const storedCredential = store.getCredential(cacheKey);
 
     if (storedCredential) {
-      return {
-        state: 'done',
-        authCredential: await refreshIfExpired(
-          store,
-          cacheKey,
-          this.authScheme,
-          storedCredential,
-        ),
-      };
+      const current = await refreshIfExpired(
+        store,
+        cacheKey,
+        this.authScheme,
+        storedCredential,
+      );
+      // A cached credential carries its own token, and every exchanger adk-js
+      // registers hands such a credential back unchanged, so the tool gets it
+      // as it is. One that carries no token cannot authenticate a call, so
+      // the handler asks the client to authorize a new one instead.
+      if (!needsUserAuthorization(this.authScheme, current)) {
+        return {state: 'done', authCredential: current};
+      }
     }
 
     const authConfig: AuthConfig = {
@@ -208,25 +274,30 @@ export class ToolAuthHandler {
     const authResponseCredential = this.context.getAuthResponse(authConfig);
     const credential = authResponseCredential ?? this.authCredential;
 
-    if (!credential) {
-      // No credential to work with, so ask the client for one.
+    if (!credential || needsUserAuthorization(this.authScheme, credential)) {
+      validateAuthorizationRequest(this.authScheme, this.authCredential);
       this.context.requestCredential(authConfig);
 
       return {state: 'pending'};
     }
-
-    const exchanger = new AutoAuthCredentialExchanger();
-    const result = await exchanger.exchange({
-      authScheme: this.authScheme,
-      authCredential: credential,
-    });
 
     // Only cache what cannot cheaply be obtained again: an auth response is
     // readable once, and an exchange costs a round trip. A statically
     // configured credential that needed no exchange is already available on
     // every invocation, so persisting it to session state would only copy a
     // secret into the session store for nothing.
-    if (authResponseCredential || result.wasExchanged) {
+    //
+    // The answer is persisted before the exchange, so an exchange that fails
+    // does not cost the user a second authorization round trip.
+    if (authResponseCredential) {
+      store.storeCredential(cacheKey, authResponseCredential);
+    }
+
+    const result = await new AutoAuthCredentialExchanger().exchange({
+      authScheme: this.authScheme,
+      authCredential: credential,
+    });
+    if (result.wasExchanged) {
       store.storeCredential(cacheKey, result.credential);
     }
 
