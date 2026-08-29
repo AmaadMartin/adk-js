@@ -8,6 +8,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -77,7 +78,13 @@ export class ToolAuthHandler {
     const existingCredential = store.getCredential(this.authScheme);
 
     if (existingCredential) {
-      return {state: 'done', authCredential: existingCredential};
+      return {
+        state: 'done',
+        authCredential: await this.useStoredCredential(
+          existingCredential,
+          store,
+        ),
+      };
     }
 
     const authConfig: AuthConfig = {
@@ -107,6 +114,13 @@ export class ToolAuthHandler {
       authCredential: credential,
     });
 
+    // An OAuth2 credential that holds an access token is the durable one: it
+    // also carries the refresh token and the expiry that a later call needs,
+    // while the bearer credential derived from it carries neither.
+    const credentialToStore = credential.oauth2?.accessToken
+      ? credential
+      : result.credential;
+
     // Only cache what cannot cheaply be obtained again: an auth response is
     // readable once, and an exchange costs a round trip. A statically
     // configured credential that needed no exchange is already available on
@@ -114,9 +128,46 @@ export class ToolAuthHandler {
     // secret into the session store for nothing.
     if (authResponseCredential || result.wasExchanged) {
       const key = store.getCredentialKey(this.authScheme);
-      store.storeCredential(key, result.credential);
+      store.storeCredential(key, credentialToStore);
     }
 
     return {state: 'done', authCredential: result.credential};
+  }
+
+  /**
+   * Derives the credential a request can carry from the one a previous tool
+   * call stored.
+   *
+   * An OAuth2 credential is refreshed when its access token has expired, then
+   * converted into the bearer credential the Authorization header needs. Any
+   * other credential is already in the form the header needs.
+   */
+  private async useStoredCredential(
+    storedCredential: AuthCredential,
+    store: ToolContextCredentialStore,
+  ): Promise<AuthCredential> {
+    if (!storedCredential.oauth2) {
+      return storedCredential;
+    }
+
+    let credential = storedCredential;
+    const refresher = new OAuth2CredentialRefresher();
+
+    if (await refresher.isRefreshNeeded(credential)) {
+      credential = await refresher.refresh(credential, this.authScheme);
+      // A provider that rotates the refresh token invalidates the previous
+      // one, so the refreshed credential replaces the stored one.
+      store.storeCredential(
+        store.getCredentialKey(this.authScheme),
+        credential,
+      );
+    }
+
+    const result = await new AutoAuthCredentialExchanger().exchange({
+      authScheme: this.authScheme,
+      authCredential: credential,
+    });
+
+    return result.credential;
   }
 }
