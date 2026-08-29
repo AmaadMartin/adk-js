@@ -77,8 +77,7 @@ export type ToolOptions<TParameters extends ToolInputParameters> = {
    * registers the tool under. Defaults to the `execute` function's own name.
    */
   name?: string;
-  /** Defaults to an empty string, matching a Python tool with no docstring. */
-  description?: string;
+  description: string;
   parameters?: TParameters;
   execute: ToolExecuteFunction<TParameters>;
   isLongRunning?: boolean;
@@ -228,7 +227,7 @@ export class FunctionTool<
     }
     super({
       name,
-      description: options.description ?? '',
+      description: options.description,
       isLongRunning: options.isLongRunning,
     });
     this.execute = options.execute;

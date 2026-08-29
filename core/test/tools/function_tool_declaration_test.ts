@@ -185,7 +185,11 @@ describe('FunctionTool declaration shape', () => {
   });
 
   it('declares an empty object for a tool with no parameters', () => {
-    const tool = new FunctionTool({name: 'sample_tool', execute: () => 'ok'});
+    const tool = new FunctionTool({
+      name: 'sample_tool',
+      description: 'Samples something.',
+      execute: () => 'ok',
+    });
 
     expect(tool._getDeclaration().parameters).toEqual({
       type: Type.OBJECT,
@@ -226,13 +230,6 @@ describe('FunctionTool declaration shape', () => {
     });
   });
 
-  it('defaults the description to an empty string when it is omitted', () => {
-    const tool = new FunctionTool({name: 'sample_tool', execute: () => 'ok'});
-
-    expect(tool.description).toBe('');
-    expect(tool._getDeclaration().description).toBe('');
-  });
-
   it('advertises the execute function name when no name is given', () => {
     const tool = new FunctionTool({
       description: 'Samples something.',
@@ -246,15 +243,23 @@ describe('FunctionTool declaration shape', () => {
   });
 
   it('falls back to the property name for an inline arrow function', () => {
-    const tool = new FunctionTool({execute: () => 'ok'});
+    const tool = new FunctionTool({
+      description: 'Samples something.',
+      execute: () => 'ok',
+    });
 
     expect(tool._getDeclaration().name).toBe('execute');
   });
 
   it('refuses a name that resolves to nothing', () => {
-    expect(() => new FunctionTool({name: '', execute: () => 'ok'})).toThrow(
-      'Tool name cannot be empty',
-    );
+    expect(
+      () =>
+        new FunctionTool({
+          name: '',
+          description: 'Samples something.',
+          execute: () => 'ok',
+        }),
+    ).toThrow('Tool name cannot be empty');
   });
 
   it('keeps a supplied description', () => {
