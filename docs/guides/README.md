@@ -8,4 +8,4 @@ implementation. For the official ADK documentation, visit
 
 ### Evaluation
 
-- [Running evals from the CLI](evaluation/cli_eval/index.md) - Scoring an agent's tool trajectory with `adk eval`.
+- [Running evals from the CLI](evaluation/cli_eval/index.md) - Scoring an agent's tool trajectory and answers with `adk eval`.
