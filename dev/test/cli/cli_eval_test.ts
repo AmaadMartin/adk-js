@@ -152,15 +152,22 @@ describe('parseAndGetEvalsToRun', () => {
     ]);
   });
 
+  it('lets a later selector narrow an eval set listed with none', () => {
+    // adk-python extends the same list, so an unselected entry is not sticky.
+    expect([...parseAndGetEvalsToRun(['set.json', 'set.json:a'])]).toEqual([
+      ['set.json', ['a']],
+    ]);
+  });
+
   it('drops a whitespace-only selector', () => {
     expect([...parseAndGetEvalsToRun(['set.json:a, ,b'])]).toEqual([
       ['set.json', ['a', 'b']],
     ]);
   });
 
-  it('cuts the selector list at a further colon', () => {
+  it('keeps a further colon inside the case name, discarding nothing', () => {
     expect([...parseAndGetEvalsToRun(['set.json:a,b:c'])]).toEqual([
-      ['set.json', ['a', 'b']],
+      ['set.json', ['a', 'b:c']],
     ]);
   });
 

@@ -41,51 +41,40 @@ export interface EvalAgentOptions {
  * names to run from it.
  *
  * A Windows drive letter is not a selector separator, so the search for `:`
- * starts after it. Listing one eval set twice accumulates its selectors. The
- * result is a `Map` so insertion order is kept and a case named `__proto__`
- * cannot collide with an object prototype key.
+ * starts after it. Everything after the separator is the case list, so a case
+ * name can contain a colon; adk-python cuts the list at a second colon and
+ * drops the rest of the input without a message. The result is a `Map` so
+ * insertion order is kept and a case named `__proto__` cannot collide with an
+ * object prototype key.
+ *
+ * Listing one eval set twice accumulates its selectors, which narrows an
+ * unselected entry: `['f.json', 'f.json:case_1']` runs only `case_1`, not
+ * every case. adk-python's `extend` on a `defaultdict(list)` does the same.
  */
 export function parseAndGetEvalsToRun(inputs: string[]): Map<string, string[]> {
   const evalSetToEvals = new Map<string, string[]>();
 
   for (const input of inputs) {
-    const separatorIndex = input.indexOf(
-      ':',
-      hasWindowsDrivePrefix(input) ? 3 : 0,
-    );
+    // A leading `C:\` or `C:/` is a drive letter, not a selector separator.
+    const searchFrom = /^[A-Za-z]:[\\/]/.test(input) ? 2 : 0;
+    const separatorIndex = input.indexOf(':', searchFrom);
     const evalSet =
       separatorIndex === -1 ? input : input.slice(0, separatorIndex);
     const selectors =
       separatorIndex === -1
         ? []
-        : parseSelectors(input.slice(separatorIndex + 1));
+        : input
+            .slice(separatorIndex + 1)
+            .split(',')
+            .filter((selector) => selector.trim() !== '');
 
-    const existing = evalSetToEvals.get(evalSet);
-    if (existing) {
-      existing.push(...selectors);
-    } else {
-      evalSetToEvals.set(evalSet, selectors);
-    }
+    evalSetToEvals.set(evalSet, [
+      ...(evalSetToEvals.get(evalSet) ?? []),
+      ...selectors,
+    ]);
   }
 
   return evalSetToEvals;
-}
-
-function hasWindowsDrivePrefix(input: string): boolean {
-  return (
-    input.length >= 3 &&
-    /^[A-Za-z]$/.test(input[0]) &&
-    input[1] === ':' &&
-    (input[2] === '\\' || input[2] === '/')
-  );
-}
-
-/** Everything up to a further `:`, split on commas, blanks dropped. */
-function parseSelectors(selectorList: string): string[] {
-  return selectorList
-    .split(':')[0]
-    .split(',')
-    .filter((selector) => selector.trim() !== '');
 }
 
 /**

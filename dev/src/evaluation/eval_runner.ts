@@ -23,13 +23,34 @@ import {
   EvalSetItem,
   EvalStatus,
   EvalTurn,
+  RESPONSE_MATCH_SCORE_KEY,
   ResetFunc,
   TOOL_TRAJECTORY_SCORE_KEY,
 } from './eval_types.js';
 import {processQueryWithRootAgent} from './evaluation_generator.js';
+import {evaluateResponseMatch} from './response_evaluator.js';
 import {evaluateTrajectory} from './trajectory_evaluator.js';
 
 const logger = new AdkLogger({label: 'ADK Eval', colorize: {all: true}});
+
+/**
+ * Scores one metric over the turns of an eval case, or returns `undefined`
+ * when the eval data holds nothing for that metric to compare.
+ */
+type MetricScorer = (
+  turns: EvalTurn[],
+  printDetailedResults?: boolean,
+) => number | undefined;
+
+/** The metrics with a scorer. Any other name is reported unsupported. */
+const METRIC_SCORERS = new Map<string, MetricScorer>([
+  [
+    TOOL_TRAJECTORY_SCORE_KEY,
+    (turns, printDetailedResults) =>
+      evaluateTrajectory(turns, {printDetailedResults}),
+  ],
+  [RESPONSE_MATCH_SCORE_KEY, (turns) => evaluateResponseMatch(turns)],
+]);
 
 /** Options for {@link runEvals}. */
 export interface RunEvalsOptions {
@@ -58,7 +79,12 @@ export interface RunEvalsOptions {
 export async function runEvals(
   options: RunEvalsOptions,
 ): Promise<EvalResult[]> {
-  const warnedMetrics = new Set<string>();
+  for (const {metricName} of options.evalMetrics) {
+    if (!METRIC_SCORERS.has(metricName)) {
+      logger.warn(`\`${metricName}\` is not supported.`);
+    }
+  }
+
   const evalResults: EvalResult[] = [];
 
   for (const [evalSetFile, evalsToRun] of options.evalSetToEvals) {
@@ -86,10 +112,11 @@ export async function runEvals(
 
         const evalMetricResults: Array<[EvalMetric, EvalMetricResult]> = [];
         for (const evalMetric of options.evalMetrics) {
-          const result = evaluateMetric(evalMetric, turns, {
-            printDetailedResults: options.printDetailedResults,
-            warnedMetrics,
-          });
+          const result = evaluateMetric(
+            evalMetric,
+            turns,
+            options.printDetailedResults,
+          );
           evalMetricResults.push([evalMetric, result]);
           printEvalMetricResult(evalMetric, result);
         }
@@ -133,41 +160,30 @@ async function loadEvalSet(evalSetFile: string): Promise<EvalSetItem[]> {
   return parsed.data;
 }
 
-interface EvaluateMetricOptions {
-  printDetailedResults?: boolean;
-  /** Metric names already warned about, so one warning covers the run. */
-  warnedMetrics: Set<string>;
-}
-
+/**
+ * Scores one metric and reads the score against its threshold.
+ *
+ * A metric with no scorer, or eval data holding nothing for it to compare,
+ * is NOT_EVALUATED rather than a score of 0.
+ */
 function evaluateMetric(
   evalMetric: EvalMetric,
   turns: EvalTurn[],
-  options: EvaluateMetricOptions,
+  printDetailedResults?: boolean,
 ): EvalMetricResult {
-  if (evalMetric.metricName !== TOOL_TRAJECTORY_SCORE_KEY) {
-    warnUnsupportedMetric(evalMetric.metricName, options.warnedMetrics);
+  const score = METRIC_SCORERS.get(evalMetric.metricName)?.(
+    turns,
+    printDetailedResults,
+  );
+  if (score === undefined) {
     return {evalStatus: EvalStatus.NOT_EVALUATED};
   }
 
-  const score = evaluateTrajectory([turns], {
-    printDetailedResults: options.printDetailedResults,
-  });
   return {
     score,
     evalStatus:
       score >= evalMetric.threshold ? EvalStatus.PASSED : EvalStatus.FAILED,
   };
-}
-
-function warnUnsupportedMetric(
-  metricName: string,
-  warnedMetrics: Set<string>,
-): void {
-  if (warnedMetrics.has(metricName)) {
-    return;
-  }
-  warnedMetrics.add(metricName);
-  logger.warn(`\`${metricName}\` is not supported.`);
 }
 
 /**

@@ -14,8 +14,9 @@ tool calls a good run makes, and the command tells you whether a later run still
 makes them.
 
 The command scores the **tool trajectory** — the sequence of tool names and
-arguments. It does not judge the agent's prose. A run passes when its recorded
-tool calls match the expected ones exactly, in order.
+arguments. A turn passes it when its recorded tool calls match the expected
+ones exactly, in order. Give a turn a `reference` and the command also scores
+the agent's text against it.
 
 Two neighbouring pieces do different jobs. `adk run` starts one interactive
 conversation and prints it; it scores nothing. The integration harness under
@@ -174,12 +175,37 @@ some metric fails.
 | Metric                      | Behaviour                                                                   |
 | --------------------------- | --------------------------------------------------------------------------- |
 | `tool_trajectory_avg_score` | Scored. The mean over turns of 1 for an exact tool-call match, 0 otherwise. |
-| `response_match_score`      | Reported as `NOT_EVALUATED`.                                                |
+| `response_match_score`      | Scored. The mean ROUGE-1 F-measure of the response against the `reference`. |
 | `response_evaluation_score` | Reported as `NOT_EVALUATED`.                                                |
 
-The two response metrics need a ROUGE scorer and a model-based judge, which
-adk-js does not have yet. The command warns once per run and carries on, so the
-default criteria still produce a trajectory verdict.
+`response_evaluation_score` judges coherence with a model, which adk-js has no
+abstraction for. The command warns once per run and carries on, so the other
+metrics still produce a verdict.
+
+## Scoring the response text
+
+Give a turn a `reference` and `response_match_score` compares the agent's final
+text against it:
+
+```json
+{
+  "query": "Roll a die.",
+  "expected_tool_use": [{"tool_name": "roll_die", "tool_input": {"sides": 6}}],
+  "reference": "I rolled a 6 sided die and got 4."
+}
+```
+
+The score is the ROUGE-1 F-measure: the share of single words the two texts
+have in common, balanced between the response and the reference. Word order
+does not matter, and case and punctuation are ignored. A word repeated more
+often in one text than the other counts only as often as the rarer side has it.
+
+The metric scores only the turns that carry a `reference`. When no turn carries
+one, the metric reports `NOT_EVALUATED` rather than 0: eval data that asks for
+no particular wording has not failed.
+
+adk-python computes this metric by calling Vertex AI. adk-js computes it
+locally, so the eval needs no cloud project.
 
 ## Resetting agent state between cases
 
@@ -209,7 +235,7 @@ adk-python calls this export `reset_data`. adk-js agent files are camelCase
 | No `--config_file_path`                                                           | Not an error. The default criteria apply.                     |
 
 The process exits `0` whether cases pass or fail, matching adk-python. Read the
-summary block, or call `runEvals` yourself, to gate a build on the result.
+summary block to gate a build on the result.
 
 ## Seeing the detail
 
