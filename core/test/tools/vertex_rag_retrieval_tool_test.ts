@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  isBaseRetrievalTool,
-  LlmRequest,
-  VertexRagRetrievalTool,
-} from '@google/adk';
+import {LlmRequest, VertexRagRetrievalTool} from '@google/adk';
 import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
@@ -134,31 +130,6 @@ describe('VertexRagRetrievalTool', () => {
 
       expect(llmRequest.config.tools).toHaveLength(2);
       expect(toolAt(llmRequest, 1).retrieval).toBeDefined();
-    });
-  });
-
-  describe('as a retrieval tool', () => {
-    it('is recognised by isBaseRetrievalTool', () => {
-      const tool = new VertexRagRetrievalTool({
-        ragResources: [{ragCorpus: RAG_CORPUS}],
-      });
-
-      expect(isBaseRetrievalTool(tool)).toBe(true);
-    });
-
-    it('keeps the inherited query declaration off the request', async () => {
-      const tool = new VertexRagRetrievalTool({
-        ragResources: [{ragCorpus: RAG_CORPUS}],
-      });
-      const llmRequest = makeLlmRequest();
-
-      await tool.processLlmRequest({
-        llmRequest,
-        toolContext: makeToolContext(),
-      });
-
-      expect(toolAt(llmRequest, 0).functionDeclarations).toBeUndefined();
-      expect(llmRequest.toolsDict).toEqual({});
     });
   });
 

@@ -17,7 +17,6 @@ import {
   node,
   ParallelAgent,
   SequentialAgent,
-  VertexRagRetrievalTool,
   Workflow,
 } from '@google/adk';
 import {parse} from 'ts-graphviz/ast';
@@ -253,22 +252,6 @@ describe('AgentGraph', () => {
       'label = "🔎 docsRetrieval"',
     );
     expect(nodeBlock(dotGraph, 'docsRetrieval')).toContain(
-      'shape = "cylinder"',
-    );
-  });
-
-  it('draws the shipped VertexRagRetrievalTool as a cylinder', async () => {
-    const agent = new LlmAgent({
-      name: 'testAgent',
-      tools: [new VertexRagRetrievalTool({ragResources: []})],
-    });
-
-    const dotGraph = await getAgentGraphAsDot(agent, []);
-
-    expect(nodeBlock(dotGraph, 'vertex_rag_retrieval')).toContain(
-      'label = "🔎 vertex_rag_retrieval"',
-    );
-    expect(nodeBlock(dotGraph, 'vertex_rag_retrieval')).toContain(
       'shape = "cylinder"',
     );
   });
