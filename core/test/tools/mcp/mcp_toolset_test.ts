@@ -7,17 +7,24 @@
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {Writable} from 'node:stream';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {Context} from '../../../src/agents/context.js';
 import {InvocationContext} from '../../../src/agents/invocation_context.js';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {PluginManager} from '../../../src/plugins/plugin_manager.js';
 import {createSession} from '../../../src/sessions/session.js';
 import {
-  MCPConnectionParams,
   McpConnectionError,
+  MCPConnectionParams,
 } from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+import {
+  getHttpDebugInfo,
+  isCapturingHttpDebug,
+  MAX_CAPTURED_EXCHANGES,
+  recordHttpExchange,
+} from '../../../src/utils/http_debug_utils.js';
+import {LogLevel, resetLogger, setLogLevel} from '../../../src/utils/logger.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -515,6 +522,278 @@ describe('MCPToolset', () => {
       await tools[0].runAsync({args: {}, toolContext: createToolContext()});
 
       expect(StdioClientTransport).toHaveBeenCalledWith({command: 'test'});
+    });
+  });
+
+  describe('http debug capture', () => {
+    /** A real invocation context, so `customMetadata` behaves as it does live. */
+    function createReadonlyContext(): ReadonlyContext {
+      return new ReadonlyContext(
+        new InvocationContext({
+          invocationId: 'inv-1',
+          session: createSession({
+            id: 'session-1',
+            appName: 'app',
+            userId: 'user',
+          }),
+          pluginManager: new PluginManager([]),
+        }),
+      );
+    }
+
+    /**
+     * Installs a one-shot client whose `listTools` records `count` exchanges,
+     * as the transport's fetch wrapper does for a real HTTP server.
+     */
+    async function clientRecording(count: number): Promise<void> {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(() =>
+        stubClient({
+          listTools: vi.fn().mockImplementation(async () => {
+            for (let i = 0; i < count; i++) {
+              recordHttpExchange({
+                url: `https://mcp.example.com/${i}`,
+                method: 'POST',
+                statusCode: 200,
+                requestHeaders: {authorization: 'Bearer super-secret'},
+                responseHeaders: {},
+                responseBody: 'ok',
+              });
+            }
+            return {tools: []};
+          }),
+        }),
+      );
+    }
+
+    beforeEach(() => {
+      resetLogger();
+      setLogLevel(LogLevel.DEBUG);
+    });
+
+    afterEach(() => {
+      resetLogger();
+    });
+
+    it('drains the captured exchanges into the invocation metadata', async () => {
+      await clientRecording(1);
+      const context = createReadonlyContext();
+      const toolset = new MCPToolset(stdioParams);
+
+      await toolset.getTools(context);
+
+      expect(context.invocationContext.customMetadata).toEqual({
+        http_debug_info: [
+          {
+            url: 'https://mcp.example.com/0',
+            method: 'POST',
+            statusCode: 200,
+            requestHeaders: {authorization: '<redacted>'},
+            responseHeaders: {},
+            requestBody: undefined,
+            responseBody: 'ok',
+          },
+        ],
+      });
+    });
+
+    it('records nothing when debug logging is off', async () => {
+      setLogLevel(LogLevel.INFO);
+      await clientRecording(1);
+      const context = createReadonlyContext();
+      const toolset = new MCPToolset(stdioParams);
+
+      await toolset.getTools(context);
+
+      expect(context.invocationContext.customMetadata).toEqual({});
+    });
+
+    it('adds no key when the call recorded no exchange', async () => {
+      const context = createReadonlyContext();
+      const toolset = new MCPToolset(stdioParams);
+
+      await toolset.getTools(context);
+
+      expect(context.invocationContext.customMetadata).toEqual({});
+    });
+
+    it('records nothing when no context was passed', async () => {
+      await clientRecording(1);
+      const toolset = new MCPToolset(stdioParams);
+
+      const tools = await toolset.getTools();
+
+      expect(tools).toEqual([]);
+      expect(isCapturingHttpDebug()).toBe(false);
+    });
+
+    it('appends to the existing list on a second call', async () => {
+      const context = createReadonlyContext();
+      const toolset = new MCPToolset(stdioParams);
+
+      await clientRecording(1);
+      await toolset.getTools(context);
+      await clientRecording(1);
+      await toolset.getTools(context);
+
+      expect(
+        getHttpDebugInfo(context.invocationContext.customMetadata),
+      ).toHaveLength(2);
+    });
+
+    it('caps the accumulated list', async () => {
+      const context = createReadonlyContext();
+      const toolset = new MCPToolset(stdioParams);
+
+      await clientRecording(MAX_CAPTURED_EXCHANGES);
+      await toolset.getTools(context);
+      await clientRecording(5);
+      await toolset.getTools(context);
+
+      expect(
+        getHttpDebugInfo(context.invocationContext.customMetadata),
+      ).toHaveLength(MAX_CAPTURED_EXCHANGES);
+    });
+
+    it('drains the exchanges captured before a failure', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(() =>
+        stubClient({
+          listTools: vi.fn().mockImplementation(async () => {
+            recordHttpExchange({
+              url: 'https://mcp.example.com/failing',
+              method: 'POST',
+              statusCode: 500,
+              requestHeaders: {},
+              responseHeaders: {},
+              responseBody: 'server error',
+            });
+            throw new Error('list boom');
+          }),
+        }),
+      );
+      const context = createReadonlyContext();
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.getTools(context)).rejects.toThrow('list boom');
+
+      expect(
+        getHttpDebugInfo(context.invocationContext.customMetadata),
+      ).toEqual([
+        expect.objectContaining({url: 'https://mcp.example.com/failing'}),
+      ]);
+    });
+
+    it('records a listResources call against the context', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(() =>
+        stubClient({
+          listResources: vi.fn().mockImplementation(async () => {
+            recordHttpExchange({
+              url: 'https://mcp.example.com/resources',
+              method: 'POST',
+              statusCode: 200,
+              requestHeaders: {},
+              responseHeaders: {},
+              responseBody: 'ok',
+            });
+            return {resources: [{uri: 'file:///res1', name: 'res1'}]};
+          }),
+        }),
+      );
+      const context = createReadonlyContext();
+      const toolset = new MCPToolset(stdioParams);
+
+      const names = await toolset.listResources(context);
+
+      expect(names).toEqual(['res1']);
+      expect(
+        getHttpDebugInfo(context.invocationContext.customMetadata),
+      ).toEqual([
+        expect.objectContaining({url: 'https://mcp.example.com/resources'}),
+      ]);
+    });
+
+    it('records a getResourceInfo call against the context', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(() =>
+        stubClient({
+          listResources: vi.fn().mockImplementation(async () => {
+            recordHttpExchange({
+              url: 'https://mcp.example.com/info',
+              method: 'POST',
+              statusCode: 200,
+              requestHeaders: {},
+              responseHeaders: {},
+              responseBody: 'ok',
+            });
+            return {resources: [{uri: 'file:///res1', name: 'res1'}]};
+          }),
+        }),
+      );
+      const context = createReadonlyContext();
+      const toolset = new MCPToolset(stdioParams);
+
+      const info = await toolset.getResourceInfo('res1', context);
+
+      expect(info.uri).toBe('file:///res1');
+      expect(
+        getHttpDebugInfo(context.invocationContext.customMetadata),
+      ).toEqual([
+        expect.objectContaining({url: 'https://mcp.example.com/info'}),
+      ]);
+    });
+
+    it('records both sessions of a readResource call against the context', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client)
+        .mockImplementationOnce(() =>
+          stubClient({
+            listResources: vi.fn().mockImplementation(async () => {
+              recordHttpExchange({
+                url: 'https://mcp.example.com/list',
+                method: 'POST',
+                statusCode: 200,
+                requestHeaders: {},
+                responseHeaders: {},
+                responseBody: 'ok',
+              });
+              return {resources: [{uri: 'file:///res1', name: 'res1'}]};
+            }),
+          }),
+        )
+        .mockImplementationOnce(() =>
+          stubClient({
+            readResource: vi.fn().mockImplementation(async () => {
+              recordHttpExchange({
+                url: 'https://mcp.example.com/read',
+                method: 'POST',
+                statusCode: 200,
+                requestHeaders: {},
+                responseHeaders: {},
+                responseBody: 'ok',
+              });
+              return {contents: [{uri: 'file:///res1', text: 'hello'}]};
+            }),
+          }),
+        );
+      const context = createReadonlyContext();
+      const toolset = new MCPToolset(stdioParams);
+
+      await toolset.readResource('res1', context);
+
+      const recorded = getHttpDebugInfo(
+        context.invocationContext.customMetadata,
+      );
+      expect(recorded.map((entry) => entry.url)).toEqual([
+        'https://mcp.example.com/list',
+        'https://mcp.example.com/read',
+      ]);
     });
   });
 });

@@ -18,7 +18,12 @@ import type {
 
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {formatError, isAbortError} from '../../utils/error_utils.js';
-import {logger} from '../../utils/logger.js';
+import {
+  appendHttpDebugInfo,
+  HttpExchange,
+  runWithHttpDebugCapture,
+} from '../../utils/http_debug_utils.js';
+import {logger, LogLevel} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
@@ -39,6 +44,14 @@ export interface McpToolsetOptions {
    * the parent process.
    */
   errlog?: Writable;
+}
+
+/**
+ * Whether debug logging is on. A logger that predates `isEnabledFor` reports
+ * nothing, in which case no capture is installed.
+ */
+function isDebugLoggingEnabled(): boolean {
+  return logger.isEnabledFor?.(LogLevel.DEBUG) ?? false;
 }
 
 /**
@@ -128,7 +141,7 @@ export class MCPToolset extends BaseToolset {
    * @throws {McpConnectionError} when opening the session or running `run`
    *   fails for any reason other than cancellation.
    */
-  private async executeWithSession<T>(
+  private async openSessionAndRun<T>(
     operation: string,
     run: (session: Client) => Promise<T>,
   ): Promise<T> {
@@ -145,10 +158,46 @@ export class MCPToolset extends BaseToolset {
     }
   }
 
+  /**
+   * Runs one MCP operation, capturing the HTTP exchanges behind it when debug
+   * logging is on and the caller supplied a context to record them against.
+   *
+   * The capture is installed around session creation as well as the call, so
+   * the `initialize` handshake is recorded too. It is drained on the failure
+   * path as well, which is when an operator most wants to read it.
+   *
+   * @param operation Short description of the attempt, used as the message
+   *   prefix on failure.
+   * @param run Receives the open session.
+   * @param readonlyContext The invocation to record the exchanges against.
+   * @return Whatever `run` resolves to.
+   */
+  private async executeWithSession<T>(
+    operation: string,
+    run: (session: Client) => Promise<T>,
+    readonlyContext?: ReadonlyContext,
+  ): Promise<T> {
+    if (readonlyContext === undefined || !isDebugLoggingEnabled()) {
+      return this.openSessionAndRun(operation, run);
+    }
+    const exchanges: HttpExchange[] = [];
+    try {
+      return await runWithHttpDebugCapture(exchanges, () =>
+        this.openSessionAndRun(operation, run),
+      );
+    } finally {
+      appendHttpDebugInfo(
+        readonlyContext.invocationContext.customMetadata,
+        exchanges,
+      );
+    }
+  }
+
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const listResult = await this.executeWithSession(
       'Failed to get tools from MCP server',
       async (session) => (await session.listTools()) as ListToolsResult,
+      context,
     );
     logger.debug(`number of tools: ${listResult.tools.length}`);
     for (const tool of listResult.tools) {
@@ -193,18 +242,22 @@ export class MCPToolset extends BaseToolset {
   /**
    * Lists the names of the resources advertised by the MCP server.
    *
+   * @param context The invocation to record HTTP debug information against.
    * @return The resource names available on the server.
    */
-  async listResources(): Promise<string[]> {
-    const result = await this.listResourcesResult();
+  async listResources(context?: ReadonlyContext): Promise<string[]> {
+    const result = await this.listResourcesResult(context);
     return result.resources.map((resource) => resource.name);
   }
 
   /** Fetches the server's resource listing, naming the operation on failure. */
-  private listResourcesResult(): Promise<ListResourcesResult> {
+  private listResourcesResult(
+    context?: ReadonlyContext,
+  ): Promise<ListResourcesResult> {
     return this.executeWithSession(
       'Failed to list resources from MCP server',
       async (session) => (await session.listResources()) as ListResourcesResult,
+      context,
     );
   }
 
@@ -212,11 +265,15 @@ export class MCPToolset extends BaseToolset {
    * Returns metadata for the resource whose name matches `name`.
    *
    * @param name The advertised name of the resource.
+   * @param context The invocation to record HTTP debug information against.
    * @return The matching MCP `Resource`.
    * @throws If no resource with the given name is advertised by the server.
    */
-  async getResourceInfo(name: string): Promise<Resource> {
-    const result = await this.listResourcesResult();
+  async getResourceInfo(
+    name: string,
+    context?: ReadonlyContext,
+  ): Promise<Resource> {
+    const result = await this.listResourcesResult(context);
 
     const resource = result.resources.find(
       (candidate) => candidate.name === name,
@@ -235,13 +292,15 @@ export class MCPToolset extends BaseToolset {
    * by the server (never decoded and re-encoded).
    *
    * @param name The advertised name of the resource to read.
+   * @param context The invocation to record HTTP debug information against.
    * @return The resource contents (text and/or base64-encoded binary).
    * @throws If the resource is unknown or has no URI.
    */
   async readResource(
     name: string,
+    context?: ReadonlyContext,
   ): Promise<Array<TextResourceContents | BlobResourceContents>> {
-    const resourceInfo = await this.getResourceInfo(name);
+    const resourceInfo = await this.getResourceInfo(name, context);
     if (!resourceInfo.uri) {
       throw new Error(`Resource '${name}' has no URI.`);
     }
@@ -252,6 +311,7 @@ export class MCPToolset extends BaseToolset {
         (await session.readResource({
           uri: resourceInfo.uri,
         })) as ReadResourceResult,
+      context,
     );
     return result.contents;
   }

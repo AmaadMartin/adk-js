@@ -7,9 +7,15 @@
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
 import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {FetchLike} from '@modelcontextprotocol/sdk/shared/transport.js';
 import type {Stream, Writable} from 'node:stream';
 
 import {formatError} from '../../utils/error_utils.js';
+import {
+  describeHttpExchange,
+  isCapturingHttpDebug,
+  recordHttpExchange,
+} from '../../utils/http_debug_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
@@ -84,6 +90,29 @@ function pipeStderr(
   stderr.on('data', forward);
   return () => {
     stderr.off('data', forward);
+  };
+}
+
+/**
+ * Wraps `baseFetch` so that each exchange is recorded while an HTTP debug
+ * capture is installed. Off, it costs one boolean check per request.
+ *
+ * A caller-supplied `fetch` is called, never replaced.
+ */
+function recordingFetch(baseFetch?: FetchLike): FetchLike {
+  const doFetch: FetchLike = baseFetch ?? ((url, init) => fetch(url, init));
+  return async (url, init) => {
+    const response = await doFetch(url, init);
+    if (isCapturingHttpDebug()) {
+      const request = {
+        url: String(url),
+        method: init?.method ?? 'GET',
+        headers: new Headers(init?.headers),
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      };
+      recordHttpExchange(await describeHttpExchange(request, response));
+    }
+    return response;
   };
 }
 
@@ -189,7 +218,10 @@ export class MCPSessionManager {
           break;
         }
         case 'StreamableHTTPConnectionParams': {
-          const options = this.connectionParams.transportOptions ?? {};
+          // Copied, not mutated: the caller's options outlive this session,
+          // so installing the fetch wrapper on them would wrap the wrapper
+          // again on every later session.
+          const options = {...(this.connectionParams.transportOptions ?? {})};
 
           if (
             !options.requestInit &&
@@ -199,6 +231,7 @@ export class MCPSessionManager {
               headers: this.connectionParams.header as Record<string, string>,
             };
           }
+          options.fetch = recordingFetch(options.fetch);
 
           const {StreamableHTTPClientTransport} = await loadOptionalPeer(
             MCP_SDK,
