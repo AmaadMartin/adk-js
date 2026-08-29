@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {execFile} from 'node:child_process';
+import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {logger} from './logger.js';
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Client-certificate material for a mutual-TLS connection.
@@ -137,6 +135,11 @@ async function runCertProvider(
   if (!args.includes(WITH_PASSPHRASE_FLAG)) {
     args.push(WITH_PASSPHRASE_FLAG);
   }
+
+  // Bound here rather than at module load. A client certificate is rare, and
+  // binding `execFile` eagerly would put it in the module graph of every
+  // consumer of this package.
+  const execFileAsync = promisify(childProcess.execFile);
 
   try {
     const {stdout} = await execFileAsync(executable, args, {

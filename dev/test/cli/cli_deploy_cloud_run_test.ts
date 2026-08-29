@@ -28,11 +28,8 @@ const execMock = vi.fn();
 const spawnMock =
   vi.fn<(cmd: string, args: string[], opts: unknown) => unknown>();
 
-// `execFile` is unused here, but the mock has to declare it: the module graph
-// this file loads reaches `core/src/utils/mtls_utils.ts`, which imports it.
 vi.mock('node:child_process', () => ({
   exec: (cmd: string, callback: Callback) => execMock(cmd, callback),
-  execFile: vi.fn(),
   spawn: (cmd: string, args: string[], opts: unknown) =>
     spawnMock(cmd, args, opts),
 }));
