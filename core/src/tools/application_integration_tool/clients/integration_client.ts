@@ -183,20 +183,26 @@ export class IntegrationClient {
         await connectionsClient.getEntitySchemaAndOperations(entity);
       spec.components.schemas[`connectorInputPayload_${entity}`] =
         convertJsonSchemaToOpenApiSchema(schema);
+      const schemaAsString = JSON.stringify(schema);
       const selected =
         requestedOperations.length > 0 ? requestedOperations : operations;
       for (const operation of selected) {
-        addEntityOperation(spec, {
-          path: this.executePath(
-            integrationName,
-            `${operation.toLowerCase()}_${entity}`,
-          ),
-          entity,
-          operation,
-          schemaAsString: JSON.stringify(schema),
-          toolName,
-          toolInstructions,
-        });
+        const name = operation.toLowerCase();
+        const builder = ENTITY_OPERATIONS.get(name);
+        if (!builder) {
+          throw new InputValidationError(
+            `Invalid operation: ${operation} for entity: ${entity}`,
+          );
+        }
+        spec.components.schemas[`${name}_${entity}_Request`] =
+          builder.request(entity);
+        spec.paths[this.executePath(integrationName, `${name}_${entity}`)] =
+          builder.operation({
+            entity,
+            schemaAsString,
+            toolName,
+            toolInstructions,
+          });
       }
     }
 
@@ -234,41 +240,6 @@ function isOpenApiDocument(value: unknown): value is OpenAPIV3.Document {
     !!asJsonObject(fields['info']) &&
     !!asJsonObject(fields['paths'])
   );
-}
-
-/**
- * Adds one entity operation, and the request schema it refers to, to the spec.
- *
- * @throws {InputValidationError} If the connector reports an operation this
- *     package cannot express.
- */
-function addEntityOperation(
-  spec: ConnectorSpec,
-  options: {
-    path: string;
-    entity: string;
-    operation: string;
-    schemaAsString: string;
-    toolName: string;
-    toolInstructions: string;
-  },
-): void {
-  const {path, entity, schemaAsString, toolName, toolInstructions} = options;
-  const name = options.operation.toLowerCase();
-  const builder = ENTITY_OPERATIONS.get(name);
-  if (!builder) {
-    throw new InputValidationError(
-      `Invalid operation: ${options.operation} for entity: ${entity}`,
-    );
-  }
-  spec.components.schemas[`${name}_${entity}_Request`] =
-    builder.request(entity);
-  spec.paths[path] = builder.operation({
-    entity,
-    schemaAsString,
-    toolName,
-    toolInstructions,
-  });
 }
 
 /** Adds one connector action, and the schemas it refers to, to the spec. */

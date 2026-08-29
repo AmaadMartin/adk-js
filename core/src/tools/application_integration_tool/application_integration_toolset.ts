@@ -174,7 +174,7 @@ export class ApplicationIntegrationToolset extends BaseToolset {
     if (this.openapiToolset) {
       return this.openapiToolset.getTools(context);
     }
-    return this.tools.filter((tool) => this.isToolExposed(tool, context));
+    return this.tools.filter((tool) => this.isToolSelected(tool, context));
   }
 
   /**
