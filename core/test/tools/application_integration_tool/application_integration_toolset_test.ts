@@ -223,6 +223,27 @@ async function runAndCaptureRequest(
   return {url: String(fetchMock.mock.calls[0]?.[0]), body: JSON.parse(body)};
 }
 
+/**
+ * Runs a tool inside a caller-supplied invocation, so several calls share one
+ * session state, and returns the JSON body of the request it sent.
+ */
+async function runInSession(
+  tool: BaseTool,
+  invocationContext: InvocationContext,
+  functionCallId: string,
+): Promise<unknown> {
+  const fetchMock = stubFetch();
+  await tool.runAsync({
+    args: {},
+    toolContext: new Context({invocationContext, functionCallId}),
+  });
+  const body: unknown = fetchMock.mock.calls[0]?.[1]?.body;
+  if (typeof body !== 'string') {
+    return expect.fail('the tool sent no JSON body');
+  }
+  return JSON.parse(body);
+}
+
 /** Narrows a captured constructor argument to an auth credential. */
 function isAuthCredential(value: unknown): value is AuthCredential {
   const record = asJsonObject(value);
@@ -722,6 +743,31 @@ describe('ApplicationIntegrationToolset', () => {
         expect.stringContaining('authOverrideEnabled'),
       );
       expect((await runAndCaptureRequest(tools[0])).body).toMatchObject({
+        dynamicAuthConfig: {
+          'oauth2_auth_code_flow.access_token': 'end-user-token',
+        },
+      });
+    });
+
+    it('keeps sending the end-user token on a second call in one session', async () => {
+      getConnectionDetails.mockResolvedValue({
+        ...CONNECTION_DETAILS,
+        authOverrideEnabled: true,
+      });
+      const tools = await createToolset().getTools();
+      // Both calls share one session, so the second one reads back whatever
+      // the first stored. The service account token must not turn up here.
+      const invocationContext = createInvocationContext();
+
+      const first = await runInSession(tools[0], invocationContext, 'call-1');
+      const second = await runInSession(tools[0], invocationContext, 'call-2');
+
+      expect(first).toMatchObject({
+        dynamicAuthConfig: {
+          'oauth2_auth_code_flow.access_token': 'end-user-token',
+        },
+      });
+      expect(second).toMatchObject({
         dynamicAuthConfig: {
           'oauth2_auth_code_flow.access_token': 'end-user-token',
         },

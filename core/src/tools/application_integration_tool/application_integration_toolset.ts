@@ -37,6 +37,19 @@ const MODE_ERROR_MESSAGE =
   'Invalid request, Either (integration and triggers) or (connection and' +
   ' (entityOperations or actions)) should be provided.';
 
+/**
+ * Names the slot that caches the service identity's exchanged token.
+ *
+ * In connection mode two identities call out in one session: the service
+ * account reaches `ExecuteConnection`, and the end user reaches the connector
+ * behind it. Both use a bearer scheme, so they need different credential keys
+ * to get different slots. The caller's key stays with the end user, and the
+ * service identity takes a derived one.
+ */
+function serviceIdentityCredentialKey(credentialKey?: string): string {
+  return `${credentialKey ?? 'application_integration'}_service_identity`;
+}
+
 /** Options accepted by {@link ApplicationIntegrationToolset}. */
 export interface ApplicationIntegrationToolsetOptions {
   /** Google Cloud project id. */
@@ -218,7 +231,7 @@ export class ApplicationIntegrationToolset extends BaseToolset {
       // makes each operation unique in the spec. `prepareRequestParams` drops
       // it before the request goes out.
       const restApiTool = createRestApiTool(parsed, {
-        credentialKey: this.options.credentialKey,
+        credentialKey: serviceIdentityCredentialKey(this.options.credentialKey),
       });
       restApiTool.configureAuthScheme(this.auth.authScheme);
       restApiTool.configureAuthCredential(this.auth.authCredential);
