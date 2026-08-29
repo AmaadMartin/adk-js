@@ -9,10 +9,20 @@ import {cloneDeep} from 'lodash-es';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
+import {toJsonSchema} from '../utils/schema.js';
+import {stripUnsupportedGeminiFormats} from '../utils/schema_variant_utils.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
+import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
-import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import {LiveRequestQueue} from '../agents/live_request_queue.js';
+import {
+  BaseTool,
+  RunAsyncToolRequest,
+  ToolErrorDetector,
+  ToolErrorType,
+} from './base_tool.js';
 
 /**
  * Input parameters of the function tool.
@@ -38,10 +48,15 @@ export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
 
 /**
  * The signature of the user-provided function executed by a {@link FunctionTool}.
+ *
+ * `inputStream` is the live request queue the framework owns for this tool, and
+ * is set only during a bidirectional (live) run. See
+ * {@link FunctionTool.runAsync}.
  */
 export type ToolExecuteFunction<TParameters extends ToolInputParameters> = (
   input: ToolExecuteArgument<TParameters>,
   toolContext?: Context,
+  inputStream?: LiveRequestQueue,
 ) => Promise<unknown> | unknown;
 
 /**
@@ -65,8 +80,14 @@ export type RequireConfirmation<TParameters extends ToolInputParameters> =
  * for tool definition generation.
  */
 export type ToolOptions<TParameters extends ToolInputParameters> = {
+  /**
+   * The name the model is told about and the framework registers the tool
+   * under. Defaults to the `execute` function's own name; the two names cannot
+   * be set apart, because a live tool's input stream is looked up by it.
+   */
   name?: string;
-  description: string;
+  /** Defaults to an empty string, matching a Python tool with no docstring. */
+  description?: string;
   parameters?: TParameters;
   execute: ToolExecuteFunction<TParameters>;
   isLongRunning?: boolean;
@@ -90,11 +111,16 @@ export type ToolOptions<TParameters extends ToolInputParameters> = {
   requireConfirmation?: RequireConfirmation<TParameters>;
 };
 
+/** The schema of a tool that declares no parameters. */
+function emptyObjectSchema(): Schema {
+  return {type: Type.OBJECT, properties: {}};
+}
+
 function toSchema<TParameters extends ToolInputParameters>(
   parameters: TParameters,
 ): Schema {
   if (parameters === undefined) {
-    return {type: Type.OBJECT, properties: {}};
+    return emptyObjectSchema();
   }
 
   if (isZodObject(parameters)) {
@@ -102,6 +128,51 @@ function toSchema<TParameters extends ToolInputParameters>(
   }
 
   return parameters;
+}
+
+/** What a built declaration depends on, beyond the tool's own fields. */
+interface DeclarationContext {
+  variant: GoogleLLMVariant;
+  jsonSchema: boolean;
+}
+
+function sameDeclarationContext(
+  a: DeclarationContext,
+  b: DeclarationContext,
+): boolean {
+  return a.variant === b.variant && a.jsonSchema === b.jsonSchema;
+}
+
+/**
+ * Renders a tool as the declaration sent to the model.
+ *
+ * Exactly one of `parameters` and `parametersJsonSchema` is populated: the
+ * JSON-schema form is what the `JSON_SCHEMA_FOR_FUNC_DECL` feature selects,
+ * and the genai `Schema` form is the default. Mirrors adk-python's
+ * `build_function_declaration`.
+ */
+function buildDeclaration(
+  name: string,
+  description: string,
+  parameters: ToolInputParameters,
+  {variant, jsonSchema}: DeclarationContext,
+): FunctionDeclaration {
+  if (jsonSchema) {
+    return {
+      name,
+      description,
+      parametersJsonSchema: toJsonSchema(parameters ?? emptyObjectSchema()),
+    };
+  }
+  const schema = toSchema(parameters);
+  return {
+    name,
+    description,
+    parameters:
+      variant === GoogleLLMVariant.GEMINI_API
+        ? stripUnsupportedGeminiFormats(schema)
+        : schema,
+  };
 }
 
 /** The declared-required keys absent from `args`, in declaration order. */
@@ -140,9 +211,10 @@ export function isFunctionTool(obj: unknown): obj is FunctionTool {
  * framework validates the arguments and invokes the user-provided `execute`
  * callback.
  */
-export class FunctionTool<
-  TParameters extends ToolInputParameters = undefined,
-> extends BaseTool {
+export class FunctionTool<TParameters extends ToolInputParameters = undefined>
+  extends BaseTool
+  implements ToolErrorDetector
+{
   /** A unique symbol to identify ADK function tool class. */
   readonly [FUNCTION_TOOL_SIGNATURE_SYMBOL] = true;
 
@@ -152,6 +224,11 @@ export class FunctionTool<
   private readonly parameters?: TParameters;
   // Whether the tool requires user confirmation before running.
   private readonly requireConfirmation: RequireConfirmation<TParameters>;
+  // The last built declaration, with the context it was built for.
+  private declarationCache?: {
+    context: DeclarationContext;
+    declaration: FunctionDeclaration;
+  };
 
   /**
    * The constructor acts as the user-friendly factory.
@@ -166,7 +243,7 @@ export class FunctionTool<
     }
     super({
       name,
-      description: options.description,
+      description: options.description ?? '',
       isLongRunning: options.isLongRunning,
     });
     this.execute = options.execute;
@@ -178,16 +255,50 @@ export class FunctionTool<
    * Returns the function declaration derived from the tool's name, description,
    * and parameter schema.
    *
-   * Both the returned object and its `parameters` are fresh, so a caller that
-   * prefixes the name or annotates the schema — as
-   * {@link LongRunningFunctionTool} does — never mutates the tool itself.
+   * The build is cached, and rebuilds when the API variant or the
+   * `JSON_SCHEMA_FOR_FUNC_DECL` feature changes. Every call returns a fresh
+   * copy, so a caller that prefixes the name or annotates the schema — as
+   * {@link LongRunningFunctionTool} does — never mutates the cached
+   * declaration or the tool itself.
    */
   override _getDeclaration(): FunctionDeclaration {
-    return {
-      name: this.name,
-      description: this.description,
-      parameters: cloneDeep(toSchema(this.parameters)),
+    const context: DeclarationContext = {
+      variant: this.apiVariant,
+      jsonSchema: isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL),
     };
+    let cache = this.declarationCache;
+    if (!cache || !sameDeclarationContext(cache.context, context)) {
+      cache = {
+        context,
+        declaration: buildDeclaration(
+          this.name,
+          this.description,
+          this.parameters,
+          context,
+        ),
+      };
+      this.declarationCache = cache;
+    }
+    return cloneDeep(cache.declaration);
+  }
+
+  /**
+   * The error type to record on this call's telemetry span, or `undefined`
+   * when the response is not a failure.
+   *
+   * A tool reports a failure by returning `{error: ...}` rather than by
+   * throwing, which is otherwise indistinguishable from a success in a trace.
+   */
+  detectErrorInResponse(response: unknown): string | undefined {
+    if (
+      typeof response === 'object' &&
+      response !== null &&
+      'error' in response &&
+      response.error
+    ) {
+      return ToolErrorType.TOOL_ERROR;
+    }
+    return undefined;
   }
 
   /**
@@ -197,6 +308,10 @@ export class FunctionTool<
    * A call that omits a declared-required argument resolves to an error object
    * telling the model to retry with the missing arguments, matching adk-python.
    * It never reaches the confirmation gate or `execute`.
+   *
+   * During a live run, `execute` also receives the request queue the framework
+   * registered under this tool's name. The lookup uses the registered name, so
+   * a tool cannot be handed another tool's stream.
    *
    * @param req The tool request containing arguments and tool context.
    * @returns A promise resolving to the function's return value.
@@ -226,7 +341,11 @@ export class FunctionTool<
         return pending;
       }
 
-      return await this.execute(validatedArgs, req.toolContext);
+      return await this.execute(
+        validatedArgs,
+        req.toolContext,
+        this.inputStream(req.toolContext),
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -276,6 +395,16 @@ export class FunctionTool<
     return Object.fromEntries(
       Object.entries(args).filter(([key]) => Object.hasOwn(properties, key)),
     );
+  }
+
+  /**
+   * The live request queue registered for this tool, or `undefined` outside a
+   * live run. A tool context assembled without an invocation — as several unit
+   * tests do — resolves to `undefined` rather than throwing.
+   */
+  private inputStream(toolContext?: Context): LiveRequestQueue | undefined {
+    return toolContext?.invocationContext?.activeStreamingTools?.[this.name]
+      ?.stream;
   }
 
   /** Parses `args` against the parameter schema, when one is declared. */

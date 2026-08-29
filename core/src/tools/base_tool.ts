@@ -56,6 +56,41 @@ export function isBaseTool(obj: unknown): obj is BaseTool {
   );
 }
 
+/** Error type labels a tool reports for a response it classifies as failed. */
+export enum ToolErrorType {
+  TOOL_ERROR = 'TOOL_ERROR',
+}
+
+/**
+ * A tool that classifies its own response as a failure, for telemetry only.
+ *
+ * The hook is deliberately absent from {@link BaseTool}: a tool that does not
+ * implement it reports no error type at all, rather than inheriting a default
+ * classification that does not fit it.
+ */
+export interface ToolErrorDetector {
+  /**
+   * The error type to record for `response`, or `undefined` when the response
+   * is not a failure. Must not modify the response.
+   */
+  detectErrorInResponse(response: unknown): string | undefined;
+}
+
+/**
+ * Whether `tool` classifies its own responses.
+ *
+ * Structural, so a tool built by a second copy of this package in the same
+ * runtime is still recognized.
+ */
+export function isErrorDetectingTool(
+  tool: BaseTool,
+): tool is BaseTool & ToolErrorDetector {
+  return (
+    'detectErrorInResponse' in tool &&
+    typeof tool.detectErrorInResponse === 'function'
+  );
+}
+
 /**
  * The base class for all tools.
  */
