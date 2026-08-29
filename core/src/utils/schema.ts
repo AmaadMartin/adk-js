@@ -108,6 +108,39 @@ export function parseWithSchema<T>(
 }
 
 /**
+ * Matches a markdown code fence that wraps a whole payload, capturing the text
+ * inside it. An optional language tag follows the opening fence.
+ */
+const WRAPPING_CODE_FENCE = /^```\w*\s*([\s\S]*?)\s*```$/;
+
+/**
+ * Removes a markdown code fence wrapping the whole JSON payload.
+ *
+ * A model asked for structured output sometimes wraps it in a fence, most
+ * often when tools are configured alongside an output schema and the schema
+ * becomes best-effort. Well-formed JSON never starts with a fence, so this
+ * leaves valid input alone.
+ */
+function stripJsonCodeFence(jsonText: string): string {
+  const match = WRAPPING_CODE_FENCE.exec(jsonText.trim());
+  return match ? match[1].trim() : jsonText;
+}
+
+/**
+ * Parses `jsonText` as JSON and validates the result against `schema`.
+ *
+ * A code fence wrapping the whole payload is removed first. Malformed JSON and
+ * a value that breaks the schema both throw, so a caller cannot mistake either
+ * for data the schema promised.
+ */
+export function parseJsonWithSchema(
+  schema: SchemaLike | undefined,
+  jsonText: string,
+): unknown {
+  return parseWithSchema(schema, JSON.parse(stripJsonCodeFence(jsonText)));
+}
+
+/**
  * Renders a {@link SchemaLike} as a plain JSON Schema object.
  *
  * Zod v3 and v4 schemas are converted with their respective serializers. A

@@ -7,6 +7,7 @@
 import {
   AgentTool,
   BaseAgent,
+  BasePlugin,
   Context,
   createEvent,
   createEventActions,
@@ -47,6 +48,9 @@ function mockRunner(
 ): Runner {
   return parts as Runner;
 }
+
+/** A plugin that registers under a name and does nothing else. */
+class NoopPlugin extends BasePlugin {}
 
 describe('AgentTool', () => {
   it('propagates session context and state delta', async () => {
@@ -381,6 +385,7 @@ describe('AgentTool', () => {
         userId: 'parent-user',
         session: {id: 'parent-session'},
         sessionService: mockSessionService,
+        pluginManager: new PluginManager([]),
       },
       state: {
         toRecord: () => ({}),
@@ -431,6 +436,7 @@ describe('AgentTool', () => {
         userId: 'parent-user',
         session: {id: 'parent-session'},
         sessionService: mockSessionService,
+        pluginManager: new PluginManager([]),
       },
       state: {
         toRecord: () => ({}),
@@ -1056,5 +1062,169 @@ describe('AgentTool parity with adk-python', () => {
 
     expect(childSession?.state).toHaveProperty('visibleKey', 'keepMe');
     expect(childSession?.state).not.toHaveProperty('_adk_internal');
+  });
+
+  /** Builds a caller context whose plugin manager holds `plugins`. */
+  function contextWithPlugins(
+    agent: BaseAgent,
+    plugins: BasePlugin[],
+  ): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        agent,
+        session: createSession({
+          id: 'parent-session',
+          appName: PARENT_APP_NAME,
+          userId: 'parent-user',
+        }),
+        pluginManager: new PluginManager(plugins),
+        sessionService: new InMemorySessionService(),
+      }),
+    });
+  }
+
+  /** Returns the `plugins` the sub-runner was constructed with. */
+  async function pluginsGivenToSubRunner(
+    config: {includePlugins?: boolean},
+    plugins: BasePlugin[],
+  ): Promise<BasePlugin[] | undefined> {
+    const agent = new LlmAgent({name: SUB_AGENT_NAME});
+    mockSubAgentRun([
+      createEvent({
+        author: SUB_AGENT_NAME,
+        content: {role: 'model', parts: [{text: 'done'}]},
+      }),
+    ]);
+
+    await new AgentTool({agent, ...config}).runAsync({
+      args: {request: 'go'},
+      toolContext: contextWithPlugins(agent, plugins),
+    });
+
+    const {calls} = vi.mocked(Runner).mock;
+    return calls[calls.length - 1][0].plugins;
+  }
+
+  it("passes the caller's plugins to the sub-runner by default", async () => {
+    const plugin = new NoopPlugin('parent-plugin');
+
+    expect(await pluginsGivenToSubRunner({}, [plugin])).toEqual([plugin]);
+  });
+
+  it("passes the caller's plugins when includePlugins is true", async () => {
+    const plugin = new NoopPlugin('parent-plugin');
+
+    expect(
+      await pluginsGivenToSubRunner({includePlugins: true}, [plugin]),
+    ).toEqual([plugin]);
+  });
+
+  it('passes no plugins to the sub-runner when includePlugins is false', async () => {
+    const plugin = new NoopPlugin('parent-plugin');
+
+    expect(
+      await pluginsGivenToSubRunner({includePlugins: false}, [plugin]),
+    ).toBeUndefined();
+  });
+
+  /** Runs a sub-agent that emits `events` and returns the caller's context. */
+  async function contextAfterRun(
+    config: {propagateGroundingMetadata?: boolean},
+    events: Event[],
+  ): Promise<Context> {
+    const agent = new LlmAgent({name: SUB_AGENT_NAME});
+    mockSubAgentRun(events);
+    const toolContext = parentContext(agent);
+
+    await new AgentTool({agent, ...config}).runAsync({
+      args: {request: 'go'},
+      toolContext,
+    });
+
+    return toolContext;
+  }
+
+  const GROUNDING_KEY = 'temp:_adk_grounding_metadata';
+
+  function groundedEvent(): Event {
+    return createEvent({
+      author: SUB_AGENT_NAME,
+      content: {role: 'model', parts: [{text: 'the answer'}]},
+      groundingMetadata: {webSearchQueries: ['who won']},
+    });
+  }
+
+  it('publishes grounding metadata when propagateGroundingMetadata is on', async () => {
+    const toolContext = await contextAfterRun(
+      {propagateGroundingMetadata: true},
+      [groundedEvent()],
+    );
+
+    expect(toolContext.state.get(GROUNDING_KEY)).toEqual({
+      webSearchQueries: ['who won'],
+    });
+  });
+
+  it('publishes no grounding metadata when the option is off', async () => {
+    const toolContext = await contextAfterRun({}, [groundedEvent()]);
+
+    expect(toolContext.state.get(GROUNDING_KEY)).toBeUndefined();
+  });
+
+  it('publishes no grounding metadata when the run produced none', async () => {
+    const toolContext = await contextAfterRun(
+      {propagateGroundingMetadata: true},
+      [
+        createEvent({
+          author: SUB_AGENT_NAME,
+          content: {role: 'model', parts: [{text: 'the answer'}]},
+        }),
+      ],
+    );
+
+    // The key must be absent, not present and undefined: a written key still
+    // reaches the caller's state delta.
+    expect(toolContext.state.toRecord()).not.toHaveProperty(GROUNDING_KEY);
+  });
+
+  const SUMMARY_SCHEMA: Schema = {
+    type: Type.OBJECT,
+    properties: {summary: {type: Type.STRING}},
+    required: ['summary'],
+  };
+
+  /** Returns the tool result for a sub-agent declaring `outputSchema`. */
+  async function resultForOutputSchema(
+    outputSchema: Schema,
+    text: string,
+  ): Promise<unknown> {
+    const agent = new LlmAgent({name: SUB_AGENT_NAME, outputSchema});
+    mockSubAgentRun([
+      createEvent({
+        author: SUB_AGENT_NAME,
+        content: {role: 'model', parts: [{text}]},
+      }),
+    ]);
+
+    return new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: parentContext(agent),
+    });
+  }
+
+  it('throws when the reply breaks the declared output schema', async () => {
+    await expect(
+      resultForOutputSchema(SUMMARY_SCHEMA, '{"summary":42}'),
+    ).rejects.toThrow();
+  });
+
+  it('strips a json code fence before validating the reply', async () => {
+    const result = await resultForOutputSchema(
+      SUMMARY_SCHEMA,
+      '```json\n{"summary":"all done"}\n```',
+    );
+
+    expect(result).toEqual({summary: 'all done'});
   });
 });

@@ -4,14 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, FunctionDeclaration, Part, Type} from '@google/genai';
+import {
+  Content,
+  FunctionDeclaration,
+  GroundingMetadata,
+  Part,
+  Type,
+} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
-import {parseWithSchema} from '../utils/schema.js';
+import {parseJsonWithSchema, parseWithSchema} from '../utils/schema.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
@@ -32,6 +38,25 @@ export interface AgentToolConfig {
    * Whether to skip summarization of the agent output.
    */
   skipSummarization?: boolean;
+
+  /**
+   * Whether to propagate the parent runner's plugins into the wrapped agent's
+   * runner, so plugin callbacks fire for the wrapped agent too. Defaults to
+   * true; set it to false to run the agent with an isolated plugin
+   * environment.
+   */
+  includePlugins?: boolean;
+
+  /**
+   * Whether to publish the wrapped agent's grounding metadata to the caller's
+   * state under `temp:_adk_grounding_metadata`, so the caller can cite the
+   * sources the wrapped agent used. Defaults to false.
+   *
+   * The state key is the handoff contract: `temp:` keys live for one
+   * invocation and no session service persists them, so the value reaches the
+   * caller for the rest of the invocation and is then discarded.
+   */
+  propagateGroundingMetadata?: boolean;
 }
 
 /**
@@ -39,6 +64,12 @@ export interface AgentToolConfig {
  * Defined once and shared by all BaseTool instances.
  */
 const AGENT_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.agentTool');
+
+/**
+ * The state key the wrapped agent's grounding metadata is published under.
+ * Identical to the key adk-python writes, because a caller reads it by name.
+ */
+const GROUNDING_METADATA_STATE_KEY = `${State.TEMP_PREFIX}_adk_grounding_metadata`;
 
 /**
  * Type guard to check if an object is an instance of BaseTool.
@@ -156,6 +187,10 @@ export class AgentTool extends BaseTool {
 
   private readonly skipSummarization: boolean;
 
+  private readonly includePlugins: boolean;
+
+  private readonly propagateGroundingMetadata: boolean;
+
   constructor(config: AgentToolConfig) {
     super({
       name: config.agent.name,
@@ -163,6 +198,9 @@ export class AgentTool extends BaseTool {
     });
     this.agent = config.agent;
     this.skipSummarization = config.skipSummarization || false;
+    this.includePlugins = config.includePlugins ?? true;
+    this.propagateGroundingMetadata =
+      config.propagateGroundingMetadata ?? false;
   }
 
   override _getDeclaration(): FunctionDeclaration {
@@ -173,9 +211,6 @@ export class AgentTool extends BaseTool {
       declaration = {
         name: this.name,
         description: this.description,
-        // TODO(b/425992518): We should not use the agent's input schema as is.
-        // It should be validated and possibly transformed. Consider similar
-        // logic to one we have in Python ADK.
         parameters: inputSchema,
       };
     } else {
@@ -219,7 +254,9 @@ export class AgentTool extends BaseTool {
     const inputAgent = resolveSchemaAgent(this.agent, 'first');
     const inputSchema =
       inputAgent?.inputSchemaSource ?? inputAgent?.inputSchema;
-    const outputSchema = resolveSchemaAgent(this.agent, 'last')?.outputSchema;
+    const outputAgent = resolveSchemaAgent(this.agent, 'last');
+    const outputSchema =
+      outputAgent?.outputSchemaSource ?? outputAgent?.outputSchema;
     const content: Content = {
       role: 'user',
       parts: [
@@ -250,6 +287,9 @@ export class AgentTool extends BaseTool {
         toolContext.invocationContext.memoryService ??
         new InMemoryMemoryService(),
       credentialService: toolContext.invocationContext.credentialService,
+      plugins: this.includePlugins
+        ? toolContext.invocationContext.pluginManager.listPlugins()
+        : undefined,
     });
 
     const session = await runner.sessionService.getOrCreateSession({
@@ -265,6 +305,7 @@ export class AgentTool extends BaseTool {
 
     let lastContent: Content | undefined;
     let lastErrorMessage: string | undefined;
+    let lastGroundingMetadata: GroundingMetadata | undefined;
     for await (const event of runner.runAsync({
       userId: session.userId,
       sessionId: session.id,
@@ -290,9 +331,11 @@ export class AgentTool extends BaseTool {
         lastErrorMessage = event.errorMessage;
       }
       // A run can end on an event that carries no content, such as one that
-      // only reports an error. Keep the last event that did carry content.
+      // only reports an error. Keep the last event that did carry content, and
+      // the grounding metadata that came with it.
       if (event.content) {
         lastContent = event.content;
+        lastGroundingMetadata = event.groundingMetadata;
       }
     }
 
@@ -313,8 +356,15 @@ export class AgentTool extends BaseTool {
       return lastErrorMessage;
     }
 
-    // TODO - b/425992518: In case of output schema, the output should be
-    // validated. Consider similar logic to one we have in Python ADK.
-    return outputSchema ? JSON.parse(mergedText) : mergedText;
+    if (this.propagateGroundingMetadata && lastGroundingMetadata) {
+      toolContext.state.set(
+        GROUNDING_METADATA_STATE_KEY,
+        lastGroundingMetadata,
+      );
+    }
+
+    return outputSchema
+      ? parseJsonWithSchema(outputSchema, mergedText)
+      : mergedText;
   }
 }
