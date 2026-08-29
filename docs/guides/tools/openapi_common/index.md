@@ -66,8 +66,8 @@ generateReturnDoc({
 `createApiParameter` takes the first of these that is not empty:
 
 1. the `name` you pass,
-2. the snake*case original name, prefixed with `param*` if it is a TypeScript
-   reserved word,
+2. the original name in `snake_case`, prefixed with `param_` if it is a
+   TypeScript reserved word,
 3. a name for the parameter's location.
 
 The location names are `body`, `query_param`, `path_param`, `header_param` and
@@ -152,8 +152,7 @@ line per property.
 
 ## Differences from adk-python
 
-Two things differ from `openapi_tool/common/common.py`, both because the
-generated identifiers and type names here are TypeScript:
+Three things differ from `openapi_tool/common/common.py`:
 
 - `renameReservedWords` guards against TypeScript reserved words, not Python
   ones. `function` is renamed here and not there; `def` is renamed there and not
@@ -161,6 +160,12 @@ generated identifiers and type names here are TypeScript:
 - `getTypeHint` emits `number`, `string`, `Record<string, unknown>` and
   `Array<...>` in place of `int`, `float`, `str`, `Dict[str, Any]` and
   `List[...]`. Python's `int`/`float` split collapses into `number`.
+- An array of arrays hints `Array<Array<unknown>>`. Python's `get_type_hint`
+  gives `List[Any]` there, because `array` is missing from its item map, while
+  its `get_type_value` gives `List[List[Any]]`. This follows the second one.
+
+The first two follow from the generated identifiers and type names being
+TypeScript.
 
 The `param_` prefix, the location default names and the two property indents are
 identical, because those strings reach the model in the tool schema.

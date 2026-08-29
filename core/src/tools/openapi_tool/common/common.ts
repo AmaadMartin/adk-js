@@ -147,6 +147,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+/**
+ * Reads a string field, treating any other shape as absent.
+ *
+ * A document written in YAML leaves `null` wherever a key has no value, so a
+ * field the typings declare as a string arrives missing, null, or holding
+ * something else entirely.
+ */
+function stringField(value: unknown, field: string): string {
+  if (!isRecord(value)) {
+    return '';
+  }
+  const read = value[field];
+  return typeof read === 'string' ? read : '';
+}
+
 function parseSchemaJson(value: string, context: string): unknown {
   try {
     return JSON.parse(value) as unknown;
@@ -317,7 +332,7 @@ function renderObjectProperties(
   }
   let doc = ' Object properties:\n';
   for (const [name, details] of entries) {
-    const description = '$ref' in details ? '' : (details.description ?? '');
+    const description = stringField(details, 'description');
     doc += `${indent}${name} (${getTypeHint(details)}): ${description}\n`;
   }
   return doc;
@@ -340,7 +355,7 @@ export function generateParamDoc(param: ApiParameter): string {
 /** A 2xx response that carries at least one content type. */
 interface SuccessResponse {
   description: string;
-  content: {[media: string]: OpenAPIV3.MediaTypeObject};
+  content: Record<string, unknown>;
 }
 
 /**
@@ -360,16 +375,16 @@ function pickSuccessResponse(
   let picked: SuccessResponse | undefined;
   let pickedOrder = Infinity;
   for (const [status, response] of Object.entries(responses)) {
-    if (!status.startsWith('2') || '$ref' in response) {
+    if (!status.startsWith('2') || !isRecord(response) || '$ref' in response) {
       continue;
     }
-    const content = response.content;
-    if (!content || Object.keys(content).length === 0) {
+    const content = response['content'];
+    if (!isRecord(content) || Object.keys(content).length === 0) {
       continue;
     }
     const order = statusOrder(status);
     if (picked === undefined || order < pickedOrder) {
-      picked = {description: response.description, content};
+      picked = {description: stringField(response, 'description'), content};
       pickedOrder = order;
     }
   }
@@ -391,7 +406,10 @@ export function generateReturnDoc(
   }
   const mediaType =
     response.content['application/json'] ?? Object.values(response.content)[0];
-  const schema = schemaFromOpenApi(mediaType.schema, 'response body');
+  if (!isRecord(mediaType)) {
+    return '';
+  }
+  const schema = schemaFromOpenApi(mediaType['schema'], 'response body');
   const description = response.description.trim();
   return (
     `Returns (${getTypeHint(schema)}): ${description}` +

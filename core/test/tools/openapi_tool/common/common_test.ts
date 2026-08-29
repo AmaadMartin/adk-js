@@ -633,6 +633,90 @@ describe('generateReturnDoc', () => {
   });
 });
 
+describe('null values from YAML', () => {
+  function loadResponses(document: string): OpenAPIV3.ResponsesObject {
+    return yaml.load(document) as OpenAPIV3.ResponsesObject;
+  }
+
+  it('should ignore a response key that has no value', () => {
+    const responses = loadResponses(`
+'200':
+`);
+
+    expect(responses).toEqual({'200': null});
+    expect(generateReturnDoc(responses)).toBe('');
+  });
+
+  it('should ignore a content type that has no value', () => {
+    const responses = loadResponses(`
+'200':
+  description: Successful response
+  content:
+    application/json:
+`);
+
+    expect(generateReturnDoc(responses)).toBe('');
+  });
+
+  it('should ignore a content block that has no value', () => {
+    const responses = loadResponses(`
+'200':
+  description: Successful response
+  content:
+`);
+
+    expect(generateReturnDoc(responses)).toBe('');
+  });
+
+  it('should document a response that declares no description', () => {
+    const responses = loadResponses(`
+'200':
+  content:
+    application/json:
+      schema:
+        type: string
+`);
+
+    expect(generateReturnDoc(responses)).toBe('Returns (string): ');
+  });
+
+  it('should document a property that has no value', () => {
+    const paramSchema = yaml.load(`
+type: object
+properties:
+  prop1:
+`) as OpenAPIV3.SchemaObject;
+    const param = createApiParameter({
+      originalName: 'test_param',
+      paramLocation: 'query',
+      description: 'Test object parameter',
+      paramSchema,
+    });
+
+    expect(generateParamDoc(param)).toBe(
+      'test_param (Record<string, unknown>): Test object parameter Object' +
+        ' properties:\n       prop1 (unknown): \n',
+    );
+  });
+
+  it('should ignore a property block that has no value', () => {
+    const paramSchema = yaml.load(`
+type: object
+properties:
+`) as OpenAPIV3.SchemaObject;
+    const param = createApiParameter({
+      originalName: 'test_param',
+      paramLocation: 'query',
+      description: 'Test object parameter',
+      paramSchema,
+    });
+
+    expect(generateParamDoc(param)).toBe(
+      'test_param (Record<string, unknown>): Test object parameter',
+    );
+  });
+});
+
 describe('petstore spec', () => {
   let getPetById: OpenAPIV3.OperationObject;
   let parameterDocs: string[];
