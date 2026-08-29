@@ -16,7 +16,8 @@
   "dependencies": {
     "@google/adk": "file:../../../../core",
     "@google/adk-devtools": "file:../../../../dev",
-    "@google/genai": "^2.9.0"
+    "@google/genai": "^2.9.0",
+    "@mikro-orm/core": "^6.6.10"
   },
   "devDependencies": {
     "@types/node": "^20.12.7"
