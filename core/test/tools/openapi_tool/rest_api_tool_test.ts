@@ -688,27 +688,27 @@ describe('RestApiTool Utilities', () => {
         method: 'GET',
       };
       const parameters = [
-        {
+        new ApiParameter({
           name: 'user_id',
           originalName: 'userId',
           paramLocation: 'path',
           paramSchema: {},
           required: true,
-        },
-        {
+        }),
+        new ApiParameter({
           name: 'q',
           originalName: 'q',
           paramLocation: 'query',
           paramSchema: {},
           required: false,
-        },
-        {
+        }),
+        new ApiParameter({
           name: 'x_trace_id',
           originalName: 'X-Trace-Id',
           paramLocation: 'header',
           paramSchema: {},
           required: false,
-        },
+        }),
       ];
       const args = {
         user_id: '123',
@@ -733,13 +733,13 @@ describe('RestApiTool Utilities', () => {
         method: 'GET',
       };
       const parameters = [
-        {
+        new ApiParameter({
           name: 'user_id',
           originalName: 'userId',
           paramLocation: 'path',
           paramSchema: {},
           required: true,
-        },
+        }),
       ];
       const args = {
         user_id: '123',
@@ -759,13 +759,13 @@ describe('RestApiTool Utilities', () => {
         method: 'GET',
       };
       const userIdParameters: ApiParameter[] = [
-        {
+        new ApiParameter({
           name: 'user_id',
           originalName: 'user_id',
           paramLocation: 'path',
           paramSchema: {},
           required: true,
-        },
+        }),
       ];
 
       it('should percent-encode path traversal sequences in path parameter values', () => {
@@ -814,13 +814,13 @@ describe('RestApiTool Utilities', () => {
       it('should merge declared query parameters with an encoded path value', () => {
         const parameters: ApiParameter[] = [
           ...userIdParameters,
-          {
+          new ApiParameter({
             name: 'q',
             originalName: 'q',
             paramLocation: 'query',
             paramSchema: {},
             required: false,
-          },
+          }),
         ];
 
         const result = prepareRequestParams(usersEndpoint, parameters, {
@@ -860,13 +860,13 @@ describe('RestApiTool Utilities', () => {
           method: 'GET',
         };
         const parameters: ApiParameter[] = [
-          {
+          new ApiParameter({
             name: 'region',
             originalName: 'region',
             paramLocation: 'path',
             paramSchema: {},
             required: true,
-          },
+          }),
         ];
 
         const result = prepareRequestParams(endpoint, parameters, {
@@ -984,13 +984,13 @@ describe('RestApiTool Utilities', () => {
           method: 'GET',
         };
         const parameters: ApiParameter[] = [
-          {
+          new ApiParameter({
             name: 'id',
             originalName: 'id',
             paramLocation: 'path',
             paramSchema: {},
             required: true,
-          },
+          }),
         ];
 
         const result = prepareRequestParams(endpoint, parameters, {id: '7'});

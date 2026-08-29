@@ -8,7 +8,6 @@ import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../../utils/experimental.js';
 import {
   ApiParameter,
-  createApiParameter,
   normalizeSchema,
   toSnakeCaseName,
 } from '../common/common.js';
@@ -36,11 +35,9 @@ export class OperationParser {
     this.dedupeParamNames();
   }
 
-  private getParamName(originalName: string): string {
-    if (this.preservePropertyNames) {
-      return originalName;
-    }
-    return toSnakeCaseName(originalName);
+  /** The name to force on a parameter, or `undefined` to let it derive one. */
+  private overrideName(originalName: string): string | undefined {
+    return this.preservePropertyNames ? originalName : undefined;
   }
 
   private processOperationParameters() {
@@ -55,13 +52,13 @@ export class OperationParser {
           `operation parameter '${originalName}'`,
         );
         this.params.push(
-          createApiParameter({
+          new ApiParameter({
             originalName,
             paramLocation: param.in || '',
             paramSchema: schema,
             description,
             required: param.required || false,
-            name: this.getParamName(originalName),
+            name: this.overrideName(originalName),
           }),
         );
       }
@@ -91,7 +88,7 @@ export class OperationParser {
         if (Object.keys(properties).length > 0) {
           for (const [propName, propDetails] of Object.entries(properties)) {
             this.params.push(
-              createApiParameter({
+              new ApiParameter({
                 originalName: propName,
                 paramLocation: 'body',
                 paramSchema: normalizeSchema(
@@ -99,13 +96,13 @@ export class OperationParser {
                   `request body property '${propName}'`,
                 ),
                 required: (schema.required || []).includes(propName),
-                name: this.getParamName(propName),
+                name: this.overrideName(propName),
               }),
             );
           }
         } else {
           this.params.push(
-            createApiParameter({
+            new ApiParameter({
               originalName: '',
               paramLocation: 'body',
               paramSchema: schema,
@@ -117,7 +114,7 @@ export class OperationParser {
         }
       } else {
         this.params.push(
-          createApiParameter({
+          new ApiParameter({
             originalName: schema.type === 'array' ? 'array' : 'body',
             paramLocation: 'body',
             paramSchema: schema,
@@ -151,7 +148,7 @@ export class OperationParser {
       }
     }
 
-    this.returnValue = createApiParameter({
+    this.returnValue = new ApiParameter({
       originalName: '',
       paramLocation: '',
       paramSchema: returnSchema,
@@ -219,7 +216,10 @@ export class OperationParser {
     if (!operationId) {
       throw new Error('Operation ID is missing');
     }
-    return this.getParamName(operationId).substring(0, 60);
+    const name = this.preservePropertyNames
+      ? operationId
+      : toSnakeCaseName(operationId);
+    return name.substring(0, 60);
   }
 
   /**

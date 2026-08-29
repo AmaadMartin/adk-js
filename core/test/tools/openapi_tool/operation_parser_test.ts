@@ -196,4 +196,69 @@ describe('OperationParser schema normalization', () => {
 
     expect(params[0].name).toBe('query_param');
   });
+
+  it('should prefix a parameter named after a reserved word', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'listPets',
+      parameters: [
+        {name: 'in', in: 'query', schema: {type: 'string'}},
+        {name: 'petId', in: 'path', schema: {type: 'integer'}},
+      ],
+      responses: {},
+    };
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(params.map((param) => param.name)).toEqual(['param_in', 'pet_id']);
+  });
+
+  it('should preserve declared names without renaming reserved words', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'listPets',
+      parameters: [
+        {name: 'in', in: 'query', schema: {type: 'string'}},
+        {name: 'petId', in: 'path', schema: {type: 'integer'}},
+      ],
+      responses: {},
+    };
+
+    const params = new OperationParser(op, {
+      preservePropertyNames: true,
+    }).getParameters();
+
+    expect(params.map((param) => param.name)).toEqual(['in', 'petId']);
+  });
+
+  it('should preserve the operation id as the function name', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'listPets',
+      responses: {},
+    };
+
+    expect(
+      new OperationParser(op, {preservePropertyNames: true}).getFunctionName(),
+    ).toBe('listPets');
+    expect(new OperationParser(op).getFunctionName()).toBe('list_pets');
+  });
+
+  it('should expose the parameter type on a parsed operation', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'listPets',
+      parameters: [
+        {
+          name: 'limit',
+          in: 'query',
+          description: 'How many pets',
+          schema: {type: 'integer'},
+        },
+      ],
+      responses: {},
+    };
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(params[0].typeHint).toBe('number');
+    expect(params[0].typeValue).toEqual({kind: 'integer'});
+    expect(params[0].toDocString()).toBe('limit (number): How many pets');
+  });
 });
