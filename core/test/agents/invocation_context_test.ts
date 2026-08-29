@@ -11,6 +11,7 @@ import {
   InvocationContext,
   LoopAgent,
   PluginManager,
+  ReadonlyContext,
   Session,
   createEvent,
 } from '@google/adk';
@@ -44,6 +45,29 @@ class LlmCallingAgent extends BaseAgent {
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
     context.incrementLlmCallCount();
+    yield createEvent({
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'ok'}]},
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for this test.
+  }
+}
+
+/**
+ * A sub-agent that writes to the invocation's custom metadata. It goes through
+ * `BaseAgent.runAsync`, so the write lands in the child context that
+ * `createInvocationContext` built — the copy the parent must still share.
+ */
+class MetadataWritingAgent extends BaseAgent {
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    context.customMetadata['written_by'] = this.name;
     yield createEvent({
       author: this.name,
       content: {role: 'model', parts: [{text: 'ok'}]},
@@ -170,5 +194,56 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+describe('InvocationContext custom metadata', () => {
+  function makeContext(): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'inv-1',
+      session: makeSession(),
+      pluginManager: new PluginManager([]),
+    });
+  }
+
+  it('starts empty', () => {
+    expect(makeContext().customMetadata).toEqual({});
+  });
+
+  it('shares the same record with a clone, so a child writes where the parent reads', () => {
+    const parent = makeContext();
+
+    const child = parent.clone();
+    child.customMetadata['http_debug_info'] = ['recorded by the child'];
+
+    expect(child.customMetadata).toBe(parent.customMetadata);
+    expect(parent.customMetadata['http_debug_info']).toEqual([
+      'recorded by the child',
+    ]);
+  });
+
+  it('shares the record with the context a sub-agent runs under', async () => {
+    const agent = new MetadataWritingAgent({name: 'writer'});
+    const parent = new InvocationContext({
+      invocationId: 'inv-run',
+      agent,
+      session: makeSession(),
+      pluginManager: new PluginManager([]),
+    });
+
+    for await (const _event of agent.runAsync(parent)) {
+      // Draining the generator is what runs the agent.
+    }
+
+    expect(parent.customMetadata['written_by']).toBe('writer');
+  });
+
+  it('exposes the record through ReadonlyContext', () => {
+    const context = makeContext();
+    context.customMetadata['key'] = 'value';
+
+    expect(new ReadonlyContext(context).customMetadata).toEqual({
+      key: 'value',
+    });
   });
 });

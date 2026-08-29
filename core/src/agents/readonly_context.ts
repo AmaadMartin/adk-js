@@ -67,4 +67,12 @@ export class ReadonlyContext {
   get a2aMetadata(): Record<string, unknown> | undefined {
     return this.invocationContext.a2aMetadata;
   }
+
+  /**
+   * A read-only view of the metadata that tools and services accumulated
+   * during this invocation.
+   */
+  get customMetadata(): Readonly<Record<string, unknown>> {
+    return this.invocationContext.customMetadata;
+  }
 }
