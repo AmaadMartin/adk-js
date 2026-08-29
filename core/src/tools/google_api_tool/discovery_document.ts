@@ -160,28 +160,17 @@ function getJson(
       });
     };
 
-    const request =
-      new URL(url).protocol === 'http:'
-        ? http.request(
-            url,
-            {headers: JSON_HEADERS, timeout: DISCOVERY_REQUEST_TIMEOUT_MS},
-            collect,
-          )
-        : https.request(
-            url,
-            {
-              headers: JSON_HEADERS,
-              timeout: DISCOVERY_REQUEST_TIMEOUT_MS,
-              agent: certs
-                ? new https.Agent({
-                    cert: certs.cert,
-                    key: certs.key,
-                    passphrase: certs.passphrase,
-                  })
-                : undefined,
-            },
-            collect,
-          );
+    const isPlainHttp = new URL(url).protocol === 'http:';
+    const transport = isPlainHttp ? http : https;
+    const request = transport.request(
+      url,
+      {
+        headers: JSON_HEADERS,
+        timeout: DISCOVERY_REQUEST_TIMEOUT_MS,
+        agent: certs && !isPlainHttp ? new https.Agent(certs) : undefined,
+      },
+      collect,
+    );
 
     // A timeout only fires the event; the request stays open until destroyed.
     request.on('timeout', () => {
