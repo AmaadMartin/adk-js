@@ -165,9 +165,9 @@ describe('parseAndGetEvalsToRun', () => {
     ]);
   });
 
-  it('cuts the selector list at a further colon', () => {
+  it('keeps a further colon inside the case name, discarding nothing', () => {
     expect([...parseAndGetEvalsToRun(['set.json:a,b:c'])]).toEqual([
-      ['set.json', ['a', 'b']],
+      ['set.json', ['a', 'b:c']],
     ]);
   });
 

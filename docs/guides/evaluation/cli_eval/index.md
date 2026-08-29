@@ -235,7 +235,7 @@ adk-python calls this export `reset_data`. adk-js agent files are camelCase
 | No `--config_file_path`                                                           | Not an error. The default criteria apply.                     |
 
 The process exits `0` whether cases pass or fail, matching adk-python. Read the
-summary block, or call `runEvals` yourself, to gate a build on the result.
+summary block to gate a build on the result.
 
 ## Seeing the detail
 

@@ -41,8 +41,11 @@ export interface EvalAgentOptions {
  * names to run from it.
  *
  * A Windows drive letter is not a selector separator, so the search for `:`
- * starts after it. The result is a `Map` so insertion order is kept and a case
- * named `__proto__` cannot collide with an object prototype key.
+ * starts after it. Everything after the separator is the case list, so a case
+ * name can contain a colon; adk-python cuts the list at a second colon and
+ * drops the rest of the input without a message. The result is a `Map` so
+ * insertion order is kept and a case named `__proto__` cannot collide with an
+ * object prototype key.
  *
  * Listing one eval set twice accumulates its selectors, which narrows an
  * unselected entry: `['f.json', 'f.json:case_1']` runs only `case_1`, not
@@ -60,7 +63,10 @@ export function parseAndGetEvalsToRun(inputs: string[]): Map<string, string[]> {
     const selectors =
       separatorIndex === -1
         ? []
-        : parseSelectors(input.slice(separatorIndex + 1));
+        : input
+            .slice(separatorIndex + 1)
+            .split(',')
+            .filter((selector) => selector.trim() !== '');
 
     evalSetToEvals.set(evalSet, [
       ...(evalSetToEvals.get(evalSet) ?? []),
@@ -69,14 +75,6 @@ export function parseAndGetEvalsToRun(inputs: string[]): Map<string, string[]> {
   }
 
   return evalSetToEvals;
-}
-
-/** Everything up to a further `:`, split on commas, blanks dropped. */
-function parseSelectors(selectorList: string): string[] {
-  return selectorList
-    .split(':')[0]
-    .split(',')
-    .filter((selector) => selector.trim() !== '');
 }
 
 /**
