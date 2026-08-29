@@ -53,6 +53,12 @@ function build({
     sourcemap: bundle,
     packages: 'external',
     logLevel: 'info',
+    // esbuild downlevels `import()` to `require()` for the `node10.4` target,
+    // which cannot load an ES module or a `file://` URL. Every runtime that
+    // loads this output supports dynamic import, and
+    // `resolveFullyQualifiedName` needs it to load a module a config file
+    // names.
+    supported: {'dynamic-import': true},
   };
 
   if (platform === 'browser' && bundle) {

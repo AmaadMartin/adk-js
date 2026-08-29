@@ -1,0 +1,105 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {builtinModules} from 'node:module';
+import {pathToFileURL} from 'node:url';
+
+import {InputValidationError} from '../errors/input_validation_error.js';
+
+/** Separates the module specifier from the export name. */
+const EXPORT_SEPARATOR = '#';
+
+/** Export read when a qualified name names no export. */
+const DEFAULT_EXPORT = 'default';
+
+/** Prefix of an explicitly namespaced Node built-in specifier. */
+const BUILTIN_PREFIX = 'node:';
+
+/** Every Node built-in module, by the bare name a specifier may use. */
+const BUILTIN_MODULES = new Set(builtinModules);
+
+/** Splits a qualified name into its module specifier and its export name. */
+function splitQualifiedName(name: string): [string, string] {
+  const separatorIndex = name.indexOf(EXPORT_SEPARATOR);
+  if (separatorIndex === -1) {
+    return [name, DEFAULT_EXPORT];
+  }
+  const exportName = name.slice(separatorIndex + 1);
+  return [name.slice(0, separatorIndex), exportName || DEFAULT_EXPORT];
+}
+
+/** Returns true when the specifier names a Node built-in module. */
+function isBuiltinModule(specifier: string): boolean {
+  return specifier.startsWith(BUILTIN_PREFIX) || BUILTIN_MODULES.has(specifier);
+}
+
+/** Returns true when the specifier is resolved against a base file. */
+function isRelative(specifier: string): boolean {
+  return specifier.startsWith('./') || specifier.startsWith('../');
+}
+
+/** Builds the error every failure mode of the resolver reports. */
+function invalidName(name: string, cause: unknown): InputValidationError {
+  return new InputValidationError(`Invalid fully qualified name: ${name}`, {
+    cause,
+  });
+}
+
+/**
+ * Resolves a fully-qualified name of the form `<module specifier>#<export>` to
+ * the value the named module exports. When the separator is absent the whole
+ * string is the specifier and the `default` export is read.
+ *
+ * The import runs the named module's top-level code, so a caller must trust
+ * `name` as far as it trusts the configuration file the name came from. Node
+ * built-ins are refused so that a configuration file cannot reach
+ * `node:child_process`.
+ *
+ * Unlike `optional_peer.ts`, which keeps its specifiers literal so that
+ * bundlers can see them, the specifier here is user configuration and is known
+ * only at run time.
+ *
+ * @param name The fully-qualified name to resolve.
+ * @param baseFilePath Absolute path of the file the name came from. A relative
+ *   specifier resolves against its directory. Bare and absolute specifiers
+ *   ignore it.
+ * @return The exported value.
+ * @throws {InputValidationError} When the specifier names a built-in, the
+ *   module fails to load, or the module has no such export. The underlying
+ *   failure is attached as the error's `cause`.
+ */
+export async function resolveFullyQualifiedName(
+  name: string,
+  baseFilePath?: string,
+): Promise<unknown> {
+  const [specifier, exportName] = splitQualifiedName(name);
+  if (isBuiltinModule(specifier)) {
+    throw invalidName(
+      name,
+      new Error(
+        `Node built-in module "${specifier}" cannot be named in a ` +
+          `configuration file.`,
+      ),
+    );
+  }
+  const resolved =
+    isRelative(specifier) && baseFilePath !== undefined
+      ? new URL(specifier, pathToFileURL(baseFilePath)).href
+      : specifier;
+  let namespace: Record<string, unknown>;
+  try {
+    namespace = await import(resolved);
+  } catch (err: unknown) {
+    throw invalidName(name, err);
+  }
+  if (!(exportName in namespace)) {
+    throw invalidName(
+      name,
+      new Error(`Module "${specifier}" has no export named "${exportName}".`),
+    );
+  }
+  return namespace[exportName];
+}
