@@ -78,26 +78,3 @@ await docsTool.runAsync({args: {}, toolContext});
 ```
 
 An empty string is a valid query and reaches the retriever unchanged.
-
-## Using a retriever that is not LlamaIndex.TS
-
-The tool depends on the interface, not on the package. Anything that implements
-`LlamaIndexRetriever` works:
-
-```ts
-import {LlamaIndexRetrievalTool} from '@google/adk';
-import type {LlamaIndexRetriever} from '@google/adk';
-
-const retriever: LlamaIndexRetriever = {
-  async retrieve(query: string) {
-    const text = await search(query);
-    return text ? [{node: {getContent: () => text}}] : [];
-  },
-};
-
-const tool = new LlamaIndexRetrievalTool({
-  name: 'notes',
-  description: 'Searches my notes.',
-  retriever,
-});
-```

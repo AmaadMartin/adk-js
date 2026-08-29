@@ -1,8 +1,8 @@
 # ADK Developer Guides
 
-This directory contains specific developer guides for the ADK TypeScript
-implementation. For the official ADK documentation, visit
-[adk.dev](https://adk.dev/).
+One guide per feature, for the ADK TypeScript implementation. This mirrors
+adk-python's `docs/guides/` layout, so the two SDKs document a feature in the
+same place. Product documentation lives at [adk.dev](https://adk.dev/).
 
 ## Index
 
