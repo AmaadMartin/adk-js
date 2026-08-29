@@ -40,6 +40,9 @@ export function isBaseRetrievalTool(obj: unknown): obj is BaseRetrievalTool {
  *
  * A retrieval that matches nothing is a normal outcome. Return a message that
  * says so, so the model can act on it and continue the turn. Do not throw.
+ *
+ * The model populates `args['query']`, so it is untrusted. A subclass must
+ * validate it before it reaches an index, a filesystem, or a network call.
  */
 export abstract class BaseRetrievalTool extends BaseTool {
   /** A unique symbol to identify ADK retrieval tool class. */
