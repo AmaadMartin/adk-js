@@ -5,6 +5,7 @@
  */
 
 import {JWT} from 'google-auth-library';
+import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it, vi} from 'vitest';
 import {
   AuthCredential,
@@ -73,10 +74,91 @@ describe('AutoAuthCredentialExchanger', () => {
       authCredential: credential,
     });
 
-    expect(result.credential.authType).toBe(AuthCredentialTypes.HTTP);
     expect(result.credential.http?.credentials.token).toBe(
       'oauth2-access-token',
     );
+  });
+
+  it('keeps the oauth2 data on the credential it returns', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+    const authScheme = {
+      type: 'openIdConnect',
+      openIdConnectUrl: 'https://example.com/.well-known/openid-configuration',
+      authorizationEndpoint: 'https://example.com/auth',
+      tokenEndpoint: 'https://example.com/token',
+    } satisfies OpenIdConnectWithConfig;
+
+    const result = await exchanger.exchange({
+      authScheme,
+      authCredential: {
+        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+        oauth2: {
+          accessToken: 'oauth2-access-token',
+          refreshToken: 'oauth2-refresh-token',
+        },
+      },
+    });
+
+    // The caller stores this credential. A bearer credential on its own holds
+    // no refresh token, so a later call could never renew the access token.
+    expect(result.credential.oauth2?.refreshToken).toBe('oauth2-refresh-token');
+    expect(result.credential.http?.credentials.token).toBe(
+      'oauth2-access-token',
+    );
+  });
+
+  it('reports no exchange when it only wraps a token it was given', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+    const authScheme = {
+      type: 'openIdConnect',
+      openIdConnectUrl: 'https://example.com/.well-known/openid-configuration',
+      authorizationEndpoint: 'https://example.com/auth',
+      tokenEndpoint: 'https://example.com/token',
+    } satisfies OpenIdConnectWithConfig;
+
+    const result = await exchanger.exchange({
+      authScheme,
+      authCredential: {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          accessToken: 'oauth2-access-token',
+        },
+      },
+    });
+
+    // `ToolAuthHandler` persists on this flag, so a conversion that reached no
+    // token endpoint must not report an exchange.
+    expect(result.wasExchanged).toBe(false);
+  });
+
+  it('keeps the bearer token a tool was configured with under an oauth2 scheme', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+    const authScheme = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/auth',
+          tokenUrl: 'https://example.com/token',
+          scopes: {},
+        },
+      },
+    } satisfies OpenAPIV3.OAuth2SecurityScheme;
+
+    // The dispatcher routes on `authType`, so a tool configured with an OAuth2
+    // scheme and a bearer token its owner already holds arrives here as an
+    // OAuth2-typed credential carrying no oauth2 block.
+    const result = await exchanger.exchange({
+      authScheme,
+      authCredential: {
+        authType: AuthCredentialTypes.OAUTH2,
+        http: {scheme: 'bearer', credentials: {token: 'configured-token'}},
+      },
+    });
+
+    expect(result.credential.http?.credentials.token).toBe('configured-token');
+    expect(result.wasExchanged).toBe(false);
   });
 });
 

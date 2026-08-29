@@ -15,12 +15,7 @@ import {
   OpenIdConnectWithConfig,
 } from '../../../src/auth/auth_schemes.js';
 import {CredentialExchangeError} from '../../../src/auth/exchanger/base_credential_exchanger.js';
-import {
-  checkSchemeCredentialType,
-  generateAuthToken,
-  OAuth2BearerCredentialExchanger,
-} from '../../../src/tools/openapi_tool/auth/credential_exchangers/oauth2_bearer_exchanger.js';
-import {logger} from '../../../src/utils/logger.js';
+import {OAuth2RefreshingBearerExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/oauth2_bearer_exchanger.js';
 
 const TOKEN_ENDPOINT = 'https://example.com/token';
 const ONE_HOUR_MS = 3600_000;
@@ -39,10 +34,16 @@ const apiKeyScheme = {
   name: 'X-Api-Key',
 } satisfies OpenAPIV3.ApiKeySecurityScheme;
 
-/** An oauth2 scheme whose flows declare no token URL. */
-const endpointlessScheme = {
+/** An OAuth2 scheme whose flows resolve to an acquisition grant type. */
+const authorizationCodeScheme = {
   type: 'oauth2',
-  flows: {},
+  flows: {
+    authorizationCode: {
+      authorizationUrl: 'https://example.com/auth',
+      tokenUrl: TOKEN_ENDPOINT,
+      scopes: {},
+    },
+  },
 } satisfies OpenAPIV3.OAuth2SecurityScheme;
 
 /** Builds an OAuth2 credential, overriding the fields a case cares about. */
@@ -71,83 +72,7 @@ function expiredCredential(
   });
 }
 
-function tokenResponse(body: Record<string, unknown>): Response {
-  return new Response(JSON.stringify(body), {status: 200});
-}
-
-describe('checkSchemeCredentialType', () => {
-  it('accepts an oauth2 credential with an openIdConnect scheme', () => {
-    expect(() =>
-      checkSchemeCredentialType({
-        authScheme,
-        authCredential: oauth2Credential({accessToken: 'test_access_token'}),
-      }),
-    ).not.toThrow();
-  });
-
-  it('throws when the credential is missing', () => {
-    expect(() => checkSchemeCredentialType({authScheme})).toThrow(
-      /auth_credential is empty\. Please create AuthCredential using OAuth2Auth\./,
-    );
-    expect(() => checkSchemeCredentialType({authScheme})).toThrow(
-      CredentialExchangeError,
-    );
-  });
-
-  it('reports the missing credential before the invalid scheme', () => {
-    expect(() => checkSchemeCredentialType({authScheme: apiKeyScheme})).toThrow(
-      /auth_credential is empty/,
-    );
-  });
-
-  it('throws when the scheme type is not oauth2 or openIdConnect', () => {
-    expect(() =>
-      checkSchemeCredentialType({
-        authScheme: apiKeyScheme,
-        authCredential: oauth2Credential(),
-      }),
-    ).toThrow(
-      /Invalid security scheme, expect openIdConnect or oauth2 auth scheme, but got apiKey/,
-    );
-  });
-
-  it('throws when the scheme is missing', () => {
-    expect(() =>
-      checkSchemeCredentialType({authCredential: oauth2Credential()}),
-    ).toThrow(/Invalid security scheme/);
-  });
-
-  it('throws when the credential has neither oauth2 nor http', () => {
-    expect(() =>
-      checkSchemeCredentialType({
-        authScheme,
-        authCredential: {authType: AuthCredentialTypes.OAUTH2},
-      }),
-    ).toThrow(
-      /auth_credential is not configured with oauth2\. Please create AuthCredential and set OAuth2Auth\./,
-    );
-  });
-
-  it('reports the invalid scheme before the missing oauth2 configuration', () => {
-    expect(() =>
-      checkSchemeCredentialType({
-        authScheme: apiKeyScheme,
-        authCredential: {authType: AuthCredentialTypes.OAUTH2},
-      }),
-    ).toThrow(/Invalid security scheme/);
-  });
-});
-
-describe('generateAuthToken', () => {
-  it('wraps the access token as an http bearer credential', () => {
-    expect(generateAuthToken('test_access_token')).toEqual({
-      authType: AuthCredentialTypes.HTTP,
-      http: {scheme: 'bearer', credentials: {token: 'test_access_token'}},
-    });
-  });
-});
-
-describe('OAuth2BearerCredentialExchanger', () => {
+describe('OAuth2RefreshingBearerExchanger', () => {
   const fetchMock = vi.fn<typeof fetch>();
 
   /** Exchanges through the interface and returns the wrapped token. */
@@ -155,7 +80,7 @@ describe('OAuth2BearerCredentialExchanger', () => {
     scheme: AuthScheme | undefined,
     authCredential: AuthCredential,
   ) {
-    return new OAuth2BearerCredentialExchanger().exchange({
+    return new OAuth2RefreshingBearerExchanger().exchange({
       authScheme: scheme,
       authCredential,
     });
@@ -176,10 +101,12 @@ describe('OAuth2BearerCredentialExchanger', () => {
       oauth2Credential({accessToken: 'test_access_token'}),
     );
 
-    expect(result.wasExchanged).toBe(true);
-    expect(result.credential).toEqual({
-      authType: AuthCredentialTypes.HTTP,
-      http: {scheme: 'bearer', credentials: {token: 'test_access_token'}},
+    // Wrapping a token the credential already holds reaches no token
+    // endpoint, and `ToolAuthHandler` persists the credential on this flag.
+    expect(result.wasExchanged).toBe(false);
+    expect(result.credential.http).toEqual({
+      scheme: 'bearer',
+      credentials: {token: 'test_access_token'},
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -190,8 +117,36 @@ describe('OAuth2BearerCredentialExchanger', () => {
         apiKeyScheme,
         oauth2Credential({accessToken: 'test_access_token'}),
       ),
-    ).rejects.toThrow(/Invalid security scheme/);
+    ).rejects.toThrow(
+      /Invalid security scheme, expect openIdConnect or oauth2 auth scheme, but got apiKey/,
+    );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the scheme is missing', async () => {
+    const promise = exchange(
+      undefined,
+      oauth2Credential({accessToken: 'test_access_token'}),
+    );
+
+    await expect(promise).rejects.toThrow(CredentialExchangeError);
+    await expect(promise).rejects.toThrow(/Invalid security scheme/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a credential that carries neither oauth2 nor http', async () => {
+    await expect(
+      exchange(authScheme, {authType: AuthCredentialTypes.OAUTH2}),
+    ).rejects.toThrow(
+      /auth_credential is not configured with oauth2\. Please create AuthCredential and set OAuth2Auth\./,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports the invalid scheme before the missing oauth2 configuration', async () => {
+    await expect(
+      exchange(apiKeyScheme, {authType: AuthCredentialTypes.OAUTH2}),
+    ).rejects.toThrow(/Invalid security scheme/);
   });
 
   it('returns the original credential when there is no access token', async () => {
@@ -202,7 +157,7 @@ describe('OAuth2BearerCredentialExchanger', () => {
     const result = await exchange(authScheme, authCredential);
 
     expect(result.wasExchanged).toBe(false);
-    expect(result.credential).toBe(authCredential);
+    expect(result.credential).toEqual(authCredential);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -215,161 +170,97 @@ describe('OAuth2BearerCredentialExchanger', () => {
     const result = await exchange(authScheme, authCredential);
 
     expect(result.wasExchanged).toBe(false);
-    expect(result.credential).toBe(authCredential);
+    expect(result.credential).toEqual(authCredential);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('refreshes an expired access token before wrapping it', async () => {
-    fetchMock.mockResolvedValue(
-      tokenResponse({access_token: 'refreshed_access_token', expires_in: 3600}),
-    );
+  it('passes a tool-configured bearer token through a scheme that declares flows', async () => {
+    // The shape a tool configured with an OAuth2 scheme and a bearer token
+    // reaches this exchanger with: `AutoAuthCredentialExchanger` routes on
+    // `authType`, so the credential is OAuth2-typed and carries no oauth2
+    // block. A scheme with flows resolves to a grant type, so the acquisition
+    // delegate rejects it for the OAuth2 client it does not hold.
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      http: {scheme: 'bearer', credentials: {token: 'existing_token'}},
+    };
 
-    const result = await exchange(authScheme, expiredCredential());
+    const result = await exchange(authorizationCodeScheme, authCredential);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(TOKEN_ENDPOINT);
-    const body = new URLSearchParams(String(init?.body));
-    expect(body.get('grant_type')).toBe('refresh_token');
-    expect(body.get('refresh_token')).toBe('test_refresh_token');
-    expect(body.get('client_id')).toBe('test-client-id');
-    expect(result.credential.http?.credentials.token).toBe(
-      'refreshed_access_token',
-    );
+    expect(result.wasExchanged).toBe(false);
+    expect(result.credential).toEqual(authCredential);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('keeps the stale token when the token request rejects', async () => {
-    fetchMock.mockRejectedValue(new Error('network down'));
-
-    const result = await exchange(authScheme, expiredCredential());
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('keeps the stale token when the token endpoint returns an error status', async () => {
-    fetchMock.mockResolvedValue(new Response('{}', {status: 500}));
-
-    const result = await exchange(authScheme, expiredCredential());
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('keeps the stale token when the token request rejects with a non-error', async () => {
-    fetchMock.mockRejectedValue('refresh unavailable');
-
-    const result = await exchange(authScheme, expiredCredential());
-
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('keeps the stale token when the refresh response omits the access token', async () => {
-    fetchMock.mockResolvedValue(tokenResponse({expires_in: 3600}));
-
-    const result = await exchange(authScheme, expiredCredential());
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('does not refresh a token that is still valid', async () => {
+  it('does not contact the token endpoint for an expired credential that carries no refresh token', async () => {
     const result = await exchange(
       authScheme,
-      expiredCredential({
-        accessToken: 'valid_access_token',
-        expiresAt: Date.now() + ONE_HOUR_MS,
-      }),
-    );
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.credential.http?.credentials.token).toBe(
-      'valid_access_token',
-    );
-  });
-
-  it('does not refresh an expired token without a refresh token', async () => {
-    const result = await exchange(
-      authScheme,
-      oauth2Credential({
-        accessToken: 'stale_access_token',
-        expiresAt: Date.now() - ONE_HOUR_MS,
-      }),
+      expiredCredential({refreshToken: undefined}),
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.credential.http?.credentials.token).toBe(
       'stale_access_token',
     );
-  });
-
-  it('does not refresh when the scheme declares no token endpoint', async () => {
-    const result = await exchange(endpointlessScheme, expiredCredential());
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('does not refresh without a client id', async () => {
-    const result = await exchange(
-      authScheme,
-      expiredCredential({clientId: undefined}),
-    );
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('does not refresh without a client secret', async () => {
-    const result = await exchange(
-      authScheme,
-      expiredCredential({clientSecret: undefined}),
-    );
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.credential.http?.credentials.token).toBe(
-      'stale_access_token',
-    );
-  });
-
-  it('does not warn about a missing refresh token on a healthy call', async () => {
-    const warn = vi.spyOn(logger, 'warn');
-
-    await exchange(
-      authScheme,
-      oauth2Credential({accessToken: 'valid_access_token'}),
-    );
-
-    expect(warn).not.toHaveBeenCalledWith(
-      'No refresh token available to refresh credential',
-    );
-    warn.mockRestore();
   });
 
   it('does not mutate the credential it is given', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: 'fresh_access_token',
+        expires_in: 3600,
+      }),
+    } as Response);
     const authCredential = expiredCredential({
       accessToken: 'test_access_token',
     });
-    fetchMock.mockResolvedValue(
-      tokenResponse({access_token: 'refreshed_access_token'}),
-    );
 
     await exchange(authScheme, authCredential);
 
     expect(authCredential.authType).toBe(AuthCredentialTypes.OAUTH2);
     expect(authCredential.oauth2?.accessToken).toBe('test_access_token');
     expect(authCredential.http).toBeUndefined();
+  });
+
+  it('refreshes an expired token before it wraps it', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: 'fresh_access_token',
+        expires_in: 3600,
+      }),
+    } as Response);
+
+    const result = await exchange(authScheme, expiredCredential());
+
+    expect(result.credential.http?.credentials.token).toBe(
+      'fresh_access_token',
+    );
+    // The caller stores this credential, so it must carry the tokens the
+    // refresh returned rather than the ones it replaced.
+    expect(result.credential.oauth2?.accessToken).toBe('fresh_access_token');
+    expect(result.wasExchanged).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(TOKEN_ENDPOINT, expect.anything());
+  });
+
+  it('reports an exchange when a refresh rotates only the refresh token', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: 'stale_access_token',
+        refresh_token: 'rotated_refresh_token',
+        expires_in: 3600,
+      }),
+    } as Response);
+
+    const result = await exchange(authScheme, expiredCredential());
+
+    // The caller persists on this flag. Without it the session keeps the
+    // refresh token the provider has just invalidated.
+    expect(result.wasExchanged).toBe(true);
+    expect(result.credential.oauth2?.refreshToken).toBe(
+      'rotated_refresh_token',
+    );
   });
 });

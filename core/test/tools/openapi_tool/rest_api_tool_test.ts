@@ -10,7 +10,10 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -653,6 +656,56 @@ describe('RestApiTool', () => {
       authScheme,
       authCredential,
       expect.anything(),
+    );
+  });
+
+  it('sends an OAuth2 access token as a bearer token', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      {responses: {}},
+      {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+      },
+      {
+        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          accessToken: 'oidc-access-token',
+        },
+      },
+    );
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    // The real ToolAuthHandler, exchangers and session state run here: this is
+    // the path that sent no Authorization header at all.
+    await tool.runAsync({
+      args: {},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'test-invocation',
+          session: createSession({id: 'test-session', appName: 'test-app'}),
+          pluginManager: new PluginManager([]),
+        }),
+      }),
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer oidc-access-token',
+        }),
+      }),
     );
   });
 });

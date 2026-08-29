@@ -20,13 +20,23 @@ vi.mock(
   () => {
     return {
       AutoAuthCredentialExchanger: vi.fn().mockImplementation(() => ({
-        exchange: vi.fn().mockResolvedValue({
-          credential: {
-            authType: AuthCredentialTypes.HTTP,
-            http: {scheme: 'bearer', credentials: {token: 'exchanged-token'}},
-          },
-          wasExchanged: true,
-        }),
+        // The real exchanger registers no exchanger for `HTTP`, so a
+        // credential already in bearer form comes back untouched.
+        exchange: vi.fn(
+          async ({authCredential}: {authCredential: AuthCredential}) =>
+            authCredential.authType === AuthCredentialTypes.HTTP
+              ? {credential: authCredential, wasExchanged: false}
+              : {
+                  credential: {
+                    authType: AuthCredentialTypes.HTTP,
+                    http: {
+                      scheme: 'bearer',
+                      credentials: {token: 'exchanged-token'},
+                    },
+                  },
+                  wasExchanged: true,
+                },
+        ),
       })),
     };
   },
@@ -136,7 +146,7 @@ describe('ToolAuthHandler', () => {
     expect(state.hasDelta()).toBe(true);
   });
 
-  it('re-uses a credential persisted by a previous tool call instead of re-exchanging', async () => {
+  it('re-uses a credential persisted by a previous tool call instead of requesting one', async () => {
     // First invocation: exchange and store the credential.
     const firstState = new State();
     const firstContext = {
@@ -170,7 +180,8 @@ describe('ToolAuthHandler', () => {
     expect(result.authCredential?.http?.credentials.token).toBe(
       'exchanged-token',
     );
-    // The cached credential was reused; no second exchange was triggered.
+    // The stored credential was reused, so no new credential was requested.
+    // It still runs through the exchange, which no-ops for an HTTP credential.
     expect(secondContext.getAuthResponse).not.toHaveBeenCalled();
   });
 

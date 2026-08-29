@@ -74,33 +74,36 @@ export class ToolAuthHandler {
     }
 
     const store = new ToolContextCredentialStore(this.context);
-    const existingCredential = store.getCredential(this.authScheme);
-
-    if (existingCredential) {
-      return {state: 'done', authCredential: existingCredential};
-    }
-
-    const authConfig: AuthConfig = {
-      authScheme: this.authScheme,
-      rawAuthCredential: this.authCredential,
-      credentialKey: this.credentialKey || 'default_openapi_key',
-    };
-
-    // A credential returned by an auth response was supplied interactively by
-    // the client. Otherwise fall back to the credential the tool was
-    // configured with: schemes such as `apiKey`, `http` and `serviceAccount`
-    // need no user interaction, so requesting one would strand the tool in
-    // `pending` forever.
-    const authResponseCredential = this.context.getAuthResponse(authConfig);
-    const credential = authResponseCredential ?? this.authCredential;
+    let credential = store.getCredential(this.authScheme);
+    let authResponseCredential: AuthCredential | undefined;
 
     if (!credential) {
-      // No credential to work with, so ask the client for one.
-      this.context.requestCredential(authConfig);
+      const authConfig: AuthConfig = {
+        authScheme: this.authScheme,
+        rawAuthCredential: this.authCredential,
+        credentialKey: this.credentialKey || 'default_openapi_key',
+      };
 
-      return {state: 'pending'};
+      // A credential returned by an auth response was supplied interactively
+      // by the client. Otherwise fall back to the credential the tool was
+      // configured with: schemes such as `apiKey`, `http` and `serviceAccount`
+      // need no user interaction, so requesting one would strand the tool in
+      // `pending` forever.
+      authResponseCredential = this.context.getAuthResponse(authConfig);
+      credential = authResponseCredential ?? this.authCredential;
+
+      if (!credential) {
+        // No credential to work with, so ask the client for one.
+        this.context.requestCredential(authConfig);
+
+        return {state: 'pending'};
+      }
     }
 
+    // A stored credential runs through the exchange too, so an expired OAuth2
+    // token is refreshed and the bearer form the Authorization header needs is
+    // derived again. A credential type the exchanger holds no entry for comes
+    // back untouched.
     const exchanger = new AutoAuthCredentialExchanger();
     const result = await exchanger.exchange({
       authScheme: this.authScheme,
@@ -111,7 +114,9 @@ export class ToolAuthHandler {
     // readable once, and an exchange costs a round trip. A statically
     // configured credential that needed no exchange is already available on
     // every invocation, so persisting it to session state would only copy a
-    // secret into the session store for nothing.
+    // secret into the session store for nothing. A provider that rotates the
+    // refresh token invalidates the previous one, so a refreshed credential
+    // replaces the stored one.
     if (authResponseCredential || result.wasExchanged) {
       const key = store.getCredentialKey(this.authScheme);
       store.storeCredential(key, result.credential);
