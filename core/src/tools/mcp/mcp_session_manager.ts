@@ -41,17 +41,27 @@ const RECONNECTION_EXHAUSTED = 'Maximum reconnection attempts';
 
 /** What the manager knows about the transport behind one session. */
 interface TransportState {
-  /** Set once the transport can no longer deliver a response. */
-  failure?: Error;
-  /**
-   * The requests in flight on this session, each with the function that
-   * abandons it, keyed by the request itself.
-   */
-  readonly pendingCalls: Map<Promise<unknown>, (failure: Error) => void>;
+  /** Rejects once the transport can no longer deliver a response. */
+  readonly lost: Promise<never>;
+  /** Rejects {@link TransportState.lost}. Called at most once. */
+  readonly reportLost: (failure: Error) => void;
+}
+
+/** Tracks a session's transport, so a request can stop waiting on a dead one. */
+function createTransportState(): TransportState {
+  // The executor runs synchronously, so the rejecter is collected before the
+  // promise is returned.
+  const rejecters: Array<(failure: Error) => void> = [];
+  const lost = new Promise<never>((_, reject) => rejecters.push(reject));
+  // Most sessions never lose their transport, and a rejection nobody observed
+  // would warn.
+  lost.catch(() => {});
+  const [reportLost] = rejecters;
+  return {lost, reportLost};
 }
 
 /**
- * Logs a transport error, and abandons the waiting requests if it was fatal.
+ * Logs a transport error, and ends the session if the transport cannot recover.
  *
  * Every error is logged, because a transport reports errors that no request is
  * waiting for and those would otherwise be dropped.
@@ -63,12 +73,9 @@ function handleTransportError(state: TransportState, err: unknown): void {
     return;
   }
 
-  state.failure ??= new Error('MCP session connection lost: ' + description, {
-    cause: err,
-  });
-  for (const abandon of state.pendingCalls.values()) {
-    abandon(state.failure);
-  }
+  state.reportLost(
+    new Error('MCP session connection lost: ' + description, {cause: err}),
+  );
 }
 
 /**
@@ -190,7 +197,7 @@ export class MCPSessionManager {
       () => import('@modelcontextprotocol/sdk/client/index.js'),
     );
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
-    const transportState: TransportState = {pendingCalls: new Map()};
+    const transportState = createTransportState();
     const onerror = (err: unknown) => {
       handleTransportError(transportState, err);
     };
@@ -265,24 +272,9 @@ export class MCPSessionManager {
    */
   async runGuarded<T>(client: Client, call: Promise<T>): Promise<T> {
     const state = this.transportStates.get(client);
-    if (!state) {
-      return call;
-    }
-
-    try {
-      return await new Promise<T>((resolve, reject) => {
-        state.pendingCalls.set(call, reject);
-        // This also gives `call` a rejection handler of its own: when the
-        // transport wins the race nothing else observes the call, and closing
-        // the session rejects it.
-        call.then(resolve, reject);
-        if (state.failure) {
-          reject(state.failure);
-        }
-      });
-    } finally {
-      state.pendingCalls.delete(call);
-    }
+    // `race` subscribes to both, so the loser's later rejection is observed:
+    // closing the session rejects a call the transport already gave up on.
+    return state ? Promise.race([call, state.lost]) : call;
   }
 
   async closeSession(client: Client): Promise<void> {
