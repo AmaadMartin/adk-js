@@ -4,17 +4,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, VertexRagRetrievalTool} from '@google/adk';
-import {Tool} from '@google/genai';
+import {Context, LlmRequest, VertexRagRetrievalTool} from '@google/adk';
+import {GenerateContentConfig, Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {
-  LlmRequestWithConfig,
-  makeLlmRequest,
-  makeToolContext,
-} from './tool_test_utils.js';
 
 const RAG_CORPUS =
   'projects/my-project/locations/us-central1/ragCorpora/my-corpus';
+
+/** An `LlmRequest` whose `config` is guaranteed present, so tests can index it. */
+type LlmRequestWithConfig = LlmRequest & {config: GenerateContentConfig};
+
+function makeLlmRequest(model = 'gemini-2.0-flash'): LlmRequestWithConfig {
+  return {
+    model,
+    config: {},
+    contents: [],
+    toolsDict: {},
+    liveConnectConfig: {},
+  };
+}
+
+// The tool only reads `llmRequest`; the context is never touched, so an empty
+// stand-in is enough.
+function makeToolContext(): Context {
+  return {} as Context;
+}
 
 /**
  * `config.tools` is a `ToolUnion[]` (`Tool | CallableTool`); the tool under test

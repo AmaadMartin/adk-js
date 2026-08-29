@@ -6,14 +6,31 @@
 
 import {
   BaseRetrievalTool,
+  Context,
   FunctionTool,
   isBaseRetrievalTool,
   isBaseTool,
+  LlmRequest,
   RunAsyncToolRequest,
 } from '@google/adk';
 import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {makeLlmRequest, makeToolContext} from './tool_test_utils.js';
+
+function makeLlmRequest(): LlmRequest {
+  return {
+    model: 'gemini-2.0-flash',
+    config: {},
+    contents: [],
+    toolsDict: {},
+    liveConnectConfig: {},
+  };
+}
+
+// The tool only reads `llmRequest`; the context is never touched, so an empty
+// stand-in is enough.
+function makeToolContext(): Context {
+  return {} as Context;
+}
 
 /** The declaration adk-python's `BaseRetrievalTool` produces, field for field. */
 const EXPECTED_DECLARATION = {
