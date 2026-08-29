@@ -26,6 +26,9 @@ import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {version} from '../version.js';
 
+/** OpenTelemetry semantic convention attribute for a failure's type. */
+const ERROR_TYPE = 'error.type';
+
 const GEN_AI_AGENT_DESCRIPTION = 'gen_ai.agent.description';
 const GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
 const GEN_AI_CONVERSATION_ID = 'gen_ai.conversation.id';
@@ -153,6 +156,11 @@ export interface TraceToolCallParams {
   tool: BaseTool;
   args: Record<string, unknown>;
   functionResponseEvent: Event;
+  /**
+   * The error type the tool detected in its own response, when it reported a
+   * failure by returning it rather than by throwing.
+   */
+  errorType?: string;
 }
 
 /**
@@ -164,9 +172,14 @@ export function traceToolCall({
   tool,
   args,
   functionResponseEvent,
+  errorType,
 }: TraceToolCallParams): void {
   const span = trace.getActiveSpan();
   if (!span) return;
+
+  if (errorType !== undefined) {
+    span.setAttribute(ERROR_TYPE, errorType);
+  }
 
   span.setAttributes({
     [GEN_AI_OPERATION_NAME]: 'execute_tool',
