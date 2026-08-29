@@ -97,6 +97,24 @@ export abstract class BaseToolset {
   }
 
   /**
+   * Returns whether the tool should be exposed when no context is available,
+   * for example while an agent card is being built.
+   *
+   * A name list applies with or without a context. A predicate needs one, so
+   * without a context the tool is exposed.
+   *
+   * @param tool The tool to check.
+   * @param context Context used to filter tools available to the agent.
+   * @return Whether the tool should be exposed to LLM.
+   */
+  protected isToolExposed(tool: BaseTool, context?: ReadonlyContext): boolean {
+    if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
+      return this.toolFilter.includes(tool.name);
+    }
+    return !context || this.isToolSelected(tool, context);
+  }
+
+  /**
    * Processes the outgoing LLM request for this toolset. This method will be
    * called before each tool processes the llm request.
    *

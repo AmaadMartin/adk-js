@@ -63,13 +63,24 @@ export class RestApiTool extends BaseTool {
     this.credentialKey = credentialKey;
   }
 
+  /**
+   * Returns a fresh JSON schema of this tool's parameters.
+   *
+   * A wrapping tool that hides or defaults some parameters declares them from
+   * this schema, reusing the parse this tool already did rather than parsing
+   * the same operation a second time.
+   */
+  @experimental
+  public getJsonSchema(): Record<string, unknown> {
+    return this.operationParser.getJsonSchema();
+  }
+
   @experimental
   override _getDeclaration(): FunctionDeclaration {
-    const schema = this.operationParser.getJsonSchema();
     return {
       name: this.name,
       description: this.description,
-      parameters: schema,
+      parameters: this.getJsonSchema(),
     };
   }
 
@@ -231,7 +242,13 @@ export function prepareRequestParams(
     (placeholder, name: string) =>
       Object.hasOwn(pathParams, name) ? pathParams[name] : placeholder,
   );
-  let url = `${endpoint.baseUrl}${resolvedPath}`;
+  // A spec may add a fragment to keep two operations on one path distinct. An
+  // HTTP request never carries a fragment, and leaving it here would fold it
+  // into the last query value extracted below.
+  const fragmentStart = resolvedPath.indexOf('#');
+  const requestPath =
+    fragmentStart === -1 ? resolvedPath : resolvedPath.slice(0, fragmentStart);
+  let url = `${endpoint.baseUrl}${requestPath}`;
 
   // Extract query parameters from path if any
   const urlParts = url.split('?');

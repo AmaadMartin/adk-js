@@ -51,6 +51,62 @@ describe('RestApiTool', () => {
     );
   });
 
+  it('exposes the argument JSON schema for a wrapping tool', () => {
+    const operation: OpenAPIV3.OperationObject = {
+      operationId: 'list_issues',
+      parameters: [
+        {
+          name: 'pageSize',
+          in: 'query',
+          required: true,
+          schema: {type: 'integer'},
+        },
+      ],
+      responses: {},
+    };
+    const tool = new RestApiTool(
+      'list_issues',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/issues', method: 'GET'},
+      operation,
+    );
+
+    expect(tool.getJsonSchema()).toEqual({
+      type: 'object',
+      properties: {page_size: {type: 'integer'}},
+      required: ['page_size'],
+      title: 'list_issues_Arguments',
+    });
+  });
+
+  it('rebuilds the argument JSON schema on every call', () => {
+    const operation: OpenAPIV3.OperationObject = {
+      operationId: 'list_issues',
+      parameters: [
+        {
+          name: 'pageSize',
+          in: 'query',
+          required: true,
+          schema: {type: 'integer'},
+        },
+      ],
+      responses: {},
+    };
+    const tool = new RestApiTool(
+      'list_issues',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/issues', method: 'GET'},
+      operation,
+    );
+
+    const schema = tool.getJsonSchema();
+    delete (schema['properties'] as Record<string, unknown>)['page_size'];
+
+    expect(tool.getJsonSchema()['properties']).toEqual({
+      page_size: {type: 'integer'},
+    });
+  });
+
   it('should apply headers from provider', async () => {
     const endpoint = {
       baseUrl: 'http://api.example.com',
@@ -724,6 +780,37 @@ describe('RestApiTool Utilities', () => {
       expect(result.headers).toEqual({
         'X-Trace-Id': 'trace-456',
       });
+    });
+
+    it('drops a path fragment instead of folding it into the query', () => {
+      const endpoint = {
+        baseUrl: 'https://integrations.googleapis.com',
+        path: '/v2/x:execute?triggerId=api_trigger/Foo#list_Bar',
+        method: 'POST',
+      };
+
+      const result = prepareRequestParams(endpoint, [], {});
+
+      expect(result.url).toBe(
+        'https://integrations.googleapis.com/v2/x:execute' +
+          '?triggerId=api_trigger%2FFoo',
+      );
+      expect(result.url).not.toContain('%23');
+      expect(result.url).not.toContain('#');
+    });
+
+    it('keeps a path that carries a fragment but no query', () => {
+      const endpoint = {
+        baseUrl: 'https://integrations.googleapis.com',
+        path: '/v2/x:execute#list_Bar',
+        method: 'POST',
+      };
+
+      const result = prepareRequestParams(endpoint, [], {});
+
+      expect(result.url).toBe(
+        'https://integrations.googleapis.com/v2/x:execute',
+      );
     });
 
     it('should ignore arguments that are not in parameters spec', () => {
