@@ -6,6 +6,8 @@
 
 import {
   AgentTool,
+  BasePlugin,
+  Context,
   InMemoryMemoryService,
   InMemorySessionService,
   LlmAgent,
@@ -17,6 +19,27 @@ import {
   GeminiWithMockResponses,
   RawGenerateContentResponse,
 } from '../test_case_utils.js';
+
+/** Records the agents it ran for and how many times it was closed. */
+class AgentTrackingPlugin extends BasePlugin {
+  readonly agentsSeen: string[] = [];
+  closeCount = 0;
+
+  constructor() {
+    super('agent-tracking-plugin');
+  }
+
+  override async beforeModelCallback(params: {
+    callbackContext: Context;
+  }): Promise<undefined> {
+    this.agentsSeen.push(params.callbackContext.agentName);
+    return;
+  }
+
+  override async close(): Promise<void> {
+    this.closeCount += 1;
+  }
+}
 
 describe('AgentTool', () => {
   it('propagates state changes from sub-agent to parent session', async () => {
@@ -219,5 +242,93 @@ describe('AgentTool', () => {
     }
 
     expect(toolResponses).toEqual(['print(6 * 7)\n42\nThe answer is 42.']);
+  });
+
+  it("runs the caller's plugin for the wrapped agent without closing it", async () => {
+    const subAgentResponses: RawGenerateContentResponse[] = [
+      {
+        candidates: [
+          {
+            content: {parts: [{text: 'Today is Tuesday'}], role: 'model'},
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+    ];
+
+    const parentResponses: RawGenerateContentResponse[] = [
+      {
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  functionCall: {
+                    name: 'subAgent',
+                    args: {request: 'what day is today'},
+                    id: 'adk-mock-call-1',
+                  },
+                },
+              ],
+              role: 'model',
+            },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+      {
+        candidates: [
+          {
+            content: {parts: [{text: 'It is Tuesday.'}], role: 'model'},
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+    ];
+
+    const subAgent = new LlmAgent({
+      model: new GeminiWithMockResponses(subAgentResponses),
+      name: 'subAgent',
+      description: 'subAgent',
+      instruction: 'answer what day is today',
+    });
+    const mainAgent = new LlmAgent({
+      model: new GeminiWithMockResponses(parentResponses),
+      name: 'mainAgent',
+      description: 'MainAgent',
+      instruction: 'use subAgent to answer',
+      tools: [new AgentTool({agent: subAgent})],
+    });
+
+    const plugin = new AgentTrackingPlugin();
+    const sessionService = new InMemorySessionService();
+    await sessionService.createSession({
+      appName: 'ADKTest',
+      userId: 'TestUser',
+      sessionId: '1',
+    });
+
+    const runner = new Runner({
+      appName: 'ADKTest',
+      agent: mainAgent,
+      sessionService,
+      memoryService: new InMemoryMemoryService(),
+      plugins: [plugin],
+    });
+
+    for await (const _event of runner.runAsync({
+      userId: 'TestUser',
+      sessionId: '1',
+      newMessage: {role: 'user', parts: [{text: 'What day is today?'}]},
+    })) {
+      // Consume the events.
+    }
+
+    expect(plugin.agentsSeen).toContain('subAgent');
+    expect(plugin.closeCount).toBe(0);
+
+    await runner.close();
+
+    expect(plugin.closeCount).toBe(1);
   });
 });
