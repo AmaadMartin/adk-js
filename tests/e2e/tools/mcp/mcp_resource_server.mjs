@@ -5,15 +5,23 @@
  */
 
 /**
- * A minimal, real MCP server exposing two resources (one text, one binary) over
- * stdio. It is spawned as a child process by the LoadMcpResourceTool e2e test to
- * exercise the resource path end-to-end with no mocks.
+ * A minimal, real MCP server exposing one tool and two resources (one text, one
+ * binary) over stdio. It is spawned as a child process by the
+ * LoadMcpResourceTool e2e test to exercise the resource path end-to-end with no
+ * mocks. The tool is there so a test can check where the resource tool lands in
+ * the discovered tool list.
  */
 
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 
 const server = new McpServer({name: 'e2e-resource-server', version: '1.0.0'});
+
+server.registerTool(
+  'echo',
+  {description: 'Returns the text it is given.', inputSchema: {}},
+  async () => ({content: [{type: 'text', text: 'echo'}]}),
+);
 
 server.registerResource(
   'readme',

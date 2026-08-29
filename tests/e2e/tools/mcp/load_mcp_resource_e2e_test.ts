@@ -9,6 +9,8 @@ import {
   LlmRequest,
   LoadMcpResourceTool,
   MCPToolset,
+  setAllowConfigStdioMcpServers,
+  StdioConnectionParams,
 } from '@google/adk';
 import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -27,11 +29,13 @@ const SERVER_PATH = fileURLToPath(
 /** A throwaway tool context; the tool never reads from it. */
 const toolContext = {} as unknown as Context;
 
+const stdioConnectionParams: StdioConnectionParams = {
+  type: 'StdioConnectionParams',
+  serverParams: {command: process.execPath, args: [SERVER_PATH]},
+};
+
 function createToolset(): MCPToolset {
-  return new MCPToolset({
-    type: 'StdioConnectionParams',
-    serverParams: {command: process.execPath, args: [SERVER_PATH]},
-  });
+  return new MCPToolset(stdioConnectionParams);
 }
 
 function functionResponseRequest(resourceNames: string[]): LlmRequest {
@@ -110,6 +114,70 @@ describe('LoadMcpResourceTool (e2e, real MCP server over stdio)', () => {
     expect(binaryTurn.parts?.[1].inlineData?.mimeType).toBe('image/png');
     expect(binaryTurn.parts?.[1].inlineData?.data).toBe(
       Buffer.from('binary-logo-bytes').toString('base64'),
+    );
+  });
+});
+
+describe('MCPToolset useMcpResources (e2e, real MCP server over stdio)', () => {
+  let toolset: MCPToolset;
+
+  afterEach(async () => {
+    setAllowConfigStdioMcpServers(undefined);
+    await toolset?.close();
+  });
+
+  it('omits the resource tool when the option is off', async () => {
+    toolset = createToolset();
+
+    const names = (await toolset.getTools()).map((tool) => tool.name);
+
+    expect(names).toEqual(['echo']);
+  });
+
+  it('appends the resource tool after the server tools', async () => {
+    toolset = new MCPToolset({
+      connectionParams: stdioConnectionParams,
+      useMcpResources: true,
+    });
+
+    const names = (await toolset.getTools()).map((tool) => tool.name);
+
+    expect(names).toEqual(['echo', 'load_mcp_resource']);
+  });
+
+  it('reaches real resource contents through the appended tool', async () => {
+    toolset = new MCPToolset({
+      connectionParams: stdioConnectionParams,
+      useMcpResources: true,
+    });
+    const tools = await toolset.getTools();
+    const llmRequest = functionResponseRequest(['readme']);
+
+    await tools[tools.length - 1].processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(llmRequest.contents[1].parts?.[1].text).toBe(
+      'hello from mcp resource',
+    );
+  });
+
+  it('builds the same toolset through fromConfig once stdio is allowed', async () => {
+    setAllowConfigStdioMcpServers(true);
+    toolset = MCPToolset.fromConfig({
+      stdioConnectionParams,
+      useMcpResources: true,
+    });
+
+    const names = (await toolset.getTools()).map((tool) => tool.name);
+
+    expect(names).toEqual(['echo', 'load_mcp_resource']);
+  });
+
+  it('refuses the same config while stdio is not allowed', () => {
+    setAllowConfigStdioMcpServers(false);
+
+    expect(() => MCPToolset.fromConfig({stdioConnectionParams})).toThrow(
+      /not allowed in agent configs/,
     );
   });
 });
