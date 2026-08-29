@@ -74,3 +74,13 @@ export function parseFencedJson(text: string): unknown {
     return undefined;
   }
 }
+
+/**
+ * Whether `value` is a JSON object, as opposed to an array or a primitive.
+ *
+ * Pairs with {@link parseFencedJson}, whose result is only usable as a record
+ * once narrowed.
+ */
+export function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}

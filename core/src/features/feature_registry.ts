@@ -11,6 +11,7 @@ import {logger} from '../utils/logger.js';
  * Feature names.
  */
 export enum FeatureName {
+  ENVIRONMENT_SIMULATION = 'ENVIRONMENT_SIMULATION',
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
   /**
    * Turns a failed MCP tool call into an `{error}` result instead of a thrown
@@ -38,6 +39,10 @@ export interface FeatureConfig {
 
 // Central registry: FeatureName -> FeatureConfig
 const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
+  [FeatureName.ENVIRONMENT_SIMULATION]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
+  },
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,

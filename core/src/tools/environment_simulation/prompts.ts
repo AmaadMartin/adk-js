@@ -55,3 +55,100 @@ export function toolConnectionAnalysisPrompt(toolSchemasJson: string): string {
   Your response must start with '{' and end with '}'.
   `;
 }
+
+/** Substitutions for {@link toolSpecMockPrompt}. */
+export interface ToolSpecMockPromptParams {
+  environmentData?: string;
+  tracing?: string;
+  toolConnectionMapJson: string;
+  stateStoreJson: string;
+  toolName: string;
+  toolDescription: string;
+  toolSchemaJson: string;
+  toolArgumentsJson: string;
+}
+
+/**
+ * Builds the prompt asking a model to invent a realistic JSON response for
+ * one tool call, consistent with the simulation state it is given.
+ */
+export function toolSpecMockPrompt({
+  environmentData,
+  tracing,
+  toolConnectionMapJson,
+  stateStoreJson,
+  toolName,
+  toolDescription,
+  toolSchemaJson,
+  toolArgumentsJson,
+}: ToolSpecMockPromptParams): string {
+  return `
+  You are a stateful tool simulator. Your task is to generate a
+  realistic JSON response for a tool call, maintaining consistency based
+  on a shared state.
+
+  ${environmentDataSnippet(environmentData)}
+
+  ${tracingSnippet(tracing)}
+
+  Here is the map of how tools connect via stateful parameters:
+  ${toolConnectionMapJson}
+
+  Here is the current state of all stateful parameters:
+  ${stateStoreJson}
+
+  You are now simulating the following tool call:
+  Tool Name: ${toolName}
+  Tool Description: ${toolDescription}
+  Tool Schema: ${toolSchemaJson}
+  Tool Arguments: ${toolArgumentsJson}
+
+  Your instructions:
+  1.  Analyze the tool call. Is it a "creating" or "consuming" tool
+      based on the connection map?
+  2.  If it's a "consuming" tool, check the provided arguments against
+      the state store. If an ID is provided that does not exist in the
+      state, return a realistic error (e.g., a 404 Not Found error).
+      Otherwise, use the data from the state, the provided environment data,
+      and the tracing history to generate the response.
+  3.  If it's a "creating" tool, generate a new, unique ID for the
+      stateful parameter (e.g., a random string for a ticket_id). Include
+      this new ID in your response. I will then update the state with it.
+  4.  Leverage the provided environment data (if any) to make your response
+      more realistic and consistent with the simulated environment.
+  5.  Leverage the provided tracing history (if any) to make your response
+      consistent with observed tool behavior patterns from prior runs.
+  6.  Generate a convincing, valid JSON object that mocks the tool's
+      response. The response must be only the JSON object, without any
+      additional text or formatting.
+  7.  The response must start with '{' and end with '}'.
+  `;
+}
+
+function environmentDataSnippet(environmentData?: string): string {
+  if (!environmentData) {
+    return '';
+  }
+  return `
+        Here is relevant environment data (e.g., database snippet, context information):
+        <environment_data>
+        ${environmentData}
+        </environment_data>
+        Use this information to generate more realistic responses.
+      `;
+}
+
+function tracingSnippet(tracing?: string): string {
+  if (!tracing) {
+    return '';
+  }
+  return `
+        Here is a tracing history from a prior agent run (e.g., recorded tool
+        calls and responses):
+        <tracing>
+        ${tracing}
+        </tracing>
+        Use this history to make your mock responses consistent with observed
+        tool behavior patterns.
+      `;
+}
