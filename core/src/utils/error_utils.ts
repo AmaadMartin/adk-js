@@ -11,18 +11,6 @@
  */
 
 /**
- * Narrows an arbitrary value to an indexable record, or `undefined` when it is
- * not a non-null object. Reads a duck-typed error shape without resorting to
- * `any`. An array passes, because an `AggregateError` style `errors` array
- * still carries fields worth reading.
- */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object'
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-/**
  * Maximum number of characters of an HTTP response body surfaced by
  * {@link formatError} before it is truncated. Bounds both log volume and the
  * exposure of potentially sensitive response payloads.
@@ -38,6 +26,18 @@ const UNKNOWN_ERROR = 'Unknown error';
 /** Lowest and highest values treated as an HTTP status code. */
 const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
+
+/**
+ * Narrows an arbitrary value to an indexable record, or `undefined` when it is
+ * not a non-null object. Reads a duck-typed error shape without resorting to
+ * `any`. An array passes, because an `AggregateError` style `errors` array
+ * still carries fields worth reading.
+ */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
 
 /** Returns the first argument that is a string, or `undefined` if none are. */
 function firstString(...values: unknown[]): string | undefined {
