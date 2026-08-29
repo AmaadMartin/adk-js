@@ -115,7 +115,6 @@ export {InMemoryCredentialService} from './auth/credential_service/in_memory_cre
 export {SessionStateCredentialService} from './auth/credential_service/session_state_credential_service.js';
 export {
   AuthCredentialMissingError,
-  BaseAuthCredentialExchanger,
   CredentialExchangeError,
 } from './auth/exchanger/base_credential_exchanger.js';
 export type {
