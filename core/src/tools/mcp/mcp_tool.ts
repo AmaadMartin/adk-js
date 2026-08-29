@@ -5,6 +5,7 @@
  */
 
 import {FunctionDeclaration} from '@google/genai';
+import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {RequestOptions} from '@modelcontextprotocol/sdk/shared/protocol.js';
 import type {
   CallToolRequest,
@@ -236,7 +237,7 @@ export class MCPTool extends BaseTool {
       authResult.authCredential,
       toolContext,
     );
-    const session = await this.mcpSessionManager.createSession({headers});
+    const session = await this.createSession(headers, toolContext.abortSignal);
 
     try {
       const callRequest: CallToolRequest = {} as CallToolRequest;
@@ -267,6 +268,11 @@ export class MCPTool extends BaseTool {
    * Attaches the MCP App widget this tool declares, so the host renders the
    * app beside the result. A tool that declares none attaches nothing.
    *
+   * A widget is addressed by the id of the function call that produced it, so
+   * a call without one gets no widget. Attaching it under an empty id would
+   * collide with the next such widget, and the collision would throw after the
+   * tool had already answered, discarding a good result.
+   *
    * The payload keys are snake_case because the MCP Apps renderer reads them,
    * and adk-python already feeds it those names.
    */
@@ -275,11 +281,12 @@ export class MCPTool extends BaseTool {
     args: Record<string, unknown>,
   ): void {
     const resourceUri = this.mcpAppResourceUri;
-    if (!resourceUri) {
+    const {functionCallId} = toolContext;
+    if (!resourceUri || !functionCallId) {
       return;
     }
     toolContext.renderUiWidget({
-      id: toolContext.functionCallId ?? '',
+      id: functionCallId,
       provider: MCP_WIDGET_PROVIDER,
       payload: {
         resource_uri: resourceUri,
@@ -287,6 +294,31 @@ export class MCPTool extends BaseTool {
         tool_args: args,
       },
     });
+  }
+
+  /**
+   * Opens a session, retrying once when setup fails.
+   *
+   * Only setup is retried. Once `callTool` is dispatched, no failure re-sends
+   * it: the server may already have run the tool, and running it twice is
+   * worse than reporting the failure. An aborted invocation is not retried,
+   * because the caller has stopped waiting.
+   */
+  private async createSession(
+    headers: Record<string, string> | undefined,
+    abortSignal: AbortSignal | undefined,
+  ): Promise<Client> {
+    try {
+      return await this.mcpSessionManager.createSession({headers});
+    } catch (err: unknown) {
+      if (abortSignal?.aborted) {
+        throw err;
+      }
+      logger.debug(
+        `Retrying MCP session setup after error: ${formatError(err)}`,
+      );
+      return this.mcpSessionManager.createSession({headers});
+    }
   }
 
   /**
