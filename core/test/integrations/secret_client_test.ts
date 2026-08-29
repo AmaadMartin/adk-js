@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {SecretManagerClient, version} from '@google/adk';
+import {
+  InputValidationError,
+  SecretManagerClient,
+  SecretManagerClientOptions,
+  version,
+} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 /** The request options {@link SecretManagerClient} sends to the auth client. */
@@ -160,6 +165,20 @@ describe('SecretManagerClient', () => {
       );
       expect(mocks.googleAuthConstructor).not.toHaveBeenCalled();
     });
+
+    it.each<[string, SecretManagerClientOptions]>([
+      ['unparsable service account JSON', {serviceAccountJson: 'invalid-json'}],
+      ['a service account JSON scalar', {serviceAccountJson: '123'}],
+      ['a location that is not a location ID', {location: 'evil.com/'}],
+      [
+        'both credential sources',
+        {serviceAccountJson: '{}', authToken: 'test-token'},
+      ],
+    ])('rejects %s with an InputValidationError', (_, options) => {
+      expect(() => new SecretManagerClient(options)).toThrow(
+        InputValidationError,
+      );
+    });
   });
 
   describe('getSecret', () => {
@@ -238,6 +257,16 @@ describe('SecretManagerClient', () => {
       await expect(client.getSecret(RESOURCE_NAME)).rejects.toThrow(
         "'serviceAccountJson' or 'authToken' are both missing, and error " +
           'occurred while trying to use default credentials: no ADC on this machine',
+      );
+    });
+
+    it('reports a default credential failure as an InputValidationError', async () => {
+      mocks.getClient.mockRejectedValue(new Error('no ADC on this machine'));
+
+      const client = new SecretManagerClient();
+
+      await expect(client.getSecret(RESOURCE_NAME)).rejects.toThrow(
+        InputValidationError,
       );
     });
 

@@ -10,6 +10,7 @@ import {
   JWTInput,
   OAuth2Client,
 } from 'google-auth-library';
+import {InputValidationError} from '../../errors/input_validation_error.js';
 import {getTrackingHeaders} from '../../utils/client_labels.js';
 import {base64Decode} from '../../utils/env_aware_utils.js';
 import {formatError} from '../../utils/error_utils.js';
@@ -60,10 +61,14 @@ function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
   try {
     parsed = JSON.parse(serviceAccountJson);
   } catch (e: unknown) {
-    throw new Error(`Invalid service account JSON: ${formatError(e)}`);
+    throw new InputValidationError(
+      `Invalid service account JSON: ${formatError(e)}`,
+    );
   }
   if (!isJwtInput(parsed)) {
-    throw new Error('Invalid service account JSON: expected a JSON object.');
+    throw new InputValidationError(
+      'Invalid service account JSON: expected a JSON object.',
+    );
   }
   return parsed;
 }
@@ -75,7 +80,7 @@ function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
  */
 function regionalHost(location: string): string {
   if (!LOCATION_PATTERN.test(location)) {
-    throw new Error(`Invalid location: ${location}`);
+    throw new InputValidationError(`Invalid location: ${location}`);
   }
   return `secretmanager.${location}.rep.googleapis.com`;
 }
@@ -116,13 +121,13 @@ export class SecretManagerClient {
   private readonly host: string;
 
   /**
-   * @throws If both `serviceAccountJson` and `authToken` are provided, if
-   *   `serviceAccountJson` is not valid JSON, or if `location` is not a
-   *   well-formed Google Cloud location ID.
+   * @throws {InputValidationError} If both `serviceAccountJson` and
+   *   `authToken` are provided, if `serviceAccountJson` is not valid JSON, or
+   *   if `location` is not a well-formed Google Cloud location ID.
    */
   constructor(options: SecretManagerClientOptions = {}) {
     if (options.serviceAccountJson && options.authToken) {
-      throw new Error(
+      throw new InputValidationError(
         "Must provide either 'serviceAccountJson' or 'authToken', not both.",
       );
     }
@@ -164,7 +169,7 @@ export class SecretManagerClient {
       if (!this.usesDefaultCredentials) {
         throw e;
       }
-      throw new Error(
+      throw new InputValidationError(
         "'serviceAccountJson' or 'authToken' are both missing, and error " +
           `occurred while trying to use default credentials: ${formatError(e)}`,
       );
