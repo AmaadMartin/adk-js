@@ -1191,7 +1191,11 @@ describe('LoadArtifactsTool', () => {
     expect(declaration?.parametersJsonSchema).toEqual({
       type: 'object',
       properties: {
-        artifact_names: {type: 'array', items: {type: 'string'}},
+        artifact_names: {
+          type: 'array',
+          items: {type: 'string'},
+          description: 'The names of the artifacts to load.',
+        },
       },
     });
     expect(declaration?.parameters).toBeUndefined();

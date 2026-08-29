@@ -41,6 +41,9 @@ const TEXT_FILE_SUFFIXES = ['.csv', '.txt', '.json', '.xml'];
 /** Filename suffixes of a spreadsheet workbook. */
 const SPREADSHEET_FILE_SUFFIXES = ['.xlsx', '.xls'];
 
+/** Model-facing description of the tool's only parameter. */
+const ARTIFACT_NAMES_DESCRIPTION = 'The names of the artifacts to load.';
+
 /**
  * Converts an artifact into a `Part` that is safe to send to Gemini.
  *
@@ -56,11 +59,11 @@ const SPREADSHEET_FILE_SUFFIXES = ['.xlsx', '.xls'];
  *     a markdown table instead of a placeholder.
  * @return A part that is safe to send to Gemini.
  */
-export async function asSafePartForLlm(
+export function asSafePartForLlm(
   artifact: Part,
   artifactName: string,
   enableSpreadsheetParsing = false,
-): Promise<Part> {
+): Part {
   const inlineData = artifact.inlineData;
   if (!inlineData) {
     return artifact;
@@ -130,8 +133,8 @@ export type ProcessArtifactCallback = (
   artifactName: string,
 ) => Part | undefined | Promise<Part | undefined>;
 
-/** Options for {@link LoadArtifactsTool}. */
-export interface LoadArtifactsToolOptions {
+/** Parameters for {@link LoadArtifactsTool}. */
+export interface LoadArtifactsToolParams {
   /**
    * Called for each artifact in place of the built-in safety conversion, so
    * supplying it bypasses {@link asSafePartForLlm} entirely. Returning
@@ -158,13 +161,13 @@ export class LoadArtifactsTool extends BaseTool {
   private readonly processArtifact?: ProcessArtifactCallback;
   private readonly enableSpreadsheetParsing: boolean;
 
-  constructor(options: LoadArtifactsToolOptions = {}) {
+  constructor(params: LoadArtifactsToolParams = {}) {
     super({
       name: 'load_artifacts',
       description: `Loads artifacts into the session for this request.\n\nNOTE: Call when you need access to artifacts (for example, uploads saved by the web UI).`,
     });
-    this.processArtifact = options.processArtifact;
-    this.enableSpreadsheetParsing = options.enableSpreadsheetParsing ?? false;
+    this.processArtifact = params.processArtifact;
+    this.enableSpreadsheetParsing = params.enableSpreadsheetParsing ?? false;
   }
 
   override _getDeclaration(): FunctionDeclaration | undefined {
@@ -175,7 +178,11 @@ export class LoadArtifactsTool extends BaseTool {
         parametersJsonSchema: {
           type: 'object',
           properties: {
-            artifact_names: {type: 'array', items: {type: 'string'}},
+            artifact_names: {
+              type: 'array',
+              items: {type: 'string'},
+              description: ARTIFACT_NAMES_DESCRIPTION,
+            },
           },
         },
       };
@@ -191,7 +198,7 @@ export class LoadArtifactsTool extends BaseTool {
             items: {
               type: Type.STRING,
             },
-            description: 'The names of the artifacts to load.',
+            description: ARTIFACT_NAMES_DESCRIPTION,
           },
         },
       },
@@ -308,7 +315,7 @@ export class LoadArtifactsTool extends BaseTool {
           continue;
         }
       } else {
-        artifactPart = await asSafePartForLlm(
+        artifactPart = asSafePartForLlm(
           artifact,
           artifactName,
           this.enableSpreadsheetParsing,

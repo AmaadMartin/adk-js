@@ -320,7 +320,7 @@ export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
   asSafePartForLlm,
-  type LoadArtifactsToolOptions,
+  type LoadArtifactsToolParams,
   type ProcessArtifactCallback,
 } from './tools/load_artifacts_tool.js';
 export {LOAD_MEMORY, LoadMemoryTool} from './tools/load_memory_tool.js';
