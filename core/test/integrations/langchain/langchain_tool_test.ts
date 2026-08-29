@@ -16,6 +16,7 @@ import {
   PluginManager,
 } from '@google/adk';
 import {Type} from '@google/genai';
+import {RunnableConfig} from '@langchain/core/runnables';
 import {StructuredTool, Tool, tool} from '@langchain/core/tools';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z} from 'zod';
@@ -283,6 +284,51 @@ describe('LangchainTool', () => {
       await expect(
         adkTool.runAsync({args: {}, toolContext: emptyContext}),
       ).resolves.toEqual('selfAware');
+    });
+
+    it('calls the wrapped invoke with the arguments alone', async () => {
+      const calls: unknown[][] = [];
+      const adkTool = new LangchainTool({
+        tool: {
+          name: 'arity',
+          invoke(...args: unknown[]) {
+            calls.push(args);
+            return 'ok';
+          },
+        },
+      });
+
+      await adkTool.runAsync({args: {x: 1}, toolContext: emptyContext});
+
+      expect(calls).toEqual([[{x: 1}]]);
+    });
+
+    it('keeps the ADK context out of the LangChain tool config', async () => {
+      let seenConfig: RunnableConfig | undefined;
+      const probe = tool(
+        (_input: {x: number}, config?: RunnableConfig) => {
+          seenConfig = config;
+          return 'ok';
+        },
+        {
+          name: 'probe',
+          description: 'Records the config it receives',
+          schema: z.object({x: z.number()}),
+        },
+      );
+      const adkTool = new LangchainTool({tool: probe});
+      const contextKeys = Object.keys(emptyContext);
+
+      await adkTool.runAsync({args: {x: 1}, toolContext: emptyContext});
+
+      if (!seenConfig) {
+        expect.fail('the wrapped tool received no config');
+      }
+      expect(contextKeys).not.toHaveLength(0);
+      const leaked = Object.keys(seenConfig).filter((key) =>
+        contextKeys.includes(key),
+      );
+      expect(leaked).toEqual([]);
     });
 
     it('rejects an object with no invoke method', () => {

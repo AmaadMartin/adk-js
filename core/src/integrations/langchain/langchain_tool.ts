@@ -115,6 +115,10 @@ function isErrorResult(result: unknown): boolean {
  * runs through its own entry point, so LangChain still owns argument
  * validation and its callback plumbing never reaches the model.
  *
+ * The adapter calls the tool with the model's arguments alone. The ADK
+ * `Context` stays on the ADK side, so a wrapped tool cannot read the session
+ * state or write the event actions.
+ *
  * `@langchain/core` is an optional peer dependency. This module never imports
  * it, so an install that does not use LangChain pays nothing for this class.
  *
@@ -142,10 +146,14 @@ export class LangchainTool extends FunctionTool<Schema> {
   private readonly returnDirect: boolean;
 
   constructor(options: LangchainToolOptions) {
+    // Resolved before the other options so that a value which is not a
+    // LangChain tool reports the missing `invoke` rather than a missing name.
+    const entryPoint = resolveEntryPoint(options.tool);
     super({
-      // Resolved first so that a value which is not a LangChain tool reports
-      // the missing `invoke` rather than a missing name.
-      execute: resolveEntryPoint(options.tool),
+      // Called with one argument. `FunctionTool` passes the ADK `Context`
+      // second, and LangChain reads a second argument as a `RunnableConfig`,
+      // which would hand the wrapped tool the session state and the actions.
+      execute: (input) => entryPoint(input),
       name: resolveName(options),
       description: options.description ?? options.tool.description ?? '',
       parameters: resolveParameters(options.tool),
