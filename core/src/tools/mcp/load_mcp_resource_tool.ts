@@ -18,7 +18,7 @@ import {
   ToolProcessLlmRequest,
 } from '../base_tool.js';
 
-import {MCPToolset} from './mcp_toolset.js';
+import type {MCPToolset} from './mcp_toolset.js';
 
 /**
  * A tool that loads MCP server resources and adds them to the session.

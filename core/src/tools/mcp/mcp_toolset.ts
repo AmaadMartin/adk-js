@@ -18,8 +18,88 @@ import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
+import {LoadMcpResourceTool} from './load_mcp_resource_tool.js';
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
+import {
+  McpToolsetConfig,
+  resolveConfigConnectionParams,
+} from './mcp_toolset_config.js';
+
+/**
+ * Configures an {@link MCPToolset}.
+ *
+ * Prefer this over the positional constructor when the toolset needs anything
+ * beyond a connection, a filter and a prefix.
+ */
+export interface MCPToolsetOptions {
+  /** How to reach the MCP server. */
+  connectionParams: MCPConnectionParams;
+  /** Selects the tools this toolset exposes. Defaults to no filter. */
+  toolFilter?: ToolPredicate | string[];
+  /** Prepended as `${prefix}_` to every discovered tool name. */
+  prefix?: string;
+  /**
+   * Adds {@link LoadMcpResourceTool} to the tool list, so the model can read
+   * the resources the MCP server advertises. Defaults to false.
+   */
+  useMcpResources?: boolean;
+}
+
+/**
+ * Reads the options out of either constructor form.
+ *
+ * The forms are told apart by `connectionParams`: {@link MCPToolsetOptions}
+ * always carries it and no `MCPConnectionParams` member does.
+ *
+ * @throws If the connection params are missing.
+ */
+function normalizeToolsetOptions(
+  optionsOrConnectionParams: MCPToolsetOptions | MCPConnectionParams,
+  toolFilter: ToolPredicate | string[],
+  prefix?: string,
+): MCPToolsetOptions {
+  const options =
+    optionsOrConnectionParams && 'connectionParams' in optionsOrConnectionParams
+      ? optionsOrConnectionParams
+      : {connectionParams: optionsOrConnectionParams, toolFilter, prefix};
+
+  if (!options.connectionParams) {
+    throw new Error('Missing connection params in MCPToolset.');
+  }
+  return options;
+}
+
+/**
+ * Returns the tools `filter` selects. An empty array means no filter.
+ *
+ * A {@link ToolPredicate} needs a context to evaluate; without one the filter
+ * is skipped and a warning is logged.
+ */
+function applyToolFilter(
+  tools: BaseTool[],
+  filter: ToolPredicate | string[] | undefined,
+  context?: ReadonlyContext,
+): BaseTool[] {
+  if (!filter || (Array.isArray(filter) && filter.length === 0)) {
+    return tools;
+  }
+
+  if (Array.isArray(filter)) {
+    const names = filter;
+    return tools.filter((tool) => names.includes(tool.name));
+  }
+
+  if (context) {
+    return tools.filter((tool) => filter(tool, context));
+  }
+
+  logger.warn(
+    'MCPToolset: a ToolPredicate toolFilter was provided but getTools() ' +
+      'was called without a ReadonlyContext. The filter will not be applied.',
+  );
+  return tools;
+}
 
 /**
  * A toolset that dynamically discovers and provides tools from a Model Context
@@ -52,14 +132,44 @@ import {MCPTool} from './mcp_tool.js';
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
+  private readonly useMcpResources: boolean;
 
+  constructor(options: MCPToolsetOptions);
   constructor(
     connectionParams: MCPConnectionParams,
+    toolFilter?: ToolPredicate | string[],
+    prefix?: string,
+  );
+  constructor(
+    optionsOrConnectionParams: MCPToolsetOptions | MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
   ) {
-    super(toolFilter, prefix);
-    this.mcpSessionManager = new MCPSessionManager(connectionParams);
+    const options = normalizeToolsetOptions(
+      optionsOrConnectionParams,
+      toolFilter,
+      prefix,
+    );
+    super(options.toolFilter ?? [], options.prefix);
+    this.mcpSessionManager = new MCPSessionManager(options.connectionParams);
+    this.useMcpResources = options.useMcpResources ?? false;
+  }
+
+  /**
+   * Builds a toolset from a plain configuration object.
+   *
+   * @param config The MCP server declaration.
+   * @throws If `config` does not name exactly one connection param, or names a
+   *     stdio server the application has not opted in to. See
+   *     {@link setAllowConfigStdioMcpServers}.
+   */
+  static fromConfig(config: McpToolsetConfig): MCPToolset {
+    return new MCPToolset({
+      connectionParams: resolveConfigConnectionParams(config),
+      toolFilter: config.toolFilter,
+      prefix: config.prefix,
+      useMcpResources: config.useMcpResources,
+    });
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
@@ -85,30 +195,13 @@ export class MCPToolset extends BaseToolset {
       return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
     });
 
-    // Apply toolFilter when specified.
-    // An empty array (the default) means no filter — all tools are returned.
-    const filter = this.toolFilter;
-    if (!filter || (Array.isArray(filter) && filter.length === 0)) {
-      return tools;
+    const selected = applyToolFilter(tools, this.toolFilter, context);
+    if (!this.useMcpResources) {
+      return selected;
     }
-
-    if (Array.isArray(filter)) {
-      // String-array filter: match against the (possibly-prefixed) tool name.
-      return tools.filter((tool) => (filter as string[]).includes(tool.name));
-    }
-
-    if (context) {
-      // Predicate filter: requires a ReadonlyContext to evaluate.
-      return tools.filter((tool) => filter(tool, context));
-    }
-
-    // Predicate filter requested but no context provided — return all tools
-    // and log a warning so callers are aware the filter was not applied.
-    logger.warn(
-      'MCPToolset: a ToolPredicate toolFilter was provided but getTools() ' +
-        'was called without a ReadonlyContext. The filter will not be applied.',
-    );
-    return tools;
+    // Appended after the filter so the resource tool is always last, and so a
+    // toolFilter naming the server's tools cannot drop it.
+    return [...selected, new LoadMcpResourceTool(this)];
   }
 
   /**
