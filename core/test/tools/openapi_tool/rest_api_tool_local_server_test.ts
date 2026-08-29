@@ -7,8 +7,12 @@
 import {
   AuthCredentialTypes,
   Context,
+  createSession,
   FeatureName,
+  InvocationContext,
+  LlmAgent,
   overrideFeatureEnabled,
+  PluginManager,
   RestApiTool,
 } from '@google/adk';
 import {createServer, Server} from 'node:http';
@@ -42,6 +46,17 @@ describe('RestApiTool against a local server', () => {
     server.close();
   });
 
+  function newContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'invocation-1',
+        agent: new LlmAgent({name: 'test_agent'}),
+        session: createSession({id: 'session-1', appName: 'test_app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+  }
+
   function newTool(): RestApiTool {
     return new RestApiTool(
       'get_status',
@@ -54,7 +69,7 @@ describe('RestApiTool against a local server', () => {
   it('should parse a JSON body the server labels text/plain', async () => {
     const result = await newTool().runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: newContext(),
     });
 
     expect(result).toEqual({ok: true});
@@ -63,7 +78,7 @@ describe('RestApiTool against a local server', () => {
   it('should answer the same result through call', async () => {
     const result = await newTool().call({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: newContext(),
     });
 
     expect(result).toEqual({ok: true});

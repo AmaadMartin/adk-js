@@ -10,11 +10,15 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
   FeatureName,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
   OperationEndpoint,
   OperationParser,
   overrideFeatureEnabled,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -1198,6 +1202,18 @@ function newTool(): RestApiTool {
   return new RestApiTool('test_tool', 'description', ENDPOINT, OPERATION);
 }
 
+function newContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'invocation-1',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'session-1', appName: 'test_app'}),
+      pluginManager: new PluginManager(),
+    }),
+    functionCallId: 'function-call-1',
+  });
+}
+
 describe('RestApiTool declaration', () => {
   afterEach(() => {
     overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, undefined);
@@ -1258,11 +1274,11 @@ describe('RestApiTool.call', () => {
 
     const viaRunAsync = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: newContext(),
     });
     const viaCall = await tool.call({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: newContext(),
     });
 
     expect(viaCall).toEqual(viaRunAsync);
@@ -1274,24 +1290,22 @@ describe('RestApiTool.call', () => {
     stubFetch(JSON.stringify({result: 'ok'}));
     const spy = vi.spyOn(tool, 'call');
 
-    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+    await tool.runAsync({args: {}, toolContext: newContext()});
 
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it('should report the pending auth state that runAsync reports', async () => {
     const tool = newTool();
-    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
-      prepareAuthCredentials: async () => ({state: 'pending'}),
-    } as unknown as ToolAuthHandler);
+    tool.configureAuthScheme(API_KEY_SCHEME);
 
     const viaRunAsync = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: newContext(),
     });
     const viaCall = await tool.call({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: newContext(),
     });
 
     expect(viaCall).toEqual(viaRunAsync);
@@ -1347,7 +1361,7 @@ describe('RestApiTool.detectErrorInResponse', () => {
 
     const response = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: newContext(),
     });
 
     expect(tool.detectErrorInResponse(response)).toBe('HTTP_ERROR');
@@ -1370,7 +1384,7 @@ describe('RestApiTool string inputs', () => {
 
     await fromStrings.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: newContext(),
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -1384,14 +1398,8 @@ describe('RestApiTool string inputs', () => {
     tool.configureAuthScheme(JSON.stringify(API_KEY_SCHEME));
     tool.configureAuthCredential(JSON.stringify(API_KEY_CREDENTIAL));
     stubFetch('{}');
-    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
-      prepareAuthCredentials: async () => ({
-        state: 'done',
-        authCredential: API_KEY_CREDENTIAL,
-      }),
-    } as unknown as ToolAuthHandler);
 
-    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+    await tool.runAsync({args: {}, toolContext: newContext()});
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.anything(),
@@ -1405,21 +1413,20 @@ describe('RestApiTool string inputs', () => {
 
   it('should clear the credential when configured with nothing', async () => {
     const tool = newTool();
+    tool.configureAuthScheme(API_KEY_SCHEME);
     tool.configureAuthCredential(API_KEY_CREDENTIAL);
     tool.configureAuthCredential();
     stubFetch('{}');
-    const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
-      prepareAuthCredentials: async () => ({state: 'done'}),
-    } as unknown as ToolAuthHandler);
 
-    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: newContext(),
+    });
 
-    expect(spy).toHaveBeenCalledWith(
-      expect.anything(),
-      undefined,
-      undefined,
-      expect.anything(),
-    );
+    expect(result).toEqual({
+      pending: true,
+      message: 'Needs your authorization to access your data.',
+    });
   });
 
   it('should reject an endpoint missing a field', () => {
@@ -1504,7 +1511,7 @@ describe('RestApiTool response parsing', () => {
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: newContext(),
     });
 
     expect(result).toEqual(expected);
@@ -1516,7 +1523,7 @@ describe('RestApiTool response parsing', () => {
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: newContext(),
     });
 
     expect(result).toEqual({
