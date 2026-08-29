@@ -98,4 +98,91 @@ describe('LoadMemoryTool Integration', () => {
     expect(memoryLoaded).toBe(true);
     expect(finalResponse).toContain('Your favorite color is green.');
   });
+
+  it('reports the memory content as structured parts, not a joined string', async () => {
+    const agent = new LlmAgent({
+      name: 'memory_agent',
+      description: 'Answers questions from memory.',
+      instruction: 'Answer questions about the user using memory.',
+      tools: [LOAD_MEMORY],
+    });
+
+    agent.model = new GeminiWithMockResponses([
+      {
+        candidates: [
+          {
+            content: {
+              role: 'model',
+              parts: [
+                {
+                  functionCall: {
+                    name: 'load_memory',
+                    args: {query: 'favorite color'},
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        candidates: [
+          {
+            content: {
+              role: 'model',
+              parts: [{text: 'Your favorite color is green.'}],
+            },
+          },
+        ],
+      },
+    ]);
+
+    const runner = new InMemoryRunner({
+      agent,
+      appName: 'test_memory_app',
+    });
+
+    const memorySession = await runner.sessionService.createSession({
+      appName: 'test_memory_app',
+      userId: 'test_user',
+    });
+    await runner.sessionService.appendEvent({
+      session: memorySession,
+      event: createEvent({
+        author: 'user',
+        content: createUserContent('My favorite color is green.'),
+      }),
+    });
+    await runner.memoryService!.addSessionToMemory(memorySession);
+
+    const session = await runner.sessionService.createSession({
+      appName: 'test_memory_app',
+      userId: 'test_user',
+    });
+
+    let memoryPayload: unknown;
+    for await (const event of runner.runAsync({
+      userId: 'test_user',
+      sessionId: session.id,
+      newMessage: createUserContent('What is my favorite color?'),
+    })) {
+      const functionResponse = event.content?.parts?.[0]?.functionResponse;
+      if (functionResponse?.name === 'load_memory') {
+        memoryPayload = functionResponse.response;
+      }
+    }
+
+    expect(memoryPayload).toEqual({
+      memories: [
+        {
+          content: {
+            role: 'user',
+            parts: [{text: 'My favorite color is green.'}],
+          },
+          author: 'user',
+          timestamp: expect.any(String),
+        },
+      ],
+    });
+  });
 });
