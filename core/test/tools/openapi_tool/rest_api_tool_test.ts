@@ -24,6 +24,7 @@ import {
   prepareRequestBody,
   prepareRequestParams,
 } from '../../../src/tools/openapi_tool/rest_api_tool.js';
+import {asJsonObject} from '../../../src/utils/json_utils.js';
 
 describe('RestApiTool', () => {
   afterEach(() => {
@@ -99,8 +100,11 @@ describe('RestApiTool', () => {
       operation,
     );
 
-    const schema = tool.getJsonSchema();
-    delete (schema['properties'] as Record<string, unknown>)['page_size'];
+    const properties = asJsonObject(tool.getJsonSchema()['properties']);
+    if (!properties) {
+      expect.fail('the generated schema has no properties object');
+    }
+    delete properties['page_size'];
 
     expect(tool.getJsonSchema()['properties']).toEqual({
       page_size: {type: 'integer'},

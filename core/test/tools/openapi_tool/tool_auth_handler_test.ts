@@ -8,6 +8,11 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
+  InMemorySessionService,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
@@ -33,12 +38,24 @@ vi.mock(
   },
 );
 
-/**
- * Builds a {@link Context} for a test from the members the test actually sets.
- * The cast lives here alone, so a test does not restate it.
- */
-function createMockContext(partial: Partial<Context>): Context {
-  return partial as Context;
+/** Builds a real {@link Context} whose session starts from `state`. */
+function createContext(state: Record<string, unknown> = {}): Context {
+  const agent = new LlmAgent({name: 'test_agent', model: 'gemini-2.0-flash'});
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      session: createSession({
+        id: 'session',
+        appName: 'app',
+        userId: 'user',
+        state,
+      }),
+      pluginManager: new PluginManager([]),
+      sessionService: new InMemorySessionService(),
+    }),
+    functionCallId: 'function-call-1',
+  });
 }
 
 describe('ToolAuthHandler', () => {
@@ -274,13 +291,10 @@ describe('ToolAuthHandler', () => {
   });
 
   it('gives two credential keys two slots under one scheme type', async () => {
-    const state = new State();
-    const mockContext = createMockContext({
-      state,
-      getAuthResponse: vi.fn().mockReturnValue({
-        authType: AuthCredentialTypes.API_KEY,
-        apiKey: 'key',
-      }),
+    const context = createContext();
+    vi.spyOn(context, 'getAuthResponse').mockReturnValue({
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'key',
     });
     const scheme: OpenAPIV3.SecuritySchemeObject = {
       type: 'apiKey',
@@ -289,32 +303,29 @@ describe('ToolAuthHandler', () => {
     };
 
     await new ToolAuthHandler(
-      mockContext,
+      context,
       scheme,
       undefined,
       'first',
     ).prepareAuthCredentials();
 
     expect(
-      state.get('apiKey_first_existing_exchanged_credential'),
+      context.state.get('apiKey_first_existing_exchanged_credential'),
     ).toBeDefined();
     expect(
-      state.get('apiKey_second_existing_exchanged_credential'),
+      context.state.get('apiKey_second_existing_exchanged_credential'),
     ).toBeUndefined();
   });
 
   it('does not read back a credential stored under another credential key', async () => {
-    const state = new State({
+    const context = createContext({
       'apiKey_first_existing_exchanged_credential': {
         authType: AuthCredentialTypes.HTTP,
         http: {scheme: 'bearer', credentials: {token: 'first-token'}},
       },
     });
-    const mockContext = createMockContext({
-      state,
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-      requestCredential: vi.fn(),
-    });
+    vi.spyOn(context, 'getAuthResponse').mockReturnValue(undefined);
+    vi.spyOn(context, 'requestCredential').mockImplementation(() => {});
     const scheme: OpenAPIV3.SecuritySchemeObject = {
       type: 'apiKey',
       name: 'X-API-Key',
@@ -322,7 +333,7 @@ describe('ToolAuthHandler', () => {
     };
 
     const result = await new ToolAuthHandler(
-      mockContext,
+      context,
       scheme,
       {authType: AuthCredentialTypes.API_KEY, apiKey: 'second-key'},
       'second',
@@ -334,15 +345,17 @@ describe('ToolAuthHandler', () => {
       'exchanged-token',
     );
     expect(
-      state.get('apiKey_first_existing_exchanged_credential'),
+      context.state.get('apiKey_first_existing_exchanged_credential'),
     ).toMatchObject({
       http: {credentials: {token: 'first-token'}},
     });
     // It caches into its own slot, not into the unqualified one a keyless
     // tool owns.
     expect(
-      state.get('apiKey_second_existing_exchanged_credential'),
+      context.state.get('apiKey_second_existing_exchanged_credential'),
     ).toBeDefined();
-    expect(state.get('apiKey_existing_exchanged_credential')).toBeUndefined();
+    expect(
+      context.state.get('apiKey_existing_exchanged_credential'),
+    ).toBeUndefined();
   });
 });
