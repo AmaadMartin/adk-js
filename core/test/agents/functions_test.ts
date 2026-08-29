@@ -17,6 +17,7 @@ import {
   LlmAgent,
   LongRunningFunctionTool,
   PluginManager,
+  RunAsyncToolRequest,
   Session,
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
@@ -117,6 +118,23 @@ const falsyLongRunningTool = new FunctionTool({
 
 function callFor(tool: BaseTool): FunctionCall {
   return {id: randomIdForTestingOnly(), name: tool.name, args: {}};
+}
+
+/**
+ * A tool that produces its `FunctionResponse` through another orchestrator,
+ * mirroring the ADK-internal tools that set the flag in their constructor.
+ */
+class DeferringTool extends BaseTool {
+  constructor(private readonly run: (toolContext: Context) => unknown) {
+    super({name: 'deferringTool', description: 'defers its response'});
+    this._defersResponse = true;
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    return this.run(toolContext);
+  }
 }
 
 /**
@@ -774,6 +792,54 @@ describe('handleFunctionCallList', () => {
     });
     expect(event!.actions.stateDelta).toEqual({jobStarted: true});
   });
+
+  it('should emit no event when a deferring tool returns nothing', async () => {
+    const deferringTool = new DeferringTool(() => undefined);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(deferringTool)],
+      toolsDict: {deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should emit a response part when a deferring tool returns a value', async () => {
+    const deferringTool = new DeferringTool(() => ({ok: true}));
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(deferringTool)],
+      toolsDict: {deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      ok: true,
+    });
+  });
+
+  it('should emit a content-less event carrying the actions of a deferring tool', async () => {
+    const deferringTool = new DeferringTool((toolContext) => {
+      toolContext.state.set('handedOff', true);
+      return undefined;
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(deferringTool)],
+      toolsDict: {deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content).toBeUndefined();
+    expect(event!.actions.stateDelta).toEqual({handedOff: true});
+  });
 });
 
 describe('generateAuthEvent', () => {
@@ -1098,6 +1164,15 @@ describe('getLongRunningFunctionCalls', () => {
     const result = getLongRunningFunctionCalls(functionCalls, toolsDict);
     expect(result.has('call-1')).toBe(true);
     expect(result.has('call-2')).toBe(false);
+  });
+
+  it('should not return the ID of a call to a deferring tool', () => {
+    const deferringTool = new DeferringTool(() => undefined);
+    const result = getLongRunningFunctionCalls(
+      [{name: deferringTool.name, id: 'call-3'}],
+      {[deferringTool.name]: deferringTool},
+    );
+    expect(result.size).toBe(0);
   });
 });
 

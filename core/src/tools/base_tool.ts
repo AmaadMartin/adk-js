@@ -68,6 +68,22 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
+   * Internal ADK flag. Do not set this from outside ADK.
+   *
+   * When true, ADK skips the automatic `FunctionResponse` for a call whose
+   * tool returned nothing, because another orchestrator produces the matching
+   * response later. A tool that returns a value emits its response as usual.
+   *
+   * `isLongRunning` has the same skip-on-empty behaviour, but it also marks
+   * the call on `Event.longRunningToolIds`, which A2A conversion, plugin
+   * logging and interrupt tracking read. This flag does neither.
+   *
+   * Mirrors Python's `BaseTool._defers_response`. It is not public API and it
+   * can change without notice.
+   */
+  _defersResponse = false;
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
