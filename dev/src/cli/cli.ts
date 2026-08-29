@@ -436,6 +436,7 @@ export function createProgram(): Command {
     )
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
+    .addOption(LOG_TO_TMP_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
@@ -444,11 +445,11 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
-      // No flag here, matching adk-python's `cli_run`. This command paints a
-      // chat transcript on stdout, and a log record landing between the prompt
-      // and the answer is what the temp folder exists to prevent. `-v` and
-      // `--log_level` keep working: they set the level of the file logger.
-      const logFilePath = startTmpFolderLogging();
+      // Opt in, unlike adk-python's `cli_run`, which redirects every run and
+      // leaves `-v` printing nothing to the terminal.
+      const logFilePath = getBoolean(options['log_to_tmp'])
+        ? startTmpFolderLogging()
+        : undefined;
       setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
       try {
