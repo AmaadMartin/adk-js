@@ -8,7 +8,6 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
-import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -131,33 +130,30 @@ export class ToolAuthHandler {
    * Derives the credential a request can carry from the one a previous tool
    * call stored.
    *
-   * An OAuth2 credential is refreshed when its access token has expired, then
-   * converted into the bearer credential the Authorization header needs. Any
-   * other credential is already in the form the header needs.
+   * The exchange refreshes an expired OAuth2 token and converts it into the
+   * bearer credential the Authorization header needs.
    */
   private async useStoredCredential(
     storedCredential: AuthCredential,
     store: ToolContextCredentialStore,
   ): Promise<AuthCredential> {
+    // A stored credential of any other type is already in the form the header
+    // needs. Handing it back to an exchanger would re-run the exchange that
+    // produced it, which is the round trip the store exists to avoid.
     if (!storedCredential.oauth2) {
       return storedCredential;
     }
 
-    const refresher = new OAuth2CredentialRefresher();
-    const credential = (await refresher.isRefreshNeeded(storedCredential))
-      ? await refresher.refresh(storedCredential, this.authScheme)
-      : storedCredential;
-
     const result = await new AutoAuthCredentialExchanger().exchange({
       authScheme: this.authScheme,
-      authCredential: credential,
+      authCredential: storedCredential,
     });
 
     // A provider that rotates the refresh token invalidates the previous one,
-    // so a refreshed credential replaces the stored one. The refresher hands
-    // back the credential it was given, by reference, when it cannot refresh,
-    // and rewriting that one would add a state delta to every tool call.
-    if (credential !== storedCredential) {
+    // so a refreshed credential replaces the stored one. A conversion that
+    // reached no token endpoint returns the tokens already stored, and
+    // rewriting those would add a state delta to every tool call.
+    if (result.wasExchanged) {
       store.storeCredential(
         store.getCredentialKey(this.authScheme),
         result.credential,

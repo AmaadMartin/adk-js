@@ -165,7 +165,9 @@ describe('OAuth2BearerCredentialExchanger', () => {
       oauth2Credential({accessToken: 'test_access_token'}),
     );
 
-    expect(result.wasExchanged).toBe(true);
+    // Wrapping a token the credential already holds reaches no token
+    // endpoint, and `ToolAuthHandler` persists the credential on this flag.
+    expect(result.wasExchanged).toBe(false);
     expect(result.credential).toEqual({
       authType: AuthCredentialTypes.HTTP,
       http: {scheme: 'bearer', credentials: {token: 'test_access_token'}},
@@ -211,8 +213,8 @@ describe('OAuth2BearerCredentialExchanger', () => {
   it('does not contact the token endpoint, even for an expired credential', async () => {
     const result = await exchange(authScheme, expiredCredential());
 
-    // Refreshing belongs to ToolAuthHandler, which stores the refreshed
-    // credential. This exchanger only wraps the token it is given.
+    // Refreshing belongs to AutoAuthCredentialExchanger, which refreshes
+    // before it converts. This exchanger only wraps the token it is given.
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.credential.http?.credentials.token).toBe(
       'stale_access_token',

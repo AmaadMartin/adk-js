@@ -105,6 +105,32 @@ describe('AutoAuthCredentialExchanger', () => {
       'oauth2-access-token',
     );
   });
+
+  it('reports no exchange when it only wraps a token it was given', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+    const authScheme = {
+      type: 'openIdConnect',
+      openIdConnectUrl: 'https://example.com/.well-known/openid-configuration',
+      authorizationEndpoint: 'https://example.com/auth',
+      tokenEndpoint: 'https://example.com/token',
+    } satisfies OpenIdConnectWithConfig;
+
+    const result = await exchanger.exchange({
+      authScheme,
+      authCredential: {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          accessToken: 'oauth2-access-token',
+        },
+      },
+    });
+
+    // `ToolAuthHandler` persists on this flag, so a conversion that reached no
+    // token endpoint must not report an exchange.
+    expect(result.wasExchanged).toBe(false);
+  });
 });
 
 describe('ServiceAccountCredentialExchanger', () => {

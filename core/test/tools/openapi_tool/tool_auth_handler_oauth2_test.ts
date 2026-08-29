@@ -198,6 +198,68 @@ describe('ToolAuthHandler OAuth2 credentials', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('refreshes an expired configured credential on the first call', async () => {
+    const fetchMock = stubTokenEndpoint(
+      'refreshed-access-token',
+      'rotated-refresh-token',
+    );
+    const context = createContext();
+
+    const result = await new ToolAuthHandler(
+      context,
+      OAUTH2_SCHEME,
+      expiredCredential(),
+    ).prepareAuthCredentials();
+
+    // Session state is empty on the first call, so a handler that refreshes
+    // only a stored credential sends the expired token.
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'refreshed-access-token',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const stored = context.state.get<AuthCredential>(STORE_KEY);
+    expect(stored?.oauth2?.refreshToken).toBe('rotated-refresh-token');
+  });
+
+  it('refreshes an expired auth response credential on the first call', async () => {
+    const fetchMock = stubTokenEndpoint(
+      'refreshed-access-token',
+      'rotated-refresh-token',
+    );
+    const context = createContext({[AUTH_RESPONSE_KEY]: expiredCredential()});
+
+    const result = await new ToolAuthHandler(
+      context,
+      OAUTH2_SCHEME,
+    ).prepareAuthCredentials();
+
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'refreshed-access-token',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a configured credential that needed no token request out of session state', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const context = createContext();
+
+    const result = await new ToolAuthHandler(
+      context,
+      OAUTH2_SCHEME,
+      freshCredential(),
+    ).prepareAuthCredentials();
+
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'stored-access-token',
+    );
+    // The tool holds this credential already. Storing it would copy the client
+    // secret into the session store and buy nothing.
+    expect(context.state.get<AuthCredential>(STORE_KEY)).toBeUndefined();
+    expect(context.state.hasDelta()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('stores the refresh token a client-credentials grant returns', async () => {
     stubTokenEndpoint('granted-token', 'granted-refresh-token');
     const context = createContext();

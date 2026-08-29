@@ -77,9 +77,9 @@ export class OAuth2BearerCredentialExchanger implements BaseCredentialExchanger 
   /**
    * Converts the credential into an HTTP bearer credential.
    *
-   * Keeping the token fresh belongs to the caller: `ToolAuthHandler` refreshes
-   * an expired credential and stores the result, which this exchanger cannot
-   * do because it returns only the credential a request carries.
+   * Keeping the token fresh belongs to the caller:
+   * `AutoAuthCredentialExchanger` refreshes an expired credential before it
+   * calls this exchanger.
    *
    * @param params.authScheme The OAuth2 or OpenID Connect scheme.
    * @param params.authCredential The credential to convert.
@@ -92,6 +92,9 @@ export class OAuth2BearerCredentialExchanger implements BaseCredentialExchanger 
   }): Promise<ExchangeResult> {
     checkSchemeCredentialType(params);
 
+    // A credential the caller refreshed carries both blocks, so the OAuth2
+    // access token wins over an `http` block holding the token it replaced.
+    // Python reads `http` first, where a credential never carries both.
     const {oauth2} = params.authCredential;
     if (!oauth2?.accessToken) {
       // An HTTP credential is already in the form the header needs, and a
@@ -101,7 +104,10 @@ export class OAuth2BearerCredentialExchanger implements BaseCredentialExchanger 
 
     return {
       credential: generateAuthToken(oauth2.accessToken),
-      wasExchanged: true,
+      // Wrapping a token the credential already holds costs no round trip.
+      // `ToolAuthHandler` persists on this flag, so reporting an exchange here
+      // would copy a static client secret into the session store.
+      wasExchanged: false,
     };
   }
 }
