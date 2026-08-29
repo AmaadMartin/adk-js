@@ -43,6 +43,14 @@ class StubToolContext {
   }
 }
 
+/**
+ * `Context` is a class, so a partial stub cannot satisfy it structurally. The
+ * cast is confined here instead of repeated at every call site.
+ */
+function stubContext(memories: MemoryEntry[]): Context {
+  return new StubToolContext(memories) as unknown as Context;
+}
+
 function requestWithContents(contents: Content[]): LlmRequest {
   return {contents, toolsDict: {}, liveConnectConfig: {}, config: {}};
 }
@@ -162,9 +170,7 @@ describe('PreloadMemoryTool', () => {
   });
 
   it('keeps the system instruction stable and inserts before the current turn', async () => {
-    const toolContext = new StubToolContext([
-      memoryEntry('likes tea'),
-    ]) as unknown as Context;
+    const toolContext = stubContext([memoryEntry('likes tea')]);
     const llmRequest = requestWithContents([
       createUserContent('historical question'),
       createModelContent('historical answer'),
@@ -192,9 +198,7 @@ describe('PreloadMemoryTool', () => {
       role: 'user',
       parts: [{functionResponse: {name: 'lookup', response: {result: 'done'}}}],
     };
-    const toolContext = new StubToolContext([
-      memoryEntry('likes tea'),
-    ]) as unknown as Context;
+    const toolContext = stubContext([memoryEntry('likes tea')]);
     const llmRequest = requestWithContents([
       createUserContent('current query'),
       createModelContent({functionCall: {name: 'lookup', args: {}}}),
@@ -209,7 +213,7 @@ describe('PreloadMemoryTool', () => {
 
   it('leaves the whole request untouched when searchMemory throws', async () => {
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-    const toolContext = new StubToolContext([]) as unknown as Context;
+    const toolContext = stubContext([]);
     toolContext.searchMemory = async () => {
       throw new Error('unavailable');
     };
@@ -226,9 +230,9 @@ describe('PreloadMemoryTool', () => {
   });
 
   it('omits the author prefix when a memory has no author', async () => {
-    const toolContext = new StubToolContext([
+    const toolContext = stubContext([
       {content: createUserContent('likes tea')},
-    ]) as unknown as Context;
+    ]);
     const llmRequest = requestWithContents([]);
 
     await new PreloadMemoryTool().processLlmRequest({toolContext, llmRequest});
@@ -238,7 +242,7 @@ describe('PreloadMemoryTool', () => {
   });
 
   it('leaves contents untouched when no memories are found', async () => {
-    const toolContext = new StubToolContext([]) as unknown as Context;
+    const toolContext = stubContext([]);
     const llmRequest = requestWithContents([]);
 
     await new PreloadMemoryTool().processLlmRequest({toolContext, llmRequest});
@@ -247,7 +251,7 @@ describe('PreloadMemoryTool', () => {
   });
 
   it('leaves contents untouched when no memory carries text', async () => {
-    const toolContext = new StubToolContext([
+    const toolContext = stubContext([
       {
         content: {
           role: 'user',
@@ -257,7 +261,7 @@ describe('PreloadMemoryTool', () => {
           ],
         },
       },
-    ]) as unknown as Context;
+    ]);
     const llmRequest = requestWithContents([]);
 
     await new PreloadMemoryTool().processLlmRequest({toolContext, llmRequest});
