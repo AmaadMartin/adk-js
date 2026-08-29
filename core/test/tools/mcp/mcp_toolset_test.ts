@@ -240,10 +240,11 @@ describe('MCPToolset', () => {
         useMcpResources: true,
       });
       const tools = await toolset.getTools();
-      const llmRequest = {
+      const llmRequest: LlmRequest = {
         contents: [],
         toolsDict: {},
-      } as unknown as LlmRequest;
+        liveConnectConfig: {},
+      };
 
       await tools[tools.length - 1].processLlmRequest({
         toolContext: {} as Context,
