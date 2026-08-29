@@ -10,7 +10,6 @@ import {
   AuthCredential,
   AuthCredentialTypes,
 } from '../../../src/auth/auth_credential.js';
-import {AuthCredentialMissingError} from '../../../src/auth/exchanger/base_credential_exchanger.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
 
@@ -121,20 +120,6 @@ describe('ServiceAccountCredentialExchanger', () => {
         authCredential: credential as unknown as AuthCredential,
       }),
     ).rejects.toThrow('Service account credentials are missing.');
-  });
-
-  it('should report a missing credential as AuthCredentialMissingError', async () => {
-    const exchanger = new ServiceAccountCredentialExchanger();
-    const authCredential: AuthCredential = {
-      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
-      serviceAccount: {
-        useDefaultCredential: false,
-      },
-    };
-
-    await expect(exchanger.exchange({authCredential})).rejects.toThrow(
-      AuthCredentialMissingError,
-    );
   });
 
   it('should throw if token exchange fails (missing token)', async () => {

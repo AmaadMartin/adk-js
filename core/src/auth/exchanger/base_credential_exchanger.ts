@@ -65,26 +65,19 @@ export class AuthCredentialMissingError extends Error {
  * {@link BaseCredentialExchanger} above: it takes the scheme and credential as
  * positional arguments with the scheme required, and returns the credential
  * directly rather than an {@link ExchangeResult}.
- *
- * The class is concrete on purpose. A subclass that does not override
- * {@link BaseAuthCredentialExchanger.exchangeCredential} fails on the first
- * call with a clear message instead of silently resolving to `undefined`.
  */
-export class BaseAuthCredentialExchanger {
+export abstract class BaseAuthCredentialExchanger {
   /**
    * Exchanges the provided credential for a usable token or credential.
    *
-   * @param _authScheme The security scheme. Required.
-   * @param _authCredential The authentication credential, if one is available.
+   * @param authScheme The security scheme. Required.
+   * @param authCredential The authentication credential, if one is available.
    * @returns The updated credential, or `undefined` when the exchange cannot
    *   yet produce a request-ready credential. Simple schemes such as API key
    *   may return the original credential when no exchange is needed.
-   * @throws Error If the subclass does not override this method.
    */
-  async exchangeCredential(
-    _authScheme: AuthScheme,
-    _authCredential?: AuthCredential,
-  ): Promise<AuthCredential | undefined> {
-    throw new Error('Subclasses must implement exchangeCredential.');
-  }
+  abstract exchangeCredential(
+    authScheme: AuthScheme,
+    authCredential?: AuthCredential,
+  ): Promise<AuthCredential | undefined>;
 }

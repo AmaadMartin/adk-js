@@ -66,19 +66,11 @@ describe('AuthCredentialMissingError', () => {
 });
 
 describe('BaseAuthCredentialExchanger', () => {
-  it('rejects when a subclass does not override exchangeCredential', async () => {
-    const exchanger = new BaseAuthCredentialExchanger();
+  it('accepts the scheme alone, without a credential', async () => {
+    const exchanger = new MockAuthCredentialExchanger();
 
-    await expect(
-      exchanger.exchangeCredential(AUTH_SCHEME, AUTH_CREDENTIAL),
-    ).rejects.toThrow('Subclasses must implement exchangeCredential.');
-  });
-
-  it('rejects when called with the scheme alone', async () => {
-    const exchanger = new BaseAuthCredentialExchanger();
-
-    await expect(exchanger.exchangeCredential(AUTH_SCHEME)).rejects.toThrow(
-      'Subclasses must implement exchangeCredential.',
+    await expect(exchanger.exchangeCredential(AUTH_SCHEME)).resolves.toBe(
+      EXCHANGED_CREDENTIAL,
     );
   });
 
