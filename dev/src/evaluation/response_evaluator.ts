@@ -25,12 +25,6 @@ interface ResponseRow {
   score: number;
 }
 
-/** Options for {@link evaluateResponses}. */
-export interface EvaluateResponsesOptions {
-  /** Prints a per-turn table of the response, the reference and the score. */
-  printDetailedResults?: boolean;
-}
-
 /**
  * Runs of characters the ROUGE reference tokenizer treats as separators.
  *
@@ -102,29 +96,24 @@ function totalCount(counts: Map<string, number>): number {
  * the same measure locally keeps the command usable without a Google Cloud
  * project, and keeps the eval run free of a network call.
  *
- * @param dataset One entry per conversation, each a list of scored turns.
- * @throws Error when the dataset holds no conversation.
+ * @param turns The scored turns of one case, in order.
+ * @param printDetailedResults Prints a per-turn table of the response against
+ *     its reference.
  */
 export function evaluateResponses(
-  dataset: EvalTurn[][],
-  options: EvaluateResponsesOptions = {},
+  turns: EvalTurn[],
+  printDetailedResults = false,
 ): number | undefined {
-  if (dataset.length === 0) {
-    throw new Error('The evaluation dataset is empty.');
-  }
-
-  const rows = dataset.flatMap((conversation) =>
-    conversation.flatMap((turn, index) =>
-      hasReference(turn) ? [scoreTurn(turn, index + 1)] : [],
-    ),
+  const rows = turns.flatMap((turn, index) =>
+    hasReference(turn) ? [scoreTurn(turn, index + 1)] : [],
   );
 
   if (rows.length === 0) {
     return undefined;
   }
 
-  if (options.printDetailedResults) {
-    printDetailedResults(rows);
+  if (printDetailedResults) {
+    printTurnTable(rows);
   }
 
   return rows.reduce((total, row) => total + row.score, 0) / rows.length;
@@ -145,7 +134,7 @@ function scoreTurn(turn: ScorableTurn, turnNumber: number): ResponseRow {
   };
 }
 
-function printDetailedResults(rows: ResponseRow[]): void {
+function printTurnTable(rows: ResponseRow[]): void {
   const table = formatAlignedTable([
     ['query', 'response', 'reference', 'rouge_1'],
     ...rows.map((row) => [

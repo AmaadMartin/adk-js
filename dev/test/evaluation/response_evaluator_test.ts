@@ -96,40 +96,26 @@ describe('rouge1FMeasure', () => {
 });
 
 describe('evaluateResponses', () => {
-  it('throws when the dataset holds no conversation', () => {
-    expect(() => evaluateResponses([])).toThrow(
-      'The evaluation dataset is empty.',
-    );
+  it('returns undefined for a case with no turns', () => {
+    expect(evaluateResponses([])).toBeUndefined();
   });
 
   it('returns undefined when no turn recorded a reference', () => {
-    expect(evaluateResponses([[turn('an answer')]])).toBeUndefined();
+    expect(evaluateResponses([turn('an answer')])).toBeUndefined();
   });
 
   it('returns undefined when every reference is null', () => {
-    expect(evaluateResponses([[turn('an answer', null)]])).toBeUndefined();
-  });
-
-  it('returns undefined for a conversation with no turns', () => {
-    expect(evaluateResponses([[]])).toBeUndefined();
+    expect(evaluateResponses([turn('an answer', null)])).toBeUndefined();
   });
 
   it('scores one turn against its reference', () => {
-    expect(evaluateResponses([[turn('the cat sat', 'the cat sat')]])).toBe(1);
+    expect(evaluateResponses([turn('the cat sat', 'the cat sat')])).toBe(1);
   });
 
-  it('averages over the turns of a conversation', () => {
+  it('averages over the turns of the case', () => {
     const score = evaluateResponses([
-      [turn('the cat sat', 'the cat sat'), turn('alpha', 'omega')],
-    ]);
-
-    expect(score).toBe(0.5);
-  });
-
-  it('averages over every conversation in the dataset', () => {
-    const score = evaluateResponses([
-      [turn('the cat sat', 'the cat sat')],
-      [turn('alpha', 'omega')],
+      turn('the cat sat', 'the cat sat'),
+      turn('alpha', 'omega'),
     ]);
 
     expect(score).toBe(0.5);
@@ -137,26 +123,25 @@ describe('evaluateResponses', () => {
 
   it('leaves a turn with no reference out of the mean', () => {
     const score = evaluateResponses([
-      [turn('the cat sat', 'the cat sat'), turn('alpha')],
+      turn('the cat sat', 'the cat sat'),
+      turn('alpha'),
     ]);
 
     expect(score).toBe(1);
   });
 
   it('scores a turn that recorded no response 0', () => {
-    expect(evaluateResponses([[turn(undefined, 'the cat sat')]])).toBe(0);
+    expect(evaluateResponses([turn(undefined, 'the cat sat')])).toBe(0);
   });
 
   it('prints nothing without printDetailedResults', () => {
-    evaluateResponses([[turn('the cat sat', 'the cat sat')]]);
+    evaluateResponses([turn('the cat sat', 'the cat sat')]);
 
     expect(logSpy).not.toHaveBeenCalled();
   });
 
   it('prints a per-turn table with printDetailedResults', () => {
-    evaluateResponses([[turn('the cat sat', 'the cat naps')]], {
-      printDetailedResults: true,
-    });
+    evaluateResponses([turn('the cat sat', 'the cat naps')], true);
 
     const output = printedOutput();
     expect(output).toContain('query');
@@ -167,7 +152,7 @@ describe('evaluateResponses', () => {
   });
 
   it('prints no table when no turn recorded a reference', () => {
-    evaluateResponses([[turn('an answer')]], {printDetailedResults: true});
+    evaluateResponses([turn('an answer')], true);
 
     expect(logSpy).not.toHaveBeenCalled();
   });

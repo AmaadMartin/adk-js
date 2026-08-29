@@ -184,9 +184,9 @@ function scoreMetric(
 
   switch (metricName) {
     case TOOL_TRAJECTORY_SCORE_KEY:
-      return evaluateTrajectory([turns], {printDetailedResults});
+      return evaluateTrajectory(turns, printDetailedResults);
     case RESPONSE_MATCH_SCORE_KEY:
-      return evaluateResponses([turns], {printDetailedResults});
+      return evaluateResponses(turns, printDetailedResults);
     default:
       warnUnsupportedMetric(metricName, options.warnedMetrics);
       return undefined;
