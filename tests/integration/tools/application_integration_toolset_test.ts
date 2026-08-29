@@ -19,11 +19,35 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 /** Records the key a signed request was built from. */
 const jwtConstructor = vi.fn();
 
+/**
+ * Stands in for `AuthClient.request`, which signs and sends every call. It
+ * goes out over the stubbed `fetch`, so one route table serves the metadata
+ * reads and the tool calls and the assertions below see the real wire URL.
+ */
+async function signedRequest(options: {
+  url: string;
+  method: string;
+  data?: unknown;
+  headers?: Record<string, string>;
+}): Promise<{status: number; statusText: string; data: unknown}> {
+  const response = await globalThis.fetch(options.url, {
+    method: options.method,
+    headers: {...options.headers, 'Authorization': 'Bearer test_token'},
+    body: options.data === undefined ? undefined : JSON.stringify(options.data),
+  });
+  return {
+    status: response.status,
+    statusText: response.statusText,
+    data: await response.json(),
+  };
+}
+
 vi.mock('google-auth-library', () => ({
   GoogleAuth: class {
     getClient() {
       return Promise.resolve({
         getAccessToken: () => Promise.resolve({token: 'test_token'}),
+        request: signedRequest,
         quotaProjectId: undefined,
       });
     }
@@ -40,6 +64,9 @@ vi.mock('google-auth-library', () => ({
     }
     authorize() {
       return Promise.resolve({access_token: 'test_token'});
+    }
+    request(options: Parameters<typeof signedRequest>[0]) {
+      return signedRequest(options);
     }
   },
 }));

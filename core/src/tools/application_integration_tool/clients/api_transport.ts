@@ -70,12 +70,13 @@ export class ApiTransport {
   }
 
   /**
-   * Returns a bearer token for the configured credentials.
+   * Fails before a request goes out when the credentials yield no token.
+   * adk-python reports that case with its own message rather than letting the
+   * API answer 401.
    *
    * @throws {Error} If the credentials cannot be resolved or yield no token.
    */
-  async getAccessToken(): Promise<string> {
-    const client = await this.resolveClient();
+  private async assertHasToken(client: AuthClient): Promise<void> {
     let token: string | null | undefined;
     try {
       token = (await client.getAccessToken()).token;
@@ -85,46 +86,47 @@ export class ApiTransport {
     if (!token) {
       throw new Error(NO_CREDENTIALS_MESSAGE);
     }
-    return token;
   }
 
   /**
    * Performs one authenticated JSON request and returns the decoded body.
    *
+   * The auth client signs, sends and decodes the call, so no bearer header is
+   * built here. `validateStatus` keeps a failing status a value instead of a
+   * thrown error, so the mapping below reads the status in one place.
+   *
    * @throws {InputValidationError} If the API answers 400 or 404.
    * @throws {Error} If the credentials, the transport or the body fail.
    */
   async fetchJson(request: JsonRequest): Promise<Record<string, unknown>> {
-    const token = await this.getAccessToken();
+    const client = await this.resolveClient();
+    await this.assertHasToken(client);
 
-    let response: Awaited<ReturnType<typeof globalThis.fetch>>;
+    let response: {status: number; statusText?: string; data: unknown};
     try {
-      response = await globalThis.fetch(request.url, {
+      response = await client.request<unknown>({
+        url: request.url,
         method: request.method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          ...request.headers,
-        },
-        body:
-          request.body === undefined ? undefined : JSON.stringify(request.body),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        data: request.body,
+        headers: {'Content-Type': 'application/json', ...request.headers},
+        timeout: REQUEST_TIMEOUT_MS,
+        responseType: 'json',
+        validateStatus: () => true,
       });
     } catch (error: unknown) {
       throw new Error(`Request error: ${formatError(error)}`);
     }
 
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       if (response.status === 400 || response.status === 404) {
         throw new InputValidationError(request.invalidRequestMessage);
       }
       throw new Error(
-        `Request error: ${response.status} ${response.statusText}`,
+        `Request error: ${response.status} ${response.statusText ?? ''}`.trim(),
       );
     }
 
-    const body = await response.json().catch(() => undefined);
-    const decoded = asJsonObject(body);
+    const decoded = asJsonObject(response.data);
     if (!decoded) {
       throw new Error(`Expected a JSON object from ${request.url}.`);
     }

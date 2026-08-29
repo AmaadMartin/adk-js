@@ -16,6 +16,8 @@ const getProjectId = vi.fn();
 const quotaProjectId = vi.fn();
 /** Counts credential resolutions. One `ApiTransport` resolves once. */
 const authClientRequests = vi.fn();
+/** Stands in for `AuthClient.request`, which signs and sends every call. */
+const request = vi.fn();
 
 vi.mock('google-auth-library', () => ({
   GoogleAuth: class {
@@ -23,6 +25,7 @@ vi.mock('google-auth-library', () => ({
       authClientRequests();
       return Promise.resolve({
         getAccessToken,
+        request,
         quotaProjectId: quotaProjectId(),
       });
     }
@@ -33,6 +36,9 @@ vi.mock('google-auth-library', () => ({
   JWT: class {
     getAccessToken() {
       return getAccessToken();
+    }
+    request(options: unknown) {
+      return request(options);
     }
   },
 }));
@@ -71,22 +77,21 @@ const SERVICE_ACCOUNT_KEY = JSON.stringify({
 function jsonResponse(body: unknown, init: {status?: number} = {}) {
   const status = init.status ?? 200;
   return {
-    ok: status >= 200 && status < 300,
     status,
     statusText: status === 200 ? 'OK' : 'Error',
-    json: async () => body,
+    data: body,
   };
 }
 
 /** Answers a request by the first route whose fragment the URL contains. */
-function routedFetch(routes: Array<[string, unknown]>) {
-  return vi.fn().mockImplementation((url: string) => {
+function routeRequests(routes: Array<[string, unknown]>) {
+  request.mockImplementation((options: {url: string}) => {
     for (const [fragment, body] of routes) {
-      if (url.includes(fragment)) {
+      if (options.url.includes(fragment)) {
         return Promise.resolve(jsonResponse(body));
       }
     }
-    return Promise.reject(new Error(`unexpected request: ${url}`));
+    return Promise.reject(new Error(`unexpected request: ${options.url}`));
   });
 }
 
@@ -137,16 +142,16 @@ function createClient(
   );
 }
 
-/** Reads and decodes the JSON body a mocked fetch call carried. */
-function requestBody(init: unknown): unknown {
-  const body =
-    typeof init === 'object' && init !== null
-      ? (init as {body?: unknown}).body
+/** Reads the JSON body a mocked auth-client request carried. */
+function requestBody(options: unknown): unknown {
+  const data =
+    typeof options === 'object' && options !== null
+      ? (options as {data?: unknown}).data
       : undefined;
-  if (typeof body !== 'string') {
+  if (data === undefined) {
     return expect.fail('the request carried no JSON body');
   }
-  return JSON.parse(body);
+  return data;
 }
 
 /** Returns the path item at `path`, failing the test when it is absent. */
@@ -180,10 +185,9 @@ describe('IntegrationClient', () => {
         info: {title: 'x', version: '1'},
         paths: {'/x': {}},
       };
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({openApiSpec: JSON.stringify(spec)}));
-      globalThis.fetch = fetchMock;
+      request.mockResolvedValue(
+        jsonResponse({openApiSpec: JSON.stringify(spec)}),
+      );
 
       const result = await createClient({
         integration: 'test-integration',
@@ -191,8 +195,8 @@ describe('IntegrationClient', () => {
       }).getOpenApiSpecForIntegration();
 
       expect(result).toEqual(spec);
-      expect(fetchMock.mock.calls[0][0]).toBe(GENERATE_SPEC_URL);
-      expect(requestBody(fetchMock.mock.calls[0][1])).toEqual({
+      expect(request.mock.calls[0][0].url).toBe(GENERATE_SPEC_URL);
+      expect(requestBody(request.mock.calls[0][0])).toEqual({
         apiTriggerResources: [
           {
             integrationResource: 'test-integration',
@@ -204,16 +208,13 @@ describe('IntegrationClient', () => {
     });
 
     it('sends a null trigger id when no triggers were given', async () => {
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
-      globalThis.fetch = fetchMock;
+      request.mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
 
       await createClient({
         integration: 'test-integration',
       }).getOpenApiSpecForIntegration();
 
-      expect(requestBody(fetchMock.mock.calls[0][1])).toEqual({
+      expect(requestBody(request.mock.calls[0][0])).toEqual({
         apiTriggerResources: [
           {integrationResource: 'test-integration', triggerId: null},
         ],
@@ -222,10 +223,7 @@ describe('IntegrationClient', () => {
     });
 
     it('sends the quota project header when using default credentials', async () => {
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
-      globalThis.fetch = fetchMock;
+      request.mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
       quotaProjectId.mockReturnValue('quota-project');
 
       await createClient({
@@ -233,9 +231,9 @@ describe('IntegrationClient', () => {
         triggers: [],
       }).getOpenApiSpecForIntegration();
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        GENERATE_SPEC_URL,
+      expect(request).toHaveBeenCalledWith(
         expect.objectContaining({
+          url: GENERATE_SPEC_URL,
           headers: expect.objectContaining({
             'x-goog-user-project': 'quota-project',
           }),
@@ -244,10 +242,7 @@ describe('IntegrationClient', () => {
     });
 
     it('falls back to the configured project for the quota header', async () => {
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
-      globalThis.fetch = fetchMock;
+      request.mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
       getProjectId.mockRejectedValue(new Error('no project'));
 
       await createClient({
@@ -255,9 +250,9 @@ describe('IntegrationClient', () => {
         triggers: [],
       }).getOpenApiSpecForIntegration();
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        GENERATE_SPEC_URL,
+      expect(request).toHaveBeenCalledWith(
         expect.objectContaining({
+          url: GENERATE_SPEC_URL,
           headers: expect.objectContaining({
             'x-goog-user-project': 'test-project',
           }),
@@ -266,19 +261,16 @@ describe('IntegrationClient', () => {
     });
 
     it('omits the quota project header when a service account key is given', async () => {
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
-      globalThis.fetch = fetchMock;
+      request.mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
 
       await createClient(
         {integration: 'test-integration', triggers: []},
         SERVICE_ACCOUNT_KEY,
       ).getOpenApiSpecForIntegration();
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        GENERATE_SPEC_URL,
+      expect(request).toHaveBeenCalledWith(
         expect.objectContaining({
+          url: GENERATE_SPEC_URL,
           headers: expect.not.objectContaining({
             'x-goog-user-project': expect.anything(),
           }),
@@ -287,9 +279,7 @@ describe('IntegrationClient', () => {
     });
 
     it('reports an invalid project, location or integration on 404', async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({}, {status: 404}));
+      request.mockResolvedValue(jsonResponse({}, {status: 404}));
 
       await expect(
         createClient({
@@ -304,9 +294,7 @@ describe('IntegrationClient', () => {
     });
 
     it('reports an invalid project, location or integration on 400', async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({}, {status: 400}));
+      request.mockResolvedValue(jsonResponse({}, {status: 400}));
 
       await expect(
         createClient({
@@ -321,9 +309,7 @@ describe('IntegrationClient', () => {
     });
 
     it('reports any other failing status as a request error', async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({}, {status: 500}));
+      request.mockResolvedValue(jsonResponse({}, {status: 500}));
 
       await expect(
         createClient({
@@ -334,7 +320,7 @@ describe('IntegrationClient', () => {
     });
 
     it('reports a transport failure as a request error', async () => {
-      globalThis.fetch = vi.fn().mockRejectedValue(new Error('socket hang up'));
+      request.mockRejectedValue(new Error('socket hang up'));
 
       await expect(
         createClient({
@@ -345,25 +331,20 @@ describe('IntegrationClient', () => {
     });
 
     it('bounds the request with a 30 second timeout', async () => {
-      const timeout = vi.spyOn(AbortSignal, 'timeout');
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
+      request.mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
 
       await createClient({
         integration: 'test-integration',
         triggers: [],
       }).getOpenApiSpecForIntegration();
 
-      expect(timeout).toHaveBeenCalledWith(30_000);
-      const init = vi.mocked(globalThis.fetch).mock.calls[0][1];
-      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({timeout: 30_000}),
+      );
     });
 
     it('reports a spec string that is not JSON as an unexpected error', async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({openApiSpec: '{not json'}));
+      request.mockResolvedValue(jsonResponse({openApiSpec: '{not json'}));
 
       await expect(
         createClient({
@@ -386,7 +367,7 @@ describe('IntegrationClient', () => {
     });
 
     it('rejects a response body that is not a JSON object', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse('a string'));
+      request.mockResolvedValue(jsonResponse('a string'));
 
       await expect(
         createClient({
@@ -399,7 +380,7 @@ describe('IntegrationClient', () => {
     });
 
     it('rejects a response without an OpenAPI spec', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({}));
+      request.mockResolvedValue(jsonResponse({}));
 
       await expect(
         createClient({
@@ -412,9 +393,7 @@ describe('IntegrationClient', () => {
     });
 
     it('rejects a spec that is not a JSON object', async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(jsonResponse({openApiSpec: '[1, 2]'}));
+      request.mockResolvedValue(jsonResponse({openApiSpec: '[1, 2]'}));
 
       await expect(
         createClient({
@@ -428,11 +407,9 @@ describe('IntegrationClient', () => {
     });
 
     it('rejects a spec that carries no paths object', async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(
-          jsonResponse({openApiSpec: '{"openapi":"3.0.1","info":{}}'}),
-        );
+      request.mockResolvedValue(
+        jsonResponse({openApiSpec: '{"openapi":"3.0.1","info":{}}'}),
+      );
 
       await expect(
         createClient({
@@ -446,11 +423,9 @@ describe('IntegrationClient', () => {
     });
 
     it('rejects a spec that declares no openapi version', async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(
-          jsonResponse({openApiSpec: '{"info":{},"paths":{}}'}),
-        );
+      request.mockResolvedValue(
+        jsonResponse({openApiSpec: '{"info":{},"paths":{}}'}),
+      );
 
       await expect(
         createClient({
@@ -464,11 +439,9 @@ describe('IntegrationClient', () => {
     });
 
     it('rejects a spec that declares no info object', async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(
-          jsonResponse({openApiSpec: '{"openapi":"3.0.1","paths":{}}'}),
-        );
+      request.mockResolvedValue(
+        jsonResponse({openApiSpec: '{"openapi":"3.0.1","paths":{}}'}),
+      );
 
       await expect(
         createClient({
@@ -490,7 +463,7 @@ describe('IntegrationClient', () => {
     });
 
     it('returns the service details of the connection', async () => {
-      globalThis.fetch = routedFetch([
+      routeRequests([
         [
           'view=BASIC',
           {
@@ -512,7 +485,7 @@ describe('IntegrationClient', () => {
     });
 
     it('resolves the credentials once for the details and the spec', async () => {
-      globalThis.fetch = routedFetch([
+      routeRequests([
         ['view=BASIC', {name: 'c', serviceDirectory: 'test-service'}],
         ...connectorRoutes(),
       ]);
@@ -530,7 +503,7 @@ describe('IntegrationClient', () => {
 
   describe('getOpenApiSpecForConnection', () => {
     it('generates a path and a request schema for every entity operation', async () => {
-      globalThis.fetch = routedFetch(connectorRoutes());
+      routeRequests(connectorRoutes());
 
       const spec = await createClient({
         connection: 'test-connection',
@@ -564,7 +537,7 @@ describe('IntegrationClient', () => {
     });
 
     it('forwards the tool name and instructions into the generated operation', async () => {
-      globalThis.fetch = routedFetch(connectorRoutes({operations: ['LIST']}));
+      routeRequests(connectorRoutes({operations: ['LIST']}));
 
       const spec = await createClient({
         connection: 'test-connection',
@@ -578,9 +551,7 @@ describe('IntegrationClient', () => {
     });
 
     it('falls back to the operations the connector supports', async () => {
-      globalThis.fetch = routedFetch(
-        connectorRoutes({operations: ['LIST', 'CREATE']}),
-      );
+      routeRequests(connectorRoutes({operations: ['LIST', 'CREATE']}));
 
       const spec = await createClient({
         connection: 'test-connection',
@@ -594,7 +565,7 @@ describe('IntegrationClient', () => {
     });
 
     it('rejects an operation the generator cannot express', async () => {
-      globalThis.fetch = routedFetch(connectorRoutes());
+      routeRequests(connectorRoutes());
 
       await expect(
         createClient({
@@ -609,7 +580,7 @@ describe('IntegrationClient', () => {
     });
 
     it('rejects an operation named after an Object prototype member', async () => {
-      globalThis.fetch = routedFetch(connectorRoutes());
+      routeRequests(connectorRoutes());
 
       await expect(
         createClient({
@@ -624,7 +595,7 @@ describe('IntegrationClient', () => {
     });
 
     it('generates an input payload for a generic action', async () => {
-      globalThis.fetch = routedFetch(connectorRoutes());
+      routeRequests(connectorRoutes());
 
       const spec = await createClient({
         connection: 'test-connection',
@@ -650,7 +621,7 @@ describe('IntegrationClient', () => {
     });
 
     it('names an action the connector gives no display name for', async () => {
-      globalThis.fetch = routedFetch(
+      routeRequests(
         connectorRoutes({
           actionResponse: {
             inputJsonSchema: {type: 'object'},
@@ -684,7 +655,7 @@ describe('IntegrationClient', () => {
     });
 
     it('skips the input payload for ExecuteCustomQuery', async () => {
-      globalThis.fetch = routedFetch(
+      routeRequests(
         connectorRoutes({
           actionResponse: {
             inputJsonSchema: {type: 'object'},
@@ -710,7 +681,7 @@ describe('IntegrationClient', () => {
     });
 
     it('replaces the default integration name with the override', async () => {
-      globalThis.fetch = routedFetch(connectorRoutes({operations: ['LIST']}));
+      routeRequests(connectorRoutes({operations: ['LIST']}));
 
       const spec = await createClient({
         connection: 'test-connection',
