@@ -24,9 +24,24 @@ const MCP_SDK: OptionalPeer = {
   feature: 'MCPSessionManager (and the MCP tools built on it)',
 };
 
+/**
+ * What the MCP SDK reports once it stops trying to resume a dropped stream.
+ *
+ * Nearly every transport error a session survives arrives on the same channel:
+ * a standalone event stream the server does not offer, one unparseable event,
+ * a stream drop the SDK goes on to resume. Treating those as fatal would break
+ * servers that work. This message is the exception. The SDK raises it from
+ * `_scheduleReconnection`, having given up, and then does nothing further — so
+ * the response never arrives and the request waits out its timeout.
+ *
+ * The other errors that do end a session need no help here: the SDK rethrows a
+ * failed send to the caller, and rejects every in-flight request on close.
+ */
+const RECONNECTION_EXHAUSTED = 'Maximum reconnection attempts';
+
 /** What the manager knows about the transport behind one session. */
 interface TransportState {
-  /** The first error the transport reported, once it has reported one. */
+  /** Set once the transport can no longer deliver a response. */
   failure?: Error;
   /**
    * The requests in flight on this session, each with the function that
@@ -36,17 +51,21 @@ interface TransportState {
 }
 
 /**
- * Records the transport's first error and abandons the requests waiting on it.
+ * Logs a transport error, and abandons the waiting requests if it was fatal.
  *
- * The error is also logged, because a transport reports errors that no request
- * is waiting for and those would otherwise be dropped.
+ * Every error is logged, because a transport reports errors that no request is
+ * waiting for and those would otherwise be dropped.
  */
 function handleTransportError(state: TransportState, err: unknown): void {
-  logger.error('MCP transport error: ' + formatError(err));
-  state.failure ??= new Error(
-    'MCP session connection lost: ' + formatError(err),
-    {cause: err},
-  );
+  const description = formatError(err);
+  logger.error('MCP transport error: ' + description);
+  if (!description.includes(RECONNECTION_EXHAUSTED)) {
+    return;
+  }
+
+  state.failure ??= new Error('MCP session connection lost: ' + description, {
+    cause: err,
+  });
   for (const abandon of state.pendingCalls.values()) {
     abandon(state.failure);
   }
@@ -226,13 +245,14 @@ export class MCPSessionManager {
   }
 
   /**
-   * Runs a request on a session and abandons it if the transport fails first.
+   * Runs a request on a session and abandons it if the transport dies first.
    *
-   * The MCP SDK rejects every in-flight request when a transport *closes*, so
-   * a closed stream needs no help. A transport *error* that leaves the stream
-   * open — a gateway answering the POST with 403, for instance — only reaches
-   * `transport.onerror`, and the request then waits out the SDK's 60-second
-   * request timeout. This surfaces that error at once instead.
+   * The SDK covers most of this already: it rethrows a failed send, and
+   * rejects every in-flight request when the transport closes. It does not
+   * cover a dropped event stream it has stopped trying to resume — nothing
+   * closes, so the request waits out the SDK's 60-second request timeout. That
+   * one case is what this guards. A transport error the session survives is
+   * left alone, because failing on one would break a server that works.
    *
    * A session this manager did not open, or one already closed, runs
    * unguarded: the manager holds no transport state for it.
@@ -240,8 +260,8 @@ export class MCPSessionManager {
    * @param client The session the request runs on.
    * @param call The request, already in flight.
    * @return What the request returned.
-   * @throws `MCP session connection lost: <error>` when the transport fails
-   *     before the request settles, or has already failed.
+   * @throws `MCP session connection lost: <error>` when the transport dies
+   *     before the request settles, or has already died.
    */
   async runGuarded<T>(client: Client, call: Promise<T>): Promise<T> {
     const state = this.transportStates.get(client);
