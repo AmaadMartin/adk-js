@@ -925,7 +925,7 @@ describe('AgentTool', () => {
 
     expect(forwarded).toMatchObject({
       maxLlmCalls: 7,
-      streamingMode: StreamingMode.SSE,
+      streamingMode: StreamingMode.NONE,
     });
   });
 
@@ -955,7 +955,7 @@ describe('AgentTool', () => {
     expect(callerRunConfig.supportCfc).toBe(true);
   });
 
-  it('forwards only supportCfc: false when the caller has no run config', async () => {
+  it('forwards no run config when the caller has none', async () => {
     const tool = createAgentTool();
 
     const forwarded = await captureNestedRunConfig(
@@ -963,7 +963,78 @@ describe('AgentTool', () => {
       createToolContext(createSubAgent()),
     );
 
-    expect(forwarded).toEqual({supportCfc: false});
+    expect(forwarded).toBeUndefined();
+  });
+
+  it('forces the nested run unary when the caller streams', async () => {
+    const tool = createAgentTool();
+    const callerRunConfig: RunConfig = {
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.SSE,
+    };
+
+    const forwarded = await captureNestedRunConfig(
+      tool,
+      createToolContext(createSubAgent(), callerRunConfig),
+    );
+
+    expect(forwarded).toEqual({
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.NONE,
+    });
+    expect(callerRunConfig.streamingMode).toBe(StreamingMode.SSE);
+  });
+
+  it('drops supportCfc and forces the nested run unary together', async () => {
+    const tool = createAgentTool();
+    const callerRunConfig: RunConfig = {
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.SSE,
+      supportCfc: true,
+    };
+
+    const forwarded = await captureNestedRunConfig(
+      tool,
+      createToolContext(createSubAgent(), callerRunConfig),
+    );
+
+    expect(forwarded).toEqual({
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.NONE,
+      supportCfc: false,
+    });
+    expect(callerRunConfig).toEqual({
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.SSE,
+      supportCfc: true,
+    });
+  });
+
+  it('forwards a unary caller run config as the same object', async () => {
+    const tool = createAgentTool();
+    const callerRunConfig: RunConfig = {
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.NONE,
+    };
+
+    const forwarded = await captureNestedRunConfig(
+      tool,
+      createToolContext(createSubAgent(), callerRunConfig),
+    );
+
+    expect(forwarded).toBe(callerRunConfig);
+  });
+
+  it('forwards a caller run config with no streaming mode as the same object', async () => {
+    const tool = createAgentTool();
+    const callerRunConfig: RunConfig = {maxLlmCalls: 7};
+
+    const forwarded = await captureNestedRunConfig(
+      tool,
+      createToolContext(createSubAgent(), callerRunConfig),
+    );
+
+    expect(forwarded).toBe(callerRunConfig);
   });
 });
 
