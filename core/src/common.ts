@@ -433,6 +433,17 @@ export type {ApplicationIntegrationToolsetOptions} from './tools/application_int
 export {IntegrationConnectorTool} from './tools/application_integration_tool/integration_connector_tool.js';
 export type {IntegrationConnectorToolOptions} from './tools/application_integration_tool/integration_connector_tool.js';
 export * from './tools/base_tool.js';
+export type {
+  DiscoveryDocument,
+  DiscoveryMethod,
+  DiscoveryParameter,
+  DiscoveryResource,
+  DiscoverySchema,
+} from './tools/google_api_tool/discovery_document.js';
+export {
+  GoogleApiToOpenApiConverter,
+  convertDiscoveryDocument,
+} from './tools/google_api_tool/googleapi_to_openapi_converter.js';
 export {
   createApiParameter,
   generateParamDoc,
