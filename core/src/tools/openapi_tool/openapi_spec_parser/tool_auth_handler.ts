@@ -16,9 +16,6 @@ export interface AuthPreparationResult {
   authCredential?: AuthCredential;
 }
 
-/** Credential key recorded on the auth config when the caller names none. */
-const DEFAULT_CREDENTIAL_KEY = 'default_openapi_key';
-
 class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
 
@@ -104,7 +101,7 @@ export class ToolAuthHandler {
     const authConfig: AuthConfig = {
       authScheme: this.authScheme,
       rawAuthCredential: this.authCredential,
-      credentialKey: this.credentialKey || DEFAULT_CREDENTIAL_KEY,
+      credentialKey: this.credentialKey || 'default_openapi_key',
     };
 
     // A credential returned by an auth response was supplied interactively by
