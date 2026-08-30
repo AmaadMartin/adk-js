@@ -45,17 +45,6 @@ function withoutFields(
   return copy;
 }
 
-function readStringField(
-  source: object | undefined,
-  key: string,
-): string | undefined {
-  if (!source || !(key in source)) {
-    return undefined;
-  }
-  const value = (source as Record<string, unknown>)[key];
-  return typeof value === 'string' && value ? value : undefined;
-}
-
 async function schemeDigestName(authScheme?: AuthScheme): Promise<string> {
   if (!authScheme) {
     return '';
@@ -139,8 +128,8 @@ export function credentialKeyOverride(
   }
   for (const source of [authCredential, authScheme]) {
     for (const field of CREDENTIAL_KEY_FIELDS) {
-      const value = readStringField(source, field);
-      if (value) {
+      const value = (source as Record<string, unknown> | undefined)?.[field];
+      if (typeof value === 'string' && value) {
         return value;
       }
     }

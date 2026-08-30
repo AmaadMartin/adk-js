@@ -26,13 +26,9 @@ import {experimental} from '../../../utils/experimental.js';
 import {logger} from '../../../utils/logger.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
-/** Whether a tool can authenticate now, or is waiting for a credential. */
-export type AuthPreparationState = 'pending' | 'done';
-
 /** What {@link ToolAuthHandler.prepareAuthCredentials} resolved to. */
 export interface AuthPreparationResult {
-  state: AuthPreparationState;
-  authScheme?: AuthScheme;
+  state: 'pending' | 'done';
   authCredential?: AuthCredential;
 }
 
@@ -43,20 +39,18 @@ export interface AuthPreparationResult {
  * an in-memory store in a test, or a store backed by a secret manager.
  */
 export interface CredentialStore {
-  /** Returns the key the credential for this pair is stored under. */
-  getCredentialKey(
-    authScheme?: AuthScheme,
-    authCredential?: AuthCredential,
-  ): Promise<string>;
-
   /** Returns the stored credential for this pair, if there is one. */
   getCredential(
     authScheme?: AuthScheme,
     authCredential?: AuthCredential,
   ): Promise<AuthCredential | undefined>;
 
-  /** Stores a credential under `key`. */
-  storeCredential(key: string, credential: AuthCredential): Promise<void>;
+  /** Stores `credential` as the credential this pair resolved to. */
+  storeCredential(
+    credential: AuthCredential,
+    authScheme?: AuthScheme,
+    authCredential?: AuthCredential,
+  ): Promise<void>;
 }
 
 /** Options for {@link ToolAuthHandler}. */
@@ -69,23 +63,11 @@ export interface ToolAuthHandlerOptions {
   credentialStore?: CredentialStore;
 }
 
-/** Scheme types that authenticate through an OAuth2 authorization server. */
-const OAUTH_SCHEME_TYPES: ReadonlySet<string> = new Set([
-  'oauth2',
-  'openIdConnect',
-]);
-
-/** Credential types that carry an `oauth2` block. */
-const OAUTH_CREDENTIAL_TYPES: ReadonlySet<AuthCredentialTypes> = new Set([
-  AuthCredentialTypes.OAUTH2,
-  AuthCredentialTypes.OPEN_ID_CONNECT,
-]);
-
 /** Suffix of the session state key holding a tool's credential. */
 const STORE_KEY_SUFFIX = '_existing_exchanged_credential';
 
 function isOAuthScheme(authScheme: AuthScheme): boolean {
-  return OAUTH_SCHEME_TYPES.has(authScheme.type);
+  return authScheme.type === 'oauth2' || authScheme.type === 'openIdConnect';
 }
 
 /**
@@ -102,7 +84,10 @@ function externalExchangeRequired(
   authScheme: AuthScheme,
   credential: AuthCredential,
 ): boolean {
-  if (!OAUTH_CREDENTIAL_TYPES.has(credential.authType)) {
+  if (
+    credential.authType !== AuthCredentialTypes.OAUTH2 &&
+    credential.authType !== AuthCredentialTypes.OPEN_ID_CONNECT
+  ) {
     return false;
   }
   if (credential.oauth2?.accessToken) {
@@ -192,19 +177,18 @@ export class ToolContextCredentialStore implements CredentialStore {
   }
 
   async storeCredential(
-    key: string,
     credential: AuthCredential,
+    authScheme?: AuthScheme,
+    authCredential?: AuthCredential,
   ): Promise<void> {
     // Use State.set so the credential is recorded in the state delta and
     // persisted to the session. A plain assignment (`state[key] = ...`) sets
     // an own property on the State instance that is never committed, so the
     // exchanged credential would be re-created on every tool invocation.
-    this.context.state.set(key, credential);
-  }
-
-  /** Drops the credential held under `key`, for a caller that revoked it. */
-  removeCredential(key: string): void {
-    this.context.state.set(key, undefined);
+    this.context.state.set(
+      await this.getCredentialKey(authScheme, authCredential),
+      credential,
+    );
   }
 }
 
@@ -261,11 +245,7 @@ export class ToolAuthHandler {
       if (!credential) {
         assertConsentCredentialComplete(authScheme, this.authCredential);
         this.context.requestCredential(authConfig);
-        return {
-          state: 'pending',
-          authScheme,
-          authCredential: this.authCredential,
-        };
+        return {state: 'pending', authCredential: this.authCredential};
       }
       // Store what the client supplied before exchanging it. That is the
       // durable credential: it carries the refresh token a later invocation
@@ -285,7 +265,7 @@ export class ToolAuthHandler {
       await this.storeCredential(result.credential);
     }
 
-    return {state: 'done', authScheme, authCredential: result.credential};
+    return {state: 'done', authCredential: result.credential};
   }
 
   private async buildAuthConfig(authScheme: AuthScheme): Promise<AuthConfig> {
@@ -323,10 +303,10 @@ export class ToolAuthHandler {
   }
 
   private async storeCredential(credential: AuthCredential): Promise<void> {
-    const key = await this.credentialStore.getCredentialKey(
+    await this.credentialStore.storeCredential(
+      credential,
       this.authScheme,
       this.authCredential,
     );
-    await this.credentialStore.storeCredential(key, credential);
   }
 }

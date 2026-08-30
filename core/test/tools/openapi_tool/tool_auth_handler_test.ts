@@ -114,20 +114,13 @@ class FakeCredentialStore implements CredentialStore {
   readonly entries = new Map<string, AuthCredential>();
   getCredentialCalls = 0;
 
-  async getCredentialKey(): Promise<string> {
-    return FakeCredentialStore.KEY;
-  }
-
   async getCredential(): Promise<AuthCredential | undefined> {
     this.getCredentialCalls += 1;
     return this.entries.get(FakeCredentialStore.KEY);
   }
 
-  async storeCredential(
-    key: string,
-    credential: AuthCredential,
-  ): Promise<void> {
-    this.entries.set(key, credential);
+  async storeCredential(credential: AuthCredential): Promise<void> {
+    this.entries.set(FakeCredentialStore.KEY, credential);
   }
 }
 
@@ -433,7 +426,6 @@ describe('ToolAuthHandler credential lifecycle', () => {
     ).prepareAuthCredentials();
 
     expect(result.state).toBe('pending');
-    expect(result.authScheme).toBe(OIDC_SCHEME);
     expect(result.authCredential).toBe(OIDC_CREDENTIAL);
     expect(exchanger.exchange).not.toHaveBeenCalled();
   });
@@ -495,7 +487,6 @@ describe('ToolAuthHandler credential lifecycle', () => {
     ).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
-    expect(result.authScheme).toBe(OIDC_SCHEME);
     expect(result.authCredential).toBe(EXCHANGED_CREDENTIAL);
     expect(getAuthResponse).toHaveBeenCalledTimes(1);
     // The stored credential carries the refresh token, which the exchanged
@@ -744,7 +735,6 @@ describe('ToolAuthHandler credential validation', () => {
     ).prepareAuthCredentials();
 
     expect(result.state).toBe('pending');
-    expect(result.authScheme).toBe(API_KEY_SCHEME);
     expect(requestedKey(context)).toMatch(/^adk_apiKey_/);
   });
 });
@@ -853,29 +843,13 @@ describe('ToolContextCredentialStore', () => {
     const store = new ToolContextCredentialStore(context);
     const otherCredential = oidcCredential({clientId: 'other-client-id'});
     const cached = oidcCredential({accessToken: 'first-app-token'});
-    await store.storeCredential(
-      await store.getCredentialKey(OIDC_SCHEME, OIDC_CREDENTIAL),
-      cached,
-    );
+    await store.storeCredential(cached, OIDC_SCHEME, OIDC_CREDENTIAL);
 
     expect(await store.getCredential(OIDC_SCHEME, OIDC_CREDENTIAL)).toEqual(
       cached,
     );
     expect(
       await store.getCredential(OIDC_SCHEME, otherCredential),
-    ).toBeUndefined();
-  });
-
-  it('removes a credential a caller revoked', async () => {
-    const context = createContext();
-    const store = new ToolContextCredentialStore(context);
-    const key = await store.getCredentialKey(OIDC_SCHEME, OIDC_CREDENTIAL);
-    await store.storeCredential(key, oidcCredential({accessToken: 'token'}));
-
-    store.removeCredential(key);
-
-    expect(
-      await store.getCredential(OIDC_SCHEME, OIDC_CREDENTIAL),
     ).toBeUndefined();
   });
 });

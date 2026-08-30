@@ -19,41 +19,18 @@ const DIGEST_LENGTH = 16;
  *     booleans are supported; a value that `JSON.stringify` cannot represent
  *     is written as `null`.
  * @returns The canonical JSON text.
- * @throws Error If the value contains a circular reference.
  */
 export function canonicalJson(value: unknown): string {
-  return encode(value, new Set<object>());
-}
-
-function encode(value: unknown, ancestors: Set<object>): string {
   if (value === null || typeof value !== 'object') {
     return JSON.stringify(value) ?? 'null';
   }
-  if (ancestors.has(value)) {
-    throw new Error(
-      'canonicalJson: the value contains a circular reference and cannot be ' +
-        'serialized.',
-    );
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(',')}]`;
   }
-  ancestors.add(value);
-  try {
-    return Array.isArray(value)
-      ? encodeArray(value, ancestors)
-      : encodeObject(value, ancestors);
-  } finally {
-    ancestors.delete(value);
-  }
-}
-
-function encodeArray(value: unknown[], ancestors: Set<object>): string {
-  return `[${value.map((item) => encode(item, ancestors)).join(',')}]`;
-}
-
-function encodeObject(value: object, ancestors: Set<object>): string {
   const entries = Object.entries(value)
     .filter(([, item]) => item !== undefined && item !== null)
     .sort(([left], [right]) => (left < right ? -1 : 1))
-    .map(([key, item]) => `${JSON.stringify(key)}:${encode(item, ancestors)}`);
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`);
   return `{${entries.join(',')}}`;
 }
 

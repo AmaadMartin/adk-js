@@ -39,21 +39,7 @@ describe('canonicalJson', () => {
     expect(canonicalJson(undefined)).toBe('null');
   });
 
-  it('throws on a circular reference instead of overflowing the stack', () => {
-    const cyclic: Record<string, unknown> = {name: 'root'};
-    cyclic['self'] = cyclic;
-
-    expect(() => canonicalJson(cyclic)).toThrow(/circular reference/);
-  });
-
-  it('throws on a circular reference reached through an array', () => {
-    const items: unknown[] = [];
-    items.push(items);
-
-    expect(() => canonicalJson(items)).toThrow(/circular reference/);
-  });
-
-  it('accepts the same object twice when it is not an ancestor', () => {
+  it('serializes the same object twice independently', () => {
     const shared = {a: 1};
 
     expect(canonicalJson({left: shared, right: shared})).toBe(

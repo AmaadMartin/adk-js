@@ -389,7 +389,6 @@ export {
 } from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export type {
   AuthPreparationResult,
-  AuthPreparationState,
   CredentialStore,
   ToolAuthHandlerOptions,
 } from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
