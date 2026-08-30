@@ -40,6 +40,13 @@ const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 /** Highest port number a URL authority can name. */
 const MAX_PORT = 65535;
 
+/**
+ * Asks the origin server for an uncompressed body. `node:http` has no
+ * decompressor, and a server may compress a reply that carries no
+ * `Accept-Encoding` at all, which would decode to noise.
+ */
+const IDENTITY_ENCODING = {'Accept-Encoding': 'identity'} as const;
+
 /** A vetted fetch target: where to connect, and what to claim to be. */
 interface RequestTarget {
   /** The parsed, canonicalized URL. */
@@ -240,7 +247,7 @@ function requestPinned(
     // Node must not synthesize a Host header from the pinned IP, and the
     // certificate is validated against the original hostname, not the IP.
     setHost: false,
-    headers: {Host: target.hostHeader},
+    headers: {Host: target.hostHeader, ...IDENTITY_ENCODING},
     agent: false,
     ...(servername === undefined ? {} : {servername}),
   };
@@ -283,7 +290,11 @@ function requestThroughProxy(
     path: absoluteRequestUri(target.url),
     method: 'GET',
     setHost: false,
-    headers: {Host: target.hostHeader, ...proxyAuthHeaders(proxy)},
+    headers: {
+      Host: target.hostHeader,
+      ...IDENTITY_ENCODING,
+      ...proxyAuthHeaders(proxy),
+    },
     agent: false,
   });
   return sendRequest(request, timeoutMs);
@@ -338,7 +349,7 @@ async function requestThroughTunnel(
       path: requestPath(target.url),
       method: 'GET',
       setHost: false,
-      headers: {Host: target.hostHeader},
+      headers: {Host: target.hostHeader, ...IDENTITY_ENCODING},
     });
     return await sendRequest(request, timeoutMs);
   } catch (err: unknown) {
