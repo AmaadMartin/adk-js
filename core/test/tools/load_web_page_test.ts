@@ -17,6 +17,7 @@ import {
 import type {RequestOptions} from 'node:https';
 import {connect as netConnect, type Socket} from 'node:net';
 import type {ConnectionOptions, TLSSocket} from 'node:tls';
+import {gzipSync} from 'node:zlib';
 
 import {FunctionTool, LOAD_WEB_PAGE, loadWebPage} from '@google/adk';
 import {
@@ -490,6 +491,15 @@ describe('loadWebPage', () => {
       expect(originRequests[0].url).toBe('/a?q=1');
     });
 
+    it('asks the origin for an uncompressed body', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+
+      await loadWebPage('https://example.com/');
+
+      expect(originRequests[0].headers['accept-encoding']).toBe('identity');
+    });
+
     it('keeps a non-default port in the Host header', async () => {
       resolveTo('93.184.216.34');
       pinToOrigin();
@@ -616,6 +626,29 @@ describe('loadWebPage', () => {
       expect(result).toBe('Café serves very good cake');
     });
 
+    it('reads a body from a server that compresses unrequested replies', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+      // RFC 9110 lets a server compress when the client sends no
+      // `Accept-Encoding`, and `node:http` has no decompressor.
+      originHandler = (req, res) => {
+        if (req.headers['accept-encoding'] === 'identity') {
+          res.writeHead(200, {'Content-Type': 'text/html'});
+          res.end(PAGE_HTML);
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Content-Encoding': 'gzip',
+        });
+        res.end(gzipSync(PAGE_HTML));
+      };
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe(PAGE_TEXT);
+    });
+
     it('falls back to UTF-8 for a charset the runtime does not know', async () => {
       resolveTo('93.184.216.34');
       pinToOrigin();
@@ -719,6 +752,14 @@ describe('loadWebPage', () => {
       expect(proxyRequests[0].headers.host).toBe('example.com');
     });
 
+    it('asks the proxied origin for an uncompressed body', async () => {
+      vi.stubEnv('http_proxy', `http://127.0.0.1:${proxyPort}`);
+
+      await loadWebPage('http://example.com/page');
+
+      expect(proxyRequests[0].headers['accept-encoding']).toBe('identity');
+    });
+
     it('uses all_proxy when the scheme has no proxy of its own', async () => {
       vi.stubEnv('ALL_PROXY', `http://127.0.0.1:${proxyPort}`);
 
@@ -804,6 +845,15 @@ describe('loadWebPage', () => {
       expect(tlsConnectSpy.mock.calls[0][0].servername).toBe(
         'does-not-resolve.invalid',
       );
+    });
+
+    it('asks for an uncompressed body over the tunnel, not on the CONNECT', async () => {
+      vi.stubEnv('https_proxy', `http://127.0.0.1:${proxyPort}`);
+
+      await loadWebPage('https://does-not-resolve.invalid/doc');
+
+      expect(tlsRequestOptions().headers?.['Accept-Encoding']).toBe('identity');
+      expect(proxyRequests[0].headers['accept-encoding']).toBeUndefined();
     });
 
     it('names the explicit port in the CONNECT authority', async () => {
