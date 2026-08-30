@@ -66,11 +66,22 @@ describe('isBlockedAddress', () => {
     ['Teredo', '2001::1'],
     ['IETF protocol assignments', '2001:1ff::1'],
     ['documentation', '2001:db8::1'],
+    ['6to4', '2002::1'],
+    ['6to4 upper bound', '2002:ffff:ffff::1'],
+    ['documentation (RFC 9637)', '3fff::1'],
+    ['documentation upper bound', '3fff:fff::1'],
     ['unique-local', 'fc00::1'],
     ['link-local', 'fe80::1'],
     ['multicast', 'ff02::1'],
   ])('blocks the %s IPv6 range (%s)', (_range, address) => {
     expect(isBlockedAddress(address)).toBe(true);
+  });
+
+  it.each([
+    ['2002::/16', '2003::1'],
+    ['3fff::/20', '3fff:1000::1'],
+  ])('allows %s neighbour %s, which the prefix excludes', (_range, address) => {
+    expect(isBlockedAddress(address)).toBe(false);
   });
 
   it.each([
@@ -92,11 +103,16 @@ describe('isBlockedAddress', () => {
 
   it.each([
     ['IPv4-mapped', '::ffff:93.184.216.34'],
-    ['6to4', '2002:5db8:d822::'],
     ['NAT64 well-known', '64:ff9b::808:808'],
     ['IPv4-compatible', '::5db8:d822'],
   ])('allows a %s address wrapping a public IPv4 (%s)', (_form, address) => {
     expect(isBlockedAddress(address)).toBe(false);
+  });
+
+  it('blocks a 6to4 address that wraps a public IPv4', () => {
+    // 6to4 of 93.184.216.34. Python reports the whole 2002::/16 prefix as not
+    // globally routable, so it refuses this address as well.
+    expect(isBlockedAddress('2002:5db8:d822::')).toBe(true);
   });
 
   it('blocks an IPv4-mapped address whose own range is blocked', () => {
