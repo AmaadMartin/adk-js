@@ -39,6 +39,13 @@ vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => {
 });
 
 describe('MCPSessionManager', () => {
+  // Cleared for every test, so an assertion only ever sees the transport its
+  // own test constructed and the file stays order-independent.
+  beforeEach(() => {
+    vi.mocked(StreamableHTTPClientTransport).mockClear();
+    vi.mocked(StdioClientTransport).mockClear();
+  });
+
   it('creates an stdio client', async () => {
     const manager = new MCPSessionManager({
       type: 'StdioConnectionParams',
@@ -317,11 +324,6 @@ describe('MCPSessionManager', () => {
       return record;
     };
 
-    beforeEach(() => {
-      vi.mocked(StreamableHTTPClientTransport).mockClear();
-      vi.mocked(StdioClientTransport).mockClear();
-    });
-
     it('merges extraHeaders into transportOptions.requestInit.headers', async () => {
       const manager = new MCPSessionManager({
         type: 'StreamableHTTPConnectionParams',
@@ -391,6 +393,23 @@ describe('MCPSessionManager', () => {
       expect(lastHeaders()).toEqual({
         'x-count': '42',
         authorization: 'Bearer t',
+      });
+    });
+
+    it('stringifies a non-string deprecated header with no extra headers', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        header: {'x-count': 42},
+      });
+
+      await manager.createSession();
+
+      // Read the raw options rather than `lastHeaders()`: with no extra
+      // headers nothing constructs a `Headers`, so this is the only test that
+      // sees what the deprecated field alone hands the transport.
+      expect(lastTransportOptions()?.requestInit?.headers).toEqual({
+        'x-count': '42',
       });
     });
 

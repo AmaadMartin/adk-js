@@ -129,9 +129,9 @@ export class MCPSessionManager {
             params.transportOptions ?? {};
 
           if (!options.requestInit && params.header !== undefined) {
-            const headers = new Headers();
+            const headers: Record<string, string> = {};
             for (const [name, value] of Object.entries(params.header)) {
-              headers.set(name, String(value));
+              headers[name] = String(value);
             }
             options = {...options, requestInit: {headers}};
           }
