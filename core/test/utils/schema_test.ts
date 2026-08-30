@@ -167,6 +167,32 @@ describe('parseJsonWithSchema', () => {
     });
   });
 
+  it('rejects an unclosed fence promptly instead of backtracking over it', () => {
+    // The sub-agent chooses this text, so an unclosed fence around a long
+    // whitespace run must not become a denial of service on the event loop.
+    const unclosed = '```json\n' + ' '.repeat(16000) + 'x';
+    const startedAt = Date.now();
+    expect(() => parseJsonWithSchema(summarySchema, unclosed)).toThrow(
+      SyntaxError,
+    );
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+  });
+
+  it('strips a fence whose body holds a long whitespace run', () => {
+    const padded = '```json\n' + ' '.repeat(16000) + '{"summary":"done"}\n```';
+    const startedAt = Date.now();
+    expect(parseJsonWithSchema(summarySchema, padded)).toEqual({
+      summary: 'done',
+    });
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+  });
+
+  it('leaves a bare fence that wraps nothing alone', () => {
+    expect(() => parseJsonWithSchema(summarySchema, '```')).toThrow(
+      SyntaxError,
+    );
+  });
+
   it('returns the parsed value when no schema is given', () => {
     expect(parseJsonWithSchema(undefined, '{"anything":true}')).toEqual({
       anything: true,

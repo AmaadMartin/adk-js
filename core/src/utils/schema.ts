@@ -107,11 +107,11 @@ export function parseWithSchema<T>(
   return validator ? (validator.parse(value) as T) : value;
 }
 
-/**
- * Matches a markdown code fence that wraps a whole payload, capturing the text
- * inside it. An optional language tag follows the opening fence.
- */
-const WRAPPING_CODE_FENCE = /^```\w*\s*([\s\S]*?)\s*```$/;
+/** The markdown code fence a model wraps structured output in. */
+const CODE_FENCE = '```';
+
+/** The optional language tag that follows the opening fence. */
+const LANGUAGE_TAG = /^\w*/;
 
 /**
  * Removes a markdown code fence wrapping the whole JSON payload.
@@ -120,10 +120,23 @@ const WRAPPING_CODE_FENCE = /^```\w*\s*([\s\S]*?)\s*```$/;
  * often when tools are configured alongside an output schema and the schema
  * becomes best-effort. Well-formed JSON never starts with a fence, so this
  * leaves valid input alone.
+ *
+ * The fence is matched by position rather than by one regular expression. A
+ * single pattern spanning both fences needs a lazy body between two whitespace
+ * runs, and that backtracks superlinearly when the closing fence is absent.
+ * The payload is model output, so a caller cannot choose it.
  */
 function stripJsonCodeFence(jsonText: string): string {
-  const match = WRAPPING_CODE_FENCE.exec(jsonText.trim());
-  return match ? match[1].trim() : jsonText;
+  const trimmed = jsonText.trim();
+  if (
+    trimmed.length < CODE_FENCE.length * 2 ||
+    !trimmed.startsWith(CODE_FENCE) ||
+    !trimmed.endsWith(CODE_FENCE)
+  ) {
+    return jsonText;
+  }
+  const body = trimmed.slice(CODE_FENCE.length, -CODE_FENCE.length);
+  return body.replace(LANGUAGE_TAG, '').trim();
 }
 
 /**

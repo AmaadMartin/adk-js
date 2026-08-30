@@ -1064,6 +1064,42 @@ describe('AgentTool parity with adk-python', () => {
     expect(childSession?.state).not.toHaveProperty('_adk_internal');
   });
 
+  it('keeps _adk-prefixed state out of the sub-agent on a repeated call', async () => {
+    const agent = new LlmAgent({name: SUB_AGENT_NAME});
+    const sessionService = new InMemorySessionService();
+    mockSubAgentRun([
+      createEvent({
+        author: SUB_AGENT_NAME,
+        content: {role: 'model', parts: [{text: 'done'}]},
+      }),
+    ]);
+    const tool = new AgentTool({agent});
+    const toolContext = parentContext(
+      agent,
+      {_adk_internal: 'dropMe', visibleKey: 'keepMe'},
+      sessionService,
+    );
+
+    await tool.runAsync({args: {request: 'first'}, toolContext});
+    // A later turn can add bookkeeping keys, so the filter has to hold for
+    // every call, not only for the one that opens the child session.
+    toolContext.invocationContext.session.state['_adk_added_later'] = 'dropMe';
+    await tool.runAsync({args: {request: 'second'}, toolContext});
+
+    const childSession = await sessionService.getSession({
+      appName: SUB_AGENT_NAME,
+      userId: 'parent-user',
+      sessionId: 'parent-session',
+    });
+
+    expect(childSession).toBeDefined();
+    expect(
+      Object.keys(childSession?.state ?? {}).filter((key) =>
+        key.startsWith('_adk'),
+      ),
+    ).toEqual([]);
+  });
+
   /** Builds a caller context whose plugin manager holds `plugins`. */
   function contextWithPlugins(
     agent: BaseAgent,
