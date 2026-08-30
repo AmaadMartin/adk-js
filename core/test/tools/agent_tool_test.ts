@@ -10,14 +10,17 @@ import {
   createEvent,
   createEventActions,
   createSession,
+  FeatureName,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
   PluginManager,
   Runner,
   State,
+  withTemporaryFeatureOverride,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import {z} from 'zod/v3';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   const actual =
@@ -502,5 +505,268 @@ describe('AgentTool', () => {
     expect(subAgentSession?.state).not.toHaveProperty(
       `${State.TEMP_PREFIX}tempKey`,
     );
+  });
+
+  it('files the child runner and session under the parent app name', async () => {
+    const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
+    const tool = new AgentTool({agent: mockAgent});
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'parent-app',
+      userId: 'parent-user',
+    });
+
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        agent: mockAgent,
+        session,
+        pluginManager: new PluginManager([]),
+        sessionService: new InMemorySessionService(),
+      }),
+    });
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'hello'}]},
+      });
+    };
+
+    let childSessionService: InMemorySessionService | undefined;
+    let childAppName: string | undefined;
+    vi.mocked(Runner).mockImplementation((config) => {
+      childAppName = config?.appName;
+      childSessionService = config?.sessionService as InMemorySessionService;
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    await tool.runAsync({args: {request: 'hello'}, toolContext});
+
+    expect(childAppName).toBe('parent-app');
+    const childSessions = await childSessionService!.listSessions({
+      appName: 'parent-app',
+      userId: 'parent-user',
+    });
+    expect(childSessions.sessions).toHaveLength(1);
+  });
+
+  it('does not forward _adk-prefixed parent state to the child session', async () => {
+    const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
+    const tool = new AgentTool({agent: mockAgent});
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'parent-app',
+      userId: 'parent-user',
+      state: {
+        normalKey: 'keepMe',
+        _adkBookkeeping: 'dropMe',
+      },
+    });
+
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        agent: mockAgent,
+        session,
+        pluginManager: new PluginManager([]),
+        sessionService: new InMemorySessionService(),
+      }),
+    });
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'hello'}]},
+      });
+    };
+
+    let childSessionService: InMemorySessionService | undefined;
+    vi.mocked(Runner).mockImplementation((config) => {
+      childSessionService = config?.sessionService as InMemorySessionService;
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    await tool.runAsync({args: {request: 'hello'}, toolContext});
+
+    const childSessions = await childSessionService!.listSessions({
+      appName: 'parent-app',
+      userId: 'parent-user',
+    });
+    const childSession = await childSessionService!.getSession({
+      appName: 'parent-app',
+      userId: 'parent-user',
+      sessionId: childSessions.sessions[0].id,
+    });
+
+    expect(childSession?.state).toHaveProperty('normalKey', 'keepMe');
+    expect(childSession?.state).not.toHaveProperty('_adkBookkeeping');
+  });
+});
+
+const REQUEST_JSON_SCHEMA = {
+  type: 'object',
+  properties: {request: {type: 'string'}},
+  required: ['request'],
+};
+
+/** Runs `body` with JSON_SCHEMA_FOR_FUNC_DECL enabled. */
+function withJsonSchemaDeclaration<T>(body: () => T): Promise<T> {
+  return withTemporaryFeatureOverride(
+    FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+    true,
+    body,
+  );
+}
+
+describe('AgentTool._getDeclaration', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('declares a request parameter when the feature is off', () => {
+    const agent = new LlmAgent({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+    });
+
+    expect(new AgentTool({agent})._getDeclaration()).toEqual({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {request: {type: 'STRING'}},
+        required: ['request'],
+      },
+    });
+  });
+
+  it('declares the agent input schema as parameters when the feature is off', () => {
+    const agent = new LlmAgent({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+      inputSchema: z.object({customInput: z.string()}),
+    });
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration.parameters).toEqual(agent.inputSchema);
+    expect(declaration.parametersJsonSchema).toBeUndefined();
+  });
+
+  it('declares a request json schema when the feature is on', async () => {
+    const agent = new LlmAgent({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+    });
+
+    const declaration = await withJsonSchemaDeclaration(() =>
+      new AgentTool({agent})._getDeclaration(),
+    );
+
+    expect(declaration).toEqual({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+      parametersJsonSchema: REQUEST_JSON_SCHEMA,
+    });
+    expect(declaration.parameters).toBeUndefined();
+  });
+
+  it('declares the agent input schema as a json schema when the feature is on', async () => {
+    const agent = new LlmAgent({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+      inputSchema: z.object({customInput: z.string()}),
+    });
+
+    const declaration = await withJsonSchemaDeclaration(() =>
+      new AgentTool({agent})._getDeclaration(),
+    );
+
+    expect(declaration.parametersJsonSchema).toMatchObject({
+      type: 'object',
+      properties: {customInput: {type: 'string'}},
+      required: ['customInput'],
+    });
+    expect(declaration.parameters).toBeUndefined();
+  });
+
+  it('declares a string response json schema off GEMINI_API without an output schema', async () => {
+    vi.stubEnv('GOOGLE_GENAI_USE_ENTERPRISE', 'true');
+    const agent = new LlmAgent({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+    });
+
+    const declaration = await withJsonSchemaDeclaration(() =>
+      new AgentTool({agent})._getDeclaration(),
+    );
+
+    expect(declaration).toEqual({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+      parametersJsonSchema: REQUEST_JSON_SCHEMA,
+      responseJsonSchema: {type: 'string'},
+    });
+    expect(declaration.response).toBeUndefined();
+  });
+
+  it('declares an object response json schema off GEMINI_API with an output schema', async () => {
+    vi.stubEnv('GOOGLE_GENAI_USE_ENTERPRISE', 'true');
+    const agent = new LlmAgent({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+      outputSchema: z.object({customOutput: z.string()}),
+    });
+
+    const declaration = await withJsonSchemaDeclaration(() =>
+      new AgentTool({agent})._getDeclaration(),
+    );
+
+    expect(declaration.responseJsonSchema).toEqual({type: 'object'});
+    expect(declaration.response).toBeUndefined();
+  });
+
+  it('declares no response json schema on GEMINI_API', async () => {
+    vi.stubEnv('GOOGLE_GENAI_USE_ENTERPRISE', 'false');
+    const agent = new LlmAgent({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+      outputSchema: z.object({customOutput: z.string()}),
+    });
+
+    const declaration = await withJsonSchemaDeclaration(() =>
+      new AgentTool({agent})._getDeclaration(),
+    );
+
+    expect(declaration).toEqual({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+      parametersJsonSchema: REQUEST_JSON_SCHEMA,
+    });
+  });
+
+  it('declares a genai response schema off GEMINI_API when the feature is off', () => {
+    vi.stubEnv('GOOGLE_GENAI_USE_ENTERPRISE', 'true');
+    const agent = new LlmAgent({
+      name: 'tool_agent',
+      description: 'A tool agent for testing.',
+      outputSchema: z.object({customOutput: z.string()}),
+    });
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration.response).toEqual({type: 'OBJECT'});
+    expect(declaration.responseJsonSchema).toBeUndefined();
   });
 });

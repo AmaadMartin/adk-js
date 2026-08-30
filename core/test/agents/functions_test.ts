@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AgentTool,
   BasePlugin,
   BaseTool,
   Context,
@@ -17,6 +18,7 @@ import {
   LlmAgent,
   LongRunningFunctionTool,
   PluginManager,
+  RunAsyncToolRequest,
   Session,
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
@@ -1224,5 +1226,167 @@ describe('findMatchingFunctionCall', () => {
     });
     expect(findMatchingFunctionCall([callEvent])).toBeUndefined();
     expect(findMatchingFunctionCall([])).toBeUndefined();
+  });
+});
+
+const SUB_AGENT_NAME = 'sub_agent';
+
+/**
+ * An `AgentTool` that answers with `result` without running a sub-agent, and
+ * sets `skipSummarization` exactly as `AgentTool.runAsync` does.
+ */
+class StubAgentTool extends AgentTool {
+  constructor(private readonly result: unknown) {
+    super({
+      agent: new LlmAgent({
+        name: SUB_AGENT_NAME,
+        description: 'a sub-agent',
+      }),
+      skipSummarization: true,
+    });
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    toolContext.actions.skipSummarization = true;
+    return this.result;
+  }
+}
+
+/** An `AgentTool` whose sub-agent run fails. */
+class FailingAgentTool extends AgentTool {
+  constructor() {
+    super({
+      agent: new LlmAgent({
+        name: SUB_AGENT_NAME,
+        description: 'a sub-agent',
+      }),
+      skipSummarization: true,
+    });
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    toolContext.actions.skipSummarization = true;
+    throw new Error('sub-agent exploded');
+  }
+}
+
+/** A non-agent tool that skips summarization of an internal acknowledgement. */
+class AcknowledgingTool extends BaseTool {
+  constructor() {
+    super({name: 'acknowledgingTool', description: 'acknowledges'});
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    toolContext.actions.skipSummarization = true;
+    return 'internal acknowledgement';
+  }
+}
+
+/** A tool whose matching `FunctionResponse` is supplied elsewhere. */
+class DeferringTool extends BaseTool {
+  override readonly defersResponse = true;
+
+  constructor(private readonly result: unknown) {
+    super({name: 'deferringTool', description: 'defers its response'});
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return this.result;
+  }
+}
+
+/** Runs one tool call and returns the resulting event. */
+function runOneCall(tool: BaseTool): Promise<Event | null> {
+  const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+  return functionsExportedForTestingOnly.handleFunctionCallList({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv_skip',
+      session: {} as Session,
+      agent,
+      pluginManager: new PluginManager(),
+    }),
+    functionCalls: [callFor(tool)],
+    toolsDict: {[tool.name]: tool},
+    beforeToolCallbacks: [],
+    afterToolCallbacks: [],
+  });
+}
+
+/** The text parts of an event's content. */
+function textParts(event: Event | null): string[] {
+  return (event?.content?.parts ?? [])
+    .map((part) => part.text)
+    .filter((text): text is string => text !== undefined);
+}
+
+describe('a deferring tool', () => {
+  it('emits no event when its response is nullish', async () => {
+    expect(await runOneCall(new DeferringTool(null))).toBeNull();
+  });
+
+  it('emits a response event when it does answer', async () => {
+    const event = await runOneCall(new DeferringTool({status: 'ok'}));
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      status: 'ok',
+    });
+  });
+
+  it('is not reported as a long running call', () => {
+    const tool = new DeferringTool(null);
+    const call = callFor(tool);
+
+    const longRunning = getLongRunningFunctionCalls([call], {
+      [tool.name]: tool,
+    });
+
+    expect(longRunning.has(call.id!)).toBe(false);
+  });
+});
+
+describe('skipSummarization on an AgentTool response', () => {
+  it('appends the string result as a text part', async () => {
+    const event = await runOneCall(new StubAgentTool('the sub-agent answer'));
+
+    expect(textParts(event)).toEqual(['the sub-agent answer']);
+  });
+
+  it('appends a non-string result as JSON', async () => {
+    const event = await runOneCall(new StubAgentTool({answer: 42}));
+
+    expect(textParts(event)).toEqual(['{"answer":42}']);
+  });
+
+  it('appends nothing for an empty string result', async () => {
+    const event = await runOneCall(new StubAgentTool(''));
+
+    expect(textParts(event)).toEqual([]);
+  });
+
+  it('appends nothing for a {result: null} placeholder', async () => {
+    const event = await runOneCall(new StubAgentTool({result: null}));
+
+    expect(textParts(event)).toEqual([]);
+  });
+
+  it('appends nothing when the sub-agent run failed', async () => {
+    const event = await runOneCall(new FailingAgentTool());
+
+    expect(textParts(event)).toEqual([]);
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      error: 'sub-agent exploded',
+    });
+  });
+
+  it('appends nothing for a tool that is not an AgentTool', async () => {
+    const event = await runOneCall(new AcknowledgingTool());
+
+    expect(textParts(event)).toEqual([]);
   });
 });
