@@ -19,9 +19,7 @@ which means assembling an `AuthCredential` by hand for every operation.
 `runAsync` straight back to it, and configures the credentials from an options
 object. Two credential shapes are supported:
 
-- An OAuth2 client id and client secret. The tool calls as the end user, so
-  the run pauses for consent the first time and `ToolAuthHandler` resumes it
-  with the token.
+- An OAuth2 client id and client secret. The tool calls as the end user.
 - A `ServiceAccount`. The tool calls as the service account, with no user
   interaction. `ServiceAccountCredentialExchanger` mints the access token.
 
@@ -32,11 +30,25 @@ A service account wins when both are given. A lone `clientId` or a lone
 copy. The wrapped tool carries the scheme, the credential and the default
 headers afterwards.
 
+### The scheme and the credential are separate
+
+A credential alone does not authenticate a call. `RestApiTool` runs its auth
+handler only when it also has an auth scheme, and `configureAuth` sets the
+credential only. The scheme comes from the OpenAPI specification, which is why
+`OpenAPIToolset` is the normal source of the wrapped tool: it reads the
+`securitySchemes` of the Discovery-derived specification and attaches the
+matching scheme to each operation.
+
+A `RestApiTool` built by hand from a specification with no security scheme has
+none, so it calls unauthenticated and reports no error. `configureSaAuth` is
+the exception: it sets the scheme as well as the credential, so a service
+account works on a tool that had no scheme.
+
 ## Get started
 
-This wraps one operation and calls it as the end user. `RestApiTool` normally
-comes out of `OpenAPIToolset`; it is built directly here so the example is
-self-contained.
+This wraps one operation and calls it as the end user. `OpenAPIToolset` is the
+normal source of the `RestApiTool` and of its scheme; the scheme is written out
+here so the example stands on its own.
 
 ```ts
 import {GoogleApiTool, RestApiTool} from '@google/adk';
@@ -50,6 +62,19 @@ const restApiTool = new RestApiTool(
     method: 'GET',
   },
   {responses: {}},
+  {
+    type: 'oauth2',
+    flows: {
+      authorizationCode: {
+        authorizationUrl: 'https://accounts.google.com/o/oauth2/auth',
+        tokenUrl: 'https://oauth2.googleapis.com/token',
+        scopes: {
+          'https://www.googleapis.com/auth/calendar.readonly':
+            'Read your calendars',
+        },
+      },
+    },
+  },
 );
 
 const tool = new GoogleApiTool(restApiTool, {
@@ -60,6 +85,13 @@ const tool = new GoogleApiTool(restApiTool, {
 
 Pass `tool` to an agent like any other `BaseTool`. Its declaration and its
 result are the wrapped tool's, unchanged.
+
+The client id and the client secret are two of the three inputs the
+authorization code exchange needs. The third is the authorization code itself,
+which the client returns in an auth response. Call the tool before that
+response exists and `OAuth2CredentialExchanger` throws
+`CredentialExchangeError`, naming the missing inputs. Supply the auth response
+for the run, or configure a service account instead.
 
 ## Calling as a service account
 

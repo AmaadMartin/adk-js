@@ -85,11 +85,14 @@ export function createBearerScheme(): OpenAPIV3.SecuritySchemeObject {
 /**
  * Builds the auth scheme and auth credential for a Google service account.
  *
- * The scheme is an HTTP bearer scheme because
- * `ServiceAccountCredentialExchanger` mints an access token and
- * `applyCredential` sends it as `Authorization: Bearer <token>`. The
- * credential keeps the service account configuration, which is what routes
- * the exchange.
+ * The `JWT` bearer scheme matches adk-python's
+ * `service_account_scheme_credential`, and its sibling
+ * `service_account_dict_to_scheme_credential` builds the same one. The scheme
+ * is descriptive here rather than functional: `AutoAuthCredentialExchanger`
+ * picks the exchanger from `authCredential.authType`, and `applyCredential`
+ * reads the exchanged `credential.http.credentials.token`, so neither consults
+ * the scheme. Keep it aligned with Python, because it is configuration a
+ * caller can observe.
  *
  * @param config The service account configuration to exchange at call time.
  * @returns The auth scheme and the auth credential to configure a tool with.
