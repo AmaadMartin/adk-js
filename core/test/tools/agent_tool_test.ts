@@ -89,13 +89,7 @@ describe('AgentTool', () => {
 
     expect(result).toBe('hello');
 
-    expect(mockSessionService.getOrCreateSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        appName: 'sub-agent',
-        userId: 'parent-user',
-        sessionId: 'parent-session',
-      }),
-    );
+    expect(mockSessionService.getOrCreateSession).not.toHaveBeenCalled();
 
     // Verify state update called with sub-agent's state delta
     expect(toolContext.state.update).toHaveBeenCalledWith({
@@ -103,7 +97,7 @@ describe('AgentTool', () => {
     });
   });
 
-  it('reuses existing session on second invocation within the same parent session', async () => {
+  it('creates a fresh session per invocation within the same parent session', async () => {
     const mockAgent = {
       name: 'sub-agent',
     } as unknown as LlmAgent;
@@ -111,17 +105,11 @@ describe('AgentTool', () => {
     const tool = new AgentTool({agent: mockAgent});
 
     const mockSessionService = new InMemorySessionService();
-    vi.spyOn(mockSessionService, 'getOrCreateSession').mockResolvedValue(
-      createSession({
-        id: 'parent-session',
-        appName: 'sub-agent',
-        userId: 'parent-user',
-      }),
-    );
+    vi.spyOn(mockSessionService, 'getOrCreateSession');
 
     const session = createSession({
       id: 'parent-session',
-      appName: 'sub-agent',
+      appName: 'parent-app',
       userId: 'parent-user',
     });
 
@@ -142,11 +130,15 @@ describe('AgentTool', () => {
       });
     };
 
+    const childSessionIds: string[] = [];
     vi.mocked(Runner).mockImplementation((config) => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
+        runAsync: vi.fn((request: {sessionId: string}) => {
+          childSessionIds.push(request.sessionId);
+          return mockRunAsync();
+        }),
       } as unknown as Runner;
     });
 
@@ -154,12 +146,10 @@ describe('AgentTool', () => {
     await tool.runAsync({args: {request: 'first'}, toolContext});
     await tool.runAsync({args: {request: 'second'}, toolContext});
 
-    // getOrCreateSession should be called twice, returning the existing
-    // session on the second call rather than throwing a duplicate-session error
-    expect(mockSessionService.getOrCreateSession).toHaveBeenCalledTimes(2);
-    expect(mockSessionService.getOrCreateSession).toHaveBeenCalledWith(
-      expect.objectContaining({sessionId: 'parent-session'}),
-    );
+    expect(childSessionIds).toHaveLength(2);
+    expect(childSessionIds[0]).not.toBe(childSessionIds[1]);
+    expect(childSessionIds).not.toContain('parent-session');
+    expect(mockSessionService.getOrCreateSession).not.toHaveBeenCalled();
   });
 
   it('strips thought parts from the merged result', async () => {
@@ -249,7 +239,7 @@ describe('AgentTool', () => {
     expect(result).toBe('');
   });
 
-  it('does not set skipSummarization on toolContext actions when skipSummarization is true', async () => {
+  it('sets skipSummarization on toolContext actions when skipSummarization is true', async () => {
     const mockAgent = {
       name: 'sub-agent',
     } as unknown as LlmAgent;
@@ -290,10 +280,7 @@ describe('AgentTool', () => {
 
     await tool.runAsync({args: {request: 'hello'}, toolContext});
 
-    // skipSummarization must NOT be set on the parent's EventActions.
-    // Setting it would cause isFinalResponse() to treat the tool-response
-    // event as terminal, prematurely breaking the parent agent's run loop.
-    expect(toolContext.actions.skipSummarization).toBeFalsy();
+    expect(toolContext.actions.skipSummarization).toBe(true);
   });
 
   it('handles abort signal during execution', async () => {
@@ -455,11 +442,9 @@ describe('AgentTool', () => {
 
     const tool = new AgentTool({agent: mockAgent});
 
-    const mockSessionService = new InMemorySessionService();
-
     const session = createSession({
       id: 'parent-session',
-      appName: 'sub-agent',
+      appName: 'parent-app',
       userId: 'parent-user',
       state: {
         normalKey: 'parentValue',
@@ -472,7 +457,7 @@ describe('AgentTool', () => {
       agent: mockAgent,
       session,
       pluginManager: new PluginManager([]),
-      sessionService: mockSessionService,
+      sessionService: new InMemorySessionService(),
     });
 
     const toolContext = new Context({
@@ -486,7 +471,9 @@ describe('AgentTool', () => {
       });
     };
 
+    let childSessionService: InMemorySessionService | undefined;
     vi.mocked(Runner).mockImplementation((config) => {
+      childSessionService = config?.sessionService as InMemorySessionService;
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
@@ -499,13 +486,18 @@ describe('AgentTool', () => {
       toolContext,
     });
 
-    const subAgentSession = await mockSessionService.getSession({
-      appName: 'sub-agent',
+    const childSessions = await childSessionService!.listSessions({
+      appName: 'parent-app',
       userId: 'parent-user',
-      sessionId: 'parent-session',
     });
 
-    expect(subAgentSession).toBeDefined();
+    expect(childSessions.sessions).toHaveLength(1);
+    const subAgentSession = await childSessionService!.getSession({
+      appName: 'parent-app',
+      userId: 'parent-user',
+      sessionId: childSessions.sessions[0].id,
+    });
+
     expect(subAgentSession?.state).toHaveProperty('normalKey', 'parentValue');
     expect(subAgentSession?.state).not.toHaveProperty(
       `${State.TEMP_PREFIX}tempKey`,
