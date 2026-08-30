@@ -9,21 +9,34 @@ import {
   FunctionDeclaration,
   GroundingMetadata,
   Part,
+  Schema,
   Type,
 } from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
+import {
+  parseWithSchema,
+  SchemaLike,
+  stripJsonCodeFence,
+  toJsonSchema,
+} from '../utils/schema.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
-import {parseWithSchema, stripJsonCodeFence} from '../utils/schema.js';
 
+import {
+  AGENT_TOOL_SIGNATURE_SYMBOL,
+  isAgentTool,
+} from './agent_tool_signature.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 import {ForwardingArtifactService} from './forwarding_artifact_service.js';
+
+export {isAgentTool};
 
 /**
  * The configuration of the agent tool.
@@ -54,10 +67,20 @@ export interface AgentToolConfig {
 }
 
 /**
- * A unique symbol to identify ADK agent classes.
- * Defined once and shared by all BaseTool instances.
+ * Prefix marking a state key as ADK bookkeeping. Such a key stays in the
+ * caller's session and never reaches a sub-agent.
  */
-const AGENT_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.agentTool');
+const ADK_INTERNAL_STATE_PREFIX = '_adk';
+
+/** The parameters of an agent that declares no input schema. */
+const REQUEST_PARAMETERS: Schema = {
+  type: Type.OBJECT,
+  properties: {request: {type: Type.STRING}},
+  required: ['request'],
+};
+
+/** {@link REQUEST_PARAMETERS} as plain JSON Schema. */
+const REQUEST_PARAMETERS_JSON_SCHEMA = toJsonSchema(REQUEST_PARAMETERS);
 
 /**
  * The state key the wrapped agent's grounding metadata is published under.
@@ -68,18 +91,24 @@ const GROUNDING_METADATA_STATE_KEY = `${State.TEMP_PREFIX}_adk_grounding_metadat
 /** The trailing newlines of a code execution result. */
 const TRAILING_NEWLINES_PATTERN = /\n+$/;
 
+/** The wrapped agent's input schema in the genai form a declaration needs. */
+function agentInputSchema(agent: BaseAgent): Schema | undefined {
+  return schemaAgent(agent, 'first')?.inputSchema;
+}
+
 /**
- * Type guard to check if an object is an instance of BaseTool.
- * @param obj The object to check.
- * @returns True if the object is an instance of BaseTool, false otherwise.
+ * The wrapped agent's input schema as the caller supplied it. A Zod schema
+ * validates faithfully, where its genai translation may not, so validation and
+ * JSON-schema rendering read this one.
  */
-export function isAgentTool(obj: unknown): obj is AgentTool {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    AGENT_TOOL_SIGNATURE_SYMBOL in obj &&
-    obj[AGENT_TOOL_SIGNATURE_SYMBOL] === true
-  );
+function agentInputSchemaSource(agent: BaseAgent): SchemaLike | undefined {
+  const source = schemaAgent(agent, 'first');
+  return source?.inputSchemaSource ?? source?.inputSchema;
+}
+
+/** Whether the wrapped agent constrains its output with a schema. */
+function agentHasOutputSchema(agent: BaseAgent): boolean {
+  return schemaAgent(agent, 'last')?.outputSchema !== undefined;
 }
 
 /**
@@ -145,25 +174,37 @@ export class AgentTool extends BaseTool {
   }
 
   override _getDeclaration(): FunctionDeclaration {
-    const inputSchema = schemaAgent(this.agent, 'first')?.inputSchema;
+    const jsonSchemaDeclaration = isFeatureEnabled(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+    );
     const declaration: FunctionDeclaration = {
       name: this.name,
       description: this.description,
-      parameters: inputSchema ?? {
-        type: Type.OBJECT,
-        properties: {
-          'request': {
-            type: Type.STRING,
-          },
-        },
-        required: ['request'],
-      },
     };
 
+    if (jsonSchemaDeclaration) {
+      const inputSchema = agentInputSchemaSource(this.agent);
+      declaration.parametersJsonSchema = inputSchema
+        ? toJsonSchema(inputSchema)
+        : REQUEST_PARAMETERS_JSON_SCHEMA;
+    } else {
+      // The agent's input schema is used as is; it is neither validated nor
+      // transformed, unlike the equivalent path in Python ADK.
+      declaration.parameters =
+        agentInputSchema(this.agent) ?? REQUEST_PARAMETERS;
+    }
+
     if (this.apiVariant !== GoogleLLMVariant.GEMINI_API) {
-      declaration.response = schemaAgent(this.agent, 'last')?.outputSchema
-        ? {type: Type.OBJECT}
-        : {type: Type.STRING};
+      const hasOutputSchema = agentHasOutputSchema(this.agent);
+      if (jsonSchemaDeclaration) {
+        declaration.responseJsonSchema = {
+          type: hasOutputSchema ? 'object' : 'string',
+        };
+      } else {
+        declaration.response = {
+          type: hasOutputSchema ? Type.OBJECT : Type.STRING,
+        };
+      }
     }
 
     return declaration;
@@ -173,17 +214,11 @@ export class AgentTool extends BaseTool {
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
-    // Note: skipSummarization is intentionally not propagated to
-    // toolContext.actions here. Setting it on the shared EventActions would
-    // leak onto the tool-response event returned to the parent agent, causing
-    // isFinalResponse() to treat that event as terminal and prematurely
-    // terminate the parent's run loop. The sub-agent's output is already
-    // returned verbatim below, which is the intended effect of
-    // skipSummarization.
+    if (this.skipSummarization) {
+      toolContext.actions.skipSummarization = true;
+    }
 
-    const inputAgent = schemaAgent(this.agent, 'first');
-    const inputSchema =
-      inputAgent?.inputSchemaSource ?? inputAgent?.inputSchema;
+    const inputSchema = agentInputSchemaSource(this.agent);
     const request = args['request'];
     const content: Content = {
       role: 'user',
@@ -200,13 +235,18 @@ export class AgentTool extends BaseTool {
       ],
     };
 
+    // Session and telemetry backends key on the app name, so the sub-agent run
+    // is filed under the caller's app rather than under the sub-agent's name.
+    const childAppName =
+      toolContext.invocationContext.appName ?? this.agent.name;
+
     const runner = new Runner({
-      appName: this.agent.name,
+      appName: childAppName,
       agent: this.agent,
       artifactService: new ForwardingArtifactService(toolContext),
-      sessionService:
-        toolContext.invocationContext.sessionService ??
-        new InMemorySessionService(),
+      // A fresh service per call: the sub-agent reads neither the caller's
+      // transcript nor its own previous turns.
+      sessionService: new InMemorySessionService(),
       memoryService:
         toolContext.invocationContext.memoryService ??
         new InMemoryMemoryService(),
@@ -218,11 +258,16 @@ export class AgentTool extends BaseTool {
         : undefined,
     });
 
-    const session = await runner.sessionService.getOrCreateSession({
-      appName: this.agent.name,
+    const state = Object.fromEntries(
+      Object.entries(toolContext.state.toRecord()).filter(
+        ([key]) => !key.startsWith(ADK_INTERNAL_STATE_PREFIX),
+      ),
+    );
+
+    const session = await runner.sessionService.createSession({
+      appName: childAppName,
       userId: toolContext.invocationContext.userId,
-      sessionId: toolContext.invocationContext.session.id,
-      state: toolContext.state.toRecord(),
+      state,
     });
 
     if (toolContext.abortSignal?.aborted) {
