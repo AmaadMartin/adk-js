@@ -374,8 +374,6 @@ export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
 export {
-  INTERNAL_AUTH_PREFIX,
-  credentialToParam,
   openidDictToSchemeCredential,
   openidUrlToSchemeCredential,
   serviceAccountDictToSchemeCredential,
@@ -384,8 +382,6 @@ export {
 } from './tools/openapi_tool/auth/auth_helpers.js';
 export type {
   ApiKeyLocation,
-  CredentialParam,
-  OpenIdConfig,
   OpenIdSchemeCredential,
   SchemeCredential,
   ServiceAccountSchemeCredential,

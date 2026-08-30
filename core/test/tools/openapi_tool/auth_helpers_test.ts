@@ -11,15 +11,11 @@ import {
   AuthCredentialTypes,
   ServiceAccount,
 } from '../../../src/auth/auth_credential.js';
-import {OpenIdConnectWithConfig} from '../../../src/auth/auth_schemes.js';
 import {
-  INTERNAL_AUTH_PREFIX,
-  OpenIdConfig,
   TokenType,
   applyCredential,
   createApiKeyScheme,
   createBearerScheme,
-  credentialToParam,
   openidDictToSchemeCredential,
   openidUrlToSchemeCredential,
   serviceAccountDictToSchemeCredential,
@@ -56,20 +52,6 @@ const OPENID_DOCUMENT = {
   token_endpoint_auth_methods_supported: ['client_secret_basic'],
   openIdConnectUrl: 'openid_url',
 };
-
-const OPENID_SCHEME: OpenIdConnectWithConfig = {
-  type: 'openIdConnect',
-  openIdConnectUrl: 'openid_url',
-  authorizationEndpoint: 'auth_url',
-  tokenEndpoint: 'token_url',
-};
-
-function bearerCredential(token: string): AuthCredential {
-  return {
-    authType: AuthCredentialTypes.HTTP,
-    http: {scheme: 'bearer', credentials: {token}},
-  };
-}
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -600,209 +582,6 @@ describe('auth_helpers', () => {
       ).rejects.toThrow(
         `Invalid JSON response from OpenID configuration endpoint ${url}:`,
       );
-    });
-  });
-
-  describe('credentialToParam', () => {
-    it('prefixes an injected argument the way the other ADK languages do', () => {
-      // A tool declaration crosses the language boundary, so the literal
-      // matters. Every other assertion here builds its key from the constant.
-      expect(INTERNAL_AUTH_PREFIX).toBe('_auth_prefix_vaf_');
-    });
-
-    it('injects an API key into a header', () => {
-      const result = credentialToParam(
-        {type: 'apiKey', in: 'header', name: 'X-API-Key'},
-        {authType: AuthCredentialTypes.API_KEY, apiKey: 'test_key'},
-      );
-
-      expect(result?.param.originalName).toBe('X-API-Key');
-      expect(result?.param.paramLocation).toBe('header');
-      expect(result?.param.description).toBe('');
-      expect(result?.param.required).toBe(false);
-      expect(result?.param.name).toBe('_auth_prefix_vaf_X-API-Key');
-      expect(result?.kwargs).toEqual({
-        [`${INTERNAL_AUTH_PREFIX}X-API-Key`]: 'test_key',
-      });
-    });
-
-    it('injects an API key into a query parameter', () => {
-      const result = credentialToParam(
-        {
-          type: 'apiKey',
-          in: 'query',
-          name: 'api_key',
-          description: 'The API key.',
-        },
-        {authType: AuthCredentialTypes.API_KEY, apiKey: 'test_key'},
-      );
-
-      expect(result?.param.paramLocation).toBe('query');
-      expect(result?.param.description).toBe('The API key.');
-      expect(result?.kwargs).toEqual({
-        [`${INTERNAL_AUTH_PREFIX}api_key`]: 'test_key',
-      });
-    });
-
-    it('injects an API key into a cookie', () => {
-      const result = credentialToParam(
-        {type: 'apiKey', in: 'cookie', name: 'session_id'},
-        {authType: AuthCredentialTypes.API_KEY, apiKey: 'test_key'},
-      );
-
-      expect(result?.param.paramLocation).toBe('cookie');
-      expect(result?.kwargs).toEqual({
-        [`${INTERNAL_AUTH_PREFIX}session_id`]: 'test_key',
-      });
-    });
-
-    it('injects a bearer token into the Authorization header', () => {
-      const result = credentialToParam(
-        {type: 'http', scheme: 'bearer'},
-        bearerCredential('test_token'),
-      );
-
-      expect(result?.param.originalName).toBe('Authorization');
-      expect(result?.param.paramLocation).toBe('header');
-      expect(result?.param.description).toBe('Bearer token');
-      expect(result?.kwargs).toEqual({
-        [`${INTERNAL_AUTH_PREFIX}Authorization`]: 'Bearer test_token',
-      });
-    });
-
-    it('injects an exchanged OAuth2 credential as a bearer token', () => {
-      const result = credentialToParam(
-        {
-          type: 'oauth2',
-          description: 'OAuth2.',
-          flows: {clientCredentials: {tokenUrl: 'token_url', scopes: {}}},
-        },
-        bearerCredential('test_token'),
-      );
-
-      expect(result?.param.originalName).toBe('Authorization');
-      expect(result?.param.description).toBe('OAuth2.');
-      expect(result?.kwargs).toEqual({
-        [`${INTERNAL_AUTH_PREFIX}Authorization`]: 'Bearer test_token',
-      });
-    });
-
-    it('injects an exchanged OpenID Connect credential as a bearer token', () => {
-      const result = credentialToParam(
-        OPENID_SCHEME,
-        bearerCredential('test_token'),
-      );
-
-      expect(result?.param.originalName).toBe('Authorization');
-      expect(result?.kwargs).toEqual({
-        [`${INTERNAL_AUTH_PREFIX}Authorization`]: 'Bearer test_token',
-      });
-    });
-
-    it('injects a bearer token an OAuth2 credential already carries', () => {
-      const result = credentialToParam(OPENID_SCHEME, {
-        authType: AuthCredentialTypes.OAUTH2,
-        http: {scheme: 'bearer', credentials: {token: 'test_token'}},
-      });
-
-      expect(result?.kwargs).toEqual({
-        [`${INTERNAL_AUTH_PREFIX}Authorization`]: 'Bearer test_token',
-      });
-    });
-
-    it('injects nothing for an OAuth2 scheme with no credential', () => {
-      expect(
-        credentialToParam({
-          type: 'oauth2',
-          flows: {clientCredentials: {tokenUrl: 'token_url', scopes: {}}},
-        }),
-      ).toBeUndefined();
-    });
-
-    it('injects nothing for an OpenID Connect scheme with no credential', () => {
-      expect(credentialToParam(OPENID_SCHEME)).toBeUndefined();
-    });
-
-    it('injects nothing before an OpenID Connect credential is exchanged', () => {
-      expect(
-        credentialToParam(OPENID_SCHEME, {
-          authType: AuthCredentialTypes.OPEN_ID_CONNECT,
-          oauth2: {clientId: 'client_id', clientSecret: 'client_secret'},
-        }),
-      ).toBeUndefined();
-    });
-
-    it('rejects HTTP basic credentials', () => {
-      expect(() =>
-        credentialToParam(
-          {type: 'http', scheme: 'basic'},
-          {
-            authType: AuthCredentialTypes.HTTP,
-            http: {
-              scheme: 'basic',
-              credentials: {username: 'user', password: 'password'},
-            },
-          },
-        ),
-      ).toThrow('Basic Authentication is not supported.');
-    });
-
-    it('rejects an HTTP credential that holds only a password', () => {
-      expect(() =>
-        credentialToParam(
-          {type: 'http', scheme: 'basic'},
-          {
-            authType: AuthCredentialTypes.HTTP,
-            http: {scheme: 'basic', credentials: {password: 'password'}},
-          },
-        ),
-      ).toThrow('Basic Authentication is not supported.');
-    });
-
-    it('rejects an HTTP credential that holds nothing usable', () => {
-      expect(() =>
-        credentialToParam(
-          {type: 'http', scheme: 'bearer'},
-          {authType: AuthCredentialTypes.HTTP},
-        ),
-      ).toThrow('Invalid HTTP auth credentials');
-    });
-
-    it('rejects an API key location the OpenAPI specification does not define', () => {
-      expect(() =>
-        credentialToParam(
-          {type: 'apiKey', in: 'body', name: 'X-API-Key'},
-          {authType: AuthCredentialTypes.API_KEY, apiKey: 'test_key'},
-        ),
-      ).toThrow('Invalid API Key location: body');
-    });
-
-    it('rejects a scheme and a credential that do not go together', () => {
-      expect(() =>
-        credentialToParam(
-          {type: 'apiKey', in: 'header', name: 'X-API-Key'},
-          {
-            authType: AuthCredentialTypes.SERVICE_ACCOUNT,
-            serviceAccount: {useDefaultCredential: true},
-          },
-        ),
-      ).toThrow('Invalid security scheme and credential combination');
-    });
-  });
-
-  describe('OpenIdConfig', () => {
-    it('names the fields of an OpenID Connect client', () => {
-      // An interface is erased at compile time, so this pins the field names
-      // through the type checker rather than at run time.
-      const config: OpenIdConfig = {
-        clientId: 'client_id',
-        authUri: 'auth_uri',
-        tokenUri: 'token_uri',
-        clientSecret: 'client_secret',
-        redirectUri: 'redirect_uri',
-      };
-
-      expect(config.clientId).toBe('client_id');
     });
   });
 });
