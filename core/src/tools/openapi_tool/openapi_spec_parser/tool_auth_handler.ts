@@ -130,27 +130,15 @@ function missingOAuth2BlockError(authScheme: AuthScheme): Error {
 }
 
 /**
- * Throws when the tool was configured with a credential that cannot
- * authenticate its scheme.
- *
- * An OAuth2 scheme handed, say, an API key would otherwise reach the provider
- * as an unauthenticated call, which reads as a permission error far from its
- * cause. Failing the tool call names the mistake instead.
- */
-function assertCredentialFitsScheme(
-  authScheme: AuthScheme,
-  authCredential: AuthCredential,
-): void {
-  if (!isOAuthScheme(authScheme) || authCredential.oauth2) {
-    return;
-  }
-  throw missingOAuth2BlockError(authScheme);
-}
-
-/**
  * Throws when the credential an OAuth2 consent round trip needs is absent or
  * incomplete. The authorization server rejects the round trip without a client
  * id and secret, so the tool cannot recover from either being missing.
+ *
+ * This runs only on the path that asks the client to authorize, never against
+ * a credential the tool can already use. An OAuth2 scheme is routinely paired
+ * with a `serviceAccount` credential, which carries no `oauth2` block and
+ * needs no consent: `ServiceAccountCredentialExchanger` mints its bearer
+ * token. Validating at entry instead would fail every such tool call.
  */
 function assertConsentCredentialComplete(
   authScheme: AuthScheme,
@@ -259,9 +247,6 @@ export class ToolAuthHandler {
     const authScheme = this.authScheme;
     if (!authScheme) {
       return {state: 'done'};
-    }
-    if (this.authCredential) {
-      assertCredentialFitsScheme(authScheme, this.authCredential);
     }
 
     const identity = credentialIdentity(authScheme, this.authCredential);

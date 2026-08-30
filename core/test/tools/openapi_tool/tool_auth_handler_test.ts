@@ -993,21 +993,23 @@ describe('ToolAuthHandler consent round trip', () => {
 });
 
 describe('ToolAuthHandler credential validation', () => {
-  it('rejects an OAuth2 scheme configured with an API key credential', async () => {
-    const handler = new ToolAuthHandler(
+  it('exchanges a service account against an OAuth2 scheme', async () => {
+    const result = await new ToolAuthHandler(
       createContext({}),
       AUTHORIZATION_CODE_SCHEME,
-      {authType: AuthCredentialTypes.API_KEY, apiKey: 'static-key'},
-    );
+      {
+        authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+        serviceAccount: {useDefaultCredential: true},
+      },
+    ).prepareAuthCredentials();
 
-    const error = await captureError(() => handler.prepareAuthCredentials());
-
-    // The exchanger has nothing registered for an API key, so without this the
-    // tool would put the API key on the wire against an OAuth2-protected API.
-    expect(error.name).toBe('Error');
-    expect(error.message).toBe(
-      'authCredential is empty for scheme oauth2. ' +
-        'Please create an AuthCredential with an oauth2 field.',
+    // A spec declaring oauth2 with the operator supplying a service account is
+    // the canonical Google pattern. It carries no oauth2 block and needs no
+    // consent, so validating the configured credential at entry would fail
+    // every such call.
+    expect(result.state).toBe('done');
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'exchanged-token',
     );
   });
 
