@@ -49,7 +49,13 @@ function makeContext(functionCallId: string): Context {
   });
 }
 
-/** Narrows a listed tool to an {@link MCPTool} by the accessor it adds. */
+/**
+ * Narrows a listed tool to an {@link MCPTool} by the accessor it adds.
+ *
+ * Structural rather than `instanceof`: an object built by one copy of the
+ * package fails `instanceof` against the class from a second copy, which is
+ * why the repository guidelines rule `instanceof` out for type detection.
+ */
 function isMcpTool(tool: BaseTool): tool is MCPTool {
   return 'rawMcpTool' in tool;
 }

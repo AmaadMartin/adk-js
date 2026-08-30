@@ -9,8 +9,6 @@ import {
   createSession,
   InvocationContext,
   LogLevel,
-  mcpHttpDebugStorage,
-  McpHttpExchange,
   MCPSessionManager,
   MCPTool,
   PluginManager,
@@ -21,6 +19,12 @@ import {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {propagation, TextMapPropagator} from '@opentelemetry/api';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
+// The HTTP debug recorder is internal (not part of the public API), as is the
+// logger singleton, so both are imported via a relative path.
+import {
+  mcpHttpDebugStorage,
+  McpHttpExchange,
+} from '../../../src/tools/mcp/http_debug_recorder.js';
 import {resetLogger} from '../../../src/utils/logger.js';
 
 describe('MCPTool', () => {
@@ -190,8 +194,10 @@ function makeMcpTool(meta?: unknown): Tool {
     name: 'test-tool',
     description: 'A test tool',
     inputSchema: {type: 'object', properties: {}},
-    _meta: meta,
-  } as Tool;
+    // The cast covers only `_meta`: these fixtures model a malformed block
+    // from a remote server, which by definition does not fit the SDK type.
+    _meta: meta as Tool['_meta'],
+  };
 }
 
 /**

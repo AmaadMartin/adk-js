@@ -4,13 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  MAX_HTTP_DEBUG_EXCHANGES,
-  MCPConnectionParams,
-  mcpHttpDebugStorage,
-  McpHttpExchange,
-  MCPSessionManager,
-} from '@google/adk';
+import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {
@@ -19,8 +13,13 @@ import {
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {FetchLike} from '@modelcontextprotocol/sdk/shared/transport.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-// The logger singleton is internal (not part of the public API), so it is
-// imported via a relative path to spy on the exact instance the manager uses.
+// The HTTP debug recorder and the logger singleton are internal (not part of
+// the public API), so they are imported via a relative path.
+import {
+  MAX_HTTP_DEBUG_EXCHANGES,
+  McpHttpExchange,
+  mcpHttpDebugStorage,
+} from '../../../src/tools/mcp/http_debug_recorder.js';
 import {logger} from '../../../src/utils/logger.js';
 
 vi.hoisted(() => {

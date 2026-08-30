@@ -17,11 +17,8 @@ import {isLogLevelEnabled, LogLevel} from '../../utils/logger.js';
 import {isRecord} from '../../utils/type_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
-import {
-  mcpHttpDebugStorage,
-  McpHttpExchange,
-  MCPSessionManager,
-} from './mcp_session_manager.js';
+import {mcpHttpDebugStorage, McpHttpExchange} from './http_debug_recorder.js';
+import {MCPSessionManager} from './mcp_session_manager.js';
 
 /** The scheme every MCP App UI resource URI carries. */
 const UI_RESOURCE_URI_PREFIX = 'ui://';
