@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   AuthCredential,
@@ -16,11 +15,11 @@ import {
   OpenIdConnectWithConfig,
 } from '../../../src/auth/auth_schemes.js';
 import {
-  applyCredential,
   createApiKeyScheme,
   createBearerScheme,
   credentialToParam,
   INTERNAL_AUTH_PREFIX,
+  OpenIdConfig,
   openIdDictToSchemeCredential,
   openIdUrlToSchemeCredential,
   serviceAccountDictToSchemeCredential,
@@ -29,105 +28,6 @@ import {
 } from '../../../src/tools/openapi_tool/auth/auth_helpers.js';
 
 describe('auth_helpers', () => {
-  describe('applyCredential', () => {
-    it('should return original URL if credential is not provided', () => {
-      const url = 'http://example.com';
-      const headers = {};
-      const result = applyCredential(url, headers, undefined);
-      expect(result).toBe(url);
-      expect(headers).toEqual({});
-    });
-
-    it('should apply API key in header', () => {
-      const url = 'http://example.com';
-      const headers: Record<string, string> = {};
-      const credential: AuthCredential = {
-        authType: AuthCredentialTypes.API_KEY,
-        apiKey: 'secret_key',
-      };
-      const authScheme: OpenAPIV3.SecuritySchemeObject = {
-        type: 'apiKey',
-        name: 'X-API-Key',
-        in: 'header',
-      };
-
-      const result = applyCredential(url, headers, credential, authScheme);
-
-      expect(result).toBe(url);
-      expect(headers['X-API-Key']).toBe('secret_key');
-    });
-
-    it('should apply API key in query', () => {
-      const url = 'http://example.com';
-      const headers: Record<string, string> = {};
-      const credential: AuthCredential = {
-        authType: AuthCredentialTypes.API_KEY,
-        apiKey: 'secret_key',
-      };
-      const authScheme: OpenAPIV3.SecuritySchemeObject = {
-        type: 'apiKey',
-        name: 'api_key',
-        in: 'query',
-      };
-
-      const result = applyCredential(url, headers, credential, authScheme);
-
-      expect(result).toBe('http://example.com?api_key=secret_key');
-      expect(headers).toEqual({});
-    });
-
-    it('should apply API key in query with existing params', () => {
-      const url = 'http://example.com?foo=bar';
-      const headers: Record<string, string> = {};
-      const credential: AuthCredential = {
-        authType: AuthCredentialTypes.API_KEY,
-        apiKey: 'secret_key',
-      };
-      const authScheme: OpenAPIV3.SecuritySchemeObject = {
-        type: 'apiKey',
-        name: 'api_key',
-        in: 'query',
-      };
-
-      const result = applyCredential(url, headers, credential, authScheme);
-
-      expect(result).toBe('http://example.com?foo=bar&api_key=secret_key');
-    });
-
-    it('should fallback to Authorization header for API key if location is not specified', () => {
-      const url = 'http://example.com';
-      const headers: Record<string, string> = {};
-      const credential: AuthCredential = {
-        authType: AuthCredentialTypes.API_KEY,
-        apiKey: 'secret_key',
-      };
-
-      const result = applyCredential(url, headers, credential);
-
-      expect(result).toBe(url);
-      expect(headers['Authorization']).toBe('secret_key');
-    });
-
-    it('should apply bearer token', () => {
-      const url = 'http://example.com';
-      const headers: Record<string, string> = {};
-      const credential: AuthCredential = {
-        authType: AuthCredentialTypes.HTTP,
-        http: {
-          scheme: 'bearer',
-          credentials: {
-            token: 'my_token',
-          },
-        },
-      };
-
-      const result = applyCredential(url, headers, credential);
-
-      expect(result).toBe(url);
-      expect(headers['Authorization']).toBe('Bearer my_token');
-    });
-  });
-
   describe('createApiKeyScheme', () => {
     it('should create an API key scheme', () => {
       const result = createApiKeyScheme('X-API-Key', 'header');
@@ -836,5 +736,54 @@ describe('credentialToParam', () => {
         {authType: AuthCredentialTypes.API_KEY},
       ),
     ).toThrow('Invalid security scheme and credential combination');
+  });
+});
+
+describe('OpenIdConfig', () => {
+  const discoveryDocument = {
+    authorization_endpoint: 'https://example.com/auth',
+    token_endpoint: 'https://example.com/token',
+  };
+
+  it('types a client that openIdDictToSchemeCredential accepts', () => {
+    const client: OpenIdConfig = {
+      clientId: 'client_id',
+      authUri: 'https://example.com/auth',
+      tokenUri: 'https://example.com/token',
+      clientSecret: 'client_secret',
+      redirectUri: 'https://example.com/callback',
+    };
+
+    const {authCredential} = openIdDictToSchemeCredential(
+      discoveryDocument,
+      ['openid'],
+      client,
+    );
+
+    expect(authCredential.oauth2).toEqual({
+      clientId: 'client_id',
+      clientSecret: 'client_secret',
+      redirectUri: 'https://example.com/callback',
+    });
+  });
+
+  it('types a client whose redirect uri is absent', () => {
+    const client: OpenIdConfig = {
+      clientId: 'client_id',
+      authUri: 'https://example.com/auth',
+      tokenUri: 'https://example.com/token',
+      clientSecret: 'client_secret',
+    };
+
+    const {authCredential} = openIdDictToSchemeCredential(
+      discoveryDocument,
+      [],
+      client,
+    );
+
+    expect(authCredential.oauth2).toEqual({
+      clientId: 'client_id',
+      clientSecret: 'client_secret',
+    });
   });
 });

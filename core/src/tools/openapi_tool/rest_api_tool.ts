@@ -11,7 +11,7 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {applyCredential} from './auth/auth_helpers.js';
+import {credentialToParam} from './auth/auth_helpers.js';
 import {
   ApiParameter,
   OperationParser,
@@ -93,19 +93,24 @@ export class RestApiTool extends BaseTool {
       };
     }
 
-    const credential = authResult.authCredential;
+    // The credential travels as one more request parameter, so the location
+    // the scheme declares - header, query or cookie - routes it.
+    const auth = this.authScheme
+      ? credentialToParam(this.authScheme, authResult.authCredential)
+      : undefined;
+    const parameters = this.operationParser.getParameters();
 
     // Prepare request
     const method = this.endpoint.method.toUpperCase();
     const {
-      url: initialUrl,
+      url,
       headers,
       body: parsedBody,
       bodyData,
     } = prepareRequestParams(
       this.endpoint,
-      this.operationParser.getParameters(),
-      args,
+      auth ? [...parameters, auth.param] : parameters,
+      auth ? {...args, ...auth.kwargs} : args,
     );
 
     // Handle body
@@ -114,14 +119,6 @@ export class RestApiTool extends BaseTool {
       parsedBody,
       bodyData,
       headers,
-    );
-
-    // Handle Auth
-    const url = applyCredential(
-      initialUrl,
-      headers,
-      credential,
-      this.authScheme,
     );
 
     // Apply dynamic headers from provider
@@ -193,6 +190,7 @@ export function prepareRequestParams(
   const paramsMap = new Map(parameters.map((p) => [p.name, p]));
   const pathParams: Record<string, string> = {};
   const bodyData: Record<string, unknown> = {};
+  const cookies: string[] = [];
 
   for (const [argName, argValue] of Object.entries(args)) {
     const param = paramsMap.get(argName);
@@ -210,6 +208,8 @@ export function prepareRequestParams(
       queryParams.append(originalName, String(argValue));
     } else if (location === 'header') {
       headers[originalName] = String(argValue);
+    } else if (location === 'cookie') {
+      cookies.push(`${originalName}=${String(argValue)}`);
     } else if (location === 'body') {
       if (
         originalName === 'body' ||
@@ -221,6 +221,10 @@ export function prepareRequestParams(
         bodyData[originalName] = argValue;
       }
     }
+  }
+
+  if (cookies.length > 0) {
+    headers['Cookie'] = cookies.join('; ');
   }
 
   // Placeholders are resolved against the path only, so a path parameter can
