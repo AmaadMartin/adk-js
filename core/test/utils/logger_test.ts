@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
+import {
+  getLogger,
+  isLogLevelEnabled,
+  Logger,
+  LogLevel,
+  setLogger,
+  setLogLevel,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {resetLogger} from '../../src/utils/logger.js';
 
@@ -140,5 +147,54 @@ describe('setLogger', () => {
 
       expect(logger.constructor.name).toBe('SimpleLogger');
     });
+  });
+});
+
+describe('isLogLevelEnabled', () => {
+  beforeEach(() => {
+    resetLogger();
+  });
+
+  afterEach(() => {
+    resetLogger();
+  });
+
+  it('is false for DEBUG at the default level', () => {
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
+  });
+
+  it('is true for DEBUG once the level is lowered to DEBUG', () => {
+    setLogLevel(LogLevel.DEBUG);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(true);
+  });
+
+  it('is true for a level at or above the configured level', () => {
+    setLogLevel(LogLevel.WARN);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
+    expect(isLogLevelEnabled(LogLevel.WARN)).toBe(true);
+    expect(isLogLevelEnabled(LogLevel.ERROR)).toBe(true);
+  });
+
+  it('is false for a custom logger that cannot report its level', () => {
+    const customLogger: Logger = {
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    };
+
+    setLogger(customLogger);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
+  });
+
+  it('is false for the disabled logger', () => {
+    setLogger(null);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
   });
 });

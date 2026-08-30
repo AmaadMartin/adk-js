@@ -250,6 +250,15 @@ export class InvocationContext {
   readonly nodeToolDepth: number;
 
   /**
+   * Free-form metadata a tool or callback attaches to this invocation.
+   *
+   * Diagnostics that belong to the whole invocation rather than to one event
+   * live here; `MCPTool` writes its captured HTTP exchanges under
+   * `http_debug_info`. Mirrors Python's `InvocationContext._custom_metadata`.
+   */
+  readonly customMetadata: Record<string, unknown> = {};
+
+  /**
    * The live request queue feeding the model on the bidirectional (live) path.
    * Set only for invocations started via `runner.runLive`.
    */
