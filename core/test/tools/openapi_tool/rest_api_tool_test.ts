@@ -22,10 +22,7 @@ import {
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {
-  applyCredential,
-  createApiKeyScheme,
-} from '../../../src/tools/openapi_tool/auth/auth_helpers.js';
+import {createApiKeyScheme} from '../../../src/tools/openapi_tool/auth/auth_helpers.js';
 import {
   prepareRequestBody,
   prepareRequestParams,
@@ -800,21 +797,26 @@ describe('RestApiTool Utilities', () => {
       });
 
       it('should not attach the credential to a traversed path', () => {
-        const result = prepareRequestParams(usersEndpoint, userIdParameters, {
-          user_id: '../../admin/export',
+        const auth = credentialToParam(createApiKeyScheme('key', 'query'), {
+          authType: AuthCredentialTypes.API_KEY,
+          apiKey: 'test-api-key',
         });
+        if (!auth) {
+          expect.fail('credentialToParam returned no parameter');
+        }
 
-        const withKey = applyCredential(
-          result.url,
-          {},
-          {authType: AuthCredentialTypes.API_KEY, apiKey: 'test-api-key'},
-          createApiKeyScheme('key', 'query'),
+        const result = prepareRequestParams(
+          usersEndpoint,
+          [...userIdParameters, auth.param],
+          {user_id: '../../admin/export', ...auth.kwargs},
         );
 
-        expect(new URL(withKey).pathname).toBe(
+        expect(new URL(result.url).pathname).toBe(
           '/v1/users/..%2F..%2Fadmin%2Fexport',
         );
-        expect(new URL(withKey).searchParams.get('key')).toBe('test-api-key');
+        expect(new URL(result.url).searchParams.get('key')).toBe(
+          'test-api-key',
+        );
       });
 
       it('should merge declared query parameters with an encoded path value', () => {
