@@ -4,14 +4,36 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseTool, ToolArgsConfig} from '@google/adk';
+import {
+  BaseTool,
+  getLogger,
+  InputValidationError,
+  Logger,
+  setLogger,
+  ToolArgsConfig,
+} from '@google/adk';
 import {FunctionResponseScheduling} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 class PlainTool extends BaseTool {
   override async runAsync(): Promise<unknown> {
     return {result: 'ok'};
   }
+}
+
+/** Collects the warnings a call emits, in place of the console logger. */
+class RecordingLogger implements Logger {
+  readonly warnings: string[] = [];
+
+  warn(...args: unknown[]): void {
+    this.warnings.push(args.join(' '));
+  }
+
+  log(): void {}
+  debug(): void {}
+  info(): void {}
+  error(): void {}
+  setLogLevel(): void {}
 }
 
 class OtherPlainTool extends BaseTool {
@@ -22,10 +44,10 @@ class OtherPlainTool extends BaseTool {
 
 /** A tool whose own config seam reads the config file path. */
 class ConfigPathTool extends BaseTool {
-  static override fromConfig(
+  static override async fromConfig(
     config: ToolArgsConfig,
     configAbsPath: string,
-  ): ConfigPathTool {
+  ): Promise<ConfigPathTool> {
     return new ConfigPathTool({
       name: String(config['name']),
       description: `loaded from ${configAbsPath}`,
@@ -136,13 +158,21 @@ describe('BaseTool.defersResponse', () => {
 
     expect(tool.defersResponse).toBe(false);
   });
+
+  it('can be assigned after construction', () => {
+    const tool = new PlainTool({name: 'plain_tool', description: 'A tool.'});
+
+    tool.defersResponse = true;
+
+    expect(tool.defersResponse).toBe(true);
+  });
 });
 
 describe('BaseTool.fromConfig', () => {
   const CONFIG_PATH = '/abs/path/agent.yaml';
 
-  it('builds a tool from the required keys alone', () => {
-    const tool = PlainTool.fromConfig(
+  it('builds a tool from the required keys alone', async () => {
+    const tool = await PlainTool.fromConfig(
       {name: 'plain_tool', description: 'A tool.'},
       CONFIG_PATH,
     );
@@ -154,8 +184,8 @@ describe('BaseTool.fromConfig', () => {
     expect(tool.customMetadata).toBeUndefined();
   });
 
-  it('carries isLongRunning and customMetadata through', () => {
-    const tool = PlainTool.fromConfig(
+  it('carries isLongRunning and customMetadata through', async () => {
+    const tool = await PlainTool.fromConfig(
       {
         name: 'plain_tool',
         description: 'A tool.',
@@ -169,8 +199,8 @@ describe('BaseTool.fromConfig', () => {
     expect(tool.customMetadata).toEqual({'my.vendor.key': 'v'});
   });
 
-  it('carries responseScheduling through', () => {
-    const tool = PlainTool.fromConfig(
+  it('carries responseScheduling through', async () => {
+    const tool = await PlainTool.fromConfig(
       {
         name: 'plain_tool',
         description: 'A tool.',
@@ -182,8 +212,8 @@ describe('BaseTool.fromConfig', () => {
     expect(tool.responseScheduling).toBe(FunctionResponseScheduling.SILENT);
   });
 
-  it('leaves responseScheduling undefined when the config omits it', () => {
-    const tool = PlainTool.fromConfig(
+  it('leaves responseScheduling undefined when the config omits it', async () => {
+    const tool = await PlainTool.fromConfig(
       {name: 'plain_tool', description: 'A tool.'},
       CONFIG_PATH,
     );
@@ -191,8 +221,8 @@ describe('BaseTool.fromConfig', () => {
     expect(tool.responseScheduling).toBeUndefined();
   });
 
-  it('rejects a responseScheduling outside the enum', () => {
-    expect(() =>
+  it('rejects a responseScheduling outside the enum', async () => {
+    await expect(
       PlainTool.fromConfig(
         {
           name: 'plain_tool',
@@ -201,14 +231,14 @@ describe('BaseTool.fromConfig', () => {
         },
         CONFIG_PATH,
       ),
-    ).toThrow(
+    ).rejects.toThrow(
       'Invalid tool config: "responseScheduling" must be one of ' +
         'SCHEDULING_UNSPECIFIED, SILENT, WHEN_IDLE, INTERRUPT, got string.',
     );
   });
 
-  it('ignores a key the base implementation does not recognize', () => {
-    const tool = PlainTool.fromConfig(
+  it('ignores a key the base implementation does not recognize', async () => {
+    const tool = await PlainTool.fromConfig(
       {name: 'plain_tool', description: 'A tool.', apiKeyEnvVar: 'MY_KEY'},
       CONFIG_PATH,
     );
@@ -217,62 +247,89 @@ describe('BaseTool.fromConfig', () => {
     expect(Object.keys(tool)).not.toContain('apiKeyEnvVar');
   });
 
-  it('rejects a missing name', () => {
-    expect(() =>
+  it('rejects a missing name', async () => {
+    await expect(
       PlainTool.fromConfig({description: 'A tool.'}, CONFIG_PATH),
-    ).toThrow('Invalid tool config: "name" must be a string, got undefined.');
+    ).rejects.toThrow(
+      'Invalid tool config: "name" must be a string, got undefined.',
+    );
   });
 
-  it('rejects a non-string name', () => {
-    expect(() =>
+  it('rejects a bad key with an InputValidationError', async () => {
+    await expect(
+      PlainTool.fromConfig({description: 'A tool.'}, CONFIG_PATH),
+    ).rejects.toBeInstanceOf(InputValidationError);
+  });
+
+  it('rejects an empty name', async () => {
+    await expect(
+      PlainTool.fromConfig({name: '', description: 'A tool.'}, CONFIG_PATH),
+    ).rejects.toThrow('Invalid tool config: "name" must not be empty.');
+  });
+
+  it('accepts an empty description', async () => {
+    const tool = await PlainTool.fromConfig(
+      {name: 'plain_tool', description: ''},
+      CONFIG_PATH,
+    );
+
+    expect(tool.description).toBe('');
+  });
+
+  it('rejects a non-string name', async () => {
+    await expect(
       PlainTool.fromConfig({name: 7, description: 'A tool.'}, CONFIG_PATH),
-    ).toThrow('Invalid tool config: "name" must be a string, got number.');
+    ).rejects.toThrow(
+      'Invalid tool config: "name" must be a string, got number.',
+    );
   });
 
-  it('rejects a non-string description', () => {
-    expect(() =>
+  it('rejects a non-string description', async () => {
+    await expect(
       PlainTool.fromConfig(
         {name: 'plain_tool', description: null},
         CONFIG_PATH,
       ),
-    ).toThrow('Invalid tool config: "description" must be a string, got null.');
+    ).rejects.toThrow(
+      'Invalid tool config: "description" must be a string, got null.',
+    );
   });
 
-  it('rejects a non-boolean isLongRunning', () => {
-    expect(() =>
+  it('rejects a non-boolean isLongRunning', async () => {
+    await expect(
       PlainTool.fromConfig(
         {name: 'plain_tool', description: 'A tool.', isLongRunning: 'yes'},
         CONFIG_PATH,
       ),
-    ).toThrow(
+    ).rejects.toThrow(
       'Invalid tool config: "isLongRunning" must be a boolean, got string.',
     );
   });
 
-  it('rejects an array customMetadata', () => {
-    expect(() =>
+  it('rejects an array customMetadata', async () => {
+    await expect(
       PlainTool.fromConfig(
         {name: 'plain_tool', description: 'A tool.', customMetadata: ['a']},
         CONFIG_PATH,
       ),
-    ).toThrow(
+    ).rejects.toThrow(
       'Invalid tool config: "customMetadata" must be an object, got array.',
     );
   });
 
-  it('rejects a null customMetadata', () => {
-    expect(() =>
+  it('rejects a null customMetadata', async () => {
+    await expect(
       PlainTool.fromConfig(
         {name: 'plain_tool', description: 'A tool.', customMetadata: null},
         CONFIG_PATH,
       ),
-    ).toThrow(
+    ).rejects.toThrow(
       'Invalid tool config: "customMetadata" must be an object, got null.',
     );
   });
 
-  it('accepts an explicit undefined for an optional key', () => {
-    const tool = PlainTool.fromConfig(
+  it('accepts an explicit undefined for an optional key', async () => {
+    const tool = await PlainTool.fromConfig(
       {
         name: 'plain_tool',
         description: 'A tool.',
@@ -286,20 +343,81 @@ describe('BaseTool.fromConfig', () => {
     expect(tool.customMetadata).toBeUndefined();
   });
 
-  it('returns an instance of the subclass it is called on', () => {
+  it('returns an instance of the subclass it is called on', async () => {
     const config = {name: 'plain_tool', description: 'A tool.'};
 
-    const plain = PlainTool.fromConfig(config, CONFIG_PATH);
-    const other = OtherPlainTool.fromConfig(config, CONFIG_PATH);
+    const plain = await PlainTool.fromConfig(config, CONFIG_PATH);
+    const other = await OtherPlainTool.fromConfig(config, CONFIG_PATH);
 
     expect(plain).toBeInstanceOf(PlainTool);
     expect(other).toBeInstanceOf(OtherPlainTool);
     expect(other).not.toBeInstanceOf(PlainTool);
   });
 
-  it('uses a subclass override instead of the base implementation', () => {
-    const tool = ConfigPathTool.fromConfig({name: 'ignored'}, CONFIG_PATH);
+  it('uses a subclass override instead of the base implementation', async () => {
+    const tool = await ConfigPathTool.fromConfig(
+      {name: 'ignored'},
+      CONFIG_PATH,
+    );
 
     expect(tool.description).toBe(`loaded from ${CONFIG_PATH}`);
+  });
+});
+
+describe('BaseTool.fromConfig unrecognized keys', () => {
+  const CONFIG_PATH = '/abs/path/agent.yaml';
+  let recording: RecordingLogger;
+  let previous: Logger;
+
+  beforeEach(() => {
+    previous = getLogger();
+    recording = new RecordingLogger();
+    setLogger(recording);
+  });
+
+  afterEach(() => {
+    setLogger(previous);
+  });
+
+  it('warns once for each key it does not recognize', async () => {
+    await PlainTool.fromConfig(
+      {
+        name: 'plain_tool',
+        description: 'A tool.',
+        is_long_running: true,
+        retries: 3,
+      },
+      CONFIG_PATH,
+    );
+
+    expect(recording.warnings).toEqual([
+      'Unsupported parsing for tool config argument: is_long_running.',
+      'Unsupported parsing for tool config argument: retries.',
+    ]);
+  });
+
+  it('does not warn when it recognizes every key', async () => {
+    await PlainTool.fromConfig(
+      {
+        name: 'plain_tool',
+        description: 'A tool.',
+        isLongRunning: true,
+        customMetadata: {'my.vendor.key': 'v'},
+        responseScheduling: FunctionResponseScheduling.SILENT,
+      },
+      CONFIG_PATH,
+    );
+
+    expect(recording.warnings).toEqual([]);
+  });
+
+  it('warns before it rejects a bad key, so both problems are visible', async () => {
+    await expect(
+      PlainTool.fromConfig({description: 'A tool.', retries: 3}, CONFIG_PATH),
+    ).rejects.toBeInstanceOf(InputValidationError);
+
+    expect(recording.warnings).toEqual([
+      'Unsupported parsing for tool config argument: retries.',
+    ]);
   });
 });

@@ -14,7 +14,7 @@ import {LlmRequest} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
-import {ToolArgsConfig} from './tool_configs.js';
+import {toBaseToolParams, ToolArgsConfig} from './tool_configs.js';
 
 /**
  * The parameters for `runAsync`.
@@ -118,10 +118,14 @@ export abstract class BaseTool {
    * also records the call in `event.longRunningToolIds`, affecting A2A task
    * state, plugin logging and session metadata.
    *
-   * Subclasses opt in by redeclaring the field:
-   * `override readonly defersResponse = true;`
+   * Internal. ADK sets this on its own tools and it is not part of the public
+   * API, which is what the reference Python SDK means by naming it
+   * `_defers_response`. It is public here because the function-call flow reads
+   * it from outside the class, and this repository's style guide does not use
+   * an underscore prefix. It is not a constructor option, matching Python: a
+   * tool that defers assigns it after `super(...)`.
    */
-  readonly defersResponse: boolean = false;
+  defersResponse = false;
 
   /**
    * Base constructor for a tool.
@@ -245,91 +249,25 @@ export abstract class BaseTool {
    * and a non-object, and does not walk the value to confirm that it is JSON
    * serializable, which stays the caller's obligation.
    *
+   * The declared return type is `BaseTool`, not the class this was called on:
+   * a static typed to return the caller's concrete class rejects every
+   * subclass override that returns its own class (TS2417), and overriding is
+   * the point of the seam.
+   *
    * @param config The args of the tool config.
    * @param _configAbsPath The absolute path of the config file the config came
    *     from.
    * @return The tool instance.
-   * @throws Error if a recognized key holds a value of the wrong type.
+   * @throws {InputValidationError} If a recognized key is missing or holds a
+   *     value of the wrong type.
    */
-  static fromConfig(
+  static async fromConfig(
     this: new (params: BaseToolParams) => BaseTool,
     config: ToolArgsConfig,
     _configAbsPath: string,
-  ): BaseTool {
+  ): Promise<BaseTool> {
     return new this(toBaseToolParams(config));
   }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-const SCHEDULING_VALUES: readonly string[] = Object.values(
-  FunctionResponseScheduling,
-);
-
-function isResponseScheduling(
-  value: unknown,
-): value is FunctionResponseScheduling {
-  return typeof value === 'string' && SCHEDULING_VALUES.includes(value);
-}
-
-function describeType(value: unknown): string {
-  if (value === null) {
-    return 'null';
-  }
-  return Array.isArray(value) ? 'array' : typeof value;
-}
-
-function invalidToolConfig(
-  key: string,
-  expected: string,
-  value: unknown,
-): Error {
-  return new Error(
-    `Invalid tool config: "${key}" must be ${expected}, got ${describeType(value)}.`,
-  );
-}
-
-/**
- * Validates the keys of {@link BaseToolParams} in a tool config.
- *
- * @param config The args of the tool config.
- * @return The validated constructor params.
- * @throws Error if a recognized key holds a value of the wrong type.
- */
-function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
-  const {name, description, isLongRunning, customMetadata, responseScheduling} =
-    config;
-  if (typeof name !== 'string') {
-    throw invalidToolConfig('name', 'a string', name);
-  }
-  if (typeof description !== 'string') {
-    throw invalidToolConfig('description', 'a string', description);
-  }
-  if (isLongRunning !== undefined && typeof isLongRunning !== 'boolean') {
-    throw invalidToolConfig('isLongRunning', 'a boolean', isLongRunning);
-  }
-  if (customMetadata !== undefined && !isPlainObject(customMetadata)) {
-    throw invalidToolConfig('customMetadata', 'an object', customMetadata);
-  }
-  if (
-    responseScheduling !== undefined &&
-    !isResponseScheduling(responseScheduling)
-  ) {
-    throw invalidToolConfig(
-      'responseScheduling',
-      `one of ${SCHEDULING_VALUES.join(', ')}`,
-      responseScheduling,
-    );
-  }
-  return {
-    name,
-    description,
-    isLongRunning,
-    customMetadata,
-    responseScheduling,
-  };
 }
 
 function findToolWithFunctionDeclarations(
