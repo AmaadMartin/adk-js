@@ -16,6 +16,8 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
   invocation's buffered audio into text Content with Cloud Speech-to-Text.
 - [BasePlanner](agents/planner/index.md) - Making an agent plan before it
   answers, and marking its reasoning as thought parts.
+- [LlmAgent single-turn and task modes](agents/llm_agent/single_turn.md) -
+  Exposing a sub-agent to its parent as a callable tool that runs inline.
 
 ### Evaluation
 
