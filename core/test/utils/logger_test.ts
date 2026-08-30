@@ -8,7 +8,11 @@ import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 // `logger` is the internal façade, not part of the public API, so it is
 // imported by relative path to exercise the exact instance ADK code uses.
-import {logger, resetLogger} from '../../src/utils/logger.js';
+import {
+  isLogLevelEnabled,
+  logger,
+  resetLogger,
+} from '../../src/utils/logger.js';
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -207,5 +211,36 @@ describe('isEnabledFor', () => {
 
     expect(logger.isEnabledFor?.(LogLevel.DEBUG)).toBe(true);
     expect(asked).toEqual([LogLevel.DEBUG]);
+  });
+});
+
+describe('isLogLevelEnabled', () => {
+  beforeEach(() => {
+    resetLogger();
+  });
+
+  afterEach(() => {
+    resetLogger();
+  });
+
+  it('reports the levels at or above the configured one', () => {
+    setLogLevel(LogLevel.WARN);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
+    expect(isLogLevelEnabled(LogLevel.WARN)).toBe(true);
+  });
+
+  it('reports false for a custom logger that does not implement isEnabledFor', () => {
+    const customLogger: Logger = {
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    };
+    setLogger(customLogger);
+
+    expect(isLogLevelEnabled(LogLevel.ERROR)).toBe(false);
   });
 });

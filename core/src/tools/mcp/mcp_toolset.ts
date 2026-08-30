@@ -19,7 +19,7 @@ import type {
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {formatError, isAbortError} from '../../utils/error_utils.js';
 import {captureHttpDebugInfo} from '../../utils/http_debug_utils.js';
-import {logger} from '../../utils/logger.js';
+import {isLogLevelEnabled, logger, LogLevel} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
@@ -122,55 +122,43 @@ export class MCPToolset extends BaseToolset {
    * the caller learns which MCP call failed instead of reading a bare
    * transport string. The session is closed on every exit path.
    *
-   * @param operation Short description of the attempt, used as the message
-   *   prefix on failure.
-   * @param run Receives the open session.
-   * @return Whatever `run` resolves to.
-   * @throws {McpConnectionError} when opening the session or running `run`
-   *   fails for any reason other than cancellation.
-   */
-  private async openSessionAndRun<T>(
-    operation: string,
-    run: (session: Client) => Promise<T>,
-  ): Promise<T> {
-    let session: Client | undefined;
-    try {
-      session = await this.mcpSessionManager.createSession();
-      return await run(session);
-    } catch (err: unknown) {
-      throw nameFailedOperation(operation, err);
-    } finally {
-      if (session) {
-        await this.mcpSessionManager.closeSession(session);
-      }
-    }
-  }
-
-  /**
-   * Runs one MCP operation, capturing the HTTP exchanges behind it when debug
-   * logging is on and the caller supplied a context to record them against.
-   *
-   * The capture is installed around session creation as well as the call, so
-   * the `initialize` handshake is recorded too. It is drained on the failure
-   * path as well, which is when an operator most wants to read it.
+   * With debug logging on and a context to record against, the HTTP exchanges
+   * behind the operation are captured. The capture covers session creation as
+   * well as the call, so the `initialize` handshake is recorded too.
    *
    * @param operation Short description of the attempt, used as the message
    *   prefix on failure.
    * @param run Receives the open session.
    * @param readonlyContext The invocation to record the exchanges against.
    * @return Whatever `run` resolves to.
+   * @throws {McpConnectionError} when opening the session or running `run`
+   *   fails for any reason other than cancellation.
    */
   private async executeWithSession<T>(
     operation: string,
     run: (session: Client) => Promise<T>,
     readonlyContext?: ReadonlyContext,
   ): Promise<T> {
-    if (readonlyContext === undefined) {
-      return this.openSessionAndRun(operation, run);
+    const attempt = async (): Promise<T> => {
+      let session: Client | undefined;
+      try {
+        session = await this.mcpSessionManager.createSession();
+        return await run(session);
+      } catch (err: unknown) {
+        throw nameFailedOperation(operation, err);
+      } finally {
+        if (session) {
+          await this.mcpSessionManager.closeSession(session);
+        }
+      }
+    };
+
+    if (readonlyContext === undefined || !isLogLevelEnabled(LogLevel.DEBUG)) {
+      return attempt();
     }
     return captureHttpDebugInfo(
       readonlyContext.invocationContext.customMetadata,
-      () => this.openSessionAndRun(operation, run),
+      attempt,
     );
   }
 

@@ -162,6 +162,20 @@ export function setLogLevel(level: LogLevel) {
 }
 
 /**
+ * Whether the logger would emit a message at `level`.
+ *
+ * Use this to skip work that only feeds a log line. {@link Logger.isEnabledFor}
+ * is optional, so a logger that predates it reports nothing and this answers
+ * false.
+ *
+ * @param level The level to test.
+ * @return Whether a message at `level` would be emitted.
+ */
+export function isLogLevelEnabled(level: LogLevel): boolean {
+  return logger.isEnabledFor?.(level) ?? false;
+}
+
+/**
  * The logger instance for ADK.
  */
 export const logger: Logger = {

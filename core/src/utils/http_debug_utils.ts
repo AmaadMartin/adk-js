@@ -7,7 +7,6 @@
 import {AsyncLocalStorage} from 'node:async_hooks';
 
 import {MAX_RESPONSE_BODY_LENGTH, TRUNCATION_MARKER} from './error_utils.js';
-import {logger, LogLevel} from './logger.js';
 import {redactUriPassword} from './redact_uri.js';
 
 /**
@@ -228,11 +227,9 @@ export function appendHttpDebugInfo(
 /**
  * Runs `fn` under a capture and appends what it records to `customMetadata`.
  *
- * Capturing costs a body read per exchange, so it is on only while debug
- * logging is on. Off, `fn` runs exactly as it would without this wrapper. The
- * drain runs on the failure path too, which is when an operator most wants to
- * read the exchanges. A logger that predates {@link Logger.isEnabledFor}
- * reports nothing, and then nothing is captured.
+ * The drain runs on the failure path too, which is when an operator most wants
+ * to read the exchanges. Capturing costs a body read per exchange, so a caller
+ * installs one only while debug logging is on — see `isLogLevelEnabled`.
  *
  * @param customMetadata The invocation's metadata record, written in place.
  * @param fn The operation to run.
@@ -242,9 +239,6 @@ export async function captureHttpDebugInfo<T>(
   customMetadata: Record<string, unknown>,
   fn: () => Promise<T>,
 ): Promise<T> {
-  if (!(logger.isEnabledFor?.(LogLevel.DEBUG) ?? false)) {
-    return fn();
-  }
   const exchanges: HttpExchange[] = [];
   try {
     return await runWithHttpDebugCapture(exchanges, fn);

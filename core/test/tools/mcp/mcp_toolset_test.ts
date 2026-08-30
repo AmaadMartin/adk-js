@@ -79,21 +79,6 @@ function stubClient(methods: Record<string, unknown>): Client {
   return {connect: noop(), close: noop(), ...methods} as unknown as Client;
 }
 
-/** A real invocation context, so `customMetadata` behaves as it does live. */
-function createReadonlyContext(): ReadonlyContext {
-  return new ReadonlyContext(
-    new InvocationContext({
-      invocationId: 'inv-1',
-      session: createSession({
-        id: 'session-1',
-        appName: 'app',
-        userId: 'user',
-      }),
-      pluginManager: new PluginManager([]),
-    }),
-  );
-}
-
 describe('MCPToolset', () => {
   it('discovers tools without prefix', async () => {
     const toolset = new MCPToolset(stdioParams);
@@ -153,7 +138,7 @@ describe('MCPToolset', () => {
         stdioParams,
         (tool) => tool.name === 'other-tool',
       );
-      const tools = await toolset.getTools(createReadonlyContext());
+      const tools = await toolset.getTools({} as ReadonlyContext);
 
       expect(tools).toHaveLength(1);
       expect(tools[0].name).toBe('other-tool');
@@ -541,6 +526,21 @@ describe('MCPToolset', () => {
   });
 
   describe('http debug capture', () => {
+    /** A real invocation context, so `customMetadata` behaves as it does live. */
+    function createReadonlyContext(): ReadonlyContext {
+      return new ReadonlyContext(
+        new InvocationContext({
+          invocationId: 'inv-1',
+          session: createSession({
+            id: 'session-1',
+            appName: 'app',
+            userId: 'user',
+          }),
+          pluginManager: new PluginManager([]),
+        }),
+      );
+    }
+
     /**
      * Installs a one-shot client whose `listTools` records `count` exchanges,
      * as the transport's fetch wrapper does for a real HTTP server.

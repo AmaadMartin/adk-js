@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {
   appendHttpDebugInfo,
   captureHttpDebugInfo,
@@ -16,7 +16,6 @@ import {
   recordHttpExchange,
   runWithHttpDebugCapture,
 } from '../../src/utils/http_debug_utils.js';
-import {LogLevel, resetLogger, setLogLevel} from '../../src/utils/logger.js';
 
 const MAX_BODY_LENGTH = 1000;
 const TRUNCATION_MARKER = '... [truncated]';
@@ -313,15 +312,6 @@ describe('http debug info on an invocation', () => {
 });
 
 describe('captureHttpDebugInfo', () => {
-  beforeEach(() => {
-    resetLogger();
-    setLogLevel(LogLevel.DEBUG);
-  });
-
-  afterEach(() => {
-    resetLogger();
-  });
-
   it('drains what the operation recorded into the metadata', async () => {
     const customMetadata: Record<string, unknown> = {};
 
@@ -349,16 +339,11 @@ describe('captureHttpDebugInfo', () => {
     expect(getHttpDebugInfo(customMetadata)).toHaveLength(1);
   });
 
-  it('installs no capture when debug logging is off', async () => {
-    setLogLevel(LogLevel.INFO);
+  it('adds no key when the operation recorded nothing', async () => {
     const customMetadata: Record<string, unknown> = {};
 
-    const capturing = await captureHttpDebugInfo(customMetadata, async () => {
-      recordHttpExchange(exchange({url: 'https://a/'}));
-      return isCapturingHttpDebug();
-    });
+    await captureHttpDebugInfo(customMetadata, async () => 'done');
 
-    expect(capturing).toBe(false);
     expect(customMetadata).toEqual({});
   });
 });

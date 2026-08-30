@@ -13,6 +13,7 @@ import type {
 
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {captureHttpDebugInfo} from '../../utils/http_debug_utils.js';
+import {isLogLevelEnabled, LogLevel} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
@@ -64,6 +65,9 @@ export class MCPTool extends BaseTool {
   }
 
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
+    if (!isLogLevelEnabled(LogLevel.DEBUG)) {
+      return this.callMcpTool(request);
+    }
     return captureHttpDebugInfo(
       request.toolContext.invocationContext.customMetadata,
       () => this.callMcpTool(request),
