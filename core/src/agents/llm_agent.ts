@@ -451,25 +451,41 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 }
 
 /**
- * The tools that expose mode-declaring sub-agents to the parent model.
+ * The execution mode by which a parent drives `agent` as a tool, or `undefined`
+ * when the parent does not drive it that way.
  *
- * A sub-agent that declares an execution `mode` is driven by a tool call rather
- * than by an LLM transfer, so it is wrapped and appended to the parent's tools.
- * A sub-agent with no `mode` is left alone: it stays a transfer target and no
- * tool is created for it. That is adk-js's equivalent of adk-python's default
- * `mode='chat'`, which is likewise neither wrapped nor excluded from transfer.
+ * An agent that declares `single_turn` or `task` is reached by a tool call: the
+ * parent wraps it as a tool and stops offering it as an LLM-transfer target.
+ * An agent with no `mode` — every non-`LlmAgent`, and every conversational
+ * `LlmAgent` — is reached by a transfer instead. That is adk-js's equivalent of
+ * adk-python's default `mode='chat'`.
+ *
+ * This is the one place that decides which modes mean delegation, so the
+ * wrapper side and the transfer side cannot drift apart.
+ */
+export function delegationMode(
+  agent: BaseAgent,
+): 'single_turn' | 'task' | undefined {
+  if (!isLlmAgent(agent)) {
+    return undefined;
+  }
+  return agent.mode === 'single_turn' || agent.mode === 'task'
+    ? agent.mode
+    : undefined;
+}
+
+/**
+ * The tools that expose mode-declaring sub-agents to the parent model.
  *
  * Mirrors the sub-agent loop in adk-python's `LlmAgent.model_post_init`.
  */
 function delegationToolsFor(subAgents: BaseAgent[]): BaseTool[] {
   const tools: BaseTool[] = [];
   for (const subAgent of subAgents) {
-    if (!isLlmAgent(subAgent)) {
-      continue;
-    }
-    if (subAgent.mode === 'single_turn') {
+    const mode = delegationMode(subAgent);
+    if (mode === 'single_turn') {
       tools.push(new SingleTurnAgentTool({agent: subAgent}));
-    } else if (subAgent.mode === 'task') {
+    } else if (mode === 'task') {
       tools.push(new TaskAgentTool({agent: subAgent}));
     }
   }

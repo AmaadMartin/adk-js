@@ -14,6 +14,7 @@ import {
   Event,
   InMemorySessionService,
   LlmAgent,
+  LlmRequest,
   Runner,
   getFunctionResponses,
 } from '@google/adk';
@@ -63,6 +64,7 @@ describe('single_turn sub-agent delegation', () => {
       description: 'Translates the input text to Spanish.',
       mode: 'single_turn',
     });
+    const requests: LlmRequest[] = [];
     const writer = new LlmAgent({
       model: new GeminiWithMockResponses([
         modelCall('translator', {request: 'hello'}),
@@ -72,6 +74,10 @@ describe('single_turn sub-agent delegation', () => {
       description: 'Writes text and has it translated.',
       instruction: 'Use the translator tool.',
       subAgents: [translator],
+      beforeModelCallback: ({request}) => {
+        requests.push(request);
+        return undefined;
+      },
     });
 
     const sessionService = new InMemorySessionService();
@@ -97,6 +103,14 @@ describe('single_turn sub-agent delegation', () => {
 
     // The model was offered the sub-agent as a tool, not as a transfer target.
     expect(writer.tools).toHaveLength(1);
+    expect(requests).not.toHaveLength(0);
+    for (const request of requests) {
+      expect(Object.keys(request.toolsDict)).toContain('translator');
+      expect(Object.keys(request.toolsDict)).not.toContain('transfer_to_agent');
+      expect(request.config?.systemInstruction).not.toContain(
+        'Agent name: translator',
+      );
+    }
 
     // The sub-agent ran inline: its turn is in the caller's own session, on a
     // branch scoped to the function call.

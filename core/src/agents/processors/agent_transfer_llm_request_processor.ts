@@ -11,7 +11,7 @@ import {FunctionTool} from '../../tools/function_tool.js';
 import {BaseAgent} from '../base_agent.js';
 import {Context} from '../context.js';
 import {InvocationContext} from '../invocation_context.js';
-import {isLlmAgent, LlmAgent} from '../llm_agent.js';
+import {delegationMode, isLlmAgent, LlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
@@ -106,9 +106,18 @@ to your parent agent.
     return instructions;
   }
 
+  /**
+   * The agents `agent` can hand the conversation to: its sub-agents, its parent,
+   * and its peers.
+   *
+   * A sub-agent or peer that declares a delegation `mode` is left out. The
+   * parent already reaches it by calling it as a tool, and it runs for one node
+   * execution rather than for a conversation, so handing the conversation to it
+   * has no meaning. Mirrors adk-python's `_get_transfer_targets`.
+   */
   private getTransferTargets(agent: LlmAgent): BaseAgent[] {
     const targets: BaseAgent[] = [];
-    targets.push(...agent.subAgents);
+    targets.push(...agent.subAgents.filter((sub) => !delegationMode(sub)));
 
     if (!agent.parentAgent || !isLlmAgent(agent.parentAgent)) {
       return targets;
@@ -121,7 +130,8 @@ to your parent agent.
     if (!agent.disallowTransferToPeers) {
       targets.push(
         ...agent.parentAgent.subAgents.filter(
-          (peerAgent) => peerAgent.name !== agent.name,
+          (peerAgent) =>
+            peerAgent.name !== agent.name && !delegationMode(peerAgent),
         ),
       );
     }

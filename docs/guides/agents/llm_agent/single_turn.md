@@ -17,6 +17,10 @@ parent stays in control of the conversation. It calls the specialist, reads the
 result, and continues. `LlmAgent` builds the tool for you at construction time,
 so `subAgents` is the only thing you configure.
 
+A specialist is offered one way only. It is not a `transfer_to_agent` target,
+for itself or for its peers, because the parent already reaches it as a tool and
+it runs for one node execution rather than for a conversation.
+
 The two modes differ in how the specialist decides it is done:
 
 - `single_turn` finishes after one model turn. Its reply is the tool result.
