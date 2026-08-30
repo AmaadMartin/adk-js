@@ -107,6 +107,52 @@ export function parseWithSchema<T>(
   return validator ? (validator.parse(value) as T) : value;
 }
 
+/** The markdown code fence a model wraps structured output in. */
+const CODE_FENCE = '```';
+
+/** The optional language tag that follows the opening fence. */
+const LANGUAGE_TAG = /^\w*/;
+
+/**
+ * Removes a markdown code fence wrapping the whole JSON payload.
+ *
+ * A model asked for structured output sometimes wraps it in a fence, most
+ * often when tools are configured alongside an output schema and the schema
+ * becomes best-effort. Well-formed JSON never starts with a fence, so this
+ * leaves valid input alone.
+ *
+ * The fence is matched by position rather than by one regular expression. A
+ * single pattern spanning both fences needs a lazy body between two whitespace
+ * runs, and that backtracks superlinearly when the closing fence is absent.
+ * The payload is model output, so a caller cannot choose it.
+ */
+function stripJsonCodeFence(jsonText: string): string {
+  const trimmed = jsonText.trim();
+  if (
+    trimmed.length < CODE_FENCE.length * 2 ||
+    !trimmed.startsWith(CODE_FENCE) ||
+    !trimmed.endsWith(CODE_FENCE)
+  ) {
+    return jsonText;
+  }
+  const body = trimmed.slice(CODE_FENCE.length, -CODE_FENCE.length);
+  return body.replace(LANGUAGE_TAG, '').trim();
+}
+
+/**
+ * Parses `jsonText` as JSON and validates the result against `schema`.
+ *
+ * A code fence wrapping the whole payload is removed first. Malformed JSON and
+ * a value that breaks the schema both throw, so a caller cannot mistake either
+ * for data the schema promised.
+ */
+export function parseJsonWithSchema(
+  schema: SchemaLike | undefined,
+  jsonText: string,
+): unknown {
+  return parseWithSchema(schema, JSON.parse(stripJsonCodeFence(jsonText)));
+}
+
 /**
  * Renders a {@link SchemaLike} as a plain JSON Schema object.
  *

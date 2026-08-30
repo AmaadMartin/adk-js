@@ -10,6 +10,7 @@ import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import {
   objectSchemaFields,
+  parseJsonWithSchema,
   parseWithSchema,
   toJsonSchema,
 } from '../../src/utils/schema.js';
@@ -120,6 +121,98 @@ describe('parseWithSchema', () => {
     const roundTripped = zodObjectToSchema(zod);
     expect(parseWithSchema(roundTripped, {count: 3})).toEqual({count: 3});
     expect(() => parseWithSchema(roundTripped, {count: 'no'})).toThrow();
+  });
+});
+
+describe('parseJsonWithSchema', () => {
+  const summarySchema = z4.object({summary: z4.string()});
+
+  it('parses and validates plain JSON text', () => {
+    expect(parseJsonWithSchema(summarySchema, '{"summary":"done"}')).toEqual({
+      summary: 'done',
+    });
+  });
+
+  it('throws for JSON text that breaks the schema', () => {
+    expect(() =>
+      parseJsonWithSchema(summarySchema, '{"summary":42}'),
+    ).toThrow();
+  });
+
+  it('strips a json code fence wrapping the payload', () => {
+    const fenced = '```json\n{"summary":"done"}\n```';
+    expect(parseJsonWithSchema(summarySchema, fenced)).toEqual({
+      summary: 'done',
+    });
+  });
+
+  it('strips a code fence that carries no language tag', () => {
+    const fenced = '```\n{"summary":"done"}\n```';
+    expect(parseJsonWithSchema(summarySchema, fenced)).toEqual({
+      summary: 'done',
+    });
+  });
+
+  it('strips a fence surrounded by whitespace', () => {
+    const fenced = '\n  ```json\n{"summary":"done"}\n```  \n';
+    expect(parseJsonWithSchema(summarySchema, fenced)).toEqual({
+      summary: 'done',
+    });
+  });
+
+  it('leaves a fence that does not wrap the whole payload alone', () => {
+    const notWrapped = '{"summary":"see ```json``` below"}';
+    expect(parseJsonWithSchema(summarySchema, notWrapped)).toEqual({
+      summary: 'see ```json``` below',
+    });
+  });
+
+  it('rejects an unclosed fence promptly instead of backtracking over it', () => {
+    // The sub-agent chooses this text, so an unclosed fence around a long
+    // whitespace run must not become a denial of service on the event loop.
+    const unclosed = '```json\n' + ' '.repeat(16000) + 'x';
+    const startedAt = Date.now();
+    expect(() => parseJsonWithSchema(summarySchema, unclosed)).toThrow(
+      SyntaxError,
+    );
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+  });
+
+  it('strips a fence whose body holds a long whitespace run', () => {
+    const padded = '```json\n' + ' '.repeat(16000) + '{"summary":"done"}\n```';
+    const startedAt = Date.now();
+    expect(parseJsonWithSchema(summarySchema, padded)).toEqual({
+      summary: 'done',
+    });
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+  });
+
+  it('leaves a bare fence that wraps nothing alone', () => {
+    expect(() => parseJsonWithSchema(summarySchema, '```')).toThrow(
+      SyntaxError,
+    );
+  });
+
+  it('returns the parsed value when no schema is given', () => {
+    expect(parseJsonWithSchema(undefined, '{"anything":true}')).toEqual({
+      anything: true,
+    });
+  });
+
+  it('validates against a genai schema', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {count: {type: Type.NUMBER}},
+      required: ['count'],
+    };
+    expect(parseJsonWithSchema(schema, '{"count":3}')).toEqual({count: 3});
+    expect(() => parseJsonWithSchema(schema, '{"count":"no"}')).toThrow();
+  });
+
+  it('throws for malformed JSON', () => {
+    expect(() => parseJsonWithSchema(summarySchema, 'not json')).toThrow(
+      SyntaxError,
+    );
   });
 });
 

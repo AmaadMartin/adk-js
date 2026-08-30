@@ -29,6 +29,8 @@ export class State {
   static readonly APP_PREFIX = 'app:';
   static readonly USER_PREFIX = 'user:';
   static readonly TEMP_PREFIX = 'temp:';
+  /** Marks a key as ADK's own bookkeeping rather than application state. */
+  static readonly ADK_INTERNAL_PREFIX = '_adk';
 
   constructor(
     /** The current value of the state. */

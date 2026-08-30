@@ -88,6 +88,16 @@ export class PluginManager {
   }
 
   /**
+   * Retrieves every registered plugin, in registration order.
+   *
+   * @returns A fresh array on each call, so a caller cannot change the
+   *     registry through it.
+   */
+  listPlugins(): BasePlugin[] {
+    return Array.from(this.plugins);
+  }
+
+  /**
    * Runs the same callback for all plugins. This is a utility method to reduce
    * duplication below.
    *
