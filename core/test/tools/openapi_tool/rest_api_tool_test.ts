@@ -92,6 +92,69 @@ describe('RestApiTool', () => {
     );
   });
 
+  it('should send a header set by setDefaultHeaders', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      {responses: {}},
+    );
+    tool.setDefaultHeaders({'developer-token': 'default-value'});
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'developer-token': 'default-value',
+        }),
+      }),
+    );
+  });
+
+  it('should keep a request header over a default header of the same name', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [
+        {name: 'developer-token', in: 'header', schema: {type: 'string'}},
+      ],
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      operation,
+    );
+    tool.setDefaultHeaders({'developer-token': 'default-value'});
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    await tool.runAsync({
+      args: {'developer-token': 'request-value'},
+      toolContext: {} as unknown as Context,
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'developer-token': 'request-value',
+        }),
+      }),
+    );
+  });
+
   it('should stringify object body', async () => {
     const endpoint = {
       baseUrl: 'http://api.example.com',
