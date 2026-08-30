@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   appendHttpDebugInfo,
+  captureHttpDebugInfo,
   describeHttpExchange,
   getHttpDebugInfo,
   HttpExchange,
@@ -15,6 +16,7 @@ import {
   recordHttpExchange,
   runWithHttpDebugCapture,
 } from '../../src/utils/http_debug_utils.js';
+import {LogLevel, resetLogger, setLogLevel} from '../../src/utils/logger.js';
 
 const MAX_BODY_LENGTH = 1000;
 const TRUNCATION_MARKER = '... [truncated]';
@@ -307,5 +309,56 @@ describe('http debug info on an invocation', () => {
     expect(getHttpDebugInfo(customMetadata)).toHaveLength(
       MAX_CAPTURED_EXCHANGES,
     );
+  });
+});
+
+describe('captureHttpDebugInfo', () => {
+  beforeEach(() => {
+    resetLogger();
+    setLogLevel(LogLevel.DEBUG);
+  });
+
+  afterEach(() => {
+    resetLogger();
+  });
+
+  it('drains what the operation recorded into the metadata', async () => {
+    const customMetadata: Record<string, unknown> = {};
+
+    const result = await captureHttpDebugInfo(customMetadata, async () => {
+      recordHttpExchange(exchange({url: 'https://a/'}));
+      return 'done';
+    });
+
+    expect(result).toBe('done');
+    expect(getHttpDebugInfo(customMetadata).map((e) => e.url)).toEqual([
+      'https://a/',
+    ]);
+  });
+
+  it('drains what a failed operation recorded, and rethrows', async () => {
+    const customMetadata: Record<string, unknown> = {};
+
+    await expect(
+      captureHttpDebugInfo(customMetadata, async () => {
+        recordHttpExchange(exchange({url: 'https://a/'}));
+        throw new Error('call failed');
+      }),
+    ).rejects.toThrow('call failed');
+
+    expect(getHttpDebugInfo(customMetadata)).toHaveLength(1);
+  });
+
+  it('installs no capture when debug logging is off', async () => {
+    setLogLevel(LogLevel.INFO);
+    const customMetadata: Record<string, unknown> = {};
+
+    const capturing = await captureHttpDebugInfo(customMetadata, async () => {
+      recordHttpExchange(exchange({url: 'https://a/'}));
+      return isCapturingHttpDebug();
+    });
+
+    expect(capturing).toBe(false);
+    expect(customMetadata).toEqual({});
   });
 });

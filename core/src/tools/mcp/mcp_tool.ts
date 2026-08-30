@@ -12,6 +12,7 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
+import {captureHttpDebugInfo} from '../../utils/http_debug_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
@@ -63,6 +64,19 @@ export class MCPTool extends BaseTool {
   }
 
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
+    return captureHttpDebugInfo(
+      request.toolContext.invocationContext.customMetadata,
+      () => this.callMcpTool(request),
+    );
+  }
+
+  /**
+   * Opens a session, runs the tool on it, and closes the session again.
+   *
+   * @param request The arguments and context of this invocation.
+   * @return The server's `CallToolResult`.
+   */
+  private async callMcpTool(request: RunAsyncToolRequest): Promise<unknown> {
     const session = await this.mcpSessionManager.createSession();
 
     try {
