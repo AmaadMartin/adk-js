@@ -10,6 +10,7 @@ import {
   createEvent,
   createEventActions,
   createSession,
+  Event,
   FeatureName,
   InMemorySessionService,
   InvocationContext,
@@ -34,6 +35,28 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     })),
   };
 });
+
+/**
+ * The `Runner` mock the tool sees, capturing the config `AgentTool` built it
+ * with. The cast is unavoidable: the mock implements the two members
+ * `AgentTool.runAsync` touches, and `Runner`'s full surface is far wider.
+ */
+function mockRunner(
+  captured: {appName?: string; sessionService?: InMemorySessionService},
+  events: Event[],
+): void {
+  vi.mocked(Runner).mockImplementation((config) => {
+    captured.appName = config?.appName;
+    captured.sessionService = config?.sessionService as InMemorySessionService;
+    return {
+      appName: config?.appName,
+      sessionService: config?.sessionService,
+      runAsync: async function* () {
+        yield* events;
+      },
+    } as unknown as Runner;
+  });
+}
 
 describe('AgentTool', () => {
   it('propagates session context and state delta', async () => {
@@ -515,48 +538,38 @@ describe('AgentTool', () => {
   });
 
   it('files the child runner and session under the parent app name', async () => {
-    const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
-    const tool = new AgentTool({agent: mockAgent});
-
-    const session = createSession({
-      id: 'parent-session',
-      appName: 'parent-app',
-      userId: 'parent-user',
-    });
+    const subAgent = new LlmAgent({name: 'sub-agent', description: 'a stub'});
+    const tool = new AgentTool({agent: subAgent});
 
     const toolContext = new Context({
       invocationContext: new InvocationContext({
         invocationId: 'test-invocation',
-        agent: mockAgent,
-        session,
+        agent: subAgent,
+        session: createSession({
+          id: 'parent-session',
+          appName: 'parent-app',
+          userId: 'parent-user',
+        }),
         pluginManager: new PluginManager([]),
         sessionService: new InMemorySessionService(),
       }),
     });
 
-    const mockRunAsync = async function* () {
-      yield createEvent({
+    const captured: {
+      appName?: string;
+      sessionService?: InMemorySessionService;
+    } = {};
+    mockRunner(captured, [
+      createEvent({
         author: 'sub-agent',
         content: {role: 'model', parts: [{text: 'hello'}]},
-      });
-    };
-
-    let childSessionService: InMemorySessionService | undefined;
-    let childAppName: string | undefined;
-    vi.mocked(Runner).mockImplementation((config) => {
-      childAppName = config?.appName;
-      childSessionService = config?.sessionService as InMemorySessionService;
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
+      }),
+    ]);
 
     await tool.runAsync({args: {request: 'hello'}, toolContext});
 
-    expect(childAppName).toBe('parent-app');
-    const childSessions = await childSessionService!.listSessions({
+    expect(captured.appName).toBe('parent-app');
+    const childSessions = await captured.sessionService!.listSessions({
       appName: 'parent-app',
       userId: 'parent-user',
     });
@@ -564,53 +577,42 @@ describe('AgentTool', () => {
   });
 
   it('does not forward _adk-prefixed parent state to the child session', async () => {
-    const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
-    const tool = new AgentTool({agent: mockAgent});
-
-    const session = createSession({
-      id: 'parent-session',
-      appName: 'parent-app',
-      userId: 'parent-user',
-      state: {
-        normalKey: 'keepMe',
-        _adkBookkeeping: 'dropMe',
-      },
-    });
+    const subAgent = new LlmAgent({name: 'sub-agent', description: 'a stub'});
+    const tool = new AgentTool({agent: subAgent});
 
     const toolContext = new Context({
       invocationContext: new InvocationContext({
         invocationId: 'test-invocation',
-        agent: mockAgent,
-        session,
+        agent: subAgent,
+        session: createSession({
+          id: 'parent-session',
+          appName: 'parent-app',
+          userId: 'parent-user',
+          state: {normalKey: 'keepMe', _adkBookkeeping: 'dropMe'},
+        }),
         pluginManager: new PluginManager([]),
         sessionService: new InMemorySessionService(),
       }),
     });
 
-    const mockRunAsync = async function* () {
-      yield createEvent({
+    const captured: {
+      appName?: string;
+      sessionService?: InMemorySessionService;
+    } = {};
+    mockRunner(captured, [
+      createEvent({
         author: 'sub-agent',
         content: {role: 'model', parts: [{text: 'hello'}]},
-      });
-    };
-
-    let childSessionService: InMemorySessionService | undefined;
-    vi.mocked(Runner).mockImplementation((config) => {
-      childSessionService = config?.sessionService as InMemorySessionService;
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
+      }),
+    ]);
 
     await tool.runAsync({args: {request: 'hello'}, toolContext});
 
-    const childSessions = await childSessionService!.listSessions({
+    const childSessions = await captured.sessionService!.listSessions({
       appName: 'parent-app',
       userId: 'parent-user',
     });
-    const childSession = await childSessionService!.getSession({
+    const childSession = await captured.sessionService!.getSession({
       appName: 'parent-app',
       userId: 'parent-user',
       sessionId: childSessions.sessions[0].id,

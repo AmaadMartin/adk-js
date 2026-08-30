@@ -43,7 +43,7 @@ class EchoAgent extends BaseAgent {
     });
   }
 
-  // eslint-disable-next-line require-yield
+  // eslint-disable-next-line require-yield -- BaseAgent mandates an AsyncGenerator; this fixture never runs live.
   protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
     return;
   }
@@ -51,12 +51,12 @@ class EchoAgent extends BaseAgent {
 
 /** An agent whose run always fails. */
 class FailingAgent extends BaseAgent {
-  // eslint-disable-next-line require-yield
+  // eslint-disable-next-line require-yield -- BaseAgent mandates an AsyncGenerator; this fixture only throws.
   protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {
     throw new Error('sub-agent exploded');
   }
 
-  // eslint-disable-next-line require-yield
+  // eslint-disable-next-line require-yield -- BaseAgent mandates an AsyncGenerator; this fixture never runs live.
   protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
     return;
   }
