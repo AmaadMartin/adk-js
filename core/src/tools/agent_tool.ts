@@ -19,6 +19,7 @@ import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
+import {formatError} from '../utils/error_utils.js';
 import {
   parseWithSchema,
   SchemaLike,
@@ -26,6 +27,7 @@ import {
   toJsonSchema,
 } from '../utils/schema.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
+import {runNodeFromToolContext} from '../workflow/run_node_from_tool.js';
 
 import {State} from '../sessions/state.js';
 
@@ -141,6 +143,29 @@ function partToText(part: Part): string {
 }
 
 /**
+ * The parameters a task sub-agent gets when it declares no input schema.
+ * Mirrors adk-python's `_DefaultTaskInput`.
+ */
+const DEFAULT_TASK_INPUT_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    request: {
+      type: Type.STRING,
+      description: 'Detailed instructions or context for the task sub-agent.',
+    },
+  },
+  required: ['request'],
+};
+
+/**
+ * Appended to a task tool's description so the model does not schedule a
+ * delegated run alongside other calls.
+ */
+const TASK_DELEGATION_WARNING =
+  '\nIMPORTANT: This tool delegates execution to a specialized agent.' +
+  ' Do NOT call this tool in parallel with any other tools.';
+
+/**
  * A tool that wraps an agent.
  *
  * This tool allows an agent to be called as a tool within a larger
@@ -153,7 +178,7 @@ export class AgentTool extends BaseTool {
   /** A unique symbol to identify ADK agent tool class. */
   readonly [AGENT_TOOL_SIGNATURE_SYMBOL] = true;
 
-  private readonly agent: BaseAgent;
+  protected readonly agent: BaseAgent;
 
   private readonly skipSummarization: boolean;
 
@@ -334,5 +359,97 @@ export class AgentTool extends BaseTool {
     }
 
     return result;
+  }
+}
+
+/**
+ * Runs `agent` as a child node of the caller's own invocation and returns the
+ * node output.
+ *
+ * A failure comes back as text rather than as a throw: the model can retry a
+ * described failure, where a throw ends the caller's turn.
+ */
+async function runAgentAsChildNode(
+  agent: BaseAgent,
+  toolName: string,
+  {args, toolContext}: RunAsyncToolRequest,
+): Promise<unknown> {
+  const inputSchema = agentInputSchemaSource(agent);
+  let nodeInput: unknown;
+  if (inputSchema) {
+    try {
+      nodeInput = parseWithSchema(inputSchema, args);
+    } catch (error: unknown) {
+      return `Error validating input: ${formatError(error)}`;
+    }
+  } else {
+    nodeInput = args['request'];
+  }
+
+  try {
+    const child = await runNodeFromToolContext({
+      toolContext,
+      node: agent,
+      input: nodeInput,
+      toolName,
+    });
+    return child.output;
+  } catch (error: unknown) {
+    return `Error running sub-agent: ${formatError(error)}`;
+  }
+}
+
+/**
+ * An {@link AgentTool} that runs the wrapped agent inline, as a child node of
+ * the caller's own invocation, instead of in a nested runner.
+ *
+ * The child shares the caller's session and streams its events into the
+ * caller's event queue. It runs on a branch scoped to this function call
+ * (`<callerBranch>.<agentName>@<functionCallId>`), so its events stay
+ * distinguishable from the caller's.
+ *
+ * `LlmAgent` builds one of these for each `mode: 'single_turn'` sub-agent, so a
+ * sub-agent reaches the parent model as a callable tool. Mirrors adk-python's
+ * `_SingleTurnAgentTool`.
+ */
+export class SingleTurnAgentTool extends AgentTool {
+  override runAsync(request: RunAsyncToolRequest): Promise<unknown> {
+    return runAgentAsChildNode(this.agent, this.name, request);
+  }
+}
+
+/**
+ * An {@link AgentTool} that delegates a whole task to the wrapped agent.
+ *
+ * Execution matches {@link SingleTurnAgentTool}: the agent runs inline, as a
+ * child node of the caller's invocation. Because the agent declares
+ * `mode: 'task'`, that node run drives the `finish_task` loop and the tool
+ * result is the task output.
+ *
+ * The declaration is what differs. It carries the agent's input schema or a
+ * default `request` parameter, and a description warning the model not to call
+ * the tool in parallel. Mirrors adk-python's `_TaskAgentTool`.
+ */
+export class TaskAgentTool extends AgentTool {
+  override _getDeclaration(): FunctionDeclaration {
+    const inputSchema =
+      agentInputSchemaSource(this.agent) ?? DEFAULT_TASK_INPUT_SCHEMA;
+    const declaration: FunctionDeclaration = {
+      name: this.name,
+      description: `${this.description}${TASK_DELEGATION_WARNING}`.trim(),
+      parametersJsonSchema: toJsonSchema(inputSchema),
+    };
+
+    if (this.apiVariant !== GoogleLLMVariant.GEMINI_API) {
+      declaration.responseJsonSchema = {
+        type: agentHasOutputSchema(this.agent) ? 'object' : 'string',
+      };
+    }
+
+    return declaration;
+  }
+
+  override runAsync(request: RunAsyncToolRequest): Promise<unknown> {
+    return runAgentAsChildNode(this.agent, this.name, request);
   }
 }

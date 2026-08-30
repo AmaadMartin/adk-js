@@ -6,6 +6,7 @@
 
 import {GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
+import {SingleTurnAgentTool, TaskAgentTool} from '../tools/agent_tool.js';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
@@ -454,6 +455,32 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 }
 
 /**
+ * The tools that expose mode-declaring sub-agents to the parent model.
+ *
+ * A sub-agent that declares an execution `mode` is driven by a tool call rather
+ * than by an LLM transfer, so it is wrapped and appended to the parent's tools.
+ * A sub-agent with no `mode` is left alone: it stays a transfer target and no
+ * tool is created for it. That is adk-js's equivalent of adk-python's default
+ * `mode='chat'`, which is likewise neither wrapped nor excluded from transfer.
+ *
+ * Mirrors the sub-agent loop in adk-python's `LlmAgent.model_post_init`.
+ */
+function delegationToolsFor(subAgents: BaseAgent[]): BaseTool[] {
+  const tools: BaseTool[] = [];
+  for (const subAgent of subAgents) {
+    if (!isLlmAgent(subAgent)) {
+      continue;
+    }
+    if (subAgent.mode === 'single_turn') {
+      tools.push(new SingleTurnAgentTool({agent: subAgent}));
+    } else if (subAgent.mode === 'task') {
+      tools.push(new TaskAgentTool({agent: subAgent}));
+    }
+  }
+  return tools;
+}
+
+/**
  * An agent that uses a large language model to generate responses.
  */
 export class LlmAgent extends BaseAgent<LlmAgentConfig> {
@@ -520,6 +547,13 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.instruction = config.instruction ?? '';
     this.globalInstruction = config.globalInstruction ?? '';
     this.tools = config.tools ?? [];
+    const delegationTools = delegationToolsFor(this.subAgents);
+    if (delegationTools.length > 0) {
+      // A new array rather than a push: `config.tools` is the caller's own
+      // array, and two agents built from it must not accumulate each other's
+      // wrappers.
+      this.tools = [...this.tools, ...delegationTools];
+    }
     this.generateContentConfig = config.generateContentConfig;
     this.disallowTransferToParent = config.disallowTransferToParent ?? false;
     this.disallowTransferToPeers = config.disallowTransferToPeers ?? false;
