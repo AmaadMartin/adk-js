@@ -17,7 +17,7 @@ export interface AuthPreparationResult {
 }
 
 /** Credential key used when the tool names none. */
-const DEFAULT_CREDENTIAL_KEY = 'default_openapi_key';
+export const DEFAULT_CREDENTIAL_KEY = 'default_openapi_key';
 
 class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
