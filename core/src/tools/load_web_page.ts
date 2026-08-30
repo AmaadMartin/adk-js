@@ -37,9 +37,6 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 /** Largest response body read before the attempt is abandoned. */
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
-/** Highest port number a URL authority can name. */
-const MAX_PORT = 65535;
-
 /**
  * Asks the origin server for an uncompressed body. `node:http` has no
  * decompressor, and a server may compress a reply that carries no
@@ -63,7 +60,8 @@ interface RequestTarget {
 
 /** A completed HTTP response, body already read and decoded. */
 interface FetchedResponse {
-  status: number;
+  /** Absent only for a message Node never gave a status line. */
+  status: number | undefined;
   body: string;
 }
 
@@ -86,26 +84,13 @@ function portOf(url: URL): number {
 }
 
 /**
- * Returns the port a URL string names in its authority, or `undefined`. Read
- * from the raw string because `new URL` rejects an out-of-range port with the
- * same generic error it gives any malformed URL.
+ * Parses and validates `url`, or throws describing why it cannot be fetched.
+ *
+ * `new URL` rejects a port that is out of range or not a number, and agrees
+ * with Python's `urlparse` on every such input, so no separate port check is
+ * needed. Its message differs, but `loadWebPage` discards it.
  */
-function explicitPortOf(url: string): string | undefined {
-  const authority = url.replace(/^[^:]*:\/\//, '').split(/[/?#]/, 1)[0];
-  const hostPort = authority.slice(authority.lastIndexOf('@') + 1);
-  const separator = hostPort.lastIndexOf(':');
-  if (separator === -1 || separator < hostPort.lastIndexOf(']')) {
-    return undefined;
-  }
-  return hostPort.slice(separator + 1);
-}
-
-/** Parses and validates `url`, or throws describing why it cannot be fetched. */
 function parseRequestTarget(url: string): RequestTarget {
-  const port = explicitPortOf(url);
-  if (port !== undefined && port !== '' && !isValidPort(port)) {
-    throw new Error(`Invalid url port: ${url}`);
-  }
   const parsed = new URL(url);
   if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
     throw new Error(`Unsupported url scheme: ${url}`);
@@ -118,11 +103,6 @@ function parseRequestTarget(url: string): RequestTarget {
     port: portOf(parsed),
     isTls: parsed.protocol === 'https:',
   };
-}
-
-/** Returns `true` when `port` is a decimal number a URL authority may carry. */
-function isValidPort(port: string): boolean {
-  return /^\d+$/.test(port) && Number(port) <= MAX_PORT;
 }
 
 /**
@@ -199,7 +179,7 @@ function readResponse(
   });
   response.on('end', () => {
     resolve({
-      status: response.statusCode!,
+      status: response.statusCode,
       body: decoderFor(response.headers['content-type']).decode(
         Buffer.concat(chunks),
       ),

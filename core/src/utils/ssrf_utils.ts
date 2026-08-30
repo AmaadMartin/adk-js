@@ -44,11 +44,11 @@ function parseIpv4(address: string): number[] | null {
 function expandHextets(fragment: string): number[] {
   const hextets: number[] = [];
   for (const group of fragment.split(':')) {
-    if (group.includes('.')) {
-      const octets = parseIpv4(group)!;
-      hextets.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
-    } else {
+    const octets = parseIpv4(group);
+    if (octets === null) {
       hextets.push(parseInt(group, 16));
+    } else {
+      hextets.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
     }
   }
   return hextets;
@@ -84,17 +84,36 @@ function hextetsToBigInt(hextets: number[]): bigint {
   return value;
 }
 
+/**
+ * Parses an address from one of the CIDR tables below. Those are constants, so
+ * a rejection is a typo in this file rather than bad input, and throwing at
+ * module load reports it where it can be fixed.
+ */
+function mustParse(
+  address: string,
+  parse: (value: string) => number[] | null,
+): number[] {
+  const parsed = parse(address);
+  if (parsed === null) {
+    throw new Error(`Malformed CIDR address in this module: ${address}`);
+  }
+  return parsed;
+}
+
 /** Precomputes the network address and mask for an IPv4 CIDR string. */
 function parseIpv4Cidr(cidr: string): Ipv4Cidr {
   const [address, prefix] = cidr.split('/');
   const mask = (0xffffffff << (32 - Number(prefix))) >>> 0;
-  return {base: (ipv4ToInt(parseIpv4(address)!) & mask) >>> 0, mask};
+  return {base: (ipv4ToInt(mustParse(address, parseIpv4)) & mask) >>> 0, mask};
 }
 
 /** Precomputes the network address and prefix length for an IPv6 CIDR string. */
 function parseIpv6Cidr(cidr: string): Ipv6Cidr {
   const [address, prefix] = cidr.split('/');
-  return {base: hextetsToBigInt(parseIpv6(address)!), prefix: Number(prefix)};
+  return {
+    base: hextetsToBigInt(mustParse(address, parseIpv6)),
+    prefix: Number(prefix),
+  };
 }
 
 /**

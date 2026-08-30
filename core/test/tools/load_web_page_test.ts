@@ -566,6 +566,30 @@ describe('loadWebPage', () => {
 
       expect(httpsRequestSpy).toHaveBeenCalledTimes(1);
     });
+
+    it('pins to a full-form IPv6 address resolved via DNS', async () => {
+      resolveTo('2606:4700:4700:0:0:0:0:1111');
+      pinToOrigin();
+
+      const result = await loadWebPage('http://ipv6.example/');
+
+      expect(result).toBe(PAGE_TEXT);
+      expect(plainRequestOptions().hostname).toBe(
+        '2606:4700:4700:0:0:0:0:1111',
+      );
+      expect(originRequests[0].headers.host).toBe('ipv6.example');
+    });
+
+    it('pins to an IPv4-mapped address that wraps a public IPv4', async () => {
+      resolveTo('::ffff:93.184.216.34');
+      pinToOrigin();
+
+      const result = await loadWebPage('http://mapped-public.example/');
+
+      expect(result).toBe(PAGE_TEXT);
+      expect(plainRequestOptions().hostname).toBe('::ffff:93.184.216.34');
+      expect(originRequests[0].headers.host).toBe('mapped-public.example');
+    });
   });
 
   describe('response handling', () => {
@@ -594,6 +618,9 @@ describe('loadWebPage', () => {
       const result = await loadWebPage('https://example.com/');
 
       expect(result).toBe('Fish & chips are quite tasty today');
+      expect(result).not.toContain('secret');
+      expect(result).not.toContain('color:red');
+      expect(result).not.toContain('comment');
     });
 
     it('decodes the body with the charset the response declares', async () => {
@@ -710,6 +737,17 @@ describe('loadWebPage', () => {
       await loadWebPage('https://example.com/', {timeoutMs: 5000});
       expect(timers).toHaveBeenCalledWith(expect.any(Function), 5000);
 
+      timers.mockRestore();
+    });
+
+    it('falls back to the default when options omit timeoutMs', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+      const timers = vi.spyOn(globalThis, 'setTimeout');
+
+      await loadWebPage('https://example.com/', {});
+
+      expect(timers).toHaveBeenCalledWith(expect.any(Function), 30_000);
       timers.mockRestore();
     });
 
@@ -900,6 +938,24 @@ describe('loadWebPage', () => {
       expect(tlsConnectSpy.mock.calls[0][0].servername).toBe(
         'does-not-resolve.invalid',
       );
+    });
+
+    it('returns the page the tunnel carries', async () => {
+      vi.stubEnv('https_proxy', `http://127.0.0.1:${proxyPort}`);
+      // A local TLS origin would need a certificate, so the handshake is the
+      // one thing stubbed here: `tls.connect` hands back the tunnelled socket
+      // unencrypted. Everything after it is real -- the GET travels through
+      // the proxy to the origin, which answers over the same socket.
+      tlsConnectSpy.mockImplementation(
+        (options) => options.socket as TLSSocket,
+      );
+
+      const result = await loadWebPage('https://tunnelled.example/doc');
+
+      expect(result).toBe(PAGE_TEXT);
+      expect(proxyRequests[0].method).toBe('CONNECT');
+      expect(originRequests[0].url).toBe('/doc');
+      expect(originRequests[0].headers.host).toBe('tunnelled.example');
     });
 
     it('asks for an uncompressed body over the tunnel, not on the CONNECT', async () => {
