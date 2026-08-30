@@ -303,6 +303,41 @@ describe('SecretManagerClient', () => {
       );
     });
 
+    it('encodes a fragment marker so the access suffix survives', async () => {
+      mocks.request.mockResolvedValue(accessResponse('secret-value'));
+
+      const client = new SecretManagerClient();
+      await client.getSecret(`${RESOURCE_NAME}#`);
+
+      expect(recordedRequest().url).toBe(
+        `https://secretmanager.googleapis.com/v1/${RESOURCE_NAME}%23:access`,
+      );
+    });
+
+    it('encodes a query marker in the resource name', async () => {
+      mocks.request.mockResolvedValue(accessResponse('secret-value'));
+
+      const client = new SecretManagerClient();
+      await client.getSecret(
+        'projects/test-project/secrets/test-secret/versions/1?alt=media',
+      );
+
+      expect(recordedRequest().url).toBe(
+        'https://secretmanager.googleapis.com/v1/projects/test-project/' +
+          'secrets/test-secret/versions/1%3Falt%3Dmedia:access',
+      );
+    });
+
+    it('keeps the separators of a well-formed resource name', async () => {
+      mocks.request.mockResolvedValue(accessResponse('secret-value'));
+
+      const client = new SecretManagerClient();
+      await client.getSecret(RESOURCE_NAME);
+
+      expect(recordedRequest().url).toBe(GLOBAL_URL);
+      expect(recordedRequest().url).not.toContain('%2F');
+    });
+
     it('propagates API errors unchanged', async () => {
       const apiError = new Error('403 Permission denied on secret');
       mocks.request.mockRejectedValue(apiError);

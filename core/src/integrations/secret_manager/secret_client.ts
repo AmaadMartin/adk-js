@@ -72,6 +72,20 @@ function regionalHost(location: string): string {
 }
 
 /**
+ * Percent-encodes each segment of a resource name, keeping the `/` separators
+ * the API expects. A raw name is not safe to interpolate: WHATWG URL parsing
+ * reads an unencoded `#` as the start of a fragment, so the `:access` suffix
+ * never reaches the wire and the read silently becomes a metadata call that
+ * carries no payload.
+ */
+function encodeResourceName(resourceName: string): string {
+  return resourceName
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+/**
  * Builds the auth in the same priority order as the Python implementation:
  * service account key material, then an existing access token, then
  * Application Default Credentials.
@@ -133,15 +147,18 @@ export class SecretManagerClient {
    * @param resourceName The full resource name of the secret version, in the
    *   format `projects/{project}/secrets/{secret}/versions/{version}`, e.g.
    *   `projects/my-project/secrets/my-secret/versions/latest`. A regional
-   *   secret carries a `locations/{location}` segment as well. The name is
-   *   passed through unvalidated; the API rejects a malformed one.
+   *   secret carries a `locations/{location}` segment as well. Each segment is
+   *   percent-encoded, so a name holding a URL metacharacter reaches the API as
+   *   a literal and the API rejects it.
    */
   async getSecret(resourceName: string): Promise<string> {
     const client = await this.getAuthClient();
     // Proto3 JSON base64-encodes bytes, and omits an unset message field and a
     // default value alike, so an empty secret arrives with neither key.
     const response = await client.request<{payload?: {data?: string}}>({
-      url: `https://${this.host}/${API_VERSION}/${resourceName}:access`,
+      url: `https://${this.host}/${API_VERSION}/${encodeResourceName(
+        resourceName,
+      )}:access`,
       headers: getTrackingHeaders(),
     });
     return base64Decode(response.data.payload?.data ?? '');
