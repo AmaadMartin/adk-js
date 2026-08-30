@@ -145,12 +145,10 @@ export class RestApiTool extends BaseTool {
       Object.assign(headers, providerHeaders);
     }
 
-    const finalHeaders = {...this.defaultHeaders, ...headers};
-
     try {
       const response = await globalThis.fetch(url, {
         method,
-        headers: finalHeaders,
+        headers: {...this.defaultHeaders, ...headers},
         // eslint-disable-next-line no-undef
         body: body as BodyInit,
       });

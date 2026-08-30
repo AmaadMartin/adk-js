@@ -45,6 +45,18 @@ export interface GoogleApiToolOptions {
  * built from a Google API Discovery document, and owns only the credential
  * configuration. It configures the instance it is given rather than a copy, so
  * the wrapped tool carries the credentials afterwards.
+ *
+ * The intended producer is a Google API toolset, which builds one of these per
+ * operation of a Discovery document. That toolset is not ported yet, so for
+ * now a caller wraps each `RestApiTool` it already holds.
+ *
+ * @example
+ * ```ts
+ * const tool = new GoogleApiTool(restApiTool, {
+ *   serviceAccount: {useDefaultCredential: true, scopes},
+ *   additionalHeaders: {'developer-token': developerToken},
+ * });
+ * ```
  */
 @experimental
 export class GoogleApiTool extends BaseTool {
