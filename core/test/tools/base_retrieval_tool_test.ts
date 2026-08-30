@@ -7,10 +7,14 @@
 import {
   BaseRetrievalTool,
   Context,
+  createSession,
   FunctionTool,
+  InvocationContext,
   isBaseRetrievalTool,
   isBaseTool,
+  LlmAgent,
   LlmRequest,
+  PluginManager,
   RunAsyncToolRequest,
 } from '@google/adk';
 import {Type} from '@google/genai';
@@ -26,10 +30,17 @@ function makeLlmRequest(): LlmRequest {
   };
 }
 
-// The tool only reads `llmRequest`; the context is never touched, so an empty
-// stand-in is enough.
 function makeToolContext(): Context {
-  return {} as Context;
+  const session = createSession({id: 's1', appName: 'app', userId: 'u1'});
+  const invocationContext = new InvocationContext({
+    invocationId: 'inv-1',
+    // A real agent instance, so the fixture breaks if InvocationContext's
+    // contract changes (rather than being silenced by a cast).
+    agent: new LlmAgent({name: 'a', model: 'gemini-2.5-flash'}),
+    session,
+    pluginManager: new PluginManager([]),
+  });
+  return new Context({invocationContext});
 }
 
 /** The declaration adk-python's `BaseRetrievalTool` produces, field for field. */
