@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {LookupAddress} from 'node:dns';
 import {lookup} from 'node:dns/promises';
 import {
   request as httpRequest,
@@ -122,7 +123,7 @@ function isValidPort(port: string): boolean {
  * hostname when any answer is not globally routable.
  */
 async function resolveDirectAddresses(hostname: string): Promise<string[]> {
-  let records;
+  let records: LookupAddress[];
   try {
     records = await lookup(hostname, {all: true});
   } catch {
@@ -257,9 +258,9 @@ async function fetchDirect(
   target: RequestTarget,
   addresses: string[],
   timeoutMs: number,
-  url: string,
 ): Promise<FetchedResponse> {
-  let lastError: unknown = new Error(`Unable to fetch url: ${url}`);
+  // Never thrown while `addresses` is non-empty, which every caller guarantees.
+  let lastError: unknown = new Error(`Unable to fetch url: ${target.url.href}`);
   for (const address of addresses) {
     try {
       return await requestPinned(target, address, timeoutMs);
@@ -373,7 +374,7 @@ async function fetchResponse(
     literal === undefined
       ? await resolveDirectAddresses(target.hostname)
       : [literal];
-  return fetchDirect(target, addresses, timeoutMs, url);
+  return fetchDirect(target, addresses, timeoutMs);
 }
 
 /** Keeps only the lines that carry more than three whitespace-separated words. */
