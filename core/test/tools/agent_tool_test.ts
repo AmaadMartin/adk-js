@@ -549,4 +549,38 @@ describe('AgentTool', () => {
 
     expect(declaration.parameters?.required).toEqual([]);
   });
+
+  it('requires nothing when a genai input schema lists no required property', () => {
+    const agent = new LlmAgent({
+      name: 'greeter',
+      description: 'Greets someone.',
+      inputSchema: {
+        type: Type.OBJECT,
+        properties: {name: {type: Type.STRING}, count: {type: Type.INTEGER}},
+      },
+    });
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(
+      Object.keys(declaration.parameters?.properties ?? {}).sort(),
+    ).toEqual(['count', 'name']);
+    expect(declaration.parameters?.required).toEqual([]);
+  });
+
+  it('keeps the required list a genai input schema declares', () => {
+    const agent = new LlmAgent({
+      name: 'greeter',
+      description: 'Greets someone.',
+      inputSchema: {
+        type: Type.OBJECT,
+        properties: {name: {type: Type.STRING}, count: {type: Type.INTEGER}},
+        required: ['name'],
+      },
+    });
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration.parameters?.required).toEqual(['name']);
+  });
 });

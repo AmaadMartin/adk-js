@@ -12,7 +12,6 @@ import {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
-import {isZodObject} from '../utils/simple_zod_to_json.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
@@ -86,14 +85,17 @@ export class AgentTool extends BaseTool {
     let declaration: FunctionDeclaration;
 
     if (isLlmAgent(this.agent) && this.agent.inputSchema) {
-      // `inputSchema` has already lost the empty required list that marks every
-      // property optional, so the declaration is built from the schema as the
-      // author supplied it.
-      const source = this.agent.inputSchemaSource;
+      const inputSchema = this.agent.inputSchema;
       declaration = buildFunctionDeclaration({
         name: this.name,
         description: this.description,
-        parameters: isZodObject(source) ? source : this.agent.inputSchema,
+        // An input schema is a complete document, so a property it does not
+        // list as required is optional. `zodObjectToSchema` omits a required
+        // list that would be empty, and `LlmAgent` runs it over a Zod schema
+        // before storing this one, so the empty list is restored here. Without
+        // it the builder derives a list from the properties and declares every
+        // property required.
+        parameters: {...inputSchema, required: inputSchema.required ?? []},
         variant: this.apiVariant,
       });
     } else {
