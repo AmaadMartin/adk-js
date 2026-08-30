@@ -17,6 +17,7 @@ import {
   InMemorySessionService,
   InputValidationError,
   LlmAgent,
+  LongRunningFunctionTool,
   NotFoundError,
   SequentialAgent,
   Session,
@@ -120,6 +121,40 @@ describe('generateResponses', () => {
     ]);
     expect(conversation[0].response).toBe('sunny');
     expect(calls).toEqual([{city: 'Paris'}]);
+  });
+
+  it('records a long-running tool call, which reads as a final response', async () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: new ScriptedLlm([
+        {
+          functionCall: {
+            id: 'fc-1',
+            name: 'ask_user',
+            args: {question: 'which city?'},
+          },
+        },
+        'done',
+      ]),
+      tools: [
+        new LongRunningFunctionTool({
+          name: 'ask_user',
+          description: 'Asks the user a question.',
+          parameters: z.object({question: z.string()}),
+          execute: () => ({status: 'pending'}),
+        }),
+      ],
+    });
+
+    const [conversation] = await generateResponses({
+      evalDataset: [[{query: 'q'}]],
+      rootAgent: agent,
+      repeatNum: 1,
+    });
+
+    expect(conversation[0].actual_tool_use).toEqual([
+      {tool_name: 'ask_user', tool_input: {question: 'which city?'}},
+    ]);
   });
 
   it('carries the recorded fields of a turn through to the result', async () => {

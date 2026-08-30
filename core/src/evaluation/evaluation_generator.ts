@@ -92,7 +92,13 @@ export interface GenerateResponsesParams {
 export async function generateResponses(
   params: GenerateResponsesParams,
 ): Promise<EvalConversation[]> {
-  const agent = resolveAgentToEvaluate(params.rootAgent, params.agentName);
+  const agent = params.agentName
+    ? params.rootAgent.findAgent(params.agentName)
+    : params.rootAgent;
+  if (!agent) {
+    throw new NotFoundError(`Sub-Agent \`${params.agentName}\` not found.`);
+  }
+
   const repeatNum = params.repeatNum ?? DEFAULT_REPEAT_NUM;
   const results: EvalConversation[] = [];
 
@@ -163,26 +169,6 @@ async function readSessionEvents(sessionPath: string): Promise<Event[]> {
   }
 
   return events.map(transformToCamelCaseEvent);
-}
-
-/**
- * The agent the dataset is replayed through.
- *
- * @throws NotFoundError when `agentName` names no agent in the tree.
- */
-function resolveAgentToEvaluate(
-  rootAgent: BaseAgent,
-  agentName: string | undefined,
-): BaseAgent {
-  if (!agentName) {
-    return rootAgent;
-  }
-
-  const found = rootAgent.findAgent(agentName);
-  if (!found) {
-    throw new NotFoundError(`Sub-Agent \`${agentName}\` not found.`);
-  }
-  return found;
 }
 
 /** The names of the tools the conversation records an output for. */
@@ -316,14 +302,12 @@ async function processConversation(
       sessionId,
       newMessage: createUserContent(entry.query),
     })) {
-      // An event that carries a function call is never a final response, so
-      // the two branches cannot both apply.
       if (isFinalResponse(event) && event.content?.parts?.length) {
         response = event.content.parts[0].text;
-      } else {
-        for (const call of getFunctionCalls(event)) {
-          actualToolUse.push({tool_name: call.name, tool_input: call.args});
-        }
+      }
+
+      for (const call of getFunctionCalls(event)) {
+        actualToolUse.push({tool_name: call.name, tool_input: call.args});
       }
     }
 
@@ -354,7 +338,10 @@ function processConversationWithEvents(
     let response: string | undefined;
 
     for (const userEvent of events) {
-      if (!isUserQuery(userEvent, entry.query)) {
+      if (
+        userEvent.author !== USER_AUTHOR ||
+        userEvent.content?.parts?.[0]?.text !== entry.query
+      ) {
         continue;
       }
 
@@ -382,10 +369,4 @@ function processConversationWithEvents(
 
     return {...entry, actual_tool_use: actualToolUse, response};
   });
-}
-
-function isUserQuery(event: Event, query: string): boolean {
-  return (
-    event.author === USER_AUTHOR && event.content?.parts?.[0]?.text === query
-  );
 }
