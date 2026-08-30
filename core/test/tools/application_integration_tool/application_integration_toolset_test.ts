@@ -19,6 +19,7 @@ import {
   OpenAPIToolset,
   PluginManager,
   RestApiTool,
+  ToolContextCredentialStore,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -81,6 +82,21 @@ const CONNECTION_DETAILS: ConnectionDetails = {
 const END_USER_SCHEME: OpenAPIV3.SecuritySchemeObject = {
   type: 'http',
   scheme: 'bearer',
+};
+
+/** The scheme and credential the toolset calls the API with itself. */
+const SERVICE_IDENTITY_SCHEME: OpenAPIV3.SecuritySchemeObject = {
+  type: 'http',
+  scheme: 'bearer',
+  bearerFormat: 'JWT',
+};
+
+const SERVICE_IDENTITY_CREDENTIAL: AuthCredential = {
+  authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+  serviceAccount: {
+    useDefaultCredential: true,
+    scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+  },
 };
 
 const END_USER_CREDENTIAL: AuthCredential = {
@@ -631,10 +647,16 @@ describe('ApplicationIntegrationToolset', () => {
       const [tool] = await toolset.getTools();
       // Two identities call out in one session. The service account reaches
       // `ExecuteConnection`, the end user reaches the connector behind it.
+      // Derive the slots instead of hardcoding them, so this pins the two
+      // identities staying apart rather than the key format.
+      const store = new ToolContextCredentialStore(createContext());
       const toolContext = createContext({
-        'http_jira_service_identity_existing_exchanged_credential':
-          bearer('service-token'),
-        'http_jira_existing_exchanged_credential': bearer('user-token'),
+        [await store.getCredentialKey(
+          SERVICE_IDENTITY_SCHEME,
+          SERVICE_IDENTITY_CREDENTIAL,
+        )]: bearer('service-token'),
+        [await store.getCredentialKey(END_USER_SCHEME, END_USER_CREDENTIAL)]:
+          bearer('user-token'),
       });
 
       const result = await tool.runAsync({args: {page_size: 5}, toolContext});
