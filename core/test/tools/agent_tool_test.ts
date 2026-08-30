@@ -586,7 +586,7 @@ describe('AgentTool', () => {
 
     expect(forwarded).toMatchObject({
       maxLlmCalls: 7,
-      streamingMode: StreamingMode.SSE,
+      streamingMode: StreamingMode.NONE,
     });
   });
 
@@ -616,11 +616,11 @@ describe('AgentTool', () => {
     expect(callerRunConfig.supportCfc).toBe(true);
   });
 
-  it('forwards only supportCfc: false when the caller has no run config', async () => {
+  it('forwards no run config when the caller has none', async () => {
     const tool = createAgentTool();
 
     const forwarded = await captureNestedRunConfig(tool, createToolContext());
 
-    expect(forwarded).toEqual({supportCfc: false});
+    expect(forwarded).toBeUndefined();
   });
 });

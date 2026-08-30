@@ -8,6 +8,7 @@ import {Content, FunctionDeclaration, Type} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
+import {RunConfig, StreamingMode} from '../agents/run_config.js';
 import {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
@@ -52,6 +53,33 @@ export function isAgentTool(obj: unknown): obj is AgentTool {
     AGENT_TOOL_SIGNATURE_SYMBOL in obj &&
     obj[AGENT_TOOL_SIGNATURE_SYMBOL] === true
   );
+}
+
+/**
+ * The run config the wrapped agent runs under, given the caller's.
+ *
+ * The caller's config carries over except for two settings. CFC describes how
+ * the caller's own model executes: handing it to the wrapped agent replaces
+ * that agent's code executor, and `Runner.runAsync` refuses to run the agent
+ * unless its model is Gemini 2 or above. The nested run is always unary,
+ * because `AgentTool` reads its result from the last event's content; a
+ * streaming run leaves only a partial chunk there.
+ *
+ * The caller's own config is never modified. It is forwarded as the same
+ * object when neither override applies.
+ */
+function nestedRunConfig(caller: RunConfig | undefined): RunConfig | undefined {
+  if (!caller) {
+    return undefined;
+  }
+  let nested = caller;
+  if (nested.supportCfc) {
+    nested = {...nested, supportCfc: false};
+  }
+  if ((nested.streamingMode ?? StreamingMode.NONE) !== StreamingMode.NONE) {
+    nested = {...nested, streamingMode: StreamingMode.NONE};
+  }
+  return nested;
 }
 
 /**
@@ -168,13 +196,7 @@ export class AgentTool extends BaseTool {
       return '';
     }
 
-    // CFC describes how the caller's own model executes. Handing it to the
-    // wrapped agent replaces that agent's code executor, and refuses to run it
-    // unless its model is Gemini 2 or above.
-    const runConfig = {
-      ...toolContext.invocationContext.runConfig,
-      supportCfc: false,
-    };
+    const runConfig = nestedRunConfig(toolContext.invocationContext.runConfig);
 
     let lastEvent: Event | undefined;
     for await (const event of runner.runAsync({
