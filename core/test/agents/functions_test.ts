@@ -120,24 +120,6 @@ function callFor(tool: BaseTool): FunctionCall {
 }
 
 /**
- * Builds a tool that answers its own call later, instead of returning the
- * answer now.
- */
-function createDeferringTool(
-  name: string,
-  respond: (toolContext?: Context) => Promise<unknown>,
-) {
-  const tool = new FunctionTool({
-    name,
-    description: 'defers its response',
-    parameters: z.object({}),
-    execute: async (_args, toolContext) => respond(toolContext),
-  });
-  tool.defersResponse = true;
-  return tool;
-}
-
-/**
  * Builds a long-running tool that mutates its tool context and then returns no
  * response.
  */
@@ -793,62 +775,6 @@ describe('handleFunctionCallList', () => {
     expect(event!.actions.stateDelta).toEqual({jobStarted: true});
   });
 
-  it('should emit no event when a deferring tool returns nothing', async () => {
-    const deferringTool = createDeferringTool(
-      'deferringTool',
-      async () => null,
-    );
-
-    const event = await handleFunctionCallList({
-      invocationContext,
-      functionCalls: [callFor(deferringTool)],
-      toolsDict: {deferringTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
-    expect(event).toBeNull();
-  });
-
-  it('should keep the function response of a deferring tool that does respond', async () => {
-    const deferringTool = createDeferringTool('deferringTool', async () => ({
-      status: 'answered',
-    }));
-
-    const event = await handleFunctionCallList({
-      invocationContext,
-      functionCalls: [callFor(deferringTool)],
-      toolsDict: {deferringTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
-    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
-      status: 'answered',
-    });
-  });
-
-  it('should emit a content-less event carrying the actions of a deferring tool', async () => {
-    const deferringTool = createDeferringTool(
-      'deferringTool',
-      async (toolContext) => {
-        toolContext!.state.set('jobStarted', true);
-        return undefined;
-      },
-    );
-
-    const event = await handleFunctionCallList({
-      invocationContext,
-      functionCalls: [callFor(deferringTool)],
-      toolsDict: {deferringTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
-    expect(event!.content).toBeUndefined();
-    expect(event!.actions.stateDelta).toEqual({jobStarted: true});
-  });
-
   it('should stamp the scheduling of the tool onto the function response', async () => {
     const scheduledTool = new FunctionTool({
       name: 'scheduledTool',
@@ -1207,20 +1133,6 @@ describe('getLongRunningFunctionCalls', () => {
     const result = getLongRunningFunctionCalls(functionCalls, toolsDict);
     expect(result.has('call-1')).toBe(true);
     expect(result.has('call-2')).toBe(false);
-  });
-
-  it('should ignore a tool that only defers its response', () => {
-    const deferringTool = createDeferringTool(
-      'deferringTool',
-      async () => null,
-    );
-
-    const result = getLongRunningFunctionCalls(
-      [{name: 'deferringTool', id: 'call-1'}],
-      {deferringTool},
-    );
-
-    expect(result.has('call-1')).toBe(false);
   });
 });
 

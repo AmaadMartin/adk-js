@@ -80,10 +80,7 @@ describe('AgentRegistrySingleMCPToolset', () => {
       });
       const tools = await toolset.getTools();
       for (const tool of tools) {
-        const meta = (
-          tool as unknown as {customMetadata?: Record<string, string>}
-        ).customMetadata;
-        expect(meta?.[GCP_MCP_SERVER_DESTINATION_ID]).toBe(
+        expect(tool.customMetadata?.[GCP_MCP_SERVER_DESTINATION_ID]).toBe(
           'projects/p/locations/l/mcpServers/s',
         );
       }
@@ -95,10 +92,9 @@ describe('AgentRegistrySingleMCPToolset', () => {
       });
       const tools = await toolset.getTools();
       for (const tool of tools) {
-        const meta = (
-          tool as unknown as {customMetadata?: Record<string, string>}
-        ).customMetadata;
-        expect(meta?.[GCP_MCP_SERVER_DESTINATION_ID]).toBeUndefined();
+        expect(
+          tool.customMetadata?.[GCP_MCP_SERVER_DESTINATION_ID],
+        ).toBeUndefined();
       }
     });
   });

@@ -11,11 +11,9 @@ import {
 } from '@google/genai';
 
 import {LlmRequest} from '../models/llm_request.js';
-import {logger} from '../utils/logger.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
-import {ToolArgsConfig} from './tool_configs.js';
 
 /**
  * The parameters for `runAsync`.
@@ -97,23 +95,6 @@ export abstract class BaseTool {
    * calling ignores it, and `undefined` keeps the default behaviour.
    */
   responseScheduling?: FunctionResponseScheduling;
-
-  /**
-   * Whether this tool answers its own call later instead of returning a
-   * response now.
-   *
-   * When true and `runAsync` returns nothing, ADK builds no
-   * `FunctionResponse`, because another orchestrator produces the matching
-   * response later in the conversation. A non-nullish return still emits a
-   * response event, exactly like any other tool.
-   *
-   * `isLongRunning` has the same skip-on-empty behaviour, but it also lists
-   * the call in `event.longRunningToolIds`; this flag does not.
-   *
-   * @internal Not part of the public API. Only ADK-internal tools set it, and
-   * it may change without notice.
-   */
-  defersResponse = false;
 
   /**
    * Base constructor for a tool.
@@ -222,31 +203,6 @@ export abstract class BaseTool {
   get apiVariant() {
     return getGoogleLlmVariant();
   }
-
-  /**
-   * Creates a tool instance from a declarative config.
-   *
-   * The base implementation reads the parameters `BaseTool` itself accepts and
-   * warns about any other key. A subclass that takes more parameters overrides
-   * this method and builds itself from them.
-   *
-   * The `this` parameter constrains the base implementation to a class whose
-   * constructor takes `BaseToolParams`; a class that takes more must override.
-   * Calling it on `BaseTool` itself does not compile, since `BaseTool` is
-   * abstract.
-   *
-   * @param config The args of the tool, as read from a config file.
-   * @param configAbsPath The absolute path of that config file. Reported in
-   *     validation errors, and used by an override to resolve a relative path.
-   * @return The tool instance.
-   */
-  static fromConfig(
-    this: new (params: BaseToolParams) => BaseTool,
-    config: ToolArgsConfig,
-    configAbsPath: string,
-  ): BaseTool {
-    return new this(toBaseToolParams(config, configAbsPath));
-  }
 }
 
 function findToolWithFunctionDeclarations(
@@ -255,112 +211,4 @@ function findToolWithFunctionDeclarations(
   return (llmRequest.config?.tools || []).find(
     (tool) => 'functionDeclarations' in tool,
   ) as Tool | undefined;
-}
-
-/** The config keys `BaseTool.fromConfig` knows how to read. */
-const BASE_TOOL_CONFIG_KEYS: ReadonlySet<string> = new Set([
-  'name',
-  'description',
-  'isLongRunning',
-  'customMetadata',
-  'responseScheduling',
-]);
-
-const RESPONSE_SCHEDULING_VALUES: readonly string[] = Object.values(
-  FunctionResponseScheduling,
-);
-
-function isBoolean(value: unknown): value is boolean {
-  return typeof value === 'boolean';
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isResponseScheduling(
-  value: unknown,
-): value is FunctionResponseScheduling {
-  return (
-    typeof value === 'string' && RESPONSE_SCHEDULING_VALUES.includes(value)
-  );
-}
-
-function toolConfigError(
-  key: string,
-  expected: string,
-  configAbsPath: string,
-): Error {
-  return new Error(
-    `Invalid tool config: '${key}' must be ${expected}, in ${configAbsPath}.`,
-  );
-}
-
-/**
- * Reads an optional config value, throwing when it is present but invalid.
- */
-function readOptional<T>(
-  config: ToolArgsConfig,
-  key: string,
-  isValid: (value: unknown) => value is T,
-  expected: string,
-  configAbsPath: string,
-): T | undefined {
-  const value = config[key];
-  if (value === undefined || isValid(value)) {
-    return value;
-  }
-  throw toolConfigError(key, expected, configAbsPath);
-}
-
-/**
- * Validates a declarative tool config and maps it onto constructor parameters.
- *
- * adk-python maps config keys onto constructor arguments by inspecting the
- * runtime type hints of `__init__`. TypeScript erases those types, so the
- * recognized keys are listed here instead and every other key is reported.
- */
-function toBaseToolParams(
-  config: ToolArgsConfig,
-  configAbsPath: string,
-): BaseToolParams {
-  for (const key of Object.keys(config)) {
-    if (!BASE_TOOL_CONFIG_KEYS.has(key)) {
-      logger.warn(`Unsupported parsing for argument: ${key}.`);
-    }
-  }
-
-  const {name, description} = config;
-  if (typeof name !== 'string' || name === '') {
-    throw toolConfigError('name', 'a non-empty string', configAbsPath);
-  }
-  if (typeof description !== 'string') {
-    throw toolConfigError('description', 'a string', configAbsPath);
-  }
-
-  return {
-    name,
-    description,
-    isLongRunning: readOptional(
-      config,
-      'isLongRunning',
-      isBoolean,
-      'a boolean',
-      configAbsPath,
-    ),
-    customMetadata: readOptional(
-      config,
-      'customMetadata',
-      isPlainObject,
-      'an object',
-      configAbsPath,
-    ),
-    responseScheduling: readOptional(
-      config,
-      'responseScheduling',
-      isResponseScheduling,
-      `one of ${RESPONSE_SCHEDULING_VALUES.join(', ')}`,
-      configAbsPath,
-    ),
-  };
 }

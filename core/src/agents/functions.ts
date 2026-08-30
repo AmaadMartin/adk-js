@@ -4,13 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Content,
-  createUserContent,
-  FunctionCall,
-  FunctionResponseScheduling,
-  Part,
-} from '@google/genai';
+import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -226,20 +220,6 @@ async function callToolAsync(
   });
 }
 
-/**
- * The scheduling to stamp on a tool's `FunctionResponse`.
- *
- * Empty when the tool asks for no scheduling, so that the emitted response
- * carries no `scheduling` key at all.
- */
-function schedulingFor(tool: BaseTool): {
-  scheduling?: FunctionResponseScheduling;
-} {
-  return tool.responseScheduling === undefined
-    ? {}
-    : {scheduling: tool.responseScheduling};
-}
-
 function buildResponseEvent(
   tool: BaseTool,
   functionResult: unknown,
@@ -260,7 +240,7 @@ function buildResponseEvent(
       name: tool.name,
       response: responseResult,
       id: toolContext.functionCallId,
-      ...schedulingFor(tool),
+      ...(tool.responseScheduling && {scheduling: tool.responseScheduling}),
     },
   };
 
@@ -621,16 +601,12 @@ export async function handleFunctionCallList({
       functionResponse = normalizeCallbackResponse(alteredFunctionResponse);
     }
 
-    // Allow a long running tool, or a tool that defers its response, to return
-    // None as response.
+    // Allow long running function to return None as response.
     // Only a nullish response defers the event. A falsy-but-present response
     // ('', 0, false) is a real result and still emits one, so long-running
     // tools that return such a value now produce a response event where they
     // previously produced none.
-    if (
-      (tool.isLongRunning || tool.defersResponse) &&
-      functionResponse == null
-    ) {
+    if (tool.isLongRunning && functionResponse == null) {
       // The tool's response will arrive later, but any actions it recorded on
       // the tool context (state/artifact deltas, auth or confirmation
       // requests, transfer, escalation, skipSummarization) must not be lost.
@@ -663,7 +639,7 @@ export async function handleFunctionCallList({
           id: toolContext.functionCallId,
           name: tool.name,
           response: functionResponse,
-          ...schedulingFor(tool),
+          ...(tool.responseScheduling && {scheduling: tool.responseScheduling}),
         },
       }),
       actions: toolContext.actions,

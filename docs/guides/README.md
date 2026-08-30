@@ -8,4 +8,4 @@ implementation. For the official ADK documentation, visit
 
 ### Tools
 
-- [BaseTool metadata, response scheduling and config construction](tools/base_tool/index.md) - Carrying tool metadata, controlling when a live model reacts to a tool response, deferring a response, and building a tool from a config.
+- [BaseTool custom metadata and response scheduling](tools/base_tool/index.md) - Carrying tool metadata, and controlling when a live model reacts to a tool response.

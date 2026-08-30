@@ -13,19 +13,13 @@ import {
   LlmAgent,
   LlmRequest,
   PluginManager,
-  ToolArgsConfig,
 } from '@google/adk';
 import {
   FunctionDeclaration,
   FunctionResponseScheduling,
   Type,
 } from '@google/genai';
-import type {MockInstance} from 'vitest';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-
-import {logger} from '../../src/utils/logger.js';
-
-const CONFIG_PATH = '/abs/path/to/agent.yaml';
+import {beforeEach, describe, expect, it} from 'vitest';
 
 const DECLARATION: FunctionDeclaration = {
   name: 'test_tool',
@@ -51,37 +45,6 @@ class TestingTool extends BaseTool {
 
   async runAsync(): Promise<unknown> {
     return undefined;
-  }
-}
-
-class DeferringTool extends TestingTool {
-  constructor(params: TestingToolParams) {
-    super(params);
-    this.defersResponse = true;
-  }
-}
-
-/** A tool that builds itself from a config key `BaseTool` does not know. */
-class GreetingTool extends BaseTool {
-  constructor(
-    params: BaseToolParams,
-    readonly greeting: string,
-  ) {
-    super(params);
-  }
-
-  static override fromConfig(
-    config: ToolArgsConfig,
-    _configAbsPath: string,
-  ): GreetingTool {
-    return new GreetingTool(
-      {name: String(config['name']), description: 'greets'},
-      String(config['greeting']),
-    );
-  }
-
-  async runAsync(): Promise<unknown> {
-    return this.greeting;
   }
 }
 
@@ -189,13 +152,6 @@ describe('BaseTool.processLlmRequest', () => {
 });
 
 describe('BaseTool fields', () => {
-  it('defaults defersResponse to false and lets a subclass set it', () => {
-    const params = {name: 'test_tool', description: 'test_description'};
-
-    expect(new TestingTool(params).defersResponse).toBe(false);
-    expect(new DeferringTool(params).defersResponse).toBe(true);
-  });
-
   it('defaults responseScheduling and customMetadata to undefined', () => {
     const tool = createTestingTool();
 
@@ -221,116 +177,5 @@ describe('BaseTool fields', () => {
     tool.customMetadata = {owner: 'catalog'};
 
     expect(tool.customMetadata).toEqual({owner: 'catalog'});
-  });
-});
-
-describe('BaseTool.fromConfig', () => {
-  let warnSpy: MockInstance<typeof logger.warn>;
-
-  beforeEach(() => {
-    warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('builds an instance carrying every recognized key', () => {
-    const tool = TestingTool.fromConfig(
-      {
-        name: 'inventory',
-        description: 'Looks up stock levels.',
-        isLongRunning: true,
-        customMetadata: {manifestVersion: 3},
-        responseScheduling: FunctionResponseScheduling.WHEN_IDLE,
-      },
-      CONFIG_PATH,
-    );
-
-    expect(tool).toBeInstanceOf(TestingTool);
-    expect(tool.name).toBe('inventory');
-    expect(tool.description).toBe('Looks up stock levels.');
-    expect(tool.isLongRunning).toBe(true);
-    expect(tool.customMetadata).toEqual({manifestVersion: 3});
-    expect(tool.responseScheduling).toBe(FunctionResponseScheduling.WHEN_IDLE);
-  });
-
-  it('leaves the optional fields unset when the config omits them', () => {
-    const tool = TestingTool.fromConfig(
-      {name: 'inventory', description: 'Looks up stock levels.'},
-      CONFIG_PATH,
-    );
-
-    expect(tool.isLongRunning).toBe(false);
-    expect(tool.customMetadata).toBeUndefined();
-    expect(tool.responseScheduling).toBeUndefined();
-    expect(warnSpy).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ['a missing name', {description: 'd'}, "'name'"],
-    ['a non-string name', {name: 7, description: 'd'}, "'name'"],
-    ['an empty name', {name: '', description: 'd'}, "'name'"],
-    ['a missing description', {name: 'n'}, "'description'"],
-    ['a non-string description', {name: 'n', description: 7}, "'description'"],
-    [
-      'a non-boolean isLongRunning',
-      {name: 'n', description: 'd', isLongRunning: 'yes'},
-      "'isLongRunning'",
-    ],
-    [
-      'null customMetadata',
-      {name: 'n', description: 'd', customMetadata: null},
-      "'customMetadata'",
-    ],
-    [
-      'array customMetadata',
-      {name: 'n', description: 'd', customMetadata: [1, 2]},
-      "'customMetadata'",
-    ],
-    [
-      'primitive customMetadata',
-      {name: 'n', description: 'd', customMetadata: 'nope'},
-      "'customMetadata'",
-    ],
-    [
-      'an unknown responseScheduling',
-      {name: 'n', description: 'd', responseScheduling: 'LOUD'},
-      "'responseScheduling'",
-    ],
-    [
-      'a non-string responseScheduling',
-      {name: 'n', description: 'd', responseScheduling: 3},
-      "'responseScheduling'",
-    ],
-  ])('rejects %s', (_label, config: ToolArgsConfig, key) => {
-    expect(() => TestingTool.fromConfig(config, CONFIG_PATH)).toThrow(key);
-    expect(() => TestingTool.fromConfig(config, CONFIG_PATH)).toThrow(
-      CONFIG_PATH,
-    );
-  });
-
-  it('warns about an unrecognized key and ignores it', () => {
-    const tool = TestingTool.fromConfig(
-      {name: 'inventory', description: 'Looks up stock levels.', region: 'eu'},
-      CONFIG_PATH,
-    );
-
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Unsupported parsing for argument: region.',
-    );
-    expect(Object.keys(tool)).not.toContain('region');
-  });
-
-  it('runs a subclass override and returns the subclass type', () => {
-    const tool: GreetingTool = GreetingTool.fromConfig(
-      {name: 'greeter', greeting: 'hello'},
-      CONFIG_PATH,
-    );
-
-    expect(tool.greeting).toBe('hello');
-    expect(tool.name).toBe('greeter');
-    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
