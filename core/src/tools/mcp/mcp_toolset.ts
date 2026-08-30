@@ -18,12 +18,8 @@ import type {
 
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {formatError, isAbortError} from '../../utils/error_utils.js';
-import {
-  appendHttpDebugInfo,
-  HttpExchange,
-  runWithHttpDebugCapture,
-} from '../../utils/http_debug_utils.js';
-import {logger, LogLevel} from '../../utils/logger.js';
+import {captureHttpDebugInfo} from '../../utils/http_debug_utils.js';
+import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
@@ -44,14 +40,6 @@ export interface McpToolsetOptions {
    * the parent process.
    */
   errlog?: Writable;
-}
-
-/**
- * Whether debug logging is on. A logger that predates `isEnabledFor` reports
- * nothing, in which case no capture is installed.
- */
-function isDebugLoggingEnabled(): boolean {
-  return logger.isEnabledFor?.(LogLevel.DEBUG) ?? false;
 }
 
 /**
@@ -177,20 +165,13 @@ export class MCPToolset extends BaseToolset {
     run: (session: Client) => Promise<T>,
     readonlyContext?: ReadonlyContext,
   ): Promise<T> {
-    if (readonlyContext === undefined || !isDebugLoggingEnabled()) {
+    if (readonlyContext === undefined) {
       return this.openSessionAndRun(operation, run);
     }
-    const exchanges: HttpExchange[] = [];
-    try {
-      return await runWithHttpDebugCapture(exchanges, () =>
-        this.openSessionAndRun(operation, run),
-      );
-    } finally {
-      appendHttpDebugInfo(
-        readonlyContext.invocationContext.customMetadata,
-        exchanges,
-      );
-    }
+    return captureHttpDebugInfo(
+      readonlyContext.invocationContext.customMetadata,
+      () => this.openSessionAndRun(operation, run),
+    );
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
