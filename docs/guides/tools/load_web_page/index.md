@@ -73,9 +73,10 @@ hostname resolves to several addresses, each attempt gets the full budget.
 
 The `http_proxy`, `https_proxy`, `all_proxy` and `no_proxy` environment
 variables are honoured, in the spelling and precedence that `curl` uses. An
-uppercase name wins over its lowercase twin. For an `https:` target the tool
-opens a `CONNECT` tunnel through the proxy and validates the certificate
-against the original hostname.
+uppercase name wins over its lowercase twin. The value must be an `http:` or
+`https:` URL; any other value is ignored and the request goes direct. For an
+`https:` target the tool opens a `CONNECT` tunnel through the proxy and
+validates the certificate against the original hostname.
 
 ## What is refused
 

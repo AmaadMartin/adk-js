@@ -182,6 +182,10 @@ function readResponse(
 ): void {
   const chunks: Buffer[] = [];
   let size = 0;
+  // A server that drops the socket after the headers destroys the response
+  // with an error. Node only emits that error when something listens for it,
+  // and it never reaches the request, so without this the read never ends.
+  response.on('error', fail);
   response.on('data', (chunk: Buffer) => {
     size += chunk.length;
     if (size > MAX_RESPONSE_BYTES) {
@@ -201,15 +205,19 @@ function readResponse(
 }
 
 /**
- * Sends `request` and reads its response. Destroying the request on failure
- * releases its socket, its timer and its listeners on every exit path.
+ * Sends `request` and reads its response. Every failure both destroys the
+ * request, which releases its socket, its timer and its listeners, and settles
+ * the promise, so no exit path can leave the caller waiting.
  */
 function sendRequest(
   request: ClientRequest,
   timeoutMs: number,
 ): Promise<FetchedResponse> {
   return new Promise<FetchedResponse>((resolve, reject) => {
-    const fail = (error: Error) => request.destroy(error);
+    const fail = (error: Error) => {
+      request.destroy(error);
+      reject(error);
+    };
     request.on('error', reject);
     request.setTimeout(timeoutMs, () => fail(new Error('Request timed out')));
     request.on('response', (response) => readResponse(response, resolve, fail));
@@ -331,7 +339,14 @@ async function requestThroughTunnel(
 ): Promise<FetchedResponse> {
   const socket = await connectTunnel(target, proxy, timeoutMs);
   try {
-    const secure = tlsConnect({socket, servername: serverNameOf(target)});
+    // `host` is what the certificate is checked against when there is no
+    // server name, so an IP-literal target is verified against the IP rather
+    // than against the proxy's own hostname.
+    const secure = tlsConnect({
+      socket,
+      host: target.hostname,
+      servername: serverNameOf(target),
+    });
     const request = httpsRequest({
       createConnection: () => secure,
       port: target.port,
@@ -415,9 +430,10 @@ export async function loadWebPage(
       url,
       options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     );
-    return keepLongLines(
-      status === 200 ? htmlToText(body) : failedToFetchMessage(url),
-    );
+    if (status !== 200) {
+      return failedToFetchMessage(url);
+    }
+    return keepLongLines(htmlToText(body));
   } catch {
     return failedToFetchMessage(url);
   }

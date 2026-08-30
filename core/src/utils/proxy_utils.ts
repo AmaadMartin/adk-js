@@ -9,6 +9,9 @@
  * that `curl`, `urllib` and `requests` all implement.
  */
 
+/** Proxy schemes this module can speak (WHATWG `URL.protocol` form). */
+const PROXY_SCHEMES = new Set(['http:', 'https:']);
+
 /**
  * Reads a proxy setting from the environment. The uppercase spelling wins when
  * both are set, and an empty value counts as unset, matching Python's
@@ -37,9 +40,10 @@ function bypassesProxy(hostname: string, noProxy: string): boolean {
  * Returns the proxy the environment configures for `protocol` (`'http:'` or
  * `'https:'`) and `hostname`, or `undefined` for a direct connection.
  *
- * `hostname` carries no brackets: pass `::1`, not `[::1]`. A proxy setting
- * that is not a URL is treated as no proxy, so a typo cannot silently redirect
- * a request somewhere unexpected.
+ * `hostname` carries no brackets: pass `::1`, not `[::1]`. A setting this
+ * cannot speak to is treated as no proxy: `new URL` accepts the scheme-less
+ * `host:port` shorthand and reads the host as a scheme, so without the scheme
+ * check a typo would send the request to `localhost`.
  */
 export function environmentProxyFor(
   protocol: string,
@@ -56,7 +60,8 @@ export function environmentProxyFor(
     return undefined;
   }
   try {
-    return new URL(setting);
+    const proxy = new URL(setting);
+    return PROXY_SCHEMES.has(proxy.protocol) ? proxy : undefined;
   } catch {
     return undefined;
   }

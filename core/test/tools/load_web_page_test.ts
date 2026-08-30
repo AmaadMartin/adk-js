@@ -133,6 +133,18 @@ function servePage(_request: IncomingMessage, response: ServerResponse): void {
   response.end(PAGE_HTML);
 }
 
+/** Sends headers promising a body, then drops the connection mid-body. */
+function truncatePage(
+  _request: IncomingMessage,
+  response: ServerResponse,
+): void {
+  response.writeHead(200, {
+    'Content-Type': 'text/html',
+    'Content-Length': '1000',
+  });
+  response.write(PAGE_HTML, () => response.destroy());
+}
+
 /** Every request the tool created, in order, with its timeout call recorded. */
 const sentRequests: ClientRequest[] = [];
 
@@ -695,6 +707,18 @@ describe('loadWebPage', () => {
       );
     });
 
+    it('returns the failure string when the origin drops the connection mid-body', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+      originHandler = truncatePage;
+
+      const result = await loadWebPage('https://example.com/', {
+        timeoutMs: 1000,
+      });
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+    });
+
     it('returns the failure string when the origin never responds', async () => {
       resolveTo('93.184.216.34');
       pinToOrigin();
@@ -776,6 +800,17 @@ describe('loadWebPage', () => {
       expect(proxyRequests).toHaveLength(0);
     });
 
+    it('returns the failure string when the proxy drops the connection mid-body', async () => {
+      vi.stubEnv('http_proxy', `http://127.0.0.1:${proxyPort}`);
+      originHandler = truncatePage;
+
+      const result = await loadWebPage('http://example.com/page', {
+        timeoutMs: 1000,
+      });
+
+      expect(result).toBe('Failed to fetch url: http://example.com/page');
+    });
+
     it('returns the failure string when the proxy is unreachable', async () => {
       vi.stubEnv('http_proxy', `http://127.0.0.1:${closedPort}`);
 
@@ -804,6 +839,21 @@ describe('loadWebPage', () => {
       expect(tlsConnectSpy.mock.calls[0][0].servername).toBe(
         'does-not-resolve.invalid',
       );
+      expect(tlsConnectSpy.mock.calls[0][0].host).toBe(
+        'does-not-resolve.invalid',
+      );
+    });
+
+    it('verifies an IP-literal tunnel target against the IP, not the proxy', async () => {
+      vi.stubEnv('https_proxy', `http://127.0.0.1:${proxyPort}`);
+
+      await loadWebPage('https://[2606:4700:4700::1111]/doc');
+
+      expect(proxyRequests[0].url).toBe('[2606:4700:4700::1111]:443');
+      // RFC 6066 forbids an IP literal as a server name, so `host` is what
+      // Node checks the certificate against.
+      expect(tlsConnectSpy.mock.calls[0][0].servername).toBeUndefined();
+      expect(tlsConnectSpy.mock.calls[0][0].host).toBe('2606:4700:4700::1111');
     });
 
     it('names the explicit port in the CONNECT authority', async () => {

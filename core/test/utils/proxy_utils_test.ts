@@ -126,6 +126,23 @@ describe('environmentProxyFor', () => {
 
     expect(environmentProxyFor('https:', 'example.com')).toBeUndefined();
   });
+
+  it.each([
+    ['the scheme-less host:port shorthand', 'proxy.test:8080'],
+    ['a scheme this module cannot speak', 'socks5://proxy.test:1080'],
+  ])('treats %s as no proxy', (_case, setting) => {
+    vi.stubEnv('HTTPS_PROXY', setting);
+
+    expect(environmentProxyFor('https:', 'example.com')).toBeUndefined();
+  });
+
+  it('accepts an https proxy', () => {
+    vi.stubEnv('HTTPS_PROXY', 'https://secure.proxy.test:8443');
+
+    expect(environmentProxyFor('https:', 'example.com')?.href).toBe(
+      'https://secure.proxy.test:8443/',
+    );
+  });
 });
 
 // Assembled rather than written inline so no literal `user:pass@` appears.
