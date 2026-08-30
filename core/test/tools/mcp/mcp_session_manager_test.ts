@@ -450,6 +450,20 @@ describe('MCPSessionManager HTTP debug capture', () => {
     expect(wrapped).toBeUndefined();
   });
 
+  it('falls back to the global fetch when the caller configured none', async () => {
+    const sink: McpHttpExchange[] = [];
+    const globalFetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(200));
+
+    const wrapped = await fetchForSession(undefined, sink);
+    await wrapped?.('http://test-url/mcp', {method: 'POST'});
+
+    expect(globalFetch).toHaveBeenCalledOnce();
+    expect(sink).toHaveLength(1);
+    globalFetch.mockRestore();
+  });
+
   it('records an exchange once when the manager opens two sessions', async () => {
     const sink: McpHttpExchange[] = [];
     const transportOptions = {fetch: vi.fn(async () => jsonResponse(200))};
