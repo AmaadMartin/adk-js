@@ -134,16 +134,6 @@ function servePage(_request: IncomingMessage, response: ServerResponse): void {
   response.end(PAGE_HTML);
 }
 
-/** Every request the tool created, in order, with its timeout call recorded. */
-const sentRequests: ClientRequest[] = [];
-
-/** Records `request` so a test can assert the timeout the tool applied. */
-function track(request: ClientRequest): ClientRequest {
-  sentRequests.push(request);
-  vi.spyOn(request, 'setTimeout');
-  return request;
-}
-
 /** Resolves any hostname to the given IP list for the DNS `lookup` mock. */
 function resolveTo(...addresses: string[]): void {
   lookupMock.mockResolvedValue(
@@ -177,9 +167,7 @@ describe('loadWebPage', () => {
       const port = failingAddresses.includes(String(options.hostname))
         ? closedPort
         : originPort;
-      return track(
-        actualHttp.request({...options, hostname: '127.0.0.1', port}),
-      );
+      return actualHttp.request({...options, hostname: '127.0.0.1', port});
     };
     httpRequestSpy.mockImplementation(redirect);
     // A local TLS origin would need a certificate, so an `https:` target is
@@ -255,12 +243,9 @@ describe('loadWebPage', () => {
     httpRequestSpy.mockReset();
     httpsRequestSpy.mockReset();
     tlsConnectSpy.mockReset();
-    sentRequests.length = 0;
-    httpRequestSpy.mockImplementation((options) =>
-      track(actualHttp.request(options)),
-    );
+    httpRequestSpy.mockImplementation((options) => actualHttp.request(options));
     httpsRequestSpy.mockImplementation((options) =>
-      track(actualHttps.request(options)),
+      actualHttps.request(options),
     );
     tlsConnectSpy.mockImplementation((options) => actualTls.connect(options));
     for (const key of PROXY_ENV_KEYS) {
@@ -715,17 +700,17 @@ describe('loadWebPage', () => {
       resolveTo('93.184.216.34');
       pinToOrigin();
 
+      // The attempt deadline is a plain timer, so the delay it is armed with
+      // is what pins the default and the override.
+      const timers = vi.spyOn(globalThis, 'setTimeout');
+
       await loadWebPage('https://example.com/');
-      expect(vi.mocked(sentRequests[0].setTimeout)).toHaveBeenCalledWith(
-        30_000,
-        expect.any(Function),
-      );
+      expect(timers).toHaveBeenCalledWith(expect.any(Function), 30_000);
 
       await loadWebPage('https://example.com/', {timeoutMs: 5000});
-      expect(vi.mocked(sentRequests[1].setTimeout)).toHaveBeenCalledWith(
-        5000,
-        expect.any(Function),
-      );
+      expect(timers).toHaveBeenCalledWith(expect.any(Function), 5000);
+
+      timers.mockRestore();
     });
 
     it('returns the failure string when the origin never responds', async () => {
@@ -736,6 +721,77 @@ describe('loadWebPage', () => {
       const result = await loadWebPage('https://example.com/', {timeoutMs: 50});
 
       expect(result).toBe('Failed to fetch url: https://example.com/');
+    });
+
+    it('bounds an origin that trickles the body past the deadline', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+      // Each byte would restart an idle timeout, so only a deadline ends this.
+      originHandler = (_req, res) => {
+        res.writeHead(200, {'Content-Type': 'text/html'});
+        const drip = setInterval(() => res.write('a'), 10);
+        res.on('close', () => clearInterval(drip));
+      };
+
+      const result = await loadWebPage('https://example.com/', {timeoutMs: 80});
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+    });
+  });
+
+  describe('a connection that drops after the response headers', () => {
+    /** Writes headers, promises 5000 bytes, then leaves the body unfinished. */
+    function truncate(end: (res: ServerResponse) => void) {
+      return (_req: IncomingMessage, res: ServerResponse) => {
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Content-Length': '5000',
+        });
+        res.write('<html><body><p>Only the first part of the body</p>');
+        end(res);
+      };
+    }
+
+    it('fails the attempt when the peer resets the connection', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+      originHandler = truncate((res) => res.socket?.destroy());
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+    });
+
+    it('fails the attempt when the peer closes without an error', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+      originHandler = truncate((res) => res.socket?.end());
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+    });
+
+    it('tries the next resolved address after a truncated response', async () => {
+      resolveTo('93.184.216.34', '93.184.216.35');
+      pinToOrigin();
+      let attempts = 0;
+      const complete = servePage;
+      originHandler = (req, res) => {
+        attempts += 1;
+        if (attempts === 1) {
+          truncate((dying) => dying.socket?.destroy())(req, res);
+          return;
+        }
+        complete(req, res);
+      };
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe(PAGE_TEXT);
+      expect(httpsRequestSpy).toHaveBeenCalledTimes(2);
+      expect(tlsRequestOptions(0).hostname).toBe('93.184.216.34');
+      expect(tlsRequestOptions(1).hostname).toBe('93.184.216.35');
     });
   });
 
@@ -784,13 +840,12 @@ describe('loadWebPage', () => {
 
     it('applies the timeout to the proxied request', async () => {
       vi.stubEnv('http_proxy', `http://127.0.0.1:${proxyPort}`);
+      const timers = vi.spyOn(globalThis, 'setTimeout');
 
       await loadWebPage('http://example.com/page', {timeoutMs: 7000});
 
-      expect(vi.mocked(sentRequests[0].setTimeout)).toHaveBeenCalledWith(
-        7000,
-        expect.any(Function),
-      );
+      expect(timers).toHaveBeenCalledWith(expect.any(Function), 7000);
+      timers.mockRestore();
     });
 
     it('takes the direct pinned path when no_proxy covers the host', async () => {

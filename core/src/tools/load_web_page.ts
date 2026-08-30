@@ -205,21 +205,46 @@ function readResponse(
       ),
     });
   });
+  // A peer that dies mid-body emits `close` without `end` and reports no
+  // error on the request, so `complete` is the only reliable signal that the
+  // attempt failed. The `error` listener is a crash guard: a stream that
+  // emits `error` with no listener throws.
+  response.on('error', fail);
+  response.on('close', () => {
+    if (!response.complete) {
+      fail(new Error('Response ended before the body was complete'));
+    }
+  });
 }
 
 /**
- * Sends `request` and reads its response. Destroying the request on failure
- * releases its socket, its timer and its listeners on every exit path.
+ * Sends `request` and reads its response, bounded by `timeoutMs`.
+ *
+ * The bound is a deadline for the whole attempt, not an idle timeout:
+ * `request.setTimeout` restarts on every byte, so an origin that trickles a
+ * body could outlive it. Destroying the request on failure releases its
+ * socket and its listeners on every exit path.
  */
 function sendRequest(
   request: ClientRequest,
   timeoutMs: number,
 ): Promise<FetchedResponse> {
   return new Promise<FetchedResponse>((resolve, reject) => {
-    const fail = (error: Error) => request.destroy(error);
-    request.on('error', reject);
-    request.setTimeout(timeoutMs, () => fail(new Error('Request timed out')));
-    request.on('response', (response) => readResponse(response, resolve, fail));
+    const deadline = setTimeout(
+      () => fail(new Error('Request timed out')),
+      timeoutMs,
+    );
+    function succeed(value: FetchedResponse): void {
+      clearTimeout(deadline);
+      resolve(value);
+    }
+    function fail(error: Error): void {
+      clearTimeout(deadline);
+      request.destroy(error);
+      reject(error);
+    }
+    request.on('error', fail);
+    request.on('response', (response) => readResponse(response, succeed, fail));
     request.end();
   });
 }
