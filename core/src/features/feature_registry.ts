@@ -18,6 +18,10 @@ export enum FeatureName {
    * exception, so one failed call cannot end the agent turn.
    */
   MCP_GRACEFUL_ERROR_HANDLING = 'MCP_GRACEFUL_ERROR_HANDLING',
+  /**
+   * Declares a function tool's parameters as a raw JSON schema
+   * (`parametersJsonSchema`) instead of a genai `Schema` (`parameters`).
+   */
   JSON_SCHEMA_FOR_FUNC_DECL = 'JSON_SCHEMA_FOR_FUNC_DECL',
 }
 
