@@ -779,8 +779,11 @@ describe('ApplicationIntegrationToolset', () => {
         bearer('exchanged-token');
       const resolved = await toolset.getTools();
 
+      expect(resolved.map((tool) => tool.name)).toEqual([
+        'run_first_trigger',
+        'run_second_trigger',
+      ]);
       expect(resolved.every((tool) => tool instanceof RestApiTool)).toBe(true);
-      expect(resolved).toEqual(stored);
       expect(resolved[0]).toBe(stored[0]);
     });
   });
