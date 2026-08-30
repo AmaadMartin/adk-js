@@ -95,13 +95,10 @@ const SERVICE_ACCOUNT_TOKEN_URL = 'https://oauth2.mtls.googleapis.com/token';
 /**
  * Builds the auth scheme and auth credential for a Google service account.
  *
- * The scheme is an OAuth2 client-credentials flow, matching adk-python's
- * `_service_account_auth_scheme`. That shape marks the credential
- * non-interactive: a credential manager that keys off the flow only
- * auto-exchanges a raw service account when the scheme is OAuth2 or OIDC
- * client-credentials. An HTTP bearer scheme reads as interactive, so the tool
- * asks the client to authorize instead of exchanging the service account it
- * already holds. After exchange the credential is an HTTP bearer token.
+ * A scheme must be set or `ToolAuthHandler` short-circuits before the
+ * exchange. The client-credentials shape and token URL match adk-python's
+ * `_service_account_auth_scheme`, and `authScheme.type` keys the
+ * exchanged-credential cache.
  *
  * @param config The service account configuration to exchange at call time.
  * @returns The auth scheme and the auth credential to configure a tool with.
