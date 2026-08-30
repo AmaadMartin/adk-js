@@ -5,14 +5,13 @@
  */
 
 /**
- * The {@link AgentTool} brand, in a module of its own so that a caller can
+ * The {@link AgentTool} brand, kept apart from the class so that a caller can
  * recognise an agent tool without loading one.
  *
- * `agents/functions.ts` asks the question and `tools/agent_tool.ts` reaches the
- * workflow node runtime, which reaches `agents/functions.ts` again. A static
- * import between the two would close that loop and leave a class extending an
- * undefined base at load time. This module imports nothing at runtime, so it
- * breaks the loop without a lazy import.
+ * `agents/functions.ts` asks the question, and `tools/agent_tool.ts` reaches
+ * `agents/functions.ts` again through `Runner`. A static import between the two
+ * closes that loop and leaves `FunctionNode extends BaseNode` with an undefined
+ * base at load time. This module imports nothing at runtime.
  */
 
 import type {AgentTool} from './agent_tool.js';

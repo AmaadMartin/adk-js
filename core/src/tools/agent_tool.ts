@@ -13,10 +13,8 @@ import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
-import {formatError} from '../utils/error_utils.js';
-import {parseWithSchema, SchemaLike, toJsonSchema} from '../utils/schema.js';
+import {SchemaLike, toJsonSchema} from '../utils/schema.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
-import {runNodeFromToolContext} from '../workflow/run_node_from_tool.js';
 
 import {State} from '../sessions/state.js';
 
@@ -58,34 +56,7 @@ const REQUEST_PARAMETERS: Schema = {
 };
 
 /** {@link REQUEST_PARAMETERS} as plain JSON Schema. */
-const REQUEST_PARAMETERS_JSON_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  properties: {request: {type: 'string'}},
-  required: ['request'],
-};
-
-/**
- * The parameters a task sub-agent gets when it declares no input schema.
- * Mirrors adk-python's `_DefaultTaskInput`.
- */
-const DEFAULT_TASK_INPUT_SCHEMA: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    request: {
-      type: Type.STRING,
-      description: 'Detailed instructions or context for the task sub-agent.',
-    },
-  },
-  required: ['request'],
-};
-
-/**
- * Appended to a task tool's description so the model does not schedule a
- * delegated run alongside other calls.
- */
-const TASK_DELEGATION_WARNING =
-  '\nIMPORTANT: This tool delegates execution to a specialized agent.' +
-  ' Do NOT call this tool in parallel with any other tools.';
+const REQUEST_PARAMETERS_JSON_SCHEMA = toJsonSchema(REQUEST_PARAMETERS);
 
 /** The wrapped agent's input schema in the genai form a declaration needs. */
 function agentInputSchema(agent: BaseAgent): Schema | undefined {
@@ -121,7 +92,7 @@ export class AgentTool extends BaseTool {
   /** A unique symbol to identify ADK agent tool class. */
   readonly [AGENT_TOOL_SIGNATURE_SYMBOL] = true;
 
-  protected readonly agent: BaseAgent;
+  private readonly agent: BaseAgent;
 
   private readonly skipSummarization: boolean;
 
@@ -265,80 +236,5 @@ export class AgentTool extends BaseTool {
     // The output is not validated against the output schema, unlike the
     // equivalent path in Python ADK.
     return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
-  }
-}
-
-/**
- * An {@link AgentTool} that runs the wrapped agent inline, as a child node of
- * the caller's own invocation, instead of in a nested runner.
- *
- * The child runs on a branch scoped to this function call, so its events stay
- * distinguishable from the caller's. A failure comes back as text rather than
- * as a throw, because the model can retry a described failure.
- *
- * ADK-internal, mirroring adk-python's `_SingleTurnAgentTool`.
- */
-export class SingleTurnAgentTool extends AgentTool {
-  override async runAsync({
-    args,
-    toolContext,
-  }: RunAsyncToolRequest): Promise<unknown> {
-    const inputSchema = agentInputSchemaSource(this.agent);
-    let nodeInput: unknown;
-    if (inputSchema) {
-      try {
-        nodeInput = parseWithSchema(inputSchema, args);
-      } catch (error: unknown) {
-        return `Error validating input: ${formatError(error)}`;
-      }
-    } else {
-      nodeInput = args['request'];
-    }
-
-    try {
-      const child = await runNodeFromToolContext({
-        toolContext,
-        node: this.agent,
-        input: nodeInput,
-        toolName: this.name,
-      });
-      return child.output;
-    } catch (error: unknown) {
-      return `Error running sub-agent: ${formatError(error)}`;
-    }
-  }
-}
-
-/**
- * An {@link AgentTool} that marks a call for framework-driven delegation.
- *
- * Calling it runs nothing. It defers its `FunctionResponse` so the framework
- * can execute the wrapped agent itself and supply the response later.
- *
- * ADK-internal, mirroring adk-python's `_TaskAgentTool`.
- */
-export class TaskAgentTool extends AgentTool {
-  override readonly defersResponse = true;
-
-  override _getDeclaration(): FunctionDeclaration {
-    const inputSchema =
-      agentInputSchemaSource(this.agent) ?? DEFAULT_TASK_INPUT_SCHEMA;
-    const declaration: FunctionDeclaration = {
-      name: this.name,
-      description: `${this.description}${TASK_DELEGATION_WARNING}`.trim(),
-      parametersJsonSchema: toJsonSchema(inputSchema),
-    };
-
-    if (this.apiVariant !== GoogleLLMVariant.GEMINI_API) {
-      declaration.responseJsonSchema = {
-        type: agentHasOutputSchema(this.agent) ? 'object' : 'string',
-      };
-    }
-
-    return declaration;
-  }
-
-  override async runAsync(): Promise<undefined> {
-    return undefined;
   }
 }

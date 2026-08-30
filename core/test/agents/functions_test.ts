@@ -1254,6 +1254,26 @@ class StubAgentTool extends AgentTool {
   }
 }
 
+/** An `AgentTool` that reports its failure as a value rather than throwing. */
+class ErrorValueAgentTool extends AgentTool {
+  constructor() {
+    super({
+      agent: new LlmAgent({
+        name: SUB_AGENT_NAME,
+        description: 'a sub-agent',
+      }),
+      skipSummarization: true,
+    });
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    toolContext.actions.skipSummarization = true;
+    return {error: 'sub-agent refused'};
+  }
+}
+
 /** An `AgentTool` whose sub-agent run fails. */
 class FailingAgentTool extends AgentTool {
   constructor() {
@@ -1288,19 +1308,6 @@ class AcknowledgingTool extends BaseTool {
   }
 }
 
-/** A tool whose matching `FunctionResponse` is supplied elsewhere. */
-class DeferringTool extends BaseTool {
-  override readonly defersResponse = true;
-
-  constructor(private readonly result: unknown) {
-    super({name: 'deferringTool', description: 'defers its response'});
-  }
-
-  override async runAsync(): Promise<unknown> {
-    return this.result;
-  }
-}
-
 /** Runs one tool call and returns the resulting event. */
 function runOneCall(tool: BaseTool): Promise<Event | null> {
   const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
@@ -1324,31 +1331,6 @@ function textParts(event: Event | null): string[] {
     .map((part) => part.text)
     .filter((text): text is string => text !== undefined);
 }
-
-describe('a deferring tool', () => {
-  it('emits no event when its response is nullish', async () => {
-    expect(await runOneCall(new DeferringTool(null))).toBeNull();
-  });
-
-  it('emits a response event when it does answer', async () => {
-    const event = await runOneCall(new DeferringTool({status: 'ok'}));
-
-    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
-      status: 'ok',
-    });
-  });
-
-  it('is not reported as a long running call', () => {
-    const tool = new DeferringTool(null);
-    const call = callFor(tool);
-
-    const longRunning = getLongRunningFunctionCalls([call], {
-      [tool.name]: tool,
-    });
-
-    expect(longRunning.has(call.id!)).toBe(false);
-  });
-});
 
 describe('skipSummarization on an AgentTool response', () => {
   it('appends the string result as a text part', async () => {
@@ -1381,6 +1363,15 @@ describe('skipSummarization on an AgentTool response', () => {
     expect(textParts(event)).toEqual([]);
     expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
       error: 'sub-agent exploded',
+    });
+  });
+
+  it('appends nothing when the result itself reports an error', async () => {
+    const event = await runOneCall(new ErrorValueAgentTool());
+
+    expect(textParts(event)).toEqual([]);
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      error: 'sub-agent refused',
     });
   });
 

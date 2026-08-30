@@ -17,12 +17,6 @@ That difference decides which one you want. Use transfer when the sub-agent
 owns the rest of the conversation. Use `AgentTool` when the parent needs one
 answer, from a specialist, in the middle of its own reasoning.
 
-The nested run is isolated. Every call builds a fresh `InMemorySessionService`
-and a new session, so the wrapped agent never reads the caller's transcript, and
-never reads its own previous turns either. What does cross the boundary is
-narrow and deliberate: the caller's session state goes in, and the sub-agent's
-state changes come back out.
-
 ## Get started
 
 ```ts
@@ -43,23 +37,6 @@ const assistant = new LlmAgent({
   instruction: 'Use the translator tool whenever the user asks for French.',
   tools: [new AgentTool({agent: translator})],
 });
-
-const runner = new InMemoryRunner({appName: 'demo', agent: assistant});
-const session = await runner.sessionService.createSession({
-  appName: 'demo',
-  userId: 'user',
-});
-
-for await (const event of runner.runAsync({
-  userId: 'user',
-  sessionId: session.id,
-  newMessage: {
-    role: 'user',
-    parts: [{text: 'How do I say "good morning" in French?'}],
-  },
-})) {
-  console.log(event.author, event.content?.parts?.[0]?.text);
-}
 ```
 
 The tool's name is the wrapped agent's name, and its description is the wrapped
@@ -68,42 +45,22 @@ thing the caller's model reads when deciding whether to call the tool.
 
 ## What the sub-agent sees
 
-The nested run gets:
+The nested run is isolated:
 
-- **A new session, every call.** The wrapped agent starts from an empty
-  transcript. Two calls in one turn do not see each other.
+- **A new session, every call.** `AgentTool` builds a fresh
+  `InMemorySessionService` per call, so the wrapped agent reads neither the
+  caller's transcript nor its own previous turns. Two calls in one turn do not
+  see each other.
 - **The caller's app name.** Session and telemetry backends key on the app name,
   so the nested run is filed under the caller's app, not under the sub-agent's
   own name.
 - **A copy of the caller's state**, minus two groups of keys. Keys prefixed
   `temp:` are invocation-scoped and are dropped by the session service. Keys
   prefixed `_adk` are ADK's own bookkeeping and are filtered out before the
-  session is created.
-- **The caller's artifact service**, through a forwarding wrapper, so the
-  sub-agent can read and write the caller's artifacts.
+  child session is created.
 
-State changes flow back. Every state delta the sub-agent's events carry is
+State changes flow back: every state delta the sub-agent's events carry is
 applied to the caller's state, again with `temp:` keys removed.
-
-## Passing arguments
-
-Without an input schema, the declaration takes a single `request` string, and
-that string becomes the sub-agent's user message.
-
-With an input schema on the wrapped `LlmAgent`, the schema becomes the tool's
-parameters and the whole argument object is passed to the sub-agent as JSON:
-
-```ts
-import {LlmAgent} from '@google/adk';
-import {z} from 'zod';
-
-const lookup = new LlmAgent({
-  name: 'lookup',
-  model: 'gemini-2.5-flash',
-  description: 'Looks up a city forecast.',
-  inputSchema: z.object({city: z.string(), days: z.number()}),
-});
-```
 
 ## Returning the answer verbatim
 
@@ -118,7 +75,7 @@ This sets `skipSummarization` on the tool context, which makes the tool-response
 event a final response and ends the caller's step loop. The sub-agent's answer is
 also appended to that event as a text part, so a user interface that does not
 render function responses still shows it. A non-string result is serialized as
-JSON; an empty result, or a failed run, appends nothing.
+JSON. An empty result, and a result reporting an error, append nothing.
 
 ## Declaring parameters as JSON Schema
 
@@ -135,9 +92,3 @@ overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, true);
 
 The feature is off by default. It can also be enabled with the
 `ADK_ENABLE_JSON_SCHEMA_FOR_FUNC_DECL` environment variable.
-
-## Delegation wrappers
-
-`SingleTurnAgentTool` and `TaskAgentTool` are two `AgentTool` subclasses the
-framework uses for inline and delegated sub-agent runs. They are ADK-internal
-and are not exported from `@google/adk`.
