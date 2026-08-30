@@ -13,12 +13,15 @@ import {parseServiceAccountCredential} from '../../../../src/utils/service_accou
 const getAccessToken = vi.fn();
 const getProjectId = vi.fn();
 const jwtConstructor = vi.fn();
+/** Counts credential resolutions. One `ApiTransport` resolves once. */
+const getClientCalls = vi.fn();
 /** Stands in for `AuthClient.request`, which signs and sends every call. */
 const request = vi.fn();
 
 vi.mock('google-auth-library', () => ({
   GoogleAuth: class {
     getClient() {
+      getClientCalls();
       return Promise.resolve({
         getAccessToken,
         request,
@@ -440,7 +443,7 @@ describe('ConnectionsClient', () => {
       await createClient().getEntitySchemaAndOperations('Issues');
 
       expect(getAccessToken).toHaveBeenCalledTimes(2);
-      expect(getProjectId).toHaveBeenCalledTimes(1);
+      expect(getClientCalls).toHaveBeenCalledTimes(1);
     });
 
     it('reports unavailable credentials as a credentials error', async () => {

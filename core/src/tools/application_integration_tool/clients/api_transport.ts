@@ -44,7 +44,6 @@ export interface JsonRequest {
  */
 export class ApiTransport {
   private client?: AuthClient;
-  private quotaProject?: string;
 
   /**
    * @param serviceAccount Key the requests are signed with. Falls back to
@@ -57,6 +56,11 @@ export class ApiTransport {
    * Default Credentials need it; a service account key does not, because the
    * key already names its project.
    *
+   * Only the credential's own quota project counts. The ambient default
+   * project that `GoogleAuth.getProjectId()` reports is a different value, and
+   * billing an unnamed project to the caller is not this client's decision, so
+   * the configured project is the fallback.
+   *
    * @throws {Error} If the credentials cannot be resolved.
    */
   async quotaProjectHeaders(
@@ -65,8 +69,8 @@ export class ApiTransport {
     if (this.serviceAccount) {
       return {};
     }
-    await this.resolveClient();
-    return {'x-goog-user-project': this.quotaProject ?? fallbackProject};
+    const client = await this.resolveClient();
+    return {'x-goog-user-project': client.quotaProjectId ?? fallbackProject};
   }
 
   /**
@@ -148,9 +152,6 @@ export class ApiTransport {
     try {
       const auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
       const client = await auth.getClient();
-      this.quotaProject =
-        client.quotaProjectId ??
-        (await auth.getProjectId().catch(() => undefined));
       this.client = client;
       return client;
     } catch (error: unknown) {

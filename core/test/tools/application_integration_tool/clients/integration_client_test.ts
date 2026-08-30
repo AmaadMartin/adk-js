@@ -248,9 +248,28 @@ describe('IntegrationClient', () => {
       );
     });
 
+    it('ignores the ambient default project for the quota header', async () => {
+      request.mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
+      quotaProjectId.mockReturnValue(undefined);
+      getProjectId.mockResolvedValue('adc-default-project');
+
+      await createClient({
+        integration: 'test-integration',
+        triggers: [],
+      }).getOpenApiSpecForIntegration();
+
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: GENERATE_SPEC_URL,
+          headers: expect.objectContaining({
+            'x-goog-user-project': 'test-project',
+          }),
+        }),
+      );
+    });
+
     it('falls back to the configured project for the quota header', async () => {
       request.mockResolvedValue(jsonResponse({openApiSpec: EMPTY_SPEC}));
-      getProjectId.mockRejectedValue(new Error('no project'));
 
       await createClient({
         integration: 'test-integration',
