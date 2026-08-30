@@ -11,11 +11,11 @@ import {
   type IncomingMessage,
 } from 'node:http';
 import {request as httpsRequest, type RequestOptions} from 'node:https';
-import {isIP, type LookupFunction, type Socket} from 'node:net';
-import {connect as tlsConnect} from 'node:tls';
+import {isIP, type LookupFunction} from 'node:net';
 
 import {z} from 'zod';
 
+import {extractText} from '../utils/html_utils.js';
 import {
   isBlockedAddress,
   isBlockedHostname,
@@ -27,17 +27,6 @@ import {FunctionTool} from './function_tool.js';
 export interface LoadWebPageOptions {
   /** Request timeout in milliseconds. Defaults to 30_000 (30s). */
   timeoutMs?: number;
-  /**
-   * Proxy to route the request through, such as
-   * `http://proxy.example.test:8080`. Credentials in the URL are sent as
-   * `Proxy-Authorization: Basic`.
-   *
-   * A proxy resolves the target hostname itself, so a hostname target is not
-   * vetted on this path; an IP-literal target still is. The proxy is therefore
-   * never read from the environment: an ambient `https_proxy` must not be able
-   * to turn address vetting off for every caller on the machine.
-   */
-  proxy?: string;
 }
 
 /** URL schemes that are allowed to be fetched (WHATWG `URL.protocol` form). */
@@ -55,15 +44,8 @@ const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
  */
 const IDENTITY_ENCODING = {'accept-encoding': 'identity'};
 
-/** HTML entities that survive tag stripping, decoded by name. */
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  apos: "'",
-  gt: '>',
-  lt: '<',
-  nbsp: ' ',
-  quot: '"',
-};
+/** Shortest line kept in the extracted text, in words. */
+const MIN_WORDS_PER_LINE = 3;
 
 /** Builds the parity failure message for a URL. */
 function failedToFetchMessage(url: string): string {
@@ -71,30 +53,23 @@ function failedToFetchMessage(url: string): string {
 }
 
 /**
- * Validates the URL's scheme up front (before any network access). Throws for
- * malformed URLs and disallowed schemes. An `http`/`https` URL always carries a
- * hostname: the WHATWG parser rejects the scheme without one.
+ * Validates the URL up front (before any network access). Throws for malformed
+ * URLs, disallowed schemes and an unconnectable port. An `http`/`https` URL
+ * always carries a hostname: the WHATWG parser rejects the scheme without one.
+ *
+ * The parser also rejects a port that is not a number or is above 65535, so
+ * port `0` is the only value left to reject here. Node reads it as "any free
+ * port" and dials a port the caller never asked for.
  */
 function parseRequestTarget(url: string): URL {
   const parsed = new URL(url);
   if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
     throw new Error(`Unsupported url scheme: ${url}`);
   }
-  return parsed;
-}
-
-/** Parses the caller's proxy option. Throws for a scheme this tool cannot speak. */
-function parseProxy(proxy: string): URL {
-  const parsed = new URL(proxy);
-  if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
-    throw new Error(`Unsupported proxy scheme: ${proxy}`);
+  if (parsed.port === '0') {
+    throw new Error(`Invalid url port: ${url}`);
   }
   return parsed;
-}
-
-/** Returns the port a URL addresses, filling in the scheme default. */
-function portOf(url: URL): number {
-  return Number(url.port || (url.protocol === 'https:' ? 443 : 80));
 }
 
 /**
@@ -121,17 +96,6 @@ async function resolveDirectAddresses(hostname: string): Promise<string[]> {
     throw new Error(`Blocked host: ${hostname}`);
   }
   return addresses;
-}
-
-/** Builds the `Proxy-Authorization` header when the proxy URL carries credentials. */
-function proxyAuthHeaders(proxy: URL): Record<string, string> {
-  if (!proxy.username) {
-    return {};
-  }
-  const credentials = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
-  return {
-    'proxy-authorization': `Basic ${Buffer.from(credentials).toString('base64')}`,
-  };
 }
 
 /**
@@ -269,142 +233,27 @@ async function requestPinned(
   throw lastError;
 }
 
-/** Opens a TLS tunnel to `url` through `proxy` with an HTTP `CONNECT`. */
-function connectProxyTunnel(
-  url: URL,
-  proxy: URL,
-  expiresAt: number,
-): Promise<Socket> {
-  const request = httpRequest({
-    headers: proxyAuthHeaders(proxy),
-    host: normalizeHost(proxy.hostname),
-    method: 'CONNECT',
-    path: `${url.hostname}:${portOf(url)}`,
-    port: portOf(proxy),
-  });
-  return withDeadline(
-    request,
-    expiresAt,
-    () =>
-      new Promise<Socket>((resolve, reject) => {
-        request.once('connect', (res: IncomingMessage, socket: Socket) => {
-          if (res.statusCode !== 200) {
-            socket.destroy();
-            reject(new Error(`Proxy refused CONNECT: ${res.statusCode}`));
-            return;
-          }
-          resolve(tlsConnect({servername: serverNameOf(url), socket}));
-        });
-        request.once('error', reject);
-        request.end();
-      }),
-  );
-}
-
 /**
- * Runs the request for `url` over an established tunnel.
- *
- * No `agent` option is passed, because Node consults `createConnection` only
- * for a request that has no agent, and `agent: false` builds a fresh agent
- * rather than skipping it. A request that lands on any other socket has
- * connected directly, and this path vets no address, so it fails instead.
- */
-async function requestThroughTunnel(
-  url: URL,
-  socket: Socket,
-  expiresAt: number,
-): Promise<string | null> {
-  const request = httpsRequest(url, {
-    createConnection: () => socket,
-    headers: {...IDENTITY_ENCODING},
-    servername: serverNameOf(url),
-  });
-  request.once('socket', (used: Socket) => {
-    if (used !== socket) {
-      request.destroy(new Error('Proxy tunnel was bypassed'));
-    }
-  });
-  try {
-    return await sendRequest(request, expiresAt);
-  } finally {
-    socket.destroy();
-  }
-}
-
-/**
- * Requests `url` through `proxy`. The proxy resolves the hostname itself, so
- * this path issues no local DNS query.
- */
-async function requestViaProxy(
-  url: URL,
-  proxy: URL,
-  expiresAt: number,
-): Promise<string | null> {
-  if (url.protocol === 'http:') {
-    const request = httpRequest({
-      agent: false,
-      headers: {
-        ...IDENTITY_ENCODING,
-        ...proxyAuthHeaders(proxy),
-        host: url.host,
-      },
-      host: normalizeHost(proxy.hostname),
-      // Absolute-form request target, as an HTTP proxy expects.
-      path: url.href,
-      port: portOf(proxy),
-    });
-    return sendRequest(request, expiresAt);
-  }
-  const socket = await connectProxyTunnel(url, proxy, expiresAt);
-  return requestThroughTunnel(url, socket, expiresAt);
-}
-
-/** Decodes HTML entities: the named set above plus decimal and hex forms. */
-function decodeHtmlEntities(text: string): string {
-  return text.replace(
-    /&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);/g,
-    (match: string, entity: string) => {
-      if (!entity.startsWith('#')) {
-        return NAMED_ENTITIES[entity.toLowerCase()] ?? match;
-      }
-      const codePoint =
-        entity[1] === 'x' || entity[1] === 'X'
-          ? parseInt(entity.slice(2), 16)
-          : Number(entity.slice(1));
-      return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : match;
-    },
-  );
-}
-
-/**
- * Extracts readable text from an HTML document. Removes `<script>`/`<style>`
- * blocks and comments, strips remaining tags, decodes entities, and keeps only
- * lines with more than three words (parity with the Python tool).
+ * Extracts readable text from an HTML document and keeps only the lines with
+ * more than {@link MIN_WORDS_PER_LINE} words, which drops navigation labels and
+ * other short fragments (parity with the Python tool).
  */
 function htmlToText(html: string): string {
-  const withoutCode = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ');
-  const text = decodeHtmlEntities(withoutCode.replace(/<[^>]+>/g, '\n'));
-  return text
+  return extractText(html)
     .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.split(/\s+/).filter(Boolean).length > 3)
+    .filter(
+      (line) => line.split(/\s+/).filter(Boolean).length > MIN_WORDS_PER_LINE,
+    )
     .join('\n');
 }
 
 /**
  * Vets `url` and returns its body, or `null` when the status is not 200.
- * Mirrors the Python `_fetch_response` decision tree: a proxy short-circuits
- * local resolution, an IP literal is vetted in place, and a hostname is
- * resolved and vetted before any connection is made.
+ * Mirrors the Python `_fetch_response` decision tree: an IP literal is vetted
+ * in place, and a hostname is resolved and vetted before any connection is
+ * made.
  */
-async function fetchBody(
-  url: URL,
-  proxy: URL | null,
-  expiresAt: number,
-): Promise<string | null> {
+async function fetchBody(url: URL, expiresAt: number): Promise<string | null> {
   const hostname = normalizeHost(url.hostname);
   if (isBlockedHostname(hostname)) {
     throw new Error(`Blocked host: ${hostname}`);
@@ -412,9 +261,6 @@ async function fetchBody(
   const literal = isIP(hostname) === 0 ? null : hostname;
   if (literal !== null && isBlockedAddress(literal)) {
     throw new Error(`Blocked host: ${hostname}`);
-  }
-  if (proxy !== null) {
-    return requestViaProxy(url, proxy, expiresAt);
   }
   const addresses =
     literal === null ? await resolveDirectAddresses(hostname) : [literal];
@@ -434,9 +280,9 @@ async function fetchBody(
  * Never throws for expected failures (bad scheme, blocked host, non-200,
  * timeout, network error); returns `Failed to fetch url: <url>` instead.
  *
- * Passing {@link LoadWebPageOptions.proxy} routes the request through a proxy,
- * which resolves the hostname itself. A hostname target is not vetted on that
- * path, so it is opt-in per call and is never read from the environment.
+ * No proxy environment variable is read. A proxy resolves the hostname itself,
+ * so the tool could not vet the address it reaches, and a machine-wide setting
+ * must not switch vetting off for every caller on the host.
  */
 export async function loadWebPage(
   url: string,
@@ -444,9 +290,7 @@ export async function loadWebPage(
 ): Promise<string> {
   const expiresAt = Date.now() + (options?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
-    const proxy =
-      options?.proxy === undefined ? null : parseProxy(options.proxy);
-    const body = await fetchBody(parseRequestTarget(url), proxy, expiresAt);
+    const body = await fetchBody(parseRequestTarget(url), expiresAt);
     return body === null ? failedToFetchMessage(url) : htmlToText(body);
   } catch {
     return failedToFetchMessage(url);
