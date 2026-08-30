@@ -10,7 +10,6 @@ import {LlmRequest} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
-import {ToolArgsConfig, toBaseToolParams} from './tool_configs.js';
 
 /**
  * The parameters for `runAsync`.
@@ -99,12 +98,8 @@ export abstract class BaseTool {
    * additionally records the call in `event.longRunningToolIds`, affecting A2A
    * conversion, plugin logging and interrupt tracking.
    *
-   * Internal: ADK sets this on its own tools and it is not part of the public
-   * API, which is what the reference Python SDK means by naming it
-   * `_defers_response`. It is public here because the function-call flow reads
-   * it from outside the class, and this repository's style guide does not use
-   * an underscore prefix. It is deliberately not a constructor option: a tool
-   * that defers assigns it after `super(...)`.
+   * A tool that defers assigns this after `super(...)`; it is not a
+   * constructor option.
    */
   defersResponse = false;
 
@@ -117,34 +112,6 @@ export abstract class BaseTool {
     this.name = params.name;
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
-  }
-
-  /**
-   * Creates a tool instance from a config.
-   *
-   * The default validates the config into {@link BaseToolParams} and calls the
-   * constructor. Subclasses override it for custom initialization, such as
-   * resolving a reference the config states relative to `configAbsPath`.
-   *
-   * `this` is typed as a concrete constructor, so a subclass whose constructor
-   * demands options beyond `BaseToolParams` cannot use this default and must
-   * override it. The override receives `configAbsPath` unchanged.
-   *
-   * Diverges from Python's synchronous `from_config`: resolving a reference in
-   * TypeScript means a dynamic `import()`, so the seam has to be async for the
-   * useful overrides to exist at all.
-   *
-   * @param config The args block of a tool config.
-   * @param _configAbsPath The absolute path of the config file the config came
-   *     from. Unused by the default; overrides resolve paths against it.
-   * @return The tool instance.
-   */
-  static async fromConfig(
-    this: new (params: BaseToolParams) => BaseTool,
-    config: ToolArgsConfig,
-    _configAbsPath: string,
-  ): Promise<BaseTool> {
-    return new this(toBaseToolParams(config));
   }
 
   /**
@@ -172,14 +139,10 @@ export abstract class BaseTool {
    * - Otherwise, can be skipped, e.g. for a built-in GoogleSearch tool for
    *   Gemini.
    *
-   * @param _request The request to run the tool.
+   * @param request The request to run the tool.
    * @return A promise that resolves to the tool response.
-   * @throws Error When the tool does not implement it. A server-side tool
-   *     never reaches this, so it does not have to write a stub.
    */
-  async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
-    throw new Error(`Tool ${this.name} does not implement runAsync().`);
-  }
+  abstract runAsync(request: RunAsyncToolRequest): Promise<unknown>;
 
   /**
    * Whether this tool needs a human to approve `args` before it runs.
