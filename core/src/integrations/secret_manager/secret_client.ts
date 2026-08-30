@@ -96,7 +96,7 @@ function resolveAuth(options: SecretManagerClientOptions): GoogleAuth {
   if (options.authToken) {
     const authClient = new OAuth2Client();
     authClient.setCredentials({access_token: options.authToken});
-    return new GoogleAuth({authClient, scopes: CLOUD_PLATFORM_SCOPES});
+    return new GoogleAuth({authClient});
   }
   return new GoogleAuth({scopes: CLOUD_PLATFORM_SCOPES});
 }

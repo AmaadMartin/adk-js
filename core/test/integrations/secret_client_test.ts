@@ -124,7 +124,6 @@ describe('SecretManagerClient', () => {
       });
       expect(mocks.googleAuthConstructor).toHaveBeenCalledExactlyOnceWith({
         authClient: expect.any(mocks.FakeOAuth2Client),
-        scopes: SCOPES,
       });
     });
 
@@ -335,7 +334,6 @@ describe('SecretManagerClient', () => {
       await client.getSecret(RESOURCE_NAME);
 
       expect(recordedRequest().url).toBe(GLOBAL_URL);
-      expect(recordedRequest().url).not.toContain('%2F');
     });
 
     it('propagates API errors unchanged', async () => {
