@@ -26,13 +26,8 @@ export interface RunNodeFromToolParams {
   node: BaseNode;
   /** The input handed to the node. */
   input: unknown;
-  /** The calling tool's name, quoted in the precondition errors below. */
+  /** The calling tool's name: the branch segment, and quoted in the errors. */
   toolName: string;
-  /**
-   * The branch segment naming this run. Defaults to `toolName`; a tool that
-   * scopes the branch to something else (the wrapped agent, say) overrides it.
-   */
-  branchName?: string;
 }
 
 /**
@@ -48,7 +43,6 @@ export function runNodeFromToolContext({
   node,
   input,
   toolName,
-  branchName,
 }: RunNodeFromToolParams): Promise<NodeContext> {
   const ic = toolContext.invocationContext;
 
@@ -99,7 +93,7 @@ export function runNodeFromToolContext({
     options: {
       runId,
       overrideBranch: createSubBranch(childIc.branch, {
-        name: branchName ?? toolName,
+        name: toolName,
         runId,
       }),
     },

@@ -301,7 +301,6 @@ export class SingleTurnAgentTool extends AgentTool {
         node: this.agent,
         input: nodeInput,
         toolName: this.name,
-        branchName: this.agent.name,
       });
       return child.output;
     } catch (error: unknown) {

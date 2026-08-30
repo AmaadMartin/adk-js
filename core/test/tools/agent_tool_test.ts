@@ -153,6 +153,13 @@ describe('AgentTool', () => {
     expect(childSessionIds[0]).not.toBe(childSessionIds[1]);
     expect(childSessionIds).not.toContain('parent-session');
     expect(mockSessionService.getOrCreateSession).not.toHaveBeenCalled();
+
+    // Neither child session was written to the caller's session service.
+    const parentSessions = await mockSessionService.listSessions({
+      appName: 'parent-app',
+      userId: 'parent-user',
+    });
+    expect(parentSessions.sessions).toHaveLength(0);
   });
 
   it('strips thought parts from the merged result', async () => {
