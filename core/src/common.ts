@@ -448,6 +448,21 @@ export type {
   DiscoverySchema,
 } from './tools/google_api_tool/discovery_document.js';
 export {
+  INTERNAL_AUTH_PREFIX,
+  credentialToParam,
+  openIdDictToSchemeCredential,
+  openIdUrlToSchemeCredential,
+  serviceAccountDictToSchemeCredential,
+  tokenToSchemeCredential,
+} from './tools/openapi_tool/auth/auth_helpers.js';
+export type {
+  CredentialParam,
+  OpenIdConfig,
+  OpenIdSchemeCredential,
+  SchemeCredential,
+  ServiceAccountSchemeCredential,
+} from './tools/openapi_tool/auth/auth_helpers.js';
+export {
   createApiParameter,
   generateParamDoc,
   generateReturnDoc,

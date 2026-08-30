@@ -23,7 +23,7 @@ import {
 } from '../../utils/ssl_utils.js';
 import {version} from '../../version.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {applyCredential, validateAuthScheme} from './auth/auth_helpers.js';
+import {credentialToParam, validateAuthScheme} from './auth/auth_helpers.js';
 import type {ApiParameter} from './common/common.js';
 import {
   OperationParser,
@@ -189,21 +189,31 @@ export class RestApiTool extends BaseTool {
       };
     }
 
-    const credential = authResult.authCredential;
+    // The credential travels as one more request parameter, so the location
+    // the scheme declares - header, query or cookie - routes it.
+    const auth = this.authScheme
+      ? credentialToParam(this.authScheme, authResult.authCredential)
+      : undefined;
 
     // Prepare request
     const method = this.endpoint.method.toUpperCase();
     const parameters = this.operationParser.getParameters();
+    const argsWithDefaults = applySchemaDefaults(parameters, args);
     const {
-      url: initialUrl,
+      url,
       headers,
       body: parsedBody,
       bodyData,
     } = prepareRequestParams(
       this.endpoint,
-      parameters,
-      applySchemaDefaults(parameters, args),
+      auth ? [...parameters, auth.param] : parameters,
+      auth ? {...argsWithDefaults, ...auth.kwargs} : argsWithDefaults,
     );
+    // The same URL built without the credential, because an apiKey scheme with
+    // `in: query` puts its secret in the URL and the log must not carry it.
+    const initialUrl = auth
+      ? prepareRequestParams(this.endpoint, parameters, argsWithDefaults).url
+      : url;
 
     // Handle body
     const body = prepareRequestBody(
@@ -213,12 +223,11 @@ export class RestApiTool extends BaseTool {
       headers,
     );
 
-    // Handle Auth
-    const url = applyCredential(
-      initialUrl,
+    // The exchanger sets additionalHeaders on the credential it returns, the
+    // quota project header for one, so the request must carry them.
+    Object.assign(
       headers,
-      credential,
-      this.authScheme,
+      authResult.authCredential?.http?.additionalHeaders ?? {},
     );
 
     // Apply dynamic headers from provider

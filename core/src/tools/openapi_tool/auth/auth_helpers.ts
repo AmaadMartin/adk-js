@@ -21,57 +21,6 @@ import {formatError} from '../../../utils/error_utils.js';
 import type {ApiParameter} from '../openapi_spec_parser/operation_parser.js';
 
 /**
- * Applies the given credential to the request headers and URL.
- *
- * @param url The target URL.
- * @param headers The request headers.
- * @param credential The auth credential.
- * @param authScheme The auth scheme from OpenAPI spec.
- * @returns The updated URL (if modified by query params).
- */
-export function applyCredential(
-  url: string,
-  headers: Record<string, string>,
-  credential?: AuthCredential,
-  authScheme?: OpenAPIV3.SecuritySchemeObject,
-): string {
-  if (!credential) return url;
-
-  if (credential.http?.additionalHeaders) {
-    Object.assign(headers, credential.http.additionalHeaders);
-  }
-
-  if (credential.apiKey) {
-    let inLocation: string | undefined;
-    let name = 'key';
-
-    if (authScheme && authScheme.type === 'apiKey') {
-      const apiKeyScheme = authScheme as OpenAPIV3.ApiKeySecurityScheme;
-      inLocation = apiKeyScheme.in;
-      name = apiKeyScheme.name;
-    }
-
-    if (inLocation === 'header') {
-      headers[name] = credential.apiKey;
-    } else if (inLocation === 'query') {
-      const separator = url.includes('?') ? '&' : '?';
-      url += `${separator}${name}=${encodeURIComponent(credential.apiKey)}`;
-    } else {
-      // Default to header Authorization if not specified or unknown location
-      headers['Authorization'] = credential.apiKey;
-    }
-  } else if (
-    credential.http &&
-    credential.http.credentials &&
-    credential.http.credentials.token
-  ) {
-    headers['Authorization'] = `Bearer ${credential.http.credentials.token}`;
-  }
-
-  return url;
-}
-
-/**
  * Helper to create a simple API Key auth scheme.
  */
 export function createApiKeyScheme(
@@ -222,6 +171,23 @@ export interface SchemeCredential {
 export interface OpenIdSchemeCredential {
   authScheme: OpenIdConnectWithConfig;
   authCredential: AuthCredential;
+}
+
+/**
+ * An OpenID Connect client configuration.
+ *
+ * Public model surface, mirroring adk-python's `OpenIdConfig`. It types the
+ * client a caller passes to {@link openIdDictToSchemeCredential} and
+ * {@link openIdUrlToSchemeCredential}, which accept the wider
+ * `Record<string, unknown>` so a client secret file read straight off disk,
+ * with snake_case keys, is also accepted.
+ */
+export interface OpenIdConfig extends Record<string, unknown> {
+  clientId: string;
+  authUri: string;
+  tokenUri: string;
+  clientSecret: string;
+  redirectUri?: string;
 }
 
 /** A generated auth parameter and the argument value that fills it. */
