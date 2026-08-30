@@ -14,10 +14,24 @@ describe('hash_utils', () => {
       expect(canonicalJson({a: 2, b: 1})).toBe('{"a":2,"b":1}');
     });
 
-    it('drops undefined and null members at every depth', () => {
+    it('drops undefined members at every depth and keeps null', () => {
       expect(
         canonicalJson({a: 1, b: undefined, c: null, d: {e: null, f: 2}}),
-      ).toBe('{"a":1,"d":{"f":2}}');
+      ).toBe('{"a":1,"c":null,"d":{"e":null,"f":2}}');
+    });
+
+    it('distinguishes a null member from an absent one', () => {
+      expect(canonicalJson({a: 1, b: null})).not.toBe(canonicalJson({a: 1}));
+    });
+
+    it('keeps an own __proto__ key that JSON.parse produced', () => {
+      const parsed: unknown = JSON.parse(
+        '{"type":"apiKey","__proto__":{"x":1}}',
+      );
+
+      expect(canonicalJson(parsed)).toBe(
+        '{"__proto__":{"x":1},"type":"apiKey"}',
+      );
     });
 
     it('preserves array order and sorts objects inside arrays', () => {

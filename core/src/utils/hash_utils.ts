@@ -34,18 +34,25 @@ function isCanonicalisableRecord(
 }
 
 /**
- * Returns a copy of `value` with object keys sorted and with `undefined` and
- * `null` members removed, so that structurally equal values serialise to the
- * same JSON.
+ * Returns a copy of `value` with object keys sorted and `undefined` members
+ * removed, so that structurally equal values serialise to the same JSON.
+ *
+ * `null` is kept. Dropping it would digest `{a: 1, b: null}` and `{a: 1}`
+ * identically, and this function exists to tell different values apart.
+ * `undefined` is dropped because `JSON.stringify` already omits it.
  */
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(canonicalize);
   }
   if (isCanonicalisableRecord(value)) {
-    const canonical: Record<string, unknown> = {};
+    // A null prototype so that an own `__proto__` key becomes an own property
+    // here. On a plain object it reaches `Object.prototype`'s setter instead
+    // and vanishes, digesting `{"type": "x", "__proto__": {...}}` and
+    // `{"type": "x"}` identically. `JSON.parse` produces exactly that key.
+    const canonical: Record<string, unknown> = Object.create(null);
     for (const key of Object.keys(value).sort()) {
-      if (value[key] === undefined || value[key] === null) {
+      if (value[key] === undefined) {
         continue;
       }
       canonical[key] = canonicalize(value[key]);
@@ -58,10 +65,9 @@ function canonicalize(value: unknown): unknown {
 /**
  * Serialises `value` to JSON that does not depend on property insertion order.
  *
- * Object keys are sorted, members that are `undefined` or `null` are dropped,
- * and array order is preserved. A top-level `undefined` serialises as `null`,
- * which is what `JSON.stringify` already does for an `undefined` array
- * element.
+ * Object keys are sorted, `undefined` members are dropped, and array order is
+ * preserved. A top-level `undefined` serialises as `null`, which is what
+ * `JSON.stringify` already does for an `undefined` array element.
  */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalize(value)) ?? 'null';
@@ -85,9 +91,9 @@ function fnv1a(bytes: Uint8Array, offsetBasis: number): number {
  * security decision.
  *
  * The hash is written out here because neither platform digest runs
- * everywhere this module does. `common.ts` re-exports it into the browser
- * bundle, and it sits on the unconditional path of every authenticated
- * OpenAPI tool call, so it has to work in both runtimes.
+ * everywhere this module does. It sits on the unconditional path of every
+ * authenticated OpenAPI tool call, and `core` ships a browser bundle as well
+ * as a Node one, so it has to work in both runtimes.
  *
  * `node:crypto` offers a synchronous `createHash`, but `build.js` aliases that
  * specifier to `crypto_shim.ts` for the web bundle, and the shim exports only

@@ -219,7 +219,11 @@ describe('OpenAPI tool credential cache over real HTTP', () => {
       credentialKey: 'oauth_b_key',
     });
 
-    // What a completed OAuth2 flow leaves behind: a bearer token per tool.
+    // A bearer token per tool, planted directly. This pins slot isolation, not
+    // the OAuth2 flow: for an oauth2 scheme `AuthHandler` stores what
+    // `OAuth2CredentialExchanger` returns, which is an OAUTH2-typed credential
+    // that `applyCredential` does not put on the wire. A bearer is the shape
+    // that makes the slot each tool reads observable on the request.
     const sessionState: Record<string, unknown> = {
       'temp:oauth_a_key': {
         authType: AuthCredentialTypes.HTTP,
