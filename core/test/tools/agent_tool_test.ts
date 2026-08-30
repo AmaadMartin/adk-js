@@ -1224,6 +1224,34 @@ describe('AgentTool parity with adk-python', () => {
     expect(toolContext.state.toRecord()).not.toHaveProperty(GROUNDING_KEY);
   });
 
+  it('publishes no grounding metadata when the reply breaks the output schema', async () => {
+    const agent = new LlmAgent({
+      name: SUB_AGENT_NAME,
+      outputSchema: {
+        type: Type.OBJECT,
+        properties: {summary: {type: Type.STRING}},
+        required: ['summary'],
+      },
+    });
+    mockSubAgentRun([
+      createEvent({
+        author: SUB_AGENT_NAME,
+        content: {role: 'model', parts: [{text: '{"summary":42}'}]},
+        groundingMetadata: {webSearchQueries: ['who won']},
+      }),
+    ]);
+    const toolContext = parentContext(agent);
+
+    await expect(
+      new AgentTool({agent, propagateGroundingMetadata: true}).runAsync({
+        args: {request: 'go'},
+        toolContext,
+      }),
+    ).rejects.toThrow();
+
+    expect(toolContext.state.toRecord()).not.toHaveProperty(GROUNDING_KEY);
+  });
+
   const SUMMARY_SCHEMA: Schema = {
     type: Type.OBJECT,
     properties: {summary: {type: Type.STRING}},

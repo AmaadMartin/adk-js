@@ -356,6 +356,12 @@ export class AgentTool extends BaseTool {
       return lastErrorMessage;
     }
 
+    // Validation runs first, so a reply that breaks the schema leaves no
+    // grounding metadata behind for the caller to read.
+    const result = outputSchema
+      ? parseJsonWithSchema(outputSchema, mergedText)
+      : mergedText;
+
     if (this.propagateGroundingMetadata && lastGroundingMetadata) {
       toolContext.state.set(
         GROUNDING_METADATA_STATE_KEY,
@@ -363,8 +369,6 @@ export class AgentTool extends BaseTool {
       );
     }
 
-    return outputSchema
-      ? parseJsonWithSchema(outputSchema, mergedText)
-      : mergedText;
+    return result;
   }
 }
