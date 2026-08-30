@@ -163,6 +163,7 @@ export type {
 export {
   generateResponses,
   generateResponsesFromSession,
+  generateResponsesFromSessionFile,
 } from './evaluation/evaluation_generator.js';
 export type {
   GenerateResponsesParams,

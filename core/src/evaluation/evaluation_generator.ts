@@ -6,13 +6,20 @@
 
 import {createUserContent} from '@google/genai';
 import {isEqual} from 'lodash-es';
+import {readFile} from 'node:fs/promises';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent, SingleBeforeToolCallback} from '../agents/llm_agent.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {InMemoryArtifactService} from '../artifacts/in_memory_artifact_service.js';
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {NotFoundError} from '../errors/not_found_error.js';
-import {Event, getFunctionCalls, isFinalResponse} from '../events/event.js';
+import {
+  Event,
+  getFunctionCalls,
+  isFinalResponse,
+  transformToCamelCaseEvent,
+} from '../events/event.js';
 import {Runner} from '../runner/runner.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
@@ -73,6 +80,10 @@ export interface GenerateResponsesParams {
  * a `mock_tool_output` for is answered from the recording instead of executed,
  * so a conversation replays without the real tool.
  *
+ * The agent tree belongs to the caller, and mocking a tool replaces the
+ * `beforeToolCallback` of the agent that owns it for good. Build the tree for
+ * the evaluation when the callback matters after the call.
+ *
  * @returns One filled-in conversation per run, ordered repeat-major: every
  *   conversation of repeat 1, then every conversation of repeat 2. adk-python's
  *   nested loop produces the same order.
@@ -111,8 +122,47 @@ export function generateResponsesFromSession(
   evalDataset: EvalConversation[],
 ): EvalConversation[] {
   return evalDataset.map((conversation) =>
-    processConversationWithSession(session, conversation),
+    processConversationWithEvents(session.events, conversation),
   );
+}
+
+/**
+ * Fills in an eval dataset from a session file, without running the agent.
+ *
+ * Ports the signature of `EvaluationGenerator.generate_responses_from_session`
+ * from adk-python, which names the session by path.
+ *
+ * The file is read as UTF-8. Event keys are accepted in either casing, so a
+ * session adk-python wrote (`invocation_id`, `function_call`) annotates the
+ * same as one adk-js wrote.
+ *
+ * @throws InputValidationError when the file holds no `events` array.
+ */
+export async function generateResponsesFromSessionFile(
+  sessionPath: string,
+  evalDataset: EvalConversation[],
+): Promise<EvalConversation[]> {
+  const events = await readSessionEvents(sessionPath);
+  return evalDataset.map((conversation) =>
+    processConversationWithEvents(events, conversation),
+  );
+}
+
+/** Reads the events of a session file, in either SDK's key casing. */
+async function readSessionEvents(sessionPath: string): Promise<Event[]> {
+  const parsed: unknown = JSON.parse(await readFile(sessionPath, 'utf-8'));
+  const events =
+    typeof parsed === 'object' && parsed !== null && 'events' in parsed
+      ? parsed.events
+      : undefined;
+
+  if (!Array.isArray(events)) {
+    throw new InputValidationError(
+      `Session file \`${sessionPath}\` holds no events array.`,
+    );
+  }
+
+  return events.map(transformToCamelCaseEvent);
 }
 
 /**
@@ -283,21 +333,32 @@ async function processConversation(
   return results;
 }
 
-/** Ports `EvaluationGenerator._process_query_with_session` from adk-python. */
-function processConversationWithSession(
-  session: Session,
+/**
+ * Ports `EvaluationGenerator._process_query_with_session` from adk-python.
+ *
+ * @throws InputValidationError when a turn carries no string query. A dataset
+ *   read from a `*.test.json` file is not typed, so the query is checked here.
+ */
+function processConversationWithEvents(
+  events: Event[],
   conversation: EvalConversation,
 ): EvalConversation {
   return conversation.map((entry) => {
+    if (typeof entry.query !== 'string') {
+      throw new InputValidationError(
+        'Each evaluation entry must contain a string query.',
+      );
+    }
+
     const actualToolUse: ToolUse[] = [];
     let response: string | undefined;
 
-    for (const userEvent of session.events) {
+    for (const userEvent of events) {
       if (!isUserQuery(userEvent, entry.query)) {
         continue;
       }
 
-      for (const event of session.events) {
+      for (const event of events) {
         if (event.invocationId !== userEvent.invocationId) {
           continue;
         }

@@ -12,15 +12,20 @@ import {
   FunctionTool,
   generateResponses,
   generateResponsesFromSession,
+  generateResponsesFromSessionFile,
   InMemoryArtifactService,
   InMemorySessionService,
+  InputValidationError,
   LlmAgent,
   NotFoundError,
   SequentialAgent,
   Session,
 } from '@google/adk';
 import {Part} from '@google/genai';
-import {describe, expect, it, vi} from 'vitest';
+import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod/v4';
 import {ScriptedLlm} from '../workflow/test_helpers.js';
 
@@ -546,36 +551,38 @@ describe('generateResponses', () => {
   });
 });
 
-describe('generateResponsesFromSession', () => {
-  const recordedSession = (): Session =>
-    createSession({
-      id: 'session-1',
-      appName: 'my_app',
-      userId: 'user_1',
-      events: [
-        createEvent({
-          author: 'user',
-          invocationId: 'inv-1',
-          content: {role: 'user', parts: [{text: 'weather?'}]},
-        }),
-        createEvent({
-          author: 'agent',
-          invocationId: 'inv-1',
-          content: {role: 'model', parts: [WEATHER_CALL]},
-        }),
-        createEvent({
-          author: 'agent',
-          invocationId: 'inv-1',
-          content: {role: 'model', parts: [{text: 'It is raining.'}]},
-        }),
-        createEvent({
-          author: 'user',
-          invocationId: 'inv-2',
-          content: {role: 'user', parts: [{text: 'thanks'}]},
-        }),
-      ],
-    });
+/** A session holding one answered turn and one unanswered turn. */
+function recordedSession(): Session {
+  return createSession({
+    id: 'session-1',
+    appName: 'my_app',
+    userId: 'user_1',
+    events: [
+      createEvent({
+        author: 'user',
+        invocationId: 'inv-1',
+        content: {role: 'user', parts: [{text: 'weather?'}]},
+      }),
+      createEvent({
+        author: 'agent',
+        invocationId: 'inv-1',
+        content: {role: 'model', parts: [WEATHER_CALL]},
+      }),
+      createEvent({
+        author: 'agent',
+        invocationId: 'inv-1',
+        content: {role: 'model', parts: [{text: 'It is raining.'}]},
+      }),
+      createEvent({
+        author: 'user',
+        invocationId: 'inv-2',
+        content: {role: 'user', parts: [{text: 'thanks'}]},
+      }),
+    ],
+  });
+}
 
+describe('generateResponsesFromSession', () => {
   it('fills a turn in from the events of the matching invocation', () => {
     const [conversation] = generateResponsesFromSession(recordedSession(), [
       [{query: 'weather?'}],
@@ -679,5 +686,149 @@ describe('generateResponsesFromSession', () => {
     expect(results).toHaveLength(2);
     expect(results[0][0].response).toBe('It is raining.');
     expect(results[1][0].response).toBeUndefined();
+  });
+
+  it('rejects a turn whose query is not a string', () => {
+    // A dataset read from a *.test.json file carries no types.
+    const dataset: EvalConversation[] = JSON.parse('[[{"query": 42}]]');
+
+    expect(() =>
+      generateResponsesFromSession(recordedSession(), dataset),
+    ).toThrow(InputValidationError);
+  });
+});
+
+describe('generateResponsesFromSessionFile', () => {
+  let directory: string;
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'adk-eval-'));
+  });
+
+  afterAll(async () => {
+    await rm(directory, {recursive: true, force: true});
+  });
+
+  /** Writes `contents` to a file of the test's own temporary directory. */
+  async function writeSessionFile(
+    name: string,
+    contents: string,
+  ): Promise<string> {
+    const path = join(directory, name);
+    await writeFile(path, contents, 'utf-8');
+    return path;
+  }
+
+  it('annotates from a session file adk-python wrote', async () => {
+    const path = await writeSessionFile(
+      'python_session.json',
+      JSON.stringify({
+        id: 'session-1',
+        app_name: 'my_app',
+        user_id: 'user_1',
+        events: [
+          {
+            author: 'user',
+            invocation_id: 'inv-1',
+            content: {role: 'user', parts: [{text: 'weather?'}]},
+          },
+          {
+            author: 'agent',
+            invocation_id: 'inv-1',
+            content: {
+              role: 'model',
+              parts: [
+                {
+                  function_call: {
+                    id: 'fc-1',
+                    name: 'get_weather',
+                    args: {city: 'Paris'},
+                  },
+                },
+              ],
+            },
+          },
+          {
+            author: 'agent',
+            invocation_id: 'inv-1',
+            content: {role: 'model', parts: [{text: 'It is raining.'}]},
+          },
+          {
+            author: 'agent',
+            invocation_id: 'inv-2',
+            content: {role: 'model', parts: [{text: 'another turn'}]},
+          },
+        ],
+      }),
+    );
+
+    const [conversation] = await generateResponsesFromSessionFile(path, [
+      [{query: 'weather?'}],
+    ]);
+
+    expect(conversation[0].actual_tool_use).toEqual([
+      {tool_name: 'get_weather', tool_input: {city: 'Paris'}},
+    ]);
+    expect(conversation[0].response).toBe('It is raining.');
+  });
+
+  it('annotates from a session file adk-js wrote', async () => {
+    const path = await writeSessionFile(
+      'js_session.json',
+      JSON.stringify(recordedSession()),
+    );
+
+    const [conversation] = await generateResponsesFromSessionFile(path, [
+      [{query: 'weather?'}],
+    ]);
+
+    expect(conversation[0].actual_tool_use).toEqual([
+      {tool_name: 'get_weather', tool_input: {city: 'Paris'}},
+    ]);
+    expect(conversation[0].response).toBe('It is raining.');
+  });
+
+  it('reads a session file that holds text outside ASCII', async () => {
+    const query = 'Como está o tempo? 🌦️ 天気は？';
+    const answer = 'Está a chover. ☔ 雨です。';
+    const path = await writeSessionFile(
+      'unicode_session.json',
+      JSON.stringify({
+        events: [
+          {
+            author: 'user',
+            invocation_id: 'inv-1',
+            content: {role: 'user', parts: [{text: query}]},
+          },
+          {
+            author: 'agent',
+            invocation_id: 'inv-1',
+            content: {role: 'model', parts: [{text: answer}]},
+          },
+        ],
+      }),
+    );
+
+    const [conversation] = await generateResponsesFromSessionFile(path, [
+      [{query}],
+    ]);
+
+    expect(conversation[0].response).toBe(answer);
+  });
+
+  it('rejects a session file that holds no events array', async () => {
+    const path = await writeSessionFile('no_events.json', '{"id": "s1"}');
+
+    await expect(
+      generateResponsesFromSessionFile(path, [[{query: 'weather?'}]]),
+    ).rejects.toThrow(InputValidationError);
+  });
+
+  it('rejects a session file that does not exist', async () => {
+    const path = join(directory, 'missing.json');
+
+    await expect(
+      generateResponsesFromSessionFile(path, [[{query: 'weather?'}]]),
+    ).rejects.toThrow('ENOENT');
   });
 });
