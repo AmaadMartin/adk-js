@@ -131,10 +131,10 @@ describe('buildAuthHeaders', () => {
     });
 
     it('sends nothing when the credential carries no credentials object', () => {
-      // A credential read from a document can omit the mandatory field.
-      const credential: AuthCredential = JSON.parse(
-        '{"authType": "http", "http": {"scheme": "bearer"}}',
-      );
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.HTTP,
+        http: {scheme: 'bearer'},
+      };
 
       expect(buildAuthHeaders(credential)).toBeUndefined();
     });
@@ -206,10 +206,11 @@ describe('buildAuthHeaders', () => {
         authType: AuthCredentialTypes.API_KEY,
         apiKey: 'test-api-key',
       };
-      // An OpenAPI document can leave `in` out, which the type does not model.
-      const schemeWithoutLocation: AuthScheme = JSON.parse(
-        '{"type": "apiKey", "name": "X-API-Key"}',
-      );
+      // `openapi-types` makes `in` mandatory, but a document can omit it.
+      const schemeWithoutLocation = {
+        type: 'apiKey',
+        name: 'X-API-Key',
+      } as unknown as AuthScheme;
 
       expect(buildAuthHeaders(credential, schemeWithoutLocation)).toEqual({
         'X-API-Key': 'test-api-key',

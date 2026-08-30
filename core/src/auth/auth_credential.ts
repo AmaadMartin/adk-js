@@ -25,7 +25,13 @@ export interface HttpAuth {
    * Examples: 'basic', 'bearer'
    */
   scheme: string;
-  credentials: HttpCredentials;
+  /**
+   * Optional because a credential deserialized from a document can omit it.
+   * adk-python declares it mandatory and pydantic rejects such a document at
+   * parse time; a TypeScript interface enforces nothing at runtime, so the
+   * readers guard instead.
+   */
+  credentials?: HttpCredentials;
 
   /**
    * Additional HTTP headers to include in the request.

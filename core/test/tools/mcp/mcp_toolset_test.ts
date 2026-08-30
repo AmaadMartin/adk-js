@@ -600,7 +600,7 @@ describe('MCPToolset', () => {
     it('rejects options that carry no connection params', () => {
       // A configuration document read at runtime can omit the field that
       // TypeScript makes mandatory.
-      const options: MCPToolsetOptions = JSON.parse('{"prefix": "srv"}');
+      const options = {prefix: 'srv'} as unknown as MCPToolsetOptions;
 
       expect(() => new MCPToolset(options)).toThrow(
         'Missing connection params in MCPToolset.',
@@ -608,7 +608,7 @@ describe('MCPToolset', () => {
     });
 
     it('rejects a missing argument', () => {
-      const options: MCPToolsetOptions = JSON.parse('null');
+      const options = null as unknown as MCPToolsetOptions;
 
       expect(() => new MCPToolset(options)).toThrow(
         'Missing connection params in MCPToolset.',
