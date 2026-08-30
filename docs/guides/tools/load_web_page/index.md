@@ -79,15 +79,14 @@ against the original hostname.
 
 ## What is refused
 
-| Input                                | Reason                                                                                                                                                               |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `file:///etc/passwd`                 | Only `http:` and `https:` are fetched.                                                                                                                               |
-| `http://example.com:99999/`          | The port is outside 0-65535.                                                                                                                                         |
-| `http://localhost:8080/`             | `localhost` and `*.localhost` are blocked.                                                                                                                           |
-| `http://169.254.169.254/`            | Link-local, private, loopback, shared and reserved ranges are blocked.                                                                                               |
-| `http://[64:ff9b::169.254.169.254]/` | An IPv6 address that wraps a blocked IPv4 address is blocked. The NAT64, IPv4-mapped and IPv4-compatible forms are unwrapped and the address inside them is checked. |
-| `http://[2002:5db8:d822::]/`         | The 6to4 prefix `2002::/16` is refused as a whole, even when it wraps a public IPv4 address.                                                                         |
-| A redirect to any of the above       | Redirects are never followed; a 3xx status returns the failure string.                                                                                               |
-| A body above 10 MiB                  | The attempt is abandoned to bound memory.                                                                                                                            |
+| Input                                | Reason                                                                                                                              |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `file:///etc/passwd`                 | Only `http:` and `https:` are fetched.                                                                                              |
+| `http://example.com:99999/`          | The port is outside 0-65535.                                                                                                        |
+| `http://localhost:8080/`             | `localhost` and `*.localhost` are blocked.                                                                                          |
+| `http://169.254.169.254/`            | Link-local, private, loopback, shared and reserved ranges are blocked.                                                              |
+| `http://[64:ff9b::169.254.169.254]/` | An IPv6 address that wraps a blocked IPv4 is blocked, and every 6to4 address is refused. NAT64 and IPv4-mapped forms are unwrapped. |
+| A redirect to any of the above       | Redirects are never followed; a 3xx status returns the failure string.                                                              |
+| A body above 10 MiB                  | The attempt is abandoned to bound memory.                                                                                           |
 
 Every one of these returns `Failed to fetch url: <url>`.
