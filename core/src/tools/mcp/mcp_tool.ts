@@ -26,10 +26,6 @@ const MCP_TOOL_ERROR = 'MCP_TOOL_ERROR';
 /** The `_meta` key MCP Apps declare their user interface under. */
 const UI_META_KEY = 'ui';
 
-function isString(value: unknown): value is string {
-  return typeof value === 'string';
-}
-
 /**
  * The visibility list an MCP server declares under `_meta.ui.visibility`.
  *
@@ -47,7 +43,7 @@ function readUiVisibility(meta: Tool['_meta']): string[] {
     return [];
   }
   const entries: unknown[] = declared;
-  return entries.every(isString) ? entries : [];
+  return entries.every((entry) => typeof entry === 'string') ? entries : [];
 }
 
 /**
