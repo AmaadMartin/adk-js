@@ -44,7 +44,6 @@ export interface JsonRequest {
  */
 export class ApiTransport {
   private client?: AuthClient;
-  private quotaProject?: string;
 
   /**
    * @param serviceAccount Key the requests are signed with. Falls back to
@@ -57,6 +56,11 @@ export class ApiTransport {
    * Default Credentials need it; a service account key does not, because the
    * key already names its project.
    *
+   * Only the credential's own quota project counts. The ambient default
+   * project that `GoogleAuth.getProjectId()` reports is a different value, and
+   * billing an unnamed project to the caller is not this client's decision, so
+   * the configured project is the fallback.
+   *
    * @throws {Error} If the credentials cannot be resolved.
    */
   async quotaProjectHeaders(
@@ -65,17 +69,18 @@ export class ApiTransport {
     if (this.serviceAccount) {
       return {};
     }
-    await this.resolveClient();
-    return {'x-goog-user-project': this.quotaProject ?? fallbackProject};
+    const client = await this.resolveClient();
+    return {'x-goog-user-project': client.quotaProjectId ?? fallbackProject};
   }
 
   /**
-   * Returns a bearer token for the configured credentials.
+   * Fails when the credentials yield no token. adk-python reports that case
+   * with its own message rather than letting the API answer 401. The check runs
+   * once per client, where the client is built, not once per request.
    *
    * @throws {Error} If the credentials cannot be resolved or yield no token.
    */
-  async getAccessToken(): Promise<string> {
-    const client = await this.resolveClient();
+  private async assertHasToken(client: AuthClient): Promise<void> {
     let token: string | null | undefined;
     try {
       token = (await client.getAccessToken()).token;
@@ -85,46 +90,46 @@ export class ApiTransport {
     if (!token) {
       throw new Error(NO_CREDENTIALS_MESSAGE);
     }
-    return token;
   }
 
   /**
    * Performs one authenticated JSON request and returns the decoded body.
    *
+   * The auth client signs, sends and decodes the call, so no bearer header is
+   * built here. `validateStatus` keeps a failing status a value instead of a
+   * thrown error, so the mapping below reads the status in one place.
+   *
    * @throws {InputValidationError} If the API answers 400 or 404.
    * @throws {Error} If the credentials, the transport or the body fail.
    */
   async fetchJson(request: JsonRequest): Promise<Record<string, unknown>> {
-    const token = await this.getAccessToken();
+    const client = await this.resolveClient();
 
-    let response: Awaited<ReturnType<typeof globalThis.fetch>>;
+    let response: {status: number; statusText?: string; data: unknown};
     try {
-      response = await globalThis.fetch(request.url, {
+      response = await client.request<unknown>({
+        url: request.url,
         method: request.method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          ...request.headers,
-        },
-        body:
-          request.body === undefined ? undefined : JSON.stringify(request.body),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        data: request.body,
+        headers: {'Content-Type': 'application/json', ...request.headers},
+        timeout: REQUEST_TIMEOUT_MS,
+        responseType: 'json',
+        validateStatus: () => true,
       });
     } catch (error: unknown) {
       throw new Error(`Request error: ${formatError(error)}`);
     }
 
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       if (response.status === 400 || response.status === 404) {
         throw new InputValidationError(request.invalidRequestMessage);
       }
       throw new Error(
-        `Request error: ${response.status} ${response.statusText}`,
+        `Request error: ${response.status} ${response.statusText ?? ''}`.trim(),
       );
     }
 
-    const body = await response.json().catch(() => undefined);
-    const decoded = asJsonObject(body);
+    const decoded = asJsonObject(response.data);
     if (!decoded) {
       throw new Error(`Expected a JSON object from ${request.url}.`);
     }
@@ -136,24 +141,25 @@ export class ApiTransport {
       return this.client;
     }
     if (this.serviceAccount) {
-      this.client = new JWT({
+      const jwt = new JWT({
         email: this.serviceAccount.clientEmail,
         key: this.serviceAccount.privateKey,
         scopes: [CLOUD_PLATFORM_SCOPE],
       });
-      return this.client;
+      await this.assertHasToken(jwt);
+      this.client = jwt;
+      return jwt;
     }
+    let client: AuthClient;
     try {
       const auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
-      const client = await auth.getClient();
-      this.quotaProject =
-        client.quotaProjectId ??
-        (await auth.getProjectId().catch(() => undefined));
-      this.client = client;
-      return client;
+      client = await auth.getClient();
     } catch (error: unknown) {
       throw credentialsError(error);
     }
+    await this.assertHasToken(client);
+    this.client = client;
+    return client;
   }
 }
 

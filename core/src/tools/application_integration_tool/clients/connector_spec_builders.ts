@@ -69,21 +69,20 @@ const OPENAPI_SCHEMA_TYPES = new Set<string>([
  * record which connector call an operation stands for, so a toolset reading
  * the generated spec can rebuild it.
  */
-export interface ConnectorOperationExtensions {
+export interface ConnectorExtensions {
   'x-operation': string;
   'x-entity'?: string;
   'x-action'?: string;
 }
 
 /** One generated path in the connector spec. */
-export type ConnectorPathItem =
-  OpenAPIV3.PathItemObject<ConnectorOperationExtensions>;
+export type ConnectorPathItem = OpenAPIV3.PathItemObject<ConnectorExtensions>;
 
 /**
  * The generated connector OpenAPI document. `components.schemas` is required,
  * because every generated operation refers to a schema recorded there.
  */
-export interface ConnectorSpec extends OpenAPIV3.Document<ConnectorOperationExtensions> {
+export interface ConnectorSpec extends OpenAPIV3.Document<ConnectorExtensions> {
   components: OpenAPIV3.ComponentsObject & {
     schemas: Record<string, OpenAPIV3.ReferenceObject | OpenAPIV3.SchemaObject>;
   };
@@ -286,33 +285,6 @@ function getOperation(context: EntityOperationContext): ConnectorPathItem {
   });
 }
 
-/** Builds the path item that creates a record of an entity. */
-function createOperation(context: EntityOperationContext): ConnectorPathItem {
-  const {entity} = context;
-  return entityOperation('create', 'CREATE_ENTITY', context, {
-    summary: `Creates a new ${entity}`,
-    description: `Creates a new ${entity}.`,
-  });
-}
-
-/** Builds the path item that updates a record of an entity. */
-function updateOperation(context: EntityOperationContext): ConnectorPathItem {
-  const {entity} = context;
-  return entityOperation('update', 'UPDATE_ENTITY', context, {
-    summary: `Updates the ${entity}`,
-    description: `Updates the ${entity}.`,
-  });
-}
-
-/** Builds the path item that deletes a record of an entity. */
-function deleteOperation(context: EntityOperationContext): ConnectorPathItem {
-  const {entity} = context;
-  return entityOperation('delete', 'DELETE_ENTITY', context, {
-    summary: `Delete the ${entity}`,
-    description: `Deletes the ${entity}.`,
-  });
-}
-
 /** Builds the request schema of a create-entity call. */
 function createOperationRequest(entity: string): OpenAPIV3.SchemaObject {
   return {
@@ -412,9 +384,39 @@ interface EntityOperationBuilder {
  */
 export const ENTITY_OPERATIONS: ReadonlyMap<string, EntityOperationBuilder> =
   new Map<string, EntityOperationBuilder>([
-    ['create', {request: createOperationRequest, operation: createOperation}],
-    ['update', {request: updateOperationRequest, operation: updateOperation}],
-    ['delete', {request: deleteOperationRequest, operation: deleteOperation}],
+    [
+      'create',
+      {
+        request: createOperationRequest,
+        operation: (context) =>
+          entityOperation('create', 'CREATE_ENTITY', context, {
+            summary: `Creates a new ${context.entity}`,
+            description: `Creates a new ${context.entity}.`,
+          }),
+      },
+    ],
+    [
+      'update',
+      {
+        request: updateOperationRequest,
+        operation: (context) =>
+          entityOperation('update', 'UPDATE_ENTITY', context, {
+            summary: `Updates the ${context.entity}`,
+            description: `Updates the ${context.entity}.`,
+          }),
+      },
+    ],
+    [
+      'delete',
+      {
+        request: deleteOperationRequest,
+        operation: (context) =>
+          entityOperation('delete', 'DELETE_ENTITY', context, {
+            summary: `Delete the ${context.entity}`,
+            description: `Deletes the ${context.entity}.`,
+          }),
+      },
+    ],
     ['list', {request: listOperationRequest, operation: listOperation}],
     ['get', {request: getOperationRequest, operation: getOperation}],
   ]);
@@ -552,7 +554,7 @@ function connectorOperation(options: {
   summary: string;
   description: string;
   operationId: string;
-  extensions: ConnectorOperationExtensions;
+  extensions: ConnectorExtensions;
   requestRef: string;
   /** Defaults to the shared `ExecuteConnection` response schema. */
   responseRef?: string;
