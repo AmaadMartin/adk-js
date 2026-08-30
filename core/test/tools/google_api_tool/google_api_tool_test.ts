@@ -7,11 +7,24 @@
 import {
   AuthCredentialTypes,
   Context,
+  createSession,
   GoogleApiTool,
+  InvocationContext,
+  PluginManager,
   RestApiTool,
   ServiceAccount,
 } from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
 
 function createRestApiToolDouble(): RestApiTool {
   return new RestApiTool(
@@ -98,7 +111,7 @@ describe('GoogleApiTool', () => {
     const tool = new GoogleApiTool(restApiTool);
     const request = {
       args: {param1: 'value1'},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     };
 
     await expect(tool.runAsync(request)).resolves.toEqual({result: 'success'});

@@ -10,7 +10,10 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -24,6 +27,16 @@ import {
   prepareRequestBody,
   prepareRequestParams,
 } from '../../../src/tools/openapi_tool/rest_api_tool.js';
+
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
 
 describe('RestApiTool', () => {
   afterEach(() => {
@@ -107,7 +120,7 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.anything(),
@@ -142,7 +155,7 @@ describe('RestApiTool', () => {
 
     await tool.runAsync({
       args: {'developer-token': 'request-value'},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(

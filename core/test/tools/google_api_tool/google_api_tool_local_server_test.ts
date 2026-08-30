@@ -4,11 +4,42 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, GoogleApiTool, RestApiTool} from '@google/adk';
+import {
+  Context,
+  createSession,
+  GoogleApiTool,
+  InvocationContext,
+  PluginManager,
+  RestApiTool,
+} from '@google/adk';
 import {createServer, IncomingHttpHeaders, Server} from 'node:http';
-import {AddressInfo} from 'node:net';
 import {OpenAPIV3} from 'openapi-types';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+
+/** Binds the server to a free loopback port and reports which one. */
+function listenOnFreePort(server: Server): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        reject(new Error('the server did not bind to a TCP port'));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+}
+
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
 
 /**
  * Drives `GoogleApiTool` against a real HTTP server over a real `fetch`, so
@@ -17,7 +48,7 @@ import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 describe('GoogleApiTool against a local server', () => {
   let server: Server;
   let baseUrl: string;
-  let receivedHeaders: IncomingHttpHeaders;
+  let receivedHeaders: IncomingHttpHeaders = {};
 
   beforeAll(async () => {
     server = createServer((request, response) => {
@@ -26,11 +57,7 @@ describe('GoogleApiTool against a local server', () => {
       response.end(JSON.stringify({items: ['calendar-1']}));
     });
 
-    await new Promise<void>((resolve) =>
-      server.listen(0, '127.0.0.1', resolve),
-    );
-    const {port} = server.address() as AddressInfo;
-    baseUrl = `http://127.0.0.1:${port}`;
+    baseUrl = `http://127.0.0.1:${await listenOnFreePort(server)}`;
   });
 
   afterAll(async () => {
@@ -59,7 +86,7 @@ describe('GoogleApiTool against a local server', () => {
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(receivedHeaders['developer-token']).toBe('local-token');
@@ -79,7 +106,7 @@ describe('GoogleApiTool against a local server', () => {
 
     await tool.runAsync({
       args: {'developer-token': 'from-request'},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(receivedHeaders['developer-token']).toBe('from-request');
