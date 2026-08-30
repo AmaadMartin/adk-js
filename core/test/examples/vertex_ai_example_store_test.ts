@@ -372,6 +372,32 @@ describe('VertexAiExampleStore', () => {
     ]);
   });
 
+  // The lower score comes first, so a mutation that sorts or reverses the
+  // surviving results fails here.
+  it('returns the surviving results in response order', async () => {
+    const store = storeWith({
+      results: [
+        similarExample({
+          similarityScore: 0.6,
+          searchKey: 'first',
+          expectedContents: [{role: 'model', parts: [{text: 'one'}]}],
+        }),
+        similarExample({
+          similarityScore: 0.9,
+          searchKey: 'second',
+          expectedContents: [{role: 'model', parts: [{text: 'two'}]}],
+        }),
+      ],
+    });
+
+    const examples = await store.getExamples('anything');
+
+    expect(examples.map((example) => example.input.parts?.[0].text)).toEqual([
+      'first',
+      'second',
+    ]);
+  });
+
   it('drops a result whose similarity score is omitted', async () => {
     const store = storeWith({
       results: [
