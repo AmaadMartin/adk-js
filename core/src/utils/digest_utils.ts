@@ -58,31 +58,41 @@ function encodeObject(value: object, ancestors: Set<object>): string {
 }
 
 /**
+ * Returns a short SHA-256 digest of a text.
+ *
+ * Web Crypto is used rather than `node:crypto` because this module reaches the
+ * browser bundle, where `node:crypto` is aliased to a shim.
+ *
+ * @param text The text to digest.
+ * @returns The first {@link DIGEST_LENGTH} hex characters of the digest.
+ * @throws Error If the Web Crypto API is unavailable.
+ */
+export async function digestText(text: string): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    throw new Error(
+      'digestText: the Web Crypto API (globalThis.crypto.subtle) is not ' +
+        'available in this environment.',
+    );
+  }
+  const digest = await subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, DIGEST_LENGTH);
+}
+
+/**
  * Returns a short, stable SHA-256 digest of a JSON-like value.
  *
  * The digest is computed over {@link canonicalJson}, so it does not depend on
  * key insertion order. It is a process-independent identifier, not a wire
  * contract: nothing outside this repository reads it.
  *
- * Web Crypto is used rather than `node:crypto` because this module reaches the
- * browser bundle, where `node:crypto` is aliased to a shim.
- *
  * @param value The value to digest.
  * @returns The first {@link DIGEST_LENGTH} hex characters of the digest.
  * @throws Error If the Web Crypto API is unavailable.
  */
 export async function stableDigest(value: unknown): Promise<string> {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle) {
-    throw new Error(
-      'stableDigest: the Web Crypto API (globalThis.crypto.subtle) is not ' +
-        'available in this environment.',
-    );
-  }
-  const bytes = new TextEncoder().encode(canonicalJson(value));
-  const digest = await subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-    .slice(0, DIGEST_LENGTH);
+  return digestText(canonicalJson(value));
 }

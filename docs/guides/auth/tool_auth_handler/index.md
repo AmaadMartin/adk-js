@@ -86,9 +86,17 @@ scheme does the same, which is how a tool loaded from a configuration document
 names its slot. An explicit option wins over the credential, and the credential
 wins over the scheme.
 
-A credential stored by an earlier release, under a key derived from the scheme
-type alone, is still found. The handler copies it to the derived key on the
-first read and leaves the old entry in place.
+A credential stored under an older key is still found. There are two older key
+schemes, and the handler reads both: one derived from the scheme and the
+credential the way adk-python derives it, and one derived from the scheme type
+alone, which earlier adk-js releases wrote. The handler copies the first hit to
+the current key and leaves the old entry in place, so a rollback still finds
+it.
+
+The handler copies the scheme and the credential you pass it. Mutating either
+object afterwards changes nothing the handler does, because the storage key is
+derived from them: a mutation would otherwise re-point the handler at another
+slot in the middle of an invocation.
 
 ## OAuth2 and OpenID Connect
 
@@ -127,6 +135,25 @@ const handler = new ToolAuthHandler(context, authScheme, authCredential, {
 An injected store replaces session state entirely; the handler writes nothing
 to `context.state`.
 
+## When the exchange fails
+
+An exchange reaches the network, so it fails for reasons the agent cannot fix:
+an unreachable metadata server, expired application default credentials, a
+token endpoint that refused the request. The handler logs the failure at error
+level and returns `state: 'done'` with no credential:
+
+```ts
+const result = await handler.prepareAuthCredentials();
+// result.state === 'done', result.authCredential === undefined
+```
+
+The tool then calls the API unauthenticated and reports the API's own
+rejection. That is deliberate. Rejecting here would abort the whole agent turn,
+and a 401 from the API tells the model more than a transport error does. Read
+`authCredential` before you use it, and treat `undefined` as unauthenticated.
+The logged message carries the error text only, never the credential or the
+storage key.
+
 ## Limitations
 
 - **Experimental.** `ToolAuthHandler` is marked `@experimental` and its API
@@ -135,6 +162,6 @@ to `context.state`.
   credential wherever the session service keeps state. The key is a digest
   for this reason: a readable key would carry the client secret into the
   store and into anything that logs a key.
-- **An exchange failure propagates.** The handler does not swallow it, so the
-  tool call fails with the exchanger's error rather than reaching the API
-  unauthenticated.
+- **A validation failure still propagates.** Only the exchange is guarded. A
+  missing `clientId` or `clientSecret` rejects the call, because no API request
+  can succeed without them.
