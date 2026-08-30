@@ -5,6 +5,7 @@
  */
 
 import {
+  AuthCredential,
   AuthCredentialTypes,
   Context,
   createSession,
@@ -93,6 +94,24 @@ function createTool(overrides: Partial<IntegrationConnectorToolOptions> = {}): {
     ...overrides,
   });
   return {tool, restApiTool};
+}
+
+function bearer(token: string): AuthCredential {
+  return {
+    authType: AuthCredentialTypes.HTTP,
+    http: {scheme: 'bearer', credentials: {token}},
+  };
+}
+
+/** Reads the dynamic auth config the delegated call carried on `callIndex`. */
+function sentDynamicAuthConfig(
+  delegated: ReturnType<typeof vi.fn>,
+  callIndex: number,
+): unknown {
+  const [{args}] = delegated.mock.calls[callIndex] as [
+    {args: Record<string, unknown>},
+  ];
+  return args['dynamic_auth_config'];
 }
 
 /** A tool context with empty session state. */
@@ -229,6 +248,39 @@ describe('IntegrationConnectorTool', () => {
       // The caller's object is the one recorded on the function-call event, so
       // the access token must never reach it.
       expect(args).toEqual({page_size: 10});
+    });
+  });
+
+  describe('withAuthCredential', () => {
+    it('copies the tool and replaces only the credential', async () => {
+      const restApiTool = createWrappedTool();
+      const delegated = vi.fn().mockResolvedValue({ok: true});
+      restApiTool.runAsync = delegated;
+      const {tool} = createTool({
+        restApiTool,
+        authScheme: BEARER_SCHEME,
+        authCredential: bearer('raw-token'),
+      });
+
+      const copy = tool.withAuthCredential(bearer('exchanged-token'));
+
+      expect(copy).not.toBe(tool);
+      expect(copy.name).toBe(tool.name);
+      expect(copy.description).toBe(tool.description);
+      await copy.runAsync({args: {}, toolContext: createContext()});
+      await tool.runAsync({args: {}, toolContext: createContext()});
+      expect(sentDynamicAuthConfig(delegated, 0)).toEqual({
+        'oauth2_auth_code_flow.access_token': 'exchanged-token',
+      });
+      expect(sentDynamicAuthConfig(delegated, 1)).toEqual({
+        'oauth2_auth_code_flow.access_token': 'raw-token',
+      });
+    });
+
+    it('returns itself when it authenticates no end user', () => {
+      const {tool} = createTool();
+
+      expect(tool.withAuthCredential(bearer('exchanged-token'))).toBe(tool);
     });
   });
 

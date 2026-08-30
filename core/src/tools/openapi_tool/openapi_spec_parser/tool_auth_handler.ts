@@ -42,7 +42,8 @@ export interface AuthPreparationResult {
  * {@link ToolAuthHandler} derives a per-identity key instead, so that one tool
  * cannot read another tool's auth response. This constant remains for a caller
  * that must name a key before it knows the credential, such as
- * `OpenAPIToolset` when it builds its `AuthConfig`.
+ * `OpenAPIToolset` or `ApplicationIntegrationToolset` when it builds its
+ * `AuthConfig`.
  */
 export const DEFAULT_OPENAPI_CREDENTIAL_KEY = 'default_openapi_key';
 

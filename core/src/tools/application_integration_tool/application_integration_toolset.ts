@@ -11,6 +11,7 @@ import {
   AuthCredentialTypes,
 } from '../../auth/auth_credential.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
+import {AuthConfig} from '../../auth/auth_tool.js';
 import {InputValidationError} from '../../errors/input_validation_error.js';
 import {experimental} from '../../utils/experimental.js';
 import {asJsonObject} from '../../utils/json_utils.js';
@@ -19,6 +20,7 @@ import {parseServiceAccountCredential} from '../../utils/service_account_utils.j
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {OpenApiSpecParser} from '../openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
+import {DEFAULT_OPENAPI_CREDENTIAL_KEY} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 import {OpenAPIToolset} from '../openapi_tool/openapi_toolset.js';
 import {createRestApiTool} from '../openapi_tool/rest_api_tool.js';
 import {CLOUD_PLATFORM_SCOPE} from './clients/api_transport.js';
@@ -126,6 +128,11 @@ export class ApplicationIntegrationToolset extends BaseToolset {
     authScheme: OpenAPIV3.SecuritySchemeObject;
     authCredential: AuthCredential;
   };
+  /**
+   * End-user auth this toolset asks a host to prepare, present only when the
+   * caller supplied an `authScheme`.
+   */
+  private readonly authConfig?: AuthConfig;
   private initialization?: Promise<void>;
   private openapiToolset?: OpenAPIToolset;
   private tools: IntegrationConnectorTool[] = [];
@@ -161,8 +168,28 @@ export class ApplicationIntegrationToolset extends BaseToolset {
         },
       },
     };
+    this.authConfig = options.authScheme
+      ? {
+          authScheme: options.authScheme,
+          rawAuthCredential: options.authCredential,
+          credentialKey:
+            options.credentialKey ?? DEFAULT_OPENAPI_CREDENTIAL_KEY,
+        }
+      : undefined;
     this.options = options;
     this.integrationClient = new IntegrationClient(options);
+  }
+
+  /**
+   * Returns the auth config built from the `authScheme`, `authCredential` and
+   * `credentialKey` options, or `undefined` when no auth scheme was given.
+   *
+   * The object is the toolset's own, so a host can fill in
+   * `exchangedAuthCredential` before it calls {@link getTools}.
+   */
+  @experimental
+  getAuthConfig(): AuthConfig | undefined {
+    return this.authConfig;
   }
 
   @experimental
@@ -173,7 +200,14 @@ export class ApplicationIntegrationToolset extends BaseToolset {
       return this.openapiToolset.getTools(context);
     }
 
-    return this.tools.filter((tool) => this.isToolSelected(tool, context));
+    const selected = this.tools.filter((tool) =>
+      this.isToolSelected(tool, context),
+    );
+    const exchanged = this.authConfig?.exchangedAuthCredential;
+    if (!exchanged) {
+      return selected;
+    }
+    return selected.map((tool) => tool.withAuthCredential(exchanged));
   }
 
   /**

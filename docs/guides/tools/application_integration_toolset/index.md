@@ -100,6 +100,38 @@ To let the connector act as the end user, pass `authScheme` and
 not, the toolset drops both and logs a warning, because the connector rejects a
 credential it was not configured to accept.
 
+### The exchanged end-user credential
+
+An OAuth2 `authCredential` holds a client id and a client secret. The connector
+wants an access token, so somebody must run the consent round trip and hand the
+result back. `getAuthConfig()` is that channel.
+
+It returns the toolset's own `AuthConfig`, built from `authScheme`,
+`authCredential` and `credentialKey`. It returns `undefined` when you passed no
+`authScheme`. Write `exchangedAuthCredential` onto it in place, then call
+`getTools()`.
+
+```ts
+import {AuthCredentialTypes} from '@google/adk';
+
+toolset.getAuthConfig()!.exchangedAuthCredential = {
+  authType: AuthCredentialTypes.HTTP,
+  http: {scheme: 'bearer', credentials: {token: endUserAccessToken}},
+};
+
+// Each tool is now a copy that calls with the exchanged credential.
+const tools = await toolset.getTools();
+```
+
+The toolset never mutates the tools it stores. Those keep the raw credential, so
+a later exchange starts from the credential you configured and not from a token
+that has since expired. Clear `exchangedAuthCredential` and `getTools()` hands
+back the stored tools again.
+
+Two cases return the stored tool unchanged. A connection with
+`authOverrideEnabled` off has no end-user scheme left to override. Integration
+mode delegates to `OpenAPIToolset` and never reads this config.
+
 ## Failure modes
 
 - Neither mode configured — `InputValidationError` from the constructor.
