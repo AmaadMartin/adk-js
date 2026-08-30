@@ -272,6 +272,7 @@ function buildResponseEvent(
       name: tool.name,
       response: responseResult,
       id: toolContext.functionCallId,
+      ...(tool.responseScheduling && {scheduling: tool.responseScheduling}),
     },
   };
 
@@ -698,6 +699,7 @@ export async function handleFunctionCallList({
         id: toolContext.functionCallId,
         name: tool.name,
         response: functionResponse,
+        ...(tool.responseScheduling && {scheduling: tool.responseScheduling}),
       },
     });
 
