@@ -371,7 +371,7 @@ describe('generateResponses', () => {
     expect(calls).toEqual([{city: 'Paris'}]);
   });
 
-  it('ends the walk at a non-LLM agent, as adk-python does', async () => {
+  it('mocks a tool owned by an LLM agent under a workflow agent', async () => {
     const calls: Array<{city: string}> = [];
     const child = scriptedAgent(
       'child',
@@ -399,8 +399,8 @@ describe('generateResponses', () => {
       repeatNum: 1,
     });
 
-    expect(child.beforeToolCallback).toBeUndefined();
-    expect(calls).toEqual([{city: 'Paris'}]);
+    expect(child.beforeToolCallback).toBeDefined();
+    expect(calls).toEqual([]);
     expect(conversation[0].response).toBe('done');
   });
 

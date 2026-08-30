@@ -185,23 +185,23 @@ function createMockToolCallback(
 /**
  * Installs `callback` on every LLM agent that owns a mocked tool.
  *
- * Ports `EvaluationGenerator.apply_before_tool_callback` from adk-python,
- * including its two observable traits: the callback replaces any
- * `beforeToolCallback` the agent already carried, and a non-LLM agent ends the
- * walk, so a tree that parents its LLM agents under a workflow is not mocked.
+ * Ports `EvaluationGenerator.apply_before_tool_callback` from adk-python. The
+ * callback replaces any `beforeToolCallback` the agent already carried.
+ *
+ * The walk continues through a non-LLM agent, where adk-python stops. A
+ * workflow agent parenting the LLM agents is the normal shape in adk-js, and
+ * stopping there runs the real tool for a call the dataset mocks.
  */
 async function applyMockToolCallback(
   agent: BaseAgent,
   callback: SingleBeforeToolCallback,
   mockedToolNames: Set<string>,
 ): Promise<void> {
-  if (!isLlmAgent(agent)) {
-    return;
-  }
-
-  const tools = await agent.canonicalTools();
-  if (tools.some((tool) => mockedToolNames.has(tool.name))) {
-    agent.beforeToolCallback = callback;
+  if (isLlmAgent(agent)) {
+    const tools = await agent.canonicalTools();
+    if (tools.some((tool) => mockedToolNames.has(tool.name))) {
+      agent.beforeToolCallback = callback;
+    }
   }
 
   for (const subAgent of agent.subAgents) {
