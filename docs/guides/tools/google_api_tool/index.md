@@ -96,9 +96,13 @@ for the run, or configure a service account instead.
 ## Calling as a service account
 
 Some Google APIs are called by an application rather than by a person. Give
-`GoogleApiTool` a `ServiceAccount` and it attaches an HTTP bearer scheme plus a
-`SERVICE_ACCOUNT` credential, which the exchanger turns into an access token at
-call time.
+`GoogleApiTool` a `ServiceAccount` and it attaches an OAuth2 client-credentials
+scheme plus a `SERVICE_ACCOUNT` credential, which the exchanger turns into an
+access token at call time. The client-credentials flow is what marks the
+credential non-interactive, so the tool exchanges the service account it
+already holds instead of asking the client to authorize one. Its token URL is a
+placeholder: the exchange uses Application Default Credentials or a JWT
+assertion and never calls that endpoint.
 
 ```ts
 import {GoogleApiTool, ServiceAccount} from '@google/adk';

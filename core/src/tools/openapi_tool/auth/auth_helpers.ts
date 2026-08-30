@@ -83,26 +83,40 @@ export function createBearerScheme(): OpenAPIV3.SecuritySchemeObject {
 }
 
 /**
+ * Placeholder token URL for the service account client-credentials scheme.
+ *
+ * The service account exchange obtains its own token from Application Default
+ * Credentials or a JWT assertion, so it never calls this endpoint. The OAuth2
+ * client-credentials model requires a token URL, and the mTLS host form is the
+ * one Google API endpoints expect.
+ */
+const SERVICE_ACCOUNT_TOKEN_URL = 'https://oauth2.mtls.googleapis.com/token';
+
+/**
  * Builds the auth scheme and auth credential for a Google service account.
  *
- * The `JWT` bearer scheme matches adk-python's
- * `service_account_scheme_credential`, and its sibling
- * `service_account_dict_to_scheme_credential` builds the same one. The scheme
- * is descriptive here rather than functional: `AutoAuthCredentialExchanger`
- * picks the exchanger from `authCredential.authType`, and `applyCredential`
- * reads the exchanged `credential.http.credentials.token`, so neither consults
- * the scheme. Keep it aligned with Python, because it is configuration a
- * caller can observe.
+ * The scheme is an OAuth2 client-credentials flow, matching adk-python's
+ * `_service_account_auth_scheme`. That shape marks the credential
+ * non-interactive: a credential manager that keys off the flow only
+ * auto-exchanges a raw service account when the scheme is OAuth2 or OIDC
+ * client-credentials. An HTTP bearer scheme reads as interactive, so the tool
+ * asks the client to authorize instead of exchanging the service account it
+ * already holds. After exchange the credential is an HTTP bearer token.
  *
  * @param config The service account configuration to exchange at call time.
  * @returns The auth scheme and the auth credential to configure a tool with.
  */
 export function serviceAccountSchemeCredential(config: ServiceAccount): {
-  authScheme: OpenAPIV3.HttpSecurityScheme;
+  authScheme: OpenAPIV3.OAuth2SecurityScheme;
   authCredential: AuthCredential;
 } {
   return {
-    authScheme: {type: 'http', scheme: 'bearer', bearerFormat: 'JWT'},
+    authScheme: {
+      type: 'oauth2',
+      flows: {
+        clientCredentials: {tokenUrl: SERVICE_ACCOUNT_TOKEN_URL, scopes: {}},
+      },
+    },
     authCredential: {
       authType: AuthCredentialTypes.SERVICE_ACCOUNT,
       serviceAccount: config,

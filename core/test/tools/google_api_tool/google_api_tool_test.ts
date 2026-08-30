@@ -141,7 +141,7 @@ describe('GoogleApiTool', () => {
   });
 
   describe('configureSaAuth', () => {
-    it('configures a bearer scheme and a service account credential', () => {
+    it('configures a client-credentials scheme and a service account credential', () => {
       const restApiTool = createRestApiToolDouble();
       const configureAuthScheme = vi.spyOn(restApiTool, 'configureAuthScheme');
       const configureAuthCredential = vi.spyOn(
@@ -153,9 +153,13 @@ describe('GoogleApiTool', () => {
       tool.configureSaAuth(SERVICE_ACCOUNT);
 
       expect(configureAuthScheme).toHaveBeenCalledWith({
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
+        type: 'oauth2',
+        flows: {
+          clientCredentials: {
+            tokenUrl: 'https://oauth2.mtls.googleapis.com/token',
+            scopes: {},
+          },
+        },
       });
       expect(configureAuthCredential).toHaveBeenCalledWith({
         authType: AuthCredentialTypes.SERVICE_ACCOUNT,

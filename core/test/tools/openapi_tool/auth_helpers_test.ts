@@ -157,13 +157,17 @@ describe('auth_helpers', () => {
       scopes: ['scope1', 'scope2'],
     };
 
-    it('should create a JWT bearer scheme', () => {
+    it('should create an OAuth2 client-credentials scheme', () => {
       const {authScheme} = serviceAccountSchemeCredential(config);
 
       expect(authScheme).toEqual({
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
+        type: 'oauth2',
+        flows: {
+          clientCredentials: {
+            tokenUrl: 'https://oauth2.mtls.googleapis.com/token',
+            scopes: {},
+          },
+        },
       });
     });
 
