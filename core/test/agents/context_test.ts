@@ -8,27 +8,20 @@ import {
   Context,
   InvocationContext,
   PluginManager,
-  Session,
   UiWidget,
   createEventActions,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
-
-function makeSession(): Session {
-  return {
-    id: 'test-session',
-    appName: 'test-app',
-    userId: 'test-user',
-    state: {},
-    events: [],
-    lastUpdateTime: Date.now(),
-  } as unknown as Session;
-}
 
 function makeInvocationContext(): InvocationContext {
   return new InvocationContext({
     invocationId: 'inv-1',
-    session: makeSession(),
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+    }),
     pluginManager: new PluginManager(),
   });
 }

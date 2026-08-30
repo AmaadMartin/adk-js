@@ -6,6 +6,7 @@
 
 import {
   Context,
+  createSession,
   InvocationContext,
   LogLevel,
   mcpHttpDebugStorage,
@@ -13,7 +14,6 @@ import {
   MCPSessionManager,
   MCPTool,
   PluginManager,
-  Session,
   setLogLevel,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
@@ -173,21 +173,14 @@ describe('MCPTool', () => {
   });
 });
 
-function makeSession(): Session {
-  return {
-    id: 'test-session',
-    appName: 'test-app',
-    userId: 'test-user',
-    state: {},
-    events: [],
-    lastUpdateTime: Date.now(),
-  } as unknown as Session;
-}
-
 function makeInvocationContext(): InvocationContext {
   return new InvocationContext({
     invocationId: 'inv-1',
-    session: makeSession(),
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+    }),
     pluginManager: new PluginManager(),
   });
 }

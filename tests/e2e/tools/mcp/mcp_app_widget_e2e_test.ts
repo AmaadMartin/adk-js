@@ -11,7 +11,7 @@ import {
   MCPTool,
   MCPToolset,
   PluginManager,
-  Session,
+  createSession,
 } from '@google/adk';
 import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -35,19 +35,14 @@ function createToolset(): MCPToolset {
 }
 
 function makeContext(functionCallId: string): Context {
-  const session = {
-    id: 'e2e-session',
-    appName: 'e2e-app',
-    userId: 'e2e-user',
-    state: {},
-    events: [],
-    lastUpdateTime: Date.now(),
-  } as unknown as Session;
-
   return new Context({
     invocationContext: new InvocationContext({
       invocationId: 'e2e-inv',
-      session,
+      session: createSession({
+        id: 'e2e-session',
+        appName: 'e2e-app',
+        userId: 'e2e-user',
+      }),
       pluginManager: new PluginManager(),
     }),
     functionCallId,
