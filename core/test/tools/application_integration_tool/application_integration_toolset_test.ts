@@ -523,7 +523,7 @@ describe('ApplicationIntegrationToolset', () => {
       expect(getOpenApiSpecForIntegration).not.toHaveBeenCalled();
     });
 
-    it('waits for an initialization that close races', async () => {
+    it('does not block close on an in-flight initialization', async () => {
       let releaseSpec: (spec: OpenAPIV3.Document) => void = () => {};
       getOpenApiSpecForIntegration.mockReset();
       getOpenApiSpecForIntegration.mockReturnValueOnce(
@@ -539,11 +539,13 @@ describe('ApplicationIntegrationToolset', () => {
       });
 
       const pendingTools = toolset.getTools();
-      const closed = toolset.close();
+
+      // The spec fetch is still outstanding, so a close that awaited the
+      // initialization would never settle here.
+      await expect(toolset.close()).resolves.toBeUndefined();
+
       releaseSpec(INTEGRATION_SPEC);
       await pendingTools;
-
-      await expect(closed).resolves.toBeUndefined();
     });
 
     it('does not serve tools built before close', async () => {

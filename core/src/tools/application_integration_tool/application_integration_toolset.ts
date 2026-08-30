@@ -165,20 +165,13 @@ export class ApplicationIntegrationToolset extends BaseToolset {
     return tools.filter((tool) => this.isToolSelected(tool, context));
   }
 
-  /**
-   * Closes the toolset. An initialization already in flight is awaited first,
-   * so the toolset it builds is closed too rather than outliving this call.
-   */
+  /** Closes the toolset and drops what the last initialization built. */
   @experimental
   override async close(): Promise<void> {
-    // A failed initialization has nothing to close, and its error belongs to
-    // the getTools caller that started it.
-    await this.initialization?.catch(() => {});
     this.initialization = undefined;
-    const toolset = this.openapiToolset;
+    await this.openapiToolset?.close();
     this.openapiToolset = undefined;
     this.tools = [];
-    await toolset?.close();
   }
 
   /**
