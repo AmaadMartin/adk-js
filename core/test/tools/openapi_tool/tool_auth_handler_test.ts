@@ -46,9 +46,9 @@ vi.mock(
  * through `exchange`.
  *
  * The real class holds a private field, so a stub object is not assignable to
- * it without a cast. This is the file's only cast: the `vi.mock` above already
- * replaced the constructor, so no part of the real class survives for the cast
- * to misrepresent.
+ * it without a cast. This is the only cast this change adds: the `vi.mock`
+ * above already replaced the constructor, so no part of the real class
+ * survives for the cast to misrepresent.
  */
 function stubNextExchange(exchange: BaseCredentialExchanger['exchange']): void {
   vi.mocked(AutoAuthCredentialExchanger).mockImplementationOnce(
@@ -59,19 +59,6 @@ function stubNextExchange(exchange: BaseCredentialExchanger['exchange']): void {
 /** Matches a cache key derived from a scheme, with or without a credential. */
 const IDENTITY_KEY_PATTERN =
   /^[a-zA-Z0-9]+_[0-9a-f]{16}_([a-zA-Z0-9]+_[0-9a-f]{16})?_existing_exchanged_credential$/;
-
-/**
- * Builds the Context a single tool call gets. `sessionState` is the record the
- * session holds, so a credential cached by one call is visible to the next.
- */
-function createContext(sessionState: Record<string, unknown>): Context {
-  return new Context({
-    invocationContext: {
-      session: {state: sessionState},
-      agent: {name: 'tool-auth-handler-agent'},
-    } as unknown as InvocationContext,
-  });
-}
 
 function cachedCredentialKeys(sessionState: Record<string, unknown>): string[] {
   return Object.keys(sessionState).filter((key) =>
@@ -86,8 +73,9 @@ const FUNCTION_CALL_ID = 'function-call-1';
  * `requestCredential` records the request against the function call it
  * answers, so it needs that call's id.
  */
-function createRequestingContext(
+function createContext(
   sessionState: Record<string, unknown>,
+  functionCallId?: string,
 ): Context {
   return new Context({
     invocationContext: new InvocationContext({
@@ -101,7 +89,7 @@ function createRequestingContext(
       }),
       pluginManager: new PluginManager(),
     }),
-    functionCallId: FUNCTION_CALL_ID,
+    functionCallId,
   });
 }
 
@@ -610,7 +598,7 @@ describe('ToolAuthHandler auth request slot', () => {
   };
 
   it('names the request slot after the scheme and the credential', async () => {
-    const context = createRequestingContext({});
+    const context = createContext({}, FUNCTION_CALL_ID);
 
     const result = await new ToolAuthHandler(
       context,
@@ -627,7 +615,7 @@ describe('ToolAuthHandler auth request slot', () => {
 
   it('reads the client answer back from the slot it asked for', async () => {
     const sessionState: Record<string, unknown> = {};
-    const first = createRequestingContext(sessionState);
+    const first = createContext(sessionState, FUNCTION_CALL_ID);
     await new ToolAuthHandler(first, SCHEME_A).prepareAuthCredentials();
 
     sessionState[`temp:${requestedCredentialKey(first)}`] = {
@@ -636,7 +624,7 @@ describe('ToolAuthHandler auth request slot', () => {
     } satisfies AuthCredential;
 
     const result = await new ToolAuthHandler(
-      createRequestingContext(sessionState),
+      createContext(sessionState, FUNCTION_CALL_ID),
       SCHEME_A,
     ).prepareAuthCredentials();
 
@@ -657,7 +645,7 @@ describe('ToolAuthHandler auth request slot', () => {
     };
 
     const result = await ToolAuthHandler.fromToolContext(
-      createRequestingContext(sessionState),
+      createContext(sessionState, FUNCTION_CALL_ID),
       SCHEME_A,
       undefined,
       {credentialKey: 'tool_tokens'},
@@ -671,7 +659,7 @@ describe('ToolAuthHandler auth request slot', () => {
 
   it('keeps one tool from consuming another tool auth response', async () => {
     const sessionState: Record<string, unknown> = {};
-    const toolA = createRequestingContext(sessionState);
+    const toolA = createContext(sessionState, FUNCTION_CALL_ID);
     await new ToolAuthHandler(toolA, SCHEME_A).prepareAuthCredentials();
 
     // The user granted this credential to tool A alone.
@@ -680,7 +668,7 @@ describe('ToolAuthHandler auth request slot', () => {
       apiKey: 'tool-a-key',
     } satisfies AuthCredential;
 
-    const toolB = createRequestingContext(sessionState);
+    const toolB = createContext(sessionState, FUNCTION_CALL_ID);
     const result = await new ToolAuthHandler(
       toolB,
       SCHEME_B,
@@ -916,7 +904,7 @@ async function captureError(
 
 describe('ToolAuthHandler consent round trip', () => {
   it('asks the client for consent when the credential holds no access token', async () => {
-    const context = createRequestingContext({});
+    const context = createContext({}, FUNCTION_CALL_ID);
 
     const result = await new ToolAuthHandler(
       context,

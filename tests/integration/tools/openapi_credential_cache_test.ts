@@ -87,20 +87,6 @@ async function buildTool(options: {
   return tool as RestApiTool;
 }
 
-/**
- * A tool call sees the session state through a fresh Context, exactly as the
- * runner builds one per call. `sessionState` is the object the session holds,
- * so a credential cached by one call is visible to the next.
- */
-function createContext(sessionState: Record<string, unknown>): Context {
-  return new Context({
-    invocationContext: {
-      session: {state: sessionState},
-      agent: {name: 'openapi-credential-cache-agent'},
-    } as unknown as InvocationContext,
-  });
-}
-
 const FUNCTION_CALL_ID = 'function-call-1';
 
 /**
@@ -108,8 +94,9 @@ const FUNCTION_CALL_ID = 'function-call-1';
  * records the request against the function call it answers, so it needs that
  * call's id.
  */
-function createRequestingContext(
+function createContext(
   sessionState: Record<string, unknown>,
+  functionCallId?: string,
 ): Context {
   return new Context({
     invocationContext: new InvocationContext({
@@ -123,7 +110,7 @@ function createRequestingContext(
       }),
       pluginManager: new PluginManager(),
     }),
-    functionCallId: FUNCTION_CALL_ID,
+    functionCallId,
   });
 }
 
@@ -257,7 +244,7 @@ describe('OpenAPI tool credential cache over real HTTP', () => {
 
     // Tool A has nothing to work with, so it asks the client. The request
     // names the slot the client must answer in.
-    const asking = createRequestingContext(sessionState);
+    const asking = createContext(sessionState, FUNCTION_CALL_ID);
     const pending = await toolA.runAsync({args: {}, toolContext: asking});
     expect(pending).toEqual({
       pending: true,
@@ -271,7 +258,7 @@ describe('OpenAPI tool credential cache over real HTTP', () => {
     // The user granted that credential to tool A, so tool B still has to ask.
     const toolBResponse = await toolB.runAsync({
       args: {},
-      toolContext: createRequestingContext(sessionState),
+      toolContext: createContext(sessionState, FUNCTION_CALL_ID),
     });
     expect(toolBResponse).toEqual({
       pending: true,
