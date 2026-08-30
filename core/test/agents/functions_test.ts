@@ -1228,3 +1228,129 @@ describe('findMatchingFunctionCall', () => {
     expect(findMatchingFunctionCall([])).toBeUndefined();
   });
 });
+
+/** Builds a tool that defers its response and returns what `execute` gives. */
+function createDeferringTool(
+  execute: (args: Record<string, unknown>, toolContext?: Context) => unknown,
+) {
+  const tool = new FunctionTool({
+    name: 'deferringTool',
+    description: 'a tool whose response arrives later',
+    parameters: z.object({}),
+    execute: async (args, toolContext) => execute(args, toolContext),
+  });
+  tool.defersResponse = true;
+  return tool;
+}
+
+describe('handleFunctionCallList with a deferring tool', () => {
+  let invocationContext: InvocationContext;
+
+  beforeEach(() => {
+    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_defer',
+      session: {} as Session,
+      agent,
+      pluginManager: new PluginManager(),
+    });
+  });
+
+  it('should emit no event when the tool returns nothing', async () => {
+    const deferringTool = createDeferringTool(() => undefined);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(deferringTool)],
+      toolsDict: {deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should still emit the response when the tool returns a value', async () => {
+    const deferringTool = createDeferringTool(() => ({status: 'done'}));
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(deferringTool)],
+      toolsDict: {deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      status: 'done',
+    });
+  });
+
+  it('should still emit the response when the tool returns an empty string', async () => {
+    const deferringTool = createDeferringTool(() => '');
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(deferringTool)],
+      toolsDict: {deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: '',
+    });
+  });
+
+  it('should emit an actions-only event when the tool records actions and returns nothing', async () => {
+    const deferringTool = createDeferringTool((_args, toolContext) => {
+      toolContext!.state.set('jobStarted', true);
+      return undefined;
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(deferringTool)],
+      toolsDict: {deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content).toBeUndefined();
+    expect(event!.actions.stateDelta).toEqual({jobStarted: true});
+  });
+
+  it('should emit the response when the tool does not defer', async () => {
+    const plainTool = new FunctionTool({
+      name: 'plainTool',
+      description: 'a tool that responds now',
+      parameters: z.object({}),
+      execute: async () => undefined,
+    });
+
+    expect(plainTool.defersResponse).toBe(false);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(plainTool)],
+      toolsDict: {plainTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: undefined,
+    });
+  });
+});
+
+describe('getLongRunningFunctionCalls with a deferring tool', () => {
+  it('should not report a deferring tool as long running', () => {
+    const deferringTool = createDeferringTool(() => undefined);
+    const functionCalls = [{name: deferringTool.name, id: 'call-defer'}];
+
+    const result = getLongRunningFunctionCalls(functionCalls, {deferringTool});
+
+    expect(result.has('call-defer')).toBe(false);
+  });
+});
