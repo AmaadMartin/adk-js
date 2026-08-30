@@ -27,7 +27,7 @@ function setup() {
   return {tool, listResources, readResource};
 }
 
-/** A throwaway tool context; the tool never reads from it. */
+/** The context the tool forwards to the toolset, so a resource read is recorded. */
 const toolContext = {} as unknown as Context;
 
 /** Builds a bare LlmRequest suitable for `processLlmRequest`. */
@@ -125,6 +125,14 @@ describe('LoadMcpResourceTool', () => {
       expect(llmRequest.contents).toHaveLength(2);
     });
 
+    it('forwards the tool context to listResources', async () => {
+      const llmRequest = makeLlmRequest();
+
+      await tool.processLlmRequest({toolContext, llmRequest});
+
+      expect(listResources).toHaveBeenCalledWith(toolContext);
+    });
+
     it('appends text resource content', async () => {
       readResource.mockResolvedValue([
         {uri: 'file:///res1', mimeType: 'text/plain', text: 'hello content'},
@@ -135,7 +143,7 @@ describe('LoadMcpResourceTool', () => {
 
       await tool.processLlmRequest({toolContext, llmRequest});
 
-      expect(readResource).toHaveBeenCalledWith('res1');
+      expect(readResource).toHaveBeenCalledWith('res1', toolContext);
       expect(llmRequest.contents).toHaveLength(2);
       const appended = llmRequest.contents[1];
       expect(appended.role).toBe('user');

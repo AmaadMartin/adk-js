@@ -10,6 +10,7 @@ import type {
   TextResourceContents,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {logger} from '../../utils/logger.js';
 import {
@@ -72,14 +73,19 @@ export class LoadMcpResourceTool extends BaseTool {
     request: ToolProcessLlmRequest,
   ): Promise<void> {
     await super.processLlmRequest(request);
-    await this.appendResourcesToLlmRequest(request.llmRequest);
+    await this.appendResourcesToLlmRequest(
+      request.llmRequest,
+      request.toolContext,
+    );
   }
 
   private async appendResourcesToLlmRequest(
     llmRequest: LlmRequest,
+    context: ReadonlyContext,
   ): Promise<void> {
     try {
-      const availableResourceNames = await this.mcpToolset.listResources();
+      const availableResourceNames =
+        await this.mcpToolset.listResources(context);
       if (availableResourceNames.length > 0) {
         appendInstructions(llmRequest, [
           `You have a list of MCP resources:\n${JSON.stringify(
@@ -137,8 +143,10 @@ export class LoadMcpResourceTool extends BaseTool {
 
     for (const resourceName of requestedResourceNames) {
       try {
-        const resourceContents =
-          await this.mcpToolset.readResource(resourceName);
+        const resourceContents = await this.mcpToolset.readResource(
+          resourceName,
+          context,
+        );
         for (const content of resourceContents) {
           llmRequest.contents.push({
             role: 'user',

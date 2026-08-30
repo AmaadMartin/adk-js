@@ -152,37 +152,34 @@ export function recordHttpExchange(exchange: HttpExchange): void {
   });
 }
 
-/** The parts of an outgoing request that a capture records. */
-export interface HttpRequestInfo {
-  url: string;
-  method: string;
-  headers: Headers;
-  /** Only a textual body is recorded; a binary one is left out. */
-  body?: string;
-}
-
 /**
  * Describes one completed HTTP exchange as an {@link HttpExchange}.
+ *
+ * The defaults a `fetch` call leaves implicit are resolved here, so that every
+ * producer records the same thing: a request with no method is a `GET`, and a
+ * body is recorded only when it is text.
  *
  * A Server-Sent Events response is recorded by name rather than by content:
  * reading it would consume the stream the caller is about to use. Any other
  * body is read from a clone, leaving the original intact.
  *
- * @param request The request that was sent.
+ * @param url The URL the request went to.
+ * @param init The `fetch` options the request was sent with.
  * @param response The response it received.
  * @return The exchange, before redaction and truncation.
  */
 export async function describeHttpExchange(
-  request: HttpRequestInfo,
+  url: string | URL,
+  init: Parameters<typeof fetch>[1],
   response: Response,
 ): Promise<HttpExchange> {
   return {
-    url: request.url,
-    method: request.method,
+    url: String(url),
+    method: init?.method ?? 'GET',
     statusCode: response.status,
-    requestHeaders: headersToRecord(request.headers),
+    requestHeaders: headersToRecord(new Headers(init?.headers)),
     responseHeaders: headersToRecord(response.headers),
-    requestBody: request.body,
+    requestBody: typeof init?.body === 'string' ? init.body : undefined,
     responseBody: await readResponseBody(response),
   };
 }

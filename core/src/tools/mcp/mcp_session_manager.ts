@@ -104,13 +104,7 @@ function recordingFetch(baseFetch?: FetchLike): FetchLike {
   return async (url, init) => {
     const response = await doFetch(url, init);
     if (isCapturingHttpDebug()) {
-      const request = {
-        url: String(url),
-        method: init?.method ?? 'GET',
-        headers: new Headers(init?.headers),
-        body: typeof init?.body === 'string' ? init.body : undefined,
-      };
-      recordHttpExchange(await describeHttpExchange(request, response));
+      recordHttpExchange(await describeHttpExchange(url, init, response));
     }
     return response;
   };
