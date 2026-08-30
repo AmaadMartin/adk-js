@@ -383,6 +383,7 @@ export {
 } from './tools/openapi_tool/auth/auth_helpers.js';
 export type {
   CredentialParam,
+  OpenIdConfig,
   OpenIdSchemeCredential,
   SchemeCredential,
   ServiceAccountSchemeCredential,

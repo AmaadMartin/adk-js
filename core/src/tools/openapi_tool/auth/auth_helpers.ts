@@ -163,6 +163,23 @@ export interface OpenIdSchemeCredential {
   authCredential: AuthCredential;
 }
 
+/**
+ * An OpenID Connect client configuration.
+ *
+ * Public model surface, mirroring adk-python's `OpenIdConfig`. It types the
+ * client a caller passes to {@link openIdDictToSchemeCredential} and
+ * {@link openIdUrlToSchemeCredential}, which accept the wider
+ * `Record<string, unknown>` so a client secret file read straight off disk,
+ * with snake_case keys, is also accepted.
+ */
+export interface OpenIdConfig extends Record<string, unknown> {
+  clientId: string;
+  authUri: string;
+  tokenUri: string;
+  clientSecret: string;
+  redirectUri?: string;
+}
+
 /** A generated auth parameter and the argument value that fills it. */
 export interface CredentialParam {
   param: ApiParameter;

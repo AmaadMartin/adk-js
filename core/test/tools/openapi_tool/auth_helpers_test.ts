@@ -21,6 +21,7 @@ import {
   createBearerScheme,
   credentialToParam,
   INTERNAL_AUTH_PREFIX,
+  OpenIdConfig,
   openIdDictToSchemeCredential,
   openIdUrlToSchemeCredential,
   serviceAccountDictToSchemeCredential,
@@ -836,5 +837,54 @@ describe('credentialToParam', () => {
         {authType: AuthCredentialTypes.API_KEY},
       ),
     ).toThrow('Invalid security scheme and credential combination');
+  });
+});
+
+describe('OpenIdConfig', () => {
+  const discoveryDocument = {
+    authorization_endpoint: 'https://example.com/auth',
+    token_endpoint: 'https://example.com/token',
+  };
+
+  it('types a client that openIdDictToSchemeCredential accepts', () => {
+    const client: OpenIdConfig = {
+      clientId: 'client_id',
+      authUri: 'https://example.com/auth',
+      tokenUri: 'https://example.com/token',
+      clientSecret: 'client_secret',
+      redirectUri: 'https://example.com/callback',
+    };
+
+    const {authCredential} = openIdDictToSchemeCredential(
+      discoveryDocument,
+      ['openid'],
+      client,
+    );
+
+    expect(authCredential.oauth2).toEqual({
+      clientId: 'client_id',
+      clientSecret: 'client_secret',
+      redirectUri: 'https://example.com/callback',
+    });
+  });
+
+  it('types a client whose redirect uri is absent', () => {
+    const client: OpenIdConfig = {
+      clientId: 'client_id',
+      authUri: 'https://example.com/auth',
+      tokenUri: 'https://example.com/token',
+      clientSecret: 'client_secret',
+    };
+
+    const {authCredential} = openIdDictToSchemeCredential(
+      discoveryDocument,
+      [],
+      client,
+    );
+
+    expect(authCredential.oauth2).toEqual({
+      clientId: 'client_id',
+      clientSecret: 'client_secret',
+    });
   });
 });
