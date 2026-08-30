@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {canonicalJson, stableDigest} from '../../src/utils/hash_utils.js';
 
 describe('hash_utils', () => {
@@ -14,10 +14,24 @@ describe('hash_utils', () => {
       expect(canonicalJson({a: 2, b: 1})).toBe('{"a":2,"b":1}');
     });
 
-    it('drops undefined and null members at every depth', () => {
+    it('drops undefined members at every depth and keeps null', () => {
       expect(
         canonicalJson({a: 1, b: undefined, c: null, d: {e: null, f: 2}}),
-      ).toBe('{"a":1,"d":{"f":2}}');
+      ).toBe('{"a":1,"c":null,"d":{"e":null,"f":2}}');
+    });
+
+    it('distinguishes a null member from an absent one', () => {
+      expect(canonicalJson({a: 1, b: null})).not.toBe(canonicalJson({a: 1}));
+    });
+
+    it('keeps an own __proto__ key that JSON.parse produced', () => {
+      const parsed: unknown = JSON.parse(
+        '{"type":"apiKey","__proto__":{"x":1}}',
+      );
+
+      expect(canonicalJson(parsed)).toBe(
+        '{"__proto__":{"x":1},"type":"apiKey"}',
+      );
     });
 
     it('preserves array order and sorts objects inside arrays', () => {
@@ -48,28 +62,62 @@ describe('hash_utils', () => {
   });
 
   describe('stableDigest', () => {
-    // SHA-256('{}') is
-    // 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.
-    it('returns the first eight bytes of the SHA-256 of the canonical JSON', async () => {
-      expect(await stableDigest({})).toBe('44136fa355b3678a');
+    // Two FNV-1a passes over the UTF-8 bytes of '{}', from offset bases
+    // 2166136261 and 2654435761, are 0x5465b825 and 0xc95e7639.
+    it('concatenates the two FNV-1a passes over the canonical JSON', () => {
+      expect(stableDigest({})).toBe('5465b825c95e7639');
     });
 
-    // SHA-256('{"k":"héllo"}') as UTF-8 is
-    // d3352a192f21ed49ab7d14dbc8b24d71f95b178a227b9e2bbb6e10e584bbaa8f. A
-    // char-oriented encoder would hash a different message.
-    it('digests the UTF-8 bytes of a non-ASCII value', async () => {
-      expect(await stableDigest({k: 'héllo'})).toBe('d3352a192f21ed49');
+    // The same two passes over the UTF-8 bytes of '{"k":"héllo"}' are
+    // 0x99ca7735 and 0xc8326561. A char-oriented encoder would hash a
+    // different message and produce a different digest.
+    it('digests the UTF-8 bytes of a non-ASCII value', () => {
+      expect(stableDigest({k: 'héllo'})).toBe('99ca7735c8326561');
     });
 
-    it('is equal for two key-order-permuted twins', async () => {
-      expect(await stableDigest({a: 1, b: {c: 2, d: 3}})).toBe(
-        await stableDigest({b: {d: 3, c: 2}, a: 1}),
+    it('returns sixteen lowercase hexadecimal characters', () => {
+      expect(stableDigest({a: 1, b: [2, 3]})).toMatch(/^[0-9a-f]{16}$/);
+    });
+
+    it('is equal for two key-order-permuted twins', () => {
+      expect(stableDigest({a: 1, b: {c: 2, d: 3}})).toBe(
+        stableDigest({b: {d: 3, c: 2}, a: 1}),
       );
     });
 
-    it('differs when one nested value differs', async () => {
-      expect(await stableDigest({a: 1, b: {c: 2}})).not.toBe(
-        await stableDigest({a: 1, b: {c: 3}}),
+    it('differs when one nested value differs', () => {
+      expect(stableDigest({a: 1, b: {c: 2}})).not.toBe(
+        stableDigest({a: 1, b: {c: 3}}),
+      );
+    });
+
+    // The digest sits on the unconditional path of every authenticated
+    // OpenAPI tool call, and reaches the browser bundle. `globalThis.crypto`
+    // is absent on a default Node 18 and on a plain-HTTP browser origin, so a
+    // digest that reads it takes that whole path down with a `TypeError`.
+    it('digests with no Web Crypto global present', () => {
+      vi.stubGlobal('crypto', undefined);
+      try {
+        expect(stableDigest({k: 'v'})).toMatch(/^[0-9a-f]{16}$/);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('digests a null-prototype object as its plain twin', () => {
+      const nullPrototype = Object.assign(Object.create(null), {b: 1, a: 2});
+
+      expect(stableDigest(nullPrototype)).toBe(stableDigest({a: 2, b: 1}));
+    });
+
+    it('keeps a self-serialising value intact', () => {
+      const date = new Date('2026-01-02T03:04:05.000Z');
+
+      expect(canonicalJson({at: date})).toBe(
+        '{"at":"2026-01-02T03:04:05.000Z"}',
+      );
+      expect(stableDigest({at: date})).toBe(
+        stableDigest({at: '2026-01-02T03:04:05.000Z'}),
       );
     });
   });

@@ -8,8 +8,11 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
   InvocationContext,
+  LlmAgent,
   OpenAPIToolset,
+  PluginManager,
   RestApiTool,
 } from '@google/adk';
 import {createServer, Server} from 'node:http';
@@ -73,7 +76,7 @@ async function buildTool(options: {
   baseUrl: string;
   operationId: string;
   authScheme: OpenAPIV3.SecuritySchemeObject;
-  credentialKey: string;
+  credentialKey?: string;
 }): Promise<RestApiTool> {
   const toolset = new OpenAPIToolset({
     specDict: echoSpec(options.baseUrl, options.operationId),
@@ -84,18 +87,37 @@ async function buildTool(options: {
   return tool as RestApiTool;
 }
 
+const FUNCTION_CALL_ID = 'function-call-1';
+
 /**
- * A tool call sees the session state through a fresh Context, exactly as the
- * runner builds one per call. `sessionState` is the object the session holds,
- * so a credential cached by one call is visible to the next.
+ * A Context a tool call can raise an auth request from. `requestCredential`
+ * records the request against the function call it answers, so it needs that
+ * call's id.
  */
-function createContext(sessionState: Record<string, unknown>): Context {
+function createContext(
+  sessionState: Record<string, unknown>,
+  functionCallId?: string,
+): Context {
   return new Context({
-    invocationContext: {
-      session: {state: sessionState},
-      agent: {name: 'openapi-credential-cache-agent'},
-    } as unknown as InvocationContext,
+    invocationContext: new InvocationContext({
+      invocationId: 'invocation-1',
+      agent: new LlmAgent({name: 'openapi_credential_cache_agent'}),
+      session: createSession({
+        id: 'session-1',
+        appName: 'app',
+        userId: 'user',
+        state: sessionState,
+      }),
+      pluginManager: new PluginManager(),
+    }),
+    functionCallId,
   });
+}
+
+/** The state key the tool asked the client to answer under. */
+function requestedCredentialKey(context: Context): string {
+  return context.eventActions.requestedAuthConfigs[FUNCTION_CALL_ID]
+    .credentialKey;
 }
 
 async function callTool(
@@ -184,7 +206,11 @@ describe('OpenAPI tool credential cache over real HTTP', () => {
       credentialKey: 'oauth_b_key',
     });
 
-    // What a completed OAuth2 flow leaves behind: a bearer token per tool.
+    // A bearer token per tool, planted directly. This pins slot isolation, not
+    // the OAuth2 flow: for an oauth2 scheme `AuthHandler` stores what
+    // `OAuth2CredentialExchanger` returns, which is an OAUTH2-typed credential
+    // that `applyCredential` does not put on the wire. A bearer is the shape
+    // that makes the slot each tool reads observable on the request.
     const sessionState: Record<string, unknown> = {
       'temp:oauth_a_key': {
         authType: AuthCredentialTypes.HTTP,
@@ -201,5 +227,45 @@ describe('OpenAPI tool credential cache over real HTTP', () => {
 
     expect(responseA.headers['authorization']).toBe('Bearer token-a');
     expect(responseB.headers['authorization']).toBe('Bearer token-b');
+  });
+
+  it('asks each tool that named no credential key for its own credential', async () => {
+    const toolA = await buildTool({
+      baseUrl: serverA.url,
+      operationId: 'echo_derived_a',
+      authScheme: {type: 'apiKey', name: 'X-A-Key', in: 'header'},
+    });
+    const toolB = await buildTool({
+      baseUrl: serverB.url,
+      operationId: 'echo_derived_b',
+      authScheme: {type: 'apiKey', name: 'X-B-Key', in: 'header'},
+    });
+    const sessionState: Record<string, unknown> = {};
+
+    // Tool A has nothing to work with, so it asks the client. The request
+    // names the slot the client must answer in.
+    const asking = createContext(sessionState, FUNCTION_CALL_ID);
+    const pending = await toolA.runAsync({args: {}, toolContext: asking});
+    expect(pending).toEqual({
+      pending: true,
+      message: 'Needs your authorization to access your data.',
+    });
+    sessionState[`temp:${requestedCredentialKey(asking)}`] = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'key-a',
+    } satisfies AuthCredential;
+
+    // The user granted that credential to tool A, so tool B still has to ask.
+    const toolBResponse = await toolB.runAsync({
+      args: {},
+      toolContext: createContext(sessionState, FUNCTION_CALL_ID),
+    });
+    expect(toolBResponse).toEqual({
+      pending: true,
+      message: 'Needs your authorization to access your data.',
+    });
+
+    const responseA = await callTool(toolA, sessionState);
+    expect(responseA.headers['x-a-key']).toBe('key-a');
   });
 });

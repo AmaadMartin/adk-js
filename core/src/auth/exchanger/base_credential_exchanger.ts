@@ -13,6 +13,23 @@ import {AuthScheme} from '../auth_schemes.js';
 export class CredentialExchangeError extends Error {}
 
 /**
+ * Raised when a credential that a scheme requires is absent or incomplete.
+ *
+ * This names a configuration mistake the caller has to correct, so it is
+ * distinct from `CredentialExchangeError`, which names an exchange the
+ * provider refused.
+ */
+export class AuthCredentialMissingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthCredentialMissingError';
+    // Extending a built-in loses the prototype chain under the ES5 class
+    // emit, which would leave callers unable to tell this error apart.
+    Object.setPrototypeOf(this, AuthCredentialMissingError.prototype);
+  }
+}
+
+/**
  * Result of a credential exchange.
  */
 export interface ExchangeResult {
