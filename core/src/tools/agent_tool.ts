@@ -8,10 +8,12 @@ import {Content, FunctionDeclaration, Type} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
+import {RunConfig, StreamingMode} from '../agents/run_config.js';
 import {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
+import {stableJsonStringify} from '../utils/json_utils.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
@@ -51,6 +53,36 @@ export function isAgentTool(obj: unknown): obj is AgentTool {
     obj !== null &&
     AGENT_TOOL_SIGNATURE_SYMBOL in obj &&
     obj[AGENT_TOOL_SIGNATURE_SYMBOL] === true
+  );
+}
+
+/**
+ * The message text sent to a wrapped agent that declares no input schema.
+ *
+ * A string `request` argument is the message, an empty one included. Anything
+ * else means the model called the tool with named parameters instead, so the
+ * whole argument record becomes the message. Its keys are sorted, so the same
+ * arguments always produce the same text.
+ */
+function noSchemaMessageText(args: Record<string, unknown>): string {
+  const request = args['request'];
+  return typeof request === 'string' ? request : stableJsonStringify(args);
+}
+
+/**
+ * The run config the wrapped agent runs under, given the caller's.
+ *
+ * The caller's config carries over except for two settings, and the caller's
+ * own object is never modified. CFC describes how the caller's own model
+ * executes: handing it to the wrapped agent replaces that agent's code
+ * executor, and `Runner.runAsync` refuses to run the agent unless its model is
+ * Gemini 2 or above. The nested run is always unary, because `AgentTool` reads
+ * its result from the last event's content; a streaming run leaves only a
+ * partial chunk there.
+ */
+function nestedRunConfig(caller: RunConfig | undefined): RunConfig | undefined {
+  return (
+    caller && {...caller, supportCfc: false, streamingMode: StreamingMode.NONE}
   );
 }
 
@@ -139,7 +171,7 @@ export class AgentTool extends BaseTool {
           // logic to one we have in Python ADK.
           text: hasInputSchema
             ? JSON.stringify(args)
-            : (args['request'] as string),
+            : noSchemaMessageText(args),
         },
       ],
     };
@@ -168,38 +200,38 @@ export class AgentTool extends BaseTool {
       return '';
     }
 
-    // CFC describes how the caller's own model executes. Handing it to the
-    // wrapped agent replaces that agent's code executor, and refuses to run it
-    // unless its model is Gemini 2 or above.
-    const runConfig = {
-      ...toolContext.invocationContext.runConfig,
-      supportCfc: false,
-    };
+    const runConfig = nestedRunConfig(toolContext.invocationContext.runConfig);
 
     let lastEvent: Event | undefined;
-    for await (const event of runner.runAsync({
-      userId: session.userId,
-      sessionId: session.id,
-      newMessage: content,
-      runConfig,
-      abortSignal: toolContext.abortSignal,
-    })) {
-      if (toolContext.abortSignal?.aborted) {
-        return;
-      }
-
-      if (event.actions.stateDelta) {
-        const filteredDelta = Object.fromEntries(
-          Object.entries(event.actions.stateDelta).filter(
-            ([key]) => !key.startsWith(State.TEMP_PREFIX),
-          ),
-        );
-        if (Object.keys(filteredDelta).length > 0) {
-          toolContext.state.update(filteredDelta);
+    try {
+      for await (const event of runner.runAsync({
+        userId: session.userId,
+        sessionId: session.id,
+        newMessage: content,
+        runConfig,
+        abortSignal: toolContext.abortSignal,
+      })) {
+        if (toolContext.abortSignal?.aborted) {
+          return;
         }
-      }
 
-      lastEvent = event;
+        if (event.actions.stateDelta) {
+          const filteredDelta = Object.fromEntries(
+            Object.entries(event.actions.stateDelta).filter(
+              ([key]) => !key.startsWith(State.TEMP_PREFIX),
+            ),
+          );
+          if (Object.keys(filteredDelta).length > 0) {
+            toolContext.state.update(filteredDelta);
+          }
+        }
+
+        lastEvent = event;
+      }
+    } finally {
+      // The sub-runner holds resources the caller does not own, MCP sessions
+      // above all. An abort and a throw both leave through here.
+      await runner.close();
     }
 
     if (!lastEvent?.content?.parts?.length) {
