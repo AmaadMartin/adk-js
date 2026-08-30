@@ -578,6 +578,21 @@ describe('LlmAgent Output Processing', () => {
     expect(lastEvent.actions?.stateDelta?.['result']).toEqual(invalidJson);
   });
 
+  it('saves the parsed object when the model fences its JSON reply', async () => {
+    const response: LlmResponse = {
+      content: {parts: [{text: '```json\n{"answer": "42"}\n```'}]},
+    };
+    agent.model = new MockLlm(response);
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    const lastEvent = events[events.length - 1];
+    expect(lastEvent.actions?.stateDelta?.['result']).toEqual({answer: '42'});
+  });
+
   it('keeps the parsed object in state when it violates the output schema', async () => {
     // Well-formed JSON, but `answer` is declared STRING. The violation is
     // logged rather than thrown, and state keeps the object the model
