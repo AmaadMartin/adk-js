@@ -115,7 +115,6 @@ export {InMemoryCredentialService} from './auth/credential_service/in_memory_cre
 export {SessionStateCredentialService} from './auth/credential_service/session_state_credential_service.js';
 export {
   AuthCredentialMissingError,
-  BaseAuthCredentialExchanger,
   CredentialExchangeError,
 } from './auth/exchanger/base_credential_exchanger.js';
 export type {
@@ -385,15 +384,12 @@ export type {
 export {OperationParser} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
 export type {ApiParameter} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
 export {
-  DEFAULT_OPENAPI_CREDENTIAL_KEY,
   ToolAuthHandler,
   ToolContextCredentialStore,
 } from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export type {
   AuthPreparationResult,
-  AuthPreparationState,
   CredentialStore,
-  ToolAuthHandlerOptions,
 } from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';
 export {

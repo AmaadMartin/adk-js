@@ -81,17 +81,9 @@ const handler = ToolAuthHandler.fromToolContext(
 );
 ```
 
-A `credential_key` or `credentialKey` field carried on the credential or on the
-scheme does the same, which is how a tool loaded from a configuration document
-names its slot. An explicit option wins over the credential, and the credential
-wins over the scheme.
-
-A credential stored under an older key is still found. There are two older key
-schemes, and the handler reads both: one derived from the scheme and the
-credential the way adk-python derives it, and one derived from the scheme type
-alone, which earlier adk-js releases wrote. The handler copies the first hit to
-the current key and leaves the old entry in place, so a rollback still finds
-it.
+A credential stored by an earlier release, under a key derived from the scheme
+type alone, is still found. The handler copies it to the derived key on the
+first read and leaves the old entry in place.
 
 The handler copies the scheme and the credential you pass it. Mutating either
 object afterwards changes nothing the handler does, because the storage key is

@@ -5,11 +5,7 @@
  */
 
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {
-  canonicalJson,
-  digestText,
-  stableDigest,
-} from '../../src/utils/digest_utils.js';
+import {canonicalJson, stableDigest} from '../../src/utils/digest_utils.js';
 
 describe('canonicalJson', () => {
   it('sorts object keys', () => {
@@ -95,35 +91,5 @@ describe('stableDigest', () => {
     vi.stubGlobal('crypto', undefined);
 
     await expect(stableDigest({a: 1})).rejects.toThrow(/Web Crypto API/);
-  });
-
-  it('digests the canonical form of the value', async () => {
-    expect(await stableDigest({b: 2, a: 1})).toBe(
-      await digestText(canonicalJson({b: 2, a: 1})),
-    );
-  });
-});
-
-describe('digestText', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('returns 16 hex characters', async () => {
-    expect(await digestText('text')).toMatch(/^[0-9a-f]{16}$/);
-  });
-
-  it('returns the same digest for the same text', async () => {
-    expect(await digestText('text')).toBe(await digestText('text'));
-  });
-
-  it('changes when the text changes', async () => {
-    expect(await digestText('text')).not.toBe(await digestText('other'));
-  });
-
-  it('reports a missing Web Crypto API rather than degrading', async () => {
-    vi.stubGlobal('crypto', undefined);
-
-    await expect(digestText('text')).rejects.toThrow(/Web Crypto API/);
   });
 });

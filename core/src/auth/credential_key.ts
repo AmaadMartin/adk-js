@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {digestText, stableDigest} from '../utils/digest_utils.js';
+import {stableDigest} from '../utils/digest_utils.js';
 import {AuthCredential, OAuth2Auth} from './auth_credential.js';
 import {AuthScheme} from './auth_schemes.js';
 
@@ -25,15 +25,6 @@ const VOLATILE_OAUTH2_FIELDS: readonly (keyof OAuth2Auth)[] = [
   'redirectUri',
 ];
 
-/**
- * Extra fields that name a key explicitly. They are dropped before digesting,
- * so naming a key does not change the digest the name overrides.
- */
-const CREDENTIAL_KEY_FIELDS: readonly string[] = [
-  'credential_key',
-  'credentialKey',
-];
-
 function withoutFields(
   source: object,
   fields: readonly string[],
@@ -45,25 +36,11 @@ function withoutFields(
   return copy;
 }
 
-function readStringField(
-  source: object | undefined,
-  key: string,
-): string | undefined {
-  if (!source || !(key in source)) {
-    return undefined;
-  }
-  const value = (source as Record<string, unknown>)[key];
-  return typeof value === 'string' && value ? value : undefined;
-}
-
 async function schemeDigestName(authScheme?: AuthScheme): Promise<string> {
   if (!authScheme) {
     return '';
   }
-  const digest = await stableDigest(
-    withoutFields(authScheme, CREDENTIAL_KEY_FIELDS),
-  );
-  return `${authScheme.type}_${digest}`;
+  return `${authScheme.type}_${await stableDigest(authScheme)}`;
 }
 
 async function credentialDigestName(
@@ -72,7 +49,7 @@ async function credentialDigestName(
   if (!authCredential) {
     return '';
   }
-  const digestable = withoutFields(authCredential, CREDENTIAL_KEY_FIELDS);
+  const digestable: Record<string, unknown> = {...authCredential};
   if (authCredential.oauth2) {
     digestable['oauth2'] = withoutFields(
       authCredential.oauth2,
@@ -103,53 +80,6 @@ export async function credentialIdentity(
   return `${schemeName}_${credentialName}`;
 }
 
-async function legacySchemeDigestName(
-  authScheme?: AuthScheme,
-): Promise<string> {
-  if (!authScheme) {
-    return '';
-  }
-  return `${authScheme.type}_${await digestText(JSON.stringify(authScheme))}`;
-}
-
-async function legacyCredentialDigestName(
-  authCredential?: AuthCredential,
-): Promise<string> {
-  if (!authCredential) {
-    return '';
-  }
-  const digestable: Record<string, unknown> = {...authCredential};
-  if (authCredential.oauth2) {
-    digestable['oauth2'] = withoutFields(
-      authCredential.oauth2,
-      VOLATILE_OAUTH2_FIELDS,
-    );
-  }
-  const digest = await digestText(JSON.stringify(digestable));
-  return `${authCredential.authType}_${digest}`;
-}
-
-/**
- * Names the credential the way releases before the canonical digest did.
- *
- * The digest is taken over the object as written, so key order and an extra
- * field still change it. That is deliberate: the identity has to reproduce
- * what the earlier scheme wrote, or a credential stored under it is never
- * found. Use {@link credentialIdentity} for anything new.
- *
- * @param authScheme The scheme the tool authenticates against.
- * @param authCredential The credential the tool was configured with.
- * @returns The identity, in the same shape as {@link credentialIdentity}.
- */
-export async function legacyCredentialIdentity(
-  authScheme?: AuthScheme,
-  authCredential?: AuthCredential,
-): Promise<string> {
-  const schemeName = await legacySchemeDigestName(authScheme);
-  const credentialName = await legacyCredentialDigestName(authCredential);
-  return `${schemeName}_${credentialName}`;
-}
-
 /**
  * Returns the default `AuthConfig.credentialKey` for a scheme and credential,
  * used when the caller names no key.
@@ -163,34 +93,4 @@ export async function deriveCredentialKey(
   authCredential?: AuthCredential,
 ): Promise<string> {
   return `adk_${await credentialIdentity(authScheme, authCredential)}`;
-}
-
-/**
- * Returns the key the caller named, or `undefined` when they named none.
- *
- * An explicit key wins over an extra field on the credential, which wins over
- * an extra field on the scheme.
- *
- * @param explicitKey The key passed by the caller.
- * @param authScheme The scheme the tool authenticates against.
- * @param authCredential The credential the tool was configured with.
- * @returns The named key, or `undefined`.
- */
-export function credentialKeyOverride(
-  explicitKey?: string,
-  authScheme?: AuthScheme,
-  authCredential?: AuthCredential,
-): string | undefined {
-  if (explicitKey) {
-    return explicitKey;
-  }
-  for (const source of [authCredential, authScheme]) {
-    for (const field of CREDENTIAL_KEY_FIELDS) {
-      const value = readStringField(source, field);
-      if (value) {
-        return value;
-      }
-    }
-  }
-  return undefined;
 }

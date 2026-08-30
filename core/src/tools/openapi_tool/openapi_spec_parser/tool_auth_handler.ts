@@ -13,9 +13,7 @@ import {AuthScheme, OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
 import {
   credentialIdentity,
-  credentialKeyOverride,
   deriveCredentialKey,
-  legacyCredentialIdentity,
 } from '../../../auth/credential_key.js';
 import {
   AuthCredentialMissingError,
@@ -29,25 +27,13 @@ import {experimental} from '../../../utils/experimental.js';
 import {logger} from '../../../utils/logger.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
-/** Whether a tool can authenticate now, or is waiting for a credential. */
-export type AuthPreparationState = 'pending' | 'done';
-
 /** What {@link ToolAuthHandler.prepareAuthCredentials} resolved to. */
 export interface AuthPreparationResult {
-  state: AuthPreparationState;
+  /** Whether the tool can authenticate now, or waits for a credential. */
+  state: 'pending' | 'done';
   authScheme?: AuthScheme;
   authCredential?: AuthCredential;
 }
-
-/**
- * Credential key used when a caller needs one and names none.
- *
- * {@link ToolAuthHandler} derives a per-identity key instead, so that one tool
- * cannot read another tool's auth response. This constant remains for a caller
- * that must name a key before it knows the credential, such as
- * `OpenAPIToolset` when it builds its `AuthConfig`.
- */
-export const DEFAULT_OPENAPI_CREDENTIAL_KEY = 'default_openapi_key';
 
 /**
  * Reads and writes the credential a tool has already obtained.
@@ -169,24 +155,11 @@ export class ToolContextCredentialStore implements CredentialStore {
   }
 
   /**
-   * Returns the keys earlier releases stored the credential under, in the
-   * order they are searched.
-   *
-   * There are two, because two key schemes are in the wild. The first is the
-   * one adk-python migrates from, kept so a credential written by a shared
-   * store is still found. The second is the one shipped adk-js releases wrote,
-   * derived from the scheme type alone; dropping it would strand every
-   * credential those releases stored.
+   * Returns the key earlier releases stored the credential under, which was
+   * derived from the scheme type alone.
    */
-  async getLegacyCredentialKeys(
-    authScheme?: AuthScheme,
-    authCredential?: AuthCredential,
-  ): Promise<string[]> {
-    const identity = await legacyCredentialIdentity(authScheme, authCredential);
-    return [
-      `${identity}${STORE_KEY_SUFFIX}`,
-      `${authScheme?.type ?? 'default'}${STORE_KEY_SUFFIX}`,
-    ];
+  getLegacyCredentialKey(authScheme?: AuthScheme): string {
+    return `${authScheme?.type ?? 'default'}${STORE_KEY_SUFFIX}`;
   }
 
   async getCredential(
@@ -202,26 +175,19 @@ export class ToolContextCredentialStore implements CredentialStore {
       return stored;
     }
 
-    // A legacy key can equal the current key, as it does when there is no
-    // scheme and no credential. That is harmless rather than a collision to
-    // guard: the read above already missed on that key.
-    const legacyKeys = await this.getLegacyCredentialKeys(
-      authScheme,
-      authCredential,
-    );
-    for (const legacyKey of legacyKeys) {
-      const legacy = this.context.state.get<AuthCredential>(legacyKey);
-      if (!legacy) {
-        continue;
-      }
-
-      // Copy the credential to the current key rather than moving it, so that
-      // a rollback to an earlier release still finds it.
-      logger.debug('Migrating a tool credential from the legacy key.');
-      this.context.state.set(key, legacy);
-      return legacy;
+    // The two formats never collide: a derived key always carries a scheme
+    // digest and a credential digest, and the legacy key has neither.
+    const legacyKey = this.getLegacyCredentialKey(authScheme);
+    const legacy = this.context.state.get<AuthCredential>(legacyKey);
+    if (!legacy) {
+      return undefined;
     }
-    return undefined;
+
+    // Copy the credential to the current key rather than moving it, so that a
+    // rollback to an earlier release still finds it.
+    logger.debug('Migrating a tool credential from the legacy key.');
+    this.context.state.set(key, legacy);
+    return legacy;
   }
 
   async storeCredential(
@@ -233,11 +199,6 @@ export class ToolContextCredentialStore implements CredentialStore {
     // an own property on the State instance that is never committed, so the
     // exchanged credential would be re-created on every tool invocation.
     this.context.state.set(key, credential);
-  }
-
-  /** Drops the credential held under `key`, for a caller that revoked it. */
-  removeCredential(key: string): void {
-    this.context.state.set(key, undefined);
   }
 }
 
@@ -266,11 +227,7 @@ export class ToolAuthHandler {
       options.credentialExchanger ?? new AutoAuthCredentialExchanger();
     this.credentialStore =
       options.credentialStore ?? new ToolContextCredentialStore(context);
-    this.credentialKey = credentialKeyOverride(
-      options.credentialKey,
-      this.authScheme,
-      this.authCredential,
-    );
+    this.credentialKey = options.credentialKey;
   }
 
   @experimental
