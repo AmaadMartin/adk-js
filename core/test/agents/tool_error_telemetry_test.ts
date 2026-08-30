@@ -13,6 +13,7 @@ import {
   LlmAgent,
   PluginManager,
   RunAsyncToolRequest,
+  ToolInputParameters,
   createSession,
   functionsExportedForTestingOnly,
 } from '@google/adk';
@@ -95,6 +96,19 @@ async function runTool(tool: BaseTool): Promise<unknown> {
   return event?.content?.parts?.[0]?.functionResponse?.response;
 }
 
+/** A tool that reports its own failures, the way `MCPTool` does. */
+class DetectingTool<
+  TParameters extends ToolInputParameters = undefined,
+> extends FunctionTool<TParameters> {
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return typeof response === 'object' &&
+      response !== null &&
+      'error' in response
+      ? 'DETECTED_ERROR'
+      : undefined;
+  }
+}
+
 /** A tool whose error detector throws, to prove telemetry cannot break a call. */
 class BrokenDetectorTool extends FunctionTool {
   override detectErrorInResponse(): string | undefined {
@@ -123,6 +137,17 @@ describe('tool error type telemetry', () => {
 
     expect(await runTool(tool)).toEqual({error: 'not found'});
     expect(recordedErrorType('failing_tool')).toBe('TOOL_ERROR');
+  });
+
+  it('records the error type a tool detects for itself', async () => {
+    const tool = new DetectingTool({
+      name: 'detecting_tool',
+      description: 'Always fails.',
+      execute: () => ({error: 'not found'}),
+    });
+
+    expect(await runTool(tool)).toEqual({error: 'not found'});
+    expect(recordedErrorType('detecting_tool')).toBe('DETECTED_ERROR');
   });
 
   it('records nothing when the tool succeeds', async () => {
@@ -204,6 +229,21 @@ describe('tool error type telemetry', () => {
     expect(recordedStatus('failed_span_tool')).toEqual({
       code: SpanStatusCode.ERROR,
       message: 'TOOL_ERROR',
+    });
+  });
+
+  it('fails the span with the error type the tool detected', async () => {
+    const tool = new DetectingTool({
+      name: 'detected_span_tool',
+      description: 'Always fails.',
+      execute: () => ({error: 'not found'}),
+    });
+
+    await runTool(tool);
+
+    expect(recordedStatus('detected_span_tool')).toEqual({
+      code: SpanStatusCode.ERROR,
+      message: 'DETECTED_ERROR',
     });
   });
 

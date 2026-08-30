@@ -30,10 +30,20 @@ import {
 import {formatError} from '../../utils/error_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {logger} from '../../utils/logger.js';
+import {isRecord, isStringArray} from '../../utils/type_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {ToolAuthHandler} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
+
+/** The `error.type` reported for a call the MCP server marked as failed. */
+const MCP_TOOL_ERROR = 'MCP_TOOL_ERROR';
+
+/** The `ui` block a tool declares in its `_meta`, when it declares one. */
+function uiMeta(tool: Tool): Record<string, unknown> | undefined {
+  const ui = isRecord(tool._meta) ? tool._meta['ui'] : undefined;
+  return isRecord(ui) ? ui : undefined;
+}
 
 /**
  * Whether the caller stopped the call, rather than the call failing on its
@@ -305,7 +315,40 @@ export class MCPTool extends BaseTool {
     this.options = options;
   }
 
+  /**
+   * The audiences the MCP server declares this tool's user interface for, or
+   * an empty list when it declares none.
+   *
+   * The list arrives from a remote server, so a `visibility` that is not a
+   * list of strings is reported as no declaration. adk-python returns the raw
+   * value; a caller of a `string[]` getter cannot survive that.
+   */
+  get visibility(): string[] {
+    const visibility = uiMeta(this.mcpTool)?.['visibility'];
+    return isStringArray(visibility) ? visibility : [];
+  }
+
+  /**
+   * Reports a result the MCP server marked with `isError` as a failed call.
+   *
+   * A server reports a tool failure inside the result rather than by failing
+   * the request, so without this the span records the call as a success.
+   */
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return isRecord(response) && response['isError']
+      ? MCP_TOOL_ERROR
+      : undefined;
+  }
+
   override _getDeclaration(): FunctionDeclaration {
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.mcpTool.name,
+        description: this.mcpTool.description,
+        parametersJsonSchema: this.mcpTool.inputSchema,
+        responseJsonSchema: this.mcpTool.outputSchema,
+      };
+    }
     return {
       name: this.mcpTool.name,
       description: this.mcpTool.description,
