@@ -7,6 +7,7 @@
 import {describe, expect, it} from 'vitest';
 import {
   camelCaseKeys,
+  camelCaseRecordKeys,
   snakeCase,
   toSnakeCaseIdentifier,
   toSnakeCaseName,
@@ -210,6 +211,25 @@ describe('case_utils', () => {
 
     it('should return an empty string for an empty input', () => {
       expect(snakeCase('')).toBe('');
+    });
+  });
+
+  describe('camelCaseRecordKeys', () => {
+    it('converts keys recursively and returns a record', () => {
+      const result = camelCaseRecordKeys({
+        'foo_bar': 'value',
+        'nested_one': {'deep_key': [{'array_key': 1}]},
+      });
+
+      expect(result).toEqual({
+        fooBar: 'value',
+        nestedOne: {deepKey: [{arrayKey: 1}]},
+      });
+      expect(Object.keys(result)).toEqual(['fooBar', 'nestedOne']);
+    });
+
+    it('returns an empty record for an empty record', () => {
+      expect(camelCaseRecordKeys({})).toEqual({});
     });
   });
 });
