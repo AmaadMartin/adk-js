@@ -7,6 +7,7 @@
 import {describe, expect, it} from 'vitest';
 import {
   appendHttpDebugInfo,
+  captureHttpDebugInfo,
   describeHttpExchange,
   getHttpDebugInfo,
   HttpExchange,
@@ -193,14 +194,15 @@ describe('http debug capture', () => {
 });
 
 describe('describeHttpExchange', () => {
-  /** A request description with the defaults a test does not care about. */
-  function request(
-    overrides: Partial<Parameters<typeof describeHttpExchange>[0]> = {},
-  ) {
+  const url = 'https://mcp.example.com/mcp';
+
+  type FetchOptions = NonNullable<Parameters<typeof describeHttpExchange>[1]>;
+
+  /** Fetch options with the defaults a test does not care about. */
+  function init(overrides: FetchOptions = {}): FetchOptions {
     return {
-      url: 'https://mcp.example.com/mcp',
       method: 'POST',
-      headers: new Headers({'content-type': 'application/json'}),
+      headers: {'content-type': 'application/json'},
       ...overrides,
     };
   }
@@ -212,7 +214,8 @@ describe('describeHttpExchange', () => {
     });
 
     const described = await describeHttpExchange(
-      request({body: '{"method":"tools/list"}'}),
+      url,
+      init({body: '{"method":"tools/list"}'}),
       response,
     );
 
@@ -234,7 +237,7 @@ describe('describeHttpExchange', () => {
       headers: {'content-type': 'text/event-stream'},
     });
 
-    const described = await describeHttpExchange(request(), response);
+    const described = await describeHttpExchange(url, init(), response);
 
     expect(described.responseBody).toBe('<SSE stream>');
     expect(response.bodyUsed).toBe(false);
@@ -250,7 +253,7 @@ describe('describeHttpExchange', () => {
       {status: 502},
     );
 
-    const described = await describeHttpExchange(request(), response);
+    const described = await describeHttpExchange(url, init(), response);
 
     expect(described.responseBody).toBe('<failed to read body>');
     expect(described.statusCode).toBe(502);
@@ -258,11 +261,43 @@ describe('describeHttpExchange', () => {
 
   it('leaves out a request body that is not text', async () => {
     const described = await describeHttpExchange(
-      request(),
+      url,
+      init(),
       new Response('{}', {status: 200}),
     );
 
     expect(described.requestBody).toBeUndefined();
+  });
+
+  it('leaves out a binary request body', async () => {
+    const described = await describeHttpExchange(
+      url,
+      init({body: new Uint8Array([1, 2, 3])}),
+      new Response('{}', {status: 200}),
+    );
+
+    expect(described.requestBody).toBeUndefined();
+  });
+
+  it('records a request with no options as a GET', async () => {
+    const described = await describeHttpExchange(
+      url,
+      undefined,
+      new Response('{}', {status: 200}),
+    );
+
+    expect(described.method).toBe('GET');
+    expect(described.requestHeaders).toEqual({});
+  });
+
+  it('accepts a URL object', async () => {
+    const described = await describeHttpExchange(
+      new URL(url),
+      init(),
+      new Response('{}', {status: 200}),
+    );
+
+    expect(described.url).toBe(url);
   });
 });
 
@@ -307,5 +342,42 @@ describe('http debug info on an invocation', () => {
     expect(getHttpDebugInfo(customMetadata)).toHaveLength(
       MAX_CAPTURED_EXCHANGES,
     );
+  });
+});
+
+describe('captureHttpDebugInfo', () => {
+  it('drains what the operation recorded into the metadata', async () => {
+    const customMetadata: Record<string, unknown> = {};
+
+    const result = await captureHttpDebugInfo(customMetadata, async () => {
+      recordHttpExchange(exchange({url: 'https://a/'}));
+      return 'done';
+    });
+
+    expect(result).toBe('done');
+    expect(getHttpDebugInfo(customMetadata).map((e) => e.url)).toEqual([
+      'https://a/',
+    ]);
+  });
+
+  it('drains what a failed operation recorded, and rethrows', async () => {
+    const customMetadata: Record<string, unknown> = {};
+
+    await expect(
+      captureHttpDebugInfo(customMetadata, async () => {
+        recordHttpExchange(exchange({url: 'https://a/'}));
+        throw new Error('call failed');
+      }),
+    ).rejects.toThrow('call failed');
+
+    expect(getHttpDebugInfo(customMetadata)).toHaveLength(1);
+  });
+
+  it('adds no key when the operation recorded nothing', async () => {
+    const customMetadata: Record<string, unknown> = {};
+
+    await captureHttpDebugInfo(customMetadata, async () => 'done');
+
+    expect(customMetadata).toEqual({});
   });
 });
