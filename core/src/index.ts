@@ -75,6 +75,10 @@ export type {
 } from './tools/application_integration_tool/clients/connector_spec_builders.js';
 export {IntegrationClient} from './tools/application_integration_tool/clients/integration_client.js';
 export type {IntegrationClientOptions} from './tools/application_integration_tool/clients/integration_client.js';
+export {
+  GoogleApiToOpenApiConverter,
+  convertDiscoveryDocument,
+} from './tools/google_api_tool/googleapi_to_openapi_converter.js';
 export {loadTextChunks} from './tools/retrieval/document_loader.js';
 export {FilesRetrieval} from './tools/retrieval/files_retrieval.js';
 export type {FilesRetrievalOptions} from './tools/retrieval/files_retrieval.js';

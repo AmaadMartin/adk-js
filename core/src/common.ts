@@ -443,10 +443,6 @@ export type {
   DiscoverySchema,
 } from './tools/google_api_tool/discovery_document.js';
 export {
-  GoogleApiToOpenApiConverter,
-  convertDiscoveryDocument,
-} from './tools/google_api_tool/googleapi_to_openapi_converter.js';
-export {
   createApiParameter,
   generateParamDoc,
   generateReturnDoc,
