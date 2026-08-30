@@ -118,6 +118,12 @@ export class RestApiTool extends BaseTool {
   /**
    * Sets the headers this tool sends when the request does not already carry
    * them. The map replaces the map an earlier call set.
+   *
+   * A default header never replaces a header the request already carries, so
+   * it cannot clobber the `Authorization` header set from the exchanged
+   * credential.
+   *
+   * @param headers The default headers.
    */
   @experimental
   public setDefaultHeaders(headers: Record<string, string>) {
@@ -229,6 +235,8 @@ export class RestApiTool extends BaseTool {
     addMissingHeaders(headers, {
       'User-Agent': `google-adk/${version} (tool: ${this.name})`,
     });
+    // The default headers are last: a default never replaces a header the
+    // request already carries.
     addMissingHeaders(headers, this.defaultHeaders);
 
     const init: DispatcherRequestInit = {

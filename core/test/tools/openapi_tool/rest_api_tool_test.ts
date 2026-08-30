@@ -116,6 +116,71 @@ describe('RestApiTool', () => {
     );
   });
 
+  it('should send a header set by setDefaultHeaders', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      {responses: {}},
+    );
+    tool.setDefaultHeaders({'developer-token': 'default-value'});
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'developer-token': 'default-value',
+        }),
+      }),
+    );
+  });
+
+  it('should keep a request header over a default header of the same name', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [
+        {name: 'developer-token', in: 'header', schema: {type: 'string'}},
+      ],
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      operation,
+    );
+    tool.setDefaultHeaders({'developer-token': 'default-value'});
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    // The tool-facing argument name is the snake_case form of the header
+    // name. The header that leaves the process keeps the name the spec gives.
+    await tool.runAsync({
+      args: {developer_token: 'request-value'},
+      toolContext: createToolContext(),
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'developer-token': 'request-value',
+        }),
+      }),
+    );
+  });
+
   it('should stringify object body', async () => {
     const endpoint = {
       baseUrl: 'http://api.example.com',
