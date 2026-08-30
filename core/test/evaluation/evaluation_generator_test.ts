@@ -742,7 +742,8 @@ describe('generateResponsesFromSessionFile', () => {
                   function_call: {
                     id: 'fc-1',
                     name: 'get_weather',
-                    args: {city: 'Paris'},
+                    // A snake_case argument name must survive the read.
+                    args: {city_name: 'Paris'},
                   },
                 },
               ],
@@ -767,15 +768,48 @@ describe('generateResponsesFromSessionFile', () => {
     ]);
 
     expect(conversation[0].actual_tool_use).toEqual([
-      {tool_name: 'get_weather', tool_input: {city: 'Paris'}},
+      {tool_name: 'get_weather', tool_input: {city_name: 'Paris'}},
     ]);
     expect(conversation[0].response).toBe('It is raining.');
   });
 
   it('annotates from a session file adk-js wrote', async () => {
+    const session = createSession({
+      id: 'session-1',
+      appName: 'my_app',
+      events: [
+        createEvent({
+          author: 'user',
+          invocationId: 'inv-1',
+          content: {role: 'user', parts: [{text: 'weather?'}]},
+        }),
+        createEvent({
+          author: 'agent',
+          invocationId: 'inv-1',
+          content: {
+            role: 'model',
+            parts: [
+              {
+                functionCall: {
+                  id: 'fc-1',
+                  name: 'get_weather',
+                  // A snake_case argument name must survive the read.
+                  args: {city_name: 'Paris'},
+                },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'agent',
+          invocationId: 'inv-1',
+          content: {role: 'model', parts: [{text: 'It is raining.'}]},
+        }),
+      ],
+    });
     const path = await writeSessionFile(
       'js_session.json',
-      JSON.stringify(recordedSession()),
+      JSON.stringify(session),
     );
 
     const [conversation] = await generateResponsesFromSessionFile(path, [
@@ -783,7 +817,7 @@ describe('generateResponsesFromSessionFile', () => {
     ]);
 
     expect(conversation[0].actual_tool_use).toEqual([
-      {tool_name: 'get_weather', tool_input: {city: 'Paris'}},
+      {tool_name: 'get_weather', tool_input: {city_name: 'Paris'}},
     ]);
     expect(conversation[0].response).toBe('It is raining.');
   });
