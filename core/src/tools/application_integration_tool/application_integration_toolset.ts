@@ -23,7 +23,7 @@ import {OpenAPIToolset} from '../openapi_tool/openapi_toolset.js';
 import {createRestApiTool} from '../openapi_tool/rest_api_tool.js';
 import {ApiTransport, CLOUD_PLATFORM_SCOPE} from './clients/api_transport.js';
 import {ConnectionDetails} from './clients/connections_client.js';
-import {ConnectorOperationExtensions} from './clients/connector_spec_builders.js';
+import {ConnectorExtensions} from './clients/connector_spec_builders.js';
 import {IntegrationClient} from './clients/integration_client.js';
 import {IntegrationConnectorTool} from './integration_connector_tool.js';
 
@@ -273,7 +273,7 @@ export class ApplicationIntegrationToolset extends BaseToolset {
  */
 function readOperationExtension(
   operation: OpenAPIV3.OperationObject,
-  key: keyof ConnectorOperationExtensions,
+  key: keyof ConnectorExtensions,
 ): string | undefined {
   const value = asJsonObject(operation)?.[key];
   return typeof value === 'string' ? value : undefined;

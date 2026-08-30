@@ -69,21 +69,20 @@ const OPENAPI_SCHEMA_TYPES = new Set<string>([
  * record which connector call an operation stands for, so a toolset reading
  * the generated spec can rebuild it.
  */
-export interface ConnectorOperationExtensions {
+export interface ConnectorExtensions {
   'x-operation': string;
   'x-entity'?: string;
   'x-action'?: string;
 }
 
 /** One generated path in the connector spec. */
-export type ConnectorPathItem =
-  OpenAPIV3.PathItemObject<ConnectorOperationExtensions>;
+export type ConnectorPathItem = OpenAPIV3.PathItemObject<ConnectorExtensions>;
 
 /**
  * The generated connector OpenAPI document. `components.schemas` is required,
  * because every generated operation refers to a schema recorded there.
  */
-export interface ConnectorSpec extends OpenAPIV3.Document<ConnectorOperationExtensions> {
+export interface ConnectorSpec extends OpenAPIV3.Document<ConnectorExtensions> {
   components: OpenAPIV3.ComponentsObject & {
     schemas: Record<string, OpenAPIV3.ReferenceObject | OpenAPIV3.SchemaObject>;
   };
@@ -555,7 +554,7 @@ function connectorOperation(options: {
   summary: string;
   description: string;
   operationId: string;
-  extensions: ConnectorOperationExtensions;
+  extensions: ConnectorExtensions;
   requestRef: string;
   /** Defaults to the shared `ExecuteConnection` response schema. */
   responseRef?: string;
