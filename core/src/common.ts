@@ -390,6 +390,9 @@ export {
 export type {
   AuthPreparationResult,
   CredentialStore,
+  // Referenced by the public `ToolAuthHandler` constructor, so `docs:check`
+  // fails as an undocumented reference without it.
+  ToolAuthHandlerOptions,
 } from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';
 export {
