@@ -10,6 +10,7 @@ import {
   createEvent,
   createEventActions,
   createSession,
+  Event,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -19,7 +20,8 @@ import {
   State,
   StreamingMode,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {Content} from '@google/genai';
+import {describe, expect, it, Mock, vi} from 'vitest';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   const actual =
@@ -29,6 +31,7 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     Runner: vi.fn().mockImplementation((config) => ({
       appName: config?.appName,
       sessionService: config?.sessionService,
+      close: vi.fn(),
       runAsync: vi.fn(),
     })),
   };
@@ -49,6 +52,7 @@ async function captureNestedRunConfig(
       ({
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         async *runAsync(params: {runConfig?: RunConfig}) {
           captured = params.runConfig;
           yield createEvent({
@@ -62,6 +66,63 @@ async function captureNestedRunConfig(
   await tool.runAsync({args: {request: 'go'}, toolContext});
 
   return captured;
+}
+
+/**
+ * Runs `tool` with `args` against a stubbed nested Runner and returns the text
+ * of the message that `AgentTool` sent to the wrapped agent.
+ */
+async function captureNestedMessageText(
+  tool: AgentTool,
+  args: Record<string, unknown>,
+): Promise<string | undefined> {
+  let captured: string | undefined;
+
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        close: vi.fn(),
+        async *runAsync(params: {newMessage: Content}) {
+          captured = params.newMessage.parts?.[0]?.text;
+          yield createEvent({
+            author: 'sub-agent',
+            content: {role: 'model', parts: [{text: 'done'}]},
+          });
+        },
+      }) as unknown as Runner,
+  );
+
+  await tool.runAsync({args, toolContext: createToolContext()});
+
+  return captured;
+}
+
+/**
+ * Runs `tool` against a nested Runner whose `runAsync` is `runAsync`, and
+ * returns that Runner's `close` mock.
+ */
+async function captureNestedClose(
+  tool: AgentTool,
+  runAsync: () => AsyncGenerator<Event>,
+  toolContext: Context = createToolContext(),
+): Promise<Mock> {
+  const close = vi.fn();
+
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        close,
+        runAsync,
+      }) as unknown as Runner,
+  );
+
+  await tool.runAsync({args: {request: 'go'}, toolContext});
+
+  return close;
 }
 
 /** Builds an AgentTool over a stub sub-agent. */
@@ -138,6 +199,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -206,6 +268,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -261,6 +324,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -344,6 +408,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -400,6 +465,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -450,6 +516,7 @@ describe('AgentTool', () => {
         ({
           appName: config?.appName,
           sessionService: config?.sessionService,
+          close: vi.fn(),
           runAsync: mockRunAsync,
         }) as unknown as Runner,
     );
@@ -499,6 +566,7 @@ describe('AgentTool', () => {
         ({
           appName: config?.appName,
           sessionService: config?.sessionService,
+          close: vi.fn(),
           runAsync: mockRunAsync,
         }) as unknown as Runner,
     );
@@ -550,6 +618,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -693,5 +762,131 @@ describe('AgentTool', () => {
     );
 
     expect(forwarded).toBe(callerRunConfig);
+  });
+
+  it('sends a string request argument to the sub-agent verbatim', async () => {
+    const text = await captureNestedMessageText(createAgentTool(), {
+      request: 'find me Nike running shoes',
+    });
+
+    expect(text).toBe('find me Nike running shoes');
+  });
+
+  it('sends an empty request argument as an empty message', async () => {
+    const text = await captureNestedMessageText(createAgentTool(), {
+      request: '',
+    });
+
+    expect(text).toBe('');
+  });
+
+  it('sends named arguments to the sub-agent as sorted JSON', async () => {
+    const text = await captureNestedMessageText(createAgentTool(), {
+      brand: 'Nike',
+      product: 'running shoes',
+    });
+
+    expect(text).toBe('{"brand":"Nike","product":"running shoes"}');
+  });
+
+  it('sends the same text whatever order the named arguments arrive in', async () => {
+    const text = await captureNestedMessageText(createAgentTool(), {
+      product: 'running shoes',
+      brand: 'Nike',
+    });
+
+    expect(text).toBe('{"brand":"Nike","product":"running shoes"}');
+  });
+
+  it('sends an empty argument record as an empty JSON object', async () => {
+    const text = await captureNestedMessageText(createAgentTool(), {});
+
+    expect(text).toBe('{}');
+  });
+
+  it('sends a non-string request argument as JSON', async () => {
+    const text = await captureNestedMessageText(createAgentTool(), {
+      request: {city: 'Paris'},
+    });
+
+    expect(text).toBe('{"request":{"city":"Paris"}}');
+  });
+
+  it('closes the sub-runner once after a normal run', async () => {
+    const close = await captureNestedClose(
+      createAgentTool(),
+      async function* () {
+        yield createEvent({
+          author: 'sub-agent',
+          content: {role: 'model', parts: [{text: 'done'}]},
+        });
+      },
+    );
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the sub-runner when the run is aborted mid-stream', async () => {
+    const controller = new AbortController();
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        agent: createSubAgent(),
+        session: createSession({
+          id: 'parent-session',
+          appName: 'sub-agent',
+          userId: 'parent-user',
+        }),
+        pluginManager: new PluginManager([]),
+        sessionService: new InMemorySessionService(),
+        abortSignal: controller.signal,
+      }),
+    });
+
+    const close = await captureNestedClose(
+      createAgentTool(),
+      async function* () {
+        yield createEvent({
+          author: 'sub-agent',
+          content: {role: 'model', parts: [{text: 'hello'}]},
+        });
+        controller.abort();
+        yield createEvent({
+          author: 'sub-agent',
+          content: {role: 'model', parts: [{text: 'world'}]},
+        });
+      },
+      toolContext,
+    );
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the sub-runner when the nested run throws', async () => {
+    const close = vi.fn();
+
+    vi.mocked(Runner).mockImplementation(
+      (config) =>
+        ({
+          appName: config?.appName,
+          sessionService: config?.sessionService,
+          close,
+          async *runAsync() {
+            yield createEvent({
+              author: 'sub-agent',
+              content: {role: 'model', parts: [{text: 'partial'}]},
+            });
+            throw new Error('sub-agent failed');
+          },
+        }) as unknown as Runner,
+    );
+
+    await expect(
+      createAgentTool().runAsync({
+        args: {request: 'go'},
+        toolContext: createToolContext(),
+      }),
+    ).rejects.toThrow('sub-agent failed');
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

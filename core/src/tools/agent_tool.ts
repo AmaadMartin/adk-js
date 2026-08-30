@@ -13,6 +13,7 @@ import {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
+import {stableJsonStringify} from '../utils/json_utils.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
@@ -53,6 +54,19 @@ export function isAgentTool(obj: unknown): obj is AgentTool {
     AGENT_TOOL_SIGNATURE_SYMBOL in obj &&
     obj[AGENT_TOOL_SIGNATURE_SYMBOL] === true
   );
+}
+
+/**
+ * The message text sent to a wrapped agent that declares no input schema.
+ *
+ * A string `request` argument is the message, an empty one included. Anything
+ * else means the model called the tool with named parameters instead, so the
+ * whole argument record becomes the message. Its keys are sorted, so the same
+ * arguments always produce the same text.
+ */
+function noSchemaMessageText(args: Record<string, unknown>): string {
+  const request = args['request'];
+  return typeof request === 'string' ? request : stableJsonStringify(args);
 }
 
 /**
@@ -167,7 +181,7 @@ export class AgentTool extends BaseTool {
           // logic to one we have in Python ADK.
           text: hasInputSchema
             ? JSON.stringify(args)
-            : (args['request'] as string),
+            : noSchemaMessageText(args),
         },
       ],
     };
@@ -199,29 +213,35 @@ export class AgentTool extends BaseTool {
     const runConfig = nestedRunConfig(toolContext.invocationContext.runConfig);
 
     let lastEvent: Event | undefined;
-    for await (const event of runner.runAsync({
-      userId: session.userId,
-      sessionId: session.id,
-      newMessage: content,
-      runConfig,
-      abortSignal: toolContext.abortSignal,
-    })) {
-      if (toolContext.abortSignal?.aborted) {
-        return;
-      }
-
-      if (event.actions.stateDelta) {
-        const filteredDelta = Object.fromEntries(
-          Object.entries(event.actions.stateDelta).filter(
-            ([key]) => !key.startsWith(State.TEMP_PREFIX),
-          ),
-        );
-        if (Object.keys(filteredDelta).length > 0) {
-          toolContext.state.update(filteredDelta);
+    try {
+      for await (const event of runner.runAsync({
+        userId: session.userId,
+        sessionId: session.id,
+        newMessage: content,
+        runConfig,
+        abortSignal: toolContext.abortSignal,
+      })) {
+        if (toolContext.abortSignal?.aborted) {
+          return;
         }
-      }
 
-      lastEvent = event;
+        if (event.actions.stateDelta) {
+          const filteredDelta = Object.fromEntries(
+            Object.entries(event.actions.stateDelta).filter(
+              ([key]) => !key.startsWith(State.TEMP_PREFIX),
+            ),
+          );
+          if (Object.keys(filteredDelta).length > 0) {
+            toolContext.state.update(filteredDelta);
+          }
+        }
+
+        lastEvent = event;
+      }
+    } finally {
+      // The sub-runner holds resources the caller does not own, MCP sessions
+      // above all. An abort and a throw both leave through here.
+      await runner.close();
     }
 
     if (!lastEvent?.content?.parts?.length) {
