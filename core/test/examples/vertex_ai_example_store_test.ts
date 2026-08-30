@@ -535,6 +535,23 @@ describe('VertexAiExampleStore', () => {
     );
   });
 
+  it('addresses the unprefixed host for the global location', async () => {
+    const request = mockSearchExamples({results: []});
+    const store = new VertexAiExampleStore(
+      'projects/p/locations/global/exampleStores/s',
+    );
+
+    await store.getExamples('anything');
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url:
+          'https://aiplatform.googleapis.com/v1beta1/' +
+          'projects/p/locations/global/exampleStores/s:searchExamples',
+      }),
+    );
+  });
+
   it('propagates a failed search instead of returning no examples', async () => {
     vi.spyOn(GoogleAuth.prototype, 'request').mockRejectedValue(
       new Error('Request failed with status code 403'),

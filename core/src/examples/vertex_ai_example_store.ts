@@ -37,6 +37,19 @@ const EXAMPLE_STORE_NAME_PATTERN =
 const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
 /**
+ * Returns the Vertex AI host serving a location.
+ *
+ * Every region prefixes the host, but `global` is served by the bare host, so
+ * prefixing it would address a name that does not resolve. `@google/genai`
+ * splits the two the same way.
+ */
+function toSearchHost(location: string): string {
+  return location === 'global'
+    ? 'aiplatform.googleapis.com'
+    : `${location}-aiplatform.googleapis.com`;
+}
+
+/**
  * A single scored result returned by `searchExamples`.
  *
  * Every field is optional: proto3 JSON omits unset fields, and an unset nested
@@ -145,7 +158,7 @@ export class VertexAiExampleStore extends BaseExampleProvider {
       );
     }
     this.searchUrl =
-      `https://${match[1]}-aiplatform.googleapis.com/v1beta1/` +
+      `https://${toSearchHost(match[1])}/v1beta1/` +
       `${examplesStoreName}:searchExamples`;
   }
 
