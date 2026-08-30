@@ -136,6 +136,28 @@ describe('LlmAgent sub-agent delegation tools', () => {
     expect(suppliedTools).toEqual([ownTool]);
   });
 
+  it('keeps the caller tools array private when no sub-agent has a mode', () => {
+    const ownTool = new FunctionTool({
+      name: 'ping',
+      description: 'Pings.',
+      execute: () => 'pong',
+    });
+    const suppliedTools = [ownTool];
+
+    const agent = new LlmAgent({name: 'solo', tools: suppliedTools});
+    // ADK pushes into `tools` after construction — SequentialAgent adds its
+    // task-completed tool to a sub-agent. That must not reach the caller.
+    agent.tools.push(
+      new FunctionTool({
+        name: 'added_later',
+        description: 'Added by the framework.',
+        execute: () => 'ok',
+      }),
+    );
+
+    expect(suppliedTools).toEqual([ownTool]);
+  });
+
   it(
     'builds a coordinator from a freshly loaded module graph',
     async () => {
