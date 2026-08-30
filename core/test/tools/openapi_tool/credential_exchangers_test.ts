@@ -51,7 +51,7 @@ describe('AutoAuthCredentialExchanger', () => {
     });
 
     expect(result.wasExchanged).toBe(true);
-    expect(result.credential.http?.credentials?.token).toBe('mock-adc-token');
+    expect(result.credential.http?.credentials.token).toBe('mock-adc-token');
   });
 });
 
@@ -86,7 +86,7 @@ describe('ServiceAccountCredentialExchanger', () => {
     });
 
     expect(result.wasExchanged).toBe(true);
-    expect(result.credential.http?.credentials?.token).toBe('mock-token');
+    expect(result.credential.http?.credentials.token).toBe('mock-token');
   });
 
   it('should exchange with default credentials', async () => {
@@ -103,7 +103,7 @@ describe('ServiceAccountCredentialExchanger', () => {
     });
 
     expect(result.wasExchanged).toBe(true);
-    expect(result.credential.http?.credentials?.token).toBe('mock-adc-token');
+    expect(result.credential.http?.credentials.token).toBe('mock-adc-token');
   });
 
   it('should throw if explicit credentials missing', async () => {

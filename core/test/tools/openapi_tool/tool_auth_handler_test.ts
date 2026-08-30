@@ -61,7 +61,7 @@ describe('ToolAuthHandler', () => {
     const result = await handler.prepareAuthCredentials();
 
     expect(result.state).toBe('done');
-    expect(result.authCredential?.http?.credentials?.token).toBe(
+    expect(result.authCredential?.http?.credentials.token).toBe(
       'exchanged-token',
     );
   });
@@ -104,9 +104,7 @@ describe('ToolAuthHandler', () => {
     const result = await handler.prepareAuthCredentials();
 
     expect(result.state).toBe('done');
-    expect(result.authCredential?.http?.credentials?.token).toBe(
-      'cached-token',
-    );
+    expect(result.authCredential?.http?.credentials.token).toBe('cached-token');
   });
 
   it('should store exchanged credential in state and record it in the delta', async () => {
@@ -169,7 +167,7 @@ describe('ToolAuthHandler', () => {
     }).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
-    expect(result.authCredential?.http?.credentials?.token).toBe(
+    expect(result.authCredential?.http?.credentials.token).toBe(
       'exchanged-token',
     );
     // The cached credential was reused; no second exchange was triggered.

@@ -34,8 +34,9 @@ const DEFAULT_MCP_CREDENTIAL_KEY = 'default_mcp_key';
 /**
  * Resolves request headers immediately before an MCP session is created.
  *
- * Called once per `getTools()` invocation, so short-lived credentials (e.g. an
- * OAuth bearer token) are always freshly minted. Returned headers are merged
+ * Called once per `getTools()` call. The headers it returns are reused by every
+ * tool that call returns, for as long as those tools live, so a credential that
+ * expires mid-conversation is not re-minted. Returned headers are merged
  * over any static headers in
  * `StreamableHTTPConnectionParams.transportOptions.requestInit.headers`; on key
  * conflict the provider wins. Headers are only meaningful for HTTP transports —

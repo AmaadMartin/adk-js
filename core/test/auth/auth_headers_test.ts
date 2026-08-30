@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthCredential, AuthCredentialTypes, AuthScheme} from '@google/adk';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+  AuthScheme,
+  HttpAuth,
+} from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {buildAuthHeaders} from '../../src/auth/auth_headers.js';
@@ -133,7 +138,8 @@ describe('buildAuthHeaders', () => {
     it('sends nothing when the credential carries no credentials object', () => {
       const credential: AuthCredential = {
         authType: AuthCredentialTypes.HTTP,
-        http: {scheme: 'bearer'},
+        // `HttpAuth` makes `credentials` mandatory, but a document can omit it.
+        http: {scheme: 'bearer'} as HttpAuth,
       };
 
       expect(buildAuthHeaders(credential)).toBeUndefined();
