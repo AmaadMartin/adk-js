@@ -10,11 +10,13 @@ import {
   Tool,
 } from '@google/genai';
 
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {
   ToolErrorType,
   ToolExecutionError,
 } from '../errors/tool_execution_error.js';
 import {LlmRequest} from '../models/llm_request.js';
+import {logger} from '../utils/logger.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
@@ -59,6 +61,11 @@ export interface BaseToolParams {
    */
   responseScheduling?: FunctionResponseScheduling;
 }
+
+/** A concrete tool class whose constructor takes {@link BaseToolParams}. */
+export type BaseToolConstructor<T extends BaseTool = BaseTool> = new (
+  params: BaseToolParams,
+) => T;
 
 /**
  * A unique symbol to identify ADK agent classes.
@@ -122,10 +129,11 @@ export abstract class BaseTool {
    * also records the call in `event.longRunningToolIds`, affecting A2A task
    * state, plugin logging and session metadata.
    *
-   * Subclasses opt in by redeclaring the field:
-   * `override readonly defersResponse = true;`
+   * Not a constructor option, matching the reference Python SDK. A tool that
+   * defers assigns it after `super(...)`, or an orchestrator assigns it on a
+   * tool instance it did not construct.
    */
-  readonly defersResponse: boolean = false;
+  defersResponse = false;
 
   /**
    * Base constructor for a tool.
@@ -259,19 +267,47 @@ export abstract class BaseTool {
    * and a non-object, and does not walk the value to confirm that it is JSON
    * serializable, which stays the caller's obligation.
    *
+   * The declared return type is `BaseTool`, not the class this was called on.
+   * TypeScript cannot express both: a static typed to return the caller's
+   * concrete class rejects every subclass override that returns its own class
+   * (TS2417), which is the whole point of the seam. Call
+   * {@link toolFromConfig} instead where the class is known and the concrete
+   * type matters.
+   *
    * @param config The args of the tool config.
    * @param _configAbsPath The absolute path of the config file the config came
    *     from.
    * @return The tool instance.
-   * @throws Error if a recognized key holds a value of the wrong type.
+   * @throws {InputValidationError} If a recognized key is missing or holds a
+   *     value of the wrong type.
    */
-  static fromConfig(
-    this: new (params: BaseToolParams) => BaseTool,
+  static async fromConfig(
+    this: BaseToolConstructor,
     config: ToolArgsConfig,
     _configAbsPath: string,
-  ): BaseTool {
+  ): Promise<BaseTool> {
     return new this(toBaseToolParams(config));
   }
+}
+
+/**
+ * Builds a tool of a known class from its declarative configuration.
+ *
+ * The typed counterpart of {@link BaseTool.fromConfig}, for a caller that
+ * holds the tool class and needs the built tool at that class's type. It
+ * applies the same validation and does not consult a subclass override.
+ *
+ * @param ctor The tool class to build.
+ * @param config The args of the tool config.
+ * @return The tool instance, at the class's own type.
+ * @throws {InputValidationError} If a recognized key is missing or holds a
+ *     value of the wrong type.
+ */
+export async function toolFromConfig<T extends BaseTool>(
+  ctor: BaseToolConstructor<T>,
+  config: ToolArgsConfig,
+): Promise<T> {
+  return new ctor(toBaseToolParams(config));
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -299,24 +335,47 @@ function invalidToolConfig(
   key: string,
   expected: string,
   value: unknown,
-): Error {
-  return new Error(
+): InputValidationError {
+  return new InputValidationError(
     `Invalid tool config: "${key}" must be ${expected}, got ${describeType(value)}.`,
   );
 }
 
+/** The keys {@link toBaseToolParams} maps onto {@link BaseToolParams}. */
+const BASE_TOOL_PARAM_KEYS: ReadonlySet<string> = new Set([
+  'name',
+  'description',
+  'isLongRunning',
+  'customMetadata',
+  'responseScheduling',
+]);
+
 /**
  * Validates the keys of {@link BaseToolParams} in a tool config.
  *
+ * A key the base mapper does not recognize is a warning, not an error: a
+ * subclass config legitimately carries keys only its own override reads.
+ *
  * @param config The args of the tool config.
  * @return The validated constructor params.
- * @throws Error if a recognized key holds a value of the wrong type.
+ * @throws {InputValidationError} If a recognized key is missing or holds a
+ *     value of the wrong type.
  */
 function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
   const {name, description, isLongRunning, customMetadata, responseScheduling} =
     config;
+  for (const key of Object.keys(config)) {
+    if (!BASE_TOOL_PARAM_KEYS.has(key)) {
+      logger.warn(`Unsupported parsing for tool config argument: ${key}.`);
+    }
+  }
   if (typeof name !== 'string') {
     throw invalidToolConfig('name', 'a string', name);
+  }
+  if (name === '') {
+    throw new InputValidationError(
+      'Invalid tool config: "name" must not be empty.',
+    );
   }
   if (typeof description !== 'string') {
     throw invalidToolConfig('description', 'a string', description);
