@@ -329,7 +329,6 @@ describe('ConnectionsClient', () => {
       expect(await createClient().getActionSchema('CustomAction')).toEqual({
         inputSchema: {type: 'object'},
         outputSchema: {type: 'string'},
-        description: 'an action',
         displayName: 'Custom Action',
       });
       expect(request).toHaveBeenNthCalledWith(
@@ -367,7 +366,6 @@ describe('ConnectionsClient', () => {
       expect(await createClient().getActionSchema('CustomAction')).toEqual({
         inputSchema: {},
         outputSchema: {},
-        description: '',
         displayName: '',
       });
     });

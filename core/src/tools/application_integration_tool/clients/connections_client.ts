@@ -42,7 +42,6 @@ export interface EntitySchemaAndOperations {
 export interface ActionSchema {
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
-  description: string;
   displayName: string;
 }
 
@@ -126,7 +125,6 @@ export class ConnectionsClient {
     return {
       inputSchema: asJsonObject(response['inputJsonSchema']) ?? {},
       outputSchema: asJsonObject(response['outputJsonSchema']) ?? {},
-      description: readString(response, 'description'),
       displayName: readString(response, 'displayName'),
     };
   }
