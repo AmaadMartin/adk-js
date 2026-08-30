@@ -10,6 +10,10 @@ import {
   Tool,
 } from '@google/genai';
 
+import {
+  ToolErrorType,
+  ToolExecutionError,
+} from '../errors/tool_execution_error.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
@@ -161,10 +165,20 @@ export abstract class BaseTool {
    * - Otherwise, can be skipped, e.g. for a built-in GoogleSearch tool for
    *   Gemini.
    *
-   * @param request The request to run the tool.
+   * The default rejects, so a tool that only the model runs can leave it
+   * undefined and still fail loudly if the client calls it. Mirrors Python's
+   * `BaseTool.run_async`, which raises `NotImplementedError`.
+   *
+   * @param _request The request to run the tool.
    * @return A promise that resolves to the tool response.
+   * @throws {ToolExecutionError} When the subclass does not implement it.
    */
-  abstract runAsync(request: RunAsyncToolRequest): Promise<unknown>;
+  async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
+    throw new ToolExecutionError(
+      `Tool ${this.name} does not implement runAsync.`,
+      ToolErrorType.INTERNAL_SERVER_ERROR,
+    );
+  }
 
   /**
    * Whether this tool needs a human to approve `args` before it runs.
