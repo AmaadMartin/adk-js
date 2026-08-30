@@ -88,6 +88,15 @@ describe('GoogleApiTool', () => {
     expect(setDefaultHeaders).not.toHaveBeenCalled();
   });
 
+  it('does not set default headers when the given headers are empty', () => {
+    const restApiTool = createRestApiToolDouble();
+    const setDefaultHeaders = vi.spyOn(restApiTool, 'setDefaultHeaders');
+
+    new GoogleApiTool(restApiTool, {additionalHeaders: {}});
+
+    expect(setDefaultHeaders).not.toHaveBeenCalled();
+  });
+
   it('returns the wrapped tool declaration', () => {
     const restApiTool = createRestApiToolDouble();
     const declaration = {

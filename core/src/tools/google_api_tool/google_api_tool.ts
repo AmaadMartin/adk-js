@@ -72,7 +72,7 @@ export class GoogleApiTool extends BaseTool {
 
     const {clientId, clientSecret, serviceAccount, additionalHeaders} = options;
 
-    if (additionalHeaders) {
+    if (additionalHeaders && Object.keys(additionalHeaders).length > 0) {
       this.restApiTool.setDefaultHeaders(additionalHeaders);
     }
 
