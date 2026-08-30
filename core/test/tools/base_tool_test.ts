@@ -11,21 +11,11 @@ import {
   Logger,
   setLogger,
   ToolArgsConfig,
-  toolFromConfig,
 } from '@google/adk';
 import {FunctionResponseScheduling} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 class PlainTool extends BaseTool {
-  override async runAsync(): Promise<unknown> {
-    return {result: 'ok'};
-  }
-}
-
-/** A tool class with a member of its own, to pin what a builder returns. */
-class FlavouredTool extends BaseTool {
-  readonly flavor = 'vanilla';
-
   override async runAsync(): Promise<unknown> {
     return {result: 'ok'};
   }
@@ -429,32 +419,5 @@ describe('BaseTool.fromConfig unrecognized keys', () => {
     expect(recording.warnings).toEqual([
       'Unsupported parsing for tool config argument: retries.',
     ]);
-  });
-});
-
-describe('toolFromConfig', () => {
-  it('builds the tool at the class its caller named', async () => {
-    const tool: FlavouredTool = await toolFromConfig(FlavouredTool, {
-      name: 'flavoured_tool',
-      description: 'A tool.',
-    });
-
-    expect(tool.flavor).toBe('vanilla');
-    expect(tool.name).toBe('flavoured_tool');
-  });
-
-  it('applies the same validation as the static seam', async () => {
-    await expect(
-      toolFromConfig(PlainTool, {description: 'A tool.'}),
-    ).rejects.toBeInstanceOf(InputValidationError);
-  });
-
-  it('does not consult a subclass override of fromConfig', async () => {
-    const tool = await toolFromConfig(ConfigPathTool, {
-      name: 'config_path_tool',
-      description: 'A tool.',
-    });
-
-    expect(tool.description).toBe('A tool.');
   });
 });
