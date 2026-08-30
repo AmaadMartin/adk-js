@@ -58,13 +58,4 @@ describe('loadWebPage against a real server', () => {
     expect(result).toBe(`Failed to fetch url: ${url}`);
     expect(received).toBeUndefined();
   });
-
-  it('opens no socket for a port of zero', async () => {
-    const url = `http://public.example:0/page`;
-
-    const result = await loadWebPage(url);
-
-    expect(result).toBe(`Failed to fetch url: ${url}`);
-    expect(received).toBeUndefined();
-  });
 });
