@@ -412,9 +412,34 @@ describe('ApplicationIntegrationToolset', () => {
       });
 
       expect(await toolset.getTools()).toEqual([]);
-      expect(capturedOpenApiToolsetOptions()['toolFilter']).toEqual([
-        'other_tool',
-      ]);
+    });
+
+    it('keeps a tool the name filter names', async () => {
+      const toolset = new ApplicationIntegrationToolset({
+        project: 'test-project',
+        location: 'us-central1',
+        integration: 'test-integration',
+        triggers: [],
+        toolFilter: ['run_integration'],
+      });
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['run_integration']);
+    });
+
+    it('owns the filter instead of delegating it to the inner toolset', async () => {
+      const toolset = new ApplicationIntegrationToolset({
+        project: 'test-project',
+        location: 'us-central1',
+        integration: 'test-integration',
+        triggers: [],
+        toolFilter: ['other_tool'],
+      });
+
+      await toolset.getTools();
+
+      expect(capturedOpenApiToolsetOptions()['toolFilter']).toBeUndefined();
     });
 
     it('runs the initialization once for repeated callers', async () => {

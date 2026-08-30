@@ -442,7 +442,7 @@ describe('ConnectionsClient', () => {
 
       await createClient().getEntitySchemaAndOperations('Issues');
 
-      expect(getAccessToken).toHaveBeenCalledTimes(2);
+      expect(getAccessToken).toHaveBeenCalledTimes(1);
       expect(getClientCalls).toHaveBeenCalledTimes(1);
     });
 

@@ -56,17 +56,13 @@ export type IntegrationClientOptions = Pick<
  */
 @experimental
 export class IntegrationClient {
-  private connectionsClient?: ConnectionsClient;
-
   constructor(
     private readonly options: IntegrationClientOptions,
     private readonly transport: ApiTransport,
   ) {}
 
   /**
-   * Returns the connector metadata client, building it on first use. One
-   * instance is shared, so a toolset resolves its credentials once instead of
-   * once per caller.
+   * Returns a connector metadata client bound to the shared transport.
    *
    * @throws {InputValidationError} If no connection name was configured.
    */
@@ -77,7 +73,7 @@ export class IntegrationClient {
         'A connection name is required to read connector metadata.',
       );
     }
-    this.connectionsClient ??= new ConnectionsClient(
+    return new ConnectionsClient(
       {
         project: this.options.project,
         location: this.options.location,
@@ -85,7 +81,6 @@ export class IntegrationClient {
       },
       this.transport,
     );
-    return this.connectionsClient;
   }
 
   /**

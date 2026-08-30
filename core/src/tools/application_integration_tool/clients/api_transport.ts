@@ -74,9 +74,9 @@ export class ApiTransport {
   }
 
   /**
-   * Fails before a request goes out when the credentials yield no token.
-   * adk-python reports that case with its own message rather than letting the
-   * API answer 401.
+   * Fails when the credentials yield no token. adk-python reports that case
+   * with its own message rather than letting the API answer 401. The check runs
+   * once per client, where the client is built, not once per request.
    *
    * @throws {Error} If the credentials cannot be resolved or yield no token.
    */
@@ -104,7 +104,6 @@ export class ApiTransport {
    */
   async fetchJson(request: JsonRequest): Promise<Record<string, unknown>> {
     const client = await this.resolveClient();
-    await this.assertHasToken(client);
 
     let response: {status: number; statusText?: string; data: unknown};
     try {
@@ -142,21 +141,25 @@ export class ApiTransport {
       return this.client;
     }
     if (this.serviceAccount) {
-      this.client = new JWT({
+      const jwt = new JWT({
         email: this.serviceAccount.clientEmail,
         key: this.serviceAccount.privateKey,
         scopes: [CLOUD_PLATFORM_SCOPE],
       });
-      return this.client;
+      await this.assertHasToken(jwt);
+      this.client = jwt;
+      return jwt;
     }
+    let client: AuthClient;
     try {
       const auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
-      const client = await auth.getClient();
-      this.client = client;
-      return client;
+      client = await auth.getClient();
     } catch (error: unknown) {
       throw credentialsError(error);
     }
+    await this.assertHasToken(client);
+    this.client = client;
+    return client;
   }
 }
 

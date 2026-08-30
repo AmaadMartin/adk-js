@@ -286,33 +286,6 @@ function getOperation(context: EntityOperationContext): ConnectorPathItem {
   });
 }
 
-/** Builds the path item that creates a record of an entity. */
-function createOperation(context: EntityOperationContext): ConnectorPathItem {
-  const {entity} = context;
-  return entityOperation('create', 'CREATE_ENTITY', context, {
-    summary: `Creates a new ${entity}`,
-    description: `Creates a new ${entity}.`,
-  });
-}
-
-/** Builds the path item that updates a record of an entity. */
-function updateOperation(context: EntityOperationContext): ConnectorPathItem {
-  const {entity} = context;
-  return entityOperation('update', 'UPDATE_ENTITY', context, {
-    summary: `Updates the ${entity}`,
-    description: `Updates the ${entity}.`,
-  });
-}
-
-/** Builds the path item that deletes a record of an entity. */
-function deleteOperation(context: EntityOperationContext): ConnectorPathItem {
-  const {entity} = context;
-  return entityOperation('delete', 'DELETE_ENTITY', context, {
-    summary: `Delete the ${entity}`,
-    description: `Deletes the ${entity}.`,
-  });
-}
-
 /** Builds the request schema of a create-entity call. */
 function createOperationRequest(entity: string): OpenAPIV3.SchemaObject {
   return {
@@ -412,9 +385,39 @@ interface EntityOperationBuilder {
  */
 export const ENTITY_OPERATIONS: ReadonlyMap<string, EntityOperationBuilder> =
   new Map<string, EntityOperationBuilder>([
-    ['create', {request: createOperationRequest, operation: createOperation}],
-    ['update', {request: updateOperationRequest, operation: updateOperation}],
-    ['delete', {request: deleteOperationRequest, operation: deleteOperation}],
+    [
+      'create',
+      {
+        request: createOperationRequest,
+        operation: (context) =>
+          entityOperation('create', 'CREATE_ENTITY', context, {
+            summary: `Creates a new ${context.entity}`,
+            description: `Creates a new ${context.entity}.`,
+          }),
+      },
+    ],
+    [
+      'update',
+      {
+        request: updateOperationRequest,
+        operation: (context) =>
+          entityOperation('update', 'UPDATE_ENTITY', context, {
+            summary: `Updates the ${context.entity}`,
+            description: `Updates the ${context.entity}.`,
+          }),
+      },
+    ],
+    [
+      'delete',
+      {
+        request: deleteOperationRequest,
+        operation: (context) =>
+          entityOperation('delete', 'DELETE_ENTITY', context, {
+            summary: `Delete the ${context.entity}`,
+            description: `Deletes the ${context.entity}.`,
+          }),
+      },
+    ],
     ['list', {request: listOperationRequest, operation: listOperation}],
     ['get', {request: getOperationRequest, operation: getOperation}],
   ]);

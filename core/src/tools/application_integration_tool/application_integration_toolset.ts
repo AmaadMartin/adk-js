@@ -159,10 +159,10 @@ export class ApplicationIntegrationToolset extends BaseToolset {
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     await this.initializeOnce();
 
-    if (this.openapiToolset) {
-      return this.openapiToolset.getTools(context);
-    }
-    return this.tools.filter((tool) => this.isToolSelected(tool, context));
+    const tools = this.openapiToolset
+      ? await this.openapiToolset.getTools()
+      : this.tools;
+    return tools.filter((tool) => this.isToolSelected(tool, context));
   }
 
   /**
@@ -201,7 +201,6 @@ export class ApplicationIntegrationToolset extends BaseToolset {
         specDict: spec,
         ...this.auth,
         credentialKey: this.options.credentialKey,
-        toolFilter: this.options.toolFilter,
       });
       return;
     }
