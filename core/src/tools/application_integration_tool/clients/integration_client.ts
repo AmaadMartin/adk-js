@@ -7,7 +7,6 @@
 import {OpenAPIV3} from 'openapi-types';
 import {InputValidationError} from '../../../errors/input_validation_error.js';
 import {formatError} from '../../../utils/error_utils.js';
-import {experimental} from '../../../utils/experimental.js';
 import {asJsonObject} from '../../../utils/json_utils.js';
 import {logger} from '../../../utils/logger.js';
 import type {ApplicationIntegrationToolsetOptions} from '../application_integration_toolset.js';
@@ -54,7 +53,6 @@ export type IntegrationClientOptions = Pick<
  * Reads Application Integration and Integration Connectors metadata and turns
  * it into the OpenAPI document the OpenAPI tooling consumes.
  */
-@experimental
 export class IntegrationClient {
   constructor(
     private readonly options: IntegrationClientOptions,
@@ -88,7 +86,6 @@ export class IntegrationClient {
    *
    * @throws {Error} If the API call fails.
    */
-  @experimental
   async getConnectionDetails(): Promise<ConnectionDetails> {
     return this.connectorClient().getConnectionDetails();
   }
@@ -101,7 +98,6 @@ export class IntegrationClient {
    *     triggers.
    * @throws {Error} If the call fails or returns no usable spec.
    */
-  @experimental
   async getOpenApiSpecForIntegration(): Promise<OpenAPIV3.Document> {
     const headers = await this.transport.quotaProjectHeaders(
       this.options.project,
@@ -163,7 +159,6 @@ export class IntegrationClient {
    * @param toolInstructions Appended to every generated description.
    * @throws {InputValidationError} If an operation is unknown.
    */
-  @experimental
   async getOpenApiSpecForConnection(
     toolName: string,
     toolInstructions: string,

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {experimental} from '../../../utils/experimental.js';
 import {asJsonObject, readString} from '../../../utils/json_utils.js';
 import {ApiTransport} from './api_transport.js';
 
@@ -59,7 +58,6 @@ export interface ConnectionsClientOptions {
  * Reads connection metadata and entity or action schemas from the Google Cloud
  * Integration Connectors API.
  */
-@experimental
 export class ConnectionsClient {
   constructor(
     private readonly options: ConnectionsClientOptions,
@@ -71,7 +69,6 @@ export class ConnectionsClient {
    *
    * @throws {Error} If the API call fails.
    */
-  @experimental
   async getConnectionDetails(): Promise<ConnectionDetails> {
     const data = await this.get(`${this.connectionUrl()}?view=BASIC`);
     const host = readString(data, 'host');
@@ -92,7 +89,6 @@ export class ConnectionsClient {
    *
    * @throws {Error} If the API call fails or returns no operation to poll.
    */
-  @experimental
   async getEntitySchemaAndOperations(
     entity: string,
   ): Promise<EntitySchemaAndOperations> {
@@ -115,7 +111,6 @@ export class ConnectionsClient {
    *
    * @throws {Error} If the API call fails or returns no operation to poll.
    */
-  @experimental
   async getActionSchema(action: string): Promise<ActionSchema> {
     const response = await this.startOperation(
       `${this.connectionUrl()}/connectionSchemaMetadata:getAction` +
@@ -181,6 +176,8 @@ export class ConnectionsClient {
   }
 }
 
+// Uses the global setTimeout rather than node:timers/promises, because vitest's
+// fake clock patches the global only. The poll-timeout test depends on that.
 function sleep(durationMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
