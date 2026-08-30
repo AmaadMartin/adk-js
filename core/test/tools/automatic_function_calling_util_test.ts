@@ -10,6 +10,9 @@ import {z} from 'zod/v4';
 
 import {
   buildFunctionDeclaration,
+  buildFunctionDeclarationFromProperties,
+  buildFunctionDeclarationFromSchema,
+  buildFunctionDeclarationUtil,
   JsonSchemaNode,
 } from '../../src/tools/_automatic_function_calling_util.js';
 import {GoogleLLMVariant} from '../../src/utils/variant_utils.js';
@@ -33,12 +36,13 @@ function propertiesOf(parameters: Schema | undefined): Record<string, Schema> {
   return parameters?.properties ?? {};
 }
 
-describe('buildFunctionDeclaration type mapping', () => {
+describe('buildFunctionDeclarationUtil', () => {
   it('maps schema type names to gemini types', () => {
-    const declaration = buildFunctionDeclaration({
+    const declaration = buildFunctionDeclarationUtil({
+      vertexai: false,
       name: 'lookup',
       description: 'Look a city up.',
-      parameters: {
+      schema: {
         properties: {
           city: {type: 'str'},
           scores: {type: 'tuple', items: {type: 'float'}},
@@ -59,9 +63,10 @@ describe('buildFunctionDeclaration type mapping', () => {
   });
 
   it('maps an unrecognised type name to TYPE_UNSPECIFIED', () => {
-    const declaration = buildFunctionDeclaration({
+    const declaration = buildFunctionDeclarationUtil({
+      vertexai: false,
       name: 'lookup',
-      parameters: {properties: {value: {type: 'complex128'}}},
+      schema: {properties: {value: {type: 'complex128'}}},
     });
 
     expect(propertiesOf(declaration.parameters)['value'].type).toBe(
@@ -69,10 +74,81 @@ describe('buildFunctionDeclaration type mapping', () => {
     );
   });
 
+  it('omits parameters when the schema has no properties', () => {
+    const empty = buildFunctionDeclarationUtil({
+      vertexai: false,
+      name: 'ping',
+      description: 'Ping the service.',
+      schema: {properties: {}},
+    });
+    const absent = buildFunctionDeclarationUtil({
+      vertexai: false,
+      name: 'ping',
+    });
+
+    expect(empty.parameters).toBeUndefined();
+    expect(empty.description).toBe('Ping the service.');
+    expect(absent.parameters).toBeUndefined();
+    expect('description' in absent).toBe(false);
+  });
+
+  it('sets the response schema from the return type for vertexai', () => {
+    const declaration = buildFunctionDeclarationUtil({
+      vertexai: true,
+      name: 'stringify',
+      returnType: 'str',
+      schema: {properties: {count: {type: 'integer'}}},
+    });
+
+    expect(declaration.response?.type).toBe(Type.STRING);
+  });
+
+  it('falls back to TYPE_UNSPECIFIED when no return type is given', () => {
+    const declaration = buildFunctionDeclarationUtil({
+      vertexai: true,
+      name: 'stringify',
+      schema: {properties: {count: {type: 'integer'}}},
+    });
+
+    expect(declaration.response?.type).toBe(Type.TYPE_UNSPECIFIED);
+  });
+
+  it('omits the response schema when not vertexai', () => {
+    const declaration = buildFunctionDeclarationUtil({
+      vertexai: false,
+      name: 'stringify',
+      returnType: 'str',
+      schema: {properties: {count: {type: 'integer'}}},
+    });
+
+    expect(declaration.response).toBeUndefined();
+  });
+
+  it('reads the required list off the schema it is given', () => {
+    const declaration = buildFunctionDeclarationUtil({
+      vertexai: false,
+      name: 'greet',
+      schema: {properties: {name: {type: 'string'}}, required: ['name']},
+    });
+
+    expect(declaration.parameters?.required).toEqual(['name']);
+  });
+
+  it('emits an empty required list when the schema declares none', () => {
+    const declaration = buildFunctionDeclarationUtil({
+      vertexai: false,
+      name: 'greet',
+      schema: {properties: {name: {type: 'string'}}},
+    });
+
+    expect(declaration.parameters?.required).toEqual([]);
+  });
+
   it('converts a nested object property', () => {
-    const declaration = buildFunctionDeclaration({
+    const declaration = buildFunctionDeclarationUtil({
+      vertexai: false,
       name: 'save',
-      parameters: {
+      schema: {
         properties: {
           record: {type: 'Dict', properties: {label: {type: 'str'}}},
         },
@@ -85,23 +161,31 @@ describe('buildFunctionDeclaration type mapping', () => {
   });
 
   it('skips an array property that carries no items', () => {
-    const declaration = buildFunctionDeclaration({
+    const declaration = buildFunctionDeclarationUtil({
+      vertexai: false,
       name: 'collect',
-      parameters: {properties: {values: {type: 'list'}}},
+      schema: {properties: {values: {type: 'list'}}},
     });
 
     const values = propertiesOf(declaration.parameters)['values'];
     expect(values.type).toBe(Type.ARRAY);
     expect(values.items).toBeUndefined();
   });
+
+  it('throws when the name is empty', () => {
+    expect(() =>
+      buildFunctionDeclarationUtil({vertexai: false, name: ''}),
+    ).toThrowError('Function declaration name cannot be empty.');
+  });
 });
 
-describe('buildFunctionDeclaration normalisation', () => {
+describe('buildFunctionDeclarationFromProperties', () => {
   it('normalises properties for the Gemini API', () => {
-    const declaration = buildFunctionDeclaration({
+    const declaration = buildFunctionDeclarationFromProperties({
+      vertexai: false,
       name: 'greet',
       description: 'Greet someone.',
-      parameters: {properties: pydanticProperties()},
+      parameterProperties: pydanticProperties(),
     });
 
     const properties = propertiesOf(declaration.parameters);
@@ -123,10 +207,10 @@ describe('buildFunctionDeclaration normalisation', () => {
   });
 
   it('keeps anyOf, default, nullable and title on the Vertex path', () => {
-    const declaration = buildFunctionDeclaration({
+    const declaration = buildFunctionDeclarationFromProperties({
+      vertexai: true,
       name: 'greet',
-      parameters: {properties: pydanticProperties()},
-      variant: GoogleLLMVariant.VERTEX_AI,
+      parameterProperties: pydanticProperties(),
     });
 
     const properties = propertiesOf(declaration.parameters);
@@ -136,11 +220,100 @@ describe('buildFunctionDeclaration normalisation', () => {
     expect(properties['nickname'].anyOf).toEqual([{type: Type.STRING}]);
   });
 
+  it('takes the last non-null union member on the Gemini path', () => {
+    const declaration = buildFunctionDeclarationFromProperties({
+      vertexai: false,
+      name: 'coerce',
+      parameterProperties: {
+        value: {anyOf: [{type: 'str'}, {type: 'int'}, {type: 'null'}]},
+      },
+    });
+
+    const value = propertiesOf(declaration.parameters)['value'];
+    expect(value.type).toBe(Type.INTEGER);
+    expect(value.anyOf).toBeUndefined();
+    expect(value.nullable).toBeUndefined();
+    expect(declaration.parameters?.required).toEqual([]);
+  });
+
+  it('ignores a second null union member', () => {
+    const parameterProperties: Record<string, JsonSchemaNode> = {
+      value: {anyOf: [{type: 'str'}, {type: 'null'}, {type: 'null'}]},
+    };
+
+    const declaration = buildFunctionDeclarationFromProperties({
+      vertexai: false,
+      name: 'coerce',
+      parameterProperties,
+    });
+    const vertex = buildFunctionDeclarationFromProperties({
+      vertexai: true,
+      name: 'coerce',
+      parameterProperties,
+    });
+
+    const value = propertiesOf(declaration.parameters)['value'];
+    expect(value.type).toBe(Type.STRING);
+    expect(value.anyOf).toBeUndefined();
+    // Only the first null member is consumed by the nullable annotation.
+    expect(propertiesOf(vertex.parameters)['value'].anyOf).toHaveLength(2);
+  });
+
+  it('maps anyOf member types and hoists the type onto the parent', () => {
+    const declaration = buildFunctionDeclarationFromProperties({
+      vertexai: true,
+      name: 'coerce',
+      parameterProperties: {value: {anyOf: [{type: 'int'}]}},
+    });
+
+    const value = propertiesOf(declaration.parameters)['value'];
+    expect(value.anyOf).toEqual([{type: Type.INTEGER}]);
+    expect(value.type).toBe(Type.INTEGER);
+  });
+
+  it('leaves the parent typeless when a union member declares no type', () => {
+    const declaration = buildFunctionDeclarationFromProperties({
+      vertexai: true,
+      name: 'coerce',
+      parameterProperties: {value: {anyOf: [{description: 'anything'}]}},
+    });
+
+    const value = propertiesOf(declaration.parameters)['value'];
+    expect(value.type).toBeUndefined();
+    expect(value.anyOf).toEqual([{description: 'anything'}]);
+  });
+
+  it('treats a property with a null or falsy default as optional', () => {
+    const declaration = buildFunctionDeclarationFromProperties({
+      vertexai: false,
+      name: 'greet',
+      parameterProperties: {
+        nickname: {type: 'string', default: null},
+        count: {type: 'integer', default: 0},
+        label: {type: 'string', default: ''},
+      },
+    });
+
+    expect(declaration.parameters?.required).toEqual([]);
+  });
+
+  it('omits parameters when no properties are given', () => {
+    const declaration = buildFunctionDeclarationFromProperties({
+      vertexai: false,
+      name: 'ping',
+    });
+
+    expect(declaration.parameters).toBeUndefined();
+  });
+});
+
+describe('buildFunctionDeclarationFromSchema', () => {
   it('reads properties out of a full model schema', () => {
-    const declaration = buildFunctionDeclaration({
+    const declaration = buildFunctionDeclarationFromSchema({
+      vertexai: false,
       name: 'greet',
       description: 'Greet someone.',
-      parameters: {
+      schema: {
         title: 'GreetArgs',
         type: 'object',
         properties: pydanticProperties(),
@@ -157,87 +330,14 @@ describe('buildFunctionDeclaration normalisation', () => {
     expect(properties['name'].type).toBe(Type.STRING);
     expect(properties['nickname'].type).toBe(Type.STRING);
     expect(properties['count'].type).toBe(Type.INTEGER);
-    // The schema's own top-level keys are not mistaken for parameters.
     expect(declaration.parameters?.title).toBeUndefined();
   });
 
-  it('takes the last non-null union member on the Gemini path', () => {
-    const declaration = buildFunctionDeclaration({
-      name: 'coerce',
-      parameters: {
-        properties: {
-          value: {anyOf: [{type: 'str'}, {type: 'int'}, {type: 'null'}]},
-        },
-      },
-    });
-
-    const value = propertiesOf(declaration.parameters)['value'];
-    expect(value.type).toBe(Type.INTEGER);
-    expect(value.anyOf).toBeUndefined();
-    expect(value.nullable).toBeUndefined();
-    expect(declaration.parameters?.required).toEqual([]);
-  });
-
-  it('ignores a second null union member', () => {
-    const parameters: JsonSchemaNode = {
-      properties: {
-        value: {anyOf: [{type: 'str'}, {type: 'null'}, {type: 'null'}]},
-      },
-    };
-
-    const declaration = buildFunctionDeclaration({name: 'coerce', parameters});
-    const vertex = buildFunctionDeclaration({
-      name: 'coerce',
-      parameters,
-      variant: GoogleLLMVariant.VERTEX_AI,
-    });
-
-    const value = propertiesOf(declaration.parameters)['value'];
-    expect(value.type).toBe(Type.STRING);
-    expect(value.anyOf).toBeUndefined();
-    // Only the first null member is consumed by the nullable annotation.
-    expect(propertiesOf(vertex.parameters)['value'].anyOf).toHaveLength(2);
-  });
-
-  it('maps anyOf member types and hoists the type onto the parent', () => {
-    const declaration = buildFunctionDeclaration({
-      name: 'coerce',
-      parameters: {properties: {value: {anyOf: [{type: 'int'}]}}},
-      variant: GoogleLLMVariant.VERTEX_AI,
-    });
-
-    const value = propertiesOf(declaration.parameters)['value'];
-    expect(value.anyOf).toEqual([{type: Type.INTEGER}]);
-    expect(value.type).toBe(Type.INTEGER);
-  });
-
-  it('leaves the parent typeless when a union member declares no type', () => {
-    const declaration = buildFunctionDeclaration({
-      name: 'coerce',
-      parameters: {properties: {value: {anyOf: [{description: 'anything'}]}}},
-      variant: GoogleLLMVariant.VERTEX_AI,
-    });
-
-    const value = propertiesOf(declaration.parameters)['value'];
-    expect(value.type).toBeUndefined();
-    expect(value.anyOf).toEqual([{description: 'anything'}]);
-  });
-});
-
-describe('buildFunctionDeclaration required parameters', () => {
-  it('includes required parameters', () => {
-    const declaration = buildFunctionDeclaration({
-      name: 'simpleFunction',
-      parameters: {properties: {inputStr: {type: 'string'}}},
-    });
-
-    expect(declaration.parameters?.required).toEqual(['inputStr']);
-  });
-
   it('marks parameters without a default as required', () => {
-    const declaration = buildFunctionDeclaration({
+    const declaration = buildFunctionDeclarationFromSchema({
+      vertexai: false,
       name: 'greet',
-      parameters: {
+      schema: {
         properties: {
           name: {title: 'Name', type: 'string'},
           count: {default: 3, title: 'Count', type: 'integer'},
@@ -250,9 +350,10 @@ describe('buildFunctionDeclaration required parameters', () => {
   });
 
   it('keeps a parameter the schema does not require optional', () => {
-    const declaration = buildFunctionDeclaration({
+    const declaration = buildFunctionDeclarationFromSchema({
+      vertexai: false,
       name: 'greet',
-      parameters: {
+      schema: {
         properties: {name: {type: 'string'}, alias: {type: 'string'}},
         required: ['name'],
       },
@@ -261,23 +362,23 @@ describe('buildFunctionDeclaration required parameters', () => {
     expect(declaration.parameters?.required).toEqual(['name']);
   });
 
-  it('treats a property with a null or falsy default as optional', () => {
-    const declaration = buildFunctionDeclaration({
-      name: 'greet',
-      parameters: {
-        properties: {
-          nickname: {type: 'string', default: null},
-          count: {type: 'integer', default: 0},
-          label: {type: 'string', default: ''},
-        },
-      },
+  it('omits parameters when the schema declares none', () => {
+    const empty = buildFunctionDeclarationFromSchema({
+      vertexai: false,
+      name: 'ping',
+      schema: {type: 'object'},
+    });
+    const absent = buildFunctionDeclarationFromSchema({
+      vertexai: false,
+      name: 'ping',
     });
 
-    expect(declaration.parameters?.required).toEqual([]);
+    expect(empty.parameters).toBeUndefined();
+    expect(absent.parameters).toBeUndefined();
   });
 });
 
-describe('buildFunctionDeclaration parameters', () => {
+describe('buildFunctionDeclaration', () => {
   const parameters: JsonSchemaNode = {
     properties: {
       inputStr: {type: 'string'},
@@ -318,34 +419,33 @@ describe('buildFunctionDeclaration parameters', () => {
     expect(declaration.parameters).toBeUndefined();
   });
 
-  it('omits parameters when the schema has no properties', () => {
-    const empty = buildFunctionDeclaration({
-      name: 'ping',
-      description: 'Ping the service.',
-      parameters: {properties: {}},
-    });
-    const bare = buildFunctionDeclaration({
-      name: 'ping',
-      parameters: {type: 'object'},
-    });
-    const absent = buildFunctionDeclaration({name: 'ping'});
+  it('omits parameters when none are given', () => {
+    const declaration = buildFunctionDeclaration({name: 'ping'});
 
-    expect(empty.parameters).toBeUndefined();
-    expect(empty.description).toBe('Ping the service.');
-    expect(bare.parameters).toBeUndefined();
-    expect(absent.parameters).toBeUndefined();
-    expect('description' in absent).toBe(false);
+    expect(declaration.parameters).toBeUndefined();
   });
 
-  it('throws when the name is empty', () => {
-    expect(() => buildFunctionDeclaration({name: ''})).toThrowError(
-      'Function declaration name cannot be empty.',
-    );
-  });
-});
+  it('includes required parameters', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'simpleFunction',
+      parameters: {properties: {inputStr: {type: 'string'}}},
+    });
 
-describe('buildFunctionDeclaration response schema', () => {
-  const parameters: JsonSchemaNode = {properties: {param: {type: 'string'}}};
+    expect(declaration.parameters?.required).toEqual(['inputStr']);
+  });
+
+  it('defaults the variant to GEMINI_API', () => {
+    const declaration = buildFunctionDeclaration({
+      name: 'greet',
+      parameters: {properties: pydanticProperties()},
+      returnType: 'str',
+    });
+
+    expect(declaration.response).toBeUndefined();
+    expect(
+      propertiesOf(declaration.parameters)['nickname'].title,
+    ).toBeUndefined();
+  });
 
   it('omits the response schema for GEMINI_API', () => {
     const declaration = buildFunctionDeclaration({
@@ -400,32 +500,6 @@ describe('buildFunctionDeclaration response schema', () => {
     });
 
     expect(declaration.response?.type).toBe(Type.STRING);
-  });
-
-  it('maps an unrecognised return type to TYPE_UNSPECIFIED', () => {
-    const declaration = buildFunctionDeclaration({
-      name: 'functionOddReturn',
-      parameters,
-      returnType: 'complex128',
-      variant: GoogleLLMVariant.VERTEX_AI,
-    });
-
-    expect(declaration.response?.type).toBe(Type.TYPE_UNSPECIFIED);
-  });
-});
-
-describe('buildFunctionDeclaration parameter sources', () => {
-  it('defaults the variant to GEMINI_API', () => {
-    const declaration = buildFunctionDeclaration({
-      name: 'greet',
-      parameters: {properties: pydanticProperties()},
-      returnType: 'str',
-    });
-
-    expect(declaration.response).toBeUndefined();
-    expect(
-      propertiesOf(declaration.parameters)['nickname'].title,
-    ).toBeUndefined();
   });
 
   it('accepts a Zod object as the parameter source', () => {
@@ -497,6 +571,14 @@ describe('buildFunctionDeclaration parameter sources', () => {
     expect(nickname.type).toBe(Type.STRING);
   });
 
+  it('throws when the name is empty', () => {
+    expect(() => buildFunctionDeclaration({name: ''})).toThrowError(
+      'Function declaration name cannot be empty.',
+    );
+  });
+});
+
+describe('input handling', () => {
   it('does not mutate the caller schema', () => {
     const schema: JsonSchemaNode = {
       title: 'GreetArgs',
@@ -506,7 +588,17 @@ describe('buildFunctionDeclaration parameter sources', () => {
     };
     const clone = structuredClone(schema);
 
-    buildFunctionDeclaration({name: 'greet', parameters: schema});
+    buildFunctionDeclarationUtil({vertexai: false, name: 'greet', schema});
+    buildFunctionDeclarationFromSchema({
+      vertexai: false,
+      name: 'greet',
+      schema,
+    });
+    buildFunctionDeclarationFromProperties({
+      vertexai: false,
+      name: 'greet',
+      parameterProperties: schema.properties,
+    });
     buildFunctionDeclaration({
       name: 'greet',
       parameters: schema,
@@ -515,57 +607,5 @@ describe('buildFunctionDeclaration parameter sources', () => {
     });
 
     expect(schema).toEqual(clone);
-  });
-});
-
-describe('buildFunctionDeclaration optional Zod parameters', () => {
-  it('requires nothing when every Zod property is optional', () => {
-    const declaration = buildFunctionDeclaration({
-      name: 'greet',
-      parameters: z.object({
-        name: z.string().optional(),
-        count: z.number().optional(),
-      }),
-    });
-
-    const properties = propertiesOf(declaration.parameters);
-    expect(Object.keys(properties).sort()).toEqual(['count', 'name']);
-    expect(declaration.parameters?.required).toEqual([]);
-  });
-
-  it('requires nothing when a lone Zod property is optional', () => {
-    const declaration = buildFunctionDeclaration({
-      name: 'greet',
-      parameters: z.object({name: z.string().optional()}),
-      variant: GoogleLLMVariant.VERTEX_AI,
-    });
-
-    expect(declaration.parameters?.required).toEqual([]);
-  });
-
-  it('still requires the Zod properties that are not optional', () => {
-    const declaration = buildFunctionDeclaration({
-      name: 'greet',
-      parameters: z.object({
-        name: z.string(),
-        alias: z.string(),
-        count: z.number().optional(),
-      }),
-    });
-
-    expect(declaration.parameters?.required).toEqual(['name', 'alias']);
-  });
-
-  it('derives the required list of a schema that declares none', () => {
-    // A raw node carries no optionality signal of its own, so adk-python's
-    // rule applies: a property is required unless it is nullable or defaulted.
-    const declaration = buildFunctionDeclaration({
-      name: 'greet',
-      parameters: {
-        properties: {name: {type: 'string'}, count: {type: 'integer'}},
-      },
-    });
-
-    expect(declaration.parameters?.required).toEqual(['name', 'count']);
   });
 });

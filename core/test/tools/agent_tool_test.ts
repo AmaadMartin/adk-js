@@ -17,9 +17,7 @@ import {
   Runner,
   State,
 } from '@google/adk';
-import {Type} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
-import {z} from 'zod/v4';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   const actual =
@@ -512,75 +510,5 @@ describe('AgentTool', () => {
     expect(subAgentSession?.state).not.toHaveProperty(
       `${State.TEMP_PREFIX}tempKey`,
     );
-  });
-
-  it('normalises the agent input schema into the declaration', () => {
-    const agent = new LlmAgent({
-      name: 'greeter',
-      description: 'Greets someone.',
-      inputSchema: z.object({
-        name: z.string(),
-        nickname: z.union([z.string(), z.null()]),
-      }),
-    });
-
-    const declaration = new AgentTool({agent})._getDeclaration();
-
-    // The Gemini Developer API rejects `anyOf`, so a nullable field collapses
-    // to its own type and drops out of `required`.
-    const nickname = declaration.parameters?.properties?.['nickname'];
-    expect(nickname?.type).toBe(Type.STRING);
-    expect(nickname?.anyOf).toBeUndefined();
-    expect(declaration.parameters?.properties?.['name'].type).toBe(Type.STRING);
-    expect(declaration.parameters?.required).toEqual(['name']);
-  });
-
-  it('requires nothing when every input schema field is optional', () => {
-    const agent = new LlmAgent({
-      name: 'greeter',
-      description: 'Greets someone.',
-      inputSchema: z.object({
-        name: z.string().optional(),
-        count: z.number().optional(),
-      }),
-    });
-
-    const declaration = new AgentTool({agent})._getDeclaration();
-
-    expect(declaration.parameters?.required).toEqual([]);
-  });
-
-  it('requires nothing when a genai input schema lists no required property', () => {
-    const agent = new LlmAgent({
-      name: 'greeter',
-      description: 'Greets someone.',
-      inputSchema: {
-        type: Type.OBJECT,
-        properties: {name: {type: Type.STRING}, count: {type: Type.INTEGER}},
-      },
-    });
-
-    const declaration = new AgentTool({agent})._getDeclaration();
-
-    expect(
-      Object.keys(declaration.parameters?.properties ?? {}).sort(),
-    ).toEqual(['count', 'name']);
-    expect(declaration.parameters?.required).toEqual([]);
-  });
-
-  it('keeps the required list a genai input schema declares', () => {
-    const agent = new LlmAgent({
-      name: 'greeter',
-      description: 'Greets someone.',
-      inputSchema: {
-        type: Type.OBJECT,
-        properties: {name: {type: Type.STRING}, count: {type: Type.INTEGER}},
-        required: ['name'],
-      },
-    });
-
-    const declaration = new AgentTool({agent})._getDeclaration();
-
-    expect(declaration.parameters?.required).toEqual(['name']);
   });
 });

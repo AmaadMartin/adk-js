@@ -16,7 +16,6 @@ import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
 
-import {buildFunctionDeclaration} from './_automatic_function_calling_util.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 import {ForwardingArtifactService} from './forwarding_artifact_service.js';
 
@@ -85,19 +84,14 @@ export class AgentTool extends BaseTool {
     let declaration: FunctionDeclaration;
 
     if (isLlmAgent(this.agent) && this.agent.inputSchema) {
-      const inputSchema = this.agent.inputSchema;
-      declaration = buildFunctionDeclaration({
+      declaration = {
         name: this.name,
         description: this.description,
-        // An input schema is a complete document, so a property it does not
-        // list as required is optional. `zodObjectToSchema` omits a required
-        // list that would be empty, and `LlmAgent` runs it over a Zod schema
-        // before storing this one, so the empty list is restored here. Without
-        // it the builder derives a list from the properties and declares every
-        // property required.
-        parameters: {...inputSchema, required: inputSchema.required ?? []},
-        variant: this.apiVariant,
-      });
+        // TODO(b/425992518): We should not use the agent's input schema as is.
+        // It should be validated and possibly transformed. Consider similar
+        // logic to one we have in Python ADK.
+        parameters: this.agent.inputSchema,
+      };
     } else {
       declaration = {
         name: this.name,

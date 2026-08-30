@@ -57,19 +57,34 @@ export interface BuildFunctionDeclarationOptions {
   returnType?: string;
 }
 
-/** A schema's properties after normalisation, with its required list. */
-interface NormalizedSchema {
-  properties: Record<string, JsonSchemaNode>;
-  required: string[];
+/** The options every schema-driven builder shares. */
+interface BuildFromSchemaBaseOptions {
+  vertexai: boolean;
+  /** Declared tool name. Required and non-empty. */
+  name: string;
+  description?: string;
+  /** Name of the tool's return type, e.g. `'str'` or `'None'`. */
+  returnType?: string;
+}
+
+/**
+ * Options for {@link buildFunctionDeclarationUtil} and
+ * {@link buildFunctionDeclarationFromSchema}.
+ */
+export interface BuildFunctionDeclarationFromSchemaOptions extends BuildFromSchemaBaseOptions {
+  /** A whole schema node; only its `properties` and `required` are read. */
+  schema?: JsonSchemaNode;
+}
+
+/** Options for {@link buildFunctionDeclarationFromProperties}. */
+export interface BuildFunctionDeclarationFromPropertiesOptions extends BuildFromSchemaBaseOptions {
+  /** The `properties` map of a schema, without its enclosing node. */
+  parameterProperties?: Record<string, JsonSchemaNode>;
 }
 
 /**
  * Schema and language type names to genai types, transcribed from
  * adk-python's `_py_type_2_schema_type`.
- *
- * The keys are lower case and a lookup folds case, because `zodObjectToSchema`
- * and the genai `Type` enum both upper-case type names. No key in adk-python's
- * table collides once folded.
  */
 const SCHEMA_TYPE_BY_NAME: Record<string, Type> = {
   'str': Type.STRING,
@@ -84,20 +99,41 @@ const SCHEMA_TYPE_BY_NAME: Record<string, Type> = {
   'array': Type.ARRAY,
   'tuple': Type.ARRAY,
   'object': Type.OBJECT,
-  'dict': Type.OBJECT,
-  'any': Type.TYPE_UNSPECIFIED,
+  'Dict': Type.OBJECT,
+  'List': Type.ARRAY,
+  'Tuple': Type.ARRAY,
+  'Any': Type.TYPE_UNSPECIFIED,
 };
 
-/** Resolves a raw type name; an unknown name is left unspecified. */
+/**
+ * The same table keyed by lower-case name, so the upper-case type names
+ * `zodObjectToSchema` emits (`'STRING'`, `'ARRAY'`) also resolve.
+ */
+const SCHEMA_TYPE_BY_LOWERCASE_NAME: Record<string, Type> = Object.fromEntries(
+  Object.entries(SCHEMA_TYPE_BY_NAME).map(([name, type]) => [
+    name.toLowerCase(),
+    type,
+  ]),
+);
+
+/** The return type names that describe an empty return value. */
+const NULL_RETURN_TYPE_NAMES = ['none', 'null'];
+
+/** Resolves a raw type name, exact match first, then case-insensitively. */
 function toSchemaType(typeName: string): Type {
-  return SCHEMA_TYPE_BY_NAME[typeName.toLowerCase()] ?? Type.TYPE_UNSPECIFIED;
+  return (
+    SCHEMA_TYPE_BY_NAME[typeName] ??
+    SCHEMA_TYPE_BY_LOWERCASE_NAME[typeName.toLowerCase()] ??
+    Type.TYPE_UNSPECIFIED
+  );
 }
 
 /**
  * Whether a raw type name means null.
  *
- * A union member that is not recognised as the null member erases the
- * property's own type, and `zodObjectToSchema` spells it `'NULL'`.
+ * The comparison folds case, as the type lookup does. `zodObjectToSchema` and
+ * the genai `Type` enum both spell it `'NULL'`, and a union member that is not
+ * recognised as the null member erases the property's own type.
  */
 function isNullType(typeName: string | undefined): boolean {
   return typeName?.toLowerCase() === 'null';
@@ -192,23 +228,22 @@ function stripGeminiApiKeywords(property: JsonSchemaNode): JsonSchemaNode {
 
 /**
  * `_process_pydantic_schema`: normalises a schema's properties and derives its
- * required list. It takes the properties alone, so the schema's other
- * top-level keys cannot be mistaken for parameters.
+ * required list.
  *
  * The order is load-bearing. `required` is derived before defaults are
  * stripped, so a defaulted parameter stays optional.
  */
 function processJsonSchema(
   vertexai: boolean,
-  properties: Record<string, JsonSchemaNode>,
-  declaredRequired: string[] | undefined,
-): NormalizedSchema {
-  const annotated = annotateNullableFields(properties);
+  schema: JsonSchemaNode,
+): JsonSchemaNode {
+  const properties = annotateNullableFields(schema.properties ?? {});
   return {
+    ...schema,
     properties: vertexai
-      ? annotated
-      : mapProperties(annotated, stripGeminiApiKeywords),
-    required: annotateRequiredFields(annotated, declaredRequired),
+      ? properties
+      : mapProperties(properties, stripGeminiApiKeywords),
+    required: annotateRequiredFields(properties, schema.required),
   };
 }
 
@@ -244,18 +279,49 @@ function toGenaiSchema(node: JsonSchemaNode): Schema {
 /**
  * `_get_return_type`: the response schema for a named return type.
  *
- * An absent return type is adk-python's `Any`, which it renders as a schema
- * with no type at all.
+ * An absent return type is adk-python's `Any`. The reflection path renders it
+ * as a schema with no type at all and the schema path renders it as
+ * `TYPE_UNSPECIFIED`, so the caller passes the form it needs.
  */
-function mapReturnType(returnType: string | undefined): Schema {
+function mapReturnType(
+  returnType: string | undefined,
+  absentReturnType: Schema,
+): Schema {
   if (returnType === undefined) {
-    return {};
+    return absentReturnType;
   }
-  // adk-python spells the empty return type `None`.
-  if (isNullType(returnType) || returnType.toLowerCase() === 'none') {
+  if (NULL_RETURN_TYPE_NAMES.includes(returnType.toLowerCase())) {
     return {type: Type.NULL};
   }
   return {type: toSchemaType(returnType)};
+}
+
+function assembleDeclaration(
+  name: string,
+  description: string | undefined,
+  schema: JsonSchemaNode,
+  response: Schema | undefined,
+): FunctionDeclaration {
+  if (!name) {
+    throw new Error('Function declaration name cannot be empty.');
+  }
+  const declaration: FunctionDeclaration = {name};
+  if (description !== undefined) {
+    declaration.description = description;
+  }
+  const properties = mapProperties(schema.properties ?? {}, toGenaiSchema);
+  // A parameterless tool must not advertise an empty OBJECT schema.
+  if (Object.keys(properties).length > 0) {
+    declaration.parameters = {
+      type: Type.OBJECT,
+      properties,
+      required: schema.required ?? [],
+    };
+  }
+  if (response !== undefined) {
+    declaration.response = response;
+  }
+  return declaration;
 }
 
 function toJsonSchemaNode(
@@ -265,67 +331,88 @@ function toJsonSchemaNode(
     return {};
   }
   if (isZodObject(parameters)) {
-    const schema = zodObjectToSchema(parameters);
-    // Zod marks a property optional without giving it a default, so its
-    // required list is the only signal, and `zodObjectToSchema` omits that list
-    // when it would be empty. An absent list therefore means no property is
-    // required, not that the source declared nothing.
-    return {...schema, required: schema.required ?? []};
+    return zodObjectToSchema(parameters);
   }
   return parameters;
 }
 
 /**
- * Builds a function declaration for a tool from its parameter schema,
- * normalising the schema for the target API surface.
+ * Builds a function declaration from an already-normalised schema, mapping
+ * every type name it carries.
  *
- * A schema a tool wrapper already owns still carries `title`, `default` and
- * `anyOf: [T, null]`, which the Gemini Developer API rejects. They are
- * stripped for that variant and kept for Vertex AI.
+ * Ports adk-python's `build_function_declaration_util`.
+ */
+export function buildFunctionDeclarationUtil(
+  options: BuildFunctionDeclarationFromSchemaOptions,
+): FunctionDeclaration {
+  return assembleDeclaration(
+    options.name,
+    options.description,
+    options.schema ?? {},
+    options.vertexai
+      ? mapReturnType(options.returnType, {type: Type.TYPE_UNSPECIFIED})
+      : undefined,
+  );
+}
+
+/**
+ * Builds a function declaration from a whole schema node, normalising its
+ * properties for the target API surface first.
  *
- * Ports adk-python's `build_function_declaration`,
- * `build_function_declaration_util`, `build_function_declaration_for_langchain`
- * and `build_function_declaration_for_params_for_crewai`, which differ only in
- * the shape of the arguments they take. adk-python reflects the parameter list
- * and the return annotation off the function object; TypeScript erases both, so
- * this takes the schema and the return type name as arguments.
+ * The node's own top-level keys, such as `title` and `type`, are not mistaken
+ * for parameters. Ports adk-python's
+ * `build_function_declaration_for_params_for_crewai`.
+ */
+export function buildFunctionDeclarationFromSchema(
+  options: BuildFunctionDeclarationFromSchemaOptions,
+): FunctionDeclaration {
+  return buildFunctionDeclarationUtil({
+    ...options,
+    schema: processJsonSchema(options.vertexai, options.schema ?? {}),
+  });
+}
+
+/**
+ * Builds a function declaration from the `properties` map of a schema,
+ * normalising it for the target API surface first.
+ *
+ * Ports adk-python's `build_function_declaration_for_langchain`.
+ */
+export function buildFunctionDeclarationFromProperties(
+  options: BuildFunctionDeclarationFromPropertiesOptions,
+): FunctionDeclaration {
+  const {parameterProperties, ...rest} = options;
+  return buildFunctionDeclarationUtil({
+    ...rest,
+    schema: processJsonSchema(options.vertexai, {
+      properties: parameterProperties,
+    }),
+  });
+}
+
+/**
+ * Builds a function declaration for a tool from its parameter schema.
+ *
+ * Ports adk-python's `build_function_declaration`. adk-python reflects the
+ * parameter list and the return annotation off the function object; TypeScript
+ * erases both, so this takes the schema and the return type name as arguments.
  */
 export function buildFunctionDeclaration(
   options: BuildFunctionDeclarationOptions,
 ): FunctionDeclaration {
-  if (!options.name) {
-    throw new Error('Function declaration name cannot be empty.');
-  }
-  const vertexai =
-    (options.variant ?? GoogleLLMVariant.GEMINI_API) ===
-    GoogleLLMVariant.VERTEX_AI;
-  const source = toJsonSchemaNode(options.parameters);
+  const variant = options.variant ?? GoogleLLMVariant.GEMINI_API;
+  const vertexai = variant === GoogleLLMVariant.VERTEX_AI;
+  const parameters = toJsonSchemaNode(options.parameters);
   const ignoreParams = options.ignoreParams ?? [];
-  const normalized = processJsonSchema(
-    vertexai,
-    Object.fromEntries(
-      Object.entries(source.properties ?? {}).filter(
-        ([name]) => !ignoreParams.includes(name),
-      ),
+  const properties = Object.fromEntries(
+    Object.entries(parameters.properties ?? {}).filter(
+      ([name]) => !ignoreParams.includes(name),
     ),
-    source.required,
   );
-
-  const declaration: FunctionDeclaration = {name: options.name};
-  if (options.description !== undefined) {
-    declaration.description = options.description;
-  }
-  const properties = mapProperties(normalized.properties, toGenaiSchema);
-  // A parameterless tool must not advertise an empty OBJECT schema.
-  if (Object.keys(properties).length > 0) {
-    declaration.parameters = {
-      type: Type.OBJECT,
-      properties,
-      required: normalized.required,
-    };
-  }
-  if (vertexai) {
-    declaration.response = mapReturnType(options.returnType);
-  }
-  return declaration;
+  return assembleDeclaration(
+    options.name,
+    options.description,
+    processJsonSchema(vertexai, {...parameters, properties}),
+    vertexai ? mapReturnType(options.returnType, {}) : undefined,
+  );
 }
