@@ -37,6 +37,13 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 /** Largest response body read before the attempt is abandoned. */
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
+/**
+ * Asks the origin server for an uncompressed body. `node:http` has no
+ * decompressor, and a server may compress a reply that carries no
+ * `Accept-Encoding` at all, which would decode to noise.
+ */
+const IDENTITY_ENCODING = {'Accept-Encoding': 'identity'} as const;
+
 /** A vetted fetch target: where to connect, and what to claim to be. */
 interface RequestTarget {
   /** The parsed, canonicalized URL. */
@@ -53,7 +60,8 @@ interface RequestTarget {
 
 /** A completed HTTP response, body already read and decoded. */
 interface FetchedResponse {
-  status: number;
+  /** Absent only for a message Node never gave a status line. */
+  status: number | undefined;
   body: string;
 }
 
@@ -77,8 +85,10 @@ function portOf(url: URL): number {
 
 /**
  * Parses and validates `url`, or throws describing why it cannot be fetched.
- * `new URL` already rejects a port outside 0-65535, so there is no separate
- * port check.
+ *
+ * `new URL` rejects a port that is out of range or not a number, and agrees
+ * with Python's `urlparse` on every such input, so no separate port check is
+ * needed. Its message differs, but `loadWebPage` discards it.
  */
 function parseRequestTarget(url: string): RequestTarget {
   const parsed = new URL(url);
@@ -173,31 +183,51 @@ function readResponse(
   });
   response.on('end', () => {
     resolve({
-      status: response.statusCode ?? 0,
+      status: response.statusCode,
       body: decoderFor(response.headers['content-type']).decode(
         Buffer.concat(chunks),
       ),
     });
   });
+  // A peer that dies mid-body emits `close` without `end` and reports no
+  // error on the request, so `complete` is the only reliable signal that the
+  // attempt failed.
+  response.on('close', () => {
+    if (!response.complete) {
+      fail(new Error('Response ended before the body was complete'));
+    }
+  });
 }
 
 /**
- * Sends `request` and reads its response. Every failure both destroys the
- * request, which releases its socket, its timer and its listeners, and settles
- * the promise, so no exit path can leave the caller waiting.
+ * Sends `request` and reads its response, bounded by `timeoutMs`.
+ *
+ * The bound is a deadline for the whole attempt, not an idle timeout:
+ * `request.setTimeout` restarts on every byte, so an origin that trickles a
+ * body could outlive it. Every failure both destroys the request, which
+ * releases its socket and its listeners, and settles the promise, so no exit
+ * path can leave the caller waiting.
  */
 function sendRequest(
   request: ClientRequest,
   timeoutMs: number,
 ): Promise<FetchedResponse> {
   return new Promise<FetchedResponse>((resolve, reject) => {
-    const fail = (error: Error) => {
+    const deadline = setTimeout(
+      () => fail(new Error('Request timed out')),
+      timeoutMs,
+    );
+    function succeed(value: FetchedResponse): void {
+      clearTimeout(deadline);
+      resolve(value);
+    }
+    function fail(error: Error): void {
+      clearTimeout(deadline);
       request.destroy(error);
       reject(error);
-    };
-    request.on('error', reject);
-    request.setTimeout(timeoutMs, () => fail(new Error('Request timed out')));
-    request.on('response', (response) => readResponse(response, resolve, fail));
+    }
+    request.on('error', fail);
+    request.on('response', (response) => readResponse(response, succeed, fail));
     request.end();
   });
 }
@@ -225,7 +255,7 @@ function requestPinned(
     // Node must not synthesize a Host header from the pinned IP, and the
     // certificate is validated against the original hostname, not the IP.
     setHost: false,
-    headers: {Host: target.hostHeader},
+    headers: {Host: target.hostHeader, ...IDENTITY_ENCODING},
     agent: false,
     ...(servername === undefined ? {} : {servername}),
   };
@@ -268,7 +298,11 @@ function requestThroughProxy(
     path: absoluteRequestUri(target.url),
     method: 'GET',
     setHost: false,
-    headers: {Host: target.hostHeader, ...proxyAuthHeaders(proxy)},
+    headers: {
+      Host: target.hostHeader,
+      ...IDENTITY_ENCODING,
+      ...proxyAuthHeaders(proxy),
+    },
     agent: false,
   });
   return sendRequest(request, timeoutMs);
@@ -330,7 +364,7 @@ async function requestThroughTunnel(
       path: requestPath(target.url),
       method: 'GET',
       setHost: false,
-      headers: {Host: target.hostHeader},
+      headers: {Host: target.hostHeader, ...IDENTITY_ENCODING},
     });
     return await sendRequest(request, timeoutMs);
   } catch (err: unknown) {

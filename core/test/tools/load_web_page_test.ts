@@ -17,6 +17,7 @@ import {
 import type {RequestOptions} from 'node:https';
 import {connect as netConnect, type Socket} from 'node:net';
 import type {ConnectionOptions, TLSSocket} from 'node:tls';
+import {gzipSync} from 'node:zlib';
 
 import {FunctionTool, LOAD_WEB_PAGE, loadWebPage} from '@google/adk';
 import {
@@ -145,16 +146,6 @@ function truncatePage(
   response.write(PAGE_HTML, () => response.destroy());
 }
 
-/** Every request the tool created, in order, with its timeout call recorded. */
-const sentRequests: ClientRequest[] = [];
-
-/** Records `request` so a test can assert the timeout the tool applied. */
-function track(request: ClientRequest): ClientRequest {
-  sentRequests.push(request);
-  vi.spyOn(request, 'setTimeout');
-  return request;
-}
-
 /** Resolves any hostname to the given IP list for the DNS `lookup` mock. */
 function resolveTo(...addresses: string[]): void {
   lookupMock.mockResolvedValue(
@@ -188,9 +179,7 @@ describe('loadWebPage', () => {
       const port = failingAddresses.includes(String(options.hostname))
         ? closedPort
         : originPort;
-      return track(
-        actualHttp.request({...options, hostname: '127.0.0.1', port}),
-      );
+      return actualHttp.request({...options, hostname: '127.0.0.1', port});
     };
     httpRequestSpy.mockImplementation(redirect);
     // A local TLS origin would need a certificate, so an `https:` target is
@@ -266,12 +255,9 @@ describe('loadWebPage', () => {
     httpRequestSpy.mockReset();
     httpsRequestSpy.mockReset();
     tlsConnectSpy.mockReset();
-    sentRequests.length = 0;
-    httpRequestSpy.mockImplementation((options) =>
-      track(actualHttp.request(options)),
-    );
+    httpRequestSpy.mockImplementation((options) => actualHttp.request(options));
     httpsRequestSpy.mockImplementation((options) =>
-      track(actualHttps.request(options)),
+      actualHttps.request(options),
     );
     tlsConnectSpy.mockImplementation((options) => actualTls.connect(options));
     for (const key of PROXY_ENV_KEYS) {
@@ -515,6 +501,15 @@ describe('loadWebPage', () => {
       expect(originRequests[0].url).toBe('/a?q=1');
     });
 
+    it('asks the origin for an uncompressed body', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+
+      await loadWebPage('https://example.com/');
+
+      expect(originRequests[0].headers['accept-encoding']).toBe('identity');
+    });
+
     it('keeps a non-default port in the Host header', async () => {
       resolveTo('93.184.216.34');
       pinToOrigin();
@@ -596,6 +591,30 @@ describe('loadWebPage', () => {
 
       expect(httpsRequestSpy).toHaveBeenCalledTimes(1);
     });
+
+    it('pins to a full-form IPv6 address resolved via DNS', async () => {
+      resolveTo('2606:4700:4700:0:0:0:0:1111');
+      pinToOrigin();
+
+      const result = await loadWebPage('http://ipv6.example/');
+
+      expect(result).toBe(PAGE_TEXT);
+      expect(plainRequestOptions().hostname).toBe(
+        '2606:4700:4700:0:0:0:0:1111',
+      );
+      expect(originRequests[0].headers.host).toBe('ipv6.example');
+    });
+
+    it('pins to an IPv4-mapped address that wraps a public IPv4', async () => {
+      resolveTo('::ffff:93.184.216.34');
+      pinToOrigin();
+
+      const result = await loadWebPage('http://mapped-public.example/');
+
+      expect(result).toBe(PAGE_TEXT);
+      expect(plainRequestOptions().hostname).toBe('::ffff:93.184.216.34');
+      expect(originRequests[0].headers.host).toBe('mapped-public.example');
+    });
   });
 
   describe('response handling', () => {
@@ -642,6 +661,29 @@ describe('loadWebPage', () => {
       const result = await loadWebPage('https://example.com/');
 
       expect(result).toBe('Café serves very good cake');
+    });
+
+    it('reads a body from a server that compresses unrequested replies', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+      // RFC 9110 lets a server compress when the client sends no
+      // `Accept-Encoding`, and `node:http` has no decompressor.
+      originHandler = (req, res) => {
+        if (req.headers['accept-encoding'] === 'identity') {
+          res.writeHead(200, {'Content-Type': 'text/html'});
+          res.end(PAGE_HTML);
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Content-Encoding': 'gzip',
+        });
+        res.end(gzipSync(PAGE_HTML));
+      };
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe(PAGE_TEXT);
     });
 
     it('falls back to UTF-8 for a charset the runtime does not know', async () => {
@@ -756,29 +798,28 @@ describe('loadWebPage', () => {
       resolveTo('93.184.216.34');
       pinToOrigin();
 
+      // The attempt deadline is a plain timer, so the delay it is armed with
+      // is what pins the default and the override.
+      const timers = vi.spyOn(globalThis, 'setTimeout');
+
       await loadWebPage('https://example.com/');
-      expect(vi.mocked(sentRequests[0].setTimeout)).toHaveBeenCalledWith(
-        30_000,
-        expect.any(Function),
-      );
+      expect(timers).toHaveBeenCalledWith(expect.any(Function), 30_000);
 
       await loadWebPage('https://example.com/', {timeoutMs: 5000});
-      expect(vi.mocked(sentRequests[1].setTimeout)).toHaveBeenCalledWith(
-        5000,
-        expect.any(Function),
-      );
+      expect(timers).toHaveBeenCalledWith(expect.any(Function), 5000);
+
+      timers.mockRestore();
     });
 
     it('falls back to the default when options omit timeoutMs', async () => {
       resolveTo('93.184.216.34');
       pinToOrigin();
+      const timers = vi.spyOn(globalThis, 'setTimeout');
 
       await loadWebPage('https://example.com/', {});
 
-      expect(vi.mocked(sentRequests[0].setTimeout)).toHaveBeenCalledWith(
-        30_000,
-        expect.any(Function),
-      );
+      expect(timers).toHaveBeenCalledWith(expect.any(Function), 30_000);
+      timers.mockRestore();
     });
 
     it('returns the failure string when the origin drops the connection mid-body', async () => {
@@ -802,6 +843,77 @@ describe('loadWebPage', () => {
 
       expect(result).toBe('Failed to fetch url: https://example.com/');
     });
+
+    it('bounds an origin that trickles the body past the deadline', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+      // Each byte would restart an idle timeout, so only a deadline ends this.
+      originHandler = (_req, res) => {
+        res.writeHead(200, {'Content-Type': 'text/html'});
+        const drip = setInterval(() => res.write('a'), 10);
+        res.on('close', () => clearInterval(drip));
+      };
+
+      const result = await loadWebPage('https://example.com/', {timeoutMs: 80});
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+    });
+  });
+
+  describe('a connection that drops after the response headers', () => {
+    /** Writes headers, promises 5000 bytes, then leaves the body unfinished. */
+    function truncate(end: (res: ServerResponse) => void) {
+      return (_req: IncomingMessage, res: ServerResponse) => {
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Content-Length': '5000',
+        });
+        res.write('<html><body><p>Only the first part of the body</p>');
+        end(res);
+      };
+    }
+
+    it('fails the attempt when the peer resets the connection', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+      originHandler = truncate((res) => res.socket?.destroy());
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+    });
+
+    it('fails the attempt when the peer closes without an error', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+      originHandler = truncate((res) => res.socket?.end());
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe('Failed to fetch url: https://example.com/');
+    });
+
+    it('tries the next resolved address after a truncated response', async () => {
+      resolveTo('93.184.216.34', '93.184.216.35');
+      pinToOrigin();
+      let attempts = 0;
+      const complete = servePage;
+      originHandler = (req, res) => {
+        attempts += 1;
+        if (attempts === 1) {
+          truncate((dying) => dying.socket?.destroy())(req, res);
+          return;
+        }
+        complete(req, res);
+      };
+
+      const result = await loadWebPage('https://example.com/');
+
+      expect(result).toBe(PAGE_TEXT);
+      expect(httpsRequestSpy).toHaveBeenCalledTimes(2);
+      expect(tlsRequestOptions(0).hostname).toBe('93.184.216.34');
+      expect(tlsRequestOptions(1).hostname).toBe('93.184.216.35');
+    });
   });
 
   describe('proxy path', () => {
@@ -815,6 +927,14 @@ describe('loadWebPage', () => {
       expect(proxyRequests).toHaveLength(1);
       expect(proxyRequests[0].url).toBe('http://example.com/page?q=1');
       expect(proxyRequests[0].headers.host).toBe('example.com');
+    });
+
+    it('asks the proxied origin for an uncompressed body', async () => {
+      vi.stubEnv('http_proxy', `http://127.0.0.1:${proxyPort}`);
+
+      await loadWebPage('http://example.com/page');
+
+      expect(proxyRequests[0].headers['accept-encoding']).toBe('identity');
     });
 
     it('uses all_proxy when the scheme has no proxy of its own', async () => {
@@ -841,13 +961,12 @@ describe('loadWebPage', () => {
 
     it('applies the timeout to the proxied request', async () => {
       vi.stubEnv('http_proxy', `http://127.0.0.1:${proxyPort}`);
+      const timers = vi.spyOn(globalThis, 'setTimeout');
 
       await loadWebPage('http://example.com/page', {timeoutMs: 7000});
 
-      expect(vi.mocked(sentRequests[0].setTimeout)).toHaveBeenCalledWith(
-        7000,
-        expect.any(Function),
-      );
+      expect(timers).toHaveBeenCalledWith(expect.any(Function), 7000);
+      timers.mockRestore();
     });
 
     it('takes the direct pinned path when no_proxy covers the host', async () => {
@@ -928,6 +1047,33 @@ describe('loadWebPage', () => {
       // Node checks the certificate against.
       expect(tlsConnectSpy.mock.calls[0][0].servername).toBeUndefined();
       expect(tlsConnectSpy.mock.calls[0][0].host).toBe('2606:4700:4700::1111');
+    });
+
+    it('returns the page the tunnel carries', async () => {
+      vi.stubEnv('https_proxy', `http://127.0.0.1:${proxyPort}`);
+      // A local TLS origin would need a certificate, so the handshake is the
+      // one thing stubbed here: `tls.connect` hands back the tunnelled socket
+      // unencrypted. Everything after it is real -- the GET travels through
+      // the proxy to the origin, which answers over the same socket.
+      tlsConnectSpy.mockImplementation(
+        (options) => options.socket as TLSSocket,
+      );
+
+      const result = await loadWebPage('https://tunnelled.example/doc');
+
+      expect(result).toBe(PAGE_TEXT);
+      expect(proxyRequests[0].method).toBe('CONNECT');
+      expect(originRequests[0].url).toBe('/doc');
+      expect(originRequests[0].headers.host).toBe('tunnelled.example');
+    });
+
+    it('asks for an uncompressed body over the tunnel, not on the CONNECT', async () => {
+      vi.stubEnv('https_proxy', `http://127.0.0.1:${proxyPort}`);
+
+      await loadWebPage('https://does-not-resolve.invalid/doc');
+
+      expect(tlsRequestOptions().headers?.['Accept-Encoding']).toBe('identity');
+      expect(proxyRequests[0].headers['accept-encoding']).toBeUndefined();
     });
 
     it('names the explicit port in the CONNECT authority', async () => {

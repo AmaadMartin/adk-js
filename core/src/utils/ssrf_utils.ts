@@ -44,13 +44,11 @@ function parseIpv4(address: string): number[] | null {
 function expandHextets(fragment: string): number[] {
   const hextets: number[] = [];
   for (const group of fragment.split(':')) {
-    if (group.includes('.')) {
-      // The caller has already accepted the address, so an embedded IPv4 group
-      // is four decimal octets.
-      const octets = group.split('.').map(Number);
-      hextets.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
-    } else {
+    const octets = parseIpv4(group);
+    if (octets === null) {
       hextets.push(parseInt(group, 16));
+    } else {
+      hextets.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
     }
   }
   return hextets;
@@ -86,25 +84,36 @@ function hextetsToBigInt(hextets: number[]): bigint {
   return value;
 }
 
+/**
+ * Parses an address from one of the CIDR tables below. Those are constants, so
+ * a rejection is a typo in this file rather than bad input, and throwing at
+ * module load reports it where it can be fixed.
+ */
+function mustParse(
+  address: string,
+  parse: (value: string) => number[] | null,
+): number[] {
+  const parsed = parse(address);
+  if (parsed === null) {
+    throw new Error(`Malformed CIDR address in this module: ${address}`);
+  }
+  return parsed;
+}
+
 /** Precomputes the network address and mask for an IPv4 CIDR string. */
 function parseIpv4Cidr(cidr: string): Ipv4Cidr {
   const [address, prefix] = cidr.split('/');
-  const octets = parseIpv4(address);
-  if (!octets) {
-    throw new Error(`Invalid CIDR: ${cidr}`);
-  }
   const mask = (0xffffffff << (32 - Number(prefix))) >>> 0;
-  return {base: (ipv4ToInt(octets) & mask) >>> 0, mask};
+  return {base: (ipv4ToInt(mustParse(address, parseIpv4)) & mask) >>> 0, mask};
 }
 
 /** Precomputes the network address and prefix length for an IPv6 CIDR string. */
 function parseIpv6Cidr(cidr: string): Ipv6Cidr {
   const [address, prefix] = cidr.split('/');
-  const hextets = parseIpv6(address);
-  if (!hextets) {
-    throw new Error(`Invalid CIDR: ${cidr}`);
-  }
-  return {base: hextetsToBigInt(hextets), prefix: Number(prefix)};
+  return {
+    base: hextetsToBigInt(mustParse(address, parseIpv6)),
+    prefix: Number(prefix),
+  };
 }
 
 /**
@@ -131,9 +140,12 @@ const BLOCKED_IPV4_CIDRS = [
 ].map(parseIpv4Cidr);
 
 /**
- * IPv6 ranges that are not globally routable and therefore blocked. Ranges
- * that wrap an IPv4 address are handled by {@link embeddedIpv4} instead, which
- * re-checks the address they carry.
+ * IPv6 ranges that are not globally routable and therefore blocked. A range
+ * that wraps an IPv4 address is also unwrapped by {@link embeddedIpv4}, which
+ * re-checks the address it carries.
+ *
+ * The list mirrors `ipaddress.IPv6Address._constants._private_networks` on
+ * CPython 3.13, which is what Python's `is_global` consults.
  *
  * Python's `ipaddress` carves a few globally-routable blocks out of
  * `2001::/23` (`2001:1::1`, `2001:20::/28`, ...). This port blocks the whole
@@ -146,6 +158,10 @@ const BLOCKED_IPV6_CIDRS = [
   '100::/64', // discard-only
   '2001::/23', // Teredo and IETF protocol assignments
   '2001:db8::/32', // documentation
+  // 6to4, RFC 3056. The prefix is non-global as a whole, so a 6to4 address is
+  // refused even when the IPv4 address it wraps is public.
+  '2002::/16',
+  '3fff::/20', // documentation, RFC 9637
   'fc00::/7', // unique-local (ULA, private)
   'fe80::/10', // link-local
   'ff00::/8', // multicast
@@ -153,9 +169,6 @@ const BLOCKED_IPV6_CIDRS = [
 
 /** The well-known NAT64 translation prefix, RFC 6052. */
 const NAT64_WELL_KNOWN_PREFIX = parseIpv6Cidr('64:ff9b::/96');
-
-/** The 6to4 prefix, RFC 3056, which carries the IPv4 address in bits 16-47. */
-const SIXTOFOUR_PREFIX = parseIpv6Cidr('2002::/16');
 
 /** Splits an unsigned 32-bit IPv4 value into its four octets. */
 function intToIpv4(value: number): number[] {
@@ -180,15 +193,15 @@ function inIpv6Cidr(value: bigint, cidr: Ipv6Cidr): boolean {
  * reachability of the IPv4 address it wraps. `64:ff9b::169.254.169.254` looks
  * global, but on a network with NAT64 it routes to the `169.254.169.254`
  * metadata endpoint, so the embedded address has to be vetted on its own.
+ *
+ * 6to4 (`2002::/16`) needs no branch here: {@link BLOCKED_IPV6_CIDRS} refuses
+ * the whole prefix, which is also what Python's `is_global` does.
  */
 function embeddedIpv4(value: bigint): number[] | null {
   const low = Number(value & 0xffffffffn);
   // IPv4-mapped, ::ffff:a.b.c.d.
   if (value >> 32n === 0xffffn) {
     return intToIpv4(low);
-  }
-  if (inIpv6Cidr(value, SIXTOFOUR_PREFIX)) {
-    return intToIpv4(Number((value >> 80n) & 0xffffffffn));
   }
   if (inIpv6Cidr(value, NAT64_WELL_KNOWN_PREFIX)) {
     return intToIpv4(low);
