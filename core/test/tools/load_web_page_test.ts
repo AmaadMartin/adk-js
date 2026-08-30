@@ -309,7 +309,7 @@ describe('loadWebPage', () => {
       'http://example.com:0x50/',
       `http://${PROXY_CREDENTIALS}@example.com:99999/path`,
       'http://[2606:4700:4700::1111]:70000/',
-    ])('rejects the out-of-range port in %s', async (url) => {
+    ])('rejects the invalid port in %s', async (url) => {
       const result = await loadWebPage(url);
 
       expect(result).toBe(`Failed to fetch url: ${url}`);
@@ -417,17 +417,23 @@ describe('loadWebPage', () => {
       expect(httpRequestSpy).not.toHaveBeenCalled();
     });
 
-    it.each(['not-an-ip', '1.2.3.999'])(
-      'fails closed when DNS resolves to the unparseable address %s',
-      async (address) => {
-        resolveTo(address);
+    it('fails closed when DNS resolves to an unparseable address', async () => {
+      resolveTo('not-an-ip');
 
-        const result = await loadWebPage('http://weird.example/');
+      const result = await loadWebPage('http://weird.example/');
 
-        expect(result).toBe('Failed to fetch url: http://weird.example/');
-        expect(httpRequestSpy).not.toHaveBeenCalled();
-      },
-    );
+      expect(result).toBe('Failed to fetch url: http://weird.example/');
+      expect(httpRequestSpy).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when DNS resolves to an out-of-range IPv4', async () => {
+      resolveTo('1.2.3.999');
+
+      const result = await loadWebPage('http://weird.example/');
+
+      expect(result).toBe('Failed to fetch url: http://weird.example/');
+      expect(httpRequestSpy).not.toHaveBeenCalled();
+    });
 
     it('fails when DNS resolution returns no addresses', async () => {
       lookupMock.mockResolvedValue([]);
@@ -447,8 +453,15 @@ describe('loadWebPage', () => {
       expect(httpRequestSpy).not.toHaveBeenCalled();
     });
 
+    it('rejects IPv6 loopback literals', async () => {
+      const result = await loadWebPage('http://[::1]/');
+
+      expect(result).toBe('Failed to fetch url: http://[::1]/');
+      expect(httpRequestSpy).not.toHaveBeenCalled();
+      expect(lookupMock).not.toHaveBeenCalled();
+    });
+
     it.each([
-      'http://[::1]/',
       'http://[fe80::1]/',
       'http://[fc00::1]/',
       'http://[ff02::1]/',
@@ -595,7 +608,7 @@ describe('loadWebPage', () => {
       expect(result).toBe(PAGE_TEXT);
     });
 
-    it('excludes script, style and comment content', async () => {
+    it('strips <script> and <style> blocks and decodes entities', async () => {
       resolveTo('93.184.216.34');
       pinToOrigin();
       originHandler = (_req, res) => {
@@ -611,6 +624,9 @@ describe('loadWebPage', () => {
       const result = await loadWebPage('https://example.com/');
 
       expect(result).toBe('Fish & chips are quite tasty today');
+      expect(result).not.toContain('secret');
+      expect(result).not.toContain('color:red');
+      expect(result).not.toContain('comment');
     });
 
     it('decodes the body with the charset the response declares', async () => {
@@ -639,6 +655,52 @@ describe('loadWebPage', () => {
       const result = await loadWebPage('https://example.com/');
 
       expect(result).toBe('Café serves very good cake');
+    });
+
+    it('allows a global IPv6 literal target', async () => {
+      pinToOrigin();
+      originHandler = (_req, res) => {
+        res.writeHead(200, {'Content-Type': 'text/html'});
+        res.end('<p>The quick brown fox jumped over here</p>');
+      };
+
+      const result = await loadWebPage('http://[2606:4700:4700::1111]/');
+
+      expect(result).toBe('The quick brown fox jumped over here');
+      expect(httpRequestSpy).toHaveBeenCalledTimes(1);
+      expect(lookupMock).not.toHaveBeenCalled();
+    });
+
+    it('allows a global IPv6 address resolved via DNS (full form)', async () => {
+      resolveTo('2606:4700:4700:0:0:0:0:1111');
+      pinToOrigin();
+      originHandler = (_req, res) => {
+        res.writeHead(200, {'Content-Type': 'text/html'});
+        res.end('<p>The quick brown fox jumped over here</p>');
+      };
+
+      const result = await loadWebPage('http://ipv6.example/');
+
+      expect(result).toBe('The quick brown fox jumped over here');
+      expect(httpRequestSpy).toHaveBeenCalledTimes(1);
+      expect(plainRequestOptions().hostname).toBe(
+        '2606:4700:4700:0:0:0:0:1111',
+      );
+    });
+
+    it('allows an IPv4-mapped IPv6 address pointing at a public IP', async () => {
+      resolveTo('::ffff:93.184.216.34');
+      pinToOrigin();
+      originHandler = (_req, res) => {
+        res.writeHead(200, {'Content-Type': 'text/html'});
+        res.end('<p>The quick brown fox jumped over here</p>');
+      };
+
+      const result = await loadWebPage('http://mapped-public.example/');
+
+      expect(result).toBe('The quick brown fox jumped over here');
+      expect(httpRequestSpy).toHaveBeenCalledTimes(1);
+      expect(plainRequestOptions().hostname).toBe('::ffff:93.184.216.34');
     });
 
     it('returns an empty string when no line has enough words', async () => {
@@ -703,6 +765,18 @@ describe('loadWebPage', () => {
       await loadWebPage('https://example.com/', {timeoutMs: 5000});
       expect(vi.mocked(sentRequests[1].setTimeout)).toHaveBeenCalledWith(
         5000,
+        expect.any(Function),
+      );
+    });
+
+    it('falls back to the default when options omit timeoutMs', async () => {
+      resolveTo('93.184.216.34');
+      pinToOrigin();
+
+      await loadWebPage('https://example.com/', {});
+
+      expect(vi.mocked(sentRequests[0].setTimeout)).toHaveBeenCalledWith(
+        30_000,
         expect.any(Function),
       );
     });

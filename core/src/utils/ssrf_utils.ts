@@ -45,7 +45,9 @@ function expandHextets(fragment: string): number[] {
   const hextets: number[] = [];
   for (const group of fragment.split(':')) {
     if (group.includes('.')) {
-      const octets = parseIpv4(group)!;
+      // The caller has already accepted the address, so an embedded IPv4 group
+      // is four decimal octets.
+      const octets = group.split('.').map(Number);
       hextets.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
     } else {
       hextets.push(parseInt(group, 16));
@@ -87,14 +89,22 @@ function hextetsToBigInt(hextets: number[]): bigint {
 /** Precomputes the network address and mask for an IPv4 CIDR string. */
 function parseIpv4Cidr(cidr: string): Ipv4Cidr {
   const [address, prefix] = cidr.split('/');
+  const octets = parseIpv4(address);
+  if (!octets) {
+    throw new Error(`Invalid CIDR: ${cidr}`);
+  }
   const mask = (0xffffffff << (32 - Number(prefix))) >>> 0;
-  return {base: (ipv4ToInt(parseIpv4(address)!) & mask) >>> 0, mask};
+  return {base: (ipv4ToInt(octets) & mask) >>> 0, mask};
 }
 
 /** Precomputes the network address and prefix length for an IPv6 CIDR string. */
 function parseIpv6Cidr(cidr: string): Ipv6Cidr {
   const [address, prefix] = cidr.split('/');
-  return {base: hextetsToBigInt(parseIpv6(address)!), prefix: Number(prefix)};
+  const hextets = parseIpv6(address);
+  if (!hextets) {
+    throw new Error(`Invalid CIDR: ${cidr}`);
+  }
+  return {base: hextetsToBigInt(hextets), prefix: Number(prefix)};
 }
 
 /**
