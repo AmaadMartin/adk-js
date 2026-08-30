@@ -20,7 +20,7 @@ import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
-import {parseWithSchema} from '../utils/schema.js';
+import {parseWithSchema, stripJsonCodeFence} from '../utils/schema.js';
 
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 import {ForwardingArtifactService} from './forwarding_artifact_service.js';
@@ -65,12 +65,6 @@ const AGENT_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.agentTool');
  */
 const GROUNDING_METADATA_STATE_KEY = `${State.TEMP_PREFIX}_adk_grounding_metadata`;
 
-/** The marker that opens and closes a markdown code fence. */
-const CODE_FENCE = '```';
-
-/** The language tag a code fence opens with, such as the `json` of ```json. */
-const LANGUAGE_TAG_PATTERN = /^\w*/;
-
 /** The trailing newlines of a code execution result. */
 const TRAILING_NEWLINES_PATTERN = /\n+$/;
 
@@ -89,34 +83,20 @@ export function isAgentTool(obj: unknown): obj is AgentTool {
 }
 
 /**
- * The first `LlmAgent` reached by following one edge of each agent's
- * sub-agents, or `undefined` when the walk runs out of sub-agents.
- *
- * @param index 0 to follow the first sub-agent, -1 to follow the last one.
+ * The `LlmAgent` a wrapped agent takes a schema from: itself, or the sub-agent
+ * at `edge`, recursively. Mirrors adk-python's `_get_input_schema`, which
+ * follows the first sub-agent, and `_get_output_schema`, which follows the
+ * last.
  */
-function schemaAgent(agent: BaseAgent, index: 0 | -1): LlmAgent | undefined {
+function schemaAgent(
+  agent: BaseAgent,
+  edge: 'first' | 'last',
+): LlmAgent | undefined {
   if (isLlmAgent(agent)) {
     return agent;
   }
-  const next = agent.subAgents?.at(index);
-  return next ? schemaAgent(next, index) : undefined;
-}
-
-/**
- * The agent whose input schema this tool exposes: the wrapped agent, or its
- * first sub-agent, recursively. Mirrors adk-python's `_get_input_schema`.
- */
-function inputSchemaAgent(agent: BaseAgent): LlmAgent | undefined {
-  return schemaAgent(agent, 0);
-}
-
-/**
- * The agent whose output schema this tool validates against: the wrapped
- * agent, or its last sub-agent, recursively. Mirrors adk-python's
- * `_get_output_schema`.
- */
-function outputSchemaAgent(agent: BaseAgent): LlmAgent | undefined {
-  return schemaAgent(agent, -1);
+  const next = agent.subAgents?.at(edge === 'first' ? 0 : -1);
+  return next ? schemaAgent(next, edge) : undefined;
 }
 
 /** The user-visible text of a part, including code execution output. */
@@ -129,40 +109,6 @@ function partToText(part: Part): string {
     return output.replace(TRAILING_NEWLINES_PATTERN, '');
   }
   return part.executableCode?.code ?? '';
-}
-
-/**
- * Removes a markdown code fence wrapping a whole JSON payload.
- *
- * A model asked for structured output sometimes wraps it in a fence, most
- * often when tools are configured alongside an output schema. Well-formed JSON
- * never starts with a fence, so valid input is returned unchanged.
- *
- * The fence is matched by position rather than by one regular expression. A
- * pattern of the form ```` ```\s*(.*?)\s*``` ```` backtracks catastrophically
- * on an unterminated fence followed by a long run of whitespace, and this text
- * is whatever the wrapped agent's model produced.
- */
-function stripJsonCodeFence(text: string): string {
-  const trimmed = text.trim();
-  if (
-    trimmed.length < 2 * CODE_FENCE.length ||
-    !trimmed.startsWith(CODE_FENCE) ||
-    !trimmed.endsWith(CODE_FENCE)
-  ) {
-    return text;
-  }
-  const fenced = trimmed.slice(CODE_FENCE.length, -CODE_FENCE.length);
-  return fenced.replace(LANGUAGE_TAG_PATTERN, '').trim();
-}
-
-/**
- * The message text for an agent that declares no input schema: the caller's
- * `request` string verbatim, or the whole argument object as JSON.
- */
-function requestText(args: Record<string, unknown>): string {
-  const request = args['request'];
-  return typeof request === 'string' ? request : JSON.stringify(args);
 }
 
 /**
@@ -199,7 +145,7 @@ export class AgentTool extends BaseTool {
   }
 
   override _getDeclaration(): FunctionDeclaration {
-    const inputSchema = inputSchemaAgent(this.agent)?.inputSchema;
+    const inputSchema = schemaAgent(this.agent, 'first')?.inputSchema;
     const declaration: FunctionDeclaration = {
       name: this.name,
       description: this.description,
@@ -215,7 +161,7 @@ export class AgentTool extends BaseTool {
     };
 
     if (this.apiVariant !== GoogleLLMVariant.GEMINI_API) {
-      declaration.response = outputSchemaAgent(this.agent)?.outputSchema
+      declaration.response = schemaAgent(this.agent, 'last')?.outputSchema
         ? {type: Type.OBJECT}
         : {type: Type.STRING};
     }
@@ -235,18 +181,21 @@ export class AgentTool extends BaseTool {
     // returned verbatim below, which is the intended effect of
     // skipSummarization.
 
-    const inputAgent = inputSchemaAgent(this.agent);
+    const inputAgent = schemaAgent(this.agent, 'first');
     const inputSchema =
       inputAgent?.inputSchemaSource ?? inputAgent?.inputSchema;
+    const request = args['request'];
     const content: Content = {
       role: 'user',
       parts: [
         {
-          // The wrapped agent re-validates this text against the same schema,
-          // so it must stay a bare JSON document with no prose around it.
+          // With a schema the text must stay a bare JSON document: the wrapped
+          // agent re-validates it against that same schema.
           text: inputSchema
             ? JSON.stringify(parseWithSchema(inputSchema, args))
-            : requestText(args),
+            : typeof request === 'string'
+              ? request
+              : JSON.stringify(args),
         },
       ],
     };
@@ -327,7 +276,7 @@ export class AgentTool extends BaseTool {
       return lastErrorMessage;
     }
 
-    const outputAgent = outputSchemaAgent(this.agent);
+    const outputAgent = schemaAgent(this.agent, 'last');
     const result = outputAgent?.outputSchema
       ? outputAgent.validateOutput(JSON.parse(stripJsonCodeFence(mergedText)))
       : mergedText;

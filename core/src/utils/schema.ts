@@ -107,6 +107,37 @@ export function parseWithSchema<T>(
   return validator ? (validator.parse(value) as T) : value;
 }
 
+/** The marker that opens and closes a markdown code fence. */
+const CODE_FENCE = '```';
+
+/** The language tag a code fence opens with, such as the `json` of ```json. */
+const LANGUAGE_TAG_PATTERN = /^\w*/;
+
+/**
+ * Removes a markdown code fence wrapping a whole JSON payload.
+ *
+ * A model asked for structured output sometimes wraps it in a fence, most
+ * often when tools are configured alongside an output schema. Well-formed JSON
+ * never starts with a fence, so valid input is returned unchanged.
+ *
+ * The fence is matched by position rather than by one regular expression. A
+ * pattern of the form ```` ```\s*(.*?)\s*``` ```` backtracks catastrophically
+ * on an unterminated fence followed by a long run of whitespace, and this text
+ * is whatever a model produced.
+ */
+export function stripJsonCodeFence(text: string): string {
+  const trimmed = text.trim();
+  if (
+    trimmed.length < 2 * CODE_FENCE.length ||
+    !trimmed.startsWith(CODE_FENCE) ||
+    !trimmed.endsWith(CODE_FENCE)
+  ) {
+    return text;
+  }
+  const fenced = trimmed.slice(CODE_FENCE.length, -CODE_FENCE.length);
+  return fenced.replace(LANGUAGE_TAG_PATTERN, '').trim();
+}
+
 /**
  * Renders a {@link SchemaLike} as a plain JSON Schema object.
  *

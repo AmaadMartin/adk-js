@@ -11,6 +11,7 @@ import {z as z4} from 'zod/v4';
 import {
   objectSchemaFields,
   parseWithSchema,
+  stripJsonCodeFence,
   toJsonSchema,
 } from '../../src/utils/schema.js';
 import {zodObjectToSchema} from '../../src/utils/simple_zod_to_json.js';
@@ -231,5 +232,38 @@ describe('objectSchemaFields', () => {
   it('returns undefined for a schema that is not an object', () => {
     expect(fieldsOf(z4.string())).toBeUndefined();
     expect(fieldsOf(z3.string())).toBeUndefined();
+  });
+});
+
+describe('stripJsonCodeFence', () => {
+  it.each([
+    ['```json\n{"a": 1}\n```', '{"a": 1}'],
+    ['```\n{"a": 1}\n```', '{"a": 1}'],
+    ['```{"a": 1}```', '{"a": 1}'],
+    ['  ```json\n{"a": 1}\n```  ', '{"a": 1}'],
+    ['``````', ''],
+  ])('unwraps %j', (fenced, expected) => {
+    expect(stripJsonCodeFence(fenced)).toBe(expected);
+  });
+
+  it.each([['{"a": 1}'], ['not json at all'], ['```'], ['```json\n{"a": 1}']])(
+    'returns %j unchanged',
+    (text) => {
+      expect(stripJsonCodeFence(text)).toBe(text);
+    },
+  );
+
+  it('keeps a fence that is part of the payload', () => {
+    expect(stripJsonCodeFence('```json\n{"a": "```"}\n```')).toBe(
+      '{"a": "```"}',
+    );
+  });
+
+  it('returns an unterminated fence padded with blank lines without stalling', () => {
+    // A pattern of the form ```\\s*(.*?)\\s*``` backtracks catastrophically on
+    // this shape and takes seconds, so the call must finish inside the timeout.
+    const unclosed = `\`\`\`json\n${'\n'.repeat(4000)}{"a": 1}`;
+
+    expect(stripJsonCodeFence(unclosed)).toBe(unclosed);
   });
 });
