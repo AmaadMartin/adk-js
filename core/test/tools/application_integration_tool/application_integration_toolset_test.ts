@@ -27,6 +27,7 @@ import {
   ENTITY_OPERATIONS,
   getConnectorBaseSpec,
 } from '../../../src/tools/application_integration_tool/clients/connector_spec_builders.js';
+import {DEFAULT_CREDENTIAL_KEY} from '../../../src/tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 import {logger} from '../../../src/utils/logger.js';
 
 const integrationClientOptions = vi.fn();
@@ -86,6 +87,34 @@ const END_USER_SCHEME: OpenAPIV3.SecuritySchemeObject = {
 const END_USER_CREDENTIAL: AuthCredential = {
   authType: AuthCredentialTypes.HTTP,
   http: {scheme: 'bearer', credentials: {token: 'raw-user-token'}},
+};
+
+/** adk-python's authorization-code fixture, so the port is checked against it. */
+const OAUTH2_SCHEME: OpenAPIV3.SecuritySchemeObject = {
+  type: 'oauth2',
+  flows: {
+    authorizationCode: {
+      authorizationUrl: 'https://example.com/oauth2/authorize',
+      tokenUrl: 'https://example.com/oauth2/token',
+      scopes: {'https://example.com/auth/jira': 'Read and write issues.'},
+    },
+  },
+};
+
+/** What the caller configures: a client identity, and no end-user token. */
+const RAW_OAUTH2_CREDENTIAL: AuthCredential = {
+  authType: AuthCredentialTypes.OAUTH2,
+  oauth2: {clientId: 'test-client-id', clientSecret: 'test-client-secret'},
+};
+
+/** What a host writes back once it has resolved the consent round trip. */
+const EXCHANGED_OAUTH2_CREDENTIAL: AuthCredential = {
+  authType: AuthCredentialTypes.OAUTH2,
+  oauth2: {
+    clientId: 'test-client-id',
+    clientSecret: 'test-client-secret',
+    accessToken: 'exchanged-access-token',
+  },
 };
 
 /** An integration spec with two API triggers, so a filter has work to do. */
@@ -596,6 +625,163 @@ describe('ApplicationIntegrationToolset', () => {
         'Authentication schema and credentials are not used because' +
           ' authOverrideEnabled is not enabled in the connection.',
       );
+    });
+  });
+
+  describe('exchanged end-user auth', () => {
+    beforeEach(() => {
+      getConnectionDetails.mockResolvedValue({
+        ...CONNECTION_DETAILS,
+        authOverrideEnabled: true,
+      });
+    });
+
+    it('calls out with the exchanged credential and keeps the raw one stored', async () => {
+      const toolset = createToolset({
+        entityOperations: {Issues: ['list']},
+        authScheme: END_USER_SCHEME,
+        authCredential: END_USER_CREDENTIAL,
+      });
+      const [stored] = await toolset.getTools();
+
+      toolset.getAuthConfig()!.exchangedAuthCredential =
+        bearer('exchanged-token');
+      const [resolved] = await toolset.getTools();
+
+      expect(resolved).not.toBe(stored);
+      expect(
+        (await runAndCaptureArgs(asConnectorTool(resolved)))[
+          'dynamic_auth_config'
+        ],
+      ).toEqual({'oauth2_auth_code_flow.access_token': 'exchanged-token'});
+      expect(
+        (await runAndCaptureArgs(asConnectorTool(stored)))[
+          'dynamic_auth_config'
+        ],
+      ).toEqual({'oauth2_auth_code_flow.access_token': 'raw-user-token'});
+    });
+
+    it('clones for an OAuth2 configuration too', async () => {
+      const toolset = createToolset({
+        entityOperations: {Issues: ['list']},
+        authScheme: OAUTH2_SCHEME,
+        authCredential: RAW_OAUTH2_CREDENTIAL,
+      });
+      const [stored] = await toolset.getTools();
+
+      toolset.getAuthConfig()!.exchangedAuthCredential =
+        EXCHANGED_OAUTH2_CREDENTIAL;
+      const [resolved] = await toolset.getTools();
+
+      expect(resolved).not.toBe(stored);
+      expect(toolset.getAuthConfig()).toEqual({
+        authScheme: OAUTH2_SCHEME,
+        rawAuthCredential: RAW_OAUTH2_CREDENTIAL,
+        credentialKey: DEFAULT_CREDENTIAL_KEY,
+        exchangedAuthCredential: EXCHANGED_OAUTH2_CREDENTIAL,
+      });
+    });
+
+    it('returns the stored tools while no credential was exchanged', async () => {
+      const toolset = createToolset({
+        entityOperations: {Issues: ['list']},
+        authScheme: END_USER_SCHEME,
+        authCredential: END_USER_CREDENTIAL,
+      });
+
+      const [stored] = await toolset.getTools();
+      const [again] = await toolset.getTools();
+
+      expect(again).toBe(stored);
+    });
+
+    it('reports no auth config when no scheme was configured', () => {
+      expect(createToolset().getAuthConfig()).toBeUndefined();
+    });
+
+    it('reports the scheme, the raw credential and the default key', () => {
+      const toolset = createToolset({
+        authScheme: END_USER_SCHEME,
+        authCredential: END_USER_CREDENTIAL,
+      });
+
+      expect(toolset.getAuthConfig()).toEqual({
+        authScheme: END_USER_SCHEME,
+        rawAuthCredential: END_USER_CREDENTIAL,
+        credentialKey: DEFAULT_CREDENTIAL_KEY,
+      });
+    });
+
+    it('reports an explicit credential key', () => {
+      const toolset = createToolset({
+        authScheme: END_USER_SCHEME,
+        authCredential: END_USER_CREDENTIAL,
+        credentialKey: 'jira',
+      });
+
+      expect(toolset.getAuthConfig()!.credentialKey).toBe('jira');
+    });
+
+    it('reports the same object every call', () => {
+      const toolset = createToolset({authScheme: END_USER_SCHEME});
+
+      expect(toolset.getAuthConfig()).toBe(toolset.getAuthConfig());
+    });
+
+    it('filters before it clones', async () => {
+      const toolset = createToolset({
+        entityOperations: {Issues: ['list', 'create']},
+        toolFilter: ['jira_list__issues'],
+        authScheme: END_USER_SCHEME,
+        authCredential: END_USER_CREDENTIAL,
+      });
+      const stored = await toolset.getTools();
+      expect(stored.map((tool) => tool.name)).toEqual(['jira_list__issues']);
+
+      toolset.getAuthConfig()!.exchangedAuthCredential =
+        bearer('exchanged-token');
+      const resolved = await toolset.getTools();
+
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]).not.toBe(stored[0]);
+      expect(resolved[0].name).toBe('jira_list__issues');
+    });
+
+    it('leaves a tool the connection stripped the scheme from alone', async () => {
+      vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      getConnectionDetails.mockResolvedValue(CONNECTION_DETAILS);
+      const toolset = createToolset({
+        entityOperations: {Issues: ['list']},
+        authScheme: END_USER_SCHEME,
+        authCredential: END_USER_CREDENTIAL,
+      });
+      const [stored] = await toolset.getTools();
+
+      toolset.getAuthConfig()!.exchangedAuthCredential =
+        bearer('exchanged-token');
+      const [resolved] = await toolset.getTools();
+
+      expect(resolved).toBe(stored);
+    });
+
+    it('leaves integration mode untouched', async () => {
+      const toolset = createToolset({
+        connection: undefined,
+        entityOperations: undefined,
+        integration: 'test-integration',
+        triggers: ['api_trigger/first'],
+        authScheme: END_USER_SCHEME,
+        authCredential: END_USER_CREDENTIAL,
+      });
+      const stored = await toolset.getTools();
+
+      toolset.getAuthConfig()!.exchangedAuthCredential =
+        bearer('exchanged-token');
+      const resolved = await toolset.getTools();
+
+      expect(resolved.every((tool) => tool instanceof RestApiTool)).toBe(true);
+      expect(resolved).toEqual(stored);
+      expect(resolved[0]).toBe(stored[0]);
     });
   });
 
