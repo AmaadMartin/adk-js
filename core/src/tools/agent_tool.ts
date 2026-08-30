@@ -72,28 +72,18 @@ function noSchemaMessageText(args: Record<string, unknown>): string {
 /**
  * The run config the wrapped agent runs under, given the caller's.
  *
- * The caller's config carries over except for two settings. CFC describes how
- * the caller's own model executes: handing it to the wrapped agent replaces
- * that agent's code executor, and `Runner.runAsync` refuses to run the agent
- * unless its model is Gemini 2 or above. The nested run is always unary,
- * because `AgentTool` reads its result from the last event's content; a
- * streaming run leaves only a partial chunk there.
- *
- * The caller's own config is never modified. It is forwarded as the same
- * object when neither override applies.
+ * The caller's config carries over except for two settings, and the caller's
+ * own object is never modified. CFC describes how the caller's own model
+ * executes: handing it to the wrapped agent replaces that agent's code
+ * executor, and `Runner.runAsync` refuses to run the agent unless its model is
+ * Gemini 2 or above. The nested run is always unary, because `AgentTool` reads
+ * its result from the last event's content; a streaming run leaves only a
+ * partial chunk there.
  */
 function nestedRunConfig(caller: RunConfig | undefined): RunConfig | undefined {
-  if (!caller) {
-    return undefined;
-  }
-  let nested = caller;
-  if (nested.supportCfc) {
-    nested = {...nested, supportCfc: false};
-  }
-  if ((nested.streamingMode ?? StreamingMode.NONE) !== StreamingMode.NONE) {
-    nested = {...nested, streamingMode: StreamingMode.NONE};
-  }
-  return nested;
+  return (
+    caller && {...caller, supportCfc: false, streamingMode: StreamingMode.NONE}
+  );
 }
 
 /**

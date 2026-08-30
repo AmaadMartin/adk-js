@@ -54,6 +54,12 @@ describe('json_utils', () => {
       expect(stableJsonStringify({})).toBe('{}');
     });
 
+    it('serializes a Date through its toJSON, not as an empty object', () => {
+      expect(
+        stableJsonStringify({at: new Date('2020-01-02T03:04:05.000Z')}),
+      ).toBe('{"at":"2020-01-02T03:04:05.000Z"}');
+    });
+
     it('throws on cyclic input', () => {
       const cyclic: Record<string, unknown> = {};
       cyclic['self'] = cyclic;

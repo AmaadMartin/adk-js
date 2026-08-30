@@ -38,6 +38,24 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
 });
 
 /**
+ * Installs a nested Runner stub built from `overrides`. `AgentTool` reads only
+ * `sessionService`, `runAsync` and `close`, so the stub carries no more than
+ * that, and the cast that says so lives here alone.
+ */
+function stubNestedRunner(overrides: Partial<Runner>): void {
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        close: vi.fn(),
+        runAsync: vi.fn(),
+        ...overrides,
+      }) as unknown as Runner,
+  );
+}
+
+/**
  * Runs `tool` with a stubbed nested Runner and returns the RunConfig that
  * `AgentTool` handed to that Runner.
  */
@@ -47,21 +65,15 @@ async function captureNestedRunConfig(
 ): Promise<RunConfig | undefined> {
   let captured: RunConfig | undefined;
 
-  vi.mocked(Runner).mockImplementation(
-    (config) =>
-      ({
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        close: vi.fn(),
-        async *runAsync(params: {runConfig?: RunConfig}) {
-          captured = params.runConfig;
-          yield createEvent({
-            author: 'sub-agent',
-            content: {role: 'model', parts: [{text: 'done'}]},
-          });
-        },
-      }) as unknown as Runner,
-  );
+  stubNestedRunner({
+    async *runAsync(params: {runConfig?: RunConfig}) {
+      captured = params.runConfig;
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'done'}]},
+      });
+    },
+  });
 
   await tool.runAsync({args: {request: 'go'}, toolContext});
 
@@ -78,21 +90,15 @@ async function captureNestedMessageText(
 ): Promise<string | undefined> {
   let captured: string | undefined;
 
-  vi.mocked(Runner).mockImplementation(
-    (config) =>
-      ({
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        close: vi.fn(),
-        async *runAsync(params: {newMessage: Content}) {
-          captured = params.newMessage.parts?.[0]?.text;
-          yield createEvent({
-            author: 'sub-agent',
-            content: {role: 'model', parts: [{text: 'done'}]},
-          });
-        },
-      }) as unknown as Runner,
-  );
+  stubNestedRunner({
+    async *runAsync(params: {newMessage: Content}) {
+      captured = params.newMessage.parts?.[0]?.text;
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'done'}]},
+      });
+    },
+  });
 
   await tool.runAsync({args, toolContext: createToolContext()});
 
@@ -110,15 +116,7 @@ async function captureNestedClose(
 ): Promise<Mock> {
   const close = vi.fn();
 
-  vi.mocked(Runner).mockImplementation(
-    (config) =>
-      ({
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        close,
-        runAsync,
-      }) as unknown as Runner,
-  );
+  stubNestedRunner({close, runAsync});
 
   await tool.runAsync({args: {request: 'go'}, toolContext});
 
@@ -679,7 +677,11 @@ describe('AgentTool', () => {
 
     const forwarded = await captureNestedRunConfig(tool, toolContext);
 
-    expect(forwarded).toEqual({supportCfc: false, maxLlmCalls: 7});
+    expect(forwarded).toEqual({
+      supportCfc: false,
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.NONE,
+    });
     expect(forwarded).not.toBe(callerRunConfig);
     expect(toolContext.invocationContext.runConfig).toBe(callerRunConfig);
     expect(callerRunConfig.supportCfc).toBe(true);
@@ -708,6 +710,7 @@ describe('AgentTool', () => {
     expect(forwarded).toEqual({
       maxLlmCalls: 7,
       streamingMode: StreamingMode.NONE,
+      supportCfc: false,
     });
     expect(callerRunConfig.streamingMode).toBe(StreamingMode.SSE);
   });
@@ -737,7 +740,7 @@ describe('AgentTool', () => {
     });
   });
 
-  it('forwards a unary caller run config as the same object', async () => {
+  it('leaves an already unary caller run config unary', async () => {
     const tool = createAgentTool();
     const callerRunConfig: RunConfig = {
       maxLlmCalls: 7,
@@ -749,10 +752,14 @@ describe('AgentTool', () => {
       createToolContext(callerRunConfig),
     );
 
-    expect(forwarded).toBe(callerRunConfig);
+    expect(forwarded).toEqual({
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.NONE,
+      supportCfc: false,
+    });
   });
 
-  it('forwards a caller run config with no streaming mode as the same object', async () => {
+  it('runs the nested agent unary when the caller sets no streaming mode', async () => {
     const tool = createAgentTool();
     const callerRunConfig: RunConfig = {maxLlmCalls: 7};
 
@@ -761,7 +768,12 @@ describe('AgentTool', () => {
       createToolContext(callerRunConfig),
     );
 
-    expect(forwarded).toBe(callerRunConfig);
+    expect(forwarded).toEqual({
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.NONE,
+      supportCfc: false,
+    });
+    expect(callerRunConfig).toEqual({maxLlmCalls: 7});
   });
 
   it('sends a string request argument to the sub-agent verbatim', async () => {
@@ -865,21 +877,16 @@ describe('AgentTool', () => {
   it('closes the sub-runner when the nested run throws', async () => {
     const close = vi.fn();
 
-    vi.mocked(Runner).mockImplementation(
-      (config) =>
-        ({
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          close,
-          async *runAsync() {
-            yield createEvent({
-              author: 'sub-agent',
-              content: {role: 'model', parts: [{text: 'partial'}]},
-            });
-            throw new Error('sub-agent failed');
-          },
-        }) as unknown as Runner,
-    );
+    stubNestedRunner({
+      close,
+      async *runAsync() {
+        yield createEvent({
+          author: 'sub-agent',
+          content: {role: 'model', parts: [{text: 'partial'}]},
+        });
+        throw new Error('sub-agent failed');
+      },
+    });
 
     await expect(
       createAgentTool().runAsync({

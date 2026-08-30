@@ -4,40 +4,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/** Narrows to a value whose members can be read by key. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 /**
- * Returns a copy of `value` whose object keys are sorted lexicographically at
- * every level. Arrays keep their element order.
+ * A `JSON.stringify` replacer that reorders the keys of a plain object.
+ * Arrays, primitives and `null` pass through. It runs after `toJSON`, so a
+ * `Date` reaches it as its ISO string.
  */
-function sortKeysDeep(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sortKeysDeep);
-  }
-  if (!isRecord(value)) {
+function sortKeys(_key: string, value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return value;
   }
-  const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(value).sort()) {
-    sorted[key] = sortKeysDeep(value[key]);
-  }
-  return sorted;
+  // The keys of one object are unique, so the comparator never sees a tie.
+  return Object.fromEntries(
+    Object.entries(value).sort(([a], [b]) => (a < b ? -1 : 1)),
+  );
 }
 
 /**
  * Serializes `value` to JSON with object keys sorted lexicographically at every
- * level, so the same content always produces the same text whatever order its
- * keys were inserted in. Arrays keep their element order, and `undefined`
- * members are dropped as `JSON.stringify` drops them.
+ * level, the JavaScript counterpart of Python's
+ * `json.dumps(value, sort_keys=True)`. Arrays keep their element order, and
+ * `undefined` members are dropped as `JSON.stringify` drops them.
  *
- * This is the JavaScript counterpart of Python's
- * `json.dumps(value, sort_keys=True)`. Use it wherever the text has to stay
- * stable across runs, or has to agree with what the Python SDK produces.
- * Cyclic input throws, as it does with `JSON.stringify`.
+ * Cyclic input throws a `RangeError`.
  */
 export function stableJsonStringify(value: unknown): string {
-  return JSON.stringify(sortKeysDeep(value));
+  return JSON.stringify(value, sortKeys);
 }
