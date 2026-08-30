@@ -24,7 +24,10 @@ const OUTPUT_SCHEMA = {
   properties: {temperature: {type: 'number'}},
 };
 
-const sessionManager = {} as MCPSessionManager;
+const sessionManager = new MCPSessionManager({
+  type: 'StreamableHTTPConnectionParams',
+  url: 'http://localhost/unused',
+});
 
 function weatherTool(outputSchema?: Tool['outputSchema']): Tool {
   return {

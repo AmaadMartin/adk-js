@@ -14,7 +14,13 @@ const mcpTool: Tool = {
   inputSchema: {type: 'object', properties: {}},
 };
 
-const tool = new MCPTool(mcpTool, {} as MCPSessionManager);
+const tool = new MCPTool(
+  mcpTool,
+  new MCPSessionManager({
+    type: 'StreamableHTTPConnectionParams',
+    url: 'http://localhost/unused',
+  }),
+);
 
 describe('MCPTool.detectErrorInResponse', () => {
   it('reports a result the server marked as failed', () => {

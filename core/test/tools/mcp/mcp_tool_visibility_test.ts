@@ -8,7 +8,10 @@ import {MCPSessionManager, MCPTool} from '@google/adk';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it} from 'vitest';
 
-const sessionManager = {} as MCPSessionManager;
+const sessionManager = new MCPSessionManager({
+  type: 'StreamableHTTPConnectionParams',
+  url: 'http://localhost/unused',
+});
 
 /** An MCP tool declaring `meta`, which only a remote server populates. */
 function toolWithMeta(meta: Record<string, unknown>): Tool {

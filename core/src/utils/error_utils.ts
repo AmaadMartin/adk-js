@@ -10,6 +10,8 @@
  * reduced to an empty or generic string when they are reported.
  */
 
+import {isRecord} from './type_utils.js';
+
 /**
  * Maximum number of characters of an HTTP response body surfaced by
  * {@link formatError} before it is truncated. Bounds both log volume and the
@@ -26,17 +28,6 @@ const UNKNOWN_ERROR = 'Unknown error';
 /** Lowest and highest values treated as an HTTP status code. */
 const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
-
-/**
- * Narrows an arbitrary value to an indexable record, or `undefined` when it is
- * not a non-null object. Used to safely inspect duck-typed error shapes without
- * resorting to `any`.
- */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object'
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
 
 /** Returns the first argument that is a string, or `undefined` if none are. */
 function firstString(...values: unknown[]): string | undefined {
@@ -76,11 +67,12 @@ function baseMessage(err: unknown): string {
  * string, so no async `Response.text()` is ever invoked.
  */
 function extractHttpDetails(err: unknown): string | undefined {
-  const record = asRecord(err);
-  if (record === undefined) {
+  if (!isRecord(err)) {
     return undefined;
   }
-  const response = asRecord(record['response']);
+  const record = err;
+  const responseValue = record['response'];
+  const response = isRecord(responseValue) ? responseValue : undefined;
   const rawStatus = record['status'] ?? record['code'] ?? response?.['status'];
   const status =
     typeof rawStatus === 'number' &&
@@ -127,7 +119,7 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
   const http = extractHttpDetails(err);
   const base = baseMessage(err);
   // Cycles (including a direct `err.cause === err`) are handled by `seen`.
-  const cause = asRecord(err)?.['cause'];
+  const cause = isRecord(err) ? err['cause'] : undefined;
   const causeMessage =
     cause !== undefined ? formatErrorRecursive(cause, seen) : undefined;
   let message = base.length > 0 ? base : UNKNOWN_ERROR;
