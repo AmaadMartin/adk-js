@@ -8,7 +8,11 @@ import {MCPSessionManager, MCPTool} from '@google/adk';
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it} from 'vitest';
 
-const sessionManager = {} as unknown as MCPSessionManager;
+/** A real session manager; these tests never open a session with it. */
+const sessionManager = new MCPSessionManager({
+  type: 'StreamableHTTPConnectionParams',
+  url: 'http://localhost:1/mcp',
+});
 
 function toolWithMeta(meta: Tool['_meta']): MCPTool {
   const mcpTool: Tool = {

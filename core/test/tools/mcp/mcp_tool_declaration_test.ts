@@ -14,7 +14,11 @@ import {Type} from '@google/genai';
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {afterEach, describe, expect, it} from 'vitest';
 
-const sessionManager = {} as unknown as MCPSessionManager;
+/** A real session manager; these tests never open a session with it. */
+const sessionManager = new MCPSessionManager({
+  type: 'StreamableHTTPConnectionParams',
+  url: 'http://localhost:1/mcp',
+});
 
 /**
  * A tool whose input schema uses `oneOf`, which `toGeminiSchema` cannot

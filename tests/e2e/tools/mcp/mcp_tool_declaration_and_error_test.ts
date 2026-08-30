@@ -8,8 +8,12 @@ import {
   BaseTool,
   Context,
   FeatureName,
+  InvocationContext,
+  LlmAgent,
   MCPTool,
   MCPToolset,
+  PluginManager,
+  createSession,
   overrideFeatureEnabled,
 } from '@google/adk';
 import {fileURLToPath} from 'node:url';
@@ -26,8 +30,17 @@ const SERVER_PATH = fileURLToPath(
   new URL('./mcp_app_tool_server.mjs', import.meta.url),
 );
 
-/** A throwaway tool context; the call path never reads from it. */
-const toolContext = {} as unknown as Context;
+/** A real tool context; the call path reads only its abort signal. */
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'mcp-e2e-1',
+      agent: new LlmAgent({name: 'weather_agent', model: 'gemini-2.5-flash'}),
+      session: createSession({id: 's1', appName: 'app', userId: 'u1'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
+}
 
 function createToolset(): MCPToolset {
   return new MCPToolset({
@@ -94,11 +107,11 @@ describe('MCPTool (e2e, real MCP server over stdio)', () => {
 
     const failed = await tool.runAsync({
       args: {location: 'nowhere'},
-      toolContext,
+      toolContext: createToolContext(),
     });
     const succeeded = await tool.runAsync({
       args: {location: 'paris'},
-      toolContext,
+      toolContext: createToolContext(),
     });
 
     expect(tool.detectErrorInResponse(failed)).toBe('MCP_TOOL_ERROR');

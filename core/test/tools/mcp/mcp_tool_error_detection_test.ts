@@ -14,9 +14,14 @@ const mcpTool: Tool = {
   inputSchema: {type: 'object', properties: {}},
 };
 
+/** A real session manager; these tests never open a session with it. */
+const sessionManager = new MCPSessionManager({
+  type: 'StreamableHTTPConnectionParams',
+  url: 'http://localhost:1/mcp',
+});
+
 function detect(response: unknown): string | undefined {
-  const tool = new MCPTool(mcpTool, {} as unknown as MCPSessionManager);
-  return tool.detectErrorInResponse(response);
+  return new MCPTool(mcpTool, sessionManager).detectErrorInResponse(response);
 }
 
 describe('MCPTool.detectErrorInResponse', () => {
