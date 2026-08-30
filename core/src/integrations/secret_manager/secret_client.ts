@@ -19,7 +19,6 @@ const CLOUD_PLATFORM_SCOPES = [
   'https://www.googleapis.com/auth/cloud-platform',
 ];
 const GLOBAL_HOST = 'secretmanager.googleapis.com';
-const API_VERSION = 'v1';
 /** Google Cloud location IDs hold only lowercase letters, digits and hyphens. */
 const LOCATION_PATTERN = /^[a-z0-9-]+$/;
 
@@ -79,10 +78,7 @@ function regionalHost(location: string): string {
  * carries no payload.
  */
 function encodeResourceName(resourceName: string): string {
-  return resourceName
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/');
+  return resourceName.split('/').map(encodeURIComponent).join('/');
 }
 
 /**
@@ -156,9 +152,7 @@ export class SecretManagerClient {
     // Proto3 JSON base64-encodes bytes, and omits an unset message field and a
     // default value alike, so an empty secret arrives with neither key.
     const response = await client.request<{payload?: {data?: string}}>({
-      url: `https://${this.host}/${API_VERSION}/${encodeResourceName(
-        resourceName,
-      )}:access`,
+      url: `https://${this.host}/v1/${encodeResourceName(resourceName)}:access`,
       headers: getTrackingHeaders(),
     });
     return base64Decode(response.data.payload?.data ?? '');
