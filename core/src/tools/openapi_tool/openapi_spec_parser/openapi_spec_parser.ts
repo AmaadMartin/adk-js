@@ -7,7 +7,7 @@
 import type {OpenAPIV3} from 'openapi-types';
 import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
-import type {ApiParameter} from './operation_parser.js';
+import type {ApiParameter} from '../common/common.js';
 import {OperationParser} from './operation_parser.js';
 
 /** Matches a `{name}` OpenAPI Server Object variable placeholder. */

@@ -218,8 +218,8 @@ describe('OpenApiSpecParser', () => {
             },
           ],
           get: {
-            // operationId is missing, so it is synthesized from path and
-            // method as "users_id_get".
+            // operationId is missing, so the parser synthesizes one from the
+            // path and the method as "users_id_get".
             responses: {},
           },
         },

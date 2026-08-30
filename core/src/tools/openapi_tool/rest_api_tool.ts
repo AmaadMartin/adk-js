@@ -12,7 +12,7 @@ import {experimental} from '../../utils/experimental.js';
 import type {RunAsyncToolRequest} from '../base_tool.js';
 import {BaseTool} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
-import type {ApiParameter} from './openapi_spec_parser/operation_parser.js';
+import type {ApiParameter} from './common/common.js';
 import {OperationParser} from './openapi_spec_parser/operation_parser.js';
 import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 

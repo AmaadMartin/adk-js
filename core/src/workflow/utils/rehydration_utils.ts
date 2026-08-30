@@ -16,6 +16,7 @@
 
 import {requiresUserInput} from '../../agents/user_input_request.js';
 import type {Event} from '../../events/event.js';
+import {isRecord} from '../../utils/object_notation_utils.js';
 import type {RouteValue} from '../graph.js';
 import {
   interruptResponseMismatch,
@@ -504,11 +505,6 @@ export function directChildSegment(
  */
 function directChildName(path: string, parentPath: string): string | undefined {
   return directChildSegment(path, parentPath)?.split('@')[0];
-}
-
-/** Narrows an unknown value to a plain (non-array) record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**

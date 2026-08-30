@@ -5,16 +5,21 @@
  */
 
 /**
- * Converts a string to snake_case.
+ * Converts an identifier to snake_case.
  *
- * Handles lowerCamelCase, UpperCamelCase, space-separated text, acronyms
- * (e.g. "REST API") and consecutive uppercase letters.
+ * A run of non-alphanumeric characters becomes one underscore, a camelCase
+ * boundary and the end of an acronym each gain one, and repeated, leading and
+ * trailing underscores collapse away. `REST API` becomes `rest_api` and
+ * `user-id` becomes `user_id`.
  *
  * This ports `_to_snake_case` from adk-python, so an OpenAPI operation that
  * omits its `operationId` gets the same generated name in both SDKs. It also
  * names the same OpenAPI tools and tool arguments there.
  *
- * @param text The string to convert.
+ * This converts a single identifier. {@link camelCaseKeys} and the helpers in
+ * `object_notation_utils.ts` walk the keys of an object instead.
+ *
+ * @param text The identifier to convert.
  * @returns The snake_case form, without leading or trailing underscores.
  */
 export function snakeCase(text: string): string {
@@ -23,6 +28,7 @@ export function snakeCase(text: string): string {
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
     .toLowerCase()
+    .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '');
 }
 
