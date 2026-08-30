@@ -11,10 +11,44 @@ import type {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import {
+  FeatureName,
+  isFeatureEnabled,
+} from '../../features/feature_registry.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
+
+/** The `error.type` recorded when an MCP server reports a failed call. */
+const MCP_TOOL_ERROR = 'MCP_TOOL_ERROR';
+
+/** The `_meta` key MCP Apps declare their user interface under. */
+const UI_META_KEY = 'ui';
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+/**
+ * The visibility list an MCP server declares under `_meta.ui.visibility`.
+ *
+ * `_meta` is an open extension point, so a server can put anything in it.
+ * Anything other than a list of strings reads as no declaration at all, which
+ * keeps a malformed block from reaching a caller as a wrongly-typed value.
+ */
+function readUiVisibility(meta: Tool['_meta']): string[] {
+  const ui = meta?.[UI_META_KEY];
+  if (typeof ui !== 'object' || ui === null) {
+    return [];
+  }
+  const declared: unknown = (ui as Record<string, unknown>)['visibility'];
+  if (!Array.isArray(declared)) {
+    return [];
+  }
+  const entries: unknown[] = declared;
+  return entries.every(isString) ? entries : [];
+}
 
 /**
  * Represents a tool exposed via the Model Context Protocol (MCP).
@@ -51,15 +85,57 @@ export class MCPTool extends BaseTool {
     this.originalName = originalName || mcpTool.name;
   }
 
+  /**
+   * The visibility an MCP App declares for this tool, or `[]` when it declares
+   * none. Mirrors adk-python's `MCPTool.visibility`.
+   */
+  get visibility(): string[] {
+    return readUiVisibility(this.mcpTool._meta);
+  }
+
+  /**
+   * Renders this tool as the declaration sent to the model.
+   *
+   * Exactly one of `parameters` and `parametersJsonSchema` is populated. The
+   * {@link FeatureName.JSON_SCHEMA_FOR_FUNC_DECL} feature selects the
+   * JSON-schema form, which sends the server's own schemas verbatim. The
+   * genai `Schema` form is the default, and it drops the JSON Schema keywords
+   * `toGeminiSchema` cannot express, such as `oneOf` and `$ref`.
+   */
   override _getDeclaration(): FunctionDeclaration {
+    const {name, description, inputSchema, outputSchema} = this.mcpTool;
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name,
+        description,
+        parametersJsonSchema: inputSchema,
+        responseJsonSchema: outputSchema,
+      };
+    }
     return {
-      name: this.mcpTool.name,
-      description: this.mcpTool.description,
-      parameters: toGeminiSchema(this.mcpTool.inputSchema),
+      name,
+      description,
+      parameters: toGeminiSchema(inputSchema),
       // TODO: need revisit, refer to this
       // https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool-result
-      response: toGeminiSchema(this.mcpTool.outputSchema),
+      response: toGeminiSchema(outputSchema),
     };
+  }
+
+  /**
+   * The error type to record on this call's telemetry span, or `undefined`
+   * when the server did not report a failure.
+   *
+   * An MCP server reports a failed call with `isError` on the result instead
+   * of raising, so a trace cannot otherwise tell the failure from a success.
+   */
+  detectErrorInResponse(response: unknown): string | undefined {
+    return typeof response === 'object' &&
+      response !== null &&
+      'isError' in response &&
+      response.isError
+      ? MCP_TOOL_ERROR
+      : undefined;
   }
 
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
