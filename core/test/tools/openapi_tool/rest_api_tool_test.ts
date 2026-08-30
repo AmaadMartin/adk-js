@@ -10,8 +10,14 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  credentialToParam,
+  INTERNAL_AUTH_PREFIX,
+  InvocationContext,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
+  tokenToSchemeCredential,
   ToolAuthHandler,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
@@ -1151,5 +1157,197 @@ describe('RestApiTool Utilities', () => {
         'Content-Type': 'application/json',
       });
     });
+  });
+});
+
+describe('RestApiTool credential routing', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/test',
+    method: 'GET',
+  };
+  const operation: OpenAPIV3.OperationObject = {responses: {}};
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function stubFetch(): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+    globalThis.fetch = fetchMock;
+    return fetchMock;
+  }
+
+  function stubResolvedCredential(authCredential?: AuthCredential): void {
+    vi.spyOn(
+      ToolAuthHandler.prototype,
+      'prepareAuthCredentials',
+    ).mockResolvedValue({state: 'done', authCredential});
+  }
+
+  function createToolContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'inv-1',
+        session: createSession({id: 'session-1', appName: 'app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+  }
+
+  function run(authScheme?: OpenAPIV3.SecuritySchemeObject): Promise<unknown> {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      authScheme,
+    );
+    return tool.runAsync({args: {}, toolContext: createToolContext()});
+  }
+
+  it('sends an api key declared in a cookie as a Cookie header', async () => {
+    const fetchMock = stubFetch();
+    stubResolvedCredential({
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'secret_key',
+    });
+
+    await run({type: 'apiKey', name: 'session_id', in: 'cookie'});
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.example.com/test',
+      expect.objectContaining({
+        headers: {Cookie: 'session_id=secret_key'},
+      }),
+    );
+  });
+
+  it('sends an api key declared in the query string on the url', async () => {
+    const fetchMock = stubFetch();
+    stubResolvedCredential({
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'secret_key',
+    });
+
+    await run({type: 'apiKey', name: 'key', in: 'query'});
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.example.com/test?key=secret_key',
+      expect.objectContaining({headers: {}}),
+    );
+  });
+
+  it('sends an exchanged bearer token as an Authorization header', async () => {
+    const fetchMock = stubFetch();
+    stubResolvedCredential({
+      authType: AuthCredentialTypes.HTTP,
+      http: {scheme: 'bearer', credentials: {token: 'test_token'}},
+    });
+
+    await run({type: 'http', scheme: 'bearer'});
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.example.com/test',
+      expect.objectContaining({
+        headers: {Authorization: 'Bearer test_token'},
+      }),
+    );
+  });
+
+  it('rejects basic credentials instead of sending an unauthenticated request', async () => {
+    const fetchMock = stubFetch();
+    stubResolvedCredential({
+      authType: AuthCredentialTypes.HTTP,
+      http: {scheme: 'basic', credentials: {username: 'u', password: 'p'}},
+    });
+
+    await expect(run({type: 'http', scheme: 'basic'})).rejects.toThrow(
+      'Basic Authentication is not supported.',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends no credential when the tool declares no auth scheme', async () => {
+    const fetchMock = stubFetch();
+    stubResolvedCredential({
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'secret_key',
+    });
+
+    await run(undefined);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.example.com/test',
+      expect.objectContaining({headers: {}}),
+    );
+  });
+
+  it('exposes the auth helpers on the package entry point', () => {
+    expect(INTERNAL_AUTH_PREFIX).toBe('_auth_prefix_vaf_');
+
+    const {param, kwargs} =
+      credentialToParam(
+        {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+        tokenToSchemeCredential('apikey', 'header', 'X-API-Key', 'k')
+          .authCredential,
+      ) ?? {};
+
+    expect(param?.name).toBe(`${INTERNAL_AUTH_PREFIX}X-API-Key`);
+    expect(kwargs).toEqual({[`${INTERNAL_AUTH_PREFIX}X-API-Key`]: 'k'});
+  });
+});
+
+describe('prepareRequestParams cookie parameters', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/test',
+    method: 'GET',
+  };
+
+  it('joins several cookie parameters into one Cookie header', () => {
+    const parameters: ApiParameter[] = [
+      {
+        name: 'session_id',
+        originalName: 'session_id',
+        paramLocation: 'cookie',
+        paramSchema: {},
+        required: false,
+      },
+      {
+        name: 'tenant',
+        originalName: 'tenant',
+        paramLocation: 'cookie',
+        paramSchema: {},
+        required: false,
+      },
+    ];
+
+    const result = prepareRequestParams(endpoint, parameters, {
+      session_id: 'abc',
+      tenant: 'acme',
+    });
+
+    expect(result.headers).toEqual({Cookie: 'session_id=abc; tenant=acme'});
+  });
+
+  it('sets no Cookie header when no cookie parameter is supplied', () => {
+    const parameters: ApiParameter[] = [
+      {
+        name: 'session_id',
+        originalName: 'session_id',
+        paramLocation: 'cookie',
+        paramSchema: {},
+        required: false,
+      },
+    ];
+
+    const result = prepareRequestParams(endpoint, parameters, {});
+
+    expect(result.headers).toEqual({});
   });
 });
