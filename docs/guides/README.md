@@ -11,6 +11,7 @@ official ADK documentation, visit [adk.dev](https://adk.dev/).
 - [BaseAuthCredentialExchanger](auth/credential_exchanger/index.md) - The
   OpenAPI tool auth layer's exchange contract, and the error that reports a
   missing credential.
+- [Service account tokens for OpenAPI tools](auth/service_account_tokens/index.md) - Access tokens, Cloud Run ID tokens, the quota project header, and the token cache.
 
 ### Tools
 
