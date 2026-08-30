@@ -8,6 +8,8 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  BaseTool,
+  BaseToolset,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -1431,5 +1433,62 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
     expect(userEvents[1].content!.parts).toEqual([
       {text: '[Uploaded Artifact: "file2.pdf"]'},
     ]);
+  });
+});
+
+describe('Runner.close', () => {
+  class StubToolset extends BaseToolset {
+    constructor(private readonly onClose: () => Promise<void>) {
+      super([]);
+    }
+
+    override async getTools(): Promise<BaseTool[]> {
+      return [];
+    }
+
+    override async close(): Promise<void> {
+      return this.onClose();
+    }
+  }
+
+  function createRunner(toolsets: BaseToolset[]): Runner {
+    return new Runner({
+      appName: TEST_APP_ID,
+      agent: new LlmAgent({
+        name: 'root_agent',
+        model: 'gemini-2.5-flash',
+        tools: toolsets,
+      }),
+      sessionService: new InMemorySessionService(),
+    });
+  }
+
+  it("closes the root agent's toolsets", async () => {
+    const onClose = vi.fn().mockResolvedValue(undefined);
+
+    await createRunner([new StubToolset(onClose)]).close();
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes a toolset again when called twice', async () => {
+    const onClose = vi.fn().mockResolvedValue(undefined);
+    const runner = createRunner([new StubToolset(onClose)]);
+
+    await runner.close();
+    await expect(runner.close()).resolves.toBeUndefined();
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports no failure when a toolset throws on close', async () => {
+    const failing = new StubToolset(() =>
+      Promise.reject(new Error('toolset is stuck')),
+    );
+    const onClose = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      createRunner([failing, new StubToolset(onClose)]).close(),
+    ).resolves.toBeUndefined();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
