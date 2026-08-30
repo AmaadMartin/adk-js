@@ -21,6 +21,7 @@ import {
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
+import {logger} from '../../../src/utils/logger.js';
 
 const API_KEY_SCHEME: AuthScheme = {
   type: 'apiKey',
@@ -108,6 +109,23 @@ async function storedCredential(
 /** Returns the key the credential the handler asked for is filed under. */
 function requestedKey(context: Context): string | undefined {
   return context.eventActions.requestedAuthConfigs['call-1']?.credentialKey;
+}
+
+/** The legacy key derived from the scheme and the credential together. */
+async function referenceLegacyKey(
+  store: ToolContextCredentialStore,
+  authScheme?: AuthScheme,
+  authCredential?: AuthCredential,
+): Promise<string> {
+  return (await store.getLegacyCredentialKeys(authScheme, authCredential))[0];
+}
+
+/** The legacy key derived from the scheme type alone. */
+async function schemeTypeLegacyKey(
+  store: ToolContextCredentialStore,
+  authScheme?: AuthScheme,
+): Promise<string> {
+  return (await store.getLegacyCredentialKeys(authScheme))[1];
 }
 
 function recordingExchanger(credential: AuthCredential) {
@@ -448,9 +466,9 @@ describe('ToolAuthHandler', () => {
       await store.getCredentialKey(scheme),
     );
     expect(stored?.apiKey).toBe('key');
-    expect(
-      context.state.get(store.getLegacyCredentialKey(scheme)),
-    ).toBeUndefined();
+    for (const legacyKey of await store.getLegacyCredentialKeys(scheme)) {
+      expect(context.state.get(legacyKey)).toBeUndefined();
+    }
   });
 
   it('reads back a credential cached under the qualified slot', async () => {
@@ -482,7 +500,7 @@ describe('ToolAuthHandler', () => {
     const scheme: AuthScheme = {type: 'http', scheme: 'bearer'};
     const store = new ToolContextCredentialStore(createContext());
     const context = createContext({
-      [store.getLegacyCredentialKey(scheme)]: {
+      [await schemeTypeLegacyKey(store, scheme)]: {
         authType: AuthCredentialTypes.HTTP,
         http: {scheme: 'bearer', credentials: {token: 'user-token'}},
       },
@@ -511,8 +529,8 @@ describe('ToolAuthHandler credential lifecycle', () => {
     ).prepareAuthCredentials();
 
     expect(result.state).toBe('pending');
-    expect(result.authScheme).toBe(OIDC_SCHEME);
-    expect(result.authCredential).toBe(OIDC_CREDENTIAL);
+    expect(result.authScheme).toEqual(OIDC_SCHEME);
+    expect(result.authCredential).toEqual(OIDC_CREDENTIAL);
     expect(exchanger.exchange).not.toHaveBeenCalled();
   });
 
@@ -573,7 +591,7 @@ describe('ToolAuthHandler credential lifecycle', () => {
     ).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
-    expect(result.authScheme).toBe(OIDC_SCHEME);
+    expect(result.authScheme).toEqual(OIDC_SCHEME);
     expect(result.authCredential).toBe(EXCHANGED_CREDENTIAL);
     expect(getAuthResponse).toHaveBeenCalledTimes(1);
     // The stored credential carries the refresh token, which the exchanged
@@ -701,6 +719,143 @@ describe('ToolAuthHandler credential lifecycle', () => {
   });
 });
 
+describe('ToolAuthHandler failed exchange', () => {
+  const EXCHANGE_ERROR = new Error('metadata server unreachable');
+
+  /** An exchanger that fails the way an unreachable token endpoint does. */
+  function failingExchanger() {
+    return {exchange: vi.fn().mockRejectedValue(EXCHANGE_ERROR)};
+  }
+
+  it('degrades to an unauthenticated call when the exchange throws', async () => {
+    const context = createContext();
+
+    const result = await new ToolAuthHandler(
+      context,
+      API_KEY_SCHEME,
+      API_KEY_CREDENTIAL,
+      {credentialExchanger: failingExchanger()},
+    ).prepareAuthCredentials();
+
+    // The tool calls the API unauthenticated and reports the API's own
+    // rejection, rather than aborting the whole invocation.
+    expect(result.state).toBe('done');
+    expect(result.authScheme).toEqual(API_KEY_SCHEME);
+    expect(result.authCredential).toBeUndefined();
+  });
+
+  it('logs the exchange failure without the credential or the key', async () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const context = createContext();
+
+    await new ToolAuthHandler(
+      context,
+      OIDC_SCHEME,
+      oidcCredential({accessToken: 'access-token'}),
+      {
+        credentialExchanger: failingExchanger(),
+        credentialStore: new FakeCredentialStore(),
+      },
+    ).prepareAuthCredentials();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const message = String(errorSpy.mock.calls[0][0]);
+    expect(message).toContain('Failed to exchange credential');
+    expect(message).toContain('metadata server unreachable');
+    expect(message).not.toContain('client-secret');
+    expect(message).not.toContain(FakeCredentialStore.KEY);
+  });
+
+  it('keeps the auth response credential stored when the exchange throws', async () => {
+    const authResponse = oidcCredential({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+    });
+    const context = createContext({'temp:tool_tokens': authResponse});
+
+    await new ToolAuthHandler(context, OIDC_SCHEME, OIDC_CREDENTIAL, {
+      credentialKey: 'tool_tokens',
+      credentialExchanger: failingExchanger(),
+    }).prepareAuthCredentials();
+
+    // The refresh token only lives on the credential the client supplied, so
+    // a failed exchange must not roll that write back.
+    expect(await storedCredential(context, OIDC_CREDENTIAL)).toEqual(
+      authResponse,
+    );
+  });
+
+  it('stores nothing when the exchange throws on a static credential', async () => {
+    const context = createContext();
+
+    await new ToolAuthHandler(context, API_KEY_SCHEME, API_KEY_CREDENTIAL, {
+      credentialExchanger: failingExchanger(),
+    }).prepareAuthCredentials();
+
+    expect(context.state.hasDelta()).toBe(false);
+  });
+});
+
+describe('ToolAuthHandler credential copy', () => {
+  it('works from the credential as it was at construction', async () => {
+    const oauth2: OAuth2Auth = {
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+    };
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+      oauth2,
+    };
+    const beforeContext = createContext();
+    const afterContext = createContext();
+
+    const handler = new ToolAuthHandler(beforeContext, OIDC_SCHEME, credential);
+    oauth2.clientId = 'mutated-client-id';
+    const result = await handler.prepareAuthCredentials();
+    await new ToolAuthHandler(
+      afterContext,
+      OIDC_SCHEME,
+      credential,
+    ).prepareAuthCredentials();
+
+    expect(result.authCredential?.oauth2?.clientId).toBe('client-id');
+    // The storage key is derived from the credential, so a mutation after
+    // construction must not re-point the handler at another slot.
+    expect(requestedKey(beforeContext)).not.toBe(requestedKey(afterContext));
+  });
+
+  it('shields the caller from an exchanger that writes back', async () => {
+    const context = createContext();
+    const scheme: AuthScheme = {...API_KEY_SCHEME};
+    const credential: AuthCredential = {...API_KEY_CREDENTIAL};
+    const schemeSnapshot = structuredClone(scheme);
+    const credentialSnapshot = structuredClone(credential);
+    const exchanger = {
+      exchange: vi
+        .fn()
+        .mockImplementation(
+          async (params: {
+            authScheme: AuthScheme;
+            authCredential: AuthCredential;
+          }) => {
+            params.authCredential.apiKey = 'exchanged-api-key';
+            if (params.authScheme.type === 'apiKey') {
+              params.authScheme.name = 'X-Exchanged-Key';
+            }
+            return {credential: params.authCredential, wasExchanged: true};
+          },
+        ),
+    };
+
+    await new ToolAuthHandler(context, scheme, credential, {
+      credentialExchanger: exchanger,
+    }).prepareAuthCredentials();
+
+    expect(scheme).toEqual(schemeSnapshot);
+    expect(credential).toEqual(credentialSnapshot);
+  });
+});
+
 describe('ToolAuthHandler external exchange', () => {
   const AUTHORIZATION_CODE_SCHEME: AuthScheme = {
     type: 'oauth2',
@@ -822,7 +977,7 @@ describe('ToolAuthHandler credential validation', () => {
     ).prepareAuthCredentials();
 
     expect(result.state).toBe('pending');
-    expect(result.authScheme).toBe(API_KEY_SCHEME);
+    expect(result.authScheme).toEqual(API_KEY_SCHEME);
     expect(requestedKey(context)).toMatch(/^adk_apiKey_/);
   });
 });
@@ -884,27 +1039,68 @@ describe('ToolContextCredentialStore', () => {
     );
   });
 
+  it('searches the credential-scoped legacy key before the scheme-type one', async () => {
+    const store = new ToolContextCredentialStore(createContext());
+
+    const keys = await store.getLegacyCredentialKeys(
+      OIDC_SCHEME,
+      OIDC_CREDENTIAL,
+    );
+
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+    expect(keys[1]).toBe('openIdConnect_existing_exchanged_credential');
+  });
+
   it('keys the legacy slot the same across a redirectUri change', async () => {
     const store = new ToolContextCredentialStore(createContext());
 
-    expect(store.getLegacyCredentialKey(OIDC_SCHEME)).toBe(
-      store.getLegacyCredentialKey({...OIDC_SCHEME}),
+    expect(
+      await referenceLegacyKey(
+        store,
+        OIDC_SCHEME,
+        oidcCredential({redirectUri: 'https://one.example.com/callback'}),
+      ),
+    ).toBe(
+      await referenceLegacyKey(
+        store,
+        OIDC_SCHEME,
+        oidcCredential({redirectUri: 'https://two.example.com/callback'}),
+      ),
     );
   });
 
-  it('names a default legacy slot when there is no scheme', () => {
+  it('keys two OAuth2 apps to different legacy slots', async () => {
     const store = new ToolContextCredentialStore(createContext());
 
-    expect(store.getLegacyCredentialKey()).toBe(
+    expect(
+      await referenceLegacyKey(store, OIDC_SCHEME, OIDC_CREDENTIAL),
+    ).not.toBe(
+      await referenceLegacyKey(
+        store,
+        OIDC_SCHEME,
+        oidcCredential({clientId: 'other-client-id'}),
+      ),
+    );
+  });
+
+  it('names a default legacy slot when there is no scheme', async () => {
+    const store = new ToolContextCredentialStore(createContext());
+
+    expect(await store.getLegacyCredentialKeys()).toContain(
       'default_existing_exchanged_credential',
     );
   });
 
-  it('migrates a credential held under the legacy key', async () => {
+  it('migrates a credential held under the reference legacy key', async () => {
     const cached = oidcCredential({accessToken: 'legacy-token'});
     const context = createContext();
     const store = new ToolContextCredentialStore(context);
-    const legacyKey = store.getLegacyCredentialKey(OIDC_SCHEME);
+    const legacyKey = await referenceLegacyKey(
+      store,
+      OIDC_SCHEME,
+      OIDC_CREDENTIAL,
+    );
     const key = await store.getCredentialKey(OIDC_SCHEME, OIDC_CREDENTIAL);
     context.state.set(legacyKey, cached);
 
@@ -916,6 +1112,35 @@ describe('ToolContextCredentialStore', () => {
     expect(context.state.get(key)).toEqual(cached);
     // A rollback to an earlier release must still find the credential.
     expect(context.state.get(legacyKey)).toEqual(cached);
+  });
+
+  it('migrates a credential held under the scheme-type legacy key', async () => {
+    const cached = oidcCredential({accessToken: 'legacy-token'});
+    const context = createContext();
+    const store = new ToolContextCredentialStore(context);
+    const legacyKey = await schemeTypeLegacyKey(store, OIDC_SCHEME);
+    const key = await store.getCredentialKey(OIDC_SCHEME, OIDC_CREDENTIAL);
+    context.state.set(legacyKey, cached);
+
+    expect(legacyKey).not.toBe(key);
+    expect(await store.getCredential(OIDC_SCHEME, OIDC_CREDENTIAL)).toEqual(
+      cached,
+    );
+    expect(context.state.get(key)).toEqual(cached);
+    expect(context.state.get(legacyKey)).toEqual(cached);
+  });
+
+  it('does not migrate when a legacy key equals the current key', async () => {
+    const context = createContext();
+    const store = new ToolContextCredentialStore(context);
+
+    // With no scheme and no credential both key schemes collapse to the same
+    // string, so the read that already missed must not be repeated as a hit.
+    expect(await store.getLegacyCredentialKeys()).toContain(
+      await store.getCredentialKey(),
+    );
+    expect(await store.getCredential()).toBeUndefined();
+    expect(context.state.hasDelta()).toBe(false);
   });
 
   it('reports no credential when neither key holds one', async () => {

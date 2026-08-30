@@ -15,13 +15,16 @@ import {
   credentialIdentity,
   credentialKeyOverride,
   deriveCredentialKey,
+  legacyCredentialIdentity,
 } from '../../../auth/credential_key.js';
 import {
   AuthCredentialMissingError,
   BaseCredentialExchanger,
+  ExchangeResult,
 } from '../../../auth/exchanger/base_credential_exchanger.js';
 import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
+import {formatError} from '../../../utils/error_utils.js';
 import {experimental} from '../../../utils/experimental.js';
 import {logger} from '../../../utils/logger.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
@@ -167,11 +170,24 @@ export class ToolContextCredentialStore implements CredentialStore {
   }
 
   /**
-   * Returns the key earlier releases stored the credential under, which was
-   * derived from the scheme type alone.
+   * Returns the keys earlier releases stored the credential under, in the
+   * order they are searched.
+   *
+   * There are two, because two key schemes are in the wild. The first is the
+   * one adk-python migrates from, kept so a credential written by a shared
+   * store is still found. The second is the one shipped adk-js releases wrote,
+   * derived from the scheme type alone; dropping it would strand every
+   * credential those releases stored.
    */
-  getLegacyCredentialKey(authScheme?: AuthScheme): string {
-    return `${authScheme?.type ?? 'default'}${STORE_KEY_SUFFIX}`;
+  async getLegacyCredentialKeys(
+    authScheme?: AuthScheme,
+    authCredential?: AuthCredential,
+  ): Promise<string[]> {
+    const identity = await legacyCredentialIdentity(authScheme, authCredential);
+    return [
+      `${identity}${STORE_KEY_SUFFIX}`,
+      `${authScheme?.type ?? 'default'}${STORE_KEY_SUFFIX}`,
+    ];
   }
 
   async getCredential(
@@ -187,19 +203,26 @@ export class ToolContextCredentialStore implements CredentialStore {
       return stored;
     }
 
-    // The two formats never collide: a derived key always carries a scheme
-    // digest and a credential digest, and the legacy key has neither.
-    const legacyKey = this.getLegacyCredentialKey(authScheme);
-    const legacy = this.context.state.get<AuthCredential>(legacyKey);
-    if (!legacy) {
-      return undefined;
-    }
+    // A legacy key can equal the current key, as it does when there is no
+    // scheme and no credential. That is harmless rather than a collision to
+    // guard: the read above already missed on that key.
+    const legacyKeys = await this.getLegacyCredentialKeys(
+      authScheme,
+      authCredential,
+    );
+    for (const legacyKey of legacyKeys) {
+      const legacy = this.context.state.get<AuthCredential>(legacyKey);
+      if (!legacy) {
+        continue;
+      }
 
-    // Copy the credential to the current key rather than moving it, so that a
-    // rollback to an earlier release still finds it.
-    logger.debug('Migrating a tool credential from the legacy key.');
-    this.context.state.set(key, legacy);
-    return legacy;
+      // Copy the credential to the current key rather than moving it, so that
+      // a rollback to an earlier release still finds it.
+      logger.debug('Migrating a tool credential from the legacy key.');
+      this.context.state.set(key, legacy);
+      return legacy;
+    }
+    return undefined;
   }
 
   async storeCredential(
@@ -221,24 +244,33 @@ export class ToolContextCredentialStore implements CredentialStore {
 
 @experimental
 export class ToolAuthHandler {
+  private readonly authScheme?: AuthScheme;
+  private readonly authCredential?: AuthCredential;
   private readonly credentialExchanger: BaseCredentialExchanger;
   private readonly credentialStore: CredentialStore;
   private readonly credentialKey?: string;
 
   constructor(
     private readonly context: Context,
-    private readonly authScheme?: AuthScheme,
-    private readonly authCredential?: AuthCredential,
+    authScheme?: AuthScheme,
+    authCredential?: AuthCredential,
     options: ToolAuthHandlerOptions = {},
   ) {
+    // Copy both, because the storage key is derived from them. A caller that
+    // mutates its credential after construction would otherwise re-point the
+    // handler at a different storage slot mid-invocation.
+    this.authScheme = authScheme ? structuredClone(authScheme) : undefined;
+    this.authCredential = authCredential
+      ? structuredClone(authCredential)
+      : undefined;
     this.credentialExchanger =
       options.credentialExchanger ?? new AutoAuthCredentialExchanger();
     this.credentialStore =
       options.credentialStore ?? new ToolContextCredentialStore(context);
     this.credentialKey = credentialKeyOverride(
       options.credentialKey,
-      authScheme,
-      authCredential,
+      this.authScheme,
+      this.authCredential,
     );
   }
 
@@ -285,10 +317,21 @@ export class ToolAuthHandler {
       await this.storeCredential(credential);
     }
 
-    const result = await this.credentialExchanger.exchange({
-      authScheme,
-      authCredential: credential,
-    });
+    let result: ExchangeResult;
+    try {
+      result = await this.credentialExchanger.exchange({
+        authScheme,
+        authCredential: credential,
+      });
+    } catch (error: unknown) {
+      // An exchange fails for environmental reasons far more often than for
+      // programming ones: expired application default credentials, an
+      // unreachable metadata server, a token endpoint that refused the
+      // request. Rejecting here would abort the whole invocation, so the tool
+      // calls the API unauthenticated and reports what the API says.
+      logger.error(`Failed to exchange credential: ${formatError(error)}`);
+      return {state: 'done', authScheme};
+    }
 
     // An exchange costs a round trip, so its result is worth persisting. The
     // auth response path already stored the credential it has to keep.

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {stableDigest} from '../utils/digest_utils.js';
+import {digestText, stableDigest} from '../utils/digest_utils.js';
 import {AuthCredential, OAuth2Auth} from './auth_credential.js';
 import {AuthScheme} from './auth_schemes.js';
 
@@ -100,6 +100,53 @@ export async function credentialIdentity(
 ): Promise<string> {
   const schemeName = await schemeDigestName(authScheme);
   const credentialName = await credentialDigestName(authCredential);
+  return `${schemeName}_${credentialName}`;
+}
+
+async function legacySchemeDigestName(
+  authScheme?: AuthScheme,
+): Promise<string> {
+  if (!authScheme) {
+    return '';
+  }
+  return `${authScheme.type}_${await digestText(JSON.stringify(authScheme))}`;
+}
+
+async function legacyCredentialDigestName(
+  authCredential?: AuthCredential,
+): Promise<string> {
+  if (!authCredential) {
+    return '';
+  }
+  const digestable: Record<string, unknown> = {...authCredential};
+  if (authCredential.oauth2) {
+    digestable['oauth2'] = withoutFields(
+      authCredential.oauth2,
+      VOLATILE_OAUTH2_FIELDS,
+    );
+  }
+  const digest = await digestText(JSON.stringify(digestable));
+  return `${authCredential.authType}_${digest}`;
+}
+
+/**
+ * Names the credential the way releases before the canonical digest did.
+ *
+ * The digest is taken over the object as written, so key order and an extra
+ * field still change it. That is deliberate: the identity has to reproduce
+ * what the earlier scheme wrote, or a credential stored under it is never
+ * found. Use {@link credentialIdentity} for anything new.
+ *
+ * @param authScheme The scheme the tool authenticates against.
+ * @param authCredential The credential the tool was configured with.
+ * @returns The identity, in the same shape as {@link credentialIdentity}.
+ */
+export async function legacyCredentialIdentity(
+  authScheme?: AuthScheme,
+  authCredential?: AuthCredential,
+): Promise<string> {
+  const schemeName = await legacySchemeDigestName(authScheme);
+  const credentialName = await legacyCredentialDigestName(authCredential);
   return `${schemeName}_${credentialName}`;
 }
 
