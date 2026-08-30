@@ -40,6 +40,9 @@ const DEFAULT_MCP_CREDENTIAL_KEY = 'default_mcp_key';
  * `StreamableHTTPConnectionParams.transportOptions.requestInit.headers`; on key
  * conflict the provider wins. Headers are only meaningful for HTTP transports —
  * they are ignored for `StdioConnectionParams`.
+ *
+ * The context is absent on the resource calls, which carry none, so a provider
+ * must not dereference it unconditionally.
  */
 export type MCPHeaderProvider = (
   context?: ReadonlyContext,
@@ -192,6 +195,10 @@ export class MCPToolset extends BaseToolset {
    * The same instance is returned on every call, so a caller can set
    * `exchangedAuthCredential` on it and have the next {@link getTools} call —
    * and every tool that call returns — send the matching header.
+   *
+   * That instance is shared for the toolset's lifetime, and a toolset outlives
+   * every session it opens. A per-user token written onto it is therefore read
+   * by every other user, so store one only on a toolset scoped to that user.
    *
    * @return The auth config, or `undefined` when no auth scheme was
    *     configured.
