@@ -11,10 +11,36 @@ import type {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import {
+  FeatureName,
+  isFeatureEnabled,
+} from '../../features/feature_registry.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
+
+/** The `error.type` reported for a call the MCP server marked as failed. */
+const MCP_TOOL_ERROR = 'MCP_TOOL_ERROR';
+
+/** Narrows a value read out of an untyped `_meta` block to a record. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** Narrows a value read out of an untyped `_meta` block to a list of strings. */
+function asStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+    ? (value as string[])
+    : undefined;
+}
+
+/** The `ui` block a tool declares in its `_meta`, when it declares one. */
+function uiMeta(tool: Tool): Record<string, unknown> | undefined {
+  return asRecord(asRecord(tool._meta)?.['ui']);
+}
 
 /**
  * Represents a tool exposed via the Model Context Protocol (MCP).
@@ -51,7 +77,37 @@ export class MCPTool extends BaseTool {
     this.originalName = originalName || mcpTool.name;
   }
 
+  /**
+   * The audiences the MCP server declares this tool's user interface for, or
+   * an empty list when it declares none.
+   *
+   * The list arrives from a remote server, so a `visibility` that is not a
+   * list of strings is reported as no declaration. adk-python returns the raw
+   * value; a caller of a `string[]` getter cannot survive that.
+   */
+  get visibility(): string[] {
+    return asStringArray(uiMeta(this.mcpTool)?.['visibility']) ?? [];
+  }
+
+  /**
+   * Reports a result the MCP server marked with `isError` as a failed call.
+   *
+   * A server reports a tool failure inside the result rather than by failing
+   * the request, so without this the span records the call as a success.
+   */
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return asRecord(response)?.['isError'] ? MCP_TOOL_ERROR : undefined;
+  }
+
   override _getDeclaration(): FunctionDeclaration {
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.mcpTool.name,
+        description: this.mcpTool.description,
+        parametersJsonSchema: this.mcpTool.inputSchema,
+        responseJsonSchema: this.mcpTool.outputSchema,
+      };
+    }
     return {
       name: this.mcpTool.name,
       description: this.mcpTool.description,
