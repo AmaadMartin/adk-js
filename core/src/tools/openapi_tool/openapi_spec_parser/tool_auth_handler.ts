@@ -29,12 +29,6 @@ export interface AuthPreparationResult {
   authCredential?: AuthCredential;
 }
 
-/** Scheme types that authenticate through an OAuth2 authorization server. */
-const OAUTH_SCHEME_TYPES: ReadonlySet<string> = new Set([
-  'oauth2',
-  'openIdConnect',
-]);
-
 /** Credential types that carry an `oauth2` block. */
 const OAUTH_CREDENTIAL_TYPES: ReadonlySet<AuthCredentialTypes> = new Set([
   AuthCredentialTypes.OAUTH2,
@@ -60,10 +54,6 @@ const ROUND_TRIP_OAUTH2_FIELDS: readonly (keyof OAuth2Auth)[] = [
   'expiresIn',
   'redirectUri',
 ];
-
-function isOAuthScheme(authScheme: AuthScheme): boolean {
-  return OAUTH_SCHEME_TYPES.has(authScheme.type);
-}
 
 function withoutRoundTripOAuth2Fields(
   credential: AuthCredential,
@@ -122,13 +112,6 @@ function requiresClientRoundTrip(
   return determineGrantType(authScheme) !== OAuthGrantType.CLIENT_CREDENTIALS;
 }
 
-function missingOAuth2BlockError(authScheme: AuthScheme): Error {
-  return new Error(
-    `authCredential is empty for scheme ${authScheme.type}. ` +
-      'Please create an AuthCredential with an oauth2 field.',
-  );
-}
-
 /**
  * Throws when the credential an OAuth2 consent round trip needs is absent or
  * incomplete. The authorization server rejects the round trip without a client
@@ -144,12 +127,15 @@ function assertConsentCredentialComplete(
   authScheme: AuthScheme,
   authCredential?: AuthCredential,
 ): void {
-  if (!isOAuthScheme(authScheme)) {
+  if (authScheme.type !== 'oauth2' && authScheme.type !== 'openIdConnect') {
     return;
   }
   const oauth2 = authCredential?.oauth2;
   if (!oauth2) {
-    throw missingOAuth2BlockError(authScheme);
+    throw new Error(
+      `authCredential is empty for scheme ${authScheme.type}. ` +
+        'Please create an AuthCredential with an oauth2 field.',
+    );
   }
   if (!oauth2.clientId) {
     throw new AuthCredentialMissingError(
@@ -163,29 +149,9 @@ function assertConsentCredentialComplete(
   }
 }
 
-/** Reads and writes a tool's credential in the session state. */
-class ToolContextCredentialStore {
-  constructor(private readonly context: Context) {}
-
-  getCredential(key: string): AuthCredential | undefined {
-    // Read through the State API so we see values persisted from previous
-    // tool calls. `context.state` is a `State` instance, not a plain object;
-    // bracket access would bypass its value/delta store and always miss.
-    return this.context.state.get<AuthCredential>(key);
-  }
-
-  storeCredential(key: string, credential: AuthCredential): void {
-    // Use State.set so the credential is recorded in the state delta and
-    // persisted to the session. A plain assignment (`state[key] = ...`) sets
-    // an own property on the State instance that is never committed, so the
-    // exchanged credential would be re-created on every tool invocation.
-    this.context.state.set(key, credential);
-  }
-}
-
 /**
  * Returns `stored` with a fresh access token when its own has expired, and
- * writes the refreshed credential back to `store`.
+ * writes the refreshed credential back to the session state.
  *
  * The write-back is what makes the next invocation work against a provider
  * that rotates the refresh token on every refresh: without it the tool keeps
@@ -198,7 +164,7 @@ class ToolContextCredentialStore {
  * has not changed.
  */
 async function refreshIfExpired(
-  store: ToolContextCredentialStore,
+  context: Context,
   cacheKey: string,
   authScheme: AuthScheme,
   stored: AuthCredential,
@@ -213,13 +179,15 @@ async function refreshIfExpired(
     return stored;
   }
 
-  store.storeCredential(cacheKey, refreshed);
+  // State.set so the credential lands in the state delta and is persisted. A
+  // plain assignment sets an own property on the State instance that is never
+  // committed, so the refresh would repeat on every tool invocation.
+  context.state.set(cacheKey, refreshed);
   return refreshed;
 }
 
 @experimental
 export class ToolAuthHandler {
-  private readonly store: ToolContextCredentialStore;
   private readonly credentialKey?: string;
 
   constructor(
@@ -228,7 +196,6 @@ export class ToolAuthHandler {
     private readonly authCredential?: AuthCredential,
     options: {credentialKey?: string} = {},
   ) {
-    this.store = new ToolContextCredentialStore(context);
     this.credentialKey = options.credentialKey || undefined;
   }
 
@@ -295,7 +262,10 @@ export class ToolAuthHandler {
     // every invocation, so persisting it to session state would only copy a
     // secret into the session store for nothing.
     if (!usable || exchange.wasExchanged) {
-      this.store.storeCredential(cacheKey, exchange.credential);
+      // State.set so the credential is recorded in the state delta and
+      // persisted. A plain assignment would be dropped, re-running the
+      // exchange on every tool invocation.
+      this.context.state.set(cacheKey, exchange.credential);
     }
 
     return {state: 'done', authCredential: exchange.credential};
@@ -305,11 +275,14 @@ export class ToolAuthHandler {
     authScheme: AuthScheme,
     cacheKey: string,
   ): Promise<AuthCredential | undefined> {
-    const stored = this.store.getCredential(cacheKey);
+    // Read through the State API to see values persisted by previous tool
+    // calls. `context.state` is a `State` instance, not a plain object, so
+    // bracket access would bypass its value store and always miss.
+    const stored = this.context.state.get<AuthCredential>(cacheKey);
     if (!stored) {
       return undefined;
     }
-    return refreshIfExpired(this.store, cacheKey, authScheme, stored);
+    return refreshIfExpired(this.context, cacheKey, authScheme, stored);
   }
 
   /**
