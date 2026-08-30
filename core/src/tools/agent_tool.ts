@@ -4,20 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, FunctionDeclaration, Type} from '@google/genai';
+import {Content, FunctionDeclaration, Schema, Type} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {Event} from '../events/event.js';
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
+import {formatError} from '../utils/error_utils.js';
+import {parseWithSchema, SchemaLike, toJsonSchema} from '../utils/schema.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
+import {runNodeFromToolContext} from '../workflow/run_node_from_tool.js';
 
 import {State} from '../sessions/state.js';
 
+import {
+  AGENT_TOOL_SIGNATURE_SYMBOL,
+  isAgentTool,
+} from './agent_tool_signature.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 import {ForwardingArtifactService} from './forwarding_artifact_service.js';
+
+export {isAgentTool};
 
 /**
  * The configuration of the agent tool.
@@ -35,23 +45,67 @@ export interface AgentToolConfig {
 }
 
 /**
- * A unique symbol to identify ADK agent classes.
- * Defined once and shared by all BaseTool instances.
+ * Prefix marking a state key as ADK bookkeeping. Such a key stays in the
+ * caller's session and never reaches a sub-agent.
  */
-const AGENT_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.agentTool');
+const ADK_INTERNAL_STATE_PREFIX = '_adk';
+
+/** The parameters of an agent that declares no input schema. */
+const REQUEST_PARAMETERS: Schema = {
+  type: Type.OBJECT,
+  properties: {request: {type: Type.STRING}},
+  required: ['request'],
+};
+
+/** {@link REQUEST_PARAMETERS} as plain JSON Schema. */
+const REQUEST_PARAMETERS_JSON_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {request: {type: 'string'}},
+  required: ['request'],
+};
 
 /**
- * Type guard to check if an object is an instance of BaseTool.
- * @param obj The object to check.
- * @returns True if the object is an instance of BaseTool, false otherwise.
+ * The parameters a task sub-agent gets when it declares no input schema.
+ * Mirrors adk-python's `_DefaultTaskInput`.
  */
-export function isAgentTool(obj: unknown): obj is AgentTool {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    AGENT_TOOL_SIGNATURE_SYMBOL in obj &&
-    obj[AGENT_TOOL_SIGNATURE_SYMBOL] === true
-  );
+const DEFAULT_TASK_INPUT_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    request: {
+      type: Type.STRING,
+      description: 'Detailed instructions or context for the task sub-agent.',
+    },
+  },
+  required: ['request'],
+};
+
+/**
+ * Appended to a task tool's description so the model does not schedule a
+ * delegated run alongside other calls.
+ */
+const TASK_DELEGATION_WARNING =
+  '\nIMPORTANT: This tool delegates execution to a specialized agent.' +
+  ' Do NOT call this tool in parallel with any other tools.';
+
+/** The wrapped agent's input schema in the genai form a declaration needs. */
+function agentInputSchema(agent: BaseAgent): Schema | undefined {
+  return isLlmAgent(agent) ? agent.inputSchema : undefined;
+}
+
+/**
+ * The wrapped agent's input schema as the caller supplied it. A Zod schema
+ * validates faithfully, where its genai translation may not, so validation and
+ * JSON-schema rendering read this one.
+ */
+function agentInputSchemaSource(agent: BaseAgent): SchemaLike | undefined {
+  return isLlmAgent(agent)
+    ? (agent.inputSchemaSource ?? agent.inputSchema)
+    : undefined;
+}
+
+/** Whether the wrapped agent constrains its output with a schema. */
+function agentHasOutputSchema(agent: BaseAgent): boolean {
+  return isLlmAgent(agent) && agent.outputSchema !== undefined;
 }
 
 /**
@@ -67,7 +121,7 @@ export class AgentTool extends BaseTool {
   /** A unique symbol to identify ADK agent tool class. */
   readonly [AGENT_TOOL_SIGNATURE_SYMBOL] = true;
 
-  private readonly agent: BaseAgent;
+  protected readonly agent: BaseAgent;
 
   private readonly skipSummarization: boolean;
 
@@ -81,38 +135,37 @@ export class AgentTool extends BaseTool {
   }
 
   override _getDeclaration(): FunctionDeclaration {
-    let declaration: FunctionDeclaration;
+    const jsonSchemaDeclaration = isFeatureEnabled(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+    );
+    const declaration: FunctionDeclaration = {
+      name: this.name,
+      description: this.description,
+    };
 
-    if (isLlmAgent(this.agent) && this.agent.inputSchema) {
-      declaration = {
-        name: this.name,
-        description: this.description,
-        // TODO(b/425992518): We should not use the agent's input schema as is.
-        // It should be validated and possibly transformed. Consider similar
-        // logic to one we have in Python ADK.
-        parameters: this.agent.inputSchema,
-      };
+    if (jsonSchemaDeclaration) {
+      const inputSchema = agentInputSchemaSource(this.agent);
+      declaration.parametersJsonSchema = inputSchema
+        ? toJsonSchema(inputSchema)
+        : REQUEST_PARAMETERS_JSON_SCHEMA;
     } else {
-      declaration = {
-        name: this.name,
-        description: this.description,
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            'request': {
-              type: Type.STRING,
-            },
-          },
-          required: ['request'],
-        },
-      };
+      // The agent's input schema is used as is; it is neither validated nor
+      // transformed, unlike the equivalent path in Python ADK.
+      declaration.parameters =
+        agentInputSchema(this.agent) ?? REQUEST_PARAMETERS;
     }
 
     if (this.apiVariant !== GoogleLLMVariant.GEMINI_API) {
-      const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
-      declaration.response = hasOutputSchema
-        ? {type: Type.OBJECT}
-        : {type: Type.STRING};
+      const hasOutputSchema = agentHasOutputSchema(this.agent);
+      if (jsonSchemaDeclaration) {
+        declaration.responseJsonSchema = {
+          type: hasOutputSchema ? 'object' : 'string',
+        };
+      } else {
+        declaration.response = {
+          type: hasOutputSchema ? Type.OBJECT : Type.STRING,
+        };
+      }
     }
 
     return declaration;
@@ -122,21 +175,15 @@ export class AgentTool extends BaseTool {
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
-    // Note: skipSummarization is intentionally not propagated to
-    // toolContext.actions here. Setting it on the shared EventActions would
-    // leak onto the tool-response event returned to the parent agent, causing
-    // isFinalResponse() to treat that event as terminal and prematurely
-    // terminate the parent's run loop. The sub-agent's output is already
-    // returned verbatim below, which is the intended effect of
-    // skipSummarization.
+    if (this.skipSummarization) {
+      toolContext.actions.skipSummarization = true;
+    }
 
-    const hasInputSchema = isLlmAgent(this.agent) && this.agent.inputSchema;
+    const hasInputSchema = agentInputSchema(this.agent) !== undefined;
     const content: Content = {
       role: 'user',
       parts: [
         {
-          // TODO(b/425992518): Should be validated. Consider similar
-          // logic to one we have in Python ADK.
           text: hasInputSchema
             ? JSON.stringify(args)
             : (args['request'] as string),
@@ -144,24 +191,34 @@ export class AgentTool extends BaseTool {
       ],
     };
 
+    // Session and telemetry backends key on the app name, so the sub-agent run
+    // is filed under the caller's app rather than under the sub-agent's name.
+    const childAppName =
+      toolContext.invocationContext.appName ?? this.agent.name;
+
     const runner = new Runner({
-      appName: this.agent.name,
+      appName: childAppName,
       agent: this.agent,
       artifactService: new ForwardingArtifactService(toolContext),
-      sessionService:
-        toolContext.invocationContext.sessionService ??
-        new InMemorySessionService(),
+      // A fresh service per call: the sub-agent reads neither the caller's
+      // transcript nor its own previous turns.
+      sessionService: new InMemorySessionService(),
       memoryService:
         toolContext.invocationContext.memoryService ??
         new InMemoryMemoryService(),
       credentialService: toolContext.invocationContext.credentialService,
     });
 
-    const session = await runner.sessionService.getOrCreateSession({
-      appName: this.agent.name,
+    const state = Object.fromEntries(
+      Object.entries(toolContext.state.toRecord()).filter(
+        ([key]) => !key.startsWith(ADK_INTERNAL_STATE_PREFIX),
+      ),
+    );
+
+    const session = await runner.sessionService.createSession({
+      appName: childAppName,
       userId: toolContext.invocationContext.userId,
-      sessionId: toolContext.invocationContext.session.id,
-      state: toolContext.state.toRecord(),
+      state,
     });
 
     if (toolContext.abortSignal?.aborted) {
@@ -197,7 +254,7 @@ export class AgentTool extends BaseTool {
       return '';
     }
 
-    const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
+    const hasOutputSchema = agentHasOutputSchema(this.agent);
     // Exclude thoughts from the merged text.
     const mergedText = lastEvent.content.parts
       .filter((part) => !part.thought)
@@ -205,8 +262,84 @@ export class AgentTool extends BaseTool {
       .filter((text) => text)
       .join('\n');
 
-    // TODO - b/425992518: In case of output schema, the output should be
-    // validated. Consider similar logic to one we have in Python ADK.
+    // The output is not validated against the output schema, unlike the
+    // equivalent path in Python ADK.
     return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
+  }
+}
+
+/**
+ * An {@link AgentTool} that runs the wrapped agent inline, as a child node of
+ * the caller's own invocation, instead of in a nested runner.
+ *
+ * The child runs on a branch scoped to this function call, so its events stay
+ * distinguishable from the caller's. A failure comes back as text rather than
+ * as a throw, because the model can retry a described failure.
+ *
+ * ADK-internal, mirroring adk-python's `_SingleTurnAgentTool`.
+ */
+export class SingleTurnAgentTool extends AgentTool {
+  override async runAsync({
+    args,
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    const inputSchema = agentInputSchemaSource(this.agent);
+    let nodeInput: unknown;
+    if (inputSchema) {
+      try {
+        nodeInput = parseWithSchema(inputSchema, args);
+      } catch (error: unknown) {
+        return `Error validating input: ${formatError(error)}`;
+      }
+    } else {
+      nodeInput = args['request'];
+    }
+
+    try {
+      const child = await runNodeFromToolContext({
+        toolContext,
+        node: this.agent,
+        input: nodeInput,
+        toolName: this.name,
+        branchName: this.agent.name,
+      });
+      return child.output;
+    } catch (error: unknown) {
+      return `Error running sub-agent: ${formatError(error)}`;
+    }
+  }
+}
+
+/**
+ * An {@link AgentTool} that marks a call for framework-driven delegation.
+ *
+ * Calling it runs nothing. It defers its `FunctionResponse` so the framework
+ * can execute the wrapped agent itself and supply the response later.
+ *
+ * ADK-internal, mirroring adk-python's `_TaskAgentTool`.
+ */
+export class TaskAgentTool extends AgentTool {
+  override readonly defersResponse = true;
+
+  override _getDeclaration(): FunctionDeclaration {
+    const inputSchema =
+      agentInputSchemaSource(this.agent) ?? DEFAULT_TASK_INPUT_SCHEMA;
+    const declaration: FunctionDeclaration = {
+      name: this.name,
+      description: `${this.description}${TASK_DELEGATION_WARNING}`.trim(),
+      parametersJsonSchema: toJsonSchema(inputSchema),
+    };
+
+    if (this.apiVariant !== GoogleLLMVariant.GEMINI_API) {
+      declaration.responseJsonSchema = {
+        type: agentHasOutputSchema(this.agent) ? 'object' : 'string',
+      };
+    }
+
+    return declaration;
+  }
+
+  override async runAsync(): Promise<undefined> {
+    return undefined;
   }
 }

@@ -19,6 +19,7 @@ import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../events/event_actions.js';
+import {isAgentTool} from '../tools/agent_tool_signature.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
@@ -321,6 +322,26 @@ function normalizeCallbackResponse(
 }
 
 /**
+ * Whether a raw tool result carries something a user can read. An empty string,
+ * a nullish value, and the `{result: null}` a void tool produces all render as
+ * noise rather than as an answer.
+ */
+function isDisplayableResult(result: unknown): boolean {
+  if (result == null || result === '') {
+    return false;
+  }
+  if (typeof result !== 'object') {
+    return true;
+  }
+  const entries = Object.entries(result);
+  return !(
+    entries.length === 1 &&
+    entries[0][0] === 'result' &&
+    entries[0][1] === null
+  );
+}
+
+/**
  * Why a name the model called may be missing from `toolsDict`. Operator-facing
  * only — the model gets the short form, since none of this is actionable to it.
  */
@@ -604,8 +625,13 @@ export async function handleFunctionCallList({
     // Only a nullish response defers the event. A falsy-but-present response
     // ('', 0, false) is a real result and still emits one, so long-running
     // tools that return such a value now produce a response event where they
-    // previously produced none.
-    if (tool.isLongRunning && functionResponse == null) {
+    // previously produced none. A tool that defers its response supplies the
+    // matching FunctionResponse later by design, so it skips the same way
+    // without being marked long running.
+    if (
+      (tool.isLongRunning || tool.defersResponse) &&
+      functionResponse == null
+    ) {
       // The tool's response will arrive later, but any actions it recorded on
       // the tool context (state/artifact deltas, auth or confirmation
       // requests, transfer, escalation, skipSummarization) must not be lost.
@@ -622,6 +648,10 @@ export async function handleFunctionCallList({
       continue;
     }
 
+    // The raw result, before normalization wraps or replaces it, is what a UI
+    // can display.
+    const displayResult = functionResponse;
+
     if (functionResponseError) {
       functionResponse = {error: functionResponseError};
     } else if (functionResponse == null) {
@@ -630,16 +660,40 @@ export async function handleFunctionCallList({
       functionResponse = normalizeCallbackResponse(functionResponse);
     }
 
+    const content = createUserContent({
+      functionResponse: {
+        id: toolContext.functionCallId,
+        name: tool.name,
+        response: functionResponse,
+      },
+    });
+
+    // Nothing summarises an AgentTool result when the flag is set, so the
+    // sub-agent's answer is added as text or it never reaches the user. This is
+    // scoped to AgentTool deliberately: other tools set the flag precisely
+    // because their response is an internal acknowledgement that must not be
+    // surfaced.
+    if (
+      toolContext.actions.skipSummarization &&
+      !functionResponseError &&
+      isAgentTool(tool) &&
+      isDisplayableResult(displayResult)
+    ) {
+      content.parts = [
+        ...(content.parts ?? []),
+        {
+          text:
+            typeof displayResult === 'string'
+              ? displayResult
+              : JSON.stringify(displayResult),
+        },
+      ];
+    }
+
     const functionResponseEvent = createEvent({
       invocationId: invocationContext.invocationId,
       author: toolEventAuthor(invocationContext),
-      content: createUserContent({
-        functionResponse: {
-          id: toolContext.functionCallId,
-          name: tool.name,
-          response: functionResponse,
-        },
-      }),
+      content,
       actions: toolContext.actions,
       branch: invocationContext.branch,
     });
