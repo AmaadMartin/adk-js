@@ -16,7 +16,7 @@ import {executeChildNode} from './node_runner.js';
  * `node -> tool -> node` recursion (a node exposed as a tool whose agent can
  * call that same tool again — unbounded model + tool spend otherwise).
  */
-export const MAX_NODE_TOOL_DEPTH = 8;
+const MAX_NODE_TOOL_DEPTH = 8;
 
 /** Parameters for {@link runNodeFromToolContext}. */
 export interface RunNodeFromToolParams {

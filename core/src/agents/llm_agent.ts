@@ -558,14 +558,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.model = config.model;
     this.instruction = config.instruction ?? '';
     this.globalInstruction = config.globalInstruction ?? '';
-    this.tools = config.tools ?? [];
-    const delegationTools = delegationToolsFor(this.subAgents);
-    if (delegationTools.length > 0) {
-      // A new array rather than a push: `config.tools` is the caller's own
-      // array, and two agents built from it must not accumulate each other's
-      // wrappers.
-      this.tools = [...this.tools, ...delegationTools];
-    }
+    // A copy, because ADK pushes into `tools` later (`SequentialAgent` adds its
+    // task-completed tool) and the caller's own array must not collect that.
+    this.tools = [
+      ...(config.tools ?? []),
+      ...delegationToolsFor(this.subAgents),
+    ];
     this.generateContentConfig = config.generateContentConfig;
     this.disallowTransferToParent = config.disallowTransferToParent ?? false;
     this.disallowTransferToPeers = config.disallowTransferToPeers ?? false;

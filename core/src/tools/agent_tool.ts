@@ -91,11 +91,6 @@ function agentInputSchemaSource(agent: BaseAgent): SchemaLike | undefined {
     : undefined;
 }
 
-/** Whether the wrapped agent constrains its output with a schema. */
-function agentHasOutputSchema(agent: BaseAgent): boolean {
-  return isLlmAgent(agent) && agent.outputSchema !== undefined;
-}
-
 /**
  * A tool that wraps an agent.
  *
@@ -333,7 +328,10 @@ export class TaskAgentTool extends AgentTool {
 
     if (this.apiVariant !== GoogleLLMVariant.GEMINI_API) {
       declaration.responseJsonSchema = {
-        type: agentHasOutputSchema(this.agent) ? 'object' : 'string',
+        type:
+          isLlmAgent(this.agent) && this.agent.outputSchema
+            ? 'object'
+            : 'string',
       };
     }
 
