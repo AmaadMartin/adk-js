@@ -45,7 +45,9 @@ const getTypeFromArrayItem = (
  * Converts a plain JSON Schema object to the genai `Schema` a function
  * declaration carries. Returns `undefined` when there is no schema to convert.
  */
-export function toGeminiSchema(jsonSchema?: object): Schema | undefined {
+export function toGeminiSchema(
+  jsonSchema?: Record<string, unknown>,
+): Schema | undefined {
   if (!jsonSchema) {
     return undefined;
   }

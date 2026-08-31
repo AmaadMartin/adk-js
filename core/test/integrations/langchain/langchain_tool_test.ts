@@ -10,7 +10,6 @@ import {
   Context,
   createEventActions,
   createSession,
-  InputValidationError,
   InvocationContext,
   isBaseTool,
   isFunctionTool,
@@ -246,6 +245,102 @@ describe('LangchainTool', () => {
       ).resolves.toEqual('HI');
     });
 
+    it('carries the constraints of a Zod object into the declaration', () => {
+      const bookTool = tool(({name}: {name: string}) => name, {
+        name: 'book',
+        description: 'Books a name against a tag list',
+        schema: z.object({
+          name: z.string().min(3).max(9),
+          tags: z.array(z.string()).min(1).max(4),
+        }),
+      });
+      const adkTool = new LangchainTool({tool: bookTool});
+
+      expect(adkTool._getDeclaration().parameters?.properties).toEqual({
+        name: {type: Type.STRING, minLength: '3', maxLength: '9'},
+        tags: {
+          type: Type.ARRAY,
+          items: {type: Type.STRING},
+          minItems: '1',
+          maxItems: '4',
+        },
+      });
+    });
+
+    it('declares a defaulted field as optional', async () => {
+      const greetTool = tool(
+        ({name, greeting}: {name: string; greeting: string}) =>
+          `${greeting}, ${name}`,
+        {
+          name: 'greet_default',
+          description: 'Greets someone',
+          schema: z.object({
+            name: z.string(),
+            greeting: z.string().default('hello'),
+          }),
+        },
+      );
+      const adkTool = new LangchainTool({tool: greetTool});
+
+      expect(adkTool._getDeclaration().parameters?.required).toEqual(['name']);
+      await expect(
+        adkTool.runAsync({args: {name: 'ada'}, toolContext: emptyContext}),
+      ).resolves.toEqual('hello, ada');
+    });
+
+    it('declares a transformed field by the value it accepts', async () => {
+      const splitTool = tool(({items}: {items: string[]}) => items.length, {
+        name: 'count',
+        description: 'Counts comma-separated items',
+        schema: z.object({
+          items: z.string().transform((value) => value.split(',')),
+        }),
+      });
+      const adkTool = new LangchainTool({tool: splitTool});
+
+      expect(adkTool._getDeclaration().parameters).toEqual({
+        type: Type.OBJECT,
+        properties: {items: {type: Type.STRING}},
+        required: ['items'],
+      });
+      await expect(
+        adkTool.runAsync({args: {items: 'a,b,c'}, toolContext: emptyContext}),
+      ).resolves.toEqual(3);
+    });
+
+    it('renders the input side of a transformed object schema', async () => {
+      const upperTool = tool((word: string) => word.toUpperCase(), {
+        name: 'upper',
+        description: 'Uppercases a word',
+        schema: z.object({word: z.string()}).transform(({word}) => word),
+      });
+      const adkTool = new LangchainTool({tool: upperTool});
+
+      expect(adkTool._getDeclaration().parameters).toEqual({
+        type: Type.OBJECT,
+        properties: {word: {type: Type.STRING}},
+        required: ['word'],
+      });
+      await expect(
+        adkTool.runAsync({args: {word: 'hi'}, toolContext: emptyContext}),
+      ).resolves.toEqual('HI');
+    });
+
+    it('reports a Zod type it cannot render', () => {
+      expect(
+        () =>
+          new LangchainTool({
+            tool: {
+              name: 'dated',
+              invoke: () => 'x',
+              schema: z.object({when: z.date()}),
+            },
+          }),
+      ).toThrow(
+        /^Failed to build function declaration for Langchain tool: .*Date/,
+      );
+    });
+
     it('declares empty parameters when the tool has no schema', () => {
       const adkTool = new LangchainTool({
         tool: {name: 'ping', description: 'Pings', invoke: () => 'pong'},
@@ -402,6 +497,16 @@ describe('LangchainTool', () => {
       expect(context.actions.skipSummarization).toBe(true);
     });
 
+    it('sets skipSummarization for an array result', async () => {
+      const context = makeContext();
+      const adkTool = new LangchainTool({tool: makeReturnDirectTool([1, 2])});
+
+      await expect(
+        adkTool.runAsync({args: {}, toolContext: context}),
+      ).resolves.toEqual([1, 2]);
+      expect(context.actions.skipSummarization).toBe(true);
+    });
+
     it('sets skipSummarization for an object with no error key', async () => {
       const context = makeContext();
       const adkTool = new LangchainTool({
@@ -550,7 +655,7 @@ describe('LangchainTool.fromConfig', () => {
     });
   });
 
-  it('propagates the resolver error for a name that does not resolve', async () => {
+  it('reports a name that does not resolve, keeping the resolver error', async () => {
     const name = `${FIXTURE_PATH}#missingExport`;
 
     const error = await LangchainTool.fromConfig(
@@ -558,9 +663,14 @@ describe('LangchainTool.fromConfig', () => {
       CONFIG_PATH,
     ).catch((e: unknown) => e);
 
-    expect(error).toBeInstanceOf(InputValidationError);
+    expect(error).toBeInstanceOf(ToolExecutionError);
     expect(error).toMatchObject({
-      message: `Invalid fully qualified name: ${name}`,
+      message: `Langchain tool config names a tool that does not resolve: ${name}`,
+      errorType: ToolErrorType.BAD_REQUEST,
+      cause: {
+        name: 'InputValidationError',
+        message: `Invalid fully qualified name: ${name}`,
+      },
     });
   });
 

@@ -16,7 +16,11 @@ import {formatError} from '../../utils/error_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {resolveFullyQualifiedName} from '../../utils/module_utils.js';
 import {toJsonSchema} from '../../utils/schema.js';
-import {isZodSchema} from '../../utils/simple_zod_to_json.js';
+import {
+  isZodObject,
+  isZodSchema,
+  zodObjectToSchema,
+} from '../../utils/simple_zod_to_json.js';
 
 /**
  * The shape of a LangChain JS tool that {@link LangchainTool} can wrap.
@@ -106,14 +110,26 @@ function resolveName(options: LangchainToolOptions): string {
   return name;
 }
 
+/** Whether a value is a plain JSON Schema object the converter can walk. */
+function isJsonSchemaObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * Converts the tool's schema to the parameters of the model-facing
  * declaration, or `undefined` when the tool declares no schema.
  *
- * A Zod schema is rendered as JSON Schema first. That step matters for
- * LangChain's string-input `Tool`, whose schema is a transformed
- * `z.object({input})` rather than a plain object: rendering it yields the
- * transform's input side, `{input: string}`, which is what the model must send.
+ * Zod is read from its input side, because the declaration tells the model
+ * what to send rather than what it gets back. A field built with `.default()`
+ * is therefore optional, and a field built with `.transform()` is declared as
+ * the value the transform accepts. Reading the output side instead would
+ * declare a defaulted field as required, and would fail outright on a
+ * transform, whose result JSON Schema often cannot express.
+ *
+ * A Zod object goes through the same converter as `FunctionTool`'s own
+ * parameters. Any other Zod schema is rendered as JSON Schema first, which
+ * covers LangChain's string-input `Tool`: its schema is a transformed
+ * `z.object({input})`, and the input side of that is `{input: string}`.
  */
 function resolveParameters(tool: LangchainToolLike): Schema | undefined {
   const {schema} = tool;
@@ -121,14 +137,13 @@ function resolveParameters(tool: LangchainToolLike): Schema | undefined {
     return undefined;
   }
   try {
-    if (isZodSchema(schema)) {
-      return toGeminiSchema(toJsonSchema(schema));
+    if (isZodObject(schema)) {
+      return zodObjectToSchema(schema);
     }
-    if (
-      typeof schema !== 'object' ||
-      schema === null ||
-      Array.isArray(schema)
-    ) {
+    if (isZodSchema(schema)) {
+      return toGeminiSchema(toJsonSchema(schema, 'input'));
+    }
+    if (!isJsonSchemaObject(schema)) {
       throw new Error(`unsupported schema of type ${typeof schema}`);
     }
     return toGeminiSchema(schema);
@@ -214,9 +229,9 @@ export class LangchainTool extends FunctionTool<Schema> {
    * @param configAbsPath Absolute path of that config file. A relative module
    *   specifier in `config.tool` resolves against its directory.
    * @return The configured tool.
-   * @throws {ToolExecutionError} When `tool` is not a fully-qualified name, or
-   *   names a value that is not a LangChain tool.
-   * @throws {InputValidationError} When `tool` is a name that does not resolve.
+   * @throws {ToolExecutionError} When the config does not yield a LangChain
+   *   tool, for any reason. A name that fails to resolve carries the
+   *   resolver's error as `cause`.
    */
   static async fromConfig(
     config: LangchainToolConfig,
@@ -231,7 +246,16 @@ export class LangchainTool extends FunctionTool<Schema> {
         ToolErrorType.BAD_REQUEST,
       );
     }
-    const tool = await resolveFullyQualifiedName(config.tool, configAbsPath);
+    const tool = await resolveFullyQualifiedName(
+      config.tool,
+      configAbsPath,
+    ).catch((error: unknown) => {
+      throw new ToolExecutionError(
+        `Langchain tool config names a tool that does not resolve: ${config.tool}`,
+        ToolErrorType.BAD_REQUEST,
+        {cause: error},
+      );
+    });
     if (!isLangchainToolLike(tool)) {
       throw new ToolExecutionError(
         'Langchain tool config must name a Langchain tool instance.',

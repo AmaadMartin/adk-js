@@ -9,14 +9,11 @@ import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 import {InputValidationError} from '../../src/errors/input_validation_error.js';
 import {resolveFullyQualifiedName} from '../../src/utils/module_utils.js';
-import {
-  notAProvider,
-  staticProvider,
-} from '../tools/fixtures/example_providers.js';
+import {namedExport, otherExport} from './fixtures/module_exports.js';
 
 /** Absolute path of the fixture module the resolver loads. */
 const FIXTURE_PATH = fileURLToPath(
-  new URL('../tools/fixtures/example_providers.ts', import.meta.url),
+  new URL('./fixtures/module_exports.ts', import.meta.url),
 );
 
 /**
@@ -24,46 +21,46 @@ const FIXTURE_PATH = fileURLToPath(
  * uses it as a base for a relative specifier and never reads it.
  */
 const CONFIG_PATH = fileURLToPath(
-  new URL('../tools/fixtures/root_agent.yaml', import.meta.url),
+  new URL('./fixtures/root_agent.yaml', import.meta.url),
 );
 
 describe('resolveFullyQualifiedName', () => {
   it('resolves a named export by identity', async () => {
     const resolved = await resolveFullyQualifiedName(
-      `${FIXTURE_PATH}#staticProvider`,
+      `${FIXTURE_PATH}#namedExport`,
     );
 
-    expect(resolved).toBe(staticProvider);
+    expect(resolved).toBe(namedExport);
   });
 
   it('resolves the default export when the name has no separator', async () => {
     const resolved = await resolveFullyQualifiedName(FIXTURE_PATH);
 
-    expect(resolved).toBe(staticProvider);
+    expect(resolved).toBe(namedExport);
   });
 
   it('resolves the default export when nothing follows the separator', async () => {
     const resolved = await resolveFullyQualifiedName(`${FIXTURE_PATH}#`);
 
-    expect(resolved).toBe(staticProvider);
+    expect(resolved).toBe(namedExport);
   });
 
   it('rebases a relative specifier against the base file', async () => {
     const resolved = await resolveFullyQualifiedName(
-      './example_providers.ts#notAProvider',
+      './module_exports.ts#otherExport',
       CONFIG_PATH,
     );
 
-    expect(resolved).toBe(notAProvider);
+    expect(resolved).toBe(otherExport);
   });
 
   it('ignores the base file for an absolute specifier', async () => {
     const resolved = await resolveFullyQualifiedName(
-      `${FIXTURE_PATH}#notAProvider`,
+      `${FIXTURE_PATH}#otherExport`,
       '/nowhere/root_agent.yaml',
     );
 
-    expect(resolved).toBe(notAProvider);
+    expect(resolved).toBe(otherExport);
   });
 
   it('resolves a bare specifier through normal package resolution', async () => {
@@ -76,7 +73,7 @@ describe('resolveFullyQualifiedName', () => {
 
   it('rejects a relative specifier when no base file is given', async () => {
     const resolving = resolveFullyQualifiedName(
-      './example_providers.ts#staticProvider',
+      './module_exports.ts#namedExport',
     );
 
     await expect(resolving).rejects.toThrow(InputValidationError);

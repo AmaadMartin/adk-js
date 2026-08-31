@@ -136,6 +136,33 @@ describe('toJsonSchema', () => {
     expect((json.properties as Record<string, unknown>).count).toBeDefined();
   });
 
+  it('renders the output side of a Zod v4 schema by default', () => {
+    const schema = z4.object({greeting: z4.string().default('hello')});
+
+    expect(toJsonSchema(schema).required).toEqual(['greeting']);
+    expect(() =>
+      toJsonSchema(z4.object({items: z4.string().transform((s) => [s])})),
+    ).toThrow(/Transforms cannot be represented/);
+  });
+
+  it('renders the input side of a Zod v4 schema when asked', () => {
+    const schema = z4.object({greeting: z4.string().default('hello')});
+
+    expect(toJsonSchema(schema, 'input').required).toBeUndefined();
+    expect(
+      toJsonSchema(
+        z4.object({items: z4.string().transform((s) => [s])}),
+        'input',
+      ).properties,
+    ).toEqual({items: {type: 'string'}});
+  });
+
+  it('renders a Zod v3 schema the same on either side', () => {
+    const schema = z3.object({count: z3.number()});
+
+    expect(toJsonSchema(schema, 'input')).toEqual(toJsonSchema(schema));
+  });
+
   it('translates a genai Schema out of the genai dialect', () => {
     const schema: Schema = {
       type: Type.OBJECT,
