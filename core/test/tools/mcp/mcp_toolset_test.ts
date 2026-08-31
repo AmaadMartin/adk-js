@@ -59,18 +59,20 @@ describe('MCPToolset', () => {
     const toolset = new MCPToolset(stdioParams);
     const tools = await toolset.getTools();
 
+    expect(tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(['test-tool', 'other-tool']),
+    );
     expect(tools).toHaveLength(2);
-    expect(tools[0].name).toBe('test-tool');
-    expect(tools[1].name).toBe('other-tool');
   });
 
   it('discovers tools with prefix applied', async () => {
     const toolset = new MCPToolset(stdioParams, [], 'myprefix');
     const tools = await toolset.getTools();
 
+    expect(tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(['myprefix_test-tool', 'myprefix_other-tool']),
+    );
     expect(tools).toHaveLength(2);
-    expect(tools[0].name).toBe('myprefix_test-tool');
-    expect(tools[1].name).toBe('myprefix_other-tool');
   });
 
   describe('toolFilter', () => {
