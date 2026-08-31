@@ -10,7 +10,6 @@ import {
   CrewaiTool,
   CrewaiToolConfig,
   CrewaiToolLike,
-  CrewaiToolOptions,
   InvocationContext,
   isBaseTool,
   isFunctionTool,
@@ -104,9 +103,9 @@ describe('CrewaiTool', () => {
     });
 
     it('throws when the wrapped value has no run method', () => {
-      expect(() => new CrewaiTool({tool: {name: 'x'}})).toThrow(
-        "Tool must be a CrewAI tool with a 'run' method.",
-      );
+      expect(
+        () => new CrewaiTool({tool: {name: 'x'} as CrewaiToolLike}),
+      ).toThrow("Tool must be a CrewAI tool with a 'run' method.");
     });
 
     it('throws when no name can be resolved', () => {
@@ -236,17 +235,24 @@ describe('CrewaiTool', () => {
       const toolContext = createContext();
 
       await crewaiTool.runAsync({
-        args: {
-          search_query: 'q',
-          self: 'spoofed',
-          tool_context: 'spoofed',
-          toolContext: 'spoofed',
-        },
+        args: {search_query: 'q', self: 'spoofed', tool_context: 'spoofed'},
         toolContext,
       });
 
       expect(calls[0].args).toEqual({search_query: 'q'});
       expect(calls[0].context).toBe(toolContext);
+    });
+
+    it('forwards an argument the wrapped tool named toolContext', async () => {
+      const {tool, calls} = createEchoTool();
+      const crewaiTool = new CrewaiTool({tool, name: 'test_tool'});
+
+      await crewaiTool.runAsync({
+        args: {toolContext: 'a value the tool declared'},
+        toolContext: createContext(),
+      });
+
+      expect(calls[0].args).toEqual({toolContext: 'a value the tool declared'});
     });
 
     it("does not mutate the caller's arguments", async () => {
@@ -368,14 +374,6 @@ describe('CrewaiTool', () => {
 
       expect(crewaiTool.name).toBe('configured_tool');
       expect(crewaiTool.description).toBe('Configured tool');
-    });
-
-    it('accepts the CrewaiToolOptions alias', () => {
-      const {tool} = createEchoTool();
-      const options: CrewaiToolOptions = {tool, name: 'aliased_tool'};
-      const config: CrewaiToolConfig = options;
-
-      expect(new CrewaiTool(config).name).toBe('aliased_tool');
     });
   });
 });

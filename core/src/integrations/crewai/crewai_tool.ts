@@ -18,14 +18,7 @@ import {isZodSchema} from '../../utils/simple_zod_to_json.js';
  * Argument names the framework manages. A model can emit any of them, so they
  * are removed before the arguments reach the wrapped tool.
  */
-const RESERVED_ARG_NAMES: readonly string[] = [
-  'self',
-  'tool_context',
-  'toolContext',
-];
-
-const DECLARATION_ERROR_PREFIX =
-  'Failed to build function declaration for CrewAI tool: ';
+const RESERVED_ARG_NAMES: readonly string[] = ['self', 'tool_context'];
 
 /** The shape of a CrewAI-style tool that {@link CrewaiTool} can wrap. */
 export interface CrewaiToolLike {
@@ -39,7 +32,7 @@ export interface CrewaiToolLike {
    * The tool's entry point. It receives the model's arguments object and, as
    * a second argument, the ADK context of the call.
    */
-  run?(args: unknown, context?: Context): unknown;
+  run(args: unknown, context?: Context): unknown;
 }
 
 /**
@@ -57,12 +50,6 @@ export interface CrewaiToolConfig {
   /** Overrides the wrapped tool's description. */
   description?: string;
 }
-
-/**
- * Alias of {@link CrewaiToolConfig}, in the `*Options` spelling the other
- * integration tools use.
- */
-export type CrewaiToolOptions = CrewaiToolConfig;
 
 /** The wrapped tool's entry point, bound to the tool. */
 type CrewaiEntryPoint = (args: unknown, context?: Context) => unknown;
@@ -140,7 +127,9 @@ function resolveSchema(tool: CrewaiToolLike): ResolvedSchema {
       requiredArgs,
     };
   } catch (error: unknown) {
-    throw new Error(`${DECLARATION_ERROR_PREFIX}${formatError(error)}`);
+    throw new Error(
+      `Failed to build function declaration for CrewAI tool: ${formatError(error)}`,
+    );
   }
 }
 

@@ -201,7 +201,6 @@ export {CrewaiTool} from './integrations/crewai/crewai_tool.js';
 export type {
   CrewaiToolConfig,
   CrewaiToolLike,
-  CrewaiToolOptions,
 } from './integrations/crewai/crewai_tool.js';
 export type {
   BaseMemoryService,
