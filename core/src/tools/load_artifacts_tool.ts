@@ -53,6 +53,9 @@ const ARTIFACT_NAMES_DESCRIPTION = 'The names of the artifacts to load.';
  * placeholder naming the artifact and its size. The conversion never throws;
  * every failure degrades to a text part.
  *
+ * A `processArtifact` callback can call this to fall back to the default
+ * conversion for an artifact it does not want to handle itself.
+ *
  * @param artifact The artifact to convert.
  * @param artifactName The name the artifact was loaded under.
  * @param enableSpreadsheetParsing Whether to render a spreadsheet workbook as
