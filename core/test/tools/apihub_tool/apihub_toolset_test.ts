@@ -188,3 +188,25 @@ describe('APIHubToolset', () => {
     await expect(toolset.getTools()).rejects.toThrow();
   });
 });
+
+describe('APIHubToolset.close', () => {
+  it('closes a toolset whose tools were loaded', async () => {
+    const toolset = new APIHubToolset({
+      apihubResourceName: 'test_resource',
+      apihubClient: createMockClient(MOCK_SPEC),
+    });
+    await toolset.getTools();
+
+    await expect(toolset.close()).resolves.toBeUndefined();
+  });
+
+  it('closes a toolset that never loaded a spec', async () => {
+    const toolset = new APIHubToolset({
+      apihubResourceName: 'test_resource',
+      apihubClient: createMockClient(MOCK_SPEC),
+      lazyLoadSpec: true,
+    });
+
+    await expect(toolset.close()).resolves.toBeUndefined();
+  });
+});
