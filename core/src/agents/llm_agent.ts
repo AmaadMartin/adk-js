@@ -6,6 +6,7 @@
 
 import {GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
+import {SingleTurnAgentTool, TaskAgentTool} from '../tools/agent_tool.js';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
@@ -450,6 +451,48 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 }
 
 /**
+ * The execution mode by which a parent drives `agent` as a tool, or `undefined`
+ * when the parent does not drive it that way.
+ *
+ * An agent that declares `single_turn` or `task` is reached by a tool call: the
+ * parent wraps it as a tool and stops offering it as an LLM-transfer target.
+ * An agent with no `mode` — every non-`LlmAgent`, and every conversational
+ * `LlmAgent` — is reached by a transfer instead. That is adk-js's equivalent of
+ * adk-python's default `mode='chat'`.
+ *
+ * This is the one place that decides which modes mean delegation, so the
+ * wrapper side and the transfer side cannot drift apart.
+ */
+export function delegationMode(
+  agent: BaseAgent,
+): 'single_turn' | 'task' | undefined {
+  if (!isLlmAgent(agent)) {
+    return undefined;
+  }
+  return agent.mode === 'single_turn' || agent.mode === 'task'
+    ? agent.mode
+    : undefined;
+}
+
+/**
+ * The tools that expose mode-declaring sub-agents to the parent model.
+ *
+ * Mirrors the sub-agent loop in adk-python's `LlmAgent.model_post_init`.
+ */
+function delegationToolsFor(subAgents: BaseAgent[]): BaseTool[] {
+  const tools: BaseTool[] = [];
+  for (const subAgent of subAgents) {
+    const mode = delegationMode(subAgent);
+    if (mode === 'single_turn') {
+      tools.push(new SingleTurnAgentTool({agent: subAgent}));
+    } else if (mode === 'task') {
+      tools.push(new TaskAgentTool({agent: subAgent}));
+    }
+  }
+  return tools;
+}
+
+/**
  * An agent that uses a large language model to generate responses.
  */
 export class LlmAgent extends BaseAgent<LlmAgentConfig> {
@@ -515,7 +558,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.model = config.model;
     this.instruction = config.instruction ?? '';
     this.globalInstruction = config.globalInstruction ?? '';
-    this.tools = config.tools ?? [];
+    // A copy, because ADK pushes into `tools` later (`SequentialAgent` adds its
+    // task-completed tool) and the caller's own array must not collect that.
+    this.tools = [
+      ...(config.tools ?? []),
+      ...delegationToolsFor(this.subAgents),
+    ];
     this.generateContentConfig = config.generateContentConfig;
     this.disallowTransferToParent = config.disallowTransferToParent ?? false;
     this.disallowTransferToPeers = config.disallowTransferToPeers ?? false;
