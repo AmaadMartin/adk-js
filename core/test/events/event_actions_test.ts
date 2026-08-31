@@ -12,6 +12,7 @@ import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
+import {UiWidget} from '../../src/events/ui_widget.js';
 import {ToolConfirmation} from '../../src/tools/tool_confirmation.js';
 
 function createTestAuthConfig(credentialKey: string): AuthConfig {
@@ -251,5 +252,33 @@ describe('mergeEventActions', () => {
       createEventActions({stateDelta: {x: 1}}),
     ]);
     expect(result.stateDelta).toEqual({x: 1});
+  });
+});
+
+describe('EventActions UI widgets', () => {
+  const widget: UiWidget = {id: 'call-1', provider: 'mcp', payload: {}};
+
+  it('concatenates the widgets of every source', () => {
+    const other: UiWidget = {id: 'call-2', provider: 'mcp', payload: {}};
+
+    const merged = mergeEventActions([
+      {renderUiWidgets: [widget]},
+      {stateDelta: {a: 1}},
+      {renderUiWidgets: [other]},
+    ]);
+
+    expect(merged.renderUiWidgets).toEqual([widget, other]);
+  });
+
+  it('leaves renderUiWidgets unset when no source carries one', () => {
+    const merged = mergeEventActions([{stateDelta: {a: 1}}]);
+
+    expect(merged.renderUiWidgets).toBeUndefined();
+  });
+
+  it('treats an attached widget as a signal', () => {
+    const actions = createEventActions({renderUiWidgets: [widget]});
+
+    expect(isDefaultEventActions(actions)).toBe(false);
   });
 });

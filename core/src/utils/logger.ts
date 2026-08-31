@@ -32,8 +32,8 @@ export interface Logger {
   /**
    * Whether a message at `level` would be emitted.
    *
-   * Optional so an existing third-party {@link Logger} keeps compiling; call
-   * it through the module-level {@link logger}, which defaults it to `false`.
+   * Optional so an existing third-party {@link Logger} keeps compiling; the
+   * module-level logger defaults it to `false`.
    */
   isEnabledFor?(level: LogLevel): boolean;
 }

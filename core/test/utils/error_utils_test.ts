@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {formatError, isConnectionError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,75 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('isConnectionError', () => {
+  it.each([
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'ENOTFOUND',
+    'ETIMEDOUT',
+    'EPIPE',
+    'EAI_AGAIN',
+  ])('matches an error carrying %s', (code) => {
+    expect(isConnectionError(Object.assign(new Error('down'), {code}))).toBe(
+      true,
+    );
+  });
+
+  it('matches the socket code fetch reports on the cause', () => {
+    const err = new TypeError('fetch failed', {
+      cause: Object.assign(new Error('connect'), {code: 'ECONNREFUSED'}),
+    });
+    expect(isConnectionError(err)).toBe(true);
+  });
+
+  it('matches a code two causes deep', () => {
+    const err = new Error('outer', {
+      cause: new Error('middle', {
+        cause: Object.assign(new Error('inner'), {code: 'ECONNRESET'}),
+      }),
+    });
+    expect(isConnectionError(err)).toBe(true);
+  });
+
+  it('stops walking before an unreasonably deep cause chain', () => {
+    let err = Object.assign(new Error('root'), {code: 'ECONNREFUSED'});
+    for (let i = 0; i < 6; i++) {
+      err = Object.assign(new Error(`wrapper ${i}`, {cause: err}), {code: ''});
+    }
+    expect(isConnectionError(err)).toBe(false);
+  });
+
+  it('does not match a plain error', () => {
+    expect(isConnectionError(new Error('tool exploded'))).toBe(false);
+  });
+
+  it('does not match a cancelled operation', () => {
+    const err = Object.assign(new Error('aborted'), {
+      name: 'AbortError',
+      code: 'ECONNRESET',
+    });
+    expect(isConnectionError(err)).toBe(false);
+  });
+
+  it('does not match a protocol error the server answered with', () => {
+    const err = Object.assign(new Error('Invalid params'), {
+      name: 'McpError',
+      code: -32602,
+    });
+    expect(isConnectionError(err)).toBe(false);
+  });
+
+  it('does not match a non-object', () => {
+    expect(isConnectionError('ECONNREFUSED')).toBe(false);
+    expect(isConnectionError(undefined)).toBe(false);
+  });
+
+  it('terminates on a cause cycle', () => {
+    const err: Error & {cause?: unknown} = new Error('looping');
+    err.cause = err;
+    expect(isConnectionError(err)).toBe(false);
   });
 });
