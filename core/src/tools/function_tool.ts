@@ -12,6 +12,7 @@ import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 
 import {Context} from '../agents/context.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import {applyConfirmationGate} from './tool_confirmation.js';
 
 /**
  * Input parameters of the function tool.
@@ -261,27 +262,6 @@ export class FunctionTool<
     if (!requireConfirmation) {
       return undefined;
     }
-    if (!toolContext) {
-      throw new Error(
-        `Tool '${this.name}' requires confirmation but no tool context was provided.`,
-      );
-    }
-    if (!toolContext.toolConfirmation) {
-      toolContext.requestConfirmation({
-        hint:
-          `Please approve or reject the tool call ${this.name}() by ` +
-          'responding with a FunctionResponse with an expected ' +
-          'ToolConfirmation payload.',
-      });
-      toolContext.actions.skipSummarization = true;
-      return {
-        error:
-          'This tool call requires confirmation, please approve or reject.',
-      };
-    }
-    if (!toolContext.toolConfirmation.confirmed) {
-      return {error: 'This tool call is rejected.'};
-    }
-    return undefined;
+    return applyConfirmationGate(this.name, toolContext);
   }
 }

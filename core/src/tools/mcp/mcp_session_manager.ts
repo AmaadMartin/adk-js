@@ -165,8 +165,9 @@ export class MCPSessionManager {
   /**
    * Opens a new MCP session.
    *
-   * @param headers Headers to send on every request of this session. They are
-   *     meaningless for a stdio transport and are ignored there.
+   * @param headers Headers to send on every request of this session. An empty
+   *     set is the same as none. They are meaningless for a stdio transport and
+   *     are ignored there.
    * @return The connected client.
    */
   async createSession(headers?: Record<string, string>): Promise<Client> {
@@ -210,7 +211,7 @@ export class MCPSessionManager {
             };
           }
 
-          if (headers) {
+          if (headers && Object.keys(headers).length > 0) {
             options.requestInit = {
               ...options.requestInit,
               headers: mergeHeaders(options.requestInit?.headers, headers),
