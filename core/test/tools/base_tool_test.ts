@@ -6,13 +6,19 @@
 
 import {
   BaseTool,
+  Context,
+  createSession,
   getLogger,
   InputValidationError,
+  InvocationContext,
+  LlmRequest,
   Logger,
+  PluginManager,
   setLogger,
   ToolArgsConfig,
+  ToolExecutionError,
 } from '@google/adk';
-import {FunctionResponseScheduling} from '@google/genai';
+import {FunctionDeclaration, FunctionResponseScheduling} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 class PlainTool extends BaseTool {
@@ -165,6 +171,92 @@ describe('BaseTool.defersResponse', () => {
     tool.defersResponse = true;
 
     expect(tool.defersResponse).toBe(true);
+  });
+});
+
+/**
+ * A tool the model runs on its own side, as the built-in search tools do. It
+ * contributes a declaration and has no client-side body, so it declares no
+ * `runAsync`. Compiling at all is half of what this fixture pins.
+ */
+class DeclarationOnlyTool extends BaseTool {
+  override _getDeclaration(): FunctionDeclaration {
+    return {name: this.name, description: this.description};
+  }
+}
+
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      session: createSession({id: 's1', appName: 'app', userId: 'u1'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
+}
+
+describe('BaseTool.runAsync', () => {
+  const REQUEST = {args: {}, toolContext: createToolContext()};
+
+  it('rejects with a message naming the tool when the subclass declares none', async () => {
+    const tool = new DeclarationOnlyTool({
+      name: 'declaration_only_tool',
+      description: 'A tool the model runs.',
+    });
+
+    await expect(tool.runAsync(REQUEST)).rejects.toThrow(
+      'Tool declaration_only_tool does not implement runAsync.',
+    );
+  });
+
+  it('rejects with a plain Error, so no error type reaches the tool span', async () => {
+    const tool = new DeclarationOnlyTool({
+      name: 'declaration_only_tool',
+      description: 'A tool the model runs.',
+    });
+
+    const error = await tool.runAsync(REQUEST).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(ToolExecutionError);
+  });
+
+  it('still lets a tool with no client-side body contribute its declaration', async () => {
+    const tool = new DeclarationOnlyTool({
+      name: 'declaration_only_tool',
+      description: 'A tool the model runs.',
+    });
+    const llmRequest: LlmRequest = {
+      config: {},
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    await tool.processLlmRequest({
+      llmRequest,
+      toolContext: REQUEST.toolContext,
+    });
+
+    expect(llmRequest.config?.tools).toEqual([
+      {
+        functionDeclarations: [
+          {
+            name: 'declaration_only_tool',
+            description: 'A tool the model runs.',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('leaves a subclass implementation in place', async () => {
+    const tool: BaseTool = new PlainTool({
+      name: 'plain_tool',
+      description: 'A tool.',
+    });
+
+    await expect(tool.runAsync(REQUEST)).resolves.toEqual({result: 'ok'});
   });
 });
 
