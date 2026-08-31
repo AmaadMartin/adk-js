@@ -13,6 +13,9 @@ import {
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
+// The logger singleton is internal (not part of the public API), so it is
+// imported via a relative path to spy on the exact instance the tool uses.
+import {logger} from '../../../src/utils/logger.js';
 
 describe('MCPTool', () => {
   it('passes abort signal to callTool', async () => {
@@ -161,5 +164,105 @@ describe('MCPTool', () => {
 
     // Assert that closeSession was still called despite the error
     expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
+  });
+
+  describe('progress notifications', () => {
+    const mockTool: Tool = {
+      name: 'test-tool',
+      description: 'A test tool',
+      inputSchema: {type: 'object', properties: {}},
+    };
+
+    /** A session manager whose sessions record the `callTool` options. */
+    function stubSessionManager(): {
+      manager: MCPSessionManager;
+      callTool: ReturnType<typeof vi.fn>;
+    } {
+      const callTool = vi.fn().mockResolvedValue({content: []});
+      const manager = {
+        createSession: vi
+          .fn()
+          .mockResolvedValue({callTool} as unknown as Client),
+        closeSession: vi.fn().mockResolvedValue(undefined),
+      } as unknown as MCPSessionManager;
+      return {manager, callTool};
+    }
+
+    /** Lets every queued microtask run, including a rejected callback. */
+    function flushMicrotasks(): Promise<void> {
+      return new Promise((resolve) => setImmediate(resolve));
+    }
+
+    function toolContext(): Context {
+      return new Context({
+        invocationContext: {
+          abortSignal: new AbortController().signal,
+          session: {state: {}},
+        } as unknown as InvocationContext,
+      });
+    }
+
+    it('passes no onprogress when no callback is configured', async () => {
+      const {manager, callTool} = stubSessionManager();
+      const tool = new MCPTool(mockTool, manager);
+
+      await tool.runAsync({args: {}, toolContext: toolContext()});
+
+      expect(callTool.mock.calls[0][2].onprogress).toBeUndefined();
+    });
+
+    it('forwards a progress notification to the callback', async () => {
+      const {manager, callTool} = stubSessionManager();
+      const progressCallback = vi.fn();
+      const tool = new MCPTool(mockTool, manager, undefined, {
+        progressCallback,
+      });
+
+      await tool.runAsync({args: {}, toolContext: toolContext()});
+      callTool.mock.calls[0][2].onprogress({progress: 3, total: 10});
+      await flushMicrotasks();
+
+      expect(progressCallback).toHaveBeenCalledWith({progress: 3, total: 10});
+    });
+
+    it('logs a rejecting callback instead of failing the call', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const {manager, callTool} = stubSessionManager();
+      const tool = new MCPTool(mockTool, manager, undefined, {
+        progressCallback: () => Promise.reject(new Error('progress boom')),
+      });
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: toolContext(),
+      });
+      callTool.mock.calls[0][2].onprogress({progress: 1});
+      await flushMicrotasks();
+
+      expect(result).toEqual({content: []});
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('progress boom'),
+      );
+      warn.mockRestore();
+    });
+
+    it('logs a callback that throws synchronously', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const {manager, callTool} = stubSessionManager();
+      const tool = new MCPTool(mockTool, manager, undefined, {
+        progressCallback: () => {
+          throw new Error('sync progress boom');
+        },
+      });
+
+      await tool.runAsync({args: {}, toolContext: toolContext()});
+      callTool.mock.calls[0][2].onprogress({progress: 1});
+      await flushMicrotasks();
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('sync progress boom'),
+      );
+      warn.mockRestore();
+    });
   });
 });
