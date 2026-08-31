@@ -270,3 +270,23 @@ describe('ResponseEvaluator.evaluate', () => {
     expect(infoSpy).not.toHaveBeenCalled();
   });
 });
+
+// Not translated from Python: adk-python reads `raw_eval_dataset[0][0]` after
+// its guard, so a dataset holding only empty sessions raises IndexError there.
+// adk-js reports the same dataset with the same message instead.
+describe('ResponseEvaluator.evaluate, beyond the translated cases', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('rejects a dataset whose only session has no turns', async () => {
+    const backend = fakeBackend();
+
+    await expect(
+      ResponseEvaluator.evaluate([[]], [EvalCriterion.RESPONSE_MATCH_SCORE], {
+        backend,
+      }),
+    ).rejects.toThrow('The evaluation dataset is empty.');
+    expect(backend.performEval).not.toHaveBeenCalled();
+  });
+});
