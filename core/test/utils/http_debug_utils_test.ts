@@ -5,12 +5,12 @@
  */
 
 import {describe, expect, it, vi} from 'vitest';
+import {MAX_LOG_BODY_LENGTH} from '../../src/utils/error_utils.js';
 import {
   captureHttpDebug,
   HttpDebugRecord,
   instrumentFetch,
   MAX_HTTP_DEBUG_RECORDS,
-  MAX_LOG_BODY_LENGTH,
   recordHttpDebug,
 } from '../../src/utils/http_debug_utils.js';
 

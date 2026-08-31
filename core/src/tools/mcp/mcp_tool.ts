@@ -5,6 +5,7 @@
  */
 
 import {FunctionDeclaration} from '@google/genai';
+import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {
   CallToolRequest,
   CallToolResult,
@@ -12,7 +13,7 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js';
 import {context, propagation} from '@opentelemetry/api';
 
-import {formatError, isConnectionError} from '../../utils/error_utils.js';
+import {asRecord, formatError} from '../../utils/error_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {
   captureHttpDebug,
@@ -21,10 +22,7 @@ import {
 import {logger, LogLevel} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
-import {
-  isMcpConnectionError,
-  MCPSessionManager,
-} from './mcp_session_manager.js';
+import {MCPSessionManager} from './mcp_session_manager.js';
 
 /** Key under which a call's captured HTTP exchanges are published. */
 const HTTP_DEBUG_INFO_KEY = 'http_debug_info';
@@ -32,22 +30,13 @@ const HTTP_DEBUG_INFO_KEY = 'http_debug_info';
 /** Scheme every MCP App UI resource URI carries. */
 const UI_RESOURCE_URI_SCHEME = 'ui://';
 
-/** How many times one `runAsync` may issue the tool call. */
-const MAX_CALL_ATTEMPTS = 2;
-
-/** Narrows a value to an indexable record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 /**
  * Reads the `ui` block out of a tool's `_meta`.
  *
  * A remote server controls `_meta`, so nothing about its shape is assumed.
  */
 function uiMeta(tool: Tool): Record<string, unknown> | undefined {
-  const ui = tool._meta?.['ui'];
-  return isRecord(ui) ? ui : undefined;
+  return asRecord(tool._meta?.['ui']);
 }
 
 /** Returns `uri` when it is a usable MCP App UI resource URI. */
@@ -136,46 +125,38 @@ export class MCPTool extends BaseTool {
   }
 
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    if (!(logger.isEnabledFor?.(LogLevel.DEBUG) ?? false)) {
-      return this.callWithRetry(request);
+    if (!logger.isEnabledFor?.(LogLevel.DEBUG)) {
+      return this.callMcpTool(request);
     }
     const records: HttpDebugRecord[] = [];
     try {
-      return await captureHttpDebug(records, () => this.callWithRetry(request));
+      return await captureHttpDebug(records, () => this.callMcpTool(request));
     } finally {
       publishHttpDebugInfo(request, records);
     }
   }
 
   /**
-   * Issues the call, retrying once against a fresh session when the first
-   * attempt failed before the server answered.
+   * Opens a session, retrying once because nothing has been sent yet.
    *
-   * A protocol-level error is not retried: the server received the call, so a
-   * replay could duplicate a remote side effect.
+   * Session setup happens before the tool call exists, so a failure here
+   * provably did not run anything on the server and can be retried without
+   * risking a duplicate side effect. The call itself is never replayed: a
+   * socket cut mid-call is ambiguous, so surfacing it keeps delivery
+   * at-most-once. Mirrors Python `McpTool._create_session`.
    */
-  private async callWithRetry(
-    request: RunAsyncToolRequest,
-  ): Promise<CallToolResult> {
-    let attempt = 1;
-    for (;;) {
-      try {
-        return await this.callMcpTool(request);
-      } catch (err) {
-        const retryable = isConnectionError(err) || isMcpConnectionError(err);
-        if (
-          attempt >= MAX_CALL_ATTEMPTS ||
-          !retryable ||
-          request.toolContext.abortSignal?.aborted
-        ) {
-          throw err;
-        }
-        logger.debug(
-          `Retrying MCP tool ${this.originalName} on a fresh session after: ` +
-            formatError(err),
-        );
-        attempt++;
+  private async openSession(abortSignal?: AbortSignal): Promise<Client> {
+    try {
+      return await this.mcpSessionManager.createSession();
+    } catch (err) {
+      if (abortSignal?.aborted) {
+        throw err;
       }
+      logger.debug(
+        `Retrying the MCP session for ${this.originalName} after: ` +
+          formatError(err),
+      );
+      return this.mcpSessionManager.createSession();
     }
   }
 
@@ -183,7 +164,7 @@ export class MCPTool extends BaseTool {
   private async callMcpTool(
     request: RunAsyncToolRequest,
   ): Promise<CallToolResult> {
-    const session = await this.mcpSessionManager.createSession();
+    const session = await this.openSession(request.toolContext.abortSignal);
     try {
       // The MCP protocol carries the trace context in `_meta`. See
       // https://agentclientprotocol.com/protocol/extensibility#the-meta-field

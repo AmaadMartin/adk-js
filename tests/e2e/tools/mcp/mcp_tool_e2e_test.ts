@@ -37,7 +37,11 @@ function startServer(): Promise<{child: ChildProcess; port: number}> {
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   return new Promise((resolve, reject) => {
-    const lines = createInterface({input: child.stdout!});
+    if (!child.stdout) {
+      reject(new Error('the MCP server produced no stdout'));
+      return;
+    }
+    const lines = createInterface({input: child.stdout});
     lines.on('line', (line) => {
       const match = /^LISTENING (\d+)$/.exec(line);
       if (match) {

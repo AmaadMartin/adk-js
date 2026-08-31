@@ -75,15 +75,9 @@ export class Context extends ReadonlyContext {
     return this.eventActions;
   }
 
-  /**
-   * The invocation's free-form metadata bag, created on first read.
-   *
-   * The lazy creation is required, not defensive: many callers (tests
-   * especially) build an invocation context by casting an object literal, so
-   * the field is genuinely absent at runtime on those.
-   */
+  /** The invocation's free-form metadata bag. */
   get customMetadata(): Record<string, unknown> {
-    return (this.invocationContext.customMetadata ??= {});
+    return this.invocationContext.customMetadata;
   }
 
   /**

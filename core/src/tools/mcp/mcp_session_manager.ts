@@ -30,40 +30,6 @@ function logTransportError(err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
 }
 
-/** `name` carried by every {@link McpConnectionError}. */
-export const MCP_CONNECTION_ERROR_NAME = 'McpConnectionError';
-
-/**
- * Raised when a session could not be established with an MCP server.
- *
- * The failure happened before any tool call reached the server, so a caller
- * may open a fresh session and try again.
- */
-export class McpConnectionError extends Error {
-  constructor(message: string, options?: {cause?: unknown}) {
-    super(message, options);
-    this.name = MCP_CONNECTION_ERROR_NAME;
-  }
-}
-
-/**
- * Whether `err` is an {@link McpConnectionError}.
- *
- * Matches on `name` rather than `instanceof`, so the check still holds when
- * two copies of the package share one runtime.
- *
- * @param err The thrown or rejected value to classify.
- * @return `true` when the error came from session setup.
- */
-export function isMcpConnectionError(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'name' in err &&
-    err.name === MCP_CONNECTION_ERROR_NAME
-  );
-}
-
 /**
  * Defines the parameters for establishing a connection to an MCP server using
  * standard input/output (stdio). This is typically used for running MCP servers
@@ -183,10 +149,9 @@ export class MCPSessionManager {
         }
       }
     } catch (err) {
-      throw new McpConnectionError(
-        'Failed to create MCP session: ' + formatError(err),
-        {cause: err},
-      );
+      throw new Error('Failed to create MCP session: ' + formatError(err), {
+        cause: err,
+      });
     }
 
     this.activeSessions.add(client);

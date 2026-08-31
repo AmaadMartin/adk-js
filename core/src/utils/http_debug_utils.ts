@@ -15,7 +15,7 @@
 
 import {AsyncLocalStorage} from 'node:async_hooks';
 
-import {formatError} from './error_utils.js';
+import {formatError, truncateBody} from './error_utils.js';
 import {logger} from './logger.js';
 import {redactUriPassword} from './redact_uri.js';
 
@@ -36,12 +36,6 @@ const SENSITIVE_HEADERS = new Set([
 /** Value written in place of a credential-bearing header. */
 const REDACTED = '<redacted>';
 
-/** Maximum characters of a request or response body kept in a record. */
-export const MAX_LOG_BODY_LENGTH = 1000;
-
-/** Marker appended to a body truncated at {@link MAX_LOG_BODY_LENGTH}. */
-const TRUNCATION_MARKER = '... [truncated]';
-
 /**
  * Maximum records one buffer keeps. A long tool call can perform an unbounded
  * number of exchanges, and the buffer ends up persisted on an event.
@@ -60,13 +54,6 @@ export interface HttpDebugRecord {
 }
 
 const httpDebugStorage = new AsyncLocalStorage<HttpDebugRecord[]>();
-
-/** Truncates a body to {@link MAX_LOG_BODY_LENGTH} characters. */
-function truncateBody(body: string): string {
-  return body.length > MAX_LOG_BODY_LENGTH
-    ? body.slice(0, MAX_LOG_BODY_LENGTH) + TRUNCATION_MARKER
-    : body;
-}
 
 /**
  * Runs `fn` with `records` installed as the active capture buffer.

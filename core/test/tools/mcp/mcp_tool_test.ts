@@ -13,14 +13,13 @@ import {
   MCPTool,
   PluginManager,
   createSession,
-  recordHttpDebug,
   setLogLevel,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {propagation} from '@opentelemetry/api';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {McpConnectionError} from '../../../src/tools/mcp/mcp_session_manager.js';
+import {recordHttpDebug} from '../../../src/utils/http_debug_utils.js';
 import {resetLogger} from '../../../src/utils/logger.js';
 
 describe('MCPTool', () => {
@@ -522,32 +521,12 @@ describe('MCPTool http_debug_info capture', () => {
   });
 });
 
-describe('MCPTool connection retry', () => {
-  it('retries the call once on a fresh session after a connection error', async () => {
-    const failing = createClient();
-    vi.spyOn(failing, 'callTool').mockRejectedValue(connectionError());
-    const succeeding = createClient();
-    vi.spyOn(succeeding, 'callTool').mockResolvedValue({
-      content: [{type: 'text', text: 'second'}],
-    });
-    const manager = createSessionManager(failing, succeeding);
-    const tool = new MCPTool(createMcpTool(), manager);
-    const toolContext = createToolContext();
-
-    const result = await tool.runAsync({args: {}, toolContext});
-
-    expect(result).toEqual({content: [{type: 'text', text: 'second'}]});
-    expect(manager.createSession).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(manager.closeSession).mock.calls[0][0]).toBe(failing);
-  });
-
-  it('retries when opening the session fails', async () => {
+describe('MCPTool session retry', () => {
+  it('opens a second session when the first one fails to open', async () => {
     const succeeding = createClient();
     const manager = createSessionManager();
     vi.mocked(manager.createSession)
-      .mockRejectedValueOnce(
-        new McpConnectionError('Failed to create MCP session: refused'),
-      )
+      .mockRejectedValueOnce(new Error('Failed to create MCP session: refused'))
       .mockResolvedValueOnce(succeeding);
     const tool = new MCPTool(createMcpTool(), manager);
 
@@ -557,7 +536,51 @@ describe('MCPTool connection retry', () => {
     expect(succeeding.callTool).toHaveBeenCalledTimes(1);
   });
 
-  it('does not retry an error the server answered with', async () => {
+  it('surfaces the second failure when the retry fails too', async () => {
+    const manager = createSessionManager();
+    vi.mocked(manager.createSession)
+      .mockRejectedValueOnce(new Error('first refused'))
+      .mockRejectedValueOnce(new Error('second refused'));
+    const tool = new MCPTool(createMcpTool(), manager);
+
+    await expect(
+      tool.runAsync({args: {}, toolContext: createToolContext()}),
+    ).rejects.toThrow('second refused');
+    expect(manager.createSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reopen a session for a cancelled call', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const manager = createSessionManager();
+    vi.mocked(manager.createSession).mockRejectedValue(new Error('refused'));
+    const tool = new MCPTool(createMcpTool(), manager);
+    const toolContext = createToolContext({abortSignal: controller.signal});
+
+    await expect(tool.runAsync({args: {}, toolContext})).rejects.toThrow(
+      'refused',
+    );
+    expect(manager.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('never replays a call the server may have received', async () => {
+    // A socket cut mid-call is ambiguous, so replaying it could duplicate a
+    // remote side effect. Delivery stays at-most-once.
+    const client = createClient();
+    vi.spyOn(client, 'callTool').mockRejectedValue(
+      connectionError('ECONNRESET'),
+    );
+    const manager = createSessionManager(client);
+    const tool = new MCPTool(createMcpTool(), manager);
+
+    await expect(
+      tool.runAsync({args: {}, toolContext: createToolContext()}),
+    ).rejects.toThrow('connect ECONNRESET');
+    expect(manager.createSession).toHaveBeenCalledTimes(1);
+    expect(client.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replay a protocol error the server answered with', async () => {
     const client = createClient();
     vi.spyOn(client, 'callTool').mockRejectedValue(new Error('tool exploded'));
     const manager = createSessionManager(client);
@@ -569,36 +592,15 @@ describe('MCPTool connection retry', () => {
     expect(manager.createSession).toHaveBeenCalledTimes(1);
   });
 
-  it('does not retry a cancelled call', async () => {
-    const controller = new AbortController();
-    controller.abort();
+  it('closes the session it opened when the call fails', async () => {
     const client = createClient();
     vi.spyOn(client, 'callTool').mockRejectedValue(connectionError());
     const manager = createSessionManager(client);
     const tool = new MCPTool(createMcpTool(), manager);
-    const toolContext = createToolContext({abortSignal: controller.signal});
-
-    await expect(tool.runAsync({args: {}, toolContext})).rejects.toThrow(
-      'connect ECONNREFUSED',
-    );
-    expect(manager.createSession).toHaveBeenCalledTimes(1);
-  });
-
-  it('gives up after two attempts and surfaces the last error', async () => {
-    const first = createClient();
-    vi.spyOn(first, 'callTool').mockRejectedValue(
-      connectionError('ECONNREFUSED'),
-    );
-    const second = createClient();
-    vi.spyOn(second, 'callTool').mockRejectedValue(
-      connectionError('ENOTFOUND'),
-    );
-    const manager = createSessionManager(first, second);
-    const tool = new MCPTool(createMcpTool(), manager);
 
     await expect(
       tool.runAsync({args: {}, toolContext: createToolContext()}),
-    ).rejects.toThrow('connect ENOTFOUND');
-    expect(manager.createSession).toHaveBeenCalledTimes(2);
+    ).rejects.toThrow('connect ECONNREFUSED');
+    expect(manager.closeSession).toHaveBeenCalledWith(client);
   });
 });

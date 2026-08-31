@@ -18,7 +18,6 @@ import {
 import {describe, expect, it, vi} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
-import {isMcpConnectionError} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {captureHttpDebug} from '../../../src/utils/http_debug_utils.js';
 import {logger} from '../../../src/utils/logger.js';
 
@@ -240,26 +239,6 @@ describe('MCPSessionManager', () => {
       );
       expect((error as Error).message).toContain('403');
       expect((error as Error).message).toContain('Forbidden');
-    });
-
-    it('names the failure so a caller can retry it', async () => {
-      const refusing: Pick<Client, 'connect' | 'close'> = {
-        connect: vi.fn().mockRejectedValue(
-          Object.assign(new Error('connect ECONNREFUSED'), {
-            code: 'ECONNREFUSED',
-          }),
-        ),
-        close: vi.fn().mockResolvedValue(undefined),
-      };
-      vi.mocked(Client).mockImplementationOnce(() => refusing as Client);
-      const manager = new MCPSessionManager({
-        type: 'StreamableHTTPConnectionParams',
-        url: 'http://test-url',
-      });
-
-      const error = await manager.createSession().catch((e: unknown) => e);
-
-      expect(isMcpConnectionError(error)).toBe(true);
     });
 
     it('preserves the original error as the cause', async () => {

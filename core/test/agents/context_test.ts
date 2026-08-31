@@ -90,24 +90,4 @@ describe('Context.customMetadata', () => {
       existing: 1,
     });
   });
-
-  it('creates the bag when the invocation has none', () => {
-    const invocationContext = new InvocationContext({
-      invocationId: 'test-invocation',
-      session: createSession({
-        id: 'test-session',
-        appName: 'app',
-        userId: 'user',
-      }),
-      pluginManager: new PluginManager(),
-    });
-    // A fixture built by casting an object literal — a widespread pattern in
-    // this suite — genuinely has no `customMetadata` at runtime.
-    Reflect.deleteProperty(invocationContext, 'customMetadata');
-    const context = new Context({invocationContext});
-
-    context.customMetadata['key'] = 'value';
-
-    expect(invocationContext.customMetadata).toEqual({key: 'value'});
-  });
 });
