@@ -178,7 +178,7 @@ describe('IntegrationClient', () => {
   });
 
   it('does not perform any I/O when constructed', () => {
-    const client = new IntegrationClient({
+    new IntegrationClient({
       project: PROJECT,
       location: LOCATION,
       integration: INTEGRATION,
@@ -189,7 +189,6 @@ describe('IntegrationClient', () => {
       serviceAccountJson: SERVICE_ACCOUNT_JSON,
     });
 
-    expect(client).toBeDefined();
     expect(connections.ConnectionsClient).not.toHaveBeenCalled();
     expect(GoogleAuth).not.toHaveBeenCalled();
     expect(JWT).not.toHaveBeenCalled();
