@@ -6,22 +6,24 @@
 
 import {
   Context,
+  createSession,
   InvocationContext,
   LogLevel,
   MCPSessionManager,
   MCPTool,
   PluginManager,
-  Session,
   setLogLevel,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {propagation} from '@opentelemetry/api';
+import type {MockInstance} from 'vitest';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   getHttpDebugSink,
   HttpDebugExchange,
 } from '../../../src/tools/mcp/http_debug_recorder.js';
+import {isRecord} from '../../../src/utils/type_utils.js';
 
 describe('MCPTool', () => {
   it('passes abort signal to callTool', async () => {
@@ -173,60 +175,69 @@ describe('MCPTool', () => {
   });
 });
 
-/** A tool declaration carrying whatever `_meta` the server sent. */
-function toolWithMeta(meta?: unknown): Tool {
+/** A tool declaration carrying whatever extra fields the server sent. */
+function toolWithExtras(extras: Record<string, unknown> = {}): Tool {
   return {
     name: 'test-tool',
     description: 'A test tool',
     inputSchema: {type: 'object', properties: {}},
-    ...(meta === undefined ? {} : {_meta: meta}),
-  } as Tool;
+    ...extras,
+  };
 }
 
-function makeSession(): Session {
-  return {
-    id: 'test-session',
-    appName: 'test-app',
-    userId: 'test-user',
-    state: {},
-    events: [],
-    lastUpdateTime: Date.now(),
-  } as unknown as Session;
+/** A tool declaration carrying `_meta` exactly when the server sent one. */
+function toolWithMeta(meta?: unknown): Tool {
+  return toolWithExtras(meta === undefined ? {} : {_meta: meta});
 }
 
-function makeToolContext(functionCallId?: string): Context {
+function makeToolContext(
+  functionCallId?: string,
+  abortSignal?: AbortSignal,
+): Context {
   return new Context({
     invocationContext: new InvocationContext({
       invocationId: 'i-1',
-      session: makeSession(),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
       pluginManager: new PluginManager(),
+      abortSignal,
     }),
     functionCallId,
   });
 }
 
-/** A session manager whose `callTool` behaviour the test decides. */
-function makeSessionManager(callTool: ReturnType<typeof vi.fn>): {
+/**
+ * A real session manager handing out a real client, with the session methods
+ * and `callTool` stubbed so no transport is opened.
+ */
+function makeSessionManager(callTool: ReturnType<typeof vi.fn> = vi.fn()): {
   manager: MCPSessionManager;
-  createSession: ReturnType<typeof vi.fn>;
+  client: Client;
+  createSession: MockInstance<MCPSessionManager['createSession']>;
+  closeSession: MockInstance<MCPSessionManager['closeSession']>;
 } {
-  const client = {
-    callTool,
-    close: vi.fn().mockResolvedValue(undefined),
-  } as unknown as Client;
-  const createSession = vi.fn().mockResolvedValue(client);
-  const manager = {
-    createSession,
-    closeSession: vi.fn().mockResolvedValue(undefined),
-  } as unknown as MCPSessionManager;
-  return {manager, createSession};
+  const client = new Client({name: 'test-client', version: '1.0.0'});
+  vi.spyOn(client, 'callTool').mockImplementation(callTool);
+  vi.spyOn(client, 'close').mockResolvedValue(undefined);
+
+  const manager = new MCPSessionManager({
+    type: 'StdioConnectionParams',
+    serverParams: {command: 'unused'},
+  });
+  return {
+    manager,
+    client,
+    createSession: vi.spyOn(manager, 'createSession').mockResolvedValue(client),
+    closeSession: vi
+      .spyOn(manager, 'closeSession')
+      .mockResolvedValue(undefined),
+  };
 }
 
 describe('MCPTool.mcpAppResourceUri', () => {
   it('reads the nested form', () => {
     const tool = new MCPTool(
       toolWithMeta({ui: {resourceUri: 'ui://demo/card'}}),
-      makeSessionManager(vi.fn()).manager,
+      makeSessionManager().manager,
     );
     expect(tool.mcpAppResourceUri).toBe('ui://demo/card');
   });
@@ -234,7 +245,7 @@ describe('MCPTool.mcpAppResourceUri', () => {
   it('reads the flat form', () => {
     const tool = new MCPTool(
       toolWithMeta({'ui/resourceUri': 'ui://demo/card'}),
-      makeSessionManager(vi.fn()).manager,
+      makeSessionManager().manager,
     );
     expect(tool.mcpAppResourceUri).toBe('ui://demo/card');
   });
@@ -245,7 +256,7 @@ describe('MCPTool.mcpAppResourceUri', () => {
         ui: {resourceUri: 'http://demo/card'},
         'ui/resourceUri': 'ui://demo/flat',
       }),
-      makeSessionManager(vi.fn()).manager,
+      makeSessionManager().manager,
     );
     expect(tool.mcpAppResourceUri).toBe('ui://demo/flat');
   });
@@ -262,10 +273,7 @@ describe('MCPTool.mcpAppResourceUri', () => {
     ['a non-ui scheme in the flat form', {'ui/resourceUri': 'http://demo'}],
     ['an unrelated _meta key', {other: 'value'}],
   ])('returns undefined for %s', (_label, meta) => {
-    const tool = new MCPTool(
-      toolWithMeta(meta),
-      makeSessionManager(vi.fn()).manager,
-    );
+    const tool = new MCPTool(toolWithMeta(meta), makeSessionManager().manager);
     expect(tool.mcpAppResourceUri).toBeUndefined();
   });
 });
@@ -273,19 +281,20 @@ describe('MCPTool.mcpAppResourceUri', () => {
 describe('MCPTool.rawMcpTool', () => {
   it('returns the declaration object it was given', () => {
     const declaration = toolWithMeta();
-    const tool = new MCPTool(declaration, makeSessionManager(vi.fn()).manager);
+    const tool = new MCPTool(declaration, makeSessionManager().manager);
 
     expect(tool.rawMcpTool).toBe(declaration);
   });
 
   it('exposes a server field the wrapper does not model', () => {
-    const declaration = {
-      ...toolWithMeta(),
-      vendorSpecificField: {tier: 'gold'},
-    } as Tool;
-    const tool = new MCPTool(declaration, makeSessionManager(vi.fn()).manager);
+    const declaration = toolWithExtras({vendorSpecificField: {tier: 'gold'}});
+    const tool = new MCPTool(declaration, makeSessionManager().manager);
 
-    expect(tool.rawMcpTool['vendorSpecificField']).toEqual({tier: 'gold'});
+    const raw: unknown = tool.rawMcpTool;
+    if (!isRecord(raw)) {
+      expect.fail('expected the raw tool to be a record');
+    }
+    expect(raw['vendorSpecificField']).toEqual({tier: 'gold'});
   });
 });
 
@@ -497,15 +506,11 @@ describe('MCPTool HTTP debug capture', () => {
 describe('MCPTool session setup retry', () => {
   it('retries session setup once and then calls the tool', async () => {
     const callTool = vi.fn().mockResolvedValue({content: []});
-    const client = {callTool} as unknown as Client;
-    const createSession = vi
-      .fn()
+    const {manager, client, createSession} = makeSessionManager(callTool);
+    createSession
+      .mockReset()
       .mockRejectedValueOnce(new Error('connect refused'))
       .mockResolvedValue(client);
-    const manager = {
-      createSession,
-      closeSession: vi.fn().mockResolvedValue(undefined),
-    } as unknown as MCPSessionManager;
 
     await new MCPTool(toolWithMeta(), manager).runAsync({
       args: {},
@@ -517,15 +522,12 @@ describe('MCPTool session setup retry', () => {
   });
 
   it('gives up after the second setup attempt fails', async () => {
-    const createSession = vi
-      .fn()
+    const callTool = vi.fn().mockResolvedValue({content: []});
+    const {manager, createSession, closeSession} = makeSessionManager(callTool);
+    createSession
+      .mockReset()
       .mockRejectedValueOnce(new Error('first'))
       .mockRejectedValueOnce(new Error('second'));
-    const closeSession = vi.fn().mockResolvedValue(undefined);
-    const manager = {
-      createSession,
-      closeSession,
-    } as unknown as MCPSessionManager;
 
     await expect(
       new MCPTool(toolWithMeta(), manager).runAsync({
@@ -536,27 +538,15 @@ describe('MCPTool session setup retry', () => {
 
     expect(createSession).toHaveBeenCalledTimes(2);
     expect(closeSession).not.toHaveBeenCalled();
+    expect(callTool).not.toHaveBeenCalled();
   });
 
   it('does not retry session setup after an abort', async () => {
     const controller = new AbortController();
     controller.abort();
-    const createSession = vi
-      .fn()
-      .mockRejectedValue(new Error('connect refused'));
-    const manager = {
-      createSession,
-      closeSession: vi.fn().mockResolvedValue(undefined),
-    } as unknown as MCPSessionManager;
-    const toolContext = new Context({
-      invocationContext: new InvocationContext({
-        invocationId: 'i-1',
-        session: makeSession(),
-        pluginManager: new PluginManager(),
-        abortSignal: controller.signal,
-      }),
-      functionCallId: 'call-1',
-    });
+    const {manager, createSession} = makeSessionManager();
+    createSession.mockReset().mockRejectedValue(new Error('connect refused'));
+    const toolContext = makeToolContext('call-1', controller.signal);
 
     await expect(
       new MCPTool(toolWithMeta(), manager).runAsync({args: {}, toolContext}),
