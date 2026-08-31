@@ -165,20 +165,10 @@ export abstract class BaseTool {
    * - Otherwise, can be skipped, e.g. for a built-in GoogleSearch tool for
    *   Gemini.
    *
-   * The default rejects, so a tool the model runs on its own side can omit it
-   * and still fail with a message naming the tool. Mirrors Python's
-   * `BaseTool.run_async`, which raises `NotImplementedError`. The rejection is
-   * a plain `Error`, not a `ToolExecutionError`: a missing implementation is a
-   * programming error, and `ToolExecutionError` carries an `errorType` that
-   * reports an HTTP outcome on the tool's span.
-   *
-   * @param _request The request to run the tool.
+   * @param request The request to run the tool.
    * @return A promise that resolves to the tool response.
-   * @throws {Error} When the subclass does not implement it.
    */
-  async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
-    throw new Error(`Tool ${this.name} does not implement runAsync.`);
-  }
+  abstract runAsync(request: RunAsyncToolRequest): Promise<unknown>;
 
   /**
    * Whether this tool needs a human to approve `args` before it runs.
