@@ -17,7 +17,12 @@ import {deriveParameterName} from './parameter_names.js';
 // so the modules that already import it from this file keep working.
 export type {ApiParameter};
 
-/** The JSON Schema describing a tool function's arguments. */
+/**
+ * The JSON Schema describing a tool function's arguments.
+ *
+ * Always an object schema, so it can be converted to a Gemini `Schema` without
+ * a cast.
+ */
 export interface ToolArgumentsSchema {
   type: 'object';
   properties: Record<string, unknown>;

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {snakeToLowerCamel} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   camelCaseKeys,
@@ -230,6 +231,36 @@ describe('case_utils', () => {
 
     it('returns an empty record for an empty record', () => {
       expect(camelCaseRecordKeys({})).toEqual({});
+    });
+  });
+
+  describe('snakeToLowerCamel', () => {
+    it('should return a single word unchanged', () => {
+      expect(snakeToLowerCamel('single')).toBe('single');
+    });
+
+    it('should join two words', () => {
+      expect(snakeToLowerCamel('two_words')).toBe('twoWords');
+    });
+
+    it('should join three words', () => {
+      expect(snakeToLowerCamel('three_word_example')).toBe('threeWordExample');
+    });
+
+    it('should return an empty string unchanged', () => {
+      expect(snakeToLowerCamel('')).toBe('');
+    });
+
+    it('should return an already camelCase name unchanged', () => {
+      expect(snakeToLowerCamel('alreadyCamelCase')).toBe('alreadyCamelCase');
+    });
+
+    it('should lowercase every segment before joining', () => {
+      expect(snakeToLowerCamel('TWO_WORDS')).toBe('twoWords');
+    });
+
+    it('should tolerate a trailing underscore', () => {
+      expect(snakeToLowerCamel('trailing_')).toBe('trailing');
     });
   });
 });

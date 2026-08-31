@@ -18,6 +18,7 @@ import {
 import {validateDiscoveryUrl} from '../../../auth/oauth2/oauth2_discovery.js';
 import {camelCaseRecordKeys} from '../../../utils/case_utils.js';
 import {formatError} from '../../../utils/error_utils.js';
+import {isRecord} from '../../../utils/type_guards.js';
 import type {ApiParameter} from '../openapi_spec_parser/operation_parser.js';
 
 /**
@@ -98,6 +99,90 @@ export function validateAuthScheme(scheme: unknown): void {
       throw new Error("Missing 'type' field in security scheme.");
     default:
       throw new Error(`Invalid security scheme type: ${String(type)}`);
+  }
+}
+
+/** The locations an API key security scheme may name in its `in` field. */
+const API_KEY_LOCATIONS = ['query', 'header', 'cookie'];
+
+function requireApiKeyLocation(data: Record<string, unknown>): void {
+  const location = data['in'];
+  if (typeof location !== 'string' || !API_KEY_LOCATIONS.includes(location)) {
+    throw new Error(
+      `Invalid security scheme data: 'in' must be one of ` +
+        `${API_KEY_LOCATIONS.join(', ')}.`,
+    );
+  }
+}
+
+// Each assertion below checks the fields its scheme type requires. Call one
+// only after `dictToAuthScheme` has matched the `type` discriminator. They
+// share the field checks that `validateAuthScheme` uses, so the two functions
+// reject the same scheme with the same message.
+
+function assertApiKeyScheme(
+  data: Record<string, unknown>,
+): asserts data is Record<string, unknown> & OpenAPIV3.ApiKeySecurityScheme {
+  requireStringField(data, 'name');
+  requireApiKeyLocation(data);
+}
+
+function assertHttpScheme(
+  data: Record<string, unknown>,
+): asserts data is Record<string, unknown> & OpenAPIV3.HttpSecurityScheme {
+  requireStringField(data, 'scheme');
+}
+
+function assertOAuth2Scheme(
+  data: Record<string, unknown>,
+): asserts data is Record<string, unknown> & OpenAPIV3.OAuth2SecurityScheme {
+  requireObjectField(data, 'flows');
+}
+
+function assertOpenIdConnectScheme(
+  data: Record<string, unknown>,
+): asserts data is Record<string, unknown> & OpenAPIV3.OpenIdSecurityScheme {
+  requireStringField(data, 'openIdConnectUrl');
+}
+
+/**
+ * Coerces an untyped security scheme into a typed one, and validates it.
+ *
+ * A parsed OpenAPI specification carries its security schemes as plain data,
+ * so the `type` discriminator and the fields that type requires are checked
+ * here rather than trusted.
+ *
+ * Use this when you need the typed scheme back. Use {@link validateAuthScheme}
+ * when the scheme is already typed and you only need it checked.
+ *
+ * @see {@link https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.1.0.md#security-scheme-object}
+ * @param data The untyped security scheme.
+ * @throws {Error} If the scheme names no type, an unknown type, or a known
+ *   type whose required fields are missing or the wrong shape.
+ * @returns The validated security scheme.
+ */
+export function dictToAuthScheme(
+  data: unknown,
+): OpenAPIV3.SecuritySchemeObject {
+  if (!isRecord(data) || !('type' in data)) {
+    throw new Error("Missing 'type' field in security scheme dictionary.");
+  }
+
+  switch (data['type']) {
+    case 'apiKey':
+      assertApiKeyScheme(data);
+      return data;
+    case 'http':
+      assertHttpScheme(data);
+      return data;
+    case 'oauth2':
+      assertOAuth2Scheme(data);
+      return data;
+    case 'openIdConnect':
+      assertOpenIdConnectScheme(data);
+      return data;
+    default:
+      throw new Error(`Invalid security scheme type: ${String(data['type'])}`);
   }
 }
 
@@ -219,11 +304,6 @@ function describeIssues(error: z.ZodError): string {
   return error.issues
     .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
     .join('; ');
-}
-
-/** Narrows an arbitrary value to a plain JSON object. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isTokenType(value: string): value is TokenType {

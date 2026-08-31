@@ -94,7 +94,10 @@ export type {
   SessionLoadArtifactRequest,
   SessionSaveArtifactRequest,
 } from './artifacts/session_artifact_service.js';
-export {AuthCredentialTypes} from './auth/auth_credential.js';
+export {
+  AuthCredentialTypes,
+  parseAuthCredential,
+} from './auth/auth_credential.js';
 export type {
   AuthCredential,
   HttpAuth,
@@ -398,6 +401,7 @@ export type {
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export type {VertexRagRetrievalToolParams} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
+export {snakeToLowerCamel} from './utils/case_utils.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
@@ -451,6 +455,7 @@ export type {
 export {
   INTERNAL_AUTH_PREFIX,
   credentialToParam,
+  dictToAuthScheme,
   openIdDictToSchemeCredential,
   openIdUrlToSchemeCredential,
   serviceAccountDictToSchemeCredential,

@@ -906,8 +906,12 @@ async function capturedServiceCredential(
   let captured: AuthCredential | undefined;
   const configure = vi
     .spyOn(RestApiTool.prototype, 'configureAuthCredential')
-    .mockImplementation(function (credential?: AuthCredential) {
-      captured ??= credential;
+    .mockImplementation(function (credential?: AuthCredential | string) {
+      // `configureAuthCredential` now also accepts the JSON text of a
+      // credential. The toolset passes the object form.
+      if (typeof credential !== 'string') {
+        captured ??= credential;
+      }
     });
   await toolset.getTools();
   configure.mockRestore();
