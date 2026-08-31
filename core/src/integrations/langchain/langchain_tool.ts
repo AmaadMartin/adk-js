@@ -6,10 +6,15 @@
 
 import {Schema} from '@google/genai';
 
+import {
+  ToolErrorType,
+  ToolExecutionError,
+} from '../../errors/tool_execution_error.js';
 import {RunAsyncToolRequest} from '../../tools/base_tool.js';
 import {FunctionTool} from '../../tools/function_tool.js';
 import {formatError} from '../../utils/error_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
+import {resolveFullyQualifiedName} from '../../utils/module_utils.js';
 import {toJsonSchema} from '../../utils/schema.js';
 import {isZodSchema} from '../../utils/simple_zod_to_json.js';
 
@@ -42,6 +47,42 @@ export interface LangchainToolOptions {
   name?: string;
   /** Overrides the wrapped tool's description. */
   description?: string;
+}
+
+/**
+ * The declarative configuration of a {@link LangchainTool}, as an agent config
+ * file supplies it.
+ *
+ * It differs from {@link LangchainToolOptions} because a config file cannot
+ * hold a tool object. It names one instead.
+ */
+export interface LangchainToolConfig {
+  /**
+   * A fully-qualified name of the form `<module specifier>#<export>` that
+   * resolves to the LangChain tool instance to wrap.
+   */
+  tool: string;
+  /** Overrides the wrapped tool's name in the model-facing declaration. */
+  name?: string;
+  /** Overrides the wrapped tool's description. */
+  description?: string;
+}
+
+/**
+ * Whether a value has the shape {@link LangchainTool} can wrap.
+ *
+ * A structural check rather than an `instanceof`, so a tool built by a second
+ * copy of `@langchain/core` in the same runtime is still accepted.
+ */
+export function isLangchainToolLike(
+  value: unknown,
+): value is LangchainToolLike {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'invoke' in value &&
+    typeof (value as LangchainToolLike).invoke === 'function'
+  );
 }
 
 /** Returns `invoke` bound to the tool, because LangChain's methods use `this`. */
@@ -159,6 +200,49 @@ export class LangchainTool extends FunctionTool<Schema> {
       parameters: resolveParameters(options.tool),
     });
     this.returnDirect = options.tool.returnDirect ?? false;
+  }
+
+  /**
+   * Builds a tool from the declarative configuration of an agent config file.
+   *
+   * An empty `name` or `description` counts as absent, so the wrapped tool
+   * keeps its own. adk-python defaults both to `''` and lets that blank the
+   * wrapped tool's name; a declaration cannot go without a name, so the port
+   * does not reproduce it.
+   *
+   * @param config The tool configuration read from an agent config file.
+   * @param configAbsPath Absolute path of that config file. A relative module
+   *   specifier in `config.tool` resolves against its directory.
+   * @return The configured tool.
+   * @throws {ToolExecutionError} When `tool` is not a fully-qualified name, or
+   *   names a value that is not a LangChain tool.
+   * @throws {InputValidationError} When `tool` is a name that does not resolve.
+   */
+  static async fromConfig(
+    config: LangchainToolConfig,
+    configAbsPath: string,
+  ): Promise<LangchainTool> {
+    // An agent config file is a trust boundary, so the declared `string` type
+    // is checked rather than assumed.
+    if (typeof config.tool !== 'string' || !config.tool) {
+      throw new ToolExecutionError(
+        'Langchain tool config must name a Langchain tool instance with a ' +
+          'fully-qualified name.',
+        ToolErrorType.BAD_REQUEST,
+      );
+    }
+    const tool = await resolveFullyQualifiedName(config.tool, configAbsPath);
+    if (!isLangchainToolLike(tool)) {
+      throw new ToolExecutionError(
+        'Langchain tool config must name a Langchain tool instance.',
+        ToolErrorType.BAD_REQUEST,
+      );
+    }
+    return new LangchainTool({
+      tool,
+      name: config.name || undefined,
+      description: config.description || undefined,
+    });
   }
 
   /**

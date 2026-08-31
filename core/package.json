@@ -55,6 +55,12 @@
       "require": "./dist/cjs/telemetry/google_cloud.js",
       "default": "./dist/esm/telemetry/google_cloud.js"
     },
+    "./tools/langchain_tool": {
+      "types": "./dist/types/tools/langchain_tool.d.ts",
+      "import": "./dist/esm/tools/langchain_tool.js",
+      "require": "./dist/cjs/tools/langchain_tool.js",
+      "default": "./dist/esm/tools/langchain_tool.js"
+    },
     "./tools/mcp": {
       "types": "./dist/types/tools/mcp/index.d.ts",
       "import": "./dist/esm/tools/mcp/index.js",
