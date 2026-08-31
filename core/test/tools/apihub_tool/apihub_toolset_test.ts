@@ -174,11 +174,16 @@ describe('APIHubToolset', () => {
     expect(toolset.name).toBe('');
   });
 
-  it('rejects when the spec content is not valid YAML', async () => {
+  it('latches an eager spec failure and rethrows it from getTools', async () => {
     const toolset = new APIHubToolset({
       apihubResourceName: 'test_resource',
       apihubClient: createMockClient(INVALID_YAML_SPEC),
     });
+
+    // The eager fetch has already rejected. Draining the macrotask queue before
+    // getTools() makes vitest report an unhandled rejection unless the toolset
+    // latched it, so this pins the latch as well as the rethrow.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     await expect(toolset.getTools()).rejects.toThrow();
   });
