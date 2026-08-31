@@ -265,4 +265,40 @@ describe('MCPTool', () => {
       warn.mockRestore();
     });
   });
+
+  describe('declaration', () => {
+    it('translates the MCP schemas into a function declaration', () => {
+      const tool = new MCPTool(
+        {
+          name: 'test-tool',
+          description: 'A test tool',
+          inputSchema: {
+            type: 'object',
+            properties: {path: {type: 'string'}},
+          },
+          outputSchema: {
+            type: 'object',
+            properties: {size: {type: 'number'}},
+          },
+        },
+        {} as unknown as MCPSessionManager,
+      );
+
+      expect(tool._getDeclaration()).toMatchObject({
+        name: 'test-tool',
+        description: 'A test tool',
+        parameters: {properties: {path: {type: 'STRING'}}},
+        response: {properties: {size: {type: 'NUMBER'}}},
+      });
+    });
+
+    it('describes a tool the server gave no description as empty', () => {
+      const tool = new MCPTool(
+        {name: 'bare-tool', inputSchema: {type: 'object', properties: {}}},
+        {} as unknown as MCPSessionManager,
+      );
+
+      expect(tool.description).toBe('');
+    });
+  });
 });

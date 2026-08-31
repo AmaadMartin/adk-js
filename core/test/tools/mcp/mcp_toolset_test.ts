@@ -372,14 +372,53 @@ describe('MCPToolset', () => {
   });
 
   describe('tool order', () => {
+    it('keeps both tools when a server advertises one name twice', async () => {
+      vi.mocked(Client).mockImplementationOnce(
+        () =>
+          ({
+            connect: noop(),
+            close: noop(),
+            listTools: vi.fn().mockResolvedValue({
+              tools: [
+                {name: 'twin', description: 'first', inputSchema: {}},
+                {name: 'twin', description: 'second', inputSchema: {}},
+              ],
+            }),
+          }) as unknown as Client,
+      );
+      const toolset = new MCPToolset(stdioParams);
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.description)).toEqual([
+        'first',
+        'second',
+      ]);
+    });
+
     it('returns the tools sorted by name', async () => {
+      vi.mocked(Client).mockImplementationOnce(
+        () =>
+          ({
+            connect: noop(),
+            close: noop(),
+            listTools: vi.fn().mockResolvedValue({
+              tools: [
+                {name: 'zebra', description: 'z', inputSchema: {}},
+                {name: 'alpha', description: 'a', inputSchema: {}},
+                {name: 'mango', description: 'm', inputSchema: {}},
+              ],
+            }),
+          }) as unknown as Client,
+      );
       const toolset = new MCPToolset(stdioParams);
 
       const tools = await toolset.getTools();
 
       expect(tools.map((tool) => tool.name)).toEqual([
-        'other-tool',
-        'test-tool',
+        'alpha',
+        'mango',
+        'zebra',
       ]);
     });
   });
