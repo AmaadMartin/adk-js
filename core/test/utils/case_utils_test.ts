@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys} from '../../src/utils/case_utils.js';
+import {camelCaseKeys, toSnakeCase} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
   describe('camelCaseKeys', () => {
@@ -89,6 +89,49 @@ describe('case_utils', () => {
       expect(camelCaseKeys(123)).toBe(123);
       expect(camelCaseKeys('hello')).toBe('hello');
       expect(camelCaseKeys(true)).toBe(true);
+    });
+  });
+
+  describe('toSnakeCase', () => {
+    it('should split lowerCamelCase', () => {
+      expect(toSnakeCase('camelCase')).toBe('camel_case');
+      expect(toSnakeCase('emptyDescTest')).toBe('empty_desc_test');
+    });
+
+    it('should split UpperCamelCase', () => {
+      expect(toSnakeCase('UpperCamelCase')).toBe('upper_camel_case');
+    });
+
+    it('should split a digit from the word that follows it', () => {
+      expect(toSnakeCase('oauth2Client')).toBe('oauth2_client');
+    });
+
+    it('should keep an acronym together and split the word after it', () => {
+      expect(toSnakeCase('RESTClient')).toBe('rest_client');
+      expect(toSnakeCase('Mock API')).toBe('mock_api');
+      expect(toSnakeCase('Empty Description API')).toBe(
+        'empty_description_api',
+      );
+    });
+
+    it('should replace runs of non-alphanumeric characters with one underscore', () => {
+      expect(toSnakeCase('space separated')).toBe('space_separated');
+      expect(toSnakeCase('dash-and.dot')).toBe('dash_and_dot');
+      expect(toSnakeCase('many   spaces')).toBe('many_spaces');
+    });
+
+    it('should trim leading and trailing underscores', () => {
+      expect(toSnakeCase('__wrapped__')).toBe('wrapped');
+      expect(toSnakeCase('  padded  ')).toBe('padded');
+    });
+
+    it('should leave a snake_case string unchanged', () => {
+      expect(toSnakeCase('already_snake_case')).toBe('already_snake_case');
+    });
+
+    it('should return an empty string when nothing survives', () => {
+      expect(toSnakeCase('')).toBe('');
+      expect(toSnakeCase('---')).toBe('');
     });
   });
 });
