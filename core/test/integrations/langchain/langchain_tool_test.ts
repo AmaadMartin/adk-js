@@ -4,22 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {fileURLToPath} from 'node:url';
+
 import {
   Context,
   createEventActions,
   createSession,
+  InputValidationError,
   InvocationContext,
   isBaseTool,
   isFunctionTool,
   LangchainTool,
+  LangchainToolConfig,
   LlmRequest,
   PluginManager,
+  ToolErrorType,
+  ToolExecutionError,
 } from '@google/adk';
 import {Type} from '@google/genai';
 import {RunnableConfig} from '@langchain/core/runnables';
 import {StructuredTool, Tool, tool} from '@langchain/core/tools';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z} from 'zod';
+
+import {searchTool} from './fixtures/langchain_tools.js';
 
 /** A structured `@langchain/core` tool backed by a synchronous function. */
 function makeAddTool() {
@@ -429,5 +437,160 @@ describe('LangchainTool', () => {
 
       expect(context.actions.skipSummarization).toBeUndefined();
     });
+  });
+});
+
+/** Absolute path of the fixture module a config file names. */
+const FIXTURE_PATH = fileURLToPath(
+  new URL('./fixtures/langchain_tools.ts', import.meta.url),
+);
+
+/** Absolute path of a config file sitting next to the fixture. */
+const CONFIG_PATH = fileURLToPath(
+  new URL('./fixtures/root_agent.yaml', import.meta.url),
+);
+
+/**
+ * Builds a config carrying a value the declared type forbids. A config file is
+ * parsed at run time, so its contents are not what the type promises.
+ */
+function malformedConfig(tool: unknown): LangchainToolConfig {
+  return {tool} as LangchainToolConfig;
+}
+
+/** Message the tool raises when `tool` is not a fully-qualified name. */
+const BAD_NAME_MESSAGE =
+  'Langchain tool config must name a Langchain tool instance with a ' +
+  'fully-qualified name.';
+
+/** Message the tool raises when the resolved value is not a LangChain tool. */
+const NOT_A_TOOL_MESSAGE =
+  'Langchain tool config must name a Langchain tool instance.';
+
+describe('LangchainTool.fromConfig', () => {
+  it('builds the same declaration as the constructor does', async () => {
+    const adkTool = await LangchainTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#searchTool`},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool._getDeclaration()).toEqual(
+      new LangchainTool({tool: searchTool})._getDeclaration(),
+    );
+  });
+
+  it('resolves a relative specifier against the config file', async () => {
+    const adkTool = await LangchainTool.fromConfig(
+      {tool: './langchain_tools.ts#searchTool'},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('search');
+  });
+
+  it('applies the name and description the config overrides', async () => {
+    const adkTool = await LangchainTool.fromConfig(
+      {
+        tool: `${FIXTURE_PATH}#searchTool`,
+        name: 'lookup',
+        description: 'Looks something up',
+      },
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('lookup');
+    expect(adkTool.description).toEqual('Looks something up');
+  });
+
+  it('keeps the wrapped tool name when the config omits the overrides', async () => {
+    const adkTool = await LangchainTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#searchTool`},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('search');
+    expect(adkTool.description).toEqual('Searches the web');
+  });
+
+  it('reads an empty override as absent, not as a blank name', async () => {
+    const adkTool = await LangchainTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#searchTool`, name: '', description: ''},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('search');
+    expect(adkTool.description).toEqual('Searches the web');
+  });
+
+  it('names an unnamed tool from the config', async () => {
+    const adkTool = await LangchainTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#unnamedTool`, name: 'given'},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('given');
+    expect(adkTool.description).toEqual('Has no name of its own');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['a number', 42],
+    ['an object', {}],
+  ])('rejects a tool name that is %s', async (_label, value) => {
+    const error = await LangchainTool.fromConfig(
+      malformedConfig(value),
+      CONFIG_PATH,
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ToolExecutionError);
+    expect(error).toMatchObject({
+      message: BAD_NAME_MESSAGE,
+      errorType: ToolErrorType.BAD_REQUEST,
+    });
+  });
+
+  it('propagates the resolver error for a name that does not resolve', async () => {
+    const name = `${FIXTURE_PATH}#missingExport`;
+
+    const error = await LangchainTool.fromConfig(
+      {tool: name},
+      CONFIG_PATH,
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(InputValidationError);
+    expect(error).toMatchObject({
+      message: `Invalid fully qualified name: ${name}`,
+    });
+  });
+
+  it.each(['notATool', 'nullTool', 'toolWithoutInvoke', 'nonCallableInvoke'])(
+    'rejects %s, which is not a LangChain tool',
+    async (exportName) => {
+      const error = await LangchainTool.fromConfig(
+        {tool: `${FIXTURE_PATH}#${exportName}`},
+        CONFIG_PATH,
+      ).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ToolExecutionError);
+      expect(error).toMatchObject({
+        message: NOT_A_TOOL_MESSAGE,
+        errorType: ToolErrorType.BAD_REQUEST,
+      });
+    },
+  );
+
+  it('runs the tool it built', async () => {
+    const adkTool = await LangchainTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#searchTool`},
+      CONFIG_PATH,
+    );
+
+    const result = await adkTool.runAsync({
+      args: {query: 'adk'},
+      toolContext: makeContext(),
+    });
+
+    expect(result).toEqual('hit: adk');
   });
 });
