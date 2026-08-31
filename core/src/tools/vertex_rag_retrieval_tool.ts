@@ -111,6 +111,17 @@ export class VertexRagRetrievalTool extends BaseRetrievalTool {
     llmRequest.config.tools.push({
       retrieval: {vertexRagStore: this.vertexRagStore},
     });
+
+    // The server-side branch sends no declaration, so `BaseTool` never
+    // registers the name and a model that returns the tool as an explicit
+    // function call could not be routed. Claim the name here, as `BuiltInTool`
+    // does for the tools that only ever run inside the model. `runAsync`
+    // answers such a call with a real retrieval.
+    // `Object.hasOwn` rather than `in`, so a tool named after an
+    // `Object.prototype` member is not read as already registered.
+    if (!Object.hasOwn(llmRequest.toolsDict, this.name)) {
+      llmRequest.toolsDict[this.name] = this;
+    }
   }
 }
 

@@ -365,8 +365,14 @@ describe('GoogleSearchTool', () => {
     expect(tool.model).toBe('gemini-2.5-flash-lite');
   });
 
-  it('resolves runAsync', async () => {
-    await expect(new GoogleSearchTool().runAsync()).resolves.toBeUndefined();
+  // `BuiltInTool` answers such a call rather than resolving to undefined, so
+  // a model that returns the tool as a function call gets an answer.
+  it('answers runAsync by telling the model it is not callable', async () => {
+    const {error} = (await new GoogleSearchTool().runAsync()) as {
+      error: string;
+    };
+
+    expect(error).toContain('google_search runs inside the model');
   });
 
   it('has a global instance GOOGLE_SEARCH', () => {

@@ -11,7 +11,8 @@ import {
   isGeminiModelIdCheckDisabled,
 } from '../utils/model_name.js';
 
-import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
+import {ToolProcessLlmRequest} from './base_tool.js';
+import {BuiltInTool} from './built_in_tool.js';
 
 /**
  * Parameters for the {@link GoogleSearchTool} constructor.
@@ -37,7 +38,7 @@ export interface GoogleSearchToolParams {
  * This tool operates internally within the model and does not require or
  * perform local code execution.
  */
-export class GoogleSearchTool extends BaseTool {
+export class GoogleSearchTool extends BuiltInTool {
   readonly bypassMultiToolsLimit: boolean;
   readonly model?: string;
 
@@ -51,13 +52,7 @@ export class GoogleSearchTool extends BaseTool {
     this.model = model;
   }
 
-  runAsync(): Promise<unknown> {
-    // This is a built-in tool on server side, it's triggered by setting the
-    // corresponding request parameters.
-    return Promise.resolve();
-  }
-
-  override async processLlmRequest({
+  protected override async applyBuiltInConfig({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
     if (this.model !== undefined) {

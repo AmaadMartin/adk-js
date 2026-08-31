@@ -137,7 +137,7 @@ describe('VertexRagRetrievalTool', () => {
       expect(llmRequest.config.tools).toEqual([
         {retrieval: {vertexRagStore: {ragCorpora: [RAG_CORPUS]}}},
       ]);
-      expect(llmRequest.toolsDict['rag_retrieval']).toBeUndefined();
+      expect(llmRequest.toolsDict['rag_retrieval']).toBe(tool);
     });
 
     it('gives a non-Gemini model the query declaration', async () => {
@@ -201,7 +201,7 @@ describe('VertexRagRetrievalTool', () => {
       expect(llmRequest.config.tools).toEqual([
         {retrieval: {vertexRagStore: {ragCorpora: [RAG_CORPUS]}}},
       ]);
-      expect(llmRequest.toolsDict['rag_retrieval']).toBeUndefined();
+      expect(llmRequest.toolsDict['rag_retrieval']).toBe(tool);
     });
 
     it('declares the query function when the request names no model', async () => {
@@ -354,7 +354,7 @@ describe('VertexRagRetrievalTool', () => {
       });
 
       expect(toolAt(llmRequest, 0).functionDeclarations).toBeUndefined();
-      expect(llmRequest.toolsDict).toEqual({});
+      expect(llmRequest.toolsDict).toEqual({vertex_rag_retrieval: tool});
     });
   });
 
@@ -471,6 +471,30 @@ describe('VertexRagRetrievalTool', () => {
           },
         },
       });
+    });
+
+    // A built-in tool answers such a call with guidance, because it cannot run
+    // here. This one can, so the server-side branch registers the name and the
+    // call it routes performs the retrieval.
+    it('answers a call the server-side branch routed to it', async () => {
+      fetchMock.mockResolvedValue(contextsResponse([{text: 'chunk'}]));
+      const tool = new VertexRagRetrievalTool({
+        ragResources: [{ragCorpus: RAG_CORPUS}],
+      });
+      const llmRequest = makeLlmRequest('gemini-2.5-flash');
+
+      await tool.processLlmRequest({
+        llmRequest,
+        toolContext: makeToolContext(),
+      });
+      const routed = llmRequest.toolsDict['vertex_rag_retrieval'];
+      const result = await routed.runAsync({
+        args: {query: 'how do I ship it'},
+        toolContext: makeToolContext(),
+      });
+
+      expect(routed).toBe(tool);
+      expect(result).toEqual(['chunk']);
     });
   });
 });
