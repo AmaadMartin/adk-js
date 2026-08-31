@@ -12,6 +12,7 @@ import {
   FeatureName,
   InvocationContext,
   LlmAgent,
+  MCPConnectionParams,
   McpProgressCallback,
   MCPSessionManager,
   MCPTool,
@@ -32,6 +33,13 @@ import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the tool uses.
 import {logger} from '../../../src/utils/logger.js';
+
+import {clientStub, createTestToolContext} from './mcp_context_test_utils.js';
+
+const stdioParams: MCPConnectionParams = {
+  type: 'StdioConnectionParams',
+  serverParams: {command: 'test'},
+};
 
 describe('MCPTool', () => {
   it('passes abort signal to callTool', async () => {
@@ -816,7 +824,10 @@ describe('MCPTool progress notifications', () => {
   });
 
   it('builds a callback per invocation from the factory', async () => {
-    const callback: McpProgressCallback = () => {};
+    const received: Progress[] = [];
+    const callback: McpProgressCallback = (progress) => {
+      received.push(progress);
+    };
     const progressCallbackFactory = vi.fn().mockReturnValue(callback);
     const client = createClient();
     const manager = createSessionManager(client);
@@ -831,7 +842,11 @@ describe('MCPTool progress notifications', () => {
     expect(progressCallbackFactory).toHaveBeenCalledWith('test-tool', {
       callbackContext: toolContext,
     });
-    expect(callOptions(client)?.onprogress).toBe(callback);
+    // The factory's callback reaches the SDK through the adapter, so it is
+    // identified by what it receives rather than by identity.
+    callOptions(client)?.onprogress?.({progress: 1, total: 2});
+    await Promise.resolve();
+    expect(received).toEqual([{progress: 1, total: 2}]);
   });
 
   it('sends no onprogress when the factory returns nothing', async () => {
@@ -1002,5 +1017,135 @@ describe('MCPTool without options', () => {
       {signal: controller.signal},
     );
     expect(sessionHeaders(manager)).toBeUndefined();
+  });
+
+  describe('progress notifications', () => {
+    const mockTool: Tool = {
+      name: 'test-tool',
+      description: 'A test tool',
+      inputSchema: {type: 'object', properties: {}},
+    };
+
+    /** A session manager whose sessions record the `callTool` options. */
+    function stubSessionManager(): {
+      manager: MCPSessionManager;
+      callTool: ReturnType<typeof vi.fn>;
+    } {
+      const callTool = vi.fn().mockResolvedValue({content: []});
+      const manager = new MCPSessionManager(stdioParams);
+      vi.spyOn(manager, 'createSession').mockResolvedValue(
+        clientStub({callTool}),
+      );
+      vi.spyOn(manager, 'closeSession').mockResolvedValue(undefined);
+      return {manager, callTool};
+    }
+
+    /** Lets every queued microtask run, including a rejected callback. */
+    function flushMicrotasks(): Promise<void> {
+      return new Promise((resolve) => setImmediate(resolve));
+    }
+
+    function toolContext(): Context {
+      return createTestToolContext();
+    }
+
+    it('passes no onprogress when no callback is configured', async () => {
+      const {manager, callTool} = stubSessionManager();
+      const tool = new MCPTool(mockTool, manager);
+
+      await tool.runAsync({args: {}, toolContext: toolContext()});
+
+      expect(callTool.mock.calls[0][2].onprogress).toBeUndefined();
+    });
+
+    it('forwards a progress notification to the callback', async () => {
+      const {manager, callTool} = stubSessionManager();
+      const progressCallback = vi.fn();
+      const tool = new MCPTool(mockTool, manager, undefined, {
+        progressCallback,
+      });
+
+      await tool.runAsync({args: {}, toolContext: toolContext()});
+      callTool.mock.calls[0][2].onprogress({progress: 3, total: 10});
+      await flushMicrotasks();
+
+      expect(progressCallback).toHaveBeenCalledWith({progress: 3, total: 10});
+    });
+
+    it('logs a rejecting callback instead of failing the call', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const {manager, callTool} = stubSessionManager();
+      const tool = new MCPTool(mockTool, manager, undefined, {
+        progressCallback: () => Promise.reject(new Error('progress boom')),
+      });
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: toolContext(),
+      });
+      callTool.mock.calls[0][2].onprogress({progress: 1});
+      await flushMicrotasks();
+
+      expect(result).toEqual({content: []});
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('progress boom'),
+      );
+      warn.mockRestore();
+    });
+
+    it('logs a callback that throws synchronously', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const {manager, callTool} = stubSessionManager();
+      const tool = new MCPTool(mockTool, manager, undefined, {
+        progressCallback: () => {
+          throw new Error('sync progress boom');
+        },
+      });
+
+      await tool.runAsync({args: {}, toolContext: toolContext()});
+      callTool.mock.calls[0][2].onprogress({progress: 1});
+      await flushMicrotasks();
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('sync progress boom'),
+      );
+      warn.mockRestore();
+    });
+  });
+
+  describe('declaration', () => {
+    it('translates the MCP schemas into a function declaration', () => {
+      const tool = new MCPTool(
+        {
+          name: 'test-tool',
+          description: 'A test tool',
+          inputSchema: {
+            type: 'object',
+            properties: {path: {type: 'string'}},
+          },
+          outputSchema: {
+            type: 'object',
+            properties: {size: {type: 'number'}},
+          },
+        },
+        new MCPSessionManager(stdioParams),
+      );
+
+      expect(tool._getDeclaration()).toMatchObject({
+        name: 'test-tool',
+        description: 'A test tool',
+        parameters: {properties: {path: {type: 'STRING'}}},
+        response: {properties: {size: {type: 'NUMBER'}}},
+      });
+    });
+
+    it('describes a tool the server gave no description as empty', () => {
+      const tool = new MCPTool(
+        {name: 'bare-tool', inputSchema: {type: 'object', properties: {}}},
+        new MCPSessionManager(stdioParams),
+      );
+
+      expect(tool.description).toBe('');
+    });
   });
 });

@@ -7,6 +7,13 @@
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
 import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {
+  ClientCapabilities,
+  CreateMessageRequest,
+  CreateMessageResult,
+  ElicitRequest,
+  ElicitResult,
+} from '@modelcontextprotocol/sdk/types.js';
 import type {Stream, Writable} from 'node:stream';
 
 import {formatError} from '../../utils/error_utils.js';
@@ -41,6 +48,22 @@ export class McpConnectionError extends Error {
   }
 }
 
+/**
+ * Handles a `sampling/createMessage` request from the MCP server: the server
+ * asks this client to run an inference on its behalf.
+ */
+export type McpSamplingCallback = (
+  request: CreateMessageRequest['params'],
+) => CreateMessageResult | Promise<CreateMessageResult>;
+
+/**
+ * Handles an `elicitation/create` request from the MCP server: the server asks
+ * this client for a value from the user mid-call.
+ */
+export type McpElicitationCallback = (
+  request: ElicitRequest['params'],
+) => ElicitResult | Promise<ElicitResult>;
+
 /** Optional configuration for an {@link MCPSessionManager}. */
 export interface MCPSessionManagerOptions {
   /**
@@ -50,6 +73,17 @@ export interface MCPSessionManagerOptions {
    * and a stdio server's stderr is inherited by the parent process.
    */
   errlog?: Writable;
+  /**
+   * The server-to-client callbacks to register on every session this manager
+   * creates.
+   *
+   * A capability is declared to the server only when its callback is supplied,
+   * so a server never asks for something this client cannot answer.
+   */
+  samplingCallback?: McpSamplingCallback;
+  /** Extra detail for the declared `sampling` capability. */
+  samplingCapabilities?: ClientCapabilities['sampling'];
+  elicitationCallback?: McpElicitationCallback;
 }
 
 /**
@@ -178,40 +212,44 @@ export type MCPConnectionParams =
  */
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
+  private readonly options: MCPSessionManagerOptions;
   /**
    * Active sessions, each mapped to the teardown for the resources that
    * outlive `client.close()` — currently the stderr pipe into `errlog`.
    */
   private readonly activeSessions = new Map<Client, (() => void) | undefined>();
-  private readonly errlog?: Writable;
 
   constructor(
     connectionParams: MCPConnectionParams,
     options: MCPSessionManagerOptions = {},
   ) {
     this.connectionParams = connectionParams;
-    this.errlog = options.errlog;
+    this.options = options;
   }
 
   /**
    * Opens a new MCP client session.
    *
    * @param options.headers Extra HTTP headers for this session, applied on top
-   *     of the configured transport headers. Ignored by the stdio transport,
-   *     which carries no headers. Header names are compared case-insensitively,
-   *     so a per-session header replaces a configured one that differs only in
-   *     case.
+   *     of the configured transport headers. An empty set is the same as none.
+   *     Ignored by the stdio transport, which carries no headers. Header names
+   *     are compared case-insensitively, so a per-session header replaces a
+   *     configured one that differs only in case.
    * @return The connected client.
    */
   async createSession(
     options: {headers?: Record<string, string>} = {},
   ): Promise<Client> {
-    const {errlog} = this;
+    const {errlog} = this.options;
     const {Client} = await loadOptionalPeer(
       MCP_SDK,
       () => import('@modelcontextprotocol/sdk/client/index.js'),
     );
-    const client = new Client({name: 'MCPClient', version: '1.0.0'});
+    const capabilities = this.clientCapabilities();
+    const client = capabilities
+      ? new Client({name: 'MCPClient', version: '1.0.0'}, {capabilities})
+      : new Client({name: 'MCPClient', version: '1.0.0'});
+    await this.registerServerCallbacks(client);
     let detach: (() => void) | undefined;
 
     try {
@@ -252,10 +290,11 @@ export class MCPSessionManager {
             ...configured,
             ...(requestInit === undefined ? {} : {requestInit}),
           };
-          if (options.headers !== undefined) {
+          const {headers} = options;
+          if (headers !== undefined && Object.keys(headers).length > 0) {
             transportOptions.requestInit = {
               ...requestInit,
-              headers: mergeHeaders(requestInit?.headers, options.headers),
+              headers: mergeHeaders(requestInit?.headers, headers),
             };
           }
 
@@ -285,6 +324,47 @@ export class MCPSessionManager {
 
     this.activeSessions.set(client, detach);
     return client;
+  }
+
+  /** The capabilities to declare, or `undefined` when there are none. */
+  private clientCapabilities(): ClientCapabilities | undefined {
+    const {samplingCallback, samplingCapabilities, elicitationCallback} =
+      this.options;
+    const capabilities: ClientCapabilities = {};
+    if (samplingCallback) {
+      capabilities.sampling = samplingCapabilities ?? {};
+    }
+    if (elicitationCallback) {
+      capabilities.elicitation = {};
+    }
+    return samplingCallback || elicitationCallback ? capabilities : undefined;
+  }
+
+  /** Wires the configured callbacks to the requests the server sends back. */
+  private async registerServerCallbacks(client: Client): Promise<void> {
+    const {samplingCallback, elicitationCallback} = this.options;
+    if (!samplingCallback && !elicitationCallback) {
+      return;
+    }
+
+    // The schemas are needed as values, not as types, so this import has to
+    // go through the optional peer loader like every other MCP SDK import.
+    const {CreateMessageRequestSchema, ElicitRequestSchema} =
+      await loadOptionalPeer(
+        MCP_SDK,
+        () => import('@modelcontextprotocol/sdk/types.js'),
+      );
+
+    if (samplingCallback) {
+      client.setRequestHandler(CreateMessageRequestSchema, (request) =>
+        samplingCallback(request.params),
+      );
+    }
+    if (elicitationCallback) {
+      client.setRequestHandler(ElicitRequestSchema, (request) =>
+        elicitationCallback(request.params),
+      );
+    }
   }
 
   async closeSession(client: Client): Promise<void> {
