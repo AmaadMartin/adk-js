@@ -5,6 +5,7 @@
  */
 
 import {
+  convertDiscoveryDocument,
   DiscoveryDocument,
   DiscoveryMethod,
   DiscoveryParameter,
@@ -232,6 +233,42 @@ const SCHEMA_OBJECT_CASES: ReadonlyArray<
   ],
 ];
 
+/**
+ * Shapes the ported v0.2.0 cases never reach. They live in their own table so
+ * the table above stays a faithful transcription of the reference suite.
+ */
+const SCHEMA_OBJECT_EDGE_CASES: ReadonlyArray<
+  [string, DiscoverySchema, ConvertedSchema]
+> = [
+  [
+    'a reference that already starts with #',
+    {$ref: '#Calendar'},
+    {$ref: '#/components/schemas/Calendar'},
+  ],
+  [
+    'an object with no properties, omitting required',
+    {type: 'object'},
+    {type: 'object'},
+  ],
+  ['an array with no items', {type: 'array'}, {type: 'array', items: {}}],
+  [
+    'the Discovery any type, as a oneOf',
+    {type: 'any'},
+    {
+      oneOf: [
+        {type: 'object'},
+        {type: 'array', items: {}},
+        {type: 'string'},
+        {type: 'number'},
+        {type: 'boolean'},
+      ],
+    },
+  ],
+  ['a boolean', {type: 'boolean'}, {type: 'boolean'}],
+  ['a number', {type: 'number'}, {type: 'number'}],
+  ['a type OpenAPI 3.0 does not have, by dropping it', {type: 'symbol'}, {}],
+];
+
 const PATH_PARAMETER_CASES: ReadonlyArray<[string, string[]]> = [
   ['/calendars/{calendarId}/events/{eventId}', ['calendarId', 'eventId']],
   ['/calendars/events', []],
@@ -355,6 +392,27 @@ describe('GoogleApiToOpenApiConverter', () => {
         },
       ]);
     });
+
+    it('keeps a servicePath that has no trailing slash', () => {
+      expect(
+        convertServers(
+          {rootUrl: 'https://example.googleapis.com/', servicePath: 'v1'},
+          'example',
+          'v1',
+        ),
+      ).toEqual([
+        {
+          url: 'https://example.googleapis.com/v1',
+          description: 'example v1 API',
+        },
+      ]);
+    });
+
+    it('yields an empty url when the document declares no host', () => {
+      expect(convertServers({}, 'calendar', 'v3')).toEqual([
+        {url: '', description: 'calendar v3 API'},
+      ]);
+    });
   });
 
   describe('convertSecuritySchemes', () => {
@@ -387,6 +445,31 @@ describe('GoogleApiToOpenApiConverter', () => {
         {oauth2: [CALENDAR_SCOPE, CALENDAR_READONLY_SCOPE]},
         {apiKey: []},
       ]);
+    });
+
+    it('emits only the apiKey scheme when the document declares no oauth2', () => {
+      const {securitySchemes, security} = convertSecuritySchemes({});
+
+      expect(Object.keys(securitySchemes)).toEqual(['apiKey']);
+      expect(security).toEqual([{}, {apiKey: []}]);
+    });
+
+    it('defaults a scope with no description to an empty string', () => {
+      const {securitySchemes} = convertSecuritySchemes({
+        auth: {oauth2: {scopes: {[CALENDAR_SCOPE]: {}}}},
+      });
+
+      expect(securitySchemes['oauth2']).toEqual({
+        type: 'oauth2',
+        description: 'OAuth 2.0 authentication',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://accounts.google.com/o/oauth2/auth',
+            tokenUrl: 'https://oauth2.googleapis.com/token',
+            scopes: {[CALENDAR_SCOPE]: ''},
+          },
+        },
+      });
     });
   });
 
@@ -431,6 +514,13 @@ describe('GoogleApiToOpenApiConverter', () => {
     it.each(SCHEMA_OBJECT_CASES)('converts %s', (_name, input, expected) => {
       expect(convertSchemaObject(input)).toEqual(expected);
     });
+
+    it.each(SCHEMA_OBJECT_EDGE_CASES)(
+      'converts %s',
+      (_name, input, expected) => {
+        expect(convertSchemaObject(input)).toEqual(expected);
+      },
+    );
   });
 
   describe('extractPathParameters', () => {
@@ -469,7 +559,7 @@ describe('GoogleApiToOpenApiConverter', () => {
           schema: {type: 'string'},
         },
       });
-      expect(okResponseContent(get)).toEqual({
+      expect(responseAt(get, '200').content).toEqual({
         'application/json': {schema: CALENDAR_REF},
       });
 
@@ -480,9 +570,57 @@ describe('GoogleApiToOpenApiConverter', () => {
         required: true,
         content: {'application/json': {schema: CALENDAR_REF}},
       });
-      expect(okResponseContent(post)).toEqual({
+      expect(responseAt(post, '200').content).toEqual({
         'application/json': {schema: CALENDAR_REF},
       });
+    });
+
+    it('falls back to GET at / for a method that declares nothing', () => {
+      const paths: OpenAPIV3.PathsObject = {};
+
+      convertMethods({bare: {}}, paths);
+
+      expect(operationAt(paths, '/', OpenAPIV3.HttpMethods.GET)).toEqual({
+        operationId: '',
+        summary: '',
+        description: '',
+        parameters: [],
+        responses: {
+          '200': {description: 'Successful operation'},
+          '400': {description: 'Bad request'},
+          '401': {description: 'Unauthorized'},
+          '403': {description: 'Forbidden'},
+          '404': {description: 'Not found'},
+          '500': {description: 'Server error'},
+        },
+      });
+    });
+
+    it('skips a method whose httpMethod is not an OpenAPI verb', () => {
+      const paths: OpenAPIV3.PathsObject = {};
+
+      convertMethods({lock: {path: 'calendars', httpMethod: 'LOCK'}}, paths);
+
+      expect(paths).toEqual({});
+    });
+
+    it('defaults an underspecified parameter to a required-false query string', () => {
+      const paths: OpenAPIV3.PathsObject = {};
+
+      convertMethods(
+        {search: {path: 'items', parameters: {filter: {}}, scopes: []}},
+        paths,
+      );
+
+      const operation = operationAt(paths, '/items', OpenAPIV3.HttpMethods.GET);
+      expect(parametersByName(operation)['filter']).toEqual({
+        name: 'filter',
+        in: 'query',
+        description: '',
+        required: false,
+        schema: {type: 'string'},
+      });
+      expect(operation.security).toBeUndefined();
     });
   });
 
@@ -503,6 +641,55 @@ describe('GoogleApiToOpenApiConverter', () => {
         'maxResults',
         'orderBy',
       ]);
+    });
+
+    it('adds no path for a resource with no methods and no children', () => {
+      const paths: OpenAPIV3.PathsObject = {};
+
+      convertResources({empty: {}}, paths);
+
+      expect(paths).toEqual({});
+    });
+  });
+
+  describe('convertDiscoveryDocument', () => {
+    it('builds a minimal document and omits externalDocs', () => {
+      expect(convertDiscoveryDocument({}, 'calendar', 'v3')).toEqual({
+        openapi: '3.0.0',
+        info: {
+          title: 'calendar API',
+          description: '',
+          version: 'v3',
+          contact: {},
+          termsOfService: '',
+        },
+        servers: [{url: '', description: 'calendar v3 API'}],
+        paths: {},
+        components: {
+          schemas: {},
+          securitySchemes: {
+            apiKey: {
+              type: 'apiKey',
+              in: 'query',
+              name: 'key',
+              description: 'API key for accessing this API',
+            },
+          },
+        },
+        security: [{}, {apiKey: []}],
+      });
+    });
+
+    it('converts methods declared at the top level of the document', () => {
+      const spec = convertDiscoveryDocument(
+        {methods: {ping: {id: 'example.ping', path: 'ping'}}},
+        'example',
+        'v1',
+      );
+
+      expect(
+        operationAt(spec.paths, '/ping', OpenAPIV3.HttpMethods.GET).operationId,
+      ).toBe('example.ping');
     });
   });
 
@@ -528,7 +715,7 @@ describe('GoogleApiToOpenApiConverter', () => {
       );
       expect(get.operationId).toBe('calendar.calendars.get');
       expect(Object.keys(parametersByName(get))).toEqual(['calendarId']);
-      expect(okResponseContent(get)).toEqual({
+      expect(responseAt(get, '200').content).toEqual({
         'application/json': {schema: CALENDAR_REF},
       });
 
@@ -599,7 +786,6 @@ function isSchemaObject(
   return !('$ref' in value) || Object.keys(value).length > 1;
 }
 
-/** Narrows a schema slot to an inline schema, failing the test otherwise. */
 function asSchema(
   value: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined,
 ): OpenAPIV3.SchemaObject {
@@ -647,12 +833,13 @@ function requestBodyOf(
 }
 
 /** `ResponseObject` declares no `$ref`, so `'$ref' in response` discriminates. */
-function okResponseContent(
+function responseAt(
   operation: OpenAPIV3.OperationObject,
-): Record<string, OpenAPIV3.MediaTypeObject> | undefined {
-  const response = operation.responses['200'];
+  code: string,
+): OpenAPIV3.ResponseObject {
+  const response = operation.responses[code];
   if (response === undefined || '$ref' in response) {
-    expect.fail('expected an inline 200 response');
+    expect.fail(`expected an inline ${code} response`);
   }
-  return response.content;
+  return response;
 }
