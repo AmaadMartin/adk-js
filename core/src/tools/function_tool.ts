@@ -8,10 +8,19 @@ import {FunctionDeclaration, Schema, Type} from '@google/genai';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 
+import {
+  DestructuredParameters,
+  parseDestructuredParameters,
+} from '../utils/function_signature_utils.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 
 import {Context} from '../agents/context.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import {
+  getSyncCallableRunner,
+  isAsyncCallable,
+  runWithSyncCallableRunner,
+} from './sync_callable_runner.js';
 
 /**
  * Input parameters of the function tool.
@@ -25,6 +34,9 @@ export type ToolInputParameters =
 /**
  * The arguments passed to the function tool's `execute` callback, inferred
  * from the `parameters` schema type.
+ *
+ * Without a `parameters` schema there is nothing to infer from, so `execute`
+ * receives the model's argument object as it arrived.
  */
 export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
   TParameters extends z3.ZodObject<infer T, infer U, infer V>
@@ -33,7 +45,7 @@ export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
       ? z4.infer<z4.ZodObject<T>>
       : TParameters extends Schema
         ? unknown
-        : string;
+        : Record<string, unknown>;
 
 /**
  * The signature of the user-provided function executed by a {@link FunctionTool}.
@@ -60,8 +72,11 @@ export type RequireConfirmation<TParameters extends ToolInputParameters> =
  * The `name`, `description` and `parameters` fields are used to generate the
  * tool definition that is passed to the LLM prompt.
  *
- * Note: Unlike Python's ADK, JSDoc on the `execute` function is ignored
- * for tool definition generation.
+ * Note: Python's ADK reads a function's docstring for the tool description,
+ * which TypeScript cannot do: JSDoc is a comment, and
+ * `Function.prototype.toString()` starts at the parameter list, so the text is
+ * gone at runtime. `description` is therefore required. The parameter list
+ * does survive, so `parameters` is derived from `execute` when it is omitted.
  */
 export type ToolOptions<TParameters extends ToolInputParameters> = {
   name?: string;
@@ -104,6 +119,26 @@ function toSchema<TParameters extends ToolInputParameters>(
 }
 
 /**
+ * Builds the model-facing schema for parameters read off the `execute`
+ * signature.
+ *
+ * TypeScript erases parameter types, so every derived property is in the
+ * position adk-python gives an unannotated parameter, and takes the same
+ * `TYPE_UNSPECIFIED` type.
+ */
+function derivedSchema(parameters: DestructuredParameters): Schema {
+  const properties: Record<string, Schema> = {};
+  for (const name of parameters.names) {
+    properties[name] = {type: Type.TYPE_UNSPECIFIED};
+  }
+  const schema: Schema = {type: Type.OBJECT, properties};
+  if (parameters.required.length > 0) {
+    schema.required = [...parameters.required];
+  }
+  return schema;
+}
+
+/**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all BaseTool instances.
  */
@@ -141,6 +176,8 @@ export class FunctionTool<
   private readonly execute: ToolExecuteFunction<TParameters>;
   // Typed input parameters.
   private readonly parameters?: TParameters;
+  // Parameters read off the `execute` signature, when none were declared.
+  private readonly derivedParameters?: DestructuredParameters;
   // Whether the tool requires user confirmation before running.
   private readonly requireConfirmation: RequireConfirmation<TParameters>;
 
@@ -162,6 +199,12 @@ export class FunctionTool<
     });
     this.execute = options.execute;
     this.parameters = options.parameters;
+    // Parsed once: reading the signature costs a `toString()` and a scan, and
+    // the declaration is rebuilt on every LLM call.
+    this.derivedParameters =
+      options.parameters === undefined
+        ? parseDestructuredParameters(options.execute)
+        : undefined;
     this.requireConfirmation = options.requireConfirmation ?? false;
   }
 
@@ -173,8 +216,22 @@ export class FunctionTool<
     return {
       name: this.name,
       description: this.description,
-      parameters: toSchema(this.parameters),
+      parameters: this.parameterSchema(),
     };
+  }
+
+  /**
+   * The schema advertised for the tool's arguments: the declared `parameters`
+   * when there are some, otherwise the signature of `execute`.
+   *
+   * Built fresh on every call, because callers mutate the declaration they are
+   * handed.
+   */
+  private parameterSchema(): Schema {
+    if (this.parameters === undefined && this.derivedParameters !== undefined) {
+      return derivedSchema(this.derivedParameters);
+    }
+    return toSchema(this.parameters);
   }
 
   /**
@@ -196,7 +253,7 @@ export class FunctionTool<
         return pending;
       }
 
-      return await this.execute(validatedArgs, req.toolContext);
+      return await this.invokeExecute(validatedArgs, req.toolContext);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -222,6 +279,28 @@ export class FunctionTool<
       return this.requireConfirmation;
     }
     return this.requireConfirmation(this.validateArgs(args), toolContext);
+  }
+
+  /**
+   * Calls `execute`, through the ambient {@link SyncCallableRunner} when a host
+   * bound one and the callback is synchronous.
+   *
+   * The binding is cleared around the offloaded call, so a tool called from
+   * inside an offloaded body runs inline instead of offloading again.
+   */
+  private async invokeExecute(
+    input: ToolExecuteArgument<TParameters>,
+    toolContext?: Context,
+  ): Promise<unknown> {
+    const runner = getSyncCallableRunner();
+    if (runner === undefined || isAsyncCallable(this.execute)) {
+      return this.execute(input, toolContext);
+    }
+    return runner(() =>
+      runWithSyncCallableRunner(undefined, () =>
+        this.execute(input, toolContext),
+      ),
+    );
   }
 
   /** Parses `args` against the parameter schema, when one is declared. */
