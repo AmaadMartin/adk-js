@@ -23,7 +23,7 @@ import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
 import {GeminiLlmConnection} from './gemini_llm_connection.js';
 import {generateContentViaInteractions} from './interactions_utils.js';
-import {LlmRequest} from './llm_request.js';
+import {LlmRequest, markAsyncToolsNonBlocking} from './llm_request.js';
 import {createLlmResponse, LlmResponse} from './llm_response.js';
 
 /**
@@ -312,6 +312,7 @@ export class Gemini extends BaseLlm {
       };
     }
 
+    markAsyncToolsNonBlocking(llmRequest);
     llmRequest.liveConnectConfig.tools = llmRequest.config?.tools;
 
     // Gemini API (AI Studio) rejects `sessionResumption.transparent`; it is a

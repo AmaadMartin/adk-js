@@ -22,7 +22,7 @@ import {
   SingleBeforeToolCallback,
   ToolConfirmation,
 } from '@google/adk';
-import {FunctionCall} from '@google/genai';
+import {FunctionCall, FunctionResponseScheduling} from '@google/genai';
 import type {MockInstance} from 'vitest';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
@@ -114,6 +114,41 @@ const falsyLongRunningTool = new FunctionTool({
   execute: async () => '',
   isLongRunning: true,
 });
+
+const DEFERRING_TOOL_NAME = 'deferringTool';
+const SCHEDULING_TOOL_NAME = 'schedulingTool';
+
+/**
+ * A tool whose matching `FunctionResponse` is supplied elsewhere. Only
+ * `BaseTool` carries `defersResponse`, so the fixture cannot be a
+ * `FunctionTool`.
+ */
+class DeferringTool extends BaseTool {
+  override readonly defersResponse = true;
+
+  constructor(private readonly response: unknown) {
+    super({name: DEFERRING_TOOL_NAME, description: 'defers its response'});
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return this.response;
+  }
+}
+
+/** A tool that sets `responseScheduling` on the responses it produces. */
+class SchedulingTool extends BaseTool {
+  constructor(responseScheduling: FunctionResponseScheduling | undefined) {
+    super({
+      name: SCHEDULING_TOOL_NAME,
+      description: 'schedules its response',
+      responseScheduling,
+    });
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return {result: 'ok'};
+  }
+}
 
 function callFor(tool: BaseTool): FunctionCall {
   return {id: randomIdForTestingOnly(), name: tool.name, args: {}};
@@ -775,6 +810,91 @@ describe('handleFunctionCallList', () => {
       status: 'pending',
     });
     expect(event!.actions.stateDelta).toEqual({jobStarted: true});
+  });
+
+  it('should emit no event when a deferring tool returns nothing', async () => {
+    const deferringTool = new DeferringTool(null);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(deferringTool)],
+      toolsDict: {[DEFERRING_TOOL_NAME]: deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should emit an event when a deferring tool returns a real value', async () => {
+    const deferringTool = new DeferringTool({status: 'done'});
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(deferringTool)],
+      toolsDict: {[DEFERRING_TOOL_NAME]: deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      status: 'done',
+    });
+  });
+
+  it.each([
+    ['an empty string', ''],
+    ['zero', 0],
+    ['false', false],
+  ])(
+    'should emit an event when a deferring tool returns %s',
+    async (_label, value) => {
+      const deferringTool = new DeferringTool(value);
+
+      const event = await handleFunctionCallList({
+        invocationContext,
+        functionCalls: [callFor(deferringTool)],
+        toolsDict: {[DEFERRING_TOOL_NAME]: deferringTool},
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      });
+
+      expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+        result: value,
+      });
+    },
+  );
+
+  it('should carry the tool responseScheduling onto the emitted response', async () => {
+    const silentTool = new SchedulingTool(FunctionResponseScheduling.SILENT);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(silentTool)],
+      toolsDict: {[SCHEDULING_TOOL_NAME]: silentTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.scheduling).toBe(
+      FunctionResponseScheduling.SILENT,
+    );
+  });
+
+  it('should leave scheduling absent for a tool that does not set it', async () => {
+    const plainTool = new SchedulingTool(undefined);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(plainTool)],
+      toolsDict: {[SCHEDULING_TOOL_NAME]: plainTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(
+      event!.content!.parts![0].functionResponse!.scheduling,
+    ).toBeUndefined();
   });
 });
 
