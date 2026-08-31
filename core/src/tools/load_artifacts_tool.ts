@@ -227,6 +227,15 @@ export class LoadArtifactsTool extends BaseTool {
     );
   }
 
+  /**
+   * Appends every artifact the current turn asked for to the request.
+   *
+   * This scans all `load_artifacts` function responses in the current turn.
+   * adk-python reads only the first part of the last content, so it misses a
+   * response that shares a turn with another tool. Keep the scan: it is what
+   * fixes google/adk-js#632 for parallel and sequential tool calls. Each
+   * artifact name loads once, however often the turn names it.
+   */
   private async appendArtifactsToLlmRequest(
     toolContext: Context,
     llmRequest: LlmRequest,
