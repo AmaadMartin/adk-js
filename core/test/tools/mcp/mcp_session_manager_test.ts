@@ -378,27 +378,35 @@ describe('MCPSessionManager', () => {
       serverParams: {command: 'test-command'},
     };
 
-    /** A client stub that records the handlers the manager registers on it. */
+    /** A handler the manager registered, so this test can call it back. */
+    type RecordedHandler = (request: unknown, extra: unknown) => unknown;
+
+    /**
+     * A client stub that records the handlers the manager registers on it.
+     *
+     * The stub is cast rather than built with `clientStub`: the SDK ties
+     * `setRequestHandler`'s handler parameter to the Zod schema passed
+     * alongside it, so a recorder that accepts any schema cannot satisfy that
+     * signature.
+     */
     function stubClient(): {
       client: Client;
-      handlers: Map<unknown, (request: unknown) => unknown>;
+      handlers: Map<unknown, RecordedHandler>;
     } {
-      const handlers = new Map<unknown, (request: unknown) => unknown>();
+      const handlers = new Map<unknown, RecordedHandler>();
       const client = {
         connect: vi.fn().mockResolvedValue(undefined),
         close: vi.fn().mockResolvedValue(undefined),
-        setRequestHandler: vi.fn(
-          (schema: unknown, handler: (request: unknown) => unknown) => {
-            handlers.set(schema, handler);
-          },
-        ),
+        setRequestHandler: (schema: unknown, handler: RecordedHandler) => {
+          handlers.set(schema, handler);
+        },
       } as unknown as Client;
       vi.mocked(Client).mockImplementationOnce(() => client);
       return {client, handlers};
     }
 
     it('declares no capability and registers no handler by default', async () => {
-      const {client} = stubClient();
+      const {handlers} = stubClient();
 
       await new MCPSessionManager(stdioParams).createSession();
 
@@ -406,7 +414,7 @@ describe('MCPSessionManager', () => {
         name: 'MCPClient',
         version: '1.0.0',
       });
-      expect(client.setRequestHandler).not.toHaveBeenCalled();
+      expect(handlers.size).toBe(0);
     });
 
     it('answers a sampling request with the sampling callback', async () => {
@@ -431,7 +439,7 @@ describe('MCPSessionManager', () => {
         expect.fail('no sampling/createMessage handler was registered');
       }
       const params = {messages: [], maxTokens: 10};
-      await expect(handler({params})).resolves.toMatchObject({
+      await expect(handler({params}, undefined)).resolves.toMatchObject({
         content: {text: 'sampled'},
       });
       expect(samplingCallback).toHaveBeenCalledWith(params);
@@ -471,7 +479,7 @@ describe('MCPSessionManager', () => {
         expect.fail('no elicitation/create handler was registered');
       }
       const params = {message: 'pick one', requestedSchema: {type: 'object'}};
-      await expect(handler({params})).resolves.toMatchObject({
+      await expect(handler({params}, undefined)).resolves.toMatchObject({
         action: 'accept',
       });
       expect(elicitationCallback).toHaveBeenCalledWith(params);

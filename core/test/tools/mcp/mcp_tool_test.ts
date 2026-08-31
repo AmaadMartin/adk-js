@@ -7,6 +7,7 @@
 import {
   Context,
   InvocationContext,
+  MCPConnectionParams,
   MCPSessionManager,
   MCPTool,
 } from '@google/adk';
@@ -16,6 +17,13 @@ import {describe, expect, it, vi} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the tool uses.
 import {logger} from '../../../src/utils/logger.js';
+
+import {clientStub, createTestToolContext} from './mcp_context_test_utils.js';
+
+const stdioParams: MCPConnectionParams = {
+  type: 'StdioConnectionParams',
+  serverParams: {command: 'test'},
+};
 
 describe('MCPTool', () => {
   it('passes abort signal to callTool', async () => {
@@ -179,12 +187,11 @@ describe('MCPTool', () => {
       callTool: ReturnType<typeof vi.fn>;
     } {
       const callTool = vi.fn().mockResolvedValue({content: []});
-      const manager = {
-        createSession: vi
-          .fn()
-          .mockResolvedValue({callTool} as unknown as Client),
-        closeSession: vi.fn().mockResolvedValue(undefined),
-      } as unknown as MCPSessionManager;
+      const manager = new MCPSessionManager(stdioParams);
+      vi.spyOn(manager, 'createSession').mockResolvedValue(
+        clientStub({callTool}),
+      );
+      vi.spyOn(manager, 'closeSession').mockResolvedValue(undefined);
       return {manager, callTool};
     }
 
@@ -194,12 +201,7 @@ describe('MCPTool', () => {
     }
 
     function toolContext(): Context {
-      return new Context({
-        invocationContext: {
-          abortSignal: new AbortController().signal,
-          session: {state: {}},
-        } as unknown as InvocationContext,
-      });
+      return createTestToolContext();
     }
 
     it('passes no onprogress when no callback is configured', async () => {
@@ -281,7 +283,7 @@ describe('MCPTool', () => {
             properties: {size: {type: 'number'}},
           },
         },
-        {} as unknown as MCPSessionManager,
+        new MCPSessionManager(stdioParams),
       );
 
       expect(tool._getDeclaration()).toMatchObject({
@@ -295,7 +297,7 @@ describe('MCPTool', () => {
     it('describes a tool the server gave no description as empty', () => {
       const tool = new MCPTool(
         {name: 'bare-tool', inputSchema: {type: 'object', properties: {}}},
-        {} as unknown as MCPSessionManager,
+        new MCPSessionManager(stdioParams),
       );
 
       expect(tool.description).toBe('');

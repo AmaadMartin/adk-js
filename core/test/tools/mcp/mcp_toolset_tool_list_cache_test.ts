@@ -8,7 +8,10 @@ import {MCPConnectionParams, MCPToolset, ReadonlyContext} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {createTestReadonlyContext} from './mcp_context_test_utils.js';
+import {
+  clientStub,
+  createTestReadonlyContext,
+} from './mcp_context_test_utils.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -43,14 +46,7 @@ describe('MCPToolset tool list cache', () => {
         {name: 'alpha', description: 'a', inputSchema: {}},
       ],
     });
-    vi.mocked(Client).mockImplementation(
-      () =>
-        ({
-          connect: vi.fn().mockResolvedValue(undefined),
-          close: vi.fn().mockResolvedValue(undefined),
-          listTools,
-        }) as unknown as Client,
-    );
+    vi.mocked(Client).mockImplementation(() => clientStub({listTools}));
   });
 
   afterEach(() => {

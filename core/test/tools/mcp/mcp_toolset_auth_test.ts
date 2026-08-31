@@ -14,7 +14,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {createTestToolContext} from './mcp_context_test_utils.js';
+import {clientStub, createTestToolContext} from './mcp_context_test_utils.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -51,15 +51,12 @@ function lastSessionHeaders(): unknown {
 describe('MCPToolset auth', () => {
   beforeEach(() => {
     vi.mocked(StreamableHTTPClientTransport).mockClear();
-    vi.mocked(Client).mockImplementation(
-      () =>
-        ({
-          connect: vi.fn().mockResolvedValue(undefined),
-          close: vi.fn().mockResolvedValue(undefined),
-          listTools: vi.fn().mockResolvedValue({
-            tools: [{name: 'alpha', description: 'a', inputSchema: {}}],
-          }),
-        }) as unknown as Client,
+    vi.mocked(Client).mockImplementation(() =>
+      clientStub({
+        listTools: vi.fn().mockResolvedValue({
+          tools: [{name: 'alpha', description: 'a', inputSchema: {}}],
+        }),
+      }),
     );
   });
 
@@ -180,13 +177,8 @@ describe('MCPToolset auth', () => {
       };
 
       const [tool] = await toolset.getTools();
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: vi.fn().mockResolvedValue(undefined),
-            close: vi.fn().mockResolvedValue(undefined),
-            callTool: vi.fn().mockResolvedValue({content: []}),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        clientStub({callTool: vi.fn().mockResolvedValue({content: []})}),
       );
       await tool.runAsync({args: {}, toolContext: createTestToolContext()});
 

@@ -13,6 +13,7 @@ import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
 
 import {
+  clientStub,
   createTestReadonlyContext,
   createTestToolContext,
 } from './mcp_context_test_utils.js';
@@ -365,6 +366,8 @@ describe('MCPToolset', () => {
 
   describe('connection params', () => {
     it('rejects a missing connection params value', () => {
+      // The cast stands in for a JavaScript caller: the guard exists for a
+      // caller TypeScript does not check.
       expect(
         () => new MCPToolset(undefined as unknown as MCPConnectionParams),
       ).toThrow('Missing connection params in MCPToolset.');
@@ -373,18 +376,15 @@ describe('MCPToolset', () => {
 
   describe('tool order', () => {
     it('keeps both tools when a server advertises one name twice', async () => {
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listTools: vi.fn().mockResolvedValue({
-              tools: [
-                {name: 'twin', description: 'first', inputSchema: {}},
-                {name: 'twin', description: 'second', inputSchema: {}},
-              ],
-            }),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        clientStub({
+          listTools: vi.fn().mockResolvedValue({
+            tools: [
+              {name: 'twin', description: 'first', inputSchema: {}},
+              {name: 'twin', description: 'second', inputSchema: {}},
+            ],
+          }),
+        }),
       );
       const toolset = new MCPToolset(stdioParams);
 
@@ -397,19 +397,16 @@ describe('MCPToolset', () => {
     });
 
     it('returns the tools sorted by name', async () => {
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listTools: vi.fn().mockResolvedValue({
-              tools: [
-                {name: 'zebra', description: 'z', inputSchema: {}},
-                {name: 'alpha', description: 'a', inputSchema: {}},
-                {name: 'mango', description: 'm', inputSchema: {}},
-              ],
-            }),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        clientStub({
+          listTools: vi.fn().mockResolvedValue({
+            tools: [
+              {name: 'zebra', description: 'z', inputSchema: {}},
+              {name: 'alpha', description: 'a', inputSchema: {}},
+              {name: 'mango', description: 'm', inputSchema: {}},
+            ],
+          }),
+        }),
       );
       const toolset = new MCPToolset(stdioParams);
 
@@ -598,9 +595,7 @@ describe('MCPToolset', () => {
       const [tool] = await toolset.getTools();
       const toolContext = createTestToolContext();
       toolContext.toolConfirmation = new ToolConfirmation({confirmed: true});
-      vi.mocked(Client).mockImplementationOnce(
-        () => ({connect: noop(), close: noop(), callTool}) as unknown as Client,
-      );
+      vi.mocked(Client).mockImplementationOnce(() => clientStub({callTool}));
 
       await tool.runAsync({args: {}, toolContext});
 
@@ -632,9 +627,7 @@ describe('MCPToolset', () => {
       });
 
       const [tool] = await toolset.getTools();
-      vi.mocked(Client).mockImplementationOnce(
-        () => ({connect: noop(), close: noop(), callTool}) as unknown as Client,
-      );
+      vi.mocked(Client).mockImplementationOnce(() => clientStub({callTool}));
       await tool.runAsync({args: {}, toolContext: createTestToolContext()});
 
       const options = callTool.mock.calls[0][2];
@@ -653,9 +646,7 @@ describe('MCPToolset', () => {
       });
 
       const [tool] = await toolset.getTools();
-      vi.mocked(Client).mockImplementationOnce(
-        () => ({connect: noop(), close: noop(), callTool}) as unknown as Client,
-      );
+      vi.mocked(Client).mockImplementationOnce(() => clientStub({callTool}));
       const toolContext = createTestToolContext();
       await tool.runAsync({args: {}, toolContext});
 
@@ -683,14 +674,11 @@ describe('MCPToolset', () => {
       const toolset = new MCPToolset(stdioParams, [], undefined, {
         samplingCallback: vi.fn(),
       });
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listTools: vi.fn().mockResolvedValue({tools: []}),
-            setRequestHandler: vi.fn(),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        clientStub({
+          listTools: vi.fn().mockResolvedValue({tools: []}),
+          setRequestHandler: vi.fn(),
+        }),
       );
 
       await toolset.getTools();
@@ -705,14 +693,11 @@ describe('MCPToolset', () => {
       const toolset = new MCPToolset(stdioParams, [], undefined, {
         elicitationCallback: vi.fn(),
       });
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listTools: vi.fn().mockResolvedValue({tools: []}),
-            setRequestHandler: vi.fn(),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        clientStub({
+          listTools: vi.fn().mockResolvedValue({tools: []}),
+          setRequestHandler: vi.fn(),
+        }),
       );
 
       await toolset.getTools();
@@ -734,16 +719,14 @@ describe('MCPToolset', () => {
       const listed = new Promise<void>((resolve) => {
         releaseList = resolve;
       });
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: vi.fn().mockRejectedValue(new Error('close boom')),
-            listTools: vi.fn().mockImplementation(() => {
-              sessionOpened();
-              return listed.then(() => ({tools: []}));
-            }),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        clientStub({
+          close: vi.fn().mockRejectedValue(new Error('close boom')),
+          listTools: vi.fn().mockImplementation(() => {
+            sessionOpened();
+            return listed.then(() => ({tools: []}));
+          }),
+        }),
       );
 
       const toolset = new MCPToolset(stdioParams);
