@@ -66,6 +66,15 @@ export interface McpToolOptions extends McpAuthOptions {
    * {@link McpToolOptions.progressCallback} when both are set.
    */
   progressCallbackFactory?: McpProgressCallbackFactory;
+
+  /**
+   * The auth config to read the exchanged credential from, instead of building
+   * one from the fields above.
+   *
+   * A toolset passes its own instance to every tool it creates, so the
+   * credential the host exchanges on that one config reaches all of them.
+   */
+  authConfig?: AuthConfig;
 }
 
 /**
@@ -122,7 +131,7 @@ export class MCPTool extends BaseTool {
     this.mcpSessionManager = mcpSessionManager;
     this.originalName = originalName || mcpTool.name;
     this.options = options;
-    this.authConfig = createMcpAuthConfig(options);
+    this.authConfig = options.authConfig ?? createMcpAuthConfig(options);
   }
 
   override _getDeclaration(): FunctionDeclaration {

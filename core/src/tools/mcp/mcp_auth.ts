@@ -40,29 +40,17 @@ export interface McpAuthOptions {
 
   /** Extra headers to send with every MCP request. */
   headerProvider?: McpHeaderProvider;
-
-  /**
-   * An auth config to use instead of building one from the fields above.
-   *
-   * A toolset passes its own instance to every tool it creates, so the
-   * credential the host exchanges on that one config reaches all of them.
-   */
-  authConfig?: AuthConfig;
 }
 
 /**
  * Builds the auth config an MCP caller exposes to the host.
  *
  * @param options The configured auth options.
- * @return `options.authConfig` when one was shared, a config built from the
- *     scheme otherwise, or `undefined` when there is no scheme.
+ * @return The config, or `undefined` when no scheme was supplied.
  */
 export function createMcpAuthConfig(
   options: McpAuthOptions,
 ): AuthConfig | undefined {
-  if (options.authConfig) {
-    return options.authConfig;
-  }
   if (!options.authScheme) {
     return undefined;
   }
