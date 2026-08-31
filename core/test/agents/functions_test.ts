@@ -1219,6 +1219,17 @@ describe('getLongRunningFunctionCalls', () => {
     expect(result.has('call-1')).toBe(true);
     expect(result.has('call-2')).toBe(false);
   });
+
+  it('should not return the ID of a deferring call', () => {
+    const functionCalls = [{name: DEFERRING_TOOL_NAME, id: 'call-1'}];
+    const toolsDict: Record<string, BaseTool> = {
+      [DEFERRING_TOOL_NAME]: new DeferringTool(null),
+    };
+
+    const result = getLongRunningFunctionCalls(functionCalls, toolsDict);
+
+    expect(result.has('call-1')).toBe(false);
+  });
 });
 
 describe('mergeParallelFunctionResponseEvents', () => {

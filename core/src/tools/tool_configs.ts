@@ -7,7 +7,6 @@
 import {FunctionResponseScheduling} from '@google/genai';
 
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {logger} from '../utils/logger.js';
 
 import type {BaseToolParams} from './base_tool.js';
 
@@ -16,18 +15,9 @@ import type {BaseToolParams} from './base_tool.js';
  *
  * A config comes from outside the type system, so the shape is whatever the
  * tool's own constructor accepts. `BaseTool.fromConfig` validates the keys it
- * understands and ignores the rest.
+ * understands and forwards the rest.
  */
 export type ToolArgsConfig = Record<string, unknown>;
-
-/** The keys {@link toBaseToolParams} maps onto `BaseToolParams`. */
-const BASE_TOOL_PARAM_KEYS: ReadonlySet<string> = new Set([
-  'name',
-  'description',
-  'isLongRunning',
-  'customMetadata',
-  'responseScheduling',
-]);
 
 const SCHEDULING_VALUES: readonly string[] = Object.values(
   FunctionResponseScheduling,
@@ -61,24 +51,26 @@ function invalidToolConfig(
 }
 
 /**
- * Validates the keys of `BaseToolParams` in a tool config.
+ * Validates the keys of `BaseToolParams` in a tool config and returns the whole
+ * config as constructor params.
  *
- * A key this mapper does not recognize is a warning, not an error: a subclass
- * config legitimately carries keys only its own `fromConfig` override reads.
+ * Every key is forwarded, not just the recognized ones. A tool constructor
+ * takes a single options object and TypeScript is structurally typed, so a
+ * subclass that declares its own optional options reads them straight off the
+ * forwarded bag without overriding `fromConfig`. A key no constructor reads is
+ * inert. This mirrors the effect of adk-python's `from_config`, which populates
+ * a subclass's own constructor parameters from the same bag.
  *
  * @param config The args of the tool config.
- * @return The validated constructor params.
+ * @return The config, with the validated base keys overlaid.
  * @throws {InputValidationError} If a recognized key is missing or holds a
  *     value of the wrong type.
  */
-export function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
+export function toBaseToolParams(
+  config: ToolArgsConfig,
+): BaseToolParams & ToolArgsConfig {
   const {name, description, isLongRunning, customMetadata, responseScheduling} =
     config;
-  for (const key of Object.keys(config)) {
-    if (!BASE_TOOL_PARAM_KEYS.has(key)) {
-      logger.warn(`Unsupported parsing for tool config argument: ${key}.`);
-    }
-  }
   if (typeof name !== 'string') {
     throw invalidToolConfig('name', 'a string', name);
   }
@@ -107,6 +99,7 @@ export function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
     );
   }
   return {
+    ...config,
     name,
     description,
     isLongRunning,

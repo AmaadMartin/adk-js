@@ -6,14 +6,12 @@
 
 import {
   BaseTool,
-  getLogger,
+  BaseToolParams,
   InputValidationError,
-  Logger,
-  setLogger,
   ToolArgsConfig,
 } from '@google/adk';
 import {FunctionResponseScheduling} from '@google/genai';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 class PlainTool extends BaseTool {
   override async runAsync(): Promise<unknown> {
@@ -21,25 +19,36 @@ class PlainTool extends BaseTool {
   }
 }
 
-/** Collects the warnings a call emits, in place of the console logger. */
-class RecordingLogger implements Logger {
-  readonly warnings: string[] = [];
-
-  warn(...args: unknown[]): void {
-    this.warnings.push(args.join(' '));
-  }
-
-  log(): void {}
-  debug(): void {}
-  info(): void {}
-  error(): void {}
-  setLogLevel(): void {}
-}
-
 class OtherPlainTool extends BaseTool {
   override async runAsync(): Promise<unknown> {
     return {result: 'ok'};
   }
+}
+
+/**
+ * A tool with an optional option of its own. It relies on the inherited
+ * `fromConfig`, so it pins that the base seam forwards a key it does not
+ * recognize to the subclass constructor.
+ */
+class UnitsTool extends BaseTool {
+  readonly units: string;
+
+  constructor(params: BaseToolParams & {units?: string}) {
+    super(params);
+    this.units = params.units ?? 'metric';
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return {result: 'ok'};
+  }
+}
+
+/** Narrows a `fromConfig` result, whose declared type is `BaseTool`. */
+function asUnitsTool(tool: BaseTool): UnitsTool {
+  if (!(tool instanceof UnitsTool)) {
+    expect.fail(`expected a UnitsTool, got ${tool.name}`);
+  }
+  return tool;
 }
 
 /** A tool whose own config seam reads the config file path. */
@@ -237,7 +246,25 @@ describe('BaseTool.fromConfig', () => {
     );
   });
 
-  it('ignores a key the base implementation does not recognize', async () => {
+  it('forwards a key the base implementation does not recognize', async () => {
+    const tool = await UnitsTool.fromConfig(
+      {name: 'units_tool', description: 'A tool.', units: 'imperial'},
+      CONFIG_PATH,
+    );
+
+    expect(asUnitsTool(tool).units).toBe('imperial');
+  });
+
+  it('leaves a subclass option at its default when the config omits it', async () => {
+    const tool = await UnitsTool.fromConfig(
+      {name: 'units_tool', description: 'A tool.'},
+      CONFIG_PATH,
+    );
+
+    expect(asUnitsTool(tool).units).toBe('metric');
+  });
+
+  it('forwards a key no constructor reads without failing', async () => {
     const tool = await PlainTool.fromConfig(
       {name: 'plain_tool', description: 'A tool.', apiKeyEnvVar: 'MY_KEY'},
       CONFIG_PATH,
@@ -361,63 +388,5 @@ describe('BaseTool.fromConfig', () => {
     );
 
     expect(tool.description).toBe(`loaded from ${CONFIG_PATH}`);
-  });
-});
-
-describe('BaseTool.fromConfig unrecognized keys', () => {
-  const CONFIG_PATH = '/abs/path/agent.yaml';
-  let recording: RecordingLogger;
-  let previous: Logger;
-
-  beforeEach(() => {
-    previous = getLogger();
-    recording = new RecordingLogger();
-    setLogger(recording);
-  });
-
-  afterEach(() => {
-    setLogger(previous);
-  });
-
-  it('warns once for each key it does not recognize', async () => {
-    await PlainTool.fromConfig(
-      {
-        name: 'plain_tool',
-        description: 'A tool.',
-        is_long_running: true,
-        retries: 3,
-      },
-      CONFIG_PATH,
-    );
-
-    expect(recording.warnings).toEqual([
-      'Unsupported parsing for tool config argument: is_long_running.',
-      'Unsupported parsing for tool config argument: retries.',
-    ]);
-  });
-
-  it('does not warn when it recognizes every key', async () => {
-    await PlainTool.fromConfig(
-      {
-        name: 'plain_tool',
-        description: 'A tool.',
-        isLongRunning: true,
-        customMetadata: {'my.vendor.key': 'v'},
-        responseScheduling: FunctionResponseScheduling.SILENT,
-      },
-      CONFIG_PATH,
-    );
-
-    expect(recording.warnings).toEqual([]);
-  });
-
-  it('warns before it rejects a bad key, so both problems are visible', async () => {
-    await expect(
-      PlainTool.fromConfig({description: 'A tool.', retries: 3}, CONFIG_PATH),
-    ).rejects.toBeInstanceOf(InputValidationError);
-
-    expect(recording.warnings).toEqual([
-      'Unsupported parsing for tool config argument: retries.',
-    ]);
   });
 });
