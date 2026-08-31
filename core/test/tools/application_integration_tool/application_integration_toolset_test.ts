@@ -60,6 +60,8 @@ const CONNECTION_SPEC: OpenAPIV3.Document = {
   paths: {},
 };
 
+const CONNECTION = 'test-connection';
+
 const CONNECTION_DETAILS: ConnectionDetails = {
   serviceName: 'test-service',
   host: 'test.host',
@@ -106,13 +108,9 @@ const MISSING_PARAMS_ERROR =
  * separator. The wording, including `DONOT`, reaches the model, so it is
  * byte-identical to adk-python v0.2.0.
  */
-function connectionInstructions(
-  instructions: string,
-  details: ConnectionDetails,
-  connection: string,
-): string {
-  const name = `projects/${PROJECT}/locations/${LOCATION}/connections/${connection}`;
-  return `${instructions}ALWAYS use serviceName = ${details.serviceName}, host = ${details.host} and the connection name = ${name} when using this tool. DONOT ask the user for these values as you already have those.`;
+function connectionInstructions(instructions: string): string {
+  const name = `projects/${PROJECT}/locations/${LOCATION}/connections/${CONNECTION}`;
+  return `${instructions}ALWAYS use serviceName = ${CONNECTION_DETAILS.serviceName}, host = ${CONNECTION_DETAILS.host} and the connection name = ${name} when using this tool. DONOT ask the user for these values as you already have those.`;
 }
 
 /** A concrete tool, so the mocked `OpenAPIToolset` returns a real `BaseTool`. */
@@ -177,7 +175,7 @@ describe('ApplicationIntegrationToolset', () => {
     const toolset = new ApplicationIntegrationToolset({
       project: PROJECT,
       location: LOCATION,
-      connection: 'test-connection',
+      connection: CONNECTION,
       entityOperations: ['list', 'get'],
       toolName: 'My Connection Tool',
       toolInstructions,
@@ -190,14 +188,14 @@ describe('ApplicationIntegrationToolset', () => {
     expect(vi.mocked(IntegrationClient)).toHaveBeenCalledWith({
       project: PROJECT,
       location: LOCATION,
-      connection: 'test-connection',
+      connection: CONNECTION,
       entityOperations: ['list', 'get'],
     });
     expect(vi.mocked(ConnectionsClient)).toHaveBeenCalledOnce();
     expect(vi.mocked(ConnectionsClient)).toHaveBeenCalledWith({
       project: PROJECT,
       location: LOCATION,
-      connection: 'test-connection',
+      connection: CONNECTION,
     });
     expect(connectionsClient.getConnectionDetails).toHaveBeenCalledOnce();
     expect(
@@ -205,11 +203,7 @@ describe('ApplicationIntegrationToolset', () => {
     ).toHaveBeenCalledOnce();
     expect(integrationClient.getOpenApiSpecForConnection).toHaveBeenCalledWith(
       'My Connection Tool',
-      connectionInstructions(
-        toolInstructions,
-        CONNECTION_DETAILS,
-        'test-connection',
-      ),
+      connectionInstructions(toolInstructions),
     );
     expect(vi.mocked(OpenAPIToolset)).toHaveBeenCalledOnce();
     expect(tools).toHaveLength(1);
@@ -222,7 +216,7 @@ describe('ApplicationIntegrationToolset', () => {
     const toolset = new ApplicationIntegrationToolset({
       project: PROJECT,
       location: LOCATION,
-      connection: 'test-connection',
+      connection: CONNECTION,
       actions: ['create', 'delete'],
       toolName: 'My Actions Tool',
       toolInstructions,
@@ -235,14 +229,14 @@ describe('ApplicationIntegrationToolset', () => {
     expect(vi.mocked(IntegrationClient)).toHaveBeenCalledWith({
       project: PROJECT,
       location: LOCATION,
-      connection: 'test-connection',
+      connection: CONNECTION,
       actions: ['create', 'delete'],
     });
     expect(vi.mocked(ConnectionsClient)).toHaveBeenCalledOnce();
     expect(vi.mocked(ConnectionsClient)).toHaveBeenCalledWith({
       project: PROJECT,
       location: LOCATION,
-      connection: 'test-connection',
+      connection: CONNECTION,
     });
     expect(connectionsClient.getConnectionDetails).toHaveBeenCalledOnce();
     expect(
@@ -250,11 +244,7 @@ describe('ApplicationIntegrationToolset', () => {
     ).toHaveBeenCalledOnce();
     expect(integrationClient.getOpenApiSpecForConnection).toHaveBeenCalledWith(
       'My Actions Tool',
-      connectionInstructions(
-        toolInstructions,
-        CONNECTION_DETAILS,
-        'test-connection',
-      ),
+      connectionInstructions(toolInstructions),
     );
     expect(vi.mocked(OpenAPIToolset)).toHaveBeenCalledOnce();
     expect(tools).toHaveLength(1);
@@ -366,7 +356,7 @@ describe('ApplicationIntegrationToolset', () => {
     const toolset = new ApplicationIntegrationToolset({
       project: PROJECT,
       location: LOCATION,
-      connection: 'test-connection',
+      connection: CONNECTION,
       entityOperations: ['list'],
       toolName: 'My Connection Tool',
       toolInstructions: 'Use this tool.',
