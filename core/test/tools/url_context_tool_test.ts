@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Context, LlmRequest} from '@google/adk';
+import type {LlmRequest} from '@google/adk';
 import {URL_CONTEXT, UrlContextTool} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -132,11 +132,10 @@ describe('UrlContextTool', () => {
     });
   });
 
-  it('runAsync returns resolved promise', async () => {
+  it('runAsync tells the model the tool is not callable', async () => {
     const tool = new UrlContextTool();
-    await expect(
-      tool.runAsync({args: {}, toolContext: {} as Context}),
-    ).resolves.toBeUndefined();
+    const {error} = (await tool.runAsync()) as {error: string};
+    expect(error).toContain('url_context runs inside the model');
   });
 
   it('has a global instance URL_CONTEXT', () => {

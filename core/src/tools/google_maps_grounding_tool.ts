@@ -12,8 +12,8 @@ import {
   isGeminiModelIdCheckDisabled,
 } from '../utils/model_name.js';
 
-import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
-import {BaseTool} from './base_tool.js';
+import type {ToolProcessLlmRequest} from './base_tool.js';
+import {BuiltInTool} from './built_in_tool.js';
 
 /**
  * Applies Google Maps grounding to the LLM request if supported.
@@ -53,18 +53,12 @@ export function applyGoogleMapsGrounding(llmRequest: LlmRequest): void {
  * This tool operates internally within the model and does not require or
  * perform local code execution.
  */
-export class GoogleMapsGroundingTool extends BaseTool {
+export class GoogleMapsGroundingTool extends BuiltInTool {
   constructor() {
     super({name: 'google_maps', description: 'Google Maps Grounding Tool'});
   }
 
-  override runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
-    // This is a built-in tool on server side, it's triggered by setting the
-    // corresponding request parameters.
-    return Promise.resolve();
-  }
-
-  override async processLlmRequest({
+  protected override async applyBuiltInConfig({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
     applyGoogleMapsGrounding(llmRequest);

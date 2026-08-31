@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Context, LlmRequest} from '@google/adk';
+import type {LlmRequest} from '@google/adk';
 import {GOOGLE_MAPS_GROUNDING, GoogleMapsGroundingTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -104,11 +104,10 @@ describe('GoogleMapsGroundingTool', () => {
       }
     });
 
-    it('runAsync returns resolved promise', async () => {
+    it('runAsync tells the model the tool is not callable', async () => {
       const tool = new GoogleMapsGroundingTool();
-      await expect(
-        tool.runAsync({args: {}, toolContext: {} as Context}),
-      ).resolves.toBeUndefined();
+      const {error} = (await tool.runAsync()) as {error: string};
+      expect(error).toContain('google_maps runs inside the model');
     });
   });
 

@@ -147,11 +147,10 @@ describe('VertexAiSearchTool', () => {
     );
   });
 
-  it('runAsync returns resolved promise', async () => {
+  it('runAsync tells the model the tool is not callable', async () => {
     const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
-    await expect(
-      tool.runAsync({args: {}, toolContext: {} as Context}),
-    ).resolves.toBeUndefined();
+    const {error} = (await tool.runAsync()) as {error: string};
+    expect(error).toContain('vertex_ai_search runs inside the model');
   });
 
   describe('with env override', () => {

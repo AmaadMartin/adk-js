@@ -12,8 +12,8 @@ import {
   isGeminiModelIdCheckDisabled,
 } from '../utils/model_name.js';
 
-import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
-import {BaseTool} from './base_tool.js';
+import type {ToolProcessLlmRequest} from './base_tool.js';
+import {BuiltInTool} from './built_in_tool.js';
 
 /**
  * Appends the Enterprise Web Search built-in tool to the LLM request when the
@@ -58,7 +58,7 @@ export function applyEnterpriseWebSearch(llmRequest: LlmRequest): void {
  * This tool operates internally within the model and does not require or
  * perform local code execution.
  */
-export class EnterpriseWebSearchTool extends BaseTool {
+export class EnterpriseWebSearchTool extends BuiltInTool {
   constructor() {
     super({
       name: 'enterprise_web_search',
@@ -66,13 +66,7 @@ export class EnterpriseWebSearchTool extends BaseTool {
     });
   }
 
-  override runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
-    // This is a built-in tool on server side, it's triggered by setting the
-    // corresponding request parameters.
-    return Promise.resolve();
-  }
-
-  override async processLlmRequest({
+  protected override async applyBuiltInConfig({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
     applyEnterpriseWebSearch(llmRequest);

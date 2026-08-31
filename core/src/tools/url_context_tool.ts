@@ -12,8 +12,8 @@ import {
   isGeminiModelIdCheckDisabled,
 } from '../utils/model_name.js';
 
-import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
-import {BaseTool} from './base_tool.js';
+import type {ToolProcessLlmRequest} from './base_tool.js';
+import {BuiltInTool} from './built_in_tool.js';
 
 /**
  * A built-in tool that allows Gemini 2+ models to retrieve content from URLs
@@ -22,18 +22,12 @@ import {BaseTool} from './base_tool.js';
  * This tool operates internally within the model and does not require or
  * perform local code execution.
  */
-export class UrlContextTool extends BaseTool {
+export class UrlContextTool extends BuiltInTool {
   constructor() {
     super({name: 'url_context', description: 'URL Context Tool'});
   }
 
-  override runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
-    // This is a built-in tool on server side, it's triggered by setting the
-    // corresponding request parameters.
-    return Promise.resolve();
-  }
-
-  override async processLlmRequest({
+  protected override async applyBuiltInConfig({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
     if (!llmRequest.model) {

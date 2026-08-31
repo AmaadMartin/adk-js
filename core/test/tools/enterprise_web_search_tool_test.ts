@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Context, LlmRequest} from '@google/adk';
+import type {LlmRequest} from '@google/adk';
 import {ENTERPRISE_WEB_SEARCH, EnterpriseWebSearchTool} from '@google/adk';
 import type {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
@@ -131,11 +131,10 @@ describe('EnterpriseWebSearchTool', () => {
       }
     });
 
-    it('runAsync returns resolved promise', async () => {
+    it('runAsync tells the model the tool is not callable', async () => {
       const tool = new EnterpriseWebSearchTool();
-      await expect(
-        tool.runAsync({args: {}, toolContext: {} as Context}),
-      ).resolves.toBeUndefined();
+      const {error} = (await tool.runAsync()) as {error: string};
+      expect(error).toContain('enterprise_web_search runs inside the model');
     });
   });
 
