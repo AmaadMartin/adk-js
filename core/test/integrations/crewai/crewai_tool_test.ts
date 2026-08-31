@@ -8,7 +8,9 @@ import {
   Context,
   createSession,
   CrewaiTool,
+  CrewaiToolConfig,
   CrewaiToolLike,
+  CrewaiToolOptions,
   InvocationContext,
   isBaseTool,
   isFunctionTool,
@@ -350,6 +352,30 @@ describe('CrewaiTool', () => {
           toolContext: createContext(),
         }),
       ).rejects.toThrow("Error in tool 'search': upstream failure");
+    });
+  });
+
+  describe('config', () => {
+    it('accepts a CrewaiToolConfig', () => {
+      const {tool} = createEchoTool();
+      const config: CrewaiToolConfig = {
+        tool,
+        name: 'configured_tool',
+        description: 'Configured tool',
+      };
+
+      const crewaiTool = new CrewaiTool(config);
+
+      expect(crewaiTool.name).toBe('configured_tool');
+      expect(crewaiTool.description).toBe('Configured tool');
+    });
+
+    it('accepts the CrewaiToolOptions alias', () => {
+      const {tool} = createEchoTool();
+      const options: CrewaiToolOptions = {tool, name: 'aliased_tool'};
+      const config: CrewaiToolConfig = options;
+
+      expect(new CrewaiTool(config).name).toBe('aliased_tool');
     });
   });
 });

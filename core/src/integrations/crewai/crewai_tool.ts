@@ -42,8 +42,14 @@ export interface CrewaiToolLike {
   run?(args: unknown, context?: Context): unknown;
 }
 
-/** Options for {@link CrewaiTool}. */
-export interface CrewaiToolOptions {
+/**
+ * The configuration of a {@link CrewaiTool}.
+ *
+ * adk-python's `CrewaiToolConfig` names the wrapped tool by a fully-qualified
+ * import path, because an agent config file cannot hold an object. adk-js has
+ * no such loader, so the tool is held directly.
+ */
+export interface CrewaiToolConfig {
   /** The CrewAI tool to wrap. */
   tool: CrewaiToolLike;
   /** Overrides the wrapped tool's name in the model-facing declaration. */
@@ -51,6 +57,12 @@ export interface CrewaiToolOptions {
   /** Overrides the wrapped tool's description. */
   description?: string;
 }
+
+/**
+ * Alias of {@link CrewaiToolConfig}, in the `*Options` spelling the other
+ * integration tools use.
+ */
+export type CrewaiToolOptions = CrewaiToolConfig;
 
 /** The wrapped tool's entry point, bound to the tool. */
 type CrewaiEntryPoint = (args: unknown, context?: Context) => unknown;
@@ -76,7 +88,7 @@ function resolveEntryPoint(tool: CrewaiToolLike): CrewaiEntryPoint {
   return (args, context) => run.call(tool, args, context);
 }
 
-function resolveName(options: CrewaiToolOptions): string {
+function resolveName(options: CrewaiToolConfig): string {
   if (options.name) {
     return options.name;
   }
@@ -173,7 +185,7 @@ function missingArgsError(name: string, missing: readonly string[]): string {
 export class CrewaiTool extends FunctionTool<Schema> {
   private readonly requiredArgs: readonly string[];
 
-  constructor(options: CrewaiToolOptions) {
+  constructor(options: CrewaiToolConfig) {
     // Resolved first so a value that is not a CrewAI tool reports the missing
     // `run` rather than a missing name.
     const entryPoint = resolveEntryPoint(options.tool);
