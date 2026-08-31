@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../utils/experimental.js';
 import {
   DiscoveryDocument,
@@ -21,10 +21,25 @@ const SCHEMA_REF_PREFIX = '#/components/schemas/';
 
 export type ConvertedSchema = OpenAPIV3.SchemaObject & {$ref?: string};
 
-const HTTP_METHODS: readonly string[] = Object.values(OpenAPIV3.HttpMethods);
+/**
+ * The OpenAPI 3.0 verbs, as literals rather than `Object.values(HttpMethods)`.
+ * `openapi-types` is a devDependency, so reading its enum at runtime would emit
+ * a `require` and break every consumer of the published package. The element
+ * type still comes from the enum, so a typo here fails the build.
+ */
+const HTTP_METHODS: ReadonlyArray<`${OpenAPIV3.HttpMethods}`> = [
+  'get',
+  'put',
+  'post',
+  'delete',
+  'options',
+  'head',
+  'patch',
+  'trace',
+];
 
 function isHttpMethod(value: string): value is OpenAPIV3.HttpMethods {
-  return HTTP_METHODS.includes(value);
+  return HTTP_METHODS.some((method) => method === value);
 }
 
 function toSchemaRef(ref: string): string {
