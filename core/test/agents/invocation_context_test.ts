@@ -245,28 +245,6 @@ describe('InvocationContext.setAgentState', () => {
     expect(context.agentStates).toEqual({agent1: {step: 'one'}});
     expect(context.endOfAgents).toEqual({agent1: false});
   });
-
-  it('drops both entries when neither is given, so the agent can re-run', () => {
-    const context = makeContext();
-    context.setAgentState('agent1', {agentState: {step: 'one'}});
-
-    context.setAgentState('agent1');
-
-    expect(context.agentStates).toEqual({});
-    expect(context.endOfAgents).toEqual({});
-  });
-
-  it('ignores the checkpoint when the agent is marked finished', () => {
-    const context = makeContext();
-
-    context.setAgentState('agent1', {
-      agentState: {step: 'one'},
-      endOfAgent: true,
-    });
-
-    expect(context.agentStates).toEqual({});
-    expect(context.endOfAgents).toEqual({agent1: true});
-  });
 });
 
 describe('InvocationContext agent-state sharing', () => {

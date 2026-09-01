@@ -83,14 +83,21 @@ export interface InvocationContextParams {
 export type AgentState = Record<string, unknown>;
 
 /**
- * The checkpoint {@link InvocationContext.setAgentState} records for one agent.
+ * The checkpoint {@link InvocationContext.setAgentState} records for one agent:
+ * where it got to, or that it has finished. The two are exclusive, so a caller
+ * cannot ask for a state that would be discarded.
  */
-export interface AgentStateUpdate {
-  /** The agent's state. Ignored when `endOfAgent` is true. */
-  agentState?: AgentState;
-  /** Whether the agent has finished running in this invocation. */
-  endOfAgent?: boolean;
-}
+export type AgentStateUpdate =
+  | {
+      /** The agent's state at this point in the invocation. */
+      agentState: AgentState;
+      endOfAgent?: false;
+    }
+  | {
+      agentState?: undefined;
+      /** The agent has finished running in this invocation. */
+      endOfAgent: true;
+    };
 
 /**
  * A container to keep track of the cost of invocation.
@@ -373,22 +380,18 @@ export class InvocationContext {
    * Records the state of one agent in this invocation.
    *
    * - `endOfAgent: true` marks the agent finished and drops its checkpoint.
-   * - Otherwise an `agentState` is recorded, and the finished flag is cleared.
-   * - Otherwise both entries are removed, letting the agent run again.
+   * - An `agentState` is recorded, and the finished flag is cleared.
    *
    * @param agentName The name of the agent.
    * @param update The checkpoint to record.
    */
-  setAgentState(agentName: string, update: AgentStateUpdate = {}): void {
+  setAgentState(agentName: string, update: AgentStateUpdate): void {
     if (update.endOfAgent) {
       this.endOfAgents[agentName] = true;
       delete this.agentStates[agentName];
-    } else if (update.agentState !== undefined) {
+    } else {
       this.agentStates[agentName] = update.agentState;
       this.endOfAgents[agentName] = false;
-    } else {
-      delete this.endOfAgents[agentName];
-      delete this.agentStates[agentName];
     }
   }
 

@@ -82,15 +82,19 @@ export class ParallelAgent extends BaseAgent {
 
     let escalated = false;
     let paused = false;
-    for await (const event of mergeAgentRuns(agentRuns, subAgentNames)) {
+    // Breaking out closes the merge, which closes every branch still running.
+    for await (const event of mergeAgentRuns(agentRuns)) {
       if (context.abortSignal?.aborted) {
         return;
       }
 
       yield event;
 
-      escalated ||= asksThisAgentToExit(event, subAgentNames);
       paused ||= context.shouldPauseInvocation(event);
+      if (asksThisAgentToExit(event, subAgentNames)) {
+        escalated = true;
+        break;
+      }
     }
 
     if (paused) {
@@ -157,18 +161,6 @@ function asksThisAgentToExit(
   );
 }
 
-/** Asks branch `index` for its next event and records the pending request. */
-function requestNextEvent(
-  agentRuns: readonly AgentRun[],
-  pending: Map<number, Promise<BranchEvent>>,
-  index: number,
-): void {
-  pending.set(
-    index,
-    agentRuns[index].next().then((result) => ({index, result})),
-  );
-}
-
 /**
  * Closes every branch, so each sub-agent runs its own cleanup.
  *
@@ -191,23 +183,24 @@ async function closeAgentRuns(agentRuns: readonly AgentRun[]): Promise<void> {
  *
  * A branch is asked for its next event only after the consumer has processed
  * the previous one, so at most one event per branch is ever in flight. The
- * merge stops at the first branch failure and at an event that asks this agent
- * to exit, and closes every branch on the way out.
+ * merge stops at the first branch failure, and closes every branch on the way
+ * out — including when the consumer stops reading.
  *
  * @param agentRuns The generator driving each sub-agent.
- * @param subAgentNames Names of the parallel agent's direct sub-agents.
  *
  * @yield The next event from the merged generator.
  */
 async function* mergeAgentRuns(
   agentRuns: readonly AgentRun[],
-  subAgentNames: ReadonlySet<string>,
 ): AsyncGenerator<Event, void, void> {
   const pending = new Map<number, Promise<BranchEvent>>();
 
   try {
     for (let index = 0; index < agentRuns.length; index++) {
-      requestNextEvent(agentRuns, pending, index);
+      pending.set(
+        index,
+        agentRuns[index].next().then((result) => ({index, result})),
+      );
     }
 
     while (pending.size > 0) {
@@ -223,10 +216,10 @@ async function* mergeAgentRuns(
 
       yield result.value;
 
-      if (asksThisAgentToExit(result.value, subAgentNames)) {
-        return;
-      }
-      requestNextEvent(agentRuns, pending, index);
+      pending.set(
+        index,
+        agentRuns[index].next().then((result) => ({index, result})),
+      );
     }
   } finally {
     await closeAgentRuns(agentRuns);
