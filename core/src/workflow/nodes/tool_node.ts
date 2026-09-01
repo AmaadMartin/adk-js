@@ -6,7 +6,8 @@
 
 import type {FunctionCall} from '@google/genai';
 import {handleFunctionCallList} from '../../agents/functions.js';
-import {Event, getFunctionResponses} from '../../events/event.js';
+import {Event} from '../../events/event.js';
+import {getFunctionResponses} from '../../models/llm_response.js';
 import {BaseTool} from '../../tools/base_tool.js';
 import {BaseNode, BaseNodeConfig, isContent} from '../base_node.js';
 import {NodeContext} from '../node_context.js';

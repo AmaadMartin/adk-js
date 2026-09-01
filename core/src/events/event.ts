@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, FunctionResponse} from '@google/genai';
-
-import {LlmResponse} from '../models/llm_response.js';
+import {
+  getFunctionCalls,
+  getFunctionResponses,
+  LlmResponse,
+} from '../models/llm_response.js';
 
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
@@ -203,22 +205,6 @@ export function isFinalResponse(event: Event) {
   );
 }
 
-/**
- * Returns the function calls in the event.
- */
-export function getFunctionCalls(event: Event): FunctionCall[] {
-  const funcCalls = [];
-  if (event.content && event.content.parts) {
-    for (const part of event.content.parts) {
-      if (part.functionCall) {
-        funcCalls.push(part.functionCall);
-      }
-    }
-  }
-
-  return funcCalls;
-}
-
 export const AF_FUNCTION_CALL_ID_PREFIX = 'adk-';
 
 export function generateClientFunctionCallId(): string {
@@ -237,22 +223,6 @@ export function populateClientFunctionCallId(modelResponseEvent: Event): void {
       functionCall.id = generateClientFunctionCallId();
     }
   }
-}
-
-/**
- * Returns the function responses in the event.
- */
-export function getFunctionResponses(event: Event): FunctionResponse[] {
-  const funcResponses = [];
-  if (event.content && event.content.parts) {
-    for (const part of event.content.parts) {
-      if (part.functionResponse) {
-        funcResponses.push(part.functionResponse);
-      }
-    }
-  }
-
-  return funcResponses;
 }
 
 /**

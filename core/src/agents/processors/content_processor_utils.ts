@@ -10,12 +10,11 @@ import {
   CompactedEvent,
   isCompactedEvent,
 } from '../../events/compacted_event.js';
+import {createEvent, Event} from '../../events/event.js';
 import {
-  createEvent,
-  Event,
   getFunctionCalls,
   getFunctionResponses,
-} from '../../events/event.js';
+} from '../../models/llm_response.js';
 import {isSegmentPrefix} from '../../utils/branch_trie.js';
 
 import {

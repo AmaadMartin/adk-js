@@ -10,12 +10,11 @@ import {
   WorkflowInstructionScope,
 } from '../agents/invocation_context.js';
 import {LlmAgent} from '../agents/llm_agent.js';
+import {createEvent, Event} from '../events/event.js';
 import {
-  createEvent,
-  Event,
   getFunctionCalls,
   getFunctionResponses,
-} from '../events/event.js';
+} from '../models/llm_response.js';
 import {
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,

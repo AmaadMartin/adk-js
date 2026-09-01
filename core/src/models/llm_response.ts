@@ -8,6 +8,8 @@ import {
   CitationMetadata,
   Content,
   FinishReason,
+  FunctionCall,
+  FunctionResponse,
   GenerateContentResponse,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
@@ -112,6 +114,42 @@ export interface LlmResponse {
 
   /** The session ID of the Live session. */
   liveSessionId?: string;
+}
+
+/**
+ * Returns the function calls in the response, in the order the model emitted
+ * them.
+ */
+export function getFunctionCalls(response: LlmResponse): FunctionCall[] {
+  const funcCalls = [];
+  if (response.content && response.content.parts) {
+    for (const part of response.content.parts) {
+      if (part.functionCall) {
+        funcCalls.push(part.functionCall);
+      }
+    }
+  }
+
+  return funcCalls;
+}
+
+/**
+ * Returns the function responses in the response, in the order the model
+ * emitted them.
+ */
+export function getFunctionResponses(
+  response: LlmResponse,
+): FunctionResponse[] {
+  const funcResponses = [];
+  if (response.content && response.content.parts) {
+    for (const part of response.content.parts) {
+      if (part.functionResponse) {
+        funcResponses.push(part.functionResponse);
+      }
+    }
+  }
+
+  return funcResponses;
 }
 
 /**
