@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BasePlanner, isBasePlanner} from '@google/adk';
+import {BasePlanner, PlanReActPlanner, isBasePlanner} from '@google/adk';
 import {Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
@@ -20,6 +20,10 @@ class NoopPlanner extends BasePlanner {
 }
 
 describe('isBasePlanner', () => {
+  it('accepts a PlanReActPlanner', () => {
+    expect(isBasePlanner(new PlanReActPlanner())).toBe(true);
+  });
+
   it('accepts any subclass, so the brand is inherited', () => {
     expect(isBasePlanner(new NoopPlanner())).toBe(true);
   });
