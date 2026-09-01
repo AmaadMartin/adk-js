@@ -62,12 +62,7 @@ export {
   INTERACTIONS_REQUEST_PROCESSOR,
   InteractionsRequestProcessor,
 } from './agents/processors/interactions_request_processor.js';
-export {
-  SingleFlow,
-  createSingleFlowRequestProcessors,
-  createSingleFlowResponseProcessors,
-} from './agents/processors/single_flow.js';
-export type {SingleFlowOptions} from './agents/processors/single_flow.js';
+export {SingleFlow} from './agents/processors/single_flow.js';
 export {ReadonlyContext} from './agents/readonly_context.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';

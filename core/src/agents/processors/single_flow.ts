@@ -25,69 +25,44 @@ import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './request_input_llm_request_p
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './tool_filter_request_processor.js';
 
 /**
- * Options for building the standard single-agent processor pipeline.
- */
-export interface SingleFlowOptions {
-  /**
-   * Compactors to evaluate before the conversation history is assembled. When
-   * empty or omitted, no compaction processor is inserted.
-   */
-  contextCompactors?: BaseContextCompactor[];
-}
-
-/**
- * Builds the ordered request processors that a single-agent turn runs.
- *
- * @param options - Pipeline options.
- * @returns A fresh array; the caller may append to it.
- */
-export function createSingleFlowRequestProcessors(
-  options: SingleFlowOptions = {},
-): BaseLlmRequestProcessor[] {
-  const compactors = options.contextCompactors ?? [];
-  return [
-    BASIC_LLM_REQUEST_PROCESSOR,
-    AUTH_PREPROCESSOR,
-    IDENTITY_LLM_REQUEST_PROCESSOR,
-    INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
-    REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
-    REQUEST_INPUT_LLM_REQUEST_PROCESSOR,
-    // Read the Interactions chain id before contents. A chained request needs
-    // only the current turn, because the service keeps the earlier turns.
-    INTERACTIONS_REQUEST_PROCESSOR,
-    // Compaction runs before contents so the compacted events reach the model.
-    ...(compactors.length > 0
-      ? [new ContextCompactorRequestProcessor(compactors)]
-      : []),
-    CONTENT_REQUEST_PROCESSOR,
-    // Code execution runs after contents because it rewrites the contents to
-    // optimize data files.
-    CODE_EXECUTION_REQUEST_PROCESSOR,
-    TOOL_FILTER_REQUEST_PROCESSOR,
-  ];
-}
-
-/**
- * Builds the response processors that a single-agent turn runs.
- *
- * @returns A fresh array; the caller may append to it.
- */
-export function createSingleFlowResponseProcessors(): BaseLlmResponseProcessor[] {
-  return [CODE_EXECUTION_RESPONSE_PROCESSOR];
-}
-
-/**
- * The standard flow for an agent that considers only itself and its tools.
+ * The standard processor pipeline for an agent that considers only itself and
+ * its tools.
  *
  * Sub-agent transfer is not part of it. `LlmAgent` appends the agent-transfer
- * processor separately when the agent can transfer.
+ * processor separately when the agent can transfer. Both lists are fresh
+ * arrays, so a caller that appends to them affects no other agent.
  */
 export class SingleFlow {
   readonly requestProcessors: BaseLlmRequestProcessor[];
   readonly responseProcessors: BaseLlmResponseProcessor[];
 
-  constructor(options: SingleFlowOptions = {}) {
-    this.requestProcessors = createSingleFlowRequestProcessors(options);
-    this.responseProcessors = createSingleFlowResponseProcessors();
+  /**
+   * @param contextCompactors - Compactors to evaluate before the conversation
+   *   history is assembled. When empty, no compaction processor is inserted.
+   */
+  constructor(contextCompactors: BaseContextCompactor[] = []) {
+    this.requestProcessors = [
+      BASIC_LLM_REQUEST_PROCESSOR,
+      AUTH_PREPROCESSOR,
+      IDENTITY_LLM_REQUEST_PROCESSOR,
+      INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
+      REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
+      REQUEST_INPUT_LLM_REQUEST_PROCESSOR,
+      // Read the Interactions chain id before contents. A chained request
+      // needs only the current turn, because the service keeps the earlier
+      // turns.
+      INTERACTIONS_REQUEST_PROCESSOR,
+      // Compaction runs before contents so the compacted events reach the
+      // model.
+      ...(contextCompactors.length > 0
+        ? [new ContextCompactorRequestProcessor(contextCompactors)]
+        : []),
+      CONTENT_REQUEST_PROCESSOR,
+      // Code execution runs after contents because it rewrites the contents to
+      // optimize data files.
+      CODE_EXECUTION_REQUEST_PROCESSOR,
+      TOOL_FILTER_REQUEST_PROCESSOR,
+    ];
+    this.responseProcessors = [CODE_EXECUTION_RESPONSE_PROCESSOR];
   }
 }

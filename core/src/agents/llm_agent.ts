@@ -69,10 +69,7 @@ import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
-import {
-  createSingleFlowRequestProcessors,
-  createSingleFlowResponseProcessors,
-} from './processors/single_flow.js';
+import {SingleFlow} from './processors/single_flow.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
 
@@ -530,14 +527,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
 
+    const singleFlow = new SingleFlow(config.contextCompactors);
     this.requestProcessors =
-      config.requestProcessors ??
-      createSingleFlowRequestProcessors({
-        contextCompactors: config.contextCompactors,
-      });
-
+      config.requestProcessors ?? singleFlow.requestProcessors;
     this.responseProcessors =
-      config.responseProcessors ?? createSingleFlowResponseProcessors();
+      config.responseProcessors ?? singleFlow.responseProcessors;
 
     // Preserve the agent transfer behavior.
     const agentTransferDisabled =
