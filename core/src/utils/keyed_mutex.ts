@@ -59,7 +59,8 @@ export class KeyedMutex {
   }
 
   private releaseKey(key: string): void {
-    const remaining = (this.waiters.get(key) ?? 0) - 1;
+    // `runExclusive` counts the caller in before it can reach its `finally`.
+    const remaining = this.waiters.get(key)! - 1;
     if (remaining > 0) {
       this.waiters.set(key, remaining);
       return;

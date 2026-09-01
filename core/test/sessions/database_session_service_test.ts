@@ -1139,11 +1139,91 @@ describe('DatabaseSessionService typed errors', () => {
   });
 
   it('re-raises a write failure that is not a duplicate session', async () => {
-    await orm.em.getConnection().execute('drop table sessions');
+    await orm.em
+      .getConnection()
+      .execute(
+        'create trigger block_insert before insert on app_states begin ' +
+          "select raise(abort, 'blocked by the test'); end",
+      );
 
     await expect(
       service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
-    ).rejects.toThrow(/sessions/);
+    ).rejects.toThrow(/blocked by the test/);
+  });
+});
+
+describe('DatabaseSessionService appendEvent shapes', () => {
+  let service: DatabaseSessionService;
+  const appName = 'app';
+  const userId = 'u1';
+  const sessionId = 's1';
+
+  beforeEach(async () => {
+    service = new DatabaseSessionService('sqlite://:memory:');
+    await service.createSession({appName, userId, sessionId});
+  });
+
+  afterEach(async () => {
+    await service.close();
+  });
+
+  async function load(): Promise<Session> {
+    const session = await service.getSession({appName, userId, sessionId});
+    if (!session) {
+      expect.fail(`session ${sessionId} was not stored`);
+    }
+    return session;
+  }
+
+  it('stores nothing for a partial event', async () => {
+    const session = await load();
+
+    const event = createEvent({partial: true});
+    await expect(service.appendEvent({session, event})).resolves.toBe(event);
+
+    const reloaded = await load();
+    expect(reloaded.events).toHaveLength(0);
+    expect(session.events).toHaveLength(0);
+  });
+
+  it('accepts an event whose actions carry no state delta', async () => {
+    const session = await load();
+
+    await service.appendEvent({
+      session,
+      event: createEvent({actions: {stateDelta: undefined}}),
+    });
+
+    const reloaded = await load();
+    expect(reloaded.events).toHaveLength(1);
+  });
+
+  it('overwrites a stored event that is appended again', async () => {
+    const session = await load();
+    const event = createEvent({
+      timestamp: 1_700_000_000_000,
+      actions: createEventActions({stateDelta: {round: 1}}),
+    });
+    await service.appendEvent({session, event});
+
+    event.timestamp = 1_700_000_000_500;
+    event.actions = createEventActions({stateDelta: {round: 2}});
+    await service.appendEvent({session, event});
+
+    const reloaded = await load();
+    expect(reloaded.events).toHaveLength(1);
+    expect(reloaded.events[0].actions?.stateDelta?.['round']).toBe(2);
+    expect(reloaded.state['round']).toBe(2);
+  });
+
+  it('generates a session id when the caller supplies none', async () => {
+    const created = await service.createSession({appName, userId});
+
+    expect(created.id).toEqual(expect.any(String));
+    expect(created.id).not.toBe('');
+    await expect(
+      service.getSession({appName, userId, sessionId: created.id}),
+    ).resolves.toBeDefined();
   });
 });
 

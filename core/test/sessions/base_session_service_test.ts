@@ -97,6 +97,17 @@ describe('applyTempState', () => {
   it('does nothing when the event carries no state delta', () => {
     const session = createSession({id: 's1', appName: 'app'});
 
+    applyTempState({
+      session,
+      event: createEvent({actions: {stateDelta: undefined}}),
+    });
+
+    expect(session.state).toEqual({});
+  });
+
+  it('does nothing when the delta holds no temp entries', () => {
+    const session = createSession({id: 's1', appName: 'app'});
+
     applyTempState({session, event: createEvent()});
 
     expect(session.state).toEqual({});

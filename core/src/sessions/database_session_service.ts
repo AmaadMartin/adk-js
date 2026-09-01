@@ -533,7 +533,7 @@ export class DatabaseSessionService extends BaseSessionService {
     // the in-memory session before trimming it out of the persisted event.
     applyTempState({session, event});
     const trimmedEvent = trimTempDeltaState(event);
-    const delta = extractStateDelta(trimmedEvent.actions?.stateDelta ?? {});
+    const delta = extractStateDelta(trimmedEvent.actions.stateDelta ?? {});
 
     // JSON-encode the tuple so that ('a|b', 'c') and ('a', 'b|c') cannot
     // collide on one lock.
