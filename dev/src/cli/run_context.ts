@@ -95,12 +95,6 @@ export interface RunContext {
   credentialService: BaseCredentialService;
 }
 
-/** The scheme of a URI, for a message that must not repeat its credentials. */
-function schemeOf(uri: string): string {
-  const separator = uri.indexOf('://');
-  return separator === -1 ? '<scheme-missing>' : uri.slice(0, separator);
-}
-
 /**
  * Builds the memory service a URI names.
  *
@@ -125,7 +119,11 @@ function createMemoryServiceFromUri(uri: string): BaseMemoryService {
     return new VertexAiMemoryBankService({agentEngineId});
   }
 
-  throw new Error(`Unsupported memory service URI scheme: ${schemeOf(uri)}`);
+  // Only the scheme: a memory URI can carry credentials.
+  const separator = uri.indexOf('://');
+  const scheme =
+    separator === -1 ? '<scheme-missing>' : uri.slice(0, separator);
+  throw new Error(`Unsupported memory service URI scheme: ${scheme}`);
 }
 
 /**

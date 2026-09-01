@@ -5,10 +5,20 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  Mock,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
+import {runAgentOnce} from '../../src/cli/cli_run_once.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
@@ -35,6 +45,10 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
+}));
+
+vi.mock('../../src/cli/cli_run_once', () => ({
+  runAgentOnce: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock('../../src/version', () => ({
@@ -382,6 +396,95 @@ describe('CLI Entrypoint', () => {
         }),
       );
     });
+  });
+
+  describe('command: run with a query', () => {
+    let exit: MockInstance<typeof process.exit>;
+
+    beforeEach(() => {
+      exit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => undefined) as never);
+      (runAgentOnce as Mock).mockResolvedValue(0);
+    });
+
+    it('runs once instead of interactively', async () => {
+      await parse(['run', 'agent.ts', 'hello']);
+
+      expect(runAgentOnce).toHaveBeenCalledWith(
+        expect.objectContaining({agentPath: 'agent.ts', query: 'hello'}),
+      );
+      expect(runAgent).not.toHaveBeenCalled();
+    });
+
+    it('runs once for an empty query, which reads stdin', async () => {
+      await parse(['run', 'agent.ts', '']);
+
+      expect(runAgentOnce).toHaveBeenCalledWith(
+        expect.objectContaining({query: ''}),
+      );
+      expect(runAgent).not.toHaveBeenCalled();
+    });
+
+    it('runs interactively when there is no query', async () => {
+      await parse(['run', 'agent.ts']);
+
+      expect(runAgent).toHaveBeenCalled();
+      expect(runAgentOnce).not.toHaveBeenCalled();
+    });
+
+    it('forwards every option to the single run', async () => {
+      await parse([
+        'run',
+        'agent.ts',
+        'hello',
+        '--state',
+        '{"tier":"gold"}',
+        '--timeout',
+        '30s',
+        '--jsonl',
+        '--in_memory',
+        '--session_id',
+        'sess-123',
+        '--memory_service_uri',
+        'agentengine://123',
+        '--default_llm_model',
+        'gemini-2.5-flash',
+      ]);
+
+      expect(runAgentOnce).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          query: 'hello',
+          state: '{"tier":"gold"}',
+          timeout: '30s',
+          jsonl: true,
+          inMemory: true,
+          sessionId: 'sess-123',
+          memoryServiceUri: 'agentengine://123',
+          defaultLlmModel: 'gemini-2.5-flash',
+        }),
+      );
+    });
+
+    it('forwards --replay so the single run can refuse it', async () => {
+      await parse(['run', 'agent.ts', 'hello', '--replay', 'replay.json']);
+
+      expect(runAgentOnce).toHaveBeenCalledWith(
+        expect.objectContaining({replay: 'replay.json'}),
+      );
+    });
+
+    it.each([0, 1, 2])(
+      'exits with the code the run returned: %d',
+      async (code) => {
+        (runAgentOnce as Mock).mockResolvedValue(code);
+
+        await parse(['run', 'agent.ts', 'hello']);
+
+        expect(exit).toHaveBeenCalledWith(code);
+      },
+    );
   });
 
   describe('command: deploy cloud_run', () => {

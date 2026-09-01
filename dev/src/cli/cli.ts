@@ -23,6 +23,7 @@ import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
+import {runAgentOnce} from './cli_run_once.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
 
@@ -369,6 +370,10 @@ export function createProgram(): Command {
     .command('run')
     .description('Runs agent')
     .argument('<agent>', 'Agent file path (.js or .ts)')
+    .argument(
+      '[query]',
+      'Optional. The message to send to the agent for a single run. Without it the CLI runs interactively. An empty query reads the message from stdin.',
+    )
     .option(
       '--save_session [boolean]',
       'Optional. Whether to save the session to a json file on exit.',
@@ -428,37 +433,56 @@ export function createProgram(): Command {
     .addOption(BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
-    .action(async (agentPath: string, options: Record<string, string>) => {
-      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+    .action(
+      async (
+        agentPath: string,
+        query: string | undefined,
+        options: Record<string, string>,
+      ) => {
+        setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
-      try {
-        await runAgent({
-          agentPath,
-          inputFile: options['replay'],
-          savedSessionFile: options['resume'],
-          saveSession: getBoolean(options['save_session']),
-          sessionId: options['session_id'],
-          state: options['state'],
-          timeout: options['timeout'],
-          jsonl: getBoolean(options['jsonl']),
-          inMemory: getBoolean(options['in_memory']),
-          sessionServiceUri:
-            options['session_service_uri'] || process.env.DATABASE_URL,
-          artifactServiceUri: options['artifact_service_uri'],
-          memoryServiceUri: options['memory_service_uri'],
-          useLocalStorage:
-            !options['no_use_local_storage'] &&
-            getBoolean(options['use_local_storage']),
-          defaultLlmModel: options['default_llm_model'],
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          reloadAgents: getBoolean(options['reload_agents']),
-        });
-      } catch (error) {
-        logger.error('Error running agent:', (error as Error).message);
-        process.exit(1);
-      }
-    });
+        try {
+          const runOptions = {
+            agentPath,
+            inputFile: options['replay'],
+            savedSessionFile: options['resume'],
+            saveSession: getBoolean(options['save_session']),
+            sessionId: options['session_id'],
+            state: options['state'],
+            timeout: options['timeout'],
+            jsonl: getBoolean(options['jsonl']),
+            inMemory: getBoolean(options['in_memory']),
+            sessionServiceUri:
+              options['session_service_uri'] || process.env.DATABASE_URL,
+            artifactServiceUri: options['artifact_service_uri'],
+            memoryServiceUri: options['memory_service_uri'],
+            useLocalStorage:
+              !options['no_use_local_storage'] &&
+              getBoolean(options['use_local_storage']),
+            defaultLlmModel: options['default_llm_model'],
+            otelToCloud: options['otel_to_cloud'] ? true : false,
+            agentFileLoadOptions: getAgentFileOptions(options),
+            reloadAgents: getBoolean(options['reload_agents']),
+          };
+
+          // A query, even an empty one, selects the scriptable single run; its
+          // exit code is the process exit code.
+          if (query !== undefined) {
+            const exitCode = await runAgentOnce({
+              ...runOptions,
+              query,
+              replay: options['replay'],
+            });
+            process.exit(exitCode);
+          } else {
+            await runAgent(runOptions);
+          }
+        } catch (error) {
+          logger.error('Error running agent:', (error as Error).message);
+          process.exit(1);
+        }
+      },
+    );
 
   const DEPLOY_COMMAND = program
     .command('deploy')
