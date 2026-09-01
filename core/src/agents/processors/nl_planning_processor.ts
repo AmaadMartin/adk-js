@@ -45,7 +45,7 @@ function getPlanner(
  * A previous turn's reasoning must not be re-sent to the model as a thought.
  */
 function removeThoughtFromRequest(llmRequest: LlmRequest): void {
-  for (const content of llmRequest.contents ?? []) {
+  for (const content of llmRequest.contents) {
     for (const part of content.parts ?? []) {
       part.thought = undefined;
     }
