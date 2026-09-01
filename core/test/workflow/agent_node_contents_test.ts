@@ -122,3 +122,50 @@ describe('LlmAgent as a workflow node — request contents', () => {
     expect(texts(requests[0])).toContain('hello');
   });
 });
+
+/** Records each request, then finishes the task. */
+class CaptureTaskLlm extends BaseLlm {
+  static override readonly supportedModels = [/capture-task-.*/];
+
+  override async *generateContentAsync(
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {
+    requests.push(
+      structuredClone({contents: llmRequest.contents}) as LlmRequest,
+    );
+    yield {
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'finish_task', args: {answer: 'done'}}}],
+      },
+    } as LlmResponse;
+  }
+
+  override connect(): Promise<BaseLlmConnection> {
+    throw new Error('not supported');
+  }
+}
+LLMRegistry.register(CaptureTaskLlm);
+
+describe('task-mode agent node — request contents', () => {
+  it('reads its node input as the synthetic first user turn', async () => {
+    requests.length = 0;
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'capture-task-1',
+      mode: 'task',
+      isolationScope: true,
+      instruction: 'answer',
+      outputSchema: {
+        type: 'OBJECT',
+        properties: {answer: {type: 'STRING'}},
+      } as never,
+    });
+    const wf = new Workflow({name: 'wf', edges: [['START', agent]]});
+
+    await drive(wf, 'summarize the report');
+
+    expect(requests).toHaveLength(1);
+    expect(texts(requests[0])).toEqual(['summarize the report']);
+  });
+});
