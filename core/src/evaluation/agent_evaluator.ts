@@ -35,14 +35,9 @@ import {
   getEvaluationCriteriaOrDefault,
 } from './eval_config.js';
 import {isEvalSetJson, parseEvalSet, serializeEvalSet} from './eval_json.js';
-import {
-  EvalMetricResult,
-  EvalStatus,
-  getMetricThreshold,
-  PrebuiltMetrics,
-} from './eval_metrics.js';
+import {EvalMetricResult, EvalStatus, PrebuiltMetrics} from './eval_metrics.js';
 import {EvalCaseResult} from './eval_result.js';
-import {loadEvalRuntime} from './eval_runtime.js';
+import {loadCreateEvalService} from './eval_runtime.js';
 import {EvalSet} from './eval_set.js';
 import {EvalSetResultsManager} from './eval_set_results_manager.js';
 import {EvalSetsManager} from './eval_sets_manager.js';
@@ -145,15 +140,7 @@ interface CommonEvaluateOptions {
 export interface EvaluateEvalSetOptions extends CommonEvaluateOptions {
   evalSet: EvalSet;
 
-  /**
-   * Metric names to thresholds.
-   *
-   * @deprecated Use {@link evalConfig}. When set, it replaces `evalConfig`.
-   */
-  criteria?: Record<string, number>;
-
-  /** Required unless the deprecated {@link criteria} is given. */
-  evalConfig?: EvalConfig;
+  evalConfig: EvalConfig;
 }
 
 /** Options for {@link AgentEvaluator.evaluate}. */
@@ -180,146 +167,12 @@ export interface MigrateEvalDataOptions {
   initialSessionFile?: string;
 }
 
-/** Reads the eval config from the test file's own folder. */
-async function findConfigForTestFile(testFile: string): Promise<EvalConfig> {
-  return getEvaluationCriteriaOrDefault(
-    path.join(path.dirname(testFile), TEST_CONFIG_FILE),
-  );
-}
-
-/**
- * Runs one eval set against an agent and throws when a metric falls below its
- * threshold.
- */
-async function evaluateEvalSet(options: EvaluateEvalSetOptions): Promise<void> {
-  requireAppNameForResultsManager(options);
-  const evalConfig = resolveEvalConfig(options);
-  const {agent, app} = await getAgentForEval(
-    options.agentModule,
-    options.agentName,
-  );
-  const appName = options.appName ?? DEFAULT_APP_NAME;
-  const printDetailedResults = options.printDetailedResults ?? true;
-
-  const resultsByEvalId = await getEvalResultsByEvalId({
-    rootAgent: agent,
-    app,
-    appName,
-    evalSet: options.evalSet,
-    evalConfig,
-    numRuns: options.numRuns ?? NUM_RUNS,
-    artifactService: options.artifactService,
-    evalSetResultsManager: options.evalSetResultsManager,
-  });
-
-  const failures: string[] = [];
-  const csvRows: Array<Record<string, unknown>> = [];
-  for (const [evalId, resultsPerEvalId] of resultsByEvalId) {
-    const metricResults = groupMetricResultsByMetric(resultsPerEvalId);
-    failures.push(
-      ...processMetricsAndGetFailures(
-        metricResults,
-        printDetailedResults,
-        options.agentModule,
-      ),
-      ...getFailuresFromFinalEvalStatus(
-        evalId,
-        resultsPerEvalId,
-        options.agentModule,
-      ),
-    );
-    if (options.outputFile) {
-      csvRows.push(
-        ...getResultsAsRows(options.evalSet.evalSetId, evalId, metricResults),
-      );
-    }
-  }
-
-  if (options.outputFile) {
-    await writeResultsToCsv(csvRows, options.outputFile);
-  }
-  if (failures.length > 0) {
-    throw new Error(buildFailureMessage(failures, printDetailedResults));
-  }
-}
-
-/**
- * Runs every `*.test.json` under the given path against an agent.
- *
- * Each file is evaluated with the config found in its own folder, so one call
- * can cover folders with different criteria.
- */
-async function evaluate(options: EvaluateOptions): Promise<void> {
-  requireAppNameForResultsManager(options);
-  const testFiles = await findTestFiles(options.evalDatasetFilePathOrDir);
-  const initialSession = await getInitialSession(options.initialSessionFile);
-
-  for (const testFile of testFiles) {
-    const evalConfig = await findConfigForTestFile(testFile);
-    const evalSet = await loadEvalSetFromFile(
-      testFile,
-      evalConfig,
-      initialSession,
-    );
-    await evaluateEvalSet({
-      agentModule: options.agentModule,
-      evalSet,
-      evalConfig,
-      numRuns: options.numRuns,
-      agentName: options.agentName,
-      printDetailedResults: options.printDetailedResults,
-      artifactService: options.artifactService,
-      outputFile: options.outputFile,
-      appName: options.appName,
-      evalSetResultsManager: options.evalSetResultsManager,
-    });
-  }
-}
-
-/** Converts an eval data file in the original format to an eval set file. */
-async function migrateEvalDataToNewSchema(
-  options: MigrateEvalDataOptions,
-): Promise<void> {
-  if (!options.oldEvalDataFile || !options.newEvalDataFile) {
-    throw new InputValidationError(
-      'One of old_eval_data_file or new_eval_data_file is empty.',
-    );
-  }
-  const evalConfig = await findConfigForTestFile(options.oldEvalDataFile);
-  const initialSession = await getInitialSession(options.initialSessionFile);
-  const evalSet = await getEvalSetFromLegacyFormat(
-    options.oldEvalDataFile,
-    evalConfig,
-    initialSession,
-  );
-  await fs.writeFile(
-    options.newEvalDataFile,
-    serializeEvalSet(evalSet),
-    'utf-8',
-  );
-}
-
 function requireAppNameForResultsManager(options: CommonEvaluateOptions): void {
   if (options.evalSetResultsManager && !options.appName) {
     throw new InputValidationError(
-      'app_name is required when eval_set_results_manager is provided.',
+      'appName is required when evalSetResultsManager is provided.',
     );
   }
-}
-
-function resolveEvalConfig(options: EvaluateEvalSetOptions): EvalConfig {
-  if (options.criteria) {
-    logger.warn(
-      '`criteria` is deprecated and will be removed in a future release. ' +
-        'Its values are mapped to `evalConfig` for now, but you should move ' +
-        'to `evalConfig`.',
-    );
-    return {criteria: {...options.criteria}};
-  }
-  if (!options.evalConfig) {
-    throw new InputValidationError('`eval_config` is required.');
-  }
-  return options.evalConfig;
 }
 
 /** Everything {@link getEvalResultsByEvalId} needs to run the eval service. */
@@ -341,8 +194,8 @@ interface EvalRunOptions {
 async function getEvalResultsByEvalId(
   options: EvalRunOptions,
 ): Promise<Map<string, EvalCaseResult[]>> {
-  const runtime = await loadEvalRuntime();
-  const evalService = runtime.createEvalService({
+  const createEvalService = await loadCreateEvalService();
+  const evalService = createEvalService({
     rootAgent: options.rootAgent,
     evalSetsManager: await buildEvalSetsManager(
       options.appName,
@@ -432,7 +285,7 @@ function processMetricsAndGetFailures(
 ): string[] {
   const failures: string[] = [];
   for (const [metricName, entries] of metricResults) {
-    const threshold = getMetricThreshold(entries[0].evalMetricResult);
+    const threshold = entries[0].evalMetricResult.criterion.threshold;
     const scores = entries
       .map((entry) => entry.evalMetricResult.score)
       .filter((score): score is number => score !== undefined);
@@ -557,7 +410,7 @@ function getResultsAsRows(
         eval_set_id: evalSetId,
         eval_id: evalId,
         metric_name: metricName,
-        threshold: entry.evalMetricResult.threshold,
+        threshold: entry.evalMetricResult.criterion.threshold,
         ...detailRow(entry),
       });
     }
@@ -704,7 +557,7 @@ function validateLegacyDataset(
   criteria: Readonly<Record<string, unknown>>,
 ): void {
   if (data.length === 0) {
-    throw new InputValidationError('The evaluation dataset is None or empty.');
+    throw new InputValidationError('The evaluation dataset is empty.');
   }
   for (const key of Object.keys(criteria)) {
     if (!ALLOWED_CRITERIA.includes(key)) {
@@ -741,23 +594,121 @@ function validateLegacyDataset(
 export class AgentEvaluator {
   /** Reads the eval config from the test file's own folder. */
   static async findConfigForTestFile(testFile: string): Promise<EvalConfig> {
-    return findConfigForTestFile(testFile);
+    return getEvaluationCriteriaOrDefault(
+      path.join(path.dirname(testFile), TEST_CONFIG_FILE),
+    );
   }
 
-  /** Runs one eval set and throws when a metric falls below its threshold. */
+  /**
+   * Runs one eval set against an agent and throws when a metric falls below
+   * its threshold.
+   */
   static async evaluateEvalSet(options: EvaluateEvalSetOptions): Promise<void> {
-    return evaluateEvalSet(options);
+    requireAppNameForResultsManager(options);
+    const {agent, app} = await getAgentForEval(
+      options.agentModule,
+      options.agentName,
+    );
+    const appName = options.appName ?? DEFAULT_APP_NAME;
+    const printDetailedResults = options.printDetailedResults ?? true;
+
+    const resultsByEvalId = await getEvalResultsByEvalId({
+      rootAgent: agent,
+      app,
+      appName,
+      evalSet: options.evalSet,
+      evalConfig: options.evalConfig,
+      numRuns: options.numRuns ?? NUM_RUNS,
+      artifactService: options.artifactService,
+      evalSetResultsManager: options.evalSetResultsManager,
+    });
+
+    const failures: string[] = [];
+    const csvRows: Array<Record<string, unknown>> = [];
+    for (const [evalId, resultsPerEvalId] of resultsByEvalId) {
+      const metricResults = groupMetricResultsByMetric(resultsPerEvalId);
+      failures.push(
+        ...processMetricsAndGetFailures(
+          metricResults,
+          printDetailedResults,
+          options.agentModule,
+        ),
+        ...getFailuresFromFinalEvalStatus(
+          evalId,
+          resultsPerEvalId,
+          options.agentModule,
+        ),
+      );
+      if (options.outputFile) {
+        csvRows.push(
+          ...getResultsAsRows(options.evalSet.evalSetId, evalId, metricResults),
+        );
+      }
+    }
+
+    if (options.outputFile) {
+      await writeResultsToCsv(csvRows, options.outputFile);
+    }
+    if (failures.length > 0) {
+      throw new Error(buildFailureMessage(failures, printDetailedResults));
+    }
   }
 
-  /** Runs every `*.test.json` under the given path against an agent. */
+  /**
+   * Runs every `*.test.json` under the given path against an agent.
+   *
+   * Each file is evaluated with the config found in its own folder, so one
+   * call can cover folders with different criteria.
+   */
   static async evaluate(options: EvaluateOptions): Promise<void> {
-    return evaluate(options);
+    requireAppNameForResultsManager(options);
+    const testFiles = await findTestFiles(options.evalDatasetFilePathOrDir);
+    const initialSession = await getInitialSession(options.initialSessionFile);
+
+    for (const testFile of testFiles) {
+      const evalConfig = await AgentEvaluator.findConfigForTestFile(testFile);
+      const evalSet = await loadEvalSetFromFile(
+        testFile,
+        evalConfig,
+        initialSession,
+      );
+      await AgentEvaluator.evaluateEvalSet({
+        agentModule: options.agentModule,
+        evalSet,
+        evalConfig,
+        numRuns: options.numRuns,
+        agentName: options.agentName,
+        printDetailedResults: options.printDetailedResults,
+        artifactService: options.artifactService,
+        outputFile: options.outputFile,
+        appName: options.appName,
+        evalSetResultsManager: options.evalSetResultsManager,
+      });
+    }
   }
 
-  /** Converts an eval data file in the original format to an eval set. */
+  /** Converts an eval data file in the original format to an eval set file. */
   static async migrateEvalDataToNewSchema(
     options: MigrateEvalDataOptions,
   ): Promise<void> {
-    return migrateEvalDataToNewSchema(options);
+    if (!options.oldEvalDataFile || !options.newEvalDataFile) {
+      throw new InputValidationError(
+        'One of oldEvalDataFile or newEvalDataFile is empty.',
+      );
+    }
+    const evalConfig = await AgentEvaluator.findConfigForTestFile(
+      options.oldEvalDataFile,
+    );
+    const initialSession = await getInitialSession(options.initialSessionFile);
+    const evalSet = await getEvalSetFromLegacyFormat(
+      options.oldEvalDataFile,
+      evalConfig,
+      initialSession,
+    );
+    await fs.writeFile(
+      options.newEvalDataFile,
+      serializeEvalSet(evalSet),
+      'utf-8',
+    );
   }
 }

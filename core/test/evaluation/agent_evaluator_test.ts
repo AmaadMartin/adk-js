@@ -5,9 +5,7 @@
  */
 
 import {
-  AgentEvaluator,
   BaseEvalService,
-  CreateEvalServiceOptions,
   EvalCaseResult,
   EvalMetricResult,
   EvalSet,
@@ -25,13 +23,15 @@ import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {AgentEvaluator} from '../../src/evaluation/agent_evaluator.js';
+import {CreateEvalServiceOptions} from '../../src/evaluation/eval_runtime.js';
 import {logger} from '../../src/utils/logger.js';
 import {StubEvalSetResultsManager} from './stub_eval_set_results_manager.js';
 
 const {createEvalService} = vi.hoisted(() => ({createEvalService: vi.fn()}));
 
 vi.mock('../../src/evaluation/eval_runtime.js', () => ({
-  loadEvalRuntime: async () => ({createEvalService}),
+  loadCreateEvalService: async () => createEvalService,
 }));
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -64,7 +64,6 @@ function makeInvocation(prompt: string, response: string): Invocation {
 function makeMetricResult(score: number): EvalMetricResult {
   return {
     metricName: METRIC,
-    threshold: THRESHOLD,
     criterion: {threshold: THRESHOLD},
     score,
     evalStatus: score >= THRESHOLD ? EvalStatus.PASSED : EvalStatus.FAILED,
@@ -248,7 +247,6 @@ describe('AgentEvaluator.evaluateEvalSet wiring', () => {
     expect(spy.evaluateRequests[0].evaluateConfig.evalMetrics).toEqual([
       {
         metricName: METRIC,
-        threshold: THRESHOLD,
         criterion: {threshold: THRESHOLD},
         customFunctionPath: './metrics.js#score',
       },
@@ -448,36 +446,8 @@ describe('AgentEvaluator.evaluateEvalSet arguments', () => {
         evalSetResultsManager: new StubEvalSetResultsManager(),
       }),
     ).rejects.toThrowError(
-      'app_name is required when eval_set_results_manager is provided.',
+      'appName is required when evalSetResultsManager is provided.',
     );
-  });
-
-  it('rejects a call with neither criteria nor an eval config', async () => {
-    await expect(
-      AgentEvaluator.evaluateEvalSet({
-        agentModule: AGENT_MODULE,
-        evalSet: EVAL_SET,
-      }),
-    ).rejects.toThrowError('`eval_config` is required.');
-  });
-
-  it('maps the deprecated criteria onto the eval config and warns', async () => {
-    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-    const spy = installRuntime([makeCaseResult('roll_die', 1)]);
-
-    await AgentEvaluator.evaluateEvalSet({
-      agentModule: AGENT_MODULE,
-      evalSet: EVAL_SET,
-      criteria: {[METRIC]: THRESHOLD},
-      printDetailedResults: false,
-    });
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('`criteria` is deprecated'),
-    );
-    expect(spy.serviceOptions[0].evalConfig.criteria).toEqual({
-      [METRIC]: THRESHOLD,
-    });
   });
 
   it('forwards the results manager and persists before it throws', async () => {
@@ -617,7 +587,7 @@ describe('AgentEvaluator.migrateEvalDataToNewSchema', () => {
         newEvalDataFile: newFile,
       }),
     ).rejects.toThrowError(
-      'One of old_eval_data_file or new_eval_data_file is empty.',
+      'One of oldEvalDataFile or newEvalDataFile is empty.',
     );
   });
 
@@ -887,7 +857,7 @@ describe('AgentEvaluator.evaluate', () => {
         agentModule: AGENT_MODULE,
         evalDatasetFilePathOrDir: testFile,
       }),
-    ).rejects.toThrowError('The evaluation dataset is None or empty.');
+    ).rejects.toThrowError('The evaluation dataset is empty.');
   });
 
   it('rejects a criteria key the older format cannot be judged on', async () => {
@@ -942,7 +912,7 @@ describe('AgentEvaluator.evaluate', () => {
         evalSetResultsManager: new StubEvalSetResultsManager(),
       }),
     ).rejects.toThrowError(
-      'app_name is required when eval_set_results_manager is provided.',
+      'appName is required when evalSetResultsManager is provided.',
     );
   });
 

@@ -5,15 +5,14 @@
  */
 
 /**
- * The seam between `AgentEvaluator` and the code that actually runs an
- * agent and scores metrics.
+ * The contract `AgentEvaluator` needs from the code that runs an agent and
+ * scores its metrics.
  *
- * adk-python imports `LocalEvalService` and the metric evaluator registry
- * inside `try/except ModuleNotFoundError` at call time, so that
- * `agent_evaluator` stays importable without the `google-adk[eval]` extra.
- * This module is the same idea: the local eval service is resolved lazily, and
- * everything else in the evaluation directory works whether or not it
- * resolves.
+ * `local_eval_service.ts` is not in this package yet, so it is loaded at call
+ * time rather than imported: a static import of a file that does not exist
+ * would not compile, and the rest of this directory works without it. Once
+ * that module lands, this becomes a plain import of `createEvalService` and
+ * the lazy load goes away.
  */
 
 import {BaseAgent} from '../agents/base_agent.js';
@@ -27,9 +26,9 @@ import {EvalSetResultsManager} from './eval_set_results_manager.js';
 import {EvalSetsManager} from './eval_sets_manager.js';
 
 /**
- * The module that provides the runtime. It is built as a specifier at call
- * time rather than written as a literal, because the module is optional: a
- * literal would make the compiler and the bundler treat it as required.
+ * The module that will provide the service. Held in a constant rather than
+ * written as a literal, so that the compiler does not resolve a file that is
+ * not there yet.
  */
 const LOCAL_EVAL_SERVICE_MODULE = './local_eval_service.js';
 
@@ -63,23 +62,19 @@ export interface CreateEvalServiceOptions {
   evalSetResultsManager?: EvalSetResultsManager;
 }
 
-/** The part of the eval runtime that `AgentEvaluator` reaches. */
-export interface EvalRuntime {
-  createEvalService(options: CreateEvalServiceOptions): BaseEvalService;
-}
-
-/** Returns true when the loaded module provides the runtime contract. */
-export function isEvalRuntime(value: unknown): value is EvalRuntime {
-  return isRecord(value) && typeof value['createEvalService'] === 'function';
-}
+/** Builds the service that runs an eval set and scores its metrics. */
+export type CreateEvalService = (
+  options: CreateEvalServiceOptions,
+) => BaseEvalService;
 
 /**
- * Loads the eval runtime.
+ * Loads the local eval service.
  *
- * @throws If the local eval service is not part of this build, or does not
- *   export a `createEvalService`.
+ * @throws If the local eval service is not part of this build. It is not
+ *   today, so every call throws; `AgentEvaluator` is held out of the package's
+ *   public exports until it lands.
  */
-export async function loadEvalRuntime(): Promise<EvalRuntime> {
+export async function loadCreateEvalService(): Promise<CreateEvalService> {
   let loadError: unknown;
   const runtimeModule: unknown = await import(LOCAL_EVAL_SERVICE_MODULE).catch(
     (err: unknown) => {
@@ -87,8 +82,11 @@ export async function loadEvalRuntime(): Promise<EvalRuntime> {
       return undefined;
     },
   );
-  if (!isEvalRuntime(runtimeModule)) {
+  if (
+    !isRecord(runtimeModule) ||
+    typeof runtimeModule['createEvalService'] !== 'function'
+  ) {
     throw new Error(MISSING_EVAL_DEPENDENCIES_MESSAGE, {cause: loadError});
   }
-  return runtimeModule;
+  return runtimeModule['createEvalService'] as CreateEvalService;
 }
