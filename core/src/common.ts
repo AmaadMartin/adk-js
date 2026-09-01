@@ -151,6 +151,7 @@ export {AlreadyExistsError} from './errors/already_exists_error.js';
 export {InputValidationError} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
+export {StaleSessionError} from './errors/stale_session_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
