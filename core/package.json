@@ -55,6 +55,12 @@
       "require": "./dist/cjs/telemetry/google_cloud.js",
       "default": "./dist/esm/telemetry/google_cloud.js"
     },
+    "./tools/crewai_tool": {
+      "types": "./dist/types/tools/crewai_tool.d.ts",
+      "import": "./dist/esm/tools/crewai_tool.js",
+      "require": "./dist/cjs/tools/crewai_tool.js",
+      "default": "./dist/esm/tools/crewai_tool.js"
+    },
     "./tools/mcp": {
       "types": "./dist/types/tools/mcp/index.d.ts",
       "import": "./dist/esm/tools/mcp/index.js",

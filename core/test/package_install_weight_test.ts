@@ -111,6 +111,7 @@ describe('core/package.json subpath exports', () => {
       './artifacts/gcs',
       './sessions/database',
       './telemetry/gcp',
+      './tools/crewai_tool',
       './tools/mcp',
     ]);
   });

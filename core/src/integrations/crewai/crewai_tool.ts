@@ -7,10 +7,15 @@
 import {Schema} from '@google/genai';
 
 import {Context} from '../../agents/context.js';
+import {
+  ToolErrorType,
+  ToolExecutionError,
+} from '../../errors/tool_execution_error.js';
 import {RunAsyncToolRequest} from '../../tools/base_tool.js';
 import {FunctionTool} from '../../tools/function_tool.js';
 import {formatError} from '../../utils/error_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
+import {resolveFullyQualifiedName} from '../../utils/module_utils.js';
 import {toJsonSchema} from '../../utils/schema.js';
 import {isZodSchema} from '../../utils/simple_zod_to_json.js';
 
@@ -52,8 +57,44 @@ export interface CrewaiToolOptions {
   description?: string;
 }
 
+/**
+ * The declarative configuration of a {@link CrewaiTool}, as an agent config
+ * file supplies it.
+ *
+ * It differs from {@link CrewaiToolOptions} because a config file cannot hold
+ * a tool object. It names one instead.
+ */
+export interface CrewaiToolConfig {
+  /**
+   * A fully-qualified name of the form `<module specifier>#<export>` that
+   * resolves to the CrewAI tool instance to wrap.
+   */
+  tool: string;
+  /** Overrides the wrapped tool's name in the model-facing declaration. */
+  name?: string;
+  /** Overrides the wrapped tool's description. */
+  description?: string;
+}
+
 /** The wrapped tool's entry point, bound to the tool. */
 type CrewaiEntryPoint = (args: unknown, context?: Context) => unknown;
+
+/**
+ * Whether a value has the shape {@link CrewaiTool} can wrap.
+ *
+ * A structural check rather than an `instanceof`, so a tool built by a second
+ * copy of a CrewAI package in the same runtime is still accepted.
+ */
+export function isCrewaiToolLike(value: unknown): value is CrewaiToolLike & {
+  run: (args: unknown, context?: Context) => unknown;
+} {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'run' in value &&
+    typeof (value as CrewaiToolLike).run === 'function'
+  );
+}
 
 /** The parameter schema of the wrapped tool, in the two forms callers need. */
 interface ResolvedSchema {
@@ -69,10 +110,10 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 }
 
 function resolveEntryPoint(tool: CrewaiToolLike): CrewaiEntryPoint {
-  const {run} = tool;
-  if (typeof run !== 'function') {
+  if (!isCrewaiToolLike(tool)) {
     throw new Error("Tool must be a CrewAI tool with a 'run' method.");
   }
+  const {run} = tool;
   return (args, context) => run.call(tool, args, context);
 }
 
@@ -186,6 +227,50 @@ export class CrewaiTool extends FunctionTool<Schema> {
       execute: (input, context) => entryPoint(input, context),
     });
     this.requiredArgs = requiredArgs;
+  }
+
+  /**
+   * Builds a tool from the declarative configuration of an agent config file.
+   *
+   * An empty `name` or `description` counts as absent, so the wrapped tool
+   * keeps its own. adk-python defaults both to `''` and reads them truthily,
+   * so an empty string already means "absent" there too.
+   *
+   * @param config The tool configuration read from an agent config file.
+   * @param configAbsPath Absolute path of that config file. A relative module
+   *   specifier in `config.tool` resolves against its directory.
+   * @return The configured tool.
+   * @throws {ToolExecutionError} When `tool` is not a fully-qualified name, or
+   *   names a value that is not a CrewAI tool.
+   * @throws {InputValidationError} When `tool` is a name that does not resolve.
+   */
+  static async fromConfig(
+    config: CrewaiToolConfig,
+    configAbsPath: string,
+  ): Promise<CrewaiTool> {
+    // An agent config file is a trust boundary, so the declared `string` type
+    // is checked rather than assumed.
+    if (typeof config.tool !== 'string' || !config.tool) {
+      throw new ToolExecutionError(
+        'Crewai tool config must name a CrewAI tool instance with a ' +
+          'fully-qualified name.',
+        ToolErrorType.BAD_REQUEST,
+      );
+    }
+    const tool = await resolveFullyQualifiedName(config.tool, configAbsPath);
+    if (!isCrewaiToolLike(tool)) {
+      throw new ToolExecutionError(
+        'Crewai tool config must name a CrewAI tool instance.',
+        ToolErrorType.BAD_REQUEST,
+      );
+    }
+    // An empty `name` or `description` counts as absent: the constructor
+    // reads both truthily, as adk-python's `if name:` does.
+    return new CrewaiTool({
+      tool,
+      name: config.name,
+      description: config.description,
+    });
   }
 
   override async runAsync(req: RunAsyncToolRequest): Promise<unknown> {
