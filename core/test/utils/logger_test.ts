@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
+import {
+  getLogger,
+  isDebugEnabled,
+  Logger,
+  LogLevel,
+  setLogger,
+  setLogLevel,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {resetLogger} from '../../src/utils/logger.js';
 
@@ -140,5 +147,45 @@ describe('setLogger', () => {
 
       expect(logger.constructor.name).toBe('SimpleLogger');
     });
+  });
+});
+
+describe('isDebugEnabled', () => {
+  afterEach(() => {
+    resetLogger();
+  });
+
+  it('is true once the level reaches DEBUG', () => {
+    resetLogger();
+    setLogLevel(LogLevel.DEBUG);
+
+    expect(isDebugEnabled()).toBe(true);
+  });
+
+  it('is false at a level above DEBUG', () => {
+    resetLogger();
+    setLogLevel(LogLevel.INFO);
+
+    expect(isDebugEnabled()).toBe(false);
+  });
+
+  it('is false for the no-op logger', () => {
+    setLogger(null);
+
+    expect(isDebugEnabled()).toBe(false);
+  });
+
+  it('is false for a logger that does not implement it', () => {
+    const bare: Logger = {
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      setLogLevel: () => {},
+    };
+    setLogger(bare);
+
+    expect(isDebugEnabled()).toBe(false);
   });
 });

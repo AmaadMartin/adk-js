@@ -4,8 +4,43 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  createSession,
+  InMemorySessionService,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
+  ReadonlyContext,
+} from '@google/adk';
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {vi} from 'vitest';
+
+/**
+ * Builds a real invocation context for the MCP tests.
+ *
+ * The MCP debug capture writes onto the invocation, so the tests need a
+ * genuine context rather than a cast-over-nothing stub.
+ *
+ * @return The invocation context.
+ */
+export function createTestInvocationContext(): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'test-invocation',
+    agent: new LlmAgent({name: 'test_agent', model: 'gemini-2.0-flash'}),
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+    }),
+    pluginManager: new PluginManager([]),
+    sessionService: new InMemorySessionService(),
+  });
+}
+
+/** A readonly context over {@link createTestInvocationContext}. */
+export function createTestReadonlyContext(): ReadonlyContext {
+  return new ReadonlyContext(createTestInvocationContext());
+}
 
 /**
  * Builds an MCP `Client` test double.

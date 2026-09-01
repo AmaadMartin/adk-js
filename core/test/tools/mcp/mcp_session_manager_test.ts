@@ -11,6 +11,10 @@ import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/st
 import {describe, expect, it, vi} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
+import {
+  HttpDebugExchange,
+  runWithHttpDebugSink,
+} from '../../../src/tools/mcp/http_debug_recorder.js';
 import {logger} from '../../../src/utils/logger.js';
 
 vi.hoisted(() => {
@@ -89,6 +93,44 @@ describe('MCPSessionManager', () => {
       },
     );
     expect(client.connect).toHaveBeenCalled();
+  });
+
+  it('records the HTTP exchanges of a call made inside a debug sink', async () => {
+    const callerFetch = vi.fn().mockResolvedValue(new Response('ok'));
+    const transportOptions = {fetch: callerFetch};
+    const manager = new MCPSessionManager({
+      type: 'StreamableHTTPConnectionParams',
+      url: 'http://test-url',
+      transportOptions,
+    });
+    const sink: HttpDebugExchange[] = [];
+
+    await runWithHttpDebugSink(sink, () => manager.createSession());
+
+    const installed = vi.mocked(StreamableHTTPClientTransport).mock
+      .lastCall?.[1];
+    expect(installed?.fetch).not.toBe(callerFetch);
+    await installed?.fetch?.('http://test-url');
+    expect(callerFetch).toHaveBeenCalled();
+    expect(sink).toHaveLength(1);
+    // The caller's own options object is never modified.
+    expect(transportOptions.fetch).toBe(callerFetch);
+  });
+
+  it('leaves the transport options alone when no debug sink is open', async () => {
+    const callerFetch = vi.fn().mockResolvedValue(new Response('ok'));
+    const manager = new MCPSessionManager({
+      type: 'StreamableHTTPConnectionParams',
+      url: 'http://test-url',
+      transportOptions: {fetch: callerFetch},
+    });
+
+    await manager.createSession();
+
+    expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+      new URL('http://test-url'),
+      {fetch: callerFetch},
+    );
   });
 
   it('creates an http client with deprecated header param', async () => {

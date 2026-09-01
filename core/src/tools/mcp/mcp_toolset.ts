@@ -23,11 +23,15 @@ import {
 } from '../../agents/framework_function_calls.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {formatError, isAbortError} from '../../utils/error_utils.js';
-import {logger} from '../../utils/logger.js';
+import {isDebugEnabled, logger} from '../../utils/logger.js';
 import {retryOnce} from '../../utils/retry_utils.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
+import {
+  HttpDebugExchange,
+  runWithHttpDebugSink,
+} from './http_debug_recorder.js';
 import {
   MCP_CONNECTION_ERROR_NAME,
   McpConnectionError,
@@ -83,6 +87,35 @@ function nameFailedOperation(operation: string, err: unknown): unknown {
   return new McpConnectionError(`${operation}: ${formatError(err)}`, {
     cause: err,
   });
+}
+
+/** The key an invocation's recorded HTTP exchanges are stored under. */
+const HTTP_DEBUG_INFO_KEY = 'http_debug_info';
+
+/**
+ * Appends the exchanges recorded for one MCP call to the invocation.
+ *
+ * Nothing is written when the caller supplied no context or the call made no
+ * HTTP request, so a stdio server never grows an empty key.
+ *
+ * @param context The invocation the call belongs to.
+ * @param exchanges What the recorder captured.
+ */
+function appendHttpDebugInfo(
+  context: ReadonlyContext | undefined,
+  exchanges: HttpDebugExchange[],
+): void {
+  if (!context || exchanges.length === 0) {
+    return;
+  }
+
+  const metadata = context.invocationContext.customMetadata;
+  const recorded = metadata[HTTP_DEBUG_INFO_KEY];
+  if (Array.isArray(recorded)) {
+    recorded.push(...exchanges);
+  } else {
+    metadata[HTTP_DEBUG_INFO_KEY] = [...exchanges];
+  }
 }
 
 /**
@@ -172,14 +205,39 @@ export class MCPToolset extends BaseToolset {
    * the caller learns which MCP call failed instead of reading a bare
    * transport string. The session is closed on every exit path.
    *
+   * While debug logging is on, the HTTP exchanges the call makes are recorded
+   * onto `context` under `http_debug_info`, including those of a call that
+   * failed.
+   *
    * @param operation Short description of the attempt, used as the message
    *   prefix on failure.
    * @param run Receives the open session.
+   * @param context The invocation the call belongs to, if there is one.
    * @return Whatever `run` resolves to.
    * @throws {McpConnectionError} when opening the session or running `run`
    *   fails for any reason other than cancellation.
    */
   private async executeWithSession<T>(
+    operation: string,
+    run: (session: Client) => Promise<T>,
+    context?: ReadonlyContext,
+  ): Promise<T> {
+    if (!isDebugEnabled()) {
+      return this.openSessionAndRun(operation, run);
+    }
+
+    const exchanges: HttpDebugExchange[] = [];
+    try {
+      return await runWithHttpDebugSink(exchanges, () =>
+        this.openSessionAndRun(operation, run),
+      );
+    } finally {
+      appendHttpDebugInfo(context, exchanges);
+    }
+  }
+
+  /** Opens a session, runs `run` on it under the timeout, and closes it. */
+  private async openSessionAndRun<T>(
     operation: string,
     run: (session: Client) => Promise<T>,
   ): Promise<T> {
@@ -220,6 +278,7 @@ export class MCPToolset extends BaseToolset {
           undefined,
           ...this.callOptions,
         )) as ListToolsResult,
+      context,
     );
 
     logger.debug(`number of tools: ${listResult.tools.length}`);
