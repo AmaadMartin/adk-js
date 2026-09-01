@@ -5,7 +5,10 @@
  */
 
 import {
+  Blob,
   Content,
+  createUserContent,
+  FileData,
   FunctionDeclaration,
   GenerateContentConfig,
   LiveConnectConfig,
@@ -53,23 +56,109 @@ export interface LlmRequest {
   previousInteractionId?: string;
 }
 
-/**
- * Appends instructions to the system instruction.
- * @param instructions The instructions to append.
- */
-export function appendInstructions(
-  llmRequest: LlmRequest,
-  instructions: string[],
-): void {
+/** Renders the ` (a, b)` suffix of a reference, or `''` when it has none. */
+function referenceSuffix(descriptors: string[]): string {
+  return descriptors.length ? ` (${descriptors.join(', ')})` : '';
+}
+
+/** Describes an inline binary part that the system instruction cannot carry. */
+function inlineDataReference(data: Blob, referenceId: string): string {
+  const descriptors: string[] = [];
+  if (data.displayName) {
+    descriptors.push(`'${data.displayName}'`);
+  }
+  if (data.mimeType) {
+    descriptors.push(`type: ${data.mimeType}`);
+  }
+  return `[Reference to inline binary data: ${referenceId}${referenceSuffix(
+    descriptors,
+  )}]`;
+}
+
+/** Describes a file part that the system instruction cannot carry. */
+function fileDataReference(data: FileData, referenceId: string): string {
+  const descriptors: string[] = [];
+  if (data.displayName) {
+    descriptors.push(`'${data.displayName}'`);
+  }
+  if (data.fileUri) {
+    descriptors.push(`URI: ${data.fileUri}`);
+  }
+  if (data.mimeType) {
+    descriptors.push(`type: ${data.mimeType}`);
+  }
+  return `[Reference to file data: ${referenceId}${referenceSuffix(
+    descriptors,
+  )}]`;
+}
+
+/** Appends text to the system instruction, separated by a blank line. */
+function appendSystemInstructionText(llmRequest: LlmRequest, text: string) {
   if (!llmRequest.config) {
     llmRequest.config = {};
   }
-  const newInstructions = instructions.join('\n\n');
   if (llmRequest.config.systemInstruction) {
-    llmRequest.config.systemInstruction += '\n\n' + newInstructions;
+    llmRequest.config.systemInstruction += '\n\n' + text;
   } else {
-    llmRequest.config.systemInstruction = newInstructions;
+    llmRequest.config.systemInstruction = text;
   }
+}
+
+/**
+ * Appends instructions to the system instruction.
+ *
+ * The model API only accepts text as a system instruction. A `Content` whose
+ * parts are not all text therefore contributes a textual reference for each
+ * non-text part, and the part itself moves into {@link LlmRequest.contents} as
+ * user content.
+ *
+ * @param instructions The instructions to append.
+ * @returns The user contents extracted from non-text parts, which are also
+ *     appended to {@link LlmRequest.contents}. Empty for a list of strings.
+ */
+export function appendInstructions(
+  llmRequest: LlmRequest,
+  instructions: string[] | Content,
+): Content[] {
+  if (Array.isArray(instructions)) {
+    if (instructions.length) {
+      appendSystemInstructionText(llmRequest, instructions.join('\n\n'));
+    }
+    return [];
+  }
+
+  const texts: string[] = [];
+  const userContents: Content[] = [];
+  let nonTextCount = 0;
+  for (const part of instructions.parts ?? []) {
+    if (part.text) {
+      texts.push(part.text);
+    } else if (part.inlineData) {
+      const referenceId = `inline_data_${nonTextCount++}`;
+      texts.push(inlineDataReference(part.inlineData, referenceId));
+      userContents.push(
+        createUserContent([
+          `Referenced inline data: ${referenceId}`,
+          {inlineData: part.inlineData},
+        ]),
+      );
+    } else if (part.fileData) {
+      const referenceId = `file_data_${nonTextCount++}`;
+      texts.push(fileDataReference(part.fileData, referenceId));
+      userContents.push(
+        createUserContent([
+          `Referenced file data: ${referenceId}`,
+          {fileData: part.fileData},
+        ]),
+      );
+    }
+  }
+
+  if (texts.length) {
+    appendSystemInstructionText(llmRequest, texts.join('\n\n'));
+  }
+  llmRequest.contents.push(...userContents);
+  return userContents;
 }
 
 /**

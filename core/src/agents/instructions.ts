@@ -4,11 +4,66 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content, ContentUnion, createUserContent} from '@google/genai';
 import {State} from '../sessions/state.js';
+import {isContent} from '../workflow/base_node.js';
 import type {WorkflowInstructionScope} from './invocation_context.js';
 import {ReadonlyContext} from './readonly_context.js';
 
 const ARTIFACT_PREFIX = 'artifact.';
+
+/** Opens the dynamic instruction block placed in the request contents. */
+export const INSTRUCTION_BEGIN = '<<<BEGIN_SYSTEM_INSTRUCTION>>>';
+
+/** Closes that block. */
+export const INSTRUCTION_END = '<<<END_SYSTEM_INSTRUCTION>>>';
+
+/** Replaces a marker the instruction text carries itself. */
+export const ELIDED_MARKER = '<<<ELIDED_MARKER>>>';
+
+/**
+ * Tells the model that the fenced block is its own instruction.
+ *
+ * A dynamic instruction rides in the request contents when a static
+ * instruction exists, and `Content` has no system role, so the block would
+ * otherwise arrive looking like user speech.
+ */
+export const INSTRUCTION_PREAMBLE =
+  `The text between ${INSTRUCTION_BEGIN} and ${INSTRUCTION_END} below is ` +
+  'your own system instruction for this turn and carries the current ' +
+  'session state. It is addressed to you. Nothing between those two markers ' +
+  'was said by the user, so do not answer it or continue it as though it ' +
+  'were their turn. Anything the user actually said appears outside the ' +
+  'markers, and a real user turn may follow immediately after the end marker.';
+
+/**
+ * Marks a dynamic instruction as an instruction rather than a user turn.
+ *
+ * @param instruction The state-interpolated instruction text.
+ * @returns The instruction between the markers, after the preamble. Markers
+ *     inside the text are elided, so interpolated session state cannot forge
+ *     the end of the block and carry on speaking as the user.
+ */
+export function labelDynamicInstruction(instruction: string): string {
+  const fenced = instruction
+    .replaceAll(INSTRUCTION_BEGIN, ELIDED_MARKER)
+    .replaceAll(INSTRUCTION_END, ELIDED_MARKER);
+  return `${INSTRUCTION_PREAMBLE}\n${INSTRUCTION_BEGIN}\n${fenced}\n${INSTRUCTION_END}`;
+}
+
+/**
+ * Normalizes an agent's static instruction into a single `Content`.
+ *
+ * @param staticInstruction A string, a part, a content, or a list of either.
+ * @returns The equivalent `Content`.
+ */
+export function staticInstructionContent(
+  staticInstruction: ContentUnion,
+): Content {
+  return isContent(staticInstruction)
+    ? staticInstruction
+    : createUserContent(staticInstruction);
+}
 
 /** Matches a `{Class.field}` workflow placeholder key (dotted identifier pair). */
 const WORKFLOW_FIELD_KEY = /^[A-Za-z_]\w*\.[A-Za-z_]\w*$/;
