@@ -7,22 +7,28 @@
 import {
   AuthCredential,
   AuthCredentialTypes,
+  Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
   OpenAPIToolset,
   ParsedOperation,
+  PluginManager,
   RestApiTool,
 } from '@google/adk';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 const CALENDAR_BASE_URL = 'https://www.googleapis.com/calendar/v3';
 const CALENDAR_ID_DESCRIPTION =
   'Calendar identifier. To retrieve calendar IDs call the calendarList.list' +
   ' method. If you want to access the primary calendar of the currently' +
   ' logged in user, use the "primary" keyword.';
+const TEST_API_KEY = 'test-api-key';
 
 const specPath = path.resolve(__dirname, 'fixtures/calendar.yaml');
 const calendarSpec = yaml.load(
@@ -61,7 +67,22 @@ function resolvedResponse(
   return response;
 }
 
+function newToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'invocation-1',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'session-1', appName: 'test_app'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
+
 describe('OpenAPIToolset (Calendar v3 spec)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('builds a tool for every operation in a spec object', async () => {
     const toolset = new OpenAPIToolset({specDict: calendarSpec});
 
@@ -167,26 +188,39 @@ describe('OpenAPIToolset (Calendar v3 spec)', () => {
     };
     const authCredential: AuthCredential = {
       authType: AuthCredentialTypes.API_KEY,
+      apiKey: TEST_API_KEY,
     };
     const toolset = new OpenAPIToolset({
       specDict: calendarSpec,
       authScheme,
       authCredential,
     });
+    const fetchMock = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response('{}', {headers: {'content-type': 'application/json'}}),
+      );
+    vi.stubGlobal('fetch', fetchMock);
 
     const tools = await toolset.getTools();
 
     expect(tools).toHaveLength(5);
     for (const tool of tools) {
-      // `RestApiTool.authScheme` and `.authCredential` are private and have no
-      // public reader, so the applied override is only observable through a
-      // cast. This mirrors openapi_toolset_test.ts.
-      const internals = tool as unknown as {
-        authScheme?: OpenAPIV3.SecuritySchemeObject;
-        authCredential?: AuthCredential;
-      };
-      expect(internals.authScheme).toEqual(authScheme);
-      expect(internals.authCredential).toEqual(authCredential);
+      fetchMock.mockClear();
+
+      await tool.runAsync({
+        args: {calendar_id: 'primary'},
+        toolContext: newToolContext(),
+      });
+
+      // The header name comes from the scheme and the value from the
+      // credential, so one request pins both constructor overrides.
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({api_key: TEST_API_KEY}),
+        }),
+      );
     }
   });
 });
