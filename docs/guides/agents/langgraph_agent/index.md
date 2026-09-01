@@ -18,8 +18,8 @@ not an `LlmAgent` and holds no model, tools or instructions of its own beyond a
 system instruction it forwards to the graph.
 
 The graph is accepted structurally, so `@google/adk` does not depend on
-`@langchain/langgraph`. Anything exposing `checkpointer`, `getState` and
-`invoke` is accepted, which also lets a test drive the agent with a stub.
+`@langchain/langgraph`. Any object with `getState` and `invoke` is accepted,
+which also lets a test drive the agent with a stub.
 
 ## Install
 
@@ -40,19 +40,18 @@ import {LangGraphAgent, InMemorySessionService, Runner} from '@google/adk';
 import {AIMessage} from '@langchain/core/messages';
 import {END, MessagesAnnotation, START, StateGraph} from '@langchain/langgraph';
 
-const graph = new StateGraph(MessagesAnnotation)
+const builder = new StateGraph(MessagesAnnotation)
   .addNode('respond', (state) => ({
     messages: [new AIMessage(`echo: ${state.messages.at(-1)?.text}`)],
   }))
   .addEdge(START, 'respond')
-  .addEdge('respond', END)
-  .compile();
+  .addEdge('respond', END);
 
 const agent = new LangGraphAgent({
   name: 'echo_agent',
   description: 'Echoes the last message back',
   instruction: 'You are an echo service.',
-  graph,
+  graph: builder.compile(),
 });
 
 const sessionService = new InMemorySessionService();
@@ -84,6 +83,8 @@ agent are dropped, because they belong to that agent's turn.
 user messages is forwarded, since the graph already holds everything before it.
 The system instruction is sent only while the checkpointed state is still empty,
 so it is not duplicated on later turns.
+
+Compile the same builder with a checkpointer to switch:
 
 ```ts
 import {MemorySaver} from '@langchain/langgraph';
