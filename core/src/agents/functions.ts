@@ -19,6 +19,7 @@ import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../events/event_actions.js';
+import {findEventByFunctionCallId} from '../events/event_filters.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
@@ -57,6 +58,7 @@ export {
   generateClientFunctionCallId,
   populateClientFunctionCallId,
 } from '../events/event.js';
+export {findEventByFunctionCallId} from '../events/event_filters.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
@@ -720,27 +722,6 @@ export function mergeParallelFunctionResponseEvents(
 }
 
 // TODO - b/425992518: support function call in live connection.
-
-/**
- * Finds the function call event that matches the function call ID.
- * Mirrors Python ADK's `find_event_by_function_call_id`.
- */
-export function findEventByFunctionCallId(
-  events: Event[],
-  functionCallId: string,
-  endIndex: number = events.length,
-): Event | undefined {
-  for (let i = endIndex - 1; i >= 0; i--) {
-    const event = events[i];
-    const functionCalls = getFunctionCalls(event);
-    for (const functionCall of functionCalls) {
-      if (functionCall.id === functionCallId) {
-        return event;
-      }
-    }
-  }
-  return undefined;
-}
 
 /**
  * Finds the function call event that matches the function response ID of the last event.
