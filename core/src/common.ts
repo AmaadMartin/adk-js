@@ -246,6 +246,19 @@ export type {
   PerInvocationResult,
 } from './evaluation/evaluator.js';
 export {
+  EvalCriterion,
+  ResponseEvaluator,
+  VertexEvalMetric,
+} from './evaluation/response_evaluator.js';
+export type {
+  EvalBackend,
+  EvalDatasetRow,
+  EvalRunResult,
+  EvalTurn,
+  EvaluateOptions,
+  ToolUse,
+} from './evaluation/response_evaluator.js';
+export {
   ToolTrajectoryMatchType,
   TrajectoryEvaluator,
   parseToolTrajectoryMatchType,
