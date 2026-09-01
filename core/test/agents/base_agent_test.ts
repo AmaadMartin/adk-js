@@ -15,6 +15,7 @@ import {
   PluginManager,
   Session,
   createEvent,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -354,14 +355,7 @@ describe('BaseAgent agent state helpers', () => {
       invocationId: 'inv-state',
       branch: 'root.probe',
       agent,
-      session: {
-        id: 's',
-        appName: 'app',
-        userId: 'u',
-        state: {},
-        events: [],
-        lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      session: createSession({id: 's', appName: 'app', userId: 'u'}),
       pluginManager: new PluginManager(),
     });
   }
