@@ -904,7 +904,8 @@ describe('GoogleLlm', () => {
     });
 
     it('uses an injected client and builds none', () => {
-      const injected = {vertexai: false} as unknown as GoogleGenAI;
+      const injected = new GoogleGenAI({apiKey: 'injected-key'});
+      vi.mocked(GoogleGenAI).mockClear();
       const llm = new TestGemini({apiKey: 'test-key', client: injected});
 
       expect(llm.apiClient).toBe(injected);
