@@ -46,8 +46,9 @@ const {memories} = await memoryService.searchMemory({
 ```
 
 Each entry in `memories` carries the `content` of one event, its `author`, and
-its `timestamp` as an ISO-8601 string. Entries of one session arrive in
-timestamp order.
+its `timestamp` as an ISO-8601 string. Retrieval returns overlapping chunks of
+a transcript, so chunks of one session that share a timestamp are merged and
+sorted by timestamp.
 
 Give the service to a `Runner` to let an agent search it through the
 `load_memory` tool.
@@ -64,6 +65,7 @@ const runner = new Runner({
   appName: 'demo',
   agent: new LlmAgent({
     name: 'memory_agent',
+    model: 'gemini-flash-latest',
     instruction: 'Answer questions about the user using memory.',
     tools: [LOAD_MEMORY],
   }),
