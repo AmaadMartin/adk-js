@@ -63,6 +63,17 @@ export class RestApiTool extends BaseTool {
     this.credentialKey = credentialKey;
   }
 
+  /**
+   * The JSON schema of this operation's arguments.
+   *
+   * A tool that wraps this one needs the schema to build its own declaration.
+   * The returned object is fresh, so a caller may edit it.
+   */
+  @experimental
+  public getJsonSchema(): Record<string, unknown> {
+    return this.operationParser.getJsonSchema();
+  }
+
   @experimental
   override _getDeclaration(): FunctionDeclaration {
     const schema = this.operationParser.getJsonSchema();
@@ -223,10 +234,17 @@ export function prepareRequestParams(
     }
   }
 
+  // A spec may give two operations the same endpoint and tell them apart by
+  // fragment. The fragment names the operation and is not part of the request,
+  // so it is dropped. Splitting the declared path, before any value is
+  // substituted in, keeps caller data out of reach of the split: encoding a
+  // value is what stops it truncating the URL, and this does not rely on it.
+  const [declaredPath] = endpoint.path.split('#');
+
   // Placeholders are resolved against the path only, so a path parameter can
   // never reach the host. `hasOwn`, because a spec may name a path parameter
   // `constructor`, which a bare lookup would resolve off Object.prototype.
-  const resolvedPath = endpoint.path.replace(
+  const resolvedPath = declaredPath.replace(
     /\{([^{}]+)\}/g,
     (placeholder, name: string) =>
       Object.hasOwn(pathParams, name) ? pathParams[name] : placeholder,

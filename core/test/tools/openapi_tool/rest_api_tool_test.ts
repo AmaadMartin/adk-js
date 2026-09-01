@@ -655,6 +655,58 @@ describe('RestApiTool', () => {
       expect.anything(),
     );
   });
+
+  it('exposes the operation argument schema', () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'post'},
+      {
+        operationId: 'test_tool',
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['pageSize'],
+                properties: {pageSize: {type: 'integer'}},
+              },
+            },
+          },
+        },
+        responses: {},
+      },
+    );
+
+    expect(tool.getJsonSchema()).toEqual({
+      type: 'object',
+      properties: {page_size: {type: 'integer'}},
+      required: ['page_size'],
+      title: 'test_tool_Arguments',
+    });
+  });
+
+  it('returns a schema a caller may edit without affecting the tool', () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'post'},
+      {
+        operationId: 'test_tool',
+        parameters: [
+          {name: 'pageSize', in: 'query', schema: {type: 'integer'}},
+        ],
+        responses: {},
+      },
+    );
+
+    const schema = tool.getJsonSchema() as {
+      properties: Record<string, unknown>;
+    };
+    delete schema.properties['page_size'];
+
+    expect(tool.getJsonSchema()).toHaveProperty('properties.page_size');
+  });
 });
 
 describe('RestApiTool Utilities', () => {
@@ -681,6 +733,66 @@ describe('RestApiTool Utilities', () => {
   });
 
   describe('prepareRequestParams', () => {
+    it('drops the fragment that distinguishes two operations on one path', () => {
+      const endpoint = {
+        baseUrl: 'https://integrations.googleapis.com',
+        path: '/v2/integrations/Run:execute?triggerId=api_trigger/Run#list_Issues',
+        method: 'POST',
+      };
+
+      const result = prepareRequestParams(endpoint, [], {});
+
+      expect(result.url).toBe(
+        'https://integrations.googleapis.com/v2/integrations/Run:execute' +
+          '?triggerId=api_trigger%2FRun',
+      );
+    });
+
+    it('drops a fragment on a path that carries no query', () => {
+      const endpoint = {
+        baseUrl: 'https://api.example.com',
+        path: '/things#list',
+        method: 'GET',
+      };
+
+      const result = prepareRequestParams(endpoint, [], {});
+
+      expect(result.url).toBe('https://api.example.com/things');
+    });
+
+    it('encodes a hash in a path parameter instead of truncating the URL', () => {
+      const endpoint = {
+        baseUrl: 'https://api.example.com',
+        path: '/things/{thingId}/parts',
+        method: 'GET',
+      };
+      const parameters = [
+        {
+          name: 'thing_id',
+          originalName: 'thingId',
+          paramLocation: 'path',
+          paramSchema: {},
+          required: true,
+        },
+        {
+          name: 'q',
+          originalName: 'q',
+          paramLocation: 'query',
+          paramSchema: {},
+          required: false,
+        },
+      ];
+
+      const result = prepareRequestParams(endpoint, parameters, {
+        thing_id: 'a#b',
+        q: 'kept',
+      });
+
+      expect(result.url).toBe(
+        'https://api.example.com/things/a%23b/parts?q=kept',
+      );
+    });
+
     it('should map query, path, and header parameters correctly', () => {
       const endpoint = {
         baseUrl: 'http://api.example.com',
