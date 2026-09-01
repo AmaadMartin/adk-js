@@ -5,7 +5,11 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError, isAbortError} from '../../src/utils/error_utils.js';
+import {
+  formatError,
+  isAbortError,
+  truncateBody,
+} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -255,5 +259,21 @@ describe('isAbortError', () => {
     const err: Error & {cause?: unknown} = new Error('outer');
     err.cause = err;
     expect(isAbortError(err)).toBe(false);
+  });
+});
+
+describe('truncateBody', () => {
+  it('appends the marker to a body over the cap', () => {
+    const body = 'x'.repeat(MAX_RESPONSE_BODY_LENGTH + 1);
+
+    expect(truncateBody(body)).toBe(
+      'x'.repeat(MAX_RESPONSE_BODY_LENGTH) + TRUNCATION_MARKER,
+    );
+  });
+
+  it('leaves a body at the cap untouched', () => {
+    const body = 'x'.repeat(MAX_RESPONSE_BODY_LENGTH);
+
+    expect(truncateBody(body)).toBe(body);
   });
 });

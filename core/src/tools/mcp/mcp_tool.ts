@@ -666,7 +666,16 @@ export class MCPTool extends BaseTool {
     args: Record<string, unknown>,
   ): void {
     const resourceUri = this.mcpAppResourceUri;
-    if (!resourceUri || !toolContext.functionCallId) {
+    if (!resourceUri) {
+      return;
+    }
+    if (!toolContext.functionCallId) {
+      // A widget with no id cannot be addressed or de-duplicated, and losing a
+      // rendering hint is better than failing the call over one.
+      logger.debug(
+        `Not rendering the MCP App widget for ${this.originalName}: the tool ` +
+          'context carries no function call id to key it on.',
+      );
       return;
     }
 

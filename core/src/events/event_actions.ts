@@ -112,8 +112,8 @@ export function createEventActions(
  * transfer, escalation or summarization signal.
  *
  * An actions object is considered non-default when any dictionary field has at
- * least one entry, or when any scalar field has been explicitly set (including
- * being set to `false`).
+ * least one entry, when any scalar field has been explicitly set (including
+ * being set to `false`), or when a UI widget is attached.
  *
  * A pushed UI widget counts as a signal too: a tool that renders a widget and
  * nothing else still has something for the host to draw, so its event must

@@ -17,6 +17,7 @@ import type {
 import type {Stream, Writable} from 'node:stream';
 
 import {formatError} from '../../utils/error_utils.js';
+import {instrumentFetch} from '../../utils/http_debug_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
@@ -172,6 +173,18 @@ function withHttpDebugRecording(
 }
 
 /**
+ * Returns `options` with an instrumented `fetch` installed. This is the second
+ * of the two debug recorders. Unlike the first it is always installed, because
+ * its capture can start after the session is open; it records only while a
+ * capture is active, and delegates untouched otherwise.
+ */
+function withInstrumentedFetch(
+  options: StreamableHTTPClientTransportOptions,
+): StreamableHTTPClientTransportOptions {
+  return {...options, fetch: instrumentFetch(options.fetch)};
+}
+
+/**
  * Defines the parameters for establishing a connection to an MCP server using
  * standard input/output (stdio). This is typically used for running MCP servers
  * as local child processes.
@@ -319,9 +332,13 @@ export class MCPSessionManager {
             MCP_SDK,
             () => import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
           );
+          // Two recorders can sit in front of the transport's fetch, one per
+          // debug sink. Each installs itself only while its own sink is
+          // active, so an ordinary session sends exactly the bytes it sends
+          // today, and a session under both captures reports to both.
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
-            withHttpDebugRecording(transportOptions),
+            withInstrumentedFetch(withHttpDebugRecording(transportOptions)),
           );
           transport.onerror = (err) => logTransportError(err, errlog);
           await client.connect(transport);

@@ -38,6 +38,14 @@ export interface Logger {
    * `false`, which leaves such capture off.
    */
   isDebugEnabled?(): boolean;
+
+  /**
+   * Whether a message at `level` would be emitted.
+   *
+   * Optional so an existing third-party {@link Logger} keeps compiling; the
+   * module-level logger defaults it to `false`.
+   */
+  isEnabledFor?(level: LogLevel): boolean;
 }
 
 class SimpleLogger implements Logger {
@@ -74,7 +82,11 @@ class SimpleLogger implements Logger {
   }
 
   isDebugEnabled(): boolean {
-    return this.logLevel <= LogLevel.DEBUG;
+    return this.isEnabledFor(LogLevel.DEBUG);
+  }
+
+  isEnabledFor(level: LogLevel): boolean {
+    return this.logLevel <= level;
   }
 
   log(level: LogLevel, ...messages: unknown[]): void {
@@ -124,6 +136,9 @@ class SimpleLogger implements Logger {
 class NoOpLogger implements Logger {
   setLogLevel(_level: LogLevel): void {}
   isDebugEnabled(): boolean {
+    return false;
+  }
+  isEnabledFor(_level: LogLevel): boolean {
     return false;
   }
   log(_level: LogLevel, ..._args: unknown[]): void {}
@@ -194,5 +209,8 @@ export const logger: Logger = {
   },
   error(...args: unknown[]): void {
     currentLogger.error(...args);
+  },
+  isEnabledFor(level: LogLevel): boolean {
+    return currentLogger.isEnabledFor?.(level) ?? false;
   },
 };
