@@ -5,10 +5,15 @@
  */
 
 import {
+  AlreadyExistsError,
   createEvent,
   createEventActions,
+  createSession,
   DatabaseSessionService,
   Event,
+  Session,
+  SessionNotFoundError,
+  StaleSessionError,
   State,
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
@@ -16,6 +21,7 @@ import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {ENTITIES} from '../../src/sessions/db/schema.js';
 
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
@@ -739,5 +745,657 @@ describe('isDatabaseConnectionString', () => {
       false,
     ); // Has = and ; but no common keys
     expect(isDatabaseConnectionString('Server=myServer')).toBe(false); // Missing semicolon implies not a full connection string or just a weird config
+  });
+});
+
+describe('DatabaseSessionService.getUserState', () => {
+  let service: DatabaseSessionService;
+
+  beforeEach(async () => {
+    service = new DatabaseSessionService('sqlite://:memory:');
+    await service.init();
+  });
+
+  afterEach(async () => {
+    await service.close();
+  });
+
+  it('returns an empty object when the user has no stored state', async () => {
+    await expect(
+      service.getUserState({appName: 'app', userId: 'u1'}),
+    ).resolves.toEqual({});
+  });
+
+  it('returns raw keys and excludes app and session scopes', async () => {
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({
+        actions: createEventActions({
+          stateDelta: {
+            [State.USER_PREFIX + 'profile']: {name: 'Alice'},
+            [State.APP_PREFIX + 'theme']: 'dark',
+            'turnCount': 3,
+          },
+        }),
+      }),
+    });
+
+    await expect(
+      service.getUserState({appName: 'app', userId: 'u1'}),
+    ).resolves.toEqual({profile: {name: 'Alice'}});
+  });
+
+  it('is readable without a session id, from the initial state', async () => {
+    await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+      state: {[State.USER_PREFIX + 'lang']: 'fr'},
+    });
+
+    await expect(
+      service.getUserState({appName: 'app', userId: 'u1'}),
+    ).resolves.toEqual({lang: 'fr'});
+  });
+
+  it('isolates state across users and across apps', async () => {
+    await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+      state: {[State.USER_PREFIX + 'lang']: 'fr'},
+    });
+    await service.createSession({
+      appName: 'app',
+      userId: 'u2',
+      sessionId: 's2',
+    });
+    await service.createSession({
+      appName: 'other',
+      userId: 'u1',
+      sessionId: 's3',
+    });
+
+    await expect(
+      service.getUserState({appName: 'app', userId: 'u2'}),
+    ).resolves.toEqual({});
+    await expect(
+      service.getUserState({appName: 'other', userId: 'u1'}),
+    ).resolves.toEqual({});
+  });
+
+  it('reflects the latest write after two appends', async () => {
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    for (const value of ['A', 'B']) {
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          actions: createEventActions({
+            stateDelta: {[State.USER_PREFIX + 'pref']: value},
+          }),
+        }),
+      });
+    }
+
+    await expect(
+      service.getUserState({appName: 'app', userId: 'u1'}),
+    ).resolves.toEqual({pref: 'B'});
+  });
+
+  it('returns a copy that a caller cannot write back through', async () => {
+    await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+      state: {[State.USER_PREFIX + 'lang']: 'fr'},
+    });
+
+    const state = await service.getUserState({appName: 'app', userId: 'u1'});
+    state['lang'] = 'de';
+
+    await expect(
+      service.getUserState({appName: 'app', userId: 'u1'}),
+    ).resolves.toEqual({lang: 'fr'});
+  });
+});
+
+describe('DatabaseSessionService stale session detection', () => {
+  let service: DatabaseSessionService;
+  const appName = 'app';
+  const userId = 'u1';
+  const sessionId = 's1';
+
+  beforeEach(async () => {
+    service = new DatabaseSessionService('sqlite://:memory:');
+    await service.createSession({appName, userId, sessionId});
+  });
+
+  afterEach(async () => {
+    await service.close();
+  });
+
+  async function load(): Promise<Session> {
+    const session = await service.getSession({appName, userId, sessionId});
+    if (!session) {
+      expect.fail(`session ${sessionId} was not stored`);
+    }
+    return session;
+  }
+
+  it('stamps a marker on create, get and list', async () => {
+    const listed = await service.listSessions({appName, userId});
+
+    expect(await load()).toHaveProperty(
+      'storageUpdateMarker',
+      expect.any(String),
+    );
+    expect(listed.sessions[0].storageUpdateMarker).toEqual(expect.any(String));
+    expect(listed.sessions[0].storageUpdateMarker).not.toBe('');
+  });
+
+  it('rejects the second of two writers holding the same revision', async () => {
+    const first = await load();
+    const second = await load();
+
+    await service.appendEvent({session: first, event: createEvent()});
+    await expect(
+      service.appendEvent({session: second, event: createEvent()}),
+    ).rejects.toBeInstanceOf(StaleSessionError);
+  });
+
+  it('reports a stale write with the reload instruction', async () => {
+    const first = await load();
+    const second = await load();
+    await service.appendEvent({session: first, event: createEvent()});
+
+    await expect(
+      service.appendEvent({session: second, event: createEvent()}),
+    ).rejects.toThrow(/modified in storage/);
+  });
+
+  it('leaves storage untouched when it rejects a stale write', async () => {
+    const first = await load();
+    const second = await load();
+    const winner = createEvent({
+      actions: createEventActions({stateDelta: {owner: 'first'}}),
+    });
+    await service.appendEvent({session: first, event: winner});
+
+    const loser = createEvent({
+      actions: createEventActions({stateDelta: {owner: 'second'}}),
+    });
+    await expect(
+      service.appendEvent({session: second, event: loser}),
+    ).rejects.toBeInstanceOf(StaleSessionError);
+
+    const reloaded = await load();
+    expect(reloaded.events.map((e) => e.id)).toEqual([winner.id]);
+    expect(reloaded.state['owner']).toBe('first');
+  });
+
+  it('rejects exactly one of two concurrent appends, every round', async () => {
+    for (let round = 0; round < 8; round++) {
+      const [first, second] = [await load(), await load()];
+      const results = await Promise.allSettled([
+        service.appendEvent({session: first, event: createEvent()}),
+        service.appendEvent({session: second, event: createEvent()}),
+      ]);
+
+      const rejections = results.filter((r) => r.status === 'rejected');
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(rejections).toHaveLength(1);
+      expect(rejections[0].reason).toBeInstanceOf(StaleSessionError);
+    }
+  });
+
+  it('accepts a session whose timestamp drifted but whose marker matches', async () => {
+    const session = await load();
+    session.lastUpdateTime -= 5;
+
+    await expect(
+      service.appendEvent({session, event: createEvent()}),
+    ).resolves.toBeDefined();
+  });
+
+  it('accepts a marker-less session that still holds the newest event', async () => {
+    const session = await load();
+    await service.appendEvent({session, event: createEvent()});
+
+    session.storageUpdateMarker = undefined;
+    session.lastUpdateTime = 1;
+
+    await expect(
+      service.appendEvent({session, event: createEvent()}),
+    ).resolves.toBeDefined();
+  });
+
+  it('accepts a marker-less session when storage holds no events either', async () => {
+    const session = await load();
+    session.storageUpdateMarker = undefined;
+    session.lastUpdateTime = 1;
+
+    await expect(
+      service.appendEvent({session, event: createEvent()}),
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects a marker-less session that another writer moved past', async () => {
+    const behind = await load();
+    const ahead = await load();
+    await service.appendEvent({session: ahead, event: createEvent()});
+
+    behind.storageUpdateMarker = undefined;
+    behind.lastUpdateTime = 1;
+
+    await expect(
+      service.appendEvent({session: behind, event: createEvent()}),
+    ).rejects.toBeInstanceOf(StaleSessionError);
+  });
+
+  it('rejects a marker-less empty session when storage already has events', async () => {
+    const session = await load();
+    await service.appendEvent({session, event: createEvent()});
+
+    const handMade = createSession({
+      id: sessionId,
+      appName,
+      userId,
+      lastUpdateTime: 1,
+    });
+
+    await expect(
+      service.appendEvent({session: handMade, event: createEvent()}),
+    ).rejects.toBeInstanceOf(StaleSessionError);
+  });
+
+  it('carries the marker through a get, append and get round trip', async () => {
+    const loaded = await load();
+    const before = loaded.storageUpdateMarker;
+    expect(before).toEqual(expect.any(String));
+
+    await service.appendEvent({session: loaded, event: createEvent()});
+    const afterAppend = loaded.storageUpdateMarker;
+    expect(afterAppend).toEqual(expect.any(String));
+    expect(afterAppend).not.toBe(before);
+
+    const reloaded = await load();
+    expect(reloaded.storageUpdateMarker).toBe(afterAppend);
+  });
+
+  it('produces a different marker for appends one millisecond apart', async () => {
+    const session = await load();
+    const base = Date.now();
+
+    await service.appendEvent({
+      session,
+      event: createEvent({timestamp: base}),
+    });
+    const first = session.storageUpdateMarker;
+
+    await service.appendEvent({
+      session,
+      event: createEvent({timestamp: base + 1}),
+    });
+
+    expect(first).toEqual(expect.any(String));
+    expect(session.storageUpdateMarker).not.toBe(first);
+  });
+});
+
+describe('DatabaseSessionService typed errors', () => {
+  let orm: MikroORM;
+  let service: DatabaseSessionService;
+
+  beforeEach(async () => {
+    orm = await MikroORM.init({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      pool: {min: 1, max: 1},
+    });
+    service = new DatabaseSessionService(orm);
+    await service.init();
+  });
+
+  afterEach(async () => {
+    await service.close();
+    await orm.close();
+  });
+
+  it('rejects a duplicate session id with AlreadyExistsError', async () => {
+    await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+
+    await expect(
+      service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+    ).rejects.toBeInstanceOf(AlreadyExistsError);
+  });
+
+  it('rejects one of two concurrent creates of the same id', async () => {
+    const results = await Promise.allSettled([
+      service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+      service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+    ]);
+
+    const rejections = results.filter((r) => r.status === 'rejected');
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0].reason).toBeInstanceOf(AlreadyExistsError);
+  });
+
+  it('rejects an append to a deleted session with SessionNotFoundError', async () => {
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await service.deleteSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+
+    await expect(
+      service.appendEvent({session, event: createEvent()}),
+    ).rejects.toBeInstanceOf(SessionNotFoundError);
+  });
+
+  it('rejects an append when the app state row was removed out of band', async () => {
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await orm.em.getConnection().execute('delete from app_states');
+
+    await expect(
+      service.appendEvent({session, event: createEvent()}),
+    ).rejects.toThrow("App state missing for app_name='app'");
+  });
+
+  it('rejects an append when the user state row was removed out of band', async () => {
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await orm.em.getConnection().execute('delete from user_states');
+
+    await expect(
+      service.appendEvent({session, event: createEvent()}),
+    ).rejects.toThrow("User state missing for app_name='app', user_id='u1'");
+  });
+
+  it('re-raises a write failure that is not a duplicate session', async () => {
+    await orm.em.getConnection().execute('drop table sessions');
+
+    await expect(
+      service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+    ).rejects.toThrow(/sessions/);
+  });
+});
+
+describe('DatabaseSessionService lifecycle', () => {
+  it('drops the connection it opened, and close is idempotent', async () => {
+    const service = new DatabaseSessionService('sqlite://:memory:');
+    await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+
+    await service.close();
+    await service.close();
+
+    // A fresh sqlite in-memory database is empty, so a session that survives
+    // would mean the old connection was still in use.
+    await expect(
+      service.getSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+    ).resolves.toBeUndefined();
+    await service.close();
+  });
+
+  it('does nothing when closed before init', async () => {
+    const service = new DatabaseSessionService('sqlite://:memory:');
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it('leaves a caller-supplied ORM open', async () => {
+    const orm = await MikroORM.init({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      pool: {min: 1, max: 1},
+    });
+    const service = new DatabaseSessionService(orm);
+    await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+
+    await service.close();
+
+    await expect(orm.isConnected()).resolves.toBe(true);
+    await expect(
+      service.getSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+    ).resolves.toBeDefined();
+    await orm.close();
+  });
+
+  it('initializes once when called twice and when called concurrently', async () => {
+    const service = new DatabaseSessionService('sqlite://:memory:');
+    await Promise.all([service.init(), service.init()]);
+    await service.init();
+
+    await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    // A second MikroORM instance would open a second, empty in-memory
+    // database, and this read would miss the session written through the first.
+    await expect(
+      service.getSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+    ).resolves.toBeDefined();
+    await service.close();
+  });
+
+  it('rejects a legacy v0 database instead of upgrading it', async () => {
+    const orm = await MikroORM.init({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      pool: {min: 1, max: 1},
+    });
+    await orm.em
+      .getConnection()
+      .execute('create table events (id text primary key, actions blob)');
+    const service = new DatabaseSessionService(orm);
+
+    await expect(service.init()).rejects.toThrow('legacy v0 session schema');
+    await orm.close();
+  });
+
+  it('rejects a metadata table with no schema version', async () => {
+    const orm = await MikroORM.init({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      pool: {min: 1, max: 1},
+    });
+    await orm.em
+      .getConnection()
+      .execute(
+        'create table adk_internal_metadata ("key" text primary key, value text)',
+      );
+    const service = new DatabaseSessionService(orm);
+
+    await expect(service.init()).rejects.toThrow('might be malformed');
+    await orm.close();
+  });
+});
+
+describe('DatabaseSessionService connection validation', () => {
+  it('rejects an unusable connection string from the constructor', () => {
+    expect(() => new DatabaseSessionService('definitely not a url')).toThrow(
+      'Unsupported database URI',
+    );
+  });
+
+  it('keeps the password out of the rejection message', () => {
+    const password = 'sup3rs3cr3tpassphrase';
+    expect(
+      () => new DatabaseSessionService(`oracle://user:${password}@host/db`),
+    ).toThrow(/Unsupported database URI/);
+    try {
+      new DatabaseSessionService(`oracle://user:${password}@host/db`);
+      expect.fail('the constructor accepted an unsupported URI');
+    } catch (error: unknown) {
+      expect(String(error)).not.toContain(password);
+    }
+  });
+
+  it('still requires a driver in the options form', () => {
+    expect(() => new DatabaseSessionService({dbName: ':memory:'})).toThrow(
+      'Driver is required',
+    );
+  });
+
+  it('applies caller options over the ones derived from the URI', async () => {
+    const service = new DatabaseSessionService('sqlite://:memory:', {
+      pool: {min: 1, max: 1},
+      debug: false,
+    });
+    await service.init();
+
+    await expect(
+      service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+    ).resolves.toBeDefined();
+    await service.close();
+  });
+});
+
+describe('DatabaseSessionService event ordering', () => {
+  let service: DatabaseSessionService;
+  const appName = 'app';
+  const userId = 'u1';
+  const sessionId = 's1';
+
+  beforeEach(async () => {
+    service = new DatabaseSessionService('sqlite://:memory:');
+    await service.createSession({appName, userId, sessionId});
+  });
+
+  afterEach(async () => {
+    await service.close();
+  });
+
+  async function appendTiedEvents(timestamp: number): Promise<string[]> {
+    const session = await service.getSession({appName, userId, sessionId});
+    if (!session) {
+      expect.fail(`session ${sessionId} was not stored`);
+    }
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const event = createEvent({timestamp});
+      await service.appendEvent({session, event});
+      ids.push(event.id);
+    }
+    return ids.sort();
+  }
+
+  it('returns events with tied timestamps in a stable id order', async () => {
+    const sortedIds = await appendTiedEvents(1_700_000_000_000);
+
+    for (let read = 0; read < 3; read++) {
+      const loaded = await service.getSession({appName, userId, sessionId});
+      expect(loaded?.events.map((e) => e.id)).toEqual(sortedIds);
+    }
+  });
+
+  it('truncates a tie deterministically for numRecentEvents', async () => {
+    const sortedIds = await appendTiedEvents(1_700_000_000_000);
+
+    const loaded = await service.getSession({
+      appName,
+      userId,
+      sessionId,
+      config: {numRecentEvents: 2},
+    });
+
+    expect(loaded?.events.map((e) => e.id)).toEqual(sortedIds.slice(-2));
+  });
+});
+
+describe('DatabaseSessionService temp state', () => {
+  let service: DatabaseSessionService;
+  const appName = 'app';
+  const userId = 'u1';
+  const sessionId = 's1';
+
+  beforeEach(async () => {
+    service = new DatabaseSessionService('sqlite://:memory:');
+    await service.createSession({appName, userId, sessionId});
+  });
+
+  afterEach(async () => {
+    await service.close();
+  });
+
+  it('keeps a temp key readable on the in-memory session', async () => {
+    const session = await service.getSession({appName, userId, sessionId});
+    if (!session) {
+      expect.fail(`session ${sessionId} was not stored`);
+    }
+
+    await service.appendEvent({
+      session,
+      event: createEvent({
+        actions: createEventActions({
+          stateDelta: {
+            [State.TEMP_PREFIX + 'draft']: 'in progress',
+            'saved': 'yes',
+          },
+        }),
+      }),
+    });
+
+    expect(session.state[State.TEMP_PREFIX + 'draft']).toBe('in progress');
+    expect(session.state['saved']).toBe('yes');
+  });
+
+  it('does not persist a temp key into the stored session state', async () => {
+    const session = await service.getSession({appName, userId, sessionId});
+    if (!session) {
+      expect.fail(`session ${sessionId} was not stored`);
+    }
+
+    await service.appendEvent({
+      session,
+      event: createEvent({
+        actions: createEventActions({
+          stateDelta: {[State.TEMP_PREFIX + 'draft']: 'in progress'},
+        }),
+      }),
+    });
+
+    const reloaded = await service.getSession({appName, userId, sessionId});
+    expect(reloaded?.state[State.TEMP_PREFIX + 'draft']).toBeUndefined();
+    expect(
+      reloaded?.events[0].actions?.stateDelta?.[State.TEMP_PREFIX + 'draft'],
+    ).toBeUndefined();
   });
 });
