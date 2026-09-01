@@ -9,6 +9,7 @@ import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
+import {ensurePart} from './artifact_util.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -49,11 +50,8 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact(request: SaveArtifactRequest): Promise<number> {
-    if (
-      !request.artifact.inlineData &&
-      !request.artifact.text &&
-      !request.artifact.fileData
-    ) {
+    const artifact = ensurePart(request.artifact);
+    if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
       throw new Error('Artifact must have either inlineData or text content.');
     }
 
@@ -71,22 +69,19 @@ export class GcsArtifactService implements BaseArtifactService {
       ...request.customMetadata,
     };
 
-    if (request.artifact.inlineData) {
-      if (request.artifact.inlineData.displayName) {
+    if (artifact.inlineData) {
+      if (artifact.inlineData.displayName) {
         customMetadata[GCS_DISPLAY_NAME_METADATA_KEY] =
-          request.artifact.inlineData.displayName;
+          artifact.inlineData.displayName;
       }
-      await file.save(
-        Buffer.from(request.artifact.inlineData.data || '', 'base64'),
-        {
-          contentType: request.artifact.inlineData.mimeType,
-          metadata: {metadata: customMetadata},
-        },
-      );
+      await file.save(Buffer.from(artifact.inlineData.data || '', 'base64'), {
+        contentType: artifact.inlineData.mimeType,
+        metadata: {metadata: customMetadata},
+      });
 
       return version;
-    } else if (request.artifact.text !== undefined) {
-      await file.save(request.artifact.text, {
+    } else if (artifact.text !== undefined) {
+      await file.save(artifact.text, {
         contentType: 'text/plain',
         metadata: {
           metadata: {...customMetadata, [GCS_IS_TEXT_METADATA_KEY]: 'true'},
@@ -95,7 +90,7 @@ export class GcsArtifactService implements BaseArtifactService {
 
       return version;
     } else {
-      const fileData = request.artifact.fileData;
+      const fileData = artifact.fileData;
       const fileUri = fileData?.fileUri;
       if (!fileUri) {
         throw new Error('Artifact fileData must have a fileUri.');

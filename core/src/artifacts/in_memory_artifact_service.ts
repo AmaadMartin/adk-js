@@ -13,7 +13,6 @@ import {
   ArtifactScope,
   ParsedArtifactUri,
   ensurePart,
-  getArtifactUri,
   isArtifactRef,
   parseArtifactUri,
   validateArtifactReferenceScope,
@@ -60,12 +59,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     const version = versions.length;
     const metadata: ArtifactVersion = {
       version,
-      canonicalUri: getArtifactUri(
-        'memory://',
-        owningScope(scope, filename),
-        filename,
-        version,
-      ),
+      canonicalUri: canonicalUri(scope, filename, version),
       customMetadata,
     };
 
@@ -76,7 +70,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     } else if (artifact.fileData) {
       if (isArtifactRef(artifact)) {
         // A reference carries no mime type; it is known once resolved.
-        referenceTarget(scope, artifact.fileData.fileUri!);
+        referenceTarget(scope, artifact.fileData.fileUri);
       } else {
         metadata.mimeType = artifact.fileData.mimeType;
       }
@@ -218,7 +212,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
 
     const part = entry.part;
     if (isArtifactRef(part)) {
-      const fileUri = part.fileData!.fileUri!;
+      const fileUri = part.fileData.fileUri;
       const target = referenceTarget(scope, fileUri);
       if (depth >= MAX_ARTIFACT_REFERENCE_DEPTH) {
         throw new InputValidationError(
@@ -280,20 +274,26 @@ function isEmptyArtifact(part: Part): boolean {
 }
 
 /**
- * Narrows a scope to the one that owns the artifact.
+ * Builds the URI that names where this service keeps one version.
  *
  * A user-namespaced artifact belongs to the user rather than to the session
- * that saved it, so its identity carries no session.
+ * that saved it, so its URI carries no session.
  *
  * @param scope The scope the caller operates in.
  * @param filename The name of the artifact file.
- * @return The scope that owns the artifact.
+ * @param version The version being saved.
+ * @return The canonical URI.
  */
-function owningScope(scope: ArtifactScope, filename: string): ArtifactScope {
+function canonicalUri(
+  scope: ArtifactScope,
+  filename: string,
+  version: number,
+): string {
+  const {appName, userId, sessionId} = scope;
   if (fileHasUserNamespace(filename)) {
-    return {appName: scope.appName, userId: scope.userId};
+    return `memory://apps/${appName}/users/${userId}/artifacts/${filename}/versions/${version}`;
   }
-  return scope;
+  return `memory://apps/${appName}/users/${userId}/sessions/${sessionId}/artifacts/${filename}/versions/${version}`;
 }
 
 /**

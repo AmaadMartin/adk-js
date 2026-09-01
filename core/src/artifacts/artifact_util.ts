@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part} from '@google/genai';
+import {FileData, Part} from '@google/genai';
 
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
@@ -20,6 +20,11 @@ export interface ParsedArtifactUri {
   version: number;
 }
 
+/** An artifact that references another artifact. */
+export interface ArtifactRefPart extends Part {
+  fileData: FileData & {fileUri: string};
+}
+
 /** The app, user and session an artifact operation runs under. */
 export interface ArtifactScope {
   appName: string;
@@ -28,19 +33,9 @@ export interface ArtifactScope {
   sessionId?: string;
 }
 
-/**
- * A URI scheme that identifies an artifact.
- *
- * `artifact://` names a reference one artifact holds to another.
- * `memory://` names where the in-memory service keeps a version.
- */
-export type ArtifactUriScheme = 'artifact://' | 'memory://';
-
-const ARTIFACT_URI_SCHEME: ArtifactUriScheme = 'artifact://';
+const ARTIFACT_URI_SCHEME = 'artifact://';
 
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
-
-const SNAKE_CASE_KEY_RE = /_[a-z]/;
 
 const SESSION_SCOPED_ARTIFACT_URI_RE =
   /^artifact:\/\/apps\/([^/]+)\/users\/([^/]+)\/sessions\/([^/]+)\/artifacts\/(.+)\/versions\/(\d+)$/;
@@ -84,34 +79,12 @@ export function parseArtifactUri(uri: string): ParsedArtifactUri | undefined {
 }
 
 /**
- * Builds the URI that identifies one version of an artifact.
- *
- * A scope with no session produces the user-scoped form, which omits the
- * `sessions` segment.
- *
- * @param scheme The URI scheme to build the URI under.
- * @param scope The app, user and session that own the artifact.
- * @param filename The name of the artifact file.
- * @param version The version of the artifact.
- * @return The constructed URI.
- */
-export function getArtifactUri(
-  scheme: ArtifactUriScheme,
-  scope: ArtifactScope,
-  filename: string,
-  version: number,
-): string {
-  const sessionSegment = scope.sessionId ? `sessions/${scope.sessionId}/` : '';
-  return `${scheme}apps/${scope.appName}/users/${scope.userId}/${sessionSegment}artifacts/${filename}/versions/${version}`;
-}
-
-/**
  * Reports whether an artifact references another artifact.
  *
  * @param artifact The artifact part to check.
  * @return True when the part carries an `artifact://` file URI.
  */
-export function isArtifactRef(artifact: Part): boolean {
+export function isArtifactRef(artifact: Part): artifact is ArtifactRefPart {
   const fileUri = artifact.fileData?.fileUri;
   return fileUri !== undefined && fileUri.startsWith(ARTIFACT_URI_SCHEME);
 }
@@ -190,49 +163,15 @@ export function validatePathSegment(value: string, fieldName: string): void {
  * Normalizes an artifact an untyped caller supplied.
  *
  * An HTTP body or a plain JavaScript caller may name the fields the way the
- * wire format does, as `inline_data` rather than `inlineData`. A camelCase
- * object already is a `Part`, so it is returned unchanged.
+ * wire format does, as `inline_data` rather than `inlineData`. The result is a
+ * copy, so a later write to the caller's object cannot reach stored state.
  *
  * @param artifact The artifact to normalize.
  * @return The artifact with the field names the SDK expects.
  */
 export function ensurePart(artifact: Part | Record<string, unknown>): Part {
-  if (isCamelCasePart(artifact)) {
-    return artifact;
-  }
   logger.debug(
-    `[artifact_util] Normalizing artifact keys to camelCase: ${Object.keys(artifact).join(', ')}`,
+    `[artifact_util] Normalizing artifact: ${Object.keys(artifact).join(', ')}`,
   );
   return camelCaseKeys(artifact) as Part;
-}
-
-/**
- * Narrows an artifact that already uses the SDK's camelCase field names.
- *
- * @param artifact The artifact to check.
- * @return True when no field name needs conversion.
- */
-function isCamelCasePart(
-  artifact: Part | Record<string, unknown>,
-): artifact is Part {
-  return !hasSnakeCaseKey(artifact);
-}
-
-/**
- * Reports whether a value, or a plain object nested in it, has a snake_case
- * field name.
- *
- * @param value The value to inspect.
- * @return True when at least one field name needs conversion.
- */
-function hasSnakeCaseKey(value: unknown): boolean {
-  if (value === null || typeof value !== 'object') {
-    return false;
-  }
-  if (value.constructor !== Object) {
-    return false;
-  }
-  return Object.entries(value).some(
-    ([key, child]) => SNAKE_CASE_KEY_RE.test(key) || hasSnakeCaseKey(child),
-  );
 }

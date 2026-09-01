@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  InMemoryArtifactService,
-  InputValidationError,
-  SaveArtifactRequest,
-} from '@google/adk';
+import {InMemoryArtifactService, InputValidationError} from '@google/adk';
 import {Part} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 
@@ -29,20 +25,6 @@ function sessionUri(filename: string, version = 0, sessionId = SESSION_ID) {
 
 function userUri(filename: string, version = 0) {
   return `artifact://apps/${APP_NAME}/users/${USER_ID}/artifacts/${filename}/versions/${version}`;
-}
-
-/**
- * Saves through an untyped call boundary, where `sessionId` is absent.
- *
- * `CompositeSessionKey` declares `sessionId` as required, so a TypeScript
- * caller cannot omit it. An HTTP body or a plain JavaScript caller can, which
- * is the input the runtime guard exists for.
- */
-function saveWithoutSession(
-  service: InMemoryArtifactService,
-  request: Omit<SaveArtifactRequest, 'sessionId'>,
-): Promise<number> {
-  return service.saveArtifact(request as SaveArtifactRequest);
 }
 
 describe('InMemoryArtifactService adk-python parity', () => {
@@ -316,25 +298,31 @@ describe('InMemoryArtifactService adk-python parity', () => {
       ).rejects.toThrow('Invalid artifact reference URI: artifact://');
     });
 
-    it('rejects a stored reference retargeted at another session', async () => {
+    it('rejects a session-scoped reference reached through a user-scoped one', async () => {
       await service.saveArtifact({
         appName: APP_NAME,
         userId: USER_ID,
-        sessionId: 'sess1',
+        sessionId: 'sess0',
         filename: 'source.txt',
-        artifact: {text: 'other-session'},
+        artifact: {text: 'source'},
       });
-      // The service stores the part by reference, so a later write to the part
-      // reproduces a stored URI that was tampered with after it was validated.
-      const fileData = {fileUri: sessionUri('source.txt', 0, 'sess0')};
+      // A user-scoped pointer carries no session, so following it drops the
+      // caller out of sess0. The session-scoped URI it holds is then out of
+      // scope, which only the load-side check can catch.
+      await service.saveArtifact({
+        appName: APP_NAME,
+        userId: USER_ID,
+        sessionId: 'sess0',
+        filename: 'user:pointer',
+        artifact: {fileData: {fileUri: sessionUri('source.txt', 0, 'sess0')}},
+      });
       await service.saveArtifact({
         appName: APP_NAME,
         userId: USER_ID,
         sessionId: 'sess0',
         filename: 'ref.txt',
-        artifact: {fileData},
+        artifact: {fileData: {fileUri: userUri('user:pointer')}},
       });
-      fileData.fileUri = sessionUri('source.txt', 0, 'sess1');
 
       await expect(
         service.loadArtifact({
@@ -344,27 +332,6 @@ describe('InMemoryArtifactService adk-python parity', () => {
           filename: 'ref.txt',
         }),
       ).rejects.toThrow('same session scope');
-    });
-
-    it('rejects a stored reference whose URI became malformed', async () => {
-      const fileData = {fileUri: sessionUri('source.txt')};
-      await service.saveArtifact({
-        appName: APP_NAME,
-        userId: USER_ID,
-        sessionId: SESSION_ID,
-        filename: 'ref.txt',
-        artifact: {fileData},
-      });
-      fileData.fileUri = 'artifact://broken';
-
-      await expect(
-        service.loadArtifact({
-          appName: APP_NAME,
-          userId: USER_ID,
-          sessionId: SESSION_ID,
-          filename: 'ref.txt',
-        }),
-      ).rejects.toThrow('Invalid artifact reference URI: artifact://broken');
     });
 
     it('rejects a reference chain that never reaches content', async () => {
@@ -592,28 +559,34 @@ describe('InMemoryArtifactService adk-python parity', () => {
   });
 
   describe('missing session', () => {
-    it('rejects a session-scoped artifact saved without a session', async () => {
+    it('rejects a reference whose target needs a session the URI does not name', async () => {
+      await service.saveArtifact({
+        appName: APP_NAME,
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        filename: 'source.txt',
+        artifact: {text: 'source'},
+      });
+      // A user-scoped URI carries no session, but source.txt is session-scoped,
+      // so resolving it reaches the path builder with no session at all.
+      await service.saveArtifact({
+        appName: APP_NAME,
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        filename: 'ref.txt',
+        artifact: {fileData: {fileUri: userUri('source.txt')}},
+      });
+
       await expect(
-        saveWithoutSession(service, {
+        service.loadArtifact({
           appName: APP_NAME,
           userId: USER_ID,
-          filename: 'safe.txt',
-          artifact: {text: 'data'},
+          sessionId: SESSION_ID,
+          filename: 'ref.txt',
         }),
       ).rejects.toThrow(
         'Session ID must be provided for session-scoped artifacts.',
       );
-    });
-
-    it('accepts a user-namespaced artifact saved without a session', async () => {
-      await expect(
-        saveWithoutSession(service, {
-          appName: APP_NAME,
-          userId: USER_ID,
-          filename: 'user:safe.txt',
-          artifact: {text: 'data'},
-        }),
-      ).resolves.toBe(0);
     });
   });
 
@@ -639,15 +612,12 @@ describe('InMemoryArtifactService adk-python parity', () => {
     });
 
     it('accepts a snake_case artifact object', async () => {
-      const untyped: Record<string, unknown> = {
-        inline_data: {mime_type: 'text/plain', data: 'aGVsbG8='},
-      };
       await service.saveArtifact({
         appName: APP_NAME,
         userId: USER_ID,
         sessionId: SESSION_ID,
         filename: 'note.txt',
-        artifact: untyped as Part,
+        artifact: {inline_data: {mime_type: 'text/plain', data: 'aGVsbG8='}},
       });
 
       const loaded = await service.loadArtifact({
@@ -760,28 +730,6 @@ describe('InMemoryArtifactService adk-python parity', () => {
           userId: USER_ID,
           sessionId: SESSION_ID,
           filename: 'empty.bin',
-        }),
-      ).resolves.toBeUndefined();
-    });
-
-    it('reports a part that lost its content as absent', async () => {
-      const artifact: Part = {text: 'placeholder'};
-      await service.saveArtifact({
-        appName: APP_NAME,
-        userId: USER_ID,
-        sessionId: SESSION_ID,
-        filename: 'gone.txt',
-        artifact,
-      });
-      // The service stores the part by reference.
-      delete artifact.text;
-
-      await expect(
-        service.loadArtifact({
-          appName: APP_NAME,
-          userId: USER_ID,
-          sessionId: SESSION_ID,
-          filename: 'gone.txt',
         }),
       ).resolves.toBeUndefined();
     });

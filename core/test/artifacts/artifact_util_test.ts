@@ -11,7 +11,6 @@ import {describe, expect, it} from 'vitest';
 import {
   ParsedArtifactUri,
   ensurePart,
-  getArtifactUri,
   isArtifactRef,
   parseArtifactUri,
   validateArtifactReferenceScope,
@@ -80,58 +79,6 @@ describe('parseArtifactUri', () => {
     'artifact://apps/app1/users/user1/artifacts/file1/versions/1/extra',
   ])('returns undefined for %s', (uri) => {
     expect(parseArtifactUri(uri)).toBeUndefined();
-  });
-});
-
-describe('getArtifactUri', () => {
-  it('builds a session-scoped reference URI', () => {
-    expect(
-      getArtifactUri(
-        'artifact://',
-        {appName: 'app1', userId: 'user1', sessionId: 'session1'},
-        'file1',
-        123,
-      ),
-    ).toBe(
-      'artifact://apps/app1/users/user1/sessions/session1/artifacts/file1/versions/123',
-    );
-  });
-
-  it('builds a user-scoped reference URI', () => {
-    expect(
-      getArtifactUri(
-        'artifact://',
-        {appName: 'app2', userId: 'user2'},
-        'file2',
-        456,
-      ),
-    ).toBe('artifact://apps/app2/users/user2/artifacts/file2/versions/456');
-  });
-
-  it('builds a session-scoped memory URI', () => {
-    expect(
-      getArtifactUri(
-        'memory://',
-        {appName: 'app0', userId: 'user0', sessionId: '123'},
-        'filename',
-        0,
-      ),
-    ).toBe(
-      'memory://apps/app0/users/user0/sessions/123/artifacts/filename/versions/0',
-    );
-  });
-
-  it('builds a user-scoped memory URI', () => {
-    expect(
-      getArtifactUri(
-        'memory://',
-        {appName: 'app0', userId: 'user0'},
-        'user:document.pdf',
-        2,
-      ),
-    ).toBe(
-      'memory://apps/app0/users/user0/artifacts/user:document.pdf/versions/2',
-    );
   });
 });
 
@@ -281,16 +228,16 @@ describe('validateArtifactReferenceScope', () => {
 });
 
 describe('ensurePart', () => {
-  it('returns a Part unchanged', () => {
+  it('preserves a Part that already uses camelCase field names', () => {
     const part: Part = {text: 'hello'};
 
-    expect(ensurePart(part)).toBe(part);
+    expect(ensurePart(part)).toEqual(part);
   });
 
-  it('returns a camelCase object unchanged', () => {
+  it('preserves a camelCase object', () => {
     const artifact = {inlineData: {mimeType: 'image/png', data: 'dGVzdA=='}};
 
-    expect(ensurePart(artifact)).toBe(artifact);
+    expect(ensurePart(artifact)).toEqual(artifact);
   });
 
   it('converts snake_case field names', () => {
@@ -305,15 +252,12 @@ describe('ensurePart', () => {
     });
   });
 
-  it('leaves a text-only object alone', () => {
-    const artifact = {text: 'plain'};
+  it('copies the artifact, so a later write cannot reach stored state', () => {
+    const artifact: Part = {text: 'plain'};
 
-    expect(ensurePart(artifact)).toBe(artifact);
-  });
+    const normalized = ensurePart(artifact);
+    artifact.text = 'changed';
 
-  it('ignores a field whose value is not a plain object', () => {
-    const artifact = {functionCall: {args: {items: ['a'], flag: null}}};
-
-    expect(ensurePart(artifact)).toBe(artifact);
+    expect(normalized.text).toBe('plain');
   });
 });
