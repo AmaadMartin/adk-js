@@ -68,12 +68,17 @@ interface StubGraphOptions {
   response?: BaseMessage;
   /** When set, `invoke` rejects with it instead of returning a response. */
   failure?: Error;
+  /** When set, `getState` rejects with it instead of reporting state. */
+  stateFailure?: Error;
 }
 
 function createStubGraph(options: StubGraphOptions = {}) {
-  const getState = vi.fn(async (_config: LangGraphThreadConfig) => ({
-    values: options.stateValues,
-  }));
+  const getState = vi.fn(async (_config: LangGraphThreadConfig) => {
+    if (options.stateFailure) {
+      throw options.stateFailure;
+    }
+    return {values: options.stateValues};
+  });
   const invoke = vi.fn(
     async (
       _input: {messages: BaseMessage[]},
@@ -400,7 +405,7 @@ describe('LangGraphAgent', () => {
     ).rejects.toThrow('Live mode is not supported in LangGraphAgent.');
   });
 
-  it('propagates a graph failure unchanged', async () => {
+  it('propagates an invoke failure unchanged', async () => {
     const failure = new Error('graph exploded');
     const {graph} = createStubGraph({failure});
     const agent = new LangGraphAgent({name: AGENT_NAME, graph});
@@ -408,6 +413,20 @@ describe('LangGraphAgent', () => {
     await expect(
       collectEvents(agent.runAsync(createContext(agent))),
     ).rejects.toBe(failure);
+  });
+
+  it('propagates a state read failure unchanged', async () => {
+    const stateFailure = new Error('checkpointer unreachable');
+    const {graph, invoke} = createStubGraph({
+      checkpointer: {},
+      stateFailure,
+    });
+    const agent = new LangGraphAgent({name: AGENT_NAME, graph});
+
+    await expect(
+      collectEvents(agent.runAsync(createContext(agent))),
+    ).rejects.toBe(stateFailure);
+    expect(invoke).not.toHaveBeenCalled();
   });
 });
 
