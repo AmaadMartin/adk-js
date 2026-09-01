@@ -8,7 +8,6 @@ import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
   GcsArtifactService,
   InMemoryArtifactService,
-  InMemoryMemoryService,
   InMemorySessionService,
   LlmAgent,
   Logger,
@@ -167,7 +166,9 @@ describe('createApiServer', () => {
       expect(options.otelToCloud).toBe(false);
       expect(options.sessionService).toBeInstanceOf(InMemorySessionService);
       expect(options.artifactService).toBeInstanceOf(InMemoryArtifactService);
-      expect(options.memoryService).toBeInstanceOf(InMemoryMemoryService);
+      // The factory names no memory service: adk-js has one, and the server
+      // already defaults to it.
+      expect(options.memoryService).toBeUndefined();
     });
 
     it('resolves a relative agentsDir against the working directory', () => {
@@ -225,27 +226,8 @@ describe('createApiServer', () => {
       );
     });
 
-    it('reads the memory service URI', () => {
-      createApiServer({agentsDir, web: false, memoryServiceUri: 'memory://'});
-
-      expect(serverOptions().memoryService).toBeInstanceOf(
-        InMemoryMemoryService,
-      );
-    });
-
-    it('binds the host when no bindHost is given', () => {
-      createApiServer({agentsDir, web: false, host: 'card.example'});
-
-      expect(serverOptions().host).toBe('card.example');
-    });
-
-    it('binds bindHost in preference to host', () => {
-      createApiServer({
-        agentsDir,
-        web: false,
-        host: 'card.example',
-        bindHost: '0.0.0.0',
-      });
+    it('binds the configured host', () => {
+      createApiServer({agentsDir, web: false, host: '0.0.0.0'});
 
       expect(serverOptions().host).toBe('0.0.0.0');
     });
@@ -381,22 +363,6 @@ describe('createApiServer', () => {
         }),
       ).toThrow(/Unsupported artifact service URI/);
     });
-
-    it('rejects a memory service URI, naming only its scheme', () => {
-      expect(() =>
-        createApiServer({
-          agentsDir,
-          web: false,
-          memoryServiceUri: 'rag://user:hunter2@corpus',
-        }),
-      ).toThrow('Unsupported memory service URI scheme: rag');
-    });
-
-    it('rejects a memory service URI that has no scheme', () => {
-      expect(() =>
-        createApiServer({agentsDir, web: false, memoryServiceUri: 'corpus'}),
-      ).toThrow('Unsupported memory service URI scheme: <scheme-missing>');
-    });
   });
 });
 
@@ -478,7 +444,7 @@ describe('a server built by createApiServer', () => {
     expect(card.body.name).toBe(AGENT_NAME);
   });
 
-  it('advertises bindHost, not host, on the A2A agent card', async () => {
+  it('advertises the configured host on the A2A agent card', async () => {
     const agentLoader = new StubAgentLoader(new LlmAgent({name: AGENT_NAME}));
     server = createApiServer({
       agentsDir,
@@ -486,8 +452,7 @@ describe('a server built by createApiServer', () => {
       port: 0,
       a2a: true,
       agentLoader,
-      host: 'localhost',
-      bindHost: '127.0.0.1',
+      host: '127.0.0.1',
     });
     await server.start();
 
@@ -495,8 +460,8 @@ describe('a server built by createApiServer', () => {
       `${server.url}/a2a/${APP_NAME}/${AGENT_CARD_PATH}`,
     );
 
-    // The server keeps one host, so bindHost moves the advertised host too.
-    // Both the option's documentation and the guide say so.
+    // The card carries the host the caller has to serve the app on, which
+    // the option's documentation and the guide both promise.
     expect(new URL(card.body.url).hostname).toBe('127.0.0.1');
   });
 
@@ -584,10 +549,11 @@ describe('createApiServerApp', () => {
 
   /** Serves *app* on a loopback port of the operating system's choosing. */
   async function serve(app: Application): Promise<string> {
-    listener = http.createServer(app);
-    await new Promise<void>((resolve) => listener!.listen(0, resolve));
+    const created = http.createServer(app);
+    listener = created;
+    await new Promise<void>((resolve) => created.listen(0, resolve));
 
-    const address = listener.address();
+    const address = created.address();
     if (!address || typeof address === 'string') {
       expect.fail('the listener reported no port');
     }

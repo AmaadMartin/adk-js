@@ -5,10 +5,8 @@
  */
 
 import {
-  BaseMemoryService,
   getArtifactServiceFromUri,
   getSessionServiceFromUri,
-  InMemoryMemoryService,
   Logger,
   LogLevel,
 } from '@google/adk';
@@ -42,8 +40,6 @@ export interface ApiServerOptions {
   sessionServiceUri?: string;
   /** URI of the artifact service. Defaults to `memory://`. */
   artifactServiceUri?: string;
-  /** URI of the memory service. Only `memory://` is supported. */
-  memoryServiceUri?: string;
   /** Origin, or list of origins, CORS accepts. */
   allowOrigins?: string | string[];
   /**
@@ -59,17 +55,12 @@ export interface ApiServerOptions {
    */
   a2aAuthToken?: string;
   /**
-   * Host the server binds to, and the host the A2A agent card advertises.
-   * Defaults to `localhost`, which arms the DNS-rebinding guard.
+   * Host the server binds to. It is also the address the DNS-rebinding guard
+   * measures, and the host the A2A agent card advertises, so a caller behind
+   * a proxy cannot advertise one address and bind another. Defaults to
+   * `localhost`, which arms the guard.
    */
   host?: string;
-  /**
-   * Takes the place of `host` when set. `AdkApiServer` keeps one host, so
-   * this is the bind address, the address the DNS-rebinding guard measures,
-   * and the host the A2A agent card advertises -- it does not split the
-   * bind address off from the advertised one.
-   */
-  bindHost?: string;
   /** Port the server binds to. Defaults to 8000. */
   port?: number;
   /**
@@ -93,9 +84,10 @@ export interface ApiServerOptions {
 }
 
 /**
- * Assembles an ADK API server from configuration: it resolves the session,
- * artifact and memory services from their URIs and applies the defaults the
- * `adk web` and `adk api_server` commands use.
+ * Assembles an ADK API server from configuration: it resolves the session and
+ * artifact services from their URIs and applies the defaults the `adk web`
+ * and `adk api_server` commands use. The server supplies the in-memory
+ * memory service, which is the only one adk-js has.
  *
  * The returned server is not listening. Call `start()` to bind a port, or
  * `buildApp()` to serve the Express app yourself.
@@ -117,13 +109,12 @@ export function createApiServer(options: ApiServerOptions): AdkApiServer {
     artifactService: getArtifactServiceFromUri(
       options.artifactServiceUri || IN_MEMORY_URI,
     ),
-    memoryService: createMemoryService(options.memoryServiceUri),
     serveDebugUI: options.web,
     allowOrigins: options.allowOrigins,
     allowedHosts: options.allowedHosts,
     a2a: options.a2a ?? false,
     a2aAuthToken: options.a2aAuthToken,
-    host: options.bindHost ?? options.host ?? DEFAULT_HOST,
+    host: options.host ?? DEFAULT_HOST,
     port: options.port ?? DEFAULT_PORT,
     otelToCloud: resolveOtelToCloud(options, agentsDir, logger),
     reloadAgents: options.reloadAgents ?? false,
@@ -143,27 +134,6 @@ export function createApiServerApp(
   options: ApiServerOptions,
 ): Promise<Application> {
   return createApiServer(options).buildApp();
-}
-
-/**
- * Resolves a memory service from *uri*. adk-js has no memory service
- * registry, so `memory://` is the only supported scheme.
- */
-function createMemoryService(uri: string | undefined): BaseMemoryService {
-  if (!uri || uri === IN_MEMORY_URI) {
-    return new InMemoryMemoryService();
-  }
-
-  throw new Error(`Unsupported memory service URI scheme: ${uriScheme(uri)}`);
-}
-
-/**
- * Returns the scheme of *uri*, and never the rest of it: a service URI can
- * carry credentials, which must stay out of an error message.
- */
-function uriScheme(uri: string): string {
-  const separator = uri.indexOf('://');
-  return separator === -1 ? '<scheme-missing>' : uri.slice(0, separator);
 }
 
 /**

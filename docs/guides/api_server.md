@@ -1,6 +1,6 @@
 # createApiServer
 
-Builds a configured ADK API server from plain options: directories, service
+Builds a configured ADK API server from plain options: a directory, service
 URIs and flags in, a ready server or Express application out. Reach for it
 when you want the surface `adk web` and `adk api_server` serve, but from your
 own process instead of the command line.
@@ -8,11 +8,11 @@ own process instead of the command line.
 ## Introduction
 
 `AdkApiServer` takes services, not configuration. It expects a
-`BaseSessionService`, a `BaseArtifactService` and a `BaseMemoryService` that
-somebody already built. Turning `postgresql://...` or `gs://my-bucket` into
-those objects, choosing the defaults, and deciding what telemetry does is a
-separate job, and until now it lived inside the CLI command handlers where no
-other caller could reach it.
+`BaseSessionService` and a `BaseArtifactService` that somebody already built.
+Turning `postgresql://...` or `gs://my-bucket` into those objects, choosing
+the defaults, and deciding what telemetry does is a separate job, and until
+now it lived inside the CLI command handlers where no other caller could
+reach it.
 
 `createApiServer` is that job, extracted. It resolves each service from its
 URI, applies the same defaults the CLI applies, and returns the server. The
@@ -70,34 +70,20 @@ to `/dev-ui`.
 
 ## Services
 
-Each service is named by a URI, and an unsupported one throws:
-
-| Option               | Supported values                              | Default                          |
-| -------------------- | --------------------------------------------- | -------------------------------- |
-| `sessionServiceUri`  | `memory://`, a database URL, `vertexai://...` | `DATABASE_URL`, then `memory://` |
-| `artifactServiceUri` | `memory://`, `gs://<bucket>`, `file://<dir>`  | `memory://`                      |
-| `memoryServiceUri`   | `memory://`                                   | `memory://`                      |
-
-```ts
-const server = createApiServer({
-  agentsDir: './agents',
-  web: false,
-  sessionServiceUri: 'postgresql://user:pass@host/db',
-  artifactServiceUri: 'gs://my-bucket',
-});
-```
-
-An error message names the scheme and never the credentials the URI carries.
+`sessionServiceUri` accepts `memory://`, a database URL, or `vertexai://...`,
+and defaults to the `DATABASE_URL` environment variable, then to `memory://`.
+`artifactServiceUri` accepts `memory://`, `gs://<bucket>` or `file://<dir>`,
+and defaults to `memory://`. An unsupported URI throws, and the message
+redacts the password the URI carries.
 
 Pass `agentLoader` to serve agents that are already in the process, rather
 than files under `agentsDir`.
 
 ## Network
 
-`host` is the address the server binds, the address the DNS-rebinding guard
-measures, and the host the A2A agent card advertises. `bindHost` takes its
-place when set. The server keeps one host, so `bindHost` moves all three
-together; it does not advertise one address and bind another.
+`host` is the address the server binds. It is also the address the
+DNS-rebinding guard measures, and the host the A2A agent card advertises, so
+you cannot advertise one address and bind another.
 
 A server bound to loopback rejects a request whose `Host` header names
 anything else, which is what stops a DNS-rebinding page from reaching it.
@@ -109,7 +95,7 @@ CORS, and accepts one origin or a list:
 const app = await createApiServerApp({
   agentsDir: './agents',
   web: false,
-  bindHost: '0.0.0.0',
+  host: '0.0.0.0',
   allowOrigins: ['https://console.example', 'https://ops.example'],
 });
 ```
@@ -121,9 +107,9 @@ const app = await createApiServerApp({
 authenticate it; without a token the surface is served unauthenticated, which
 is a local-development setting.
 
-The agent card advertises the configured `host` and `port` -- or `bindHost`
-in place of `host` -- so serve the app on those. A client cannot reach the
-card's URL if you serve the app somewhere else, behind a proxy for instance.
+The agent card advertises the configured `host` and `port`, so serve the app
+on those. A client cannot reach the card's URL if you serve the app somewhere
+else, behind a proxy for instance.
 
 ## Telemetry
 
