@@ -8,6 +8,8 @@ official ADK documentation, visit [adk.dev](https://adk.dev/).
 
 ### Agents
 
+- [LangGraphAgent](agents/langgraph_agent/index.md) - Running a compiled
+  LangGraph state graph as an ADK agent.
 - [LlmAgent single-turn and task modes](agents/llm_agent/single_turn.md) - Exposing a sub-agent to its parent as a callable tool that runs inline.
 
 ### Auth
