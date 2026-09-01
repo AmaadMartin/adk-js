@@ -55,6 +55,7 @@ import {
   RunnableRoot,
   runNodeAsInvocation,
 } from '../workflow/run_node_as_invocation.js';
+import {findActiveTaskScope, findTaskAgentNames} from './task_scope_utils.js';
 
 /**
  * The configuration parameters for the Runner.
@@ -194,6 +195,8 @@ export class Runner {
 
   /** Where a loader found the root agent, when a loader recorded it. */
   private readonly agentOrigin: AgentOrigin;
+  /** The task-mode agents in this root, whose isolation scopes can be open. */
+  private readonly taskAgentNames: ReadonlySet<string>;
   /** Set when {@link appName} disagrees with {@link agentOrigin}. */
   private appNameAlignmentHint?: string;
 
@@ -225,6 +228,7 @@ export class Runner {
       input.app?.resumabilityConfig ?? input.resumabilityConfig;
     this.autoCreateSession = input.autoCreateSession ?? false;
     this.agentOrigin = inferAgentOrigin(this.agent);
+    this.taskAgentNames = findTaskAgentNames(this.agent);
     this.enforceAppNameAlignment();
     this.warnUncachedAgentTransfer();
   }
@@ -772,6 +776,15 @@ export class Runner {
       content: params.content,
       customMetadata: params.customMetadata,
     });
+    // A paused task agent builds its contents from its own isolation scope, so
+    // an unscoped reply would be invisible to it.
+    const activeScope = findActiveTaskScope(
+      invocationContext.session,
+      this.taskAgentNames,
+    );
+    if (activeScope) {
+      event.isolationScope = activeScope.isolationScope;
+    }
     await this.sessionService.appendEvent({
       session: invocationContext.session,
       event,
@@ -828,6 +841,10 @@ export class Runner {
   private async *runRoot(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    if (isLlmAgent(this.agent) && this.agent.mode === 'task') {
+      yield* runNodeAsInvocation(this.agent, invocationContext);
+      return;
+    }
     if (isBaseAgent(this.agent)) {
       yield* requireAgent(invocationContext).runAsync(invocationContext);
       return;

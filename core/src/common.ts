@@ -267,6 +267,10 @@ export {
   isRunner,
 } from './runner/runner.js';
 export type {RunnerConfig} from './runner/runner.js';
+export {
+  findActiveTaskScope,
+  findTaskAgentNames,
+} from './runner/task_scope_utils.js';
 export {BaseSessionService} from './sessions/base_session_service.js';
 export type {
   AppendEventRequest,
@@ -304,6 +308,7 @@ export {
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
+  FINISH_TASK_ERROR_RESULT,
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,
   FinishTaskTool,
