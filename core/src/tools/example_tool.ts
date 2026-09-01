@@ -146,7 +146,7 @@ export class ExampleTool extends BaseTool {
       return;
     }
     appendInstructions(llmRequest, [
-      buildExampleSi(this.examples, parts[0].text, llmRequest.model),
+      await buildExampleSi(this.examples, parts[0].text, llmRequest.model),
     ]);
   }
 }
