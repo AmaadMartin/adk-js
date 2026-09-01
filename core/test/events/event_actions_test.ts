@@ -50,6 +50,11 @@ describe('createEventActions', () => {
     expect(actions.escalate).toBe(true);
   });
 
+  it('applies a rewindBeforeInvocationId override', () => {
+    const actions = createEventActions({rewindBeforeInvocationId: 'inv-2'});
+    expect(actions.rewindBeforeInvocationId).toBe('inv-2');
+  });
+
   it('applies requestedAuthConfigs override', () => {
     const authConfig = createTestAuthConfig('key-1');
     const actions = createEventActions({
@@ -226,6 +231,22 @@ describe('mergeEventActions', () => {
       createEventActions({escalate: true}),
     ]);
     expect(result.escalate).toBe(true);
+  });
+
+  it('uses last-writer-wins for rewindBeforeInvocationId', () => {
+    const result = mergeEventActions([
+      createEventActions({rewindBeforeInvocationId: 'inv-1'}),
+      createEventActions({rewindBeforeInvocationId: 'inv-2'}),
+    ]);
+    expect(result.rewindBeforeInvocationId).toBe('inv-2');
+  });
+
+  it('keeps a rewindBeforeInvocationId no source overrides', () => {
+    const result = mergeEventActions(
+      [createEventActions({escalate: true})],
+      createEventActions({rewindBeforeInvocationId: 'inv-1'}),
+    );
+    expect(result.rewindBeforeInvocationId).toBe('inv-1');
   });
 
   it('applies target as the base before merging sources', () => {
