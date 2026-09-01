@@ -295,6 +295,7 @@ export type {
   CrewaiToolOptions,
 } from './integrations/crewai/crewai_tool.js';
 export type {
+  AddEventsToMemoryRequest,
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
