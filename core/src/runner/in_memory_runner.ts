@@ -43,6 +43,7 @@ export class InMemoryRunner extends Runner {
    * @param params.appName The application name. Defaults to `'InMemoryRunner'`.
    * @param params.plugins An optional list of plugins.
    * @param params.resumabilityConfig An optional resumability configuration.
+   * @param params.autoCreateSession Whether to create a missing session.
    */
   constructor(params: {
     app?: App;
@@ -50,6 +51,7 @@ export class InMemoryRunner extends Runner {
     appName?: string;
     plugins?: BasePlugin[];
     resumabilityConfig?: ResumabilityConfig;
+    autoCreateSession?: boolean;
   }) {
     const {
       agent,
@@ -57,6 +59,7 @@ export class InMemoryRunner extends Runner {
       plugins = [],
       app,
       resumabilityConfig,
+      autoCreateSession,
     } = params;
 
     super({
@@ -68,6 +71,7 @@ export class InMemoryRunner extends Runner {
       sessionService: new InMemorySessionService(),
       memoryService: new InMemoryMemoryService(),
       resumabilityConfig: app?.resumabilityConfig ?? resumabilityConfig,
+      autoCreateSession,
     });
   }
 }

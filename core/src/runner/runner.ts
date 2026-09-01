@@ -41,6 +41,7 @@ import {
   findUserMessageForInvocation,
   resolveInvocationIdFromFr,
 } from '../sessions/invocation_utils.js';
+import {rewindSession} from '../sessions/rewind_utils.js';
 import {CompositeSessionKey, Session} from '../sessions/session.js';
 import {
   runAsyncGeneratorWithOtelContext,
@@ -824,6 +825,33 @@ export class Runner {
       );
     }
     return resolved;
+  }
+
+  /**
+   * Rewinds the session to before an invocation, undoing the state it wrote
+   * and restoring the artifacts it changed.
+   *
+   * The rewind is recorded as an event on the session. Readers that rebuild
+   * contents do not yet honour it; that belongs to those modules.
+   *
+   * @param params.rewindBeforeInvocationId The invocation to rewind before.
+   * @throws {SessionNotFoundError} When the session is missing and
+   *     {@link autoCreateSession} is not set.
+   * @throws {Error} When no event in the session belongs to the invocation.
+   */
+  async rewindAsync(params: {
+    userId: string;
+    sessionId: string;
+    rewindBeforeInvocationId: string;
+  }): Promise<void> {
+    const session = await this.getOrCreateSession(params);
+    await rewindSession({
+      sessionService: this.sessionService,
+      session,
+      rewindBeforeInvocationId: params.rewindBeforeInvocationId,
+      artifactService: this.artifactService,
+      appName: this.appName,
+    });
   }
 
   /**

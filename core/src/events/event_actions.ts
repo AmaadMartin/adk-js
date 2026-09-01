@@ -61,6 +61,12 @@ export interface EventActions {
   requestedToolConfirmations: {[key: string]: ToolConfirmation};
 
   /**
+   * When set, this event rewinds the session: a reader rebuilding state or
+   * contents skips every event from the named invocation onwards.
+   */
+  rewindBeforeInvocationId?: string;
+
+  /**
    * Workflow: a serialized node/agent state snapshot used for resumable
    * checkpointing. Mirrors Python `EventActions.agent_state`.
    */

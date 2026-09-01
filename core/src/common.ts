@@ -286,6 +286,11 @@ export {
   findUserMessageForInvocation,
   resolveInvocationIdFromFr,
 } from './sessions/invocation_utils.js';
+export {
+  computeArtifactDeltaForRewind,
+  computeStateDeltaForRewind,
+  rewindSession,
+} from './sessions/rewind_utils.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
