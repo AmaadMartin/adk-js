@@ -15,11 +15,6 @@ export type {
 } from './agents/base_agent.js';
 export {Context} from './agents/context.js';
 export {
-  contextCacheTtlString,
-  createContextCacheConfig,
-} from './agents/context_cache_config.js';
-export type {ContextCacheConfig} from './agents/context_cache_config.js';
-export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
@@ -31,7 +26,6 @@ export {
 export {InvocationContext, requireAgent} from './agents/invocation_context.js';
 export type {
   InvocationContextParams,
-  QueuedInvocationEvent,
   SetAgentStateOptions,
   WorkflowInstructionScope,
 } from './agents/invocation_context.js';
@@ -70,7 +64,6 @@ export {
   InteractionsRequestProcessor,
 } from './agents/processors/interactions_request_processor.js';
 export {ReadonlyContext} from './agents/readonly_context.js';
-export type {RealtimeCacheEntry} from './agents/realtime_cache_entry.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
 export {StreamingMode} from './agents/run_config.js';
@@ -86,8 +79,6 @@ export type {
   UserInputKind,
   UserInputRequest,
 } from './agents/user_input_request.js';
-export {createEventsCompactionConfig} from './apps/events_compaction_config.js';
-export type {EventsCompactionConfig} from './apps/events_compaction_config.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';
 export type {

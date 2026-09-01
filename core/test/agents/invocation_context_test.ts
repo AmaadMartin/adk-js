@@ -5,8 +5,6 @@
  */
 
 import {
-  AsyncQueue,
-  AuthCredentialTypes,
   BaseAgent,
   BaseAgentConfig,
   Event,
@@ -15,11 +13,8 @@ import {
   LlmCallsLimitExceededError,
   LoopAgent,
   PluginManager,
-  QueuedInvocationEvent,
   Session,
-  createContextCacheConfig,
   createEvent,
-  createEventsCompactionConfig,
   createResumabilityConfig,
   isLlmCallsLimitExceededError,
 } from '@google/adk';
@@ -841,138 +836,21 @@ describe('InvocationContext LLM-call limit errors', () => {
   });
 });
 
-describe('InvocationContext.enqueueEvent', () => {
-  async function nextTurn(): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-
-  it('blocks a non-partial event until the consumer marks it processed', async () => {
-    const queue = new AsyncQueue<QueuedInvocationEvent>();
-    const context = makeContext({invocationEventQueue: queue});
-    const event = createEvent({author: 'test'});
-
-    let released = false;
-    const enqueued = context.enqueueEvent(event).then(() => {
-      released = true;
-    });
-
-    await nextTurn();
-    expect(released).toBe(false);
-
-    const queued = (await queue[Symbol.asyncIterator]().next()).value;
-    if (!queued?.markProcessed) {
-      expect.fail('the consumer received no markProcessed callback');
-    }
-    expect(queued.event).toBe(event);
-    queued.markProcessed();
-    await enqueued;
-
-    expect(released).toBe(true);
-  });
-
-  it('does not block a partial event and sends no callback with it', async () => {
-    const queue = new AsyncQueue<QueuedInvocationEvent>();
-    const context = makeContext({invocationEventQueue: queue});
-    const event = createEvent({author: 'test', partial: true});
-
-    await context.enqueueEvent(event);
-
-    expect(queue.size).toBe(1);
-    const queued = (await queue[Symbol.asyncIterator]().next()).value;
-    expect(queued?.event).toBe(event);
-    expect(queued?.markProcessed).toBeUndefined();
-  });
-
-  it('delivers events in the order they were pushed', async () => {
-    const queue = new AsyncQueue<QueuedInvocationEvent>();
-    const context = makeContext({invocationEventQueue: queue});
-
-    for (let i = 0; i < 5; i++) {
-      await context.enqueueEvent(
-        createEvent({author: `test_${i}`, partial: true}),
-      );
-    }
-
-    const iterator = queue[Symbol.asyncIterator]();
-    for (let i = 0; i < 5; i++) {
-      const queued = (await iterator.next()).value;
-      expect(queued?.event.author).toBe(`test_${i}`);
-    }
-  });
-
-  it('rejects when the queue is not set', async () => {
-    const context = makeContext();
-
-    await expect(
-      context.enqueueEvent(createEvent({author: 'test'})),
-    ).rejects.toThrowError(/invocationEventQueue is not set/);
-  });
-
-  it('rejects rather than hanging when the queue is closed', async () => {
-    const queue = new AsyncQueue<QueuedInvocationEvent>();
-    queue.close();
-    const context = makeContext({invocationEventQueue: queue});
-
-    await expect(
-      context.enqueueEvent(createEvent({author: 'test'})),
-    ).rejects.toThrowError(/invocationEventQueue is closed/);
-  });
-});
-
 describe('InvocationContext parity fields', () => {
-  it('defaults the record fields to empty and the compaction flag to false', () => {
+  it('defaults the agent-state records to empty', () => {
     const context = makeContext();
 
     expect(context.agentStates).toEqual({});
     expect(context.endOfAgents).toEqual({});
-    expect(context.credentialByKey).toEqual({});
-    expect(context.tokenCompactionChecked).toBe(false);
-    expect(context.contextCacheConfig).toBeUndefined();
-    expect(context.eventsCompactionConfig).toBeUndefined();
-    expect(context.canonicalToolsCache).toBeUndefined();
-    expect(context.nodePath).toBeUndefined();
-    expect(context.stateSchema).toBeUndefined();
-    expect(context.inputRealtimeCache).toBeUndefined();
-    expect(context.outputRealtimeCache).toBeUndefined();
-    expect(context.activeNonBlockingToolTasks).toBeUndefined();
-    expect(context.invocationEventQueue).toBeUndefined();
+    expect(context.resumabilityConfig).toBeUndefined();
   });
 
-  it('carries every new field over to a clone', () => {
+  it('carries the resumability config over to a clone', () => {
     const context = makeContext({
-      contextCacheConfig: createContextCacheConfig({cacheIntervals: 3}),
       resumabilityConfig: createResumabilityConfig({isResumable: true}),
-      eventsCompactionConfig: createEventsCompactionConfig({
-        compactionInterval: 2,
-        overlapSize: 1,
-      }),
-      tokenCompactionChecked: true,
-      credentialByKey: {
-        key: {authType: AuthCredentialTypes.API_KEY, apiKey: 'placeholder'},
-      },
-      canonicalToolsCache: [],
-      nodePath: 'wf/child',
-      inputRealtimeCache: [],
-      outputRealtimeCache: [],
-      activeNonBlockingToolTasks: {},
-      invocationEventQueue: new AsyncQueue<QueuedInvocationEvent>(),
     });
 
-    const clone = context.clone();
-
-    expect(clone.contextCacheConfig).toBe(context.contextCacheConfig);
-    expect(clone.resumabilityConfig).toBe(context.resumabilityConfig);
-    expect(clone.eventsCompactionConfig).toBe(context.eventsCompactionConfig);
-    expect(clone.tokenCompactionChecked).toBe(true);
-    expect(clone.credentialByKey).toBe(context.credentialByKey);
-    expect(clone.canonicalToolsCache).toBe(context.canonicalToolsCache);
-    expect(clone.nodePath).toBe('wf/child');
-    expect(clone.inputRealtimeCache).toBe(context.inputRealtimeCache);
-    expect(clone.outputRealtimeCache).toBe(context.outputRealtimeCache);
-    expect(clone.activeNonBlockingToolTasks).toBe(
-      context.activeNonBlockingToolTasks,
-    );
-    expect(clone.invocationEventQueue).toBe(context.invocationEventQueue);
+    expect(context.clone().resumabilityConfig).toBe(context.resumabilityConfig);
   });
 
   it('shares the agent-state records with a clone', () => {

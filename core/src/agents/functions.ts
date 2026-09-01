@@ -13,13 +13,11 @@ import {
   Event,
   generateClientFunctionCallId,
   getFunctionCalls,
-  getFunctionResponses,
 } from '../events/event.js';
 import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../events/event_actions.js';
-import {findEventByFunctionCallId} from '../events/event_filters.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
@@ -58,7 +56,10 @@ export {
   generateClientFunctionCallId,
   populateClientFunctionCallId,
 } from '../events/event.js';
-export {findEventByFunctionCallId} from '../events/event_filters.js';
+export {
+  findEventByFunctionCallId,
+  findMatchingFunctionCall,
+} from '../events/event_filters.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
@@ -722,23 +723,3 @@ export function mergeParallelFunctionResponseEvents(
 }
 
 // TODO - b/425992518: support function call in live connection.
-
-/**
- * Finds the function call event that matches the function response ID of the last event.
- * Mirrors Python ADK's `find_matching_function_call`.
- */
-export function findMatchingFunctionCall(events: Event[]): Event | undefined {
-  if (!events.length) {
-    return undefined;
-  }
-  const lastEvent = events[events.length - 1];
-  const functionResponses = getFunctionResponses(lastEvent);
-  if (!functionResponses.length || !functionResponses[0].id) {
-    return undefined;
-  }
-  return findEventByFunctionCallId(
-    events,
-    functionResponses[0].id,
-    events.length - 1,
-  );
-}

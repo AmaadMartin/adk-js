@@ -139,45 +139,6 @@ response belongs wherever its call was issued. The isolation scope is only
 filled in when the response has none, because a response already inside an
 active task must stay in it.
 
-## The invocation event queue
-
-`invocationEventQueue` is the channel every node enqueues events on for the
-runner to append to the session. `enqueueEvent` blocks on a non-partial event
-until the consumer calls `markProcessed`, so the session is consistent before
-the producer continues. A partial event streams through without blocking.
-
-```ts
-import {
-  AsyncQueue,
-  Event,
-  InvocationContext,
-  QueuedInvocationEvent,
-  createEvent,
-} from '@google/adk';
-
-async function drain(
-  queue: AsyncQueue<QueuedInvocationEvent>,
-  store: (event: Event) => Promise<void>,
-): Promise<void> {
-  for await (const {event, markProcessed} of queue) {
-    await store(event);
-    markProcessed?.();
-  }
-}
-
-async function emit(ctx: InvocationContext): Promise<void> {
-  ctx.invocationEventQueue = new AsyncQueue<QueuedInvocationEvent>();
-  await ctx.enqueueEvent(createEvent({author: 'agent'}));
-}
-```
-
-`enqueueEvent` throws when the queue is unset, and also when it is closed: a
-closed `AsyncQueue` drops what it is given, which would leave a non-partial
-producer waiting forever.
-
-This queue is separate from `eventQueue`, the per-tool channel a `NodeTool`
-interleaves its events through. They are not interchangeable.
-
 ## The LLM-call limit
 
 `incrementLlmCallCount()` throws `LlmCallsLimitExceededError` once the
@@ -204,14 +165,3 @@ function countCall(ctx: InvocationContext): boolean {
 Use `isLlmCallsLimitExceededError` rather than `instanceof`: two copies of
 adk-js in one runtime hold two different classes, and `instanceof` returns
 false between them.
-
-## Configuration carriers
-
-`contextCacheConfig`, `eventsCompactionConfig`, `tokenCompactionChecked`,
-`credentialByKey`, `canonicalToolsCache`, `nodePath`, `stateSchema`,
-`inputRealtimeCache`, `outputRealtimeCache` and `activeNonBlockingToolTasks`
-are set at construction and carried by `clone()`. Nothing in adk-js reads them
-yet: they exist so the subsystems that own them in adk-python — context
-caching, compaction scheduling, the live audio cache and the runner's event
-loop — can be ported one at a time onto a context that already carries their
-data.

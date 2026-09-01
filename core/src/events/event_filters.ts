@@ -55,7 +55,12 @@ export function filterSessionEvents(
     );
   }
   if (options.currentBranch) {
-    const branchCallIds = memoizeBranchCallIds(events, scope.branch ?? '');
+    // Gathered once per call: the ids depend on the session and the branch, not
+    // on the event being tested, so gathering them inside the predicate would
+    // rescan every session event once per user response event.
+    const branchCallIds = scope.branch
+      ? collectBranchCallIds(events, scope.branch)
+      : new Set<string>();
     results = results.filter((event) =>
       isBranchMatch(event, scope, branchCallIds),
     );
@@ -92,6 +97,31 @@ export function findEventByFunctionCallId(
 }
 
 /**
+ * Finds the event issuing the call that the LAST event in `events` answers.
+ *
+ * Mirrors `google/adk-python` `find_matching_function_call`.
+ *
+ * @param events The events to search, oldest first, with the function-response
+ *   event last.
+ * @returns The issuing event, or `undefined` when the last event carries no
+ *   identified function response, or nothing issued that call.
+ */
+export function findMatchingFunctionCall(events: Event[]): Event | undefined {
+  if (!events.length) {
+    return undefined;
+  }
+  const functionResponses = getFunctionResponses(events[events.length - 1]);
+  if (!functionResponses.length || !functionResponses[0].id) {
+    return undefined;
+  }
+  return findEventByFunctionCallId(
+    events,
+    functionResponses[0].id,
+    events.length - 1,
+  );
+}
+
+/**
  * Whether an event is part of the branch subtree `scope` describes.
  *
  * The rule differs by author, deliberately. A user event matches on this
@@ -105,7 +135,7 @@ export function findEventByFunctionCallId(
 function isBranchMatch(
   event: Event,
   scope: SessionEventFilterScope,
-  branchCallIds: () => Set<string>,
+  branchCallIds: Set<string>,
 ): boolean {
   if (event.author !== 'user') {
     return event.branch === scope.branch;
@@ -131,34 +161,14 @@ function isBranchMatch(
  * subtree. An event carrying no identified response answers nothing and is left
  * to the branch rule.
  */
-function answersCallInScope(
-  event: Event,
-  branchCallIds: () => Set<string>,
-): boolean {
+function answersCallInScope(event: Event, branchCallIds: Set<string>): boolean {
   const responseIds = getFunctionResponses(event)
     .map((response) => response.id)
     .filter((id): id is string => id !== undefined);
   if (responseIds.length === 0) {
     return true;
   }
-  const callIds = branchCallIds();
-  return responseIds.some((id) => callIds.has(id));
-}
-
-/**
- * Returns a getter for the function-call ids issued on `branch` or below it,
- * which scans the session on first use and reuses the result after.
- *
- * The ids depend on the session and the branch, not on the event being tested,
- * so gathering them inside the predicate would rescan every session event once
- * per user response event, which is quadratic in the session size.
- */
-function memoizeBranchCallIds(
-  events: Event[],
-  branch: string,
-): () => Set<string> {
-  let callIds: Set<string> | undefined;
-  return () => (callIds ??= collectBranchCallIds(events, branch));
+  return responseIds.some((id) => branchCallIds.has(id));
 }
 
 function collectBranchCallIds(events: Event[], branch: string): Set<string> {
