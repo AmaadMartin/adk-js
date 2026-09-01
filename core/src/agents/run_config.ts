@@ -115,6 +115,13 @@ export interface RunConfig {
   pauseOnToolCalls?: boolean;
 
   /**
+   * Whether to relay thought parts from other agents as labelled context when
+   * presenting their messages to the current agent. Off by default: a thought
+   * is the other agent's reasoning, not its answer.
+   */
+  includeThoughtsFromOtherAgents?: boolean;
+
+  /**
    * If true, a plain-text user reply (e.g. "yes"/"no") may resolve a pending
    * `requireConfirmation` tool gate. Off by default so an ordinary chat message
    * on a web/API surface is never silently reinterpreted as a security
