@@ -9,9 +9,6 @@ import {Session} from '../sessions/session.js';
 /** Marks a display name whose three identifiers are base64url encoded. */
 export const SOURCE_DISPLAY_NAME_PREFIX = 'adk-memory-v1.';
 
-/** Characters a base64url part may contain, once its padding is stripped. */
-const BASE64URL_CHARSET = /^[A-Za-z0-9_-]*$/;
-
 /** The session a RAG file was written for. */
 export interface SourceIdentity {
   appName: string;
@@ -36,12 +33,10 @@ function encodePart(value: string): string {
  * base64url encoding of a UTF-8 string.
  *
  * `Buffer` accepts padding, out-of-alphabet characters and non-canonical
- * trailing bits, so the charset test and the re-encode test do the rejecting.
+ * trailing bits, dropping what it cannot use, so the re-encode test does the
+ * rejecting.
  */
 function decodePart(value: string): string | undefined {
-  if (!BASE64URL_CHARSET.test(value)) {
-    return undefined;
-  }
   const bytes = Buffer.from(value, 'base64url');
   if (bytes.toString('base64url') !== value) {
     return undefined;

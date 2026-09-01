@@ -197,6 +197,18 @@ describe('VertexAiRagMemoryService constructor', () => {
     expect(client.uploadRagFile.mock.calls[0][0].ragCorpus).toBe(CORPUS);
   });
 
+  it('addresses the project and the location the corpus names, not the environment', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'europe-west4');
+    const client = createFakeClient();
+
+    await createService(client).searchMemory(ALICE_REQUEST);
+
+    expect(retrieveCall(client).parent).toBe(
+      'projects/test-project/locations/us-central1',
+    );
+  });
+
   it('defers an unresolvable project and location to the first call', async () => {
     const client = createFakeClient();
 

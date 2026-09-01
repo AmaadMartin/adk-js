@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {VertexRagStore, VertexRagStoreRagResource} from '@google/genai';
 import {Session} from '../sessions/session.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
@@ -101,15 +100,17 @@ export class VertexAiRagMemoryService implements BaseMemoryService {
     this.vectorDistanceThreshold =
       options.vectorDistanceThreshold ?? DEFAULT_VECTOR_DISTANCE_THRESHOLD;
 
+    // A qualified corpus name names the project and the location the corpus
+    // actually lives in, so it beats the environment.
     const fromCorpus = endpointFromCorpusName(options.ragCorpus);
     this.project =
       options.project ||
-      process.env['GOOGLE_CLOUD_PROJECT'] ||
-      fromCorpus?.project;
+      fromCorpus?.project ||
+      process.env['GOOGLE_CLOUD_PROJECT'];
     this.location =
       options.location ||
-      process.env['GOOGLE_CLOUD_LOCATION'] ||
-      fromCorpus?.location;
+      fromCorpus?.location ||
+      process.env['GOOGLE_CLOUD_LOCATION'];
     this.client = options.ragApiClient;
   }
 
@@ -141,7 +142,10 @@ export class VertexAiRagMemoryService implements BaseMemoryService {
 
     const response = await this.apiClient().retrieveContexts({
       parent: `projects/${endpoint.project}/locations/${endpoint.location}`,
-      vertexRagStore: this.ragStore({ragCorpus, ragFileIds}),
+      vertexRagStore: {
+        ragResources: [{ragCorpus, ragFileIds}],
+        vectorDistanceThreshold: this.vectorDistanceThreshold,
+      },
       query: {
         text: request.query,
         ragRetrievalConfig:
@@ -196,14 +200,6 @@ export class VertexAiRagMemoryService implements BaseMemoryService {
       `projects/${endpoint.project}/locations/${endpoint.location}` +
       `/ragCorpora/${this.ragCorpus}`
     );
-  }
-
-  /** Builds the store a retrieval runs against. */
-  private ragStore(ragResource: VertexRagStoreRagResource): VertexRagStore {
-    return {
-      ragResources: [ragResource],
-      vectorDistanceThreshold: this.vectorDistanceThreshold,
-    };
   }
 
   /**
