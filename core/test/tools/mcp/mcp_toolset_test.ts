@@ -179,14 +179,15 @@ describe('MCPToolset', () => {
         close: vi.fn().mockResolvedValue(undefined),
         listTools: vi.fn().mockRejectedValue(new Error('List tools failed')),
       };
-      vi.mocked(Client).mockImplementationOnce(
-        () => mockClientInstance as unknown as Client,
-      );
+      // Two stubs, because getTools retries a failed listing once.
+      vi.mocked(Client)
+        .mockImplementationOnce(() => mockClientInstance as unknown as Client)
+        .mockImplementationOnce(() => mockClientInstance as unknown as Client);
 
       const spy = vi.spyOn(toolset['mcpSessionManager'], 'closeSession');
 
       await expect(toolset.getTools()).rejects.toThrow('List tools failed');
-      expect(spy).toHaveBeenCalledOnce();
+      expect(spy).toHaveBeenCalledTimes(2);
       expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(0);
     });
   });
