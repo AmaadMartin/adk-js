@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {Invocation} from './eval_case.js';
 
 /** The verdict for one metric, or for a whole eval case. */
@@ -45,6 +46,39 @@ export interface BaseCriterion {
   threshold: number;
 }
 
+/**
+ * How actual tool calls are matched against the expected trajectory.
+ *
+ * The member names are the names of adk-python's `MatchType`, which its
+ * criterion accepts as strings under `match_type`. That is where this enum
+ * crosses the language boundary.
+ */
+export enum ToolTrajectoryMatchType {
+  /** The actual calls equal the expected ones, none extra and none missing. */
+  EXACT = 'EXACT',
+
+  /**
+   * Every expected call appears in the actual calls in the expected order.
+   * Extra actual calls in between are tolerated.
+   */
+  IN_ORDER = 'IN_ORDER',
+
+  /**
+   * Every expected call appears in the actual calls in any order, respecting
+   * multiplicity. Extra actual calls are tolerated.
+   */
+  ANY_ORDER = 'ANY_ORDER',
+}
+
+/** Criterion for scoring a tool trajectory against a reference one. */
+export interface ToolTrajectoryCriterion extends BaseCriterion {
+  /**
+   * Defaults to {@link ToolTrajectoryMatchType.EXACT}. Accepts the enum, or a
+   * string spelling such as `'in order'`, `'IN-ORDER'` or `'in_order'`.
+   */
+  matchType?: ToolTrajectoryMatchType | string;
+}
+
 /** A metric used to evaluate one aspect of an eval case. */
 export interface EvalMetric {
   metricName: string;
@@ -54,7 +88,13 @@ export interface EvalMetric {
    */
   threshold?: number;
 
-  criterion?: BaseCriterion;
+  /**
+   * The criterion the metric is judged against.
+   *
+   * The union names every concrete criterion a config can carry, so that a
+   * criterion literal carrying metric-specific fields type-checks here.
+   */
+  criterion?: BaseCriterion | ToolTrajectoryCriterion;
 
   /** Path to the scoring function, when this is a custom metric. */
   customFunctionPath?: string;
@@ -79,10 +119,42 @@ export interface EvalMetricResultPerInvocation {
   evalMetricResults: EvalMetricResult[];
 }
 
+const MATCH_TYPES_BY_NAME = new Map<string, ToolTrajectoryMatchType>(
+  Object.values(ToolTrajectoryMatchType).map((matchType) => [
+    matchType,
+    matchType,
+  ]),
+);
+
+/**
+ * Returns the match type a value names, or `undefined` when it names none.
+ *
+ * An absent value reads as {@link ToolTrajectoryMatchType.EXACT}, the field
+ * default. A string is trimmed, upper-cased, and its dashes and spaces read
+ * as underscores, so `'any order'` and `'ANY-ORDER'` both resolve.
+ */
+export function normalizeToolTrajectoryMatchType(
+  value: unknown,
+): ToolTrajectoryMatchType | undefined {
+  if (value === undefined) {
+    return ToolTrajectoryMatchType.EXACT;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  return MATCH_TYPES_BY_NAME.get(
+    value.trim().toUpperCase().replace(/[- ]/g, '_'),
+  );
+}
+
 /**
  * Returns the threshold configured for a metric.
  *
- * @throws If the metric carries neither a criterion nor a threshold.
+ * The criterion threshold wins over the metric-level one.
+ *
+ * @throws {InputValidationError} When the metric carries neither a criterion
+ *   nor a threshold.
  */
 export function getMetricThreshold(evalMetric: EvalMetric): number {
   if (evalMetric.criterion !== undefined) {
@@ -91,7 +163,8 @@ export function getMetricThreshold(evalMetric: EvalMetric): number {
   if (evalMetric.threshold !== undefined) {
     return evalMetric.threshold;
   }
-  throw new Error(
+
+  throw new InputValidationError(
     `Evaluation metric '${evalMetric.metricName}' requires a threshold.`,
   );
 }

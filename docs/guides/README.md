@@ -20,6 +20,11 @@ official ADK documentation, visit [adk.dev](https://adk.dev/).
 - [Service account tokens for OpenAPI tools](auth/service_account_tokens/index.md) - Access tokens, Cloud Run ID tokens, the quota project header, and the token cache.
 - [ToolAuthHandler](auth/tool_auth_handler/index.md) - How an OpenAPI tool gets its credential, keeps it between calls, and refreshes it.
 
+### Evaluation
+
+- [TrajectoryEvaluator](evaluation/tool_trajectory/index.md) - Scoring the tool
+  calls an agent made against a golden trajectory.
+
 ### Examples
 
 - [VertexAiExampleStore](examples/vertex_ai_example_store/index.md) - Reading

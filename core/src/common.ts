@@ -205,6 +205,7 @@ export type {
 export {
   EvalStatus,
   PrebuiltMetrics,
+  ToolTrajectoryMatchType,
   getMetricThreshold,
 } from './evaluation/eval_metrics.js';
 export type {
@@ -212,6 +213,7 @@ export type {
   EvalMetric,
   EvalMetricResult,
   EvalMetricResultPerInvocation,
+  ToolTrajectoryCriterion,
 } from './evaluation/eval_metrics.js';
 export type {EvalCaseResult} from './evaluation/eval_result.js';
 export type {EvalSet} from './evaluation/eval_set.js';
@@ -220,9 +222,16 @@ export type {
   EvalSetResultsManager,
 } from './evaluation/eval_set_results_manager.js';
 export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
+export type {
+  EvaluationResult,
+  Evaluator,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
 export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.js';
 export {convertLegacyEvalSet} from './evaluation/legacy_eval_set_converter.js';
 export type {LegacyEvalCase} from './evaluation/legacy_eval_set_converter.js';
+export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
+export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
