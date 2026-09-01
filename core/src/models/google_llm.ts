@@ -144,6 +144,9 @@ export class ResourceExhaustedError extends ApiError {
       message: `${RESOURCE_EXHAUSTED_POSSIBLE_FIX_MESSAGE}\n\n${cause.message}`,
       status: cause.status,
     });
+    // `ApiError` pins the prototype to its own, so a subclass has to restore
+    // its prototype or `instanceof` reports the base class for every instance.
+    Object.setPrototypeOf(this, ResourceExhaustedError.prototype);
     this.name = 'ResourceExhaustedError';
     this.cause = cause;
   }
