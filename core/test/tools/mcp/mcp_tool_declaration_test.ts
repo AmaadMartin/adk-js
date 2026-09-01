@@ -24,6 +24,16 @@ const OUTPUT_SCHEMA = {
   properties: {temperature: {type: 'number'}},
 };
 
+/**
+ * An input schema using `oneOf`, which `toGeminiSchema` cannot express. It is
+ * the difference between the two declaration forms.
+ */
+const ONE_OF_INPUT_SCHEMA = {
+  type: 'object' as const,
+  properties: {location: {oneOf: [{type: 'string'}, {type: 'number'}]}},
+  required: ['location'],
+};
+
 const sessionManager = new MCPSessionManager({
   type: 'StreamableHTTPConnectionParams',
   url: 'http://localhost/unused',
@@ -66,6 +76,23 @@ describe('MCPTool._getDeclaration with JSON_SCHEMA_FOR_FUNC_DECL on', () => {
     expect(declaration.response).toBeUndefined();
   });
 
+  it('keeps the oneOf that the genai Schema conversion drops', async () => {
+    const tool = new MCPTool(
+      {
+        name: 'weather',
+        description: 'Reports the weather.',
+        inputSchema: ONE_OF_INPUT_SCHEMA,
+      },
+      sessionManager,
+    );
+
+    const declaration = await withJsonSchema(() => tool._getDeclaration());
+
+    expect(declaration.parametersJsonSchema).toMatchObject({
+      properties: {location: {oneOf: [{type: 'string'}, {type: 'number'}]}},
+    });
+  });
+
   it('declares no response schema for a tool that publishes none', async () => {
     const tool = new MCPTool(weatherTool(), sessionManager);
 
@@ -100,6 +127,15 @@ describe('MCPTool._getDeclaration with JSON_SCHEMA_FOR_FUNC_DECL off', () => {
       type: 'OBJECT',
       properties: {temperature: {type: 'NUMBER'}},
     });
+  });
+
+  it('keeps the name and description', () => {
+    const tool = new MCPTool(weatherTool(OUTPUT_SCHEMA), sessionManager);
+
+    const declaration = tool._getDeclaration();
+
+    expect(declaration.name).toBe('weather');
+    expect(declaration.description).toBe('Reports the weather.');
   });
 
   it('declares no raw JSON Schema', () => {

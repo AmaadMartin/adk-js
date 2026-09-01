@@ -456,22 +456,32 @@ export class MCPTool extends BaseTool {
     return asUiResourceUri(meta['ui/resourceUri']);
   }
 
+  /**
+   * Renders this tool as the declaration sent to the model.
+   *
+   * Exactly one of `parameters` and `parametersJsonSchema` is populated. The
+   * {@link FeatureName.JSON_SCHEMA_FOR_FUNC_DECL} feature selects the
+   * JSON-schema form, which sends the server's own schemas verbatim. The
+   * genai `Schema` form is the default, and it drops the JSON Schema keywords
+   * `toGeminiSchema` cannot express, such as `oneOf` and `$ref`.
+   */
   override _getDeclaration(): FunctionDeclaration {
+    const {name, description, inputSchema, outputSchema} = this.mcpTool;
     if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
       return {
-        name: this.mcpTool.name,
-        description: this.mcpTool.description,
-        parametersJsonSchema: this.mcpTool.inputSchema,
-        responseJsonSchema: this.mcpTool.outputSchema,
+        name,
+        description,
+        parametersJsonSchema: inputSchema,
+        responseJsonSchema: outputSchema,
       };
     }
     return {
-      name: this.mcpTool.name,
-      description: this.mcpTool.description,
-      parameters: toGeminiSchema(this.mcpTool.inputSchema),
+      name,
+      description,
+      parameters: toGeminiSchema(inputSchema),
       // TODO: need revisit, refer to this
       // https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool-result
-      response: toGeminiSchema(this.mcpTool.outputSchema),
+      response: toGeminiSchema(outputSchema),
     };
   }
 

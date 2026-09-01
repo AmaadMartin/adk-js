@@ -24,9 +24,12 @@ const tool = new MCPTool(
 
 describe('MCPTool.detectErrorInResponse', () => {
   it('reports a result the server marked as failed', () => {
-    expect(tool.detectErrorInResponse({isError: true, content: []})).toBe(
-      'MCP_TOOL_ERROR',
-    );
+    expect(
+      tool.detectErrorInResponse({
+        isError: true,
+        content: [{type: 'text', text: 'boom'}],
+      }),
+    ).toBe('MCP_TOOL_ERROR');
   });
 
   it('reports nothing for a result the server marked as successful', () => {
@@ -41,6 +44,7 @@ describe('MCPTool.detectErrorInResponse', () => {
 
   it('reports nothing for a response that is not an object', () => {
     expect(tool.detectErrorInResponse('boom')).toBeUndefined();
+    expect(tool.detectErrorInResponse(undefined)).toBeUndefined();
   });
 
   it('reports nothing for a null response', () => {

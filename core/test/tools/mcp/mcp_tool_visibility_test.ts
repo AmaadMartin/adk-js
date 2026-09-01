@@ -66,15 +66,24 @@ describe('MCPTool.visibility', () => {
   });
 
   it('returns an empty list when meta declares no ui block', () => {
-    const tool = new MCPTool(toolWithMeta({}), sessionManager);
-
-    expect(tool.visibility).toEqual([]);
+    expect(new MCPTool(toolWithMeta({}), sessionManager).visibility).toEqual(
+      [],
+    );
+    expect(
+      new MCPTool(toolWithMeta({other: 'value'}), sessionManager).visibility,
+    ).toEqual([]);
   });
 
   it('returns an empty list when the ui block is not an object', () => {
-    const tool = new MCPTool(toolWithMeta({ui: 'nope'}), sessionManager);
-
-    expect(tool.visibility).toEqual([]);
+    expect(
+      new MCPTool(toolWithMeta({ui: 'nope'}), sessionManager).visibility,
+    ).toEqual([]);
+    expect(
+      new MCPTool(toolWithMeta({ui: null}), sessionManager).visibility,
+    ).toEqual([]);
+    expect(
+      new MCPTool(toolWithMeta({ui: ['app']}), sessionManager).visibility,
+    ).toEqual([]);
   });
 
   it('returns an empty list when the ui block declares no visibility', () => {
@@ -98,6 +107,15 @@ describe('MCPTool.visibility', () => {
   it('returns an empty list when visibility holds a value that is not a string', () => {
     const tool = new MCPTool(
       toolWithMeta({ui: {visibility: ['app', 7]}}),
+      sessionManager,
+    );
+
+    expect(tool.visibility).toEqual([]);
+  });
+
+  it('returns an empty list for an empty declared list', () => {
+    const tool = new MCPTool(
+      toolWithMeta({ui: {visibility: []}}),
       sessionManager,
     );
 
