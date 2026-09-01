@@ -179,6 +179,13 @@ export type {
   Evaluator,
   PerInvocationResult,
 } from './evaluation/evaluator.js';
+export {
+  TrajectoryEvaluator,
+  areToolCallsAnyOrderMatch,
+  areToolCallsExactMatch,
+  areToolCallsInOrderMatch,
+} from './evaluation/trajectory_evaluator.js';
+export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
