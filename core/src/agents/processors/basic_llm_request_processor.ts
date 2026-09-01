@@ -128,8 +128,8 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
     // Preserved across the agent-config overwrite below, then merged back.
     const runConfigHttpOptions = llmRequest.config?.httpOptions;
 
-    const agentConfig = agent.generateContentConfig;
-    llmRequest.config = agentConfig ? copyRequestScopedConfig(agentConfig) : {};
+    const agentConfig = agent.generateContentConfig ?? {};
+    llmRequest.config = copyRequestScopedConfig(agentConfig);
 
     if (runConfigHttpOptions) {
       mergeRunConfigHttpOptions(llmRequest.config, runConfigHttpOptions);
@@ -157,9 +157,7 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
       setOutputSchema(llmRequest, agent.outputSchema);
     }
 
-    if (agentConfig) {
-      applyAgentSamplingToLiveConfig(llmRequest.liveConnectConfig, agentConfig);
-    }
+    applyAgentSamplingToLiveConfig(llmRequest.liveConnectConfig, agentConfig);
 
     if (invocationContext.runConfig) {
       const runConfig = invocationContext.runConfig;

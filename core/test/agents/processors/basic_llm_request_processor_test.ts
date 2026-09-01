@@ -588,6 +588,22 @@ describe('BasicLlmRequestProcessor', () => {
       expect(agentSafetySettings).toHaveLength(1);
     });
 
+    it('yields an empty config for an agent that has no generation config', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+      });
+      // `LlmAgent` defaults the field to `{}`. LLM flows also drive agents
+      // defined outside the package that leave it unset.
+      agent.generateContentConfig = undefined;
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(createMockInvocationContext(agent), llmRequest);
+
+      expect(llmRequest.config).toEqual({});
+      expect(llmRequest.liveConnectConfig.temperature).toBeUndefined();
+    });
+
     it('does not accumulate safety settings across invocations', async () => {
       const agent = new LlmAgent({
         name: 'test_agent',
