@@ -883,3 +883,84 @@ describe('InMemorySessionService', () => {
     });
   });
 });
+
+describe('InMemorySessionService.getUserState', () => {
+  let service: InMemorySessionService;
+
+  beforeEach(() => {
+    service = new InMemorySessionService();
+  });
+
+  it('returns an empty object when the user has no stored state', async () => {
+    await expect(
+      service.getUserState({appName: 'app', userId: 'u1'}),
+    ).resolves.toEqual({});
+  });
+
+  it('returns raw keys and excludes app and session scopes', async () => {
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({
+        actions: createEventActions({
+          stateDelta: {
+            [State.USER_PREFIX + 'profile']: {name: 'Alice'},
+            [State.APP_PREFIX + 'theme']: 'dark',
+            'turnCount': 3,
+          },
+        }),
+      }),
+    });
+
+    await expect(
+      service.getUserState({appName: 'app', userId: 'u1'}),
+    ).resolves.toEqual({profile: {name: 'Alice'}});
+  });
+
+  it('isolates state across users', async () => {
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({
+        actions: createEventActions({
+          stateDelta: {[State.USER_PREFIX + 'lang']: 'fr'},
+        }),
+      }),
+    });
+
+    await expect(
+      service.getUserState({appName: 'app', userId: 'u2'}),
+    ).resolves.toEqual({});
+  });
+
+  it('returns a copy that a caller cannot write back through', async () => {
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({
+        actions: createEventActions({
+          stateDelta: {[State.USER_PREFIX + 'lang']: 'fr'},
+        }),
+      }),
+    });
+
+    const state = await service.getUserState({appName: 'app', userId: 'u1'});
+    state['lang'] = 'de';
+
+    await expect(
+      service.getUserState({appName: 'app', userId: 'u1'}),
+    ).resolves.toEqual({lang: 'fr'});
+  });
+});
