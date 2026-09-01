@@ -116,6 +116,8 @@ class FakeLiveLlm extends BaseLlm {
   }
   readonly connections: RecordingConnection[] = [];
   readonly llmRequestsSeen: LlmRequest[] = [];
+  /** The live request objects themselves, for aliasing assertions. */
+  readonly llmRequestsSeenByReference: LlmRequest[] = [];
 
   constructor(
     private readonly responses:
@@ -141,6 +143,7 @@ class FakeLiveLlm extends BaseLlm {
     this.llmRequestsSeen.push(
       JSON.parse(JSON.stringify(llmRequest)) as LlmRequest,
     );
+    this.llmRequestsSeenByReference.push(llmRequest);
     const isSequence =
       Array.isArray(this.responses) && Array.isArray(this.responses[0]);
     const responses = isSequence
@@ -1181,6 +1184,57 @@ describe('Runner.runLive run config parity fields', () => {
     });
   });
 
+  it('applies the live-connect fields without the basic request processor', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: llm,
+      requestProcessors: [],
+    });
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+    const sessionResumption = {transparent: true};
+    const historyConfig = {initialHistoryInClientContent: true};
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {
+        explicitVadSignal: true,
+        translationConfig: {targetLanguageCode: 'es-ES'},
+        avatarConfig: {avatarName: 'ada'},
+        sessionResumption,
+        historyConfig,
+      },
+    })) {
+      // drain
+    }
+
+    const liveConfig = llm.llmRequestsSeen[0]
+      .liveConnectConfig as LiveConnectConfigWithHistory;
+    expect(liveConfig.explicitVadSignal).toBe(true);
+    expect(liveConfig.translationConfig).toEqual({targetLanguageCode: 'es-ES'});
+    expect(liveConfig.avatarConfig).toEqual({avatarName: 'ada'});
+    expect(liveConfig.sessionResumption).toEqual({transparent: true});
+    expect(liveConfig.historyConfig).toEqual({
+      initialHistoryInClientContent: true,
+    });
+
+    const liveConfigByReference = llm.llmRequestsSeenByReference[0]
+      .liveConnectConfig as LiveConnectConfigWithHistory;
+    liveConfigByReference.sessionResumption!.handle = 'server-handle';
+    liveConfigByReference.historyConfig!.initialHistoryInClientContent = false;
+    expect(sessionResumption).toEqual({transparent: true});
+    expect(historyConfig).toEqual({initialHistoryInClientContent: true});
+  });
+
   it('lets a caller resumption handle override the run config sessionResumption', async () => {
     const llm = new FakeLiveLlm([{turnComplete: true}]);
     const agent = new LlmAgent({name: 'agent', model: llm});
@@ -1299,7 +1353,7 @@ describe('Runner.runLive run config parity fields', () => {
     ).toHaveLength(1);
   });
 
-  it('still drops a partial live audio event when saveLiveBlob is on', async () => {
+  it('does not save an artifact for a partial live audio event', async () => {
     const audioPart: Content = {
       role: 'model',
       parts: [{inlineData: {data: 'AAA=', mimeType: 'audio/pcm'}}],
@@ -1327,6 +1381,13 @@ describe('Runner.runLive run config parity fields', () => {
       // drain
     }
 
+    expect(
+      await artifactService.listArtifactKeys({
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+      }),
+    ).toEqual([]);
     const session = await sessionService.getSession({
       appName: TEST_APP_ID,
       userId: TEST_USER_ID,
