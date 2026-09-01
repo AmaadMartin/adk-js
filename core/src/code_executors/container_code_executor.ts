@@ -44,16 +44,6 @@ const LANGUAGE_RUNTIME_COMMAND_MAP: Partial<
   [CodeExecutionLanguage.SHELL]: ['sh', '-c'],
 };
 
-/**
- * Appends the timeout notice to what the code wrote to stderr. It is appended
- * rather than assigned: the code's own stderr is the useful diagnostic, but on
- * its own it hides that the supervisor cut the run short.
- */
-function withTimeoutNotice(stderr: string, timeoutSeconds: number): string {
-  const notice = `Code execution timed out after ${timeoutSeconds} seconds.`;
-  return stderr ? `${stderr}\n${notice}` : notice;
-}
-
 /** Options for {@link ContainerCodeExecutor}. */
 export interface ContainerCodeExecutorOptions {
   /** Base url of a user-hosted Docker daemon, e.g. `tcp://host:2375`. */
@@ -166,11 +156,14 @@ export class ContainerCodeExecutor extends BaseCodeExecutor {
       code,
     ]);
     logger.debug(`Executed ${language} code:\n\`\`\`\n${code}\n\`\`\``);
+    const notice = `Code execution timed out after ${this.timeoutSeconds} seconds.`;
     return {
       stdout,
+      // The notice is appended, not assigned: what the code wrote before the
+      // bound expired is the useful diagnostic, but alone it hides the kill.
       stderr:
         exitCode === TIMEOUT_EXIT_CODE
-          ? withTimeoutNotice(stderr, this.timeoutSeconds)
+          ? [stderr, notice].filter(Boolean).join('\n')
           : stderr,
       outputFiles: [],
       exitCode,

@@ -35,7 +35,8 @@ export interface FakeDockerConfig {
 /** The fake container `createContainer` resolves to. */
 export interface FakeContainer {
   id: string;
-  exec: Mock;
+  /** Typed so that a test can read the `Cmd` of a call without a cast. */
+  exec: Mock<(options: Dockerode.ExecCreateOptions) => unknown>;
   start: Mock;
   stop: Mock;
   remove: Mock;
@@ -76,7 +77,7 @@ export function createFakeDocker(config: FakeDockerConfig = {}): {
 
   const container: FakeContainer = {
     id: 'test-container-id',
-    exec: vi.fn(async () => {
+    exec: vi.fn(async (_options: Dockerode.ExecCreateOptions) => {
       const status = execCount++ === 0 ? probeExitCode : exitCode;
       return {
         start: vi.fn().mockResolvedValue(new PassThrough()),

@@ -25,6 +25,9 @@ const PYTHON = 'python3';
 const RUN_TIMEOUT_MS = 20000;
 const TEST_TIMEOUT_MS = 30000;
 
+/** POSIX signal number for SIGTERM, which a killed run reports as 128 + 15. */
+const SIGTERM_NUMBER = 15;
+
 /** POSIX `fork`, `killpg` and `SIGALRM` are what the supervisor is built on. */
 const isPosix = os.platform() !== 'win32';
 const hasPython =
@@ -128,6 +131,19 @@ describe.skipIf(!hasPython)('PYTHON_TIMEOUT_WRAPPER', () => {
 
       expect(completed.status).toBe(3);
       expect(completed.stdout.trim()).toBe('hello');
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'reports a command a signal killed as 128 plus that signal',
+    () => {
+      const completed = runPython(
+        5,
+        'import os, signal\nos.kill(os.getpid(), signal.SIGTERM)\n',
+      );
+
+      expect(completed.status).toBe(128 + SIGTERM_NUMBER);
     },
     TEST_TIMEOUT_MS,
   );

@@ -36,9 +36,7 @@ const {loadOptionalPeer: actualLoadOptionalPeer} = await vi.importActual<
 /** Whether `raw` is the `once` wrapper Node built around `handler`. */
 function hasWrappedListener(raw: unknown, handler: unknown): boolean {
   return (
-    typeof raw === 'function' &&
-    'listener' in raw &&
-    (raw as {listener: unknown}).listener === handler
+    typeof raw === 'function' && 'listener' in raw && raw.listener === handler
   );
 }
 
