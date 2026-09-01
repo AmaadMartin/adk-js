@@ -347,7 +347,6 @@ export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {
   isGemini2OrAbove,
-  isGemini35LiveTranslate,
   isGemini3xFlashLive,
   isGemini3xLive,
 } from './utils/model_name.js';

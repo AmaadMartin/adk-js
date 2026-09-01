@@ -12,7 +12,6 @@ import {
   FunctionTool,
   InvocationContext,
   LlmAgent,
-  LlmAgentConfig,
   LLMRegistry,
   LlmRequest,
   LlmResponse,
@@ -85,20 +84,6 @@ function createMockInvocationContext(
     pluginManager: new PluginManager([]),
     runConfig,
   });
-}
-
-/** An agent that names a separate model for its live connection. */
-class LiveModelAgent extends LlmAgent {
-  constructor(
-    params: LlmAgentConfig,
-    private readonly liveModel: BaseLlm,
-  ) {
-    super(params);
-  }
-
-  get canonicalLiveModel(): BaseLlm {
-    return this.liveModel;
-  }
 }
 
 function makeLlmRequest(): LlmRequest {
@@ -773,19 +758,13 @@ describe('BasicLlmRequestProcessor', () => {
   });
 
   describe('Gemini 3.x live gating', () => {
-    async function runWithLiveModel(
-      model: string,
-      agentOverrides: {canonicalLiveModel?: BaseLlm} = {},
-    ): Promise<LlmRequest> {
-      const params = {
+    async function runWithLiveModel(model: string): Promise<LlmRequest> {
+      const agent = new LlmAgent({
         name: 'test_agent',
         // A model instance is used so that `canonicalModel` resolves without
         // credentials.
         model: new TestLlmModel({model}),
-      };
-      const agent = agentOverrides.canonicalLiveModel
-        ? new LiveModelAgent(params, agentOverrides.canonicalLiveModel)
-        : new LlmAgent(params);
+      });
       const invocationContext = createMockInvocationContext(agent, {
         enableAffectiveDialog: true,
         proactivity: {proactiveAudio: true},
@@ -828,18 +807,13 @@ describe('BasicLlmRequestProcessor', () => {
       });
     });
 
-    it('gates on canonicalLiveModel when the agent exposes one', async () => {
-      const llmRequest = await runWithLiveModel('gemini-2.5-flash', {
-        canonicalLiveModel: new TestLlmModel({
-          model: 'gemini-3.5-flash-lite-live-preview',
-        }),
-      });
+    it('keeps both fields for a non-live Gemini 3.x model', async () => {
+      const llmRequest = await runWithLiveModel('gemini-3.5-flash');
 
-      expect(llmRequest.model).toBe('gemini-2.5-flash');
-      expect(
-        llmRequest.liveConnectConfig.enableAffectiveDialog,
-      ).toBeUndefined();
-      expect(llmRequest.liveConnectConfig.proactivity).toBeUndefined();
+      expect(llmRequest.liveConnectConfig.enableAffectiveDialog).toBe(true);
+      expect(llmRequest.liveConnectConfig.proactivity).toEqual({
+        proactiveAudio: true,
+      });
     });
   });
 });

@@ -6,11 +6,11 @@
 
 import {
   isGemini2OrAbove,
-  isGemini35LiveTranslate,
   isGemini3xFlashLive,
   isGemini3xLive,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {isGemini35LiveTranslate} from '../../src/utils/model_name.js';
 
 describe('isGemini2OrAbove', () => {
   describe('valid models', () => {

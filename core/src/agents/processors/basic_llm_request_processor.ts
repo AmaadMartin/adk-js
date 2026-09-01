@@ -7,7 +7,6 @@
 import {GenerateContentConfig, HttpOptions} from '@google/genai';
 
 import {Event} from '../../events/event.js';
-import {BaseLlm} from '../../models/base_llm.js';
 import {LlmRequest, setOutputSchema} from '../../models/llm_request.js';
 import {
   copyHttpOptions,
@@ -16,37 +15,8 @@ import {
 import {isGemini3xLive} from '../../utils/model_name.js';
 import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
 import {InvocationContext} from '../invocation_context.js';
-import {LlmAgent, isLlmAgent} from '../llm_agent.js';
+import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
-
-/** The surface an agent needs to resolve its own live model. */
-interface AgentWithCanonicalLiveModel {
-  canonicalLiveModel: BaseLlm;
-}
-
-function hasCanonicalLiveModel(
-  agent: object,
-): agent is AgentWithCanonicalLiveModel {
-  return 'canonicalLiveModel' in agent;
-}
-
-/**
- * Resolves the model the live connection will actually open with.
- *
- * `LlmAgent` resolves the same model for both paths, so this falls back to the
- * request's model. The branch exists because LLM flows also drive agents
- * defined outside this package that provide the `LlmAgent` surface without
- * subclassing it, and those may name a separate live model.
- */
-function activeLiveModelName(
-  agent: LlmAgent,
-  requestModel: string | undefined,
-): string | undefined {
-  const liveModel = hasCanonicalLiveModel(agent)
-    ? agent.canonicalLiveModel.model
-    : undefined;
-  return liveModel || requestModel;
-}
 
 /**
  * Merges the run config's HTTP options into the request config, run winning.
@@ -174,17 +144,15 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
       liveConnectConfig.contextWindowCompression =
         runConfig.contextWindowCompression;
       liveConnectConfig.avatarConfig = runConfig.avatarConfig;
-      // Copied rather than aliased: `LlmAgent.runLiveFlow` stamps each
-      // server-issued resumption handle onto this object, and aliasing the run
-      // config's own object carries a stale handle into a later run.
+      // Copied rather than aliased: `GoogleLlm.connect` deletes `transparent`
+      // from this object in place, which would otherwise edit the caller's own
+      // run config.
       liveConnectConfig.sessionResumption = runConfig.sessionResumption
         ? {...runConfig.sessionResumption}
         : undefined;
 
       // Gemini 3.x live models reject both fields.
-      const gated = isGemini3xLive(
-        activeLiveModelName(agent, llmRequest.model),
-      );
+      const gated = isGemini3xLive(llmRequest.model);
       liveConnectConfig.enableAffectiveDialog = gated
         ? undefined
         : runConfig.enableAffectiveDialog;
