@@ -317,6 +317,12 @@ describe('functionDeclarationToToolParam', () => {
     });
   });
 
+  it('rejects a declaration with no function name', () => {
+    expect(() =>
+      functionDeclarationToToolParam({description: 'Nameless.'}),
+    ).toThrowError('Anthropic tool definitions require a function name');
+  });
+
   it('falls back to an empty object schema for a non-object schema', () => {
     expect(
       functionDeclarationToToolParam({
@@ -724,6 +730,12 @@ describe('ToolUseIdSanitizer', () => {
       name: 'test',
       input: {},
     });
+  });
+
+  it('rejects a function call with no name', () => {
+    expect(() => convert({functionCall: {id: 'toolu_01abc'}})).toThrowError(
+      'Anthropic tool calls require a function name',
+    );
   });
 
   it('carries the call arguments through', () => {

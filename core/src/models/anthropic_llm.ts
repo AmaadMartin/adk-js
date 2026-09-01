@@ -186,17 +186,40 @@ function isVertexAnthropicClient(
   return 'region' in client && 'projectId' in client;
 }
 
-/** Streamed state of one `tool_use` content block. */
-interface ToolUseAccumulator {
-  id: string;
-  name: string;
-  argsJson: string;
-}
+/**
+ * The accumulated state of one streamed content block.
+ *
+ * Claude addresses each block of a turn by index and one index carries exactly
+ * one block type, so the discriminant here mirrors the block type it came
+ * from.
+ */
+type StreamedBlock =
+  | {type: 'thinking'; thinking: string; signature: string}
+  | {type: 'redacted_thinking'; data: string}
+  | {type: 'text'; text: string}
+  | {type: 'tool_use'; id: string; name: string; argsJson: string};
 
-/** Streamed state of one `thinking` content block. */
-interface ThinkingAccumulator {
-  thinking: string;
-  signature: string;
+function streamedBlockToPart(block: StreamedBlock): Part {
+  switch (block.type) {
+    case 'thinking':
+      return contentBlockToPart({
+        type: 'thinking',
+        thinking: block.thinking,
+        signature: block.signature,
+      });
+    case 'redacted_thinking':
+      return contentBlockToPart({type: 'redacted_thinking', data: block.data});
+    case 'text':
+      return {text: block.text};
+    case 'tool_use':
+      return {
+        functionCall: {
+          id: block.id,
+          name: block.name,
+          args: block.argsJson ? JSON.parse(block.argsJson) : {},
+        },
+      };
+  }
 }
 
 /**
@@ -206,28 +229,27 @@ interface ThinkingAccumulator {
  * deltas have to be gathered per index and only ordered at the end.
  */
 class StreamedContentBlocks {
-  private readonly texts = new Map<number, string>();
-  private readonly toolUses = new Map<number, ToolUseAccumulator>();
-  private readonly thinking = new Map<number, ThinkingAccumulator>();
-  private readonly redactedThinking = new Map<number, string>();
+  private readonly blocks = new Map<number, StreamedBlock>();
 
   start(index: number, block: Anthropic.ContentBlock): void {
     switch (block.type) {
       case 'thinking':
-        this.thinking.set(index, {
+        this.blocks.set(index, {
+          type: 'thinking',
           thinking: block.thinking,
           signature: block.signature,
         });
         break;
       case 'redacted_thinking':
         // A redacted block arrives complete; no deltas follow it.
-        this.redactedThinking.set(index, block.data);
+        this.blocks.set(index, {type: 'redacted_thinking', data: block.data});
         break;
       case 'text':
-        this.texts.set(index, block.text);
+        this.blocks.set(index, {type: 'text', text: block.text});
         break;
       case 'tool_use':
-        this.toolUses.set(index, {
+        this.blocks.set(index, {
+          type: 'tool_use',
           id: block.id,
           name: block.name,
           argsJson: '',
@@ -239,77 +261,45 @@ class StreamedContentBlocks {
   }
 
   appendThinking(index: number, thinking: string): void {
-    const accumulator = this.thinkingAt(index);
-    accumulator.thinking += thinking;
+    this.thinkingAt(index).thinking += thinking;
   }
 
   appendSignature(index: number, signature: string): void {
-    const accumulator = this.thinkingAt(index);
-    accumulator.signature += signature;
+    this.thinkingAt(index).signature += signature;
   }
 
   appendText(index: number, text: string): void {
-    this.texts.set(index, (this.texts.get(index) ?? '') + text);
+    const block = this.blocks.get(index);
+    if (block?.type === 'text') {
+      block.text += text;
+      return;
+    }
+    this.blocks.set(index, {type: 'text', text});
   }
 
   appendToolArgs(index: number, partialJson: string): void {
-    const accumulator = this.toolUses.get(index);
-    if (accumulator) {
-      accumulator.argsJson += partialJson;
+    const block = this.blocks.get(index);
+    if (block?.type === 'tool_use') {
+      block.argsJson += partialJson;
     }
   }
 
   /** Returns the accumulated parts in ascending block index. */
   toParts(): Part[] {
-    const indices = new Set([
-      ...this.thinking.keys(),
-      ...this.redactedThinking.keys(),
-      ...this.texts.keys(),
-      ...this.toolUses.keys(),
-    ]);
-    const parts: Part[] = [];
-    for (const index of [...indices].sort((a, b) => a - b)) {
-      const thinking = this.thinking.get(index);
-      if (thinking) {
-        parts.push(
-          contentBlockToPart({
-            type: 'thinking',
-            thinking: thinking.thinking,
-            signature: thinking.signature,
-          }),
-        );
-      }
-      const redacted = this.redactedThinking.get(index);
-      if (redacted !== undefined) {
-        parts.push(
-          contentBlockToPart({type: 'redacted_thinking', data: redacted}),
-        );
-      }
-      const text = this.texts.get(index);
-      if (text !== undefined) {
-        parts.push({text});
-      }
-      const toolUse = this.toolUses.get(index);
-      if (toolUse) {
-        parts.push({
-          functionCall: {
-            id: toolUse.id,
-            name: toolUse.name,
-            args: toolUse.argsJson ? JSON.parse(toolUse.argsJson) : {},
-          },
-        });
-      }
-    }
-    return parts;
+    return [...this.blocks]
+      .sort(([left], [right]) => left - right)
+      .map(([, block]) => streamedBlockToPart(block));
   }
 
-  private thinkingAt(index: number): ThinkingAccumulator {
-    let accumulator = this.thinking.get(index);
-    if (!accumulator) {
-      accumulator = {thinking: '', signature: ''};
-      this.thinking.set(index, accumulator);
+  /** Returns the thinking block at `index`, starting one if a delta leads. */
+  private thinkingAt(index: number): StreamedBlock & {type: 'thinking'} {
+    const block = this.blocks.get(index);
+    if (block?.type === 'thinking') {
+      return block;
     }
-    return accumulator;
+    const started = {type: 'thinking', thinking: '', signature: ''} as const;
+    this.blocks.set(index, started);
+    return started;
   }
 }
 
@@ -319,34 +309,32 @@ function partialResponse(part: Part): LlmResponse {
 }
 
 /**
- * Records one content-block delta and yields whatever the caller should see.
+ * Records one content-block delta and returns the part the caller should emit.
  *
- * A signature delta yields nothing: the signature is opaque rather than
+ * A signature delta returns nothing: the signature is opaque rather than
  * user-visible text. It still has to be accumulated, because a thinking block
  * that reaches the next turn unsigned makes Claude reject the request.
  */
-function* contentBlockDeltaResponses(
+function contentBlockDeltaPart(
   blocks: StreamedContentBlocks,
   event: Anthropic.RawContentBlockDeltaEvent,
-): Generator<LlmResponse> {
+): Part | undefined {
   const {delta, index} = event;
   switch (delta.type) {
     case 'thinking_delta':
       blocks.appendThinking(index, delta.thinking);
-      yield partialResponse({text: delta.thinking, thought: true});
-      break;
+      return {text: delta.thinking, thought: true};
     case 'signature_delta':
       blocks.appendSignature(index, delta.signature);
-      break;
+      return undefined;
     case 'text_delta':
       blocks.appendText(index, delta.text);
-      yield partialResponse({text: delta.text});
-      break;
+      return {text: delta.text};
     case 'input_json_delta':
       blocks.appendToolArgs(index, delta.partial_json);
-      break;
+      return undefined;
     default:
-      break;
+      return undefined;
   }
 }
 
@@ -371,9 +359,13 @@ async function* streamResponses(
       case 'content_block_start':
         blocks.start(event.index, event.content_block);
         break;
-      case 'content_block_delta':
-        yield* contentBlockDeltaResponses(blocks, event);
+      case 'content_block_delta': {
+        const part = contentBlockDeltaPart(blocks, event);
+        if (part) {
+          yield partialResponse(part);
+        }
         break;
+      }
       case 'message_delta':
         // The message delta carries the authoritative cumulative counts, so
         // the thinking detail is refreshed alongside the total it sits in.

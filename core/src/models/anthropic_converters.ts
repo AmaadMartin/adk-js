@@ -372,11 +372,15 @@ export function partToMessageBlock(
     return {type: 'text', text: part.text};
   }
   if (part.functionCall) {
+    const {id, name, args} = part.functionCall;
+    if (!name) {
+      throw new Error('Anthropic tool calls require a function name');
+    }
     return {
       type: 'tool_use',
-      id: sanitizer.sanitize(part.functionCall.id),
-      name: part.functionCall.name!,
-      input: part.functionCall.args ?? {},
+      id: sanitizer.sanitize(id),
+      name,
+      input: args ?? {},
     };
   }
   if (part.functionResponse) {
@@ -630,13 +634,18 @@ function parametersToInputSchema(parameters?: Schema): Record<string, unknown> {
 export function functionDeclarationToToolParam(
   functionDeclaration: FunctionDeclaration,
 ): Anthropic.Tool {
-  const inputSchema = functionDeclaration.parametersJsonSchema
-    ? cloneJsonObject(functionDeclaration.parametersJsonSchema)
-    : parametersToInputSchema(functionDeclaration.parameters);
+  const {name, description, parameters, parametersJsonSchema} =
+    functionDeclaration;
+  if (!name) {
+    throw new Error('Anthropic tool definitions require a function name');
+  }
+  const inputSchema = parametersJsonSchema
+    ? cloneJsonObject(parametersJsonSchema)
+    : parametersToInputSchema(parameters);
   updateTypeString(inputSchema);
   return {
-    name: functionDeclaration.name!,
-    description: functionDeclaration.description ?? '',
+    name,
+    description: description ?? '',
     input_schema: {...inputSchema, type: 'object'},
   };
 }

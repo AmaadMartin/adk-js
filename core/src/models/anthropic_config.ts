@@ -23,8 +23,7 @@ export type AnthropicEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
  *
  * `effort` is the recommended way to control reasoning depth on newer Claude
  * models, and replaces the deprecated manual `thinkingConfig.thinkingBudget`.
- * Setting `effort` together with `thinkingConfig.thinkingLevel` is rejected;
- * see {@link validateAnthropicGenerateContentConfig}.
+ * Setting `effort` together with `thinkingConfig.thinkingLevel` is rejected.
  */
 export interface AnthropicGenerateContentConfig extends GenerateContentConfig {
   /** Reasoning effort for adaptive extended thinking. */
@@ -35,9 +34,8 @@ export interface AnthropicGenerateContentConfig extends GenerateContentConfig {
  * Rejects a config that asks for a reasoning depth two different ways.
  *
  * adk-python makes this state unconstructable with a pydantic validator. A
- * TypeScript interface cannot validate at construction, so the check runs when
- * the config is read. Call it eagerly to fail at the point the config is
- * built; the request path calls it on every request either way.
+ * TypeScript interface cannot validate at construction, so the check runs on
+ * every request instead, from the effort mapping below.
  *
  * @param config The config to check.
  * @throws If both `effort` and `thinkingConfig.thinkingLevel` are set.
