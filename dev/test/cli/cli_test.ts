@@ -5,12 +5,20 @@
  */
 
 import {
+  DatabaseSessionService,
   FeatureName,
+  FileArtifactService,
+  InMemoryArtifactService,
+  InMemoryMemoryService,
+  InMemorySessionService,
   isFeatureEnabled,
   LogLevel,
   overrideFeatureEnabled,
   setLogLevel,
 } from '@google/adk';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -66,11 +74,16 @@ describe('CLI Entrypoint', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Local storage is the default now, so a bare `web` would write a .adk
+    // directory into the repository. The storage behaviour itself is covered
+    // by the "local storage" block below, against a temporary directory.
+    process.env['ADK_DISABLE_LOCAL_STORAGE'] = '1';
     program = createProgram();
     program.exitOverride();
   });
 
   afterEach(() => {
+    delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
     vi.restoreAllMocks();
   });
 
@@ -310,6 +323,103 @@ describe('CLI Entrypoint', () => {
           otelToCloud: true,
         }),
       );
+    });
+  });
+
+  describe('service URI and local storage options', () => {
+    let agentsDir: string;
+
+    beforeEach(() => {
+      agentsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-cli-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(agentsDir, {recursive: true, force: true});
+    });
+
+    it.each([['web'], ['api_server']])(
+      '%s forwards --memory_service_uri',
+      async (command) => {
+        await parse([command, agentsDir, '--memory_service_uri', 'memory://']);
+
+        const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+        expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+      },
+    );
+
+    it('run forwards --memory_service_uri', async () => {
+      await parse([
+        'run',
+        path.join(agentsDir, 'agent.ts'),
+        '--memory_service_uri',
+        'memory://',
+      ]);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          memoryService: expect.any(InMemoryMemoryService),
+        }),
+      );
+    });
+
+    it('web stores under .adk by default', async () => {
+      delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
+
+      await parse(['web', agentsDir]);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(DatabaseSessionService);
+      expect(args.artifactService).toBeInstanceOf(FileArtifactService);
+      expect(fs.existsSync(path.join(agentsDir, '.adk'))).toBe(true);
+    });
+
+    it('web keeps everything in memory under --no_use_local_storage', async () => {
+      delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
+
+      await parse(['web', agentsDir, '--no_use_local_storage']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(InMemorySessionService);
+      expect(args.artifactService).toBeInstanceOf(InMemoryArtifactService);
+      expect(fs.existsSync(path.join(agentsDir, '.adk'))).toBe(false);
+    });
+
+    it('rejects a storage flag combined with a service URI', async () => {
+      const exit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => undefined) as never);
+      const stderr = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation(() => true);
+
+      await parse([
+        'web',
+        agentsDir,
+        '--use_local_storage',
+        '--session_service_uri',
+        'memory://',
+      ]);
+
+      expect(exit).toHaveBeenCalledWith(2);
+      expect(stderr.mock.calls.flat().join('')).toContain(
+        '--use_local_storage/--no_use_local_storage cannot be used with ' +
+          '--session_service_uri or --artifact_service_uri.',
+      );
+    });
+
+    it('deploy agent_engine forwards the memory URI and opts out of local storage', async () => {
+      await parse([
+        'deploy',
+        'agent_engine',
+        agentsDir,
+        '--memory_service_uri',
+        'agentengine://123',
+      ]);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        memoryServiceUri: 'agentengine://123',
+        useLocalStorage: false,
+      });
     });
   });
 

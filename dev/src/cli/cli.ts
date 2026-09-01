@@ -5,16 +5,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseArtifactService,
-  BaseSessionService,
-  getArtifactServiceFromUri,
-  getSessionServiceFromUri,
-  LogLevel,
-  setLogLevel as setAdkCoreLogLevel,
-} from '@google/adk';
+import {LogLevel, setLogLevel as setAdkCoreLogLevel} from '@google/adk';
 import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
+import * as path from 'node:path';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
@@ -34,6 +28,13 @@ import {
   DISABLE_FEATURES_OPTION,
   ENABLE_FEATURES_OPTION,
 } from './feature_options.js';
+import {
+  MEMORY_SERVICE_URI_OPTION,
+  NO_USE_LOCAL_STORAGE_OPTION,
+  resolveServices,
+  resolveUseLocalStorage,
+  USE_LOCAL_STORAGE_OPTION,
+} from './service_options.js';
 
 dotenv.config({quiet: true});
 
@@ -59,22 +60,6 @@ function getLogLevelFromOptions(options: {
   }
 
   return LogLevel.INFO;
-}
-
-function getSessionServiceFromOptions(options: {
-  session_service_uri?: string;
-}): BaseSessionService {
-  return getSessionServiceFromUri(
-    options['session_service_uri'] || process.env.DATABASE_URL || 'memory://',
-  );
-}
-
-function getArtifactServiceFromOptions(options: {
-  artifact_service_uri?: string;
-}): BaseArtifactService | undefined {
-  return getArtifactServiceFromUri(
-    options['artifact_service_uri'] || 'memory://',
-  );
 }
 
 function getAgentFileOptions(options: {
@@ -268,6 +253,9 @@ export function createProgram(): Command {
     .addOption(RELOAD_AGENTS_OPTION)
     .addOption(ENABLE_FEATURES_OPTION)
     .addOption(DISABLE_FEATURES_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
+    .addOption(USE_LOCAL_STORAGE_OPTION)
+    .addOption(NO_USE_LOCAL_STORAGE_OPTION)
     .action(
       async (
         agentsDir: string,
@@ -287,8 +275,13 @@ export function createProgram(): Command {
             serveDebugUI: true,
             allowOrigins: options['allow_origins'],
             allowedHosts: getAllowedHosts(options['allowed_hosts']),
-            sessionService: getSessionServiceFromOptions(options),
-            artifactService: getArtifactServiceFromOptions(options),
+            ...resolveServices({
+              baseDir: getAbsolutePath(agentsDir),
+              sessionServiceUri: options['session_service_uri'],
+              artifactServiceUri: options['artifact_service_uri'],
+              memoryServiceUri: options['memory_service_uri'],
+              useLocalStorage: resolveUseLocalStorage(command, true),
+            }),
             otelToCloud: options['otel_to_cloud'] ? true : false,
             agentFileLoadOptions: getAgentFileOptions(options),
             a2a: getBoolean(options['a2a']),
@@ -325,6 +318,9 @@ export function createProgram(): Command {
     .addOption(RELOAD_AGENTS_OPTION)
     .addOption(ENABLE_FEATURES_OPTION)
     .addOption(DISABLE_FEATURES_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
+    .addOption(USE_LOCAL_STORAGE_OPTION)
+    .addOption(NO_USE_LOCAL_STORAGE_OPTION)
     .action(
       async (
         agentsDir: string,
@@ -344,8 +340,13 @@ export function createProgram(): Command {
             serveDebugUI: false,
             allowOrigins: options['allow_origins'],
             allowedHosts: getAllowedHosts(options['allowed_hosts']),
-            sessionService: getSessionServiceFromOptions(options),
-            artifactService: getArtifactServiceFromOptions(options),
+            ...resolveServices({
+              baseDir: getAbsolutePath(agentsDir),
+              sessionServiceUri: options['session_service_uri'],
+              artifactServiceUri: options['artifact_service_uri'],
+              memoryServiceUri: options['memory_service_uri'],
+              useLocalStorage: resolveUseLocalStorage(command, true),
+            }),
             otelToCloud: options['otel_to_cloud'] ? true : false,
             agentFileLoadOptions: getAgentFileOptions(options),
             a2a: getBoolean(options['a2a']),
@@ -430,6 +431,9 @@ export function createProgram(): Command {
     .addOption(RELOAD_AGENTS_OPTION)
     .addOption(ENABLE_FEATURES_OPTION)
     .addOption(DISABLE_FEATURES_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
+    .addOption(USE_LOCAL_STORAGE_OPTION)
+    .addOption(NO_USE_LOCAL_STORAGE_OPTION)
     .action(
       async (
         agentPath: string,
@@ -446,8 +450,13 @@ export function createProgram(): Command {
             savedSessionFile: options['resume'],
             saveSession: getBoolean(options['save_session']),
             sessionId: options['session_id'],
-            sessionService: getSessionServiceFromOptions(options),
-            artifactService: getArtifactServiceFromOptions(options),
+            ...resolveServices({
+              baseDir: path.dirname(getAbsolutePath(agentPath)),
+              sessionServiceUri: options['session_service_uri'],
+              artifactServiceUri: options['artifact_service_uri'],
+              memoryServiceUri: options['memory_service_uri'],
+              useLocalStorage: resolveUseLocalStorage(command, true),
+            }),
             otelToCloud: options['otel_to_cloud'] ? true : false,
             agentFileLoadOptions: getAgentFileOptions(options),
             reloadAgents: getBoolean(options['reload_agents']),
@@ -557,31 +566,42 @@ export function createProgram(): Command {
       .addOption(AGENT_FILE_MODULE_TYPE)
       .addOption(A2A_OPTION)
       .addOption(AGENT_ENGINE_ID_OPTION)
-      .action(async (agentPath: string, options: Record<string, string>) => {
-        try {
-          await deployToAgentEngine({
-            agentPath: getAbsolutePath(agentPath),
-            project: options['project'],
-            region: options['region'],
-            displayName: options['display_name'],
-            description: options['description'],
-            repository: options['repository'],
-            tempFolder: options['temp_folder'],
-            port: 8080, // Agent Engine requires fixed port of 8080
-            withUi: getBoolean(options['with_ui']),
-            logLevel: options['log_level'],
-            adkVersion: options['adk_version'],
-            allowOrigins: options['allow_origins'],
-            sessionServiceUri: options['session_service_uri'],
-            artifactServiceUri: options['artifact_service_uri'],
-            agentFileLoadOptions: getAgentFileOptions(options),
-            a2a: getBoolean(options['a2a']),
-            agentEngineId: options['agent_engine_id'],
-          });
-        } catch (error) {
-          logger.error('Error deploying agent:', (error as Error).message);
-        }
-      });
+      .addOption(MEMORY_SERVICE_URI_OPTION)
+      .addOption(USE_LOCAL_STORAGE_OPTION)
+      .addOption(NO_USE_LOCAL_STORAGE_OPTION)
+      .action(
+        async (
+          agentPath: string,
+          options: Record<string, string>,
+          command: Command,
+        ) => {
+          try {
+            await deployToAgentEngine({
+              agentPath: getAbsolutePath(agentPath),
+              project: options['project'],
+              region: options['region'],
+              displayName: options['display_name'],
+              description: options['description'],
+              repository: options['repository'],
+              tempFolder: options['temp_folder'],
+              port: 8080, // Agent Engine requires fixed port of 8080
+              withUi: getBoolean(options['with_ui']),
+              logLevel: options['log_level'],
+              adkVersion: options['adk_version'],
+              allowOrigins: options['allow_origins'],
+              sessionServiceUri: options['session_service_uri'],
+              artifactServiceUri: options['artifact_service_uri'],
+              memoryServiceUri: options['memory_service_uri'],
+              useLocalStorage: resolveUseLocalStorage(command, false),
+              agentFileLoadOptions: getAgentFileOptions(options),
+              a2a: getBoolean(options['a2a']),
+              agentEngineId: options['agent_engine_id'],
+            });
+          } catch (error) {
+            logger.error('Error deploying agent:', (error as Error).message);
+          }
+        },
+      );
   };
 
   registerAgentEngineCommand(DEPLOY_COMMAND.command('agent_engine'));

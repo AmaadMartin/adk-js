@@ -106,6 +106,8 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
       allowOrigins: options.allowOrigins,
       sessionServiceUri: options.sessionServiceUri,
       artifactServiceUri: options.artifactServiceUri,
+      memoryServiceUri: options.memoryServiceUri,
+      useLocalStorage: options.useLocalStorage,
       a2a: options.a2a,
     });
 
