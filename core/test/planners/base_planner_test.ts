@@ -15,7 +15,7 @@ import {
   ReadonlyContext,
   Session,
 } from '@google/adk';
-import {Part} from '@google/genai';
+import {Content, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 const PLANNER_SIGNATURE = Symbol.for('google.adk.basePlanner');
@@ -33,13 +33,13 @@ function createInvocationContext(): InvocationContext {
   return new InvocationContext({
     invocationId: 'inv-1',
     session,
-    agent: {} as BaseAgent,
+    agent: {name: 'test_agent'} as BaseAgent,
     pluginManager: {} as PluginManager,
   });
 }
 
-function createLlmRequest(): LlmRequest {
-  return {contents: [], liveConnectConfig: {}, toolsDict: {}};
+function createLlmRequest(contents: Content[] = []): LlmRequest {
+  return {contents, liveConnectConfig: {}, toolsDict: {}};
 }
 
 /** Mirrors `CustomPlanner` in adk-python's NL-planning flow tests. */
@@ -93,13 +93,16 @@ class ConsumingPlanner extends BasePlanner {
   }
 }
 
-/** Returns a new array instead of mutating the parts it was given. */
+/** The planner documented in docs/guides/planners/base_planner/index.md. */
 class ThoughtStrippingPlanner extends BasePlanner {
   buildPlanningInstruction(
-    _readonlyContext: ReadonlyContext,
-    _llmRequest: LlmRequest,
+    readonlyContext: ReadonlyContext,
+    llmRequest: LlmRequest,
   ): string | undefined {
-    return 'Plan before you act.';
+    if (llmRequest.contents.length === 0) {
+      return undefined;
+    }
+    return `Plan before you act, ${readonlyContext.agentName}.`;
   }
 
   processPlanningResponse(
@@ -192,6 +195,18 @@ describe('BasePlanner', () => {
 
     expect(processed).toEqual([{text: 'answer'}]);
     expect(parts).toHaveLength(2);
+  });
+
+  it('lets a subclass read both arguments of the request member', () => {
+    const planner = new ThoughtStrippingPlanner();
+    const request = createLlmRequest([{role: 'user', parts: [{text: 'hi'}]}]);
+
+    expect(planner.buildPlanningInstruction(readonlyContext, request)).toBe(
+      'Plan before you act, test_agent.',
+    );
+    expect(
+      planner.buildPlanningInstruction(readonlyContext, createLlmRequest()),
+    ).toBeUndefined();
   });
 
   it('gives the subclass a writable callback context', () => {
