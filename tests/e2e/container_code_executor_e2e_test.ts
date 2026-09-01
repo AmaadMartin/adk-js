@@ -20,12 +20,16 @@ import {afterEach, describe, expect, it} from 'vitest';
  * Runs the executor against a real Docker daemon. It needs a reachable daemon
  * and an image with `python3`, so it is opt-in and never runs in CI. Enable it
  * with `ADK_RUN_DOCKER_IT=1`, and pick the image with `ADK_DOCKER_IT_IMAGE`.
+ *
+ * The executor creates a container from an image that is already present, and
+ * never pulls one. Run `docker pull python:3-slim` first, or the daemon
+ * answers 404 and every case here fails.
  */
 const shouldRun = !!process.env.ADK_RUN_DOCKER_IT;
 const IMAGE = process.env.ADK_DOCKER_IT_IMAGE || 'python:3-slim';
 
-/** Budget for one run: pulling the image on a cold host dominates it. */
-const RUN_TIMEOUT_MS = 300000;
+/** Budget for one run, generous enough for a loaded daemon. */
+const RUN_TIMEOUT_MS = 120000;
 
 function makeParams(code: string): ExecuteCodeParams {
   return {
@@ -124,14 +128,20 @@ describe.skipIf(!shouldRun)('ContainerCodeExecutor against real Docker', () => {
   it(
     'removes the container on close',
     async () => {
+      const docker = new Docker();
+      const listIds = async (): Promise<string[]> =>
+        (await docker.listContainers()).map((entry) => entry.Id);
+      const before = new Set(await listIds());
+
       const running = new ContainerCodeExecutor({image: IMAGE});
       await running.executeCode(makeParams('print(1)'));
-      const before = await new Docker().listContainers();
+      const started = (await listIds()).filter((id) => !before.has(id));
+      expect(started).toHaveLength(1);
 
       await running.close();
 
-      const after = await new Docker().listContainers();
-      expect(after.length).toBe(before.length - 1);
+      // Checked by id: the host may be running unrelated containers.
+      expect(await listIds()).not.toContain(started[0]);
     },
     RUN_TIMEOUT_MS,
   );

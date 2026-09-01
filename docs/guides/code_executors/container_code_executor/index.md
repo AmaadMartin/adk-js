@@ -41,6 +41,13 @@ You also need a reachable Docker daemon and an image with `python3` on the
 `PATH`. The executor verifies `python3` when the container starts, because the
 timeout supervisor is written in Python.
 
+The executor creates a container from an image the daemon already holds, and
+never pulls one. Pull the image yourself first, or the daemon answers 404:
+
+```sh
+docker pull python:3-slim
+```
+
 ```ts
 import {ContainerCodeExecutor, LlmAgent} from '@google/adk';
 
@@ -112,6 +119,11 @@ The declared language picks the interpreter inside the container.
 The image must carry the interpreter you use. Any other language throws before
 a container is started. The supervisor itself is always Python, so `python3` is
 required whichever language you run.
+
+`tsx` is fetched from the npm registry, which the default configuration blocks.
+Install it in the image to run TypeScript, or set `networkEnabled: true`. A
+missing interpreter is not a crash: the run reports a non-zero exit code and
+the interpreter's own message on stderr.
 
 ## Shutting down
 

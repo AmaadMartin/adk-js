@@ -41,6 +41,24 @@ async function cleanupContainers(): Promise<void> {
   }
 }
 
+/** The termination signals the cleanup hook runs on. */
+const EXIT_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+type ExitSignal = (typeof EXIT_SIGNALS)[number];
+
+/**
+ * Cleans up on a termination signal, then re-raises it.
+ *
+ * Node drops its own terminate-on-signal behaviour as soon as any listener
+ * exists, so a handler that only cleans up would make the whole host process
+ * ignore its first `SIGINT` or `SIGTERM`. The listener is registered with
+ * `once`, so it is already detached here and the second delivery reaches
+ * whatever else the application registered, or Node's default.
+ */
+async function handleExitSignal(signal: ExitSignal): Promise<void> {
+  await cleanupContainers();
+  process.kill(process.pid, signal);
+}
+
 /**
  * Registers process-exit hooks once. Node cannot run asynchronous Docker
  * cleanup on the synchronous `'exit'` event, so `'beforeExit'` and the
@@ -53,8 +71,9 @@ function registerExitHooks(): void {
   }
   exitHooksRegistered = true;
   process.once('beforeExit', cleanupContainers);
-  process.once('SIGINT', cleanupContainers);
-  process.once('SIGTERM', cleanupContainers);
+  for (const signal of EXIT_SIGNALS) {
+    process.once(signal, handleExitSignal);
+  }
 }
 
 /** Docker daemon url schemes that dockerode names differently. */

@@ -6,7 +6,10 @@
 
 import Dockerode from 'dockerode';
 import {PassThrough} from 'node:stream';
-import {Mock, vi} from 'vitest';
+import {Mock, MockInstance, vi} from 'vitest';
+
+/** The termination signals `docker_container.ts` cleans up on. */
+export type ExitSignal = 'SIGINT' | 'SIGTERM';
 
 /** How the fake Docker client behaves for one test. */
 export interface FakeDockerConfig {
@@ -120,16 +123,28 @@ export function createFakeDocker(config: FakeDockerConfig = {}): {
 }
 
 /**
- * Returns the cleanup handler `docker_container.ts` registered on process
- * exit: the one function listening on both SIGINT and SIGTERM.
+ * Returns the signal handler `docker_container.ts` registered on process exit:
+ * the one function listening on both SIGINT and SIGTERM.
  */
-export function getExitCleanupHandler(): () => Promise<void> {
+export function getExitSignalHandler(): (signal: ExitSignal) => Promise<void> {
   const onSigterm: unknown[] = process.listeners('SIGTERM');
   const handler = process
     .listeners('SIGINT')
     .find((listener) => onSigterm.includes(listener));
   if (!handler) {
-    throw new Error('the exit cleanup handler was never registered');
+    throw new Error('the exit signal handler was never registered');
   }
-  return handler as () => Promise<void>;
+  return handler as (signal: ExitSignal) => Promise<void>;
+}
+
+/**
+ * Runs the exit signal handler with `process.kill` stubbed, so the re-raise
+ * does not terminate the test worker. Returns the stub for assertions.
+ */
+export async function runExitSignalHandler(
+  signal: ExitSignal = 'SIGTERM',
+): Promise<MockInstance<typeof process.kill>> {
+  const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+  await getExitSignalHandler()(signal);
+  return kill;
 }

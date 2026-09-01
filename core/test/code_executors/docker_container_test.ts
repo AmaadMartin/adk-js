@@ -12,7 +12,12 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {DockerContainer} from '../../src/code_executors/docker_container.js';
 import {logger} from '../../src/utils/logger.js';
 import {loadOptionalPeer} from '../../src/utils/optional_peer.js';
-import {createFakeDocker, getExitCleanupHandler} from './docker_test_utils.js';
+import {
+  ExitSignal,
+  createFakeDocker,
+  getExitSignalHandler,
+  runExitSignalHandler,
+} from './docker_test_utils.js';
 
 vi.mock('dockerode', () => ({default: vi.fn()}));
 
@@ -27,6 +32,15 @@ vi.mock('../../src/utils/optional_peer.js', async (importOriginal) => {
 const {loadOptionalPeer: actualLoadOptionalPeer} = await vi.importActual<
   typeof import('../../src/utils/optional_peer.js')
 >('../../src/utils/optional_peer.js');
+
+/** Whether `raw` is the `once` wrapper Node built around `handler`. */
+function hasWrappedListener(raw: unknown, handler: unknown): boolean {
+  return (
+    typeof raw === 'function' &&
+    'listener' in raw &&
+    (raw as {listener: unknown}).listener === handler
+  );
+}
 
 describe('DockerContainer', () => {
   const tempDirs: string[] = [];
@@ -158,7 +172,7 @@ describe('DockerContainer', () => {
 
       await expect(subject.stop()).rejects.toThrow('daemon unreachable');
 
-      await getExitCleanupHandler()();
+      await runExitSignalHandler();
       expect(container.stop).toHaveBeenCalledTimes(2);
       expect(container.remove).toHaveBeenCalledTimes(1);
     });
@@ -172,7 +186,8 @@ describe('DockerContainer', () => {
       });
       await subject.start();
 
-      await expect(getExitCleanupHandler()()).resolves.toBeUndefined();
+      const kill = await runExitSignalHandler();
+      expect(kill).toHaveBeenCalled();
 
       expect(error).toHaveBeenCalledWith(
         expect.stringContaining('Failed to stop and remove container on exit'),
@@ -180,6 +195,42 @@ describe('DockerContainer', () => {
       expect(container.remove).not.toHaveBeenCalled();
       await subject.stop();
     });
+
+    it.each<ExitSignal>(['SIGINT', 'SIGTERM'])(
+      're-raises %s so the host process still terminates',
+      async (signal: ExitSignal) => {
+        const {subject, container} = createContainer();
+        await subject.start();
+
+        const kill = await runExitSignalHandler(signal);
+
+        // Registering any listener disables Node's default terminate-on-signal
+        // behaviour, so the handler has to deliver the signal again itself.
+        expect(kill).toHaveBeenCalledWith(process.pid, signal);
+        expect(container.stop.mock.invocationCallOrder[0]).toBeLessThan(
+          kill.mock.invocationCallOrder[0],
+        );
+      },
+    );
+
+    it.each<ExitSignal>(['SIGINT', 'SIGTERM'])(
+      'listens for %s only once, so the re-raise cannot re-enter it',
+      async (signal: ExitSignal) => {
+        const {subject} = createContainer();
+        await subject.start();
+        const handler = getExitSignalHandler();
+
+        // Node detaches a `once` listener before running it and returns it
+        // wrapped from `rawListeners`. A plain `on` listener would come back
+        // unwrapped, and the re-raise would then loop back into the handler.
+        const raw = process
+          .rawListeners(signal)
+          .find((listener) => hasWrappedListener(listener, handler));
+
+        expect(raw).toBeDefined();
+        await subject.stop();
+      },
+    );
   });
 
   describe('optional peer dependency', () => {

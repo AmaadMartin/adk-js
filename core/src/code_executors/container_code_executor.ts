@@ -178,17 +178,25 @@ export class ContainerCodeExecutor extends BaseCodeExecutor {
   }
 
   /**
-   * Stops and removes the container. It does nothing when no container is
-   * running, so it is safe to call twice. When Docker rejects, the error
+   * Stops and removes the container. It does nothing when the executor never
+   * started one, so it is safe to call twice. When Docker rejects, the error
    * propagates and the executor keeps the container, so that a later
    * `close()` or the process exit hook retries the cleanup.
+   *
+   * A start still in flight is awaited first, so the container it goes on to
+   * create is stopped rather than orphaned. A start that failed leaves nothing
+   * to stop, and clearing it here lets the next execution try again instead of
+   * replaying the old error forever.
    */
   async close(): Promise<void> {
-    if (!this.container) {
+    if (!this.initPromise) {
       return;
     }
-    await this.container.stop();
-    this.container = undefined;
+    await this.initPromise.catch(() => undefined);
+    if (this.container) {
+      await this.container.stop();
+      this.container = undefined;
+    }
     this.initPromise = undefined;
   }
 

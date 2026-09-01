@@ -22,7 +22,7 @@ import {
   PYTHON_TIMEOUT_WRAPPER,
   TIMEOUT_EXIT_CODE,
 } from '../../src/code_executors/python_timeout_wrapper.js';
-import {createFakeDocker, getExitCleanupHandler} from './docker_test_utils.js';
+import {createFakeDocker, runExitSignalHandler} from './docker_test_utils.js';
 
 // The executor imports dockerode dynamically, so the real client is never
 // constructed and no Docker daemon is contacted.
@@ -266,6 +266,17 @@ describe('ContainerCodeExecutor', () => {
       },
     );
 
+    it('passes through an exit status Docker did not report', async () => {
+      const {docker} = createFakeDocker({exitCode: null});
+      const executor = new ContainerCodeExecutor({image: 'test-image', docker});
+
+      const result = await executor.executeCode(makeParams('print(1)'));
+
+      expect(result.exitCode).toBeNull();
+      expect(result.stderr).toBe('');
+      await executor.close();
+    });
+
     it('reports a run the supervisor cut short', async () => {
       const {docker} = createFakeDocker({exitCode: TIMEOUT_EXIT_CODE});
       const executor = new ContainerCodeExecutor({
@@ -358,15 +369,21 @@ describe('ContainerCodeExecutor', () => {
       );
     });
 
-    it('throws when the image has no python3', async () => {
-      const {docker} = createFakeDocker({probeExitCode: 1});
-      const executor = new ContainerCodeExecutor({image: 'test-image', docker});
+    it.each([1, null])(
+      'throws when the python3 probe returns %s',
+      async (probeExitCode: number | null) => {
+        const {docker} = createFakeDocker({probeExitCode});
+        const executor = new ContainerCodeExecutor({
+          image: 'test-image',
+          docker,
+        });
 
-      await expect(executor.executeCode(makeParams('x = 1'))).rejects.toThrow(
-        'python3 is not installed in the container.',
-      );
-      await executor.close();
-    });
+        await expect(executor.executeCode(makeParams('x = 1'))).rejects.toThrow(
+          'python3 is not installed in the container.',
+        );
+        await executor.close();
+      },
+    );
 
     it('starts one container for two sequential executions', async () => {
       const {docker, container} = createFakeDocker();
@@ -430,6 +447,45 @@ describe('ContainerCodeExecutor', () => {
 
       expect(docker.createContainer).not.toHaveBeenCalled();
       expect(container.stop).not.toHaveBeenCalled();
+    });
+
+    it('stops a container whose start was still in flight', async () => {
+      const {docker, container} = createFakeDocker();
+      let release = (): void => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      container.start.mockImplementationOnce(() => gate);
+      const executor = new ContainerCodeExecutor({image: 'test-image', docker});
+
+      const running = executor.executeCode(makeParams('x = 1'));
+      const closing = executor.close();
+      release();
+      await running;
+      await closing;
+
+      expect(container.stop).toHaveBeenCalledTimes(1);
+      expect(container.remove).toHaveBeenCalledTimes(1);
+    });
+
+    it('recovers from a failed start once the executor is closed', async () => {
+      const {docker} = createFakeDocker();
+      docker.createContainer.mockRejectedValueOnce(new Error('daemon down'));
+      const executor = new ContainerCodeExecutor({image: 'test-image', docker});
+
+      await expect(executor.executeCode(makeParams('x = 1'))).rejects.toThrow(
+        'daemon down',
+      );
+      // Without a close the memoized failure replays for every later call.
+      await expect(executor.executeCode(makeParams('x = 1'))).rejects.toThrow(
+        'daemon down',
+      );
+      await executor.close();
+
+      const result = await executor.executeCode(makeParams('x = 1'));
+
+      expect(result.exitCode).toBe(0);
+      await executor.close();
     });
 
     it('keeps the container when the stop fails, so a retry cleans it up', async () => {
@@ -511,12 +567,12 @@ describe('ContainerCodeExecutor', () => {
       const executor = new ContainerCodeExecutor({image: 'test-image', docker});
       await executor.executeCode(makeParams('x = 1'));
 
-      await getExitCleanupHandler()();
+      await runExitSignalHandler();
 
       expect(container.stop).toHaveBeenCalledTimes(1);
       expect(container.remove).toHaveBeenCalledTimes(1);
       // The container is untracked, so a later exit does not stop it twice.
-      await getExitCleanupHandler()();
+      await runExitSignalHandler();
       expect(container.stop).toHaveBeenCalledTimes(1);
     });
   });
