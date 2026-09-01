@@ -43,6 +43,12 @@ function build({
     target: platformBuildTargets[platform],
     platform,
     format,
+    // The node target predates `import()`, so esbuild compiles it down to
+    // `require()`. That breaks loading a module by path: `require()` rejects
+    // the `file://` URL a path has to become for a native `import()`, and on
+    // Node below 20.19 it cannot read an ES module at all. Keep `import()` as
+    // written. The browser target is left alone.
+    ...(platform === 'node' ? {supported: {'dynamic-import': true}} : {}),
     bundle,
     minify: bundle,
     // Minification renames classes, and we report those names at runtime:
