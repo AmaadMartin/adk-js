@@ -18,6 +18,15 @@ const {StorageMock, storageMock, TIME_CREATED} = vi.hoisted(() => {
   /** A fixed creation time, so createTime assertions are deterministic. */
   const TIME_CREATED = '2026-01-02T03:04:05.000Z';
 
+  /** Mirrors the 404 ApiError the storage client raises for a missing object. */
+  class FakeNotFoundError extends Error {
+    readonly code = 404;
+
+    constructor(objectName: string) {
+      super(`File not found: ${objectName}`);
+    }
+  }
+
   class FakeGcsFile {
     constructor(
       public name: string,
@@ -42,7 +51,7 @@ const {StorageMock, storageMock, TIME_CREATED} = vi.hoisted(() => {
     async download(): Promise<[Buffer]> {
       const file = this.bucket.files.get(this.name);
       if (!file) {
-        throw new Error(`File not found: ${this.name}`);
+        throw new FakeNotFoundError(this.name);
       }
       return [file.data];
     }
@@ -56,9 +65,13 @@ const {StorageMock, storageMock, TIME_CREATED} = vi.hoisted(() => {
         },
       ]
     > {
+      const failure = this.bucket.failures.get(this.name);
+      if (failure) {
+        throw failure;
+      }
       const file = this.bucket.files.get(this.name);
       if (!file) {
-        throw new Error(`File not found: ${this.name}`);
+        throw new FakeNotFoundError(this.name);
       }
       // GCS omits the custom metadata field when an object carries none.
       const hasCustomMetadata = Object.keys(file.metadata).length > 0;
@@ -74,7 +87,7 @@ const {StorageMock, storageMock, TIME_CREATED} = vi.hoisted(() => {
     async getSignedUrl(config: GetSignedUrlConfig): Promise<[string]> {
       const file = this.bucket.files.get(this.name);
       if (!file) {
-        throw new Error(`File not found: ${this.name}`);
+        throw new FakeNotFoundError(this.name);
       }
       this.bucket.signedUrlCalls.push({name: this.name, config});
       return [
@@ -103,6 +116,9 @@ const {StorageMock, storageMock, TIME_CREATED} = vi.hoisted(() => {
     >();
 
     signedUrlCalls: Array<{name: string; config: GetSignedUrlConfig}> = [];
+
+    /** Errors the storage client raises for an object, keyed by object name. */
+    failures = new Map<string, Error>();
 
     constructor(public name: string) {}
 
@@ -491,7 +507,53 @@ describe('GcsArtifactService.getAuthenticatedUrl', () => {
         filename: 'notes.txt',
         version: 7,
       }),
-    ).rejects.toThrow(/File not found/);
+    ).resolves.toBeUndefined();
+  });
+
+  it('returns undefined when the target of a reference was deleted', async () => {
+    const service = newService();
+    await service.saveArtifact({
+      ...SESSION_KEY,
+      filename: 'source.txt',
+      artifact: {text: 'source content'},
+    });
+    await service.saveArtifact({
+      ...SESSION_KEY,
+      filename: 'pointer.txt',
+      artifact: {
+        fileData: {
+          fileUri: getArtifactUri({
+            ...SESSION_KEY,
+            filename: 'source.txt',
+            version: 0,
+          }),
+        },
+      },
+    });
+    await service.deleteArtifact({...SESSION_KEY, filename: 'source.txt'});
+
+    await expect(
+      service.getAuthenticatedUrl({...SESSION_KEY, filename: 'pointer.txt'}),
+    ).resolves.toBeUndefined();
+  });
+
+  it('propagates a storage error that is not a missing object', async () => {
+    const service = newService();
+    await service.saveArtifact({
+      ...SESSION_KEY,
+      filename: 'notes.txt',
+      artifact: {text: 'v0'},
+    });
+    storageMock
+      .bucket(BUCKET)
+      .failures.set(
+        'test-app/test-user/test-session/notes.txt/0',
+        new Error('permission denied'),
+      );
+
+    await expect(
+      service.getAuthenticatedUrl({...SESSION_KEY, filename: 'notes.txt'}),
+    ).rejects.toThrow('permission denied');
   });
 
   it('percent-encodes characters that would change the URL', async () => {
@@ -714,11 +776,46 @@ describe('GcsArtifactService.getSignedUrl', () => {
     expect(call.config.version).toBe('v2');
   });
 
+  it('lets the default expiry override the extra signing options', async () => {
+    const service = newService();
+    await service.saveArtifact({
+      ...SESSION_KEY,
+      filename: 'notes.txt',
+      artifact: {text: 'v0'},
+    });
+
+    const before = Date.now();
+    await service.getSignedUrl({
+      ...SESSION_KEY,
+      filename: 'notes.txt',
+      extraSigningOptions: {expires: new Date('2020-01-01T00:00:00.000Z')},
+    });
+    const after = Date.now();
+
+    const [call] = storageMock.bucket(BUCKET).signedUrlCalls;
+    expect(call.config.expires).toBeGreaterThanOrEqual(before + ONE_HOUR_MS);
+    expect(call.config.expires).toBeLessThanOrEqual(after + ONE_HOUR_MS);
+  });
+
   it('returns undefined for a missing artifact', async () => {
     const service = newService();
 
     await expect(
       service.getSignedUrl({...SESSION_KEY, filename: 'absent.txt'}),
+    ).resolves.toBeUndefined();
+    expect(storageMock.bucket(BUCKET).signedUrlCalls).toHaveLength(0);
+  });
+
+  it('returns undefined for a missing version of an existing artifact', async () => {
+    const service = newService();
+    await service.saveArtifact({
+      ...SESSION_KEY,
+      filename: 'notes.txt',
+      artifact: {text: 'v0'},
+    });
+
+    await expect(
+      service.getSignedUrl({...SESSION_KEY, filename: 'notes.txt', version: 7}),
     ).resolves.toBeUndefined();
     expect(storageMock.bucket(BUCKET).signedUrlCalls).toHaveLength(0);
   });
@@ -1023,6 +1120,25 @@ describe('GcsArtifactService artifact references', () => {
     );
   });
 
+  it('reports a storage error as a missing artifact on load', async () => {
+    const service = newService();
+    await service.saveArtifact({
+      ...SESSION_KEY,
+      filename: 'notes.txt',
+      artifact: {text: 'v0'},
+    });
+    storageMock
+      .bucket(BUCKET)
+      .failures.set(
+        'test-app/test-user/test-session/notes.txt/0',
+        new Error('permission denied'),
+      );
+
+    await expect(
+      service.loadArtifact({...SESSION_KEY, filename: 'notes.txt', version: 0}),
+    ).resolves.toBeUndefined();
+  });
+
   it('loads an object that carries no custom metadata', async () => {
     const service = newService();
     storageMock
@@ -1221,6 +1337,64 @@ describe('GcsArtifactService version metadata', () => {
 
     expect(version?.version).toBe(0);
     expect(version?.createTime).toBeUndefined();
+  });
+
+  it('omits the creation time when the timestamp cannot be read', async () => {
+    const service = newService();
+    storageMock
+      .bucket(BUCKET)
+      .files.set('test-app/test-user/test-session/notes.txt/0', {
+        data: Buffer.alloc(0),
+        metadata: {},
+        timeCreated: 'not a timestamp',
+      });
+
+    const version = await service.getArtifactVersion({
+      ...SESSION_KEY,
+      filename: 'notes.txt',
+    });
+
+    expect(version?.createTime).toBeUndefined();
+  });
+
+  it('returns undefined for a missing version', async () => {
+    const service = newService();
+    await service.saveArtifact({
+      ...SESSION_KEY,
+      filename: 'notes.txt',
+      artifact: {text: 'v0'},
+    });
+
+    await expect(
+      service.getArtifactVersion({
+        ...SESSION_KEY,
+        filename: 'notes.txt',
+        version: 7,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('reports a storage error as missing version metadata', async () => {
+    const service = newService();
+    await service.saveArtifact({
+      ...SESSION_KEY,
+      filename: 'notes.txt',
+      artifact: {text: 'v0'},
+    });
+    storageMock
+      .bucket(BUCKET)
+      .failures.set(
+        'test-app/test-user/test-session/notes.txt/0',
+        new Error('permission denied'),
+      );
+
+    await expect(
+      service.getArtifactVersion({
+        ...SESSION_KEY,
+        filename: 'notes.txt',
+        version: 0,
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 

@@ -40,6 +40,7 @@ const GCS_IS_TEXT_METADATA_KEY = 'adkIsText';
 
 const USER_NAMESPACE_PREFIX = 'user:';
 const VERSION_PATTERN = /^[0-9]+$/;
+const NOT_FOUND_STATUS = 404;
 const AUTHENTICATED_URL_HOST = 'https://storage.cloud.google.com';
 const DEFAULT_SIGNED_URL_TTL_MS = 60 * 60 * 1000;
 const MAX_ARTIFACT_REFERENCE_DEPTH = 5;
@@ -310,7 +311,10 @@ export class GcsArtifactService implements BaseArtifactService {
 
       const objectName = getBlobName(request, version);
       const file = (await this.getBucket()).file(objectName);
-      const [metadata] = await file.getMetadata();
+      const metadata = await getMetadataIfExists(file);
+      if (!metadata) {
+        return undefined;
+      }
 
       return {
         version,
@@ -423,7 +427,7 @@ export class GcsArtifactService implements BaseArtifactService {
    * @param key The artifact to read.
    * @param depth How many further references may be followed.
    * @return The object, the pointer it holds to a file this service does not
-   *     own, or undefined when the artifact has no version.
+   *     own, or undefined when the object does not exist.
    * @throws InputValidationError When a reference is malformed, leaves the
    *     caller's scope, or nests deeper than the depth limit.
    */
@@ -438,7 +442,11 @@ export class GcsArtifactService implements BaseArtifactService {
 
     const objectName = getBlobName(key, version);
     const file = (await this.getBucket()).file(objectName);
-    const [metadata] = await file.getMetadata();
+    const metadata = await getMetadataIfExists(file);
+    if (!metadata) {
+      return undefined;
+    }
+
     const customMetadata = (metadata.metadata ?? {}) as Record<string, unknown>;
     const fileUri = customMetadata[GCS_FILE_URI_METADATA_KEY] as
       | string
@@ -538,6 +546,38 @@ function parseVersion(objectName: string, prefix: string): number | undefined {
   return Number(suffix);
 }
 
+/**
+ * Reads the metadata of an object.
+ *
+ * The storage client rejects with a 404 for an object that does not exist,
+ * which every read path here reports as a missing artifact rather than as a
+ * failure. Any other error still escapes.
+ *
+ * @return The metadata, or undefined when the object does not exist.
+ */
+async function getMetadataIfExists(
+  file: File,
+): Promise<FileMetadata | undefined> {
+  try {
+    const [metadata] = await file.getMetadata();
+    return metadata;
+  } catch (e: unknown) {
+    if (isNotFoundError(e)) {
+      return undefined;
+    }
+    throw e;
+  }
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === NOT_FOUND_STATUS
+  );
+}
+
 /** Percent-encodes an object name for a URL path, keeping the separators. */
 function encodeObjectName(objectName: string): string {
   return objectName
@@ -551,9 +591,17 @@ function encodeObjectName(objectName: string): string {
     .join('/');
 }
 
-/** Converts an RFC 3339 timestamp to Unix seconds. */
+/**
+ * Converts an RFC 3339 timestamp to Unix seconds.
+ *
+ * @return The timestamp in seconds, or undefined when there is none to read.
+ */
 function toEpochSeconds(timestamp?: string): number | undefined {
-  return timestamp === undefined ? undefined : Date.parse(timestamp) / 1000;
+  if (timestamp === undefined) {
+    return undefined;
+  }
+  const milliseconds = Date.parse(timestamp);
+  return Number.isNaN(milliseconds) ? undefined : milliseconds / 1000;
 }
 
 function extractArtifactKeys(
