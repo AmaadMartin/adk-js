@@ -15,6 +15,11 @@ export type {
 } from './agents/base_agent.js';
 export {Context} from './agents/context.js';
 export {
+  contextCacheTtlString,
+  createContextCacheConfig,
+} from './agents/context_cache_config.js';
+export type {ContextCacheConfig} from './agents/context_cache_config.js';
+export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
@@ -26,6 +31,8 @@ export {
 export {InvocationContext, requireAgent} from './agents/invocation_context.js';
 export type {
   InvocationContextParams,
+  QueuedInvocationEvent,
+  SetAgentStateOptions,
   WorkflowInstructionScope,
 } from './agents/invocation_context.js';
 export {LiveRequestQueue} from './agents/live_request_queue.js';
@@ -63,6 +70,7 @@ export {
   InteractionsRequestProcessor,
 } from './agents/processors/interactions_request_processor.js';
 export {ReadonlyContext} from './agents/readonly_context.js';
+export type {RealtimeCacheEntry} from './agents/realtime_cache_entry.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
 export {StreamingMode} from './agents/run_config.js';
@@ -78,6 +86,8 @@ export type {
   UserInputKind,
   UserInputRequest,
 } from './agents/user_input_request.js';
+export {createEventsCompactionConfig} from './apps/events_compaction_config.js';
+export type {EventsCompactionConfig} from './apps/events_compaction_config.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';
 export type {
@@ -149,6 +159,7 @@ export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
 export {InputValidationError} from './errors/input_validation_error.js';
+export {LlmCallsLimitExceededError} from './errors/llm_calls_limit_exceeded_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
@@ -178,6 +189,11 @@ export type {
 } from './events/event.js';
 export {createEventActions} from './events/event_actions.js';
 export type {EventActions} from './events/event_actions.js';
+export {filterSessionEvents} from './events/event_filters.js';
+export type {
+  SessionEventFilterOptions,
+  SessionEventFilterScope,
+} from './events/event_filters.js';
 export {EventType, toStructuredEvents} from './events/structured_events.js';
 export type {
   ActivityEvent,

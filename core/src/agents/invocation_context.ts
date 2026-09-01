@@ -5,20 +5,40 @@
  */
 
 import {Content} from '@google/genai';
+import {isEmpty} from 'lodash-es';
 
+import {EventsCompactionConfig} from '../apps/events_compaction_config.js';
+import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import type {AuthCredential} from '../auth/auth_credential.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
-import {Event} from '../events/event.js';
+import {LlmCallsLimitExceededError} from '../errors/llm_calls_limit_exceeded_error.js';
+import {
+  Event,
+  getFunctionCalls,
+  getFunctionResponses,
+} from '../events/event.js';
+import {
+  filterSessionEvents,
+  findEventByFunctionCallId,
+  SessionEventFilterOptions,
+} from '../events/event_filters.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import type {SchemaLike} from '../utils/schema.js';
+import type {Task} from '../utils/task.js';
+import {branchPathFromString} from '../workflow/branch_path.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
+import {ContextCacheConfig} from './context_cache_config.js';
 import {LiveRequestQueue} from './live_request_queue.js';
+import {RealtimeCacheEntry} from './realtime_cache_entry.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
 
@@ -33,6 +53,31 @@ export interface WorkflowInstructionScope {
   input?: unknown;
   /** Predecessor node outputs keyed by node name, for `<Class.field from node>`. */
   outputsByNode?: Record<string, unknown>;
+}
+
+/**
+ * One item on the invocation event queue. Mirrors the `(event, processed)`
+ * tuple `google/adk-python` puts on its queue.
+ */
+export interface QueuedInvocationEvent {
+  /** The queued event. */
+  event: Event;
+
+  /**
+   * Called by the consumer once it has appended the event to the session,
+   * releasing the blocked producer. Absent for partial events, which do not
+   * block.
+   */
+  markProcessed?: () => void;
+}
+
+/** How {@link InvocationContext.setAgentState} updates one agent's state. */
+export interface SetAgentStateOptions {
+  /** The state to record. Ignored when `endOfAgent` is true. */
+  agentState?: Record<string, unknown>;
+
+  /** Whether the agent has finished running. */
+  endOfAgent?: boolean;
 }
 
 /**
@@ -64,6 +109,20 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  contextCacheConfig?: ContextCacheConfig;
+  resumabilityConfig?: ResumabilityConfig;
+  eventsCompactionConfig?: EventsCompactionConfig;
+  tokenCompactionChecked?: boolean;
+  agentStates?: Record<string, Record<string, unknown>>;
+  endOfAgents?: Record<string, boolean>;
+  credentialByKey?: Record<string, AuthCredential>;
+  canonicalToolsCache?: BaseTool[];
+  nodePath?: string;
+  stateSchema?: SchemaLike;
+  inputRealtimeCache?: RealtimeCacheEntry[];
+  outputRealtimeCache?: RealtimeCacheEntry[];
+  activeNonBlockingToolTasks?: Record<string, Task<unknown>>;
+  invocationEventQueue?: AsyncQueue<QueuedInvocationEvent>;
 }
 
 /**
@@ -90,7 +149,7 @@ class InvocationCostManager {
       runConfig.maxLlmCalls! > 0 &&
       this.numberOfLlmCalls > runConfig.maxLlmCalls!
     ) {
-      throw new Error(
+      throw new LlmCallsLimitExceededError(
         `Max number of llm calls limit of ${runConfig.maxLlmCalls!} exceeded`,
       );
     }
@@ -267,6 +326,63 @@ export class InvocationContext {
    */
   readonly a2aMetadata?: Record<string, unknown>;
 
+  /** Context caching for every agent under this invocation. */
+  contextCacheConfig?: ContextCacheConfig;
+
+  /** Resumability for every agent under this invocation. */
+  resumabilityConfig?: ResumabilityConfig;
+
+  /** Event compaction for this invocation. */
+  eventsCompactionConfig?: EventsCompactionConfig;
+
+  /** Whether token-threshold compaction already ran in this invocation. */
+  tokenCompactionChecked: boolean;
+
+  /**
+   * The recorded state of each agent in this invocation, keyed by the agent's
+   * node path or name. Shared by reference with contexts made by
+   * {@link clone}, so a sub-agent's checkpoint is visible to its parent.
+   */
+  agentStates: Record<string, Record<string, unknown>>;
+
+  /** Which agents have finished running, keyed like {@link agentStates}. */
+  endOfAgents: Record<string, boolean>;
+
+  /** The credentials resolved during this invocation, keyed by credential key. */
+  credentialByKey: Record<string, AuthCredential>;
+
+  /** The canonical tools resolved for this invocation. */
+  canonicalToolsCache?: BaseTool[];
+
+  /**
+   * The path of the current agent in the workflow call stack, e.g.
+   * `agent_1/agent_2`. Unset outside a workflow.
+   */
+  nodePath?: string;
+
+  /**
+   * The schema declaring the state keys and types the owning agent expects.
+   * Named without adk-python's leading underscore, per this repository's rule
+   * against `_`-prefixed members.
+   */
+  stateSchema?: SchemaLike;
+
+  /** Input audio chunks held before they are flushed (live path only). */
+  inputRealtimeCache?: RealtimeCacheEntry[];
+
+  /** Output audio chunks held before they are flushed (live path only). */
+  outputRealtimeCache?: RealtimeCacheEntry[];
+
+  /** The non-blocking tool tasks still running (live path only). */
+  activeNonBlockingToolTasks?: Record<string, Task<unknown>>;
+
+  /**
+   * The queue every node in this invocation enqueues events on, drained by the
+   * Runner. Distinct from {@link eventQueue}, which is the per-tool channel a
+   * `NodeTool` interleaves its events through.
+   */
+  invocationEventQueue?: AsyncQueue<QueuedInvocationEvent>;
+
   /**
    * @param params The parameters for creating an invocation context.
    */
@@ -301,6 +417,20 @@ export class InvocationContext {
         .invocationCostManager ?? new InvocationCostManager();
     this.liveRequestQueue = params.liveRequestQueue;
     this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
+    this.contextCacheConfig = params.contextCacheConfig;
+    this.resumabilityConfig = params.resumabilityConfig;
+    this.eventsCompactionConfig = params.eventsCompactionConfig;
+    this.tokenCompactionChecked = params.tokenCompactionChecked ?? false;
+    this.agentStates = params.agentStates ?? {};
+    this.endOfAgents = params.endOfAgents ?? {};
+    this.credentialByKey = params.credentialByKey ?? {};
+    this.canonicalToolsCache = params.canonicalToolsCache;
+    this.nodePath = params.nodePath;
+    this.stateSchema = params.stateSchema;
+    this.inputRealtimeCache = params.inputRealtimeCache;
+    this.outputRealtimeCache = params.outputRealtimeCache;
+    this.activeNonBlockingToolTasks = params.activeNonBlockingToolTasks;
+    this.invocationEventQueue = params.invocationEventQueue;
   }
 
   /**
@@ -318,12 +448,233 @@ export class InvocationContext {
   }
 
   /**
+   * Whether this invocation can be paused and resumed later.
+   *
+   * A getter rather than a field, so {@link clone}'s spread of own fields
+   * cannot shadow it with a stale value.
+   */
+  get isResumable(): boolean {
+    return this.resumabilityConfig?.isResumable ?? false;
+  }
+
+  /**
    * Tracks number of llm calls made.
    *
-   * @throws If number of llm calls made exceed the set threshold.
+   * @throws {LlmCallsLimitExceededError} If number of llm calls made exceed the
+   *   set threshold.
    */
   incrementLlmCallCount() {
     this.invocationCostManager.incrementAndEnforceLlmCallsLimit(this.runConfig);
+  }
+
+  /**
+   * The session's events, optionally narrowed to this invocation and this
+   * branch's subtree.
+   *
+   * @param options Which filters to apply. With none, every session event is
+   *   returned, in order.
+   */
+  getEvents(options: SessionEventFilterOptions = {}): Event[] {
+    return filterSessionEvents(
+      this.session.events,
+      {invocationId: this.invocationId, branch: this.branch},
+      options,
+    );
+  }
+
+  /**
+   * Whether to pause the invocation right after `event`.
+   *
+   * Pausing differs from ending: a paused invocation can be resumed. An event
+   * pauses when it issues a long-running function call that nothing has
+   * answered yet. A later user event on a sub-branch of the call means the user
+   * is already answering it, so the run continues.
+   *
+   * Pausing does not depend on {@link isResumable}: adk-python pauses on a
+   * long-running call whatever the app's resumability setting.
+   *
+   * @param event The event just produced.
+   */
+  shouldPauseInvocation(event: Event): boolean {
+    const longRunningToolIds = event.longRunningToolIds;
+    const functionCalls = getFunctionCalls(event);
+    if (!longRunningToolIds?.length || functionCalls.length === 0) {
+      return false;
+    }
+
+    const events = this.session.events;
+    const eventIndex = lastIndexOfEventId(events, event.id);
+    return functionCalls.some(
+      (call) =>
+        !!call.id &&
+        longRunningToolIds.includes(call.id) &&
+        !isAnsweredInSubBranch(events, eventIndex, call.id),
+    );
+  }
+
+  /**
+   * The event in this invocation that issued the call `functionResponseEvent`
+   * answers, or `undefined` when there is none.
+   *
+   * Public, unlike adk-python's `_find_matching_function_call`: this repository
+   * does not mark members private by name, and the same five call sites exist
+   * here.
+   */
+  findMatchingFunctionCall(functionResponseEvent: Event): Event | undefined {
+    const functionResponses = getFunctionResponses(functionResponseEvent);
+    if (functionResponses.length === 0) {
+      return undefined;
+    }
+    const responseId = functionResponses[0].id;
+    if (!responseId) {
+      return undefined;
+    }
+    const events = this.getEvents({currentInvocation: true});
+    const isLastEvent =
+      events.length > 0 &&
+      events[events.length - 1].id === functionResponseEvent.id;
+    const searchSpace = isLastEvent ? events.slice(0, -1) : events;
+    return findEventByFunctionCallId(searchSpace, responseId);
+  }
+
+  /**
+   * Copies the branch, and where absent the isolation scope, of the function
+   * call `event` answers onto `event` itself.
+   *
+   * The branch is overwritten because the response belongs wherever its call
+   * was issued. The isolation scope is only filled in, because an event that
+   * already carries one is inside an active task and must stay there.
+   *
+   * @param event The function-response event to stamp, mutated in place.
+   */
+  stampEventBranchContext(event: Event): void {
+    const functionCall = this.findMatchingFunctionCall(event);
+    if (!functionCall) {
+      return;
+    }
+    event.branch = functionCall.branch;
+    if (
+      event.isolationScope === undefined &&
+      functionCall.isolationScope !== undefined
+    ) {
+      event.isolationScope = functionCall.isolationScope;
+    }
+  }
+
+  /**
+   * Records the state of one agent in this invocation.
+   *
+   * With `endOfAgent`, the agent is marked finished and its state is dropped.
+   * With `agentState`, the state is recorded and the finished flag is cleared.
+   * With neither, both are dropped, which lets the agent run again.
+   *
+   * @param agentName The agent's name, or its node path in a workflow.
+   * @param options The state to record. `endOfAgent` wins over `agentState`.
+   */
+  setAgentState(agentName: string, options: SetAgentStateOptions = {}): void {
+    if (options.endOfAgent) {
+      this.endOfAgents[agentName] = true;
+      delete this.agentStates[agentName];
+    } else if (options.agentState !== undefined) {
+      this.agentStates[agentName] = options.agentState;
+      this.endOfAgents[agentName] = false;
+    } else {
+      delete this.endOfAgents[agentName];
+      delete this.agentStates[agentName];
+    }
+  }
+
+  /**
+   * Drops the recorded state of every agent below `agentName`, so each one
+   * starts fresh when the agent runs again.
+   *
+   * @param agentName The agent whose descendants are reset. Unknown names and
+   *   a context with no agent are no-ops.
+   */
+  resetSubAgentStates(agentName: string): void {
+    const agent = this.agent?.findAgent(agentName);
+    if (!agent) {
+      return;
+    }
+    for (const subAgent of agent.subAgents) {
+      this.setAgentState(subAgent.name);
+      this.resetSubAgentStates(subAgent.name);
+    }
+  }
+
+  /**
+   * Rebuilds {@link agentStates} and {@link endOfAgents} from the events this
+   * invocation already produced, so a resumed run knows which agents finished
+   * and where the others stopped.
+   *
+   * An authored event carrying content but no state records an empty state:
+   * the agent produced something, so a resumed run must not treat it as never
+   * having started.
+   */
+  populateInvocationAgentStates(): void {
+    if (!this.isResumable) {
+      return;
+    }
+    for (const event of this.getEvents({currentInvocation: true})) {
+      const key = event.nodeInfo?.path || event.author;
+      if (!key) {
+        continue;
+      }
+      const agentState = event.actions?.agentState;
+      if (event.actions?.endOfAgent) {
+        this.endOfAgents[key] = true;
+        delete this.agentStates[key];
+      } else if (agentState !== undefined) {
+        this.agentStates[key] = agentState;
+        this.endOfAgents[key] = false;
+      } else if (
+        event.author !== 'user' &&
+        event.content &&
+        // An already-recorded empty state counts as absent, mirroring the
+        // falsy-dict test adk-python makes here.
+        isEmpty(this.agentStates[key])
+      ) {
+        this.agentStates[key] = {};
+        this.endOfAgents[key] = false;
+      }
+    }
+  }
+
+  /**
+   * Puts an event on {@link invocationEventQueue} for the Runner to append to
+   * the session.
+   *
+   * A non-partial event blocks until the consumer reports it appended, so the
+   * session is consistent before the caller continues. A partial event streams
+   * through without blocking.
+   *
+   * @param event The event to enqueue.
+   * @throws {Error} When the queue is unset, or closed. A closed
+   *   `AsyncQueue` drops what it is given, which would leave a non-partial
+   *   caller waiting forever; adk-python's `asyncio.Queue` has no closed state
+   *   and so no equivalent case.
+   */
+  async enqueueEvent(event: Event): Promise<void> {
+    const queue = this.invocationEventQueue;
+    if (!queue) {
+      throw new Error(
+        'enqueueEvent was called but invocationEventQueue is not set. Ensure ' +
+          'the Runner initialises invocationEventQueue on the InvocationContext.',
+      );
+    }
+    if (queue.isClosed) {
+      throw new Error(
+        'enqueueEvent was called but invocationEventQueue is closed. A closed ' +
+          'queue drops the event, so the caller would never be released.',
+      );
+    }
+    if (event.partial) {
+      queue.push({event});
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      queue.push({event, markProcessed: resolve});
+    });
   }
 
   /**
@@ -342,6 +693,46 @@ export class InvocationContext {
 
 export function newInvocationContextId(): string {
   return `e-${randomUUID()}`;
+}
+
+/**
+ * The index of the last event with id `eventId`, or `-1`.
+ *
+ * The search runs backwards because the event being looked up is normally the
+ * one just appended.
+ */
+function lastIndexOfEventId(events: Event[], eventId: string): number {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].id === eventId) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Whether a user event after `eventIndex` sits on a branch spawned by the call
+ * `callId`, which means the user is already answering that call.
+ *
+ * An `eventIndex` of `-1` means the issuing event is not in the session, so
+ * nothing can have answered it.
+ */
+function isAnsweredInSubBranch(
+  events: Event[],
+  eventIndex: number,
+  callId: string,
+): boolean {
+  if (eventIndex === -1) {
+    return false;
+  }
+  return events
+    .slice(eventIndex + 1)
+    .some(
+      (event) =>
+        event.author === 'user' &&
+        !!event.branch &&
+        branchPathFromString(event.branch).getRunIds().has(callId),
+    );
 }
 
 /**
