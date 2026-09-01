@@ -22,7 +22,11 @@ import {
   PYTHON_TIMEOUT_WRAPPER,
   TIMEOUT_EXIT_CODE,
 } from '../../src/code_executors/python_timeout_wrapper.js';
-import {createFakeDocker, runExitSignalHandler} from './docker_test_utils.js';
+import {
+  FakeContainer,
+  createFakeDocker,
+  runExitSignalHandler,
+} from './docker_test_utils.js';
 
 // The executor imports dockerode dynamically, so the real client is never
 // constructed and no Docker daemon is contacted.
@@ -53,12 +57,12 @@ function makeParams(
 }
 
 /** The `Cmd` of the exec that ran the user code, after the python3 probe. */
-function codeCommand(container: {
-  exec: {mock: {calls: unknown[][]}};
-}): string[] {
-  const options = container.exec.mock.calls[1][0];
-  expect(options).toMatchObject({Cmd: expect.any(Array)});
-  return (options as {Cmd: string[]}).Cmd;
+function codeCommand(container: FakeContainer): string[] {
+  const {Cmd} = container.exec.mock.calls[1][0];
+  if (!Cmd) {
+    expect.fail('the exec that runs the user code was given no command');
+  }
+  return Cmd;
 }
 
 describe('ContainerCodeExecutor', () => {

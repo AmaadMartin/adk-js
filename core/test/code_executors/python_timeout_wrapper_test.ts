@@ -28,7 +28,7 @@ const TEST_TIMEOUT_MS = 30000;
 /** POSIX signal number for SIGTERM, which a killed run reports as 128 + 15. */
 const SIGTERM_NUMBER = 15;
 
-/** POSIX `fork`, `killpg` and `SIGALRM` are what the supervisor is built on. */
+/** POSIX sessions and `killpg` are what the supervisor is built on. */
 const isPosix = os.platform() !== 'win32';
 const hasPython =
   isPosix && spawnSync(PYTHON, ['--version'], {timeout: 10000}).status === 0;
