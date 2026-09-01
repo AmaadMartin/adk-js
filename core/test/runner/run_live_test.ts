@@ -10,9 +10,9 @@ import {
   BaseLlmConnection,
   BaseTool,
   Event,
-  HistoryConfig,
   InMemoryArtifactService,
   InMemorySessionService,
+  LiveConnectConfigWithHistory,
   LiveRequestQueue,
   LlmAgent,
   LlmRequest,
@@ -20,13 +20,7 @@ import {
   RunAsyncToolRequest,
   Runner,
 } from '@google/adk';
-import {
-  Blob,
-  Content,
-  FunctionDeclaration,
-  LiveConnectConfig,
-  Modality,
-} from '@google/genai';
+import {Blob, Content, FunctionDeclaration, Modality} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';
@@ -1124,14 +1118,6 @@ describe('Runner.runLive', () => {
   });
 });
 
-/**
- * `@google/genai` 2.9.0 does not model `historyConfig` on `LiveConnectConfig`;
- * the Live API accepts it.
- */
-interface LiveConnectConfigWithHistory extends LiveConnectConfig {
-  historyConfig?: HistoryConfig;
-}
-
 describe('Runner.runLive run config parity fields', () => {
   let sessionService: InMemorySessionService;
   let artifactService: InMemoryArtifactService;
@@ -1173,8 +1159,8 @@ describe('Runner.runLive run config parity fields', () => {
       // drain
     }
 
-    const liveConfig = llm.llmRequestsSeen[0]
-      .liveConnectConfig as LiveConnectConfigWithHistory;
+    const liveConfig: LiveConnectConfigWithHistory =
+      llm.llmRequestsSeen[0].liveConnectConfig;
     expect(liveConfig.explicitVadSignal).toBe(true);
     expect(liveConfig.translationConfig).toEqual({targetLanguageCode: 'es-ES'});
     expect(liveConfig.avatarConfig).toEqual({avatarName: 'ada'});
@@ -1217,8 +1203,8 @@ describe('Runner.runLive run config parity fields', () => {
       // drain
     }
 
-    const liveConfig = llm.llmRequestsSeen[0]
-      .liveConnectConfig as LiveConnectConfigWithHistory;
+    const liveConfig: LiveConnectConfigWithHistory =
+      llm.llmRequestsSeen[0].liveConnectConfig;
     expect(liveConfig.explicitVadSignal).toBe(true);
     expect(liveConfig.translationConfig).toEqual({targetLanguageCode: 'es-ES'});
     expect(liveConfig.avatarConfig).toEqual({avatarName: 'ada'});
@@ -1227,8 +1213,8 @@ describe('Runner.runLive run config parity fields', () => {
       initialHistoryInClientContent: true,
     });
 
-    const liveConfigByReference = llm.llmRequestsSeenByReference[0]
-      .liveConnectConfig as LiveConnectConfigWithHistory;
+    const liveConfigByReference: LiveConnectConfigWithHistory =
+      llm.llmRequestsSeenByReference[0].liveConnectConfig;
     liveConfigByReference.sessionResumption!.handle = 'server-handle';
     liveConfigByReference.historyConfig!.initialHistoryInClientContent = false;
     expect(sessionResumption).toEqual({transparent: true});

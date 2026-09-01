@@ -9,6 +9,7 @@ import {
   AvatarConfig,
   ContextWindowCompressionConfig,
   HttpOptions,
+  LiveConnectConfig,
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
@@ -47,6 +48,17 @@ export interface HistoryConfig {
    * history does not trigger a model call.
    */
   initialHistoryInClientContent?: boolean;
+}
+
+/**
+ * A {@link LiveConnectConfig} that also carries {@link HistoryConfig}.
+ *
+ * `@google/genai` 2.9.0 does not model `historyConfig` on `LiveConnectConfig`;
+ * the Live API accepts it. Delete this and use the SDK type once the
+ * dependency is raised.
+ */
+export interface LiveConnectConfigWithHistory extends LiveConnectConfig {
+  historyConfig?: HistoryConfig;
 }
 
 /**

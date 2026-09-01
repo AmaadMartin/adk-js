@@ -507,46 +507,6 @@ export class Runner {
   }
 
   /**
-   * Decides what a live event contributes to the session.
-   *
-   * A partial event is never persisted. An event carrying inline audio, video
-   * or image data is persisted only when `saveLiveBlob` is on, and then its
-   * blobs go to the artifact service first, so the session holds a placeholder
-   * and a `fileData` reference instead of the raw bytes.
-   *
-   * @param event The event yielded by the live flow.
-   * @param invocationId The current invocation ID.
-   * @param session The session the event belongs to.
-   * @param saveLiveBlob Whether the run config asks for live blobs to be kept.
-   * @returns The event to append, or `undefined` when the event is dropped.
-   */
-  private async resolveLiveEventToPersist(
-    event: Event,
-    invocationId: string,
-    session: Session,
-    saveLiveBlob: boolean,
-  ): Promise<Event | undefined> {
-    if (event.partial) {
-      return undefined;
-    }
-    if (!isLiveModelMediaEventWithInlineData(event)) {
-      return event;
-    }
-    if (!saveLiveBlob) {
-      return undefined;
-    }
-    return {
-      ...event,
-      content: await this.saveArtifacts(
-        invocationId,
-        session.userId,
-        session.id,
-        event.content,
-      ),
-    };
-  }
-
-  /**
    * Saves artifacts from the message parts and replaces the inline data with
    * a file name placeholder and optional file reference.
    *
@@ -803,17 +763,29 @@ export class Runner {
 
             const eventToProcess = modifiedEvent ?? event;
 
-            const eventToPersist = await this.resolveLiveEventToPersist(
-              eventToProcess,
-              invocationContext.invocationId,
-              session,
-              runConfig.saveLiveBlob,
-            );
-            if (eventToPersist) {
-              await this.sessionService.appendEvent({
-                session,
-                event: eventToPersist,
-              });
+            // An event carrying inline audio, video or image data is persisted
+            // only when `saveLiveBlob` is on, and then its blobs go to the
+            // artifact service first, so the session holds a placeholder and a
+            // `fileData` reference instead of the raw bytes.
+            if (!eventToProcess.partial) {
+              const isMedia =
+                isLiveModelMediaEventWithInlineData(eventToProcess);
+              if (!isMedia || runConfig.saveLiveBlob) {
+                await this.sessionService.appendEvent({
+                  session,
+                  event: isMedia
+                    ? {
+                        ...eventToProcess,
+                        content: await this.saveArtifacts(
+                          invocationContext.invocationId,
+                          session.userId,
+                          session.id,
+                          eventToProcess.content,
+                        ),
+                      }
+                    : eventToProcess,
+                });
+              }
             }
 
             yield eventToProcess;

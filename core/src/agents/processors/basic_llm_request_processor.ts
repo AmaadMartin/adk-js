@@ -4,27 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  GenerateContentConfig,
-  HttpOptions,
-  LiveConnectConfig,
-} from '@google/genai';
+import {GenerateContentConfig, HttpOptions} from '@google/genai';
 
 import {Event} from '../../events/event.js';
 import {LlmRequest, setOutputSchema} from '../../models/llm_request.js';
 import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
-import {HistoryConfig} from '../run_config.js';
+import {LiveConnectConfigWithHistory} from '../run_config.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
-
-/**
- * `@google/genai` 2.9.0 does not model `historyConfig` on
- * `LiveConnectConfig`; the Live API accepts it.
- */
-interface LiveConnectConfigWithHistory extends LiveConnectConfig {
-  historyConfig?: HistoryConfig;
-}
 
 /**
  * Copies HTTP options, including the `headers` object, so a later write into

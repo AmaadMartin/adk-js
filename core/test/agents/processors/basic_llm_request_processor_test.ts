@@ -10,8 +10,8 @@ import {
   BaseLlmConnection,
   createSession,
   FunctionTool,
-  HistoryConfig,
   InvocationContext,
+  LiveConnectConfigWithHistory,
   LlmAgent,
   LLMRegistry,
   LlmRequest,
@@ -23,7 +23,6 @@ import {
   Content,
   Blob as GenaiBlob,
   HttpOptions,
-  LiveConnectConfig,
   Modality,
   Schema,
   Type,
@@ -329,14 +328,6 @@ describe('BasicLlmRequestProcessor', () => {
     expect(events).toHaveLength(0);
   });
 });
-
-/**
- * `@google/genai` 2.9.0 does not model `historyConfig` on `LiveConnectConfig`;
- * the Live API accepts it.
- */
-interface LiveConnectConfigWithHistory extends LiveConnectConfig {
-  historyConfig?: HistoryConfig;
-}
 
 describe('BasicLlmRequestProcessor run config labels', () => {
   it('merges run config labels over the agent labels', async () => {
