@@ -110,6 +110,16 @@ function serverOptions(): ConstructorParameters<typeof AdkApiServer>[0] {
   return call[0];
 }
 
+/** Returns the text of the error *call* throws. */
+function errorFrom(call: () => void): string {
+  try {
+    call();
+  } catch (error: unknown) {
+    return String(error);
+  }
+  expect.fail('the call was expected to throw, and did not');
+}
+
 async function getJson<T>(url: string): Promise<{status: number; body: T}> {
   const response = await fetch(url, {redirect: 'manual'});
   return {status: response.status, body: (await response.json()) as T};
@@ -322,17 +332,16 @@ describe('createApiServer', () => {
 
   describe('unsupported service URIs', () => {
     it('rejects a session service URI without leaking its password', () => {
-      expect(() =>
+      const failure = errorFrom(() =>
         createApiServer({
           agentsDir,
           web: false,
           sessionServiceUri: 'ftp://user:hunter2@db.example',
         }),
-      ).toThrow(
-        expect.objectContaining({
-          message: expect.not.stringContaining('hunter2') as unknown as string,
-        }),
       );
+
+      expect(failure).toContain('Unsupported session service URI');
+      expect(failure).not.toContain('hunter2');
     });
 
     it('rejects an artifact service URI', () => {
