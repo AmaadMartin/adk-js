@@ -171,6 +171,9 @@ export interface MCPSessionManagerOptions {
    * Stream that receives the MCP server's stderr and the transport errors of
    * every session this manager opens. When omitted, transport errors go to the
    * ADK logger and a stdio server's stderr is inherited by the parent process.
+   *
+   * Setting it overrides `StdioServerParameters.stderr`, which has to become
+   * `'pipe'` for the manager to read the stream at all.
    */
   errlog?: Writable;
 }

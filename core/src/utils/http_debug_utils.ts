@@ -15,9 +15,13 @@ import {redactUriPassword} from './redact_uri.js';
  *
  * A capture is installed for the duration of one call and is scoped to that
  * call's async context, so two concurrent captures never see each other's
- * entries. A credential in the URL or the headers is removed, and bodies are
- * truncated, as each exchange is recorded, because a capture is written to
- * session storage.
+ * entries. A credential in the URL or the headers is removed as each exchange
+ * is recorded, because a capture reaches the invocation's custom metadata,
+ * which the rest of the invocation can read.
+ *
+ * Bodies are truncated but not redacted, matching adk-python. A credential a
+ * server puts in a response body is therefore recorded verbatim, so treat a
+ * capture as sensitive: it is only produced under debug logging.
  */
 
 /** Maximum number of exchanges one capture keeps. Further ones are dropped. */

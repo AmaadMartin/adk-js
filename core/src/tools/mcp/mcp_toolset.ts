@@ -151,10 +151,13 @@ function compareByName(a: BaseTool, b: BaseTool): number {
  * Rejects when `call` outlives `timeoutSeconds`, and clears the timer on both
  * the success and the failure path.
  *
- * The rejection is a plain error rather than an `AbortError`, so that the
- * retry treats an unresponsive server as a failure worth one more attempt,
- * exactly as `asyncio.wait_for` inside adk-python's `_execute_with_session`
- * does.
+ * The rejection is a plain error rather than an `AbortError`, so the retry
+ * treats an unresponsive server as a failure worth one more attempt. This
+ * diverges from adk-python: there `asyncio.wait_for` raises a `TimeoutError`
+ * whose context is a `CancelledError`, which `retry_on_errors` re-raises
+ * without a second attempt. The cost of the divergence is one extra
+ * connection, and up to twice the timeout, against a server that never
+ * answers.
  */
 function withTimeout<T>(call: Promise<T>, timeoutSeconds?: number): Promise<T> {
   if (timeoutSeconds === undefined) {

@@ -81,32 +81,82 @@ function allowConfigStdioServersEnabled(): boolean {
   );
 }
 
+/** One transport field of a config, with the params it declares. */
+interface DeclaredTransport {
+  field: string;
+  /** The `type` a params object under `field` must carry. */
+  expectedType: MCPConnectionParams['type'];
+  params: MCPConnectionParams;
+}
+
+/**
+ * Collects the transport fields `config` populates.
+ *
+ * `!= null` also rejects an explicit `null`, which is what JSON and YAML
+ * produce for a field a config leaves blank.
+ */
+function declaredTransports(config: McpToolsetConfig): DeclaredTransport[] {
+  const declared: DeclaredTransport[] = [];
+  if (config.stdioConnectionParams != null) {
+    declared.push({
+      field: 'stdioConnectionParams',
+      expectedType: 'StdioConnectionParams',
+      params: config.stdioConnectionParams,
+    });
+  }
+  if (config.streamableHttpConnectionParams != null) {
+    declared.push({
+      field: 'streamableHttpConnectionParams',
+      expectedType: 'StreamableHTTPConnectionParams',
+      params: config.streamableHttpConnectionParams,
+    });
+  }
+  return declared;
+}
+
 /**
  * Returns the single connection param `config` declares.
  *
+ * A config that reaches this point is untrusted data: `McpToolsetConfig` is an
+ * interface, so nothing has checked at runtime that the object under a field
+ * is the kind of transport that field names. Both the field and the object's
+ * own `type` are therefore checked, because `MCPSessionManager` dispatches on
+ * the `type`, and a mismatch would otherwise open a local process through the
+ * remote-transport field.
+ *
  * @param config The declared MCP server.
  * @return The one populated connection param.
- * @throws If the number of populated connection-param fields is not one, or if
- *     the config declares a stdio server without an opt-in.
+ * @throws If the number of populated transport fields is not one, if the
+ *     params carry a `type` that does not match the field they are declared
+ *     under, or if the config declares a stdio server without an opt-in.
  */
 export function resolveConfigConnectionParams(
   config: McpToolsetConfig,
 ): MCPConnectionParams {
-  const populated = [
-    config.stdioConnectionParams,
-    config.streamableHttpConnectionParams,
-    // `!= null` also rejects an explicit `null`, which is what JSON and YAML
-    // produce for a field a config leaves blank.
-  ].filter((params): params is MCPConnectionParams => params != null);
+  const declared = declaredTransports(config);
 
-  if (populated.length !== 1) {
+  if (declared.length !== 1) {
     throw new Error(
       'Exactly one of stdioConnectionParams, streamableHttpConnectionParams ' +
         'must be set.',
     );
   }
 
-  if (config.stdioConnectionParams && !allowConfigStdioServersEnabled()) {
+  const [transport] = declared;
+  if (transport.params.type !== transport.expectedType) {
+    throw new Error(
+      `${transport.field} must declare connection params of type ` +
+        `'${transport.expectedType}', but it declares ` +
+        `'${String(transport.params.type)}'. The transport is chosen from the ` +
+        'type, so a mismatch would let a config reach a transport its field ' +
+        'does not name.',
+    );
+  }
+
+  if (
+    transport.params.type === 'StdioConnectionParams' &&
+    !allowConfigStdioServersEnabled()
+  ) {
     throw new Error(
       'Stdio MCP servers are not allowed in agent configs: the ' +
         "config-supplied 'command' is launched as a local process when the " +
@@ -118,5 +168,5 @@ export function resolveConfigConnectionParams(
     );
   }
 
-  return populated[0];
+  return transport.params;
 }

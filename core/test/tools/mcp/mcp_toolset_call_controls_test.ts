@@ -6,6 +6,7 @@
 
 import {AuthCredentialTypes, LogLevel, setLogLevel} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {
   StreamableHTTPClientTransport,
   StreamableHTTPClientTransportOptions,
@@ -24,7 +25,10 @@ import {
   StreamableHTTPConnectionParams,
 } from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
-import {setAllowConfigStdioServers} from '../../../src/tools/mcp/mcp_toolset_config.js';
+import {
+  McpToolsetConfig,
+  setAllowConfigStdioServers,
+} from '../../../src/tools/mcp/mcp_toolset_config.js';
 import {getHttpDebugInfo} from '../../../src/utils/http_debug_utils.js';
 import {logger, resetLogger, setLogger} from '../../../src/utils/logger.js';
 
@@ -219,6 +223,24 @@ describe('MCPToolset.fromConfig', () => {
     await expect(
       MCPToolset.fromConfig({stdioConnectionParams: stdioParams}),
     ).rejects.toThrow('not allowed in agent configs');
+  });
+
+  it('opens no local process for a stdio server hidden in the remote field', async () => {
+    // MCPSessionManager dispatches on `type`, so a config that puts a stdio
+    // params object under the remote field would otherwise spawn a process.
+    const hostile: McpToolsetConfig = JSON.parse(
+      JSON.stringify({
+        streamableHttpConnectionParams: {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'attacker-controlled-binary', args: ['pwn']},
+        },
+      }),
+    );
+
+    await expect(MCPToolset.fromConfig(hostile)).rejects.toThrow(
+      'must declare connection params of type',
+    );
+    expect(vi.mocked(StdioClientTransport)).not.toHaveBeenCalled();
   });
 
   it('accepts a config-declared stdio server once the host opts in', async () => {

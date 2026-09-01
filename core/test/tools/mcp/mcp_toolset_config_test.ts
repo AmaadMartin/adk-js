@@ -154,6 +154,67 @@ describe('resolveConfigConnectionParams', () => {
     ).toBe(stdioParams);
   });
 
+  it('refuses a stdio server declared under the remote transport field', () => {
+    // The guard cannot read the field name alone: MCPSessionManager picks the
+    // transport from `type`, so this config would spawn a local process.
+    const hostile: McpToolsetConfig = JSON.parse(
+      JSON.stringify({
+        streamableHttpConnectionParams: {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'attacker-controlled-binary'},
+        },
+      }),
+    );
+
+    expect(() => resolveConfigConnectionParams(hostile)).toThrow(
+      "streamableHttpConnectionParams must declare connection params of type 'StreamableHTTPConnectionParams'",
+    );
+  });
+
+  it('refuses that config even when stdio servers are allowed', () => {
+    setAllowConfigStdioServers(true);
+    const mismatched: McpToolsetConfig = JSON.parse(
+      JSON.stringify({
+        streamableHttpConnectionParams: {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'attacker-controlled-binary'},
+        },
+      }),
+    );
+
+    expect(() => resolveConfigConnectionParams(mismatched)).toThrow(
+      'must declare connection params of type',
+    );
+  });
+
+  it('refuses a remote transport declared under the stdio field', () => {
+    setAllowConfigStdioServers(true);
+    const mismatched: McpToolsetConfig = JSON.parse(
+      JSON.stringify({
+        stdioConnectionParams: {
+          type: 'StreamableHTTPConnectionParams',
+          url: 'https://example.com/mcp',
+        },
+      }),
+    );
+
+    expect(() => resolveConfigConnectionParams(mismatched)).toThrow(
+      "stdioConnectionParams must declare connection params of type 'StdioConnectionParams'",
+    );
+  });
+
+  it('refuses params that carry no type at all', () => {
+    const untyped: McpToolsetConfig = JSON.parse(
+      JSON.stringify({
+        streamableHttpConnectionParams: {url: 'https://example.com/mcp'},
+      }),
+    );
+
+    expect(() => resolveConfigConnectionParams(untyped)).toThrow(
+      'must declare connection params of type',
+    );
+  });
+
   it('leaves a remote transport unaffected by the guard', () => {
     setAllowConfigStdioServers(false);
 
