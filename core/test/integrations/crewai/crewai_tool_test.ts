@@ -4,20 +4,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {fileURLToPath} from 'node:url';
+
 import {
   Context,
   createSession,
   CrewaiTool,
+  CrewaiToolConfig,
   CrewaiToolLike,
+  InputValidationError,
   InvocationContext,
   isBaseTool,
+  isCrewaiToolLike,
   isFunctionTool,
   LlmAgent,
   PluginManager,
+  ToolErrorType,
+  ToolExecutionError,
 } from '@google/adk';
 import {Type} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
+
+import {searchTool} from './fixtures/crewai_tools.js';
 
 /** The args schema the Python reference test uses, as plain JSON Schema. */
 const SEARCH_QUERY_SCHEMA = {
@@ -350,6 +359,202 @@ describe('CrewaiTool', () => {
           toolContext: createContext(),
         }),
       ).rejects.toThrow("Error in tool 'search': upstream failure");
+    });
+  });
+});
+
+/** Absolute path of the fixture module the config names. */
+const FIXTURE_PATH = fileURLToPath(
+  new URL('./fixtures/crewai_tools.ts', import.meta.url),
+);
+
+/**
+ * Absolute path of a config file sitting next to the fixture. Only its
+ * directory is used, so the file itself need not exist.
+ */
+const CONFIG_PATH = fileURLToPath(
+  new URL('./fixtures/root_agent.yaml', import.meta.url),
+);
+
+/** Builds a config whose `tool` is not the string the type promises. */
+function malformedConfig(tool: unknown): CrewaiToolConfig {
+  return {tool} as CrewaiToolConfig;
+}
+
+const BAD_NAME_MESSAGE =
+  'Crewai tool config must name a CrewAI tool instance with a ' +
+  'fully-qualified name.';
+
+const NOT_A_TOOL_MESSAGE =
+  'Crewai tool config must name a CrewAI tool instance.';
+
+describe('isCrewaiToolLike', () => {
+  it('accepts a value with a callable run', () => {
+    expect(isCrewaiToolLike({run: () => 1})).toBe(true);
+  });
+
+  it.each([
+    ['a number', 42],
+    ['null', null],
+    ['an object without run', {name: 'x'}],
+    ['an object whose run is not callable', {run: 'not a function'}],
+  ])('rejects %s', (_label, value) => {
+    expect(isCrewaiToolLike(value)).toBe(false);
+  });
+});
+
+describe('CrewaiTool.fromConfig', () => {
+  it('builds the same declaration as the constructor does', async () => {
+    const adkTool = await CrewaiTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#searchTool`},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool._getDeclaration()).toEqual(
+      new CrewaiTool({tool: searchTool})._getDeclaration(),
+    );
+  });
+
+  it('resolves a relative specifier against the config file', async () => {
+    const adkTool = await CrewaiTool.fromConfig(
+      {tool: './crewai_tools.ts#searchTool'},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('search');
+  });
+
+  it('applies the name and description the config overrides', async () => {
+    const adkTool = await CrewaiTool.fromConfig(
+      {
+        tool: `${FIXTURE_PATH}#searchTool`,
+        name: 'lookup',
+        description: 'Looks something up',
+      },
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('lookup');
+    expect(adkTool.description).toEqual('Looks something up');
+  });
+
+  it('keeps the wrapped tool name when the config omits the overrides', async () => {
+    const adkTool = await CrewaiTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#searchTool`},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('search');
+    expect(adkTool.description).toEqual('Searches the web');
+  });
+
+  it('lowers and underscores a spaced tool name', async () => {
+    const adkTool = await CrewaiTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#spacedTool`},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('serper_dev_tool');
+  });
+
+  it('reads an empty override as absent, not as a blank name', async () => {
+    const adkTool = await CrewaiTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#searchTool`, name: '', description: ''},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('search');
+    expect(adkTool.description).toEqual('Searches the web');
+  });
+
+  it('names an unnamed tool from the config', async () => {
+    const adkTool = await CrewaiTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#unnamedTool`, name: 'given'},
+      CONFIG_PATH,
+    );
+
+    expect(adkTool.name).toEqual('given');
+    expect(adkTool.description).toEqual('Has no name of its own');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['a number', 42],
+    ['an object', {}],
+  ])('rejects a tool name that is %s', async (_label, value) => {
+    const error = await CrewaiTool.fromConfig(
+      malformedConfig(value),
+      CONFIG_PATH,
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ToolExecutionError);
+    expect(error).toMatchObject({
+      message: BAD_NAME_MESSAGE,
+      errorType: ToolErrorType.BAD_REQUEST,
+    });
+  });
+
+  it('propagates the resolver error for a name that does not resolve', async () => {
+    const name = `${FIXTURE_PATH}#missingExport`;
+
+    const error = await CrewaiTool.fromConfig({tool: name}, CONFIG_PATH).catch(
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(InputValidationError);
+    expect(error).toMatchObject({
+      message: `Invalid fully qualified name: ${name}`,
+    });
+  });
+
+  it.each(['notATool', 'nullTool', 'toolWithoutRun', 'nonCallableRun'])(
+    'rejects %s, which is not a CrewAI tool',
+    async (exportName) => {
+      const error = await CrewaiTool.fromConfig(
+        {tool: `${FIXTURE_PATH}#${exportName}`},
+        CONFIG_PATH,
+      ).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ToolExecutionError);
+      expect(error).toMatchObject({
+        message: NOT_A_TOOL_MESSAGE,
+        errorType: ToolErrorType.BAD_REQUEST,
+      });
+    },
+  );
+
+  it('runs the tool it built', async () => {
+    const adkTool = await CrewaiTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#searchTool`},
+      CONFIG_PATH,
+    );
+
+    const result = await adkTool.runAsync({
+      args: {query: 'adk'},
+      toolContext: createContext(),
+    });
+
+    expect(result).toEqual('hit: adk');
+  });
+
+  it('returns the retry hint when a mandatory argument is missing', async () => {
+    const adkTool = await CrewaiTool.fromConfig(
+      {tool: `${FIXTURE_PATH}#searchTool`},
+      CONFIG_PATH,
+    );
+
+    const result = await adkTool.runAsync({
+      args: {},
+      toolContext: createContext(),
+    });
+
+    expect(result).toEqual({
+      error:
+        'Invoking `search()` failed as the following mandatory input parameters are not present:\n' +
+        'query\n' +
+        'You could retry calling this tool, but it is IMPORTANT for you to ' +
+        'provide all the mandatory parameters.',
     });
   });
 });
