@@ -5,7 +5,7 @@
  */
 
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {ConversationScenario, Invocation} from './eval_case.js';
+import {Invocation} from './eval_case.js';
 import {EvalMetric, getMetricThreshold} from './eval_metrics.js';
 import {
   emptyEvaluationResult,
@@ -39,7 +39,6 @@ export class RougeEvaluator extends Evaluator {
   override async evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-    _conversationScenario?: ConversationScenario,
   ): Promise<EvaluationResult> {
     if (expectedInvocations === undefined) {
       throw new InputValidationError(

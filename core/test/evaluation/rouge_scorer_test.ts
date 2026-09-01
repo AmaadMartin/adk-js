@@ -18,12 +18,12 @@ describe('tokenizeForRouge', () => {
     ]);
   });
 
-  it('emits one token per CJK character', () => {
-    expect(tokenizeForRouge('北京大学')).toEqual(['北', '京', '大', '学']);
+  it('segments Chinese text written without spaces into words', () => {
+    expect(tokenizeForRouge('北京大学')).toEqual(['北京', '大学']);
   });
 
-  it('keeps a Thai combining mark attached to its base character', () => {
-    expect(tokenizeForRouge('สวัสดี')).toEqual(['ส', 'วั', 'ส', 'ดี']);
+  it('segments Thai text written without spaces into words', () => {
+    expect(tokenizeForRouge('สวัสดีครับ')).toEqual(['สวัสดี', 'ครับ']);
   });
 
   it('folds full-width characters to their half-width spelling', () => {
@@ -89,10 +89,10 @@ describe('rouge1Score', () => {
     expect(rouge1Score('สวัสดีครับ', 'สวัสดีครับ').fmeasure).toBe(1);
   });
 
-  it('scores a CJK text by character overlap', () => {
+  it('scores Chinese text by word overlap', () => {
     const score = rouge1Score('北京大学', '北京');
 
-    expect(score.precision).toBeCloseTo(2 / 4);
+    expect(score.precision).toBeCloseTo(1 / 2);
     expect(score.recall).toBe(1);
   });
 });

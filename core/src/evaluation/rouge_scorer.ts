@@ -8,11 +8,18 @@
  * A local ROUGE-1 scorer, ported from the `rouge_score` usage in
  * `adk-python`'s `final_response_match_v1.py`.
  *
- * Divergence from `adk-python`: tokens are not stemmed. `rouge_score` stems
- * tokens longer than three characters with NLTK's Porter stemmer, which has no
- * equivalent here and would need either a new dependency or an unverifiable
- * hand port. Scores therefore differ from Python's for texts whose only
- * overlap is between two inflections of one word.
+ * Two divergences from `adk-python`:
+ *
+ * 1. Tokens are not stemmed. `rouge_score` stems tokens longer than three
+ *    characters with NLTK's Porter stemmer, which has no equivalent here and
+ *    would need either a new dependency or an unverifiable hand port. Scores
+ *    therefore differ from Python's for texts whose only overlap is between
+ *    two inflections of one word.
+ * 2. Text written without spaces is segmented into words by `Intl.Segmenter`,
+ *    not into single characters. `adk-python` splits such text per character
+ *    because dictionary segmentation would cost it a heavy dependency, so
+ *    scores for Chinese, Japanese, Thai, Lao and Khmer count words here and
+ *    characters there.
  */
 
 /** The three ROUGE figures for one candidate/reference pair. */
@@ -27,62 +34,24 @@ export interface RougeScore {
   fmeasure: number;
 }
 
-/** Characters written without spaces and tokenized one per character. */
-const CJK_RANGES: Array<[number, number]> = [
-  [0x4e00, 0x9fff], // CJK Unified Ideographs
-  [0x3040, 0x309f], // Hiragana
-  [0x30a0, 0x30ff], // Katakana
-  [0xac00, 0xd7af], // Hangul Syllables
-];
-
-/** Scripts written without spaces and tokenized by grapheme cluster. */
-const NON_SPACED_SCRIPT_RANGES: Array<[number, number]> = [
-  [0x0e00, 0x0e7f], // Thai
-  [0x0e80, 0x0eff], // Lao
-  [0x1780, 0x17ff], // Khmer
-  [0x1000, 0x109f], // Myanmar
-];
-
-const COMBINING_MARK = /\p{M}/u;
-const WORD_CHAR = /[\p{L}\p{N}\p{M}]/u;
-
-function inRanges(char: string, ranges: Array<[number, number]>): boolean {
-  const code = char.codePointAt(0)!;
-  return ranges.some(([start, end]) => code >= start && code <= end);
-}
+/**
+ * The segmenter carries a fixed locale so that a score never depends on the
+ * locale of the machine that computes it.
+ */
+const WORD_SEGMENTER = new Intl.Segmenter('en', {granularity: 'word'});
 
 /**
- * Splits text into ROUGE unigrams, keeping non-Latin word characters.
+ * Splits text into ROUGE unigrams.
  *
- * The `rouge_score` default tokenizer drops every character outside `[a-z0-9]`,
- * so text in a non-Latin script tokenizes to nothing and always scores 0. This
- * tokenizer normalizes to NFKC, keeps Unicode word characters, splits CJK text
- * one token per character, and keeps a combining mark attached to the base
- * character it modifies.
- *
- * Languages written without spaces are tokenized by character or grapheme
- * cluster rather than by word, because dictionary-based segmentation needs a
- * heavy external dependency. ROUGE-1 overlap for those languages therefore
- * counts those units instead of full words.
+ * Text is folded to NFKC and lowercased, so a full-width and a half-width
+ * spelling of one word count as the same token. Punctuation and whitespace
+ * are dropped.
  */
 export function tokenizeForRouge(text: string): string[] {
-  const processed: string[] = [];
-  for (const char of text.normalize('NFKC').toLowerCase()) {
-    if (inRanges(char, CJK_RANGES)) {
-      processed.push(' ', char, ' ');
-    } else if (inRanges(char, NON_SPACED_SCRIPT_RANGES)) {
-      if (COMBINING_MARK.test(char)) {
-        processed.push(char);
-      } else {
-        processed.push(' ', char);
-      }
-    } else if (WORD_CHAR.test(char)) {
-      processed.push(char);
-    } else {
-      processed.push(' ');
-    }
-  }
-  return processed.join('').split(/\s+/).filter(Boolean);
+  const segments = WORD_SEGMENTER.segment(text.normalize('NFKC').toLowerCase());
+  return [...segments]
+    .filter((segment) => segment.isWordLike)
+    .map((segment) => segment.segment);
 }
 
 function countTokens(tokens: string[]): Map<string, number> {

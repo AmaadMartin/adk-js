@@ -12,7 +12,7 @@ import {
   VertexAiEvalRequest,
   VertexEvaluationResult,
 } from '@google/adk';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 /** A client that returns one canned result and records what it was asked. */
 class FakeEvalClient implements VertexAiEvalClient {
@@ -43,10 +43,6 @@ const expectedInvocations: Invocation[] = [
 ];
 
 describe('ResponseEvaluator', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it('scores the rouge metric locally', async () => {
     const client = new FakeEvalClient({});
     const evaluator = new ResponseEvaluator({
@@ -119,20 +115,14 @@ describe('ResponseEvaluator', () => {
     expect(result.perInvocationResults).toHaveLength(1);
   });
 
-  it('reports missing credentials when the metric runs, not when it is built', async () => {
-    vi.stubEnv('GOOGLE_API_KEY', undefined);
-    vi.stubEnv('GOOGLE_CLOUD_PROJECT', undefined);
-    vi.stubEnv('GOOGLE_CLOUD_LOCATION', undefined);
-    const evaluator = new ResponseEvaluator({
-      threshold: 0.8,
-      metricName: 'response_evaluation_score',
-    });
-
-    await expect(
-      evaluator.evaluateInvocations(actualInvocations, expectedInvocations),
-    ).rejects.toThrow(
-      'Either API Key or Google cloud Project id and location should be specified.',
-    );
+  it('rejects the coherence metric without an eval client', () => {
+    expect(
+      () =>
+        new ResponseEvaluator({
+          threshold: 0.8,
+          metricName: 'response_evaluation_score',
+        }),
+    ).toThrow('`response_evaluation_score` requires an evalClient');
   });
 
   it('takes the threshold and the metric name from an eval metric', async () => {

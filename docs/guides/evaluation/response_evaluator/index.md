@@ -81,9 +81,9 @@ the mean. When no invocation could be scored, `overallScore` is undefined too.
 
 ## Scoring coherence
 
-The Vertex AI Gen AI evaluation service has no JavaScript SDK. Supply a
-`VertexAiEvalClient` that calls the service, and `ResponseEvaluator` sends it
-one request per invocation.
+The Vertex AI Gen AI evaluation service has no JavaScript SDK, so this metric
+needs a `VertexAiEvalClient` that you supply. `ResponseEvaluator` rejects the
+metric without one, and sends the client one request per invocation.
 
 ```ts
 import {
@@ -110,16 +110,16 @@ const evaluator = new ResponseEvaluator({
 });
 ```
 
-Without a client, the evaluator reads `GOOGLE_API_KEY`, or else
-`GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`, and rejects the call when
-neither is complete. It then reports that no client is available. The check
-runs when the metric runs, not when you build the evaluator.
+Your client owns authentication. ADK reads no credentials of its own for this
+metric.
 
 ## Differences from adk-python
 
 - The ROUGE tokenizer does not stem tokens. `adk-python` uses `rouge_score`,
   which stems tokens longer than three characters with NLTK's Porter stemmer.
   Two inflections of one word therefore match in Python and do not match here.
-- `adk-python` builds a Vertex AI client itself and validates the credentials
-  in the environment on every path. Here an injected client owns
-  authentication, so the environment is only read when you inject no client.
+- Text written without spaces is segmented into words by `Intl.Segmenter`.
+  `adk-python` splits such text one token per character, so scores for Chinese,
+  Japanese, Thai, Lao and Khmer differ between the two.
+- `adk-python` builds a Vertex AI client from the environment. Here you supply
+  the client, so ADK reads no credentials.

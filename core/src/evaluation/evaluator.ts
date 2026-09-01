@@ -6,7 +6,7 @@
 
 import {Content} from '@google/genai';
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {ConversationScenario, Invocation} from './eval_case.js';
+import {Invocation} from './eval_case.js';
 import {EvalStatus} from './eval_metrics.js';
 
 /** The score a metric gave to a single invocation. */
@@ -45,13 +45,10 @@ export abstract class Evaluator {
    *     test.
    * @param expectedInvocations An optional list of golden invocations. When
    *     given, it usually has the same length as `actualInvocations`.
-   * @param conversationScenario An optional scenario for multi-turn
-   *     conversations.
    */
   abstract evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-    conversationScenario?: ConversationScenario,
   ): Promise<EvaluationResult>;
 }
 

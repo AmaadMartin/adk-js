@@ -5,7 +5,7 @@
  */
 
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {ConversationScenario, Invocation} from './eval_case.js';
+import {Invocation} from './eval_case.js';
 import {
   emptyEvaluationResult,
   EvaluationResult,
@@ -15,11 +15,6 @@ import {
   PerInvocationResult,
   validateInvocationLengths,
 } from './evaluator.js';
-
-/** A metric that the Vertex AI Gen AI evaluation service provides. */
-export enum VertexPrebuiltMetric {
-  COHERENCE = 'COHERENCE',
-}
 
 /** One prompt/response pair to score, with an optional golden reference. */
 export interface VertexEvalCaseRow {
@@ -57,7 +52,8 @@ export interface VertexAiEvalRequest {
 /**
  * The Vertex AI Gen AI evaluation service, as this package uses it.
  *
- * The service has no JavaScript SDK, so the caller supplies the transport.
+ * The service has no JavaScript SDK, so the caller supplies the transport and
+ * owns authentication.
  */
 export interface VertexAiEvalClient {
   evaluate(request: VertexAiEvalRequest): Promise<VertexEvaluationResult>;
@@ -74,63 +70,8 @@ export interface VertexAiEvalFacadeOptions {
   /** Whether the metric needs golden invocations. Defaults to false. */
   expectedInvocationsRequired?: boolean;
 
-  /**
-   * The client that reaches the service. When it is absent, the credentials
-   * in the environment are validated and every evaluation call then reports
-   * that no client is available.
-   */
-  client?: VertexAiEvalClient;
-}
-
-const ERROR_MESSAGE_SUFFIX = `
-You should specify both project id and location. This metric uses Vertex Gen AI
-Eval SDK, and it requires google cloud credentials.
-
-If using an .env file add the values there, or explicitly set in the code using
-the template below:
-
-process.env.GOOGLE_CLOUD_LOCATION = <LOCATION>
-process.env.GOOGLE_CLOUD_PROJECT = <PROJECT ID>
-`;
-
-const NO_CLIENT_MESSAGE =
-  'The Vertex AI Gen AI evaluation service has no JavaScript SDK. Supply a ' +
-  'VertexAiEvalClient that calls the service to use this metric.';
-
-/**
- * Validates the credentials in the environment and returns a client that
- * reports the missing transport when it is called.
- *
- * @throws InputValidationError if the environment carries neither an API key
- *     nor a complete project and location pair.
- */
-function createUnavailableClient(): VertexAiEvalClient {
-  const projectId = process.env?.['GOOGLE_CLOUD_PROJECT'];
-  const location = process.env?.['GOOGLE_CLOUD_LOCATION'];
-  const apiKey = process.env?.['GOOGLE_API_KEY'];
-
-  if (!apiKey) {
-    if (!projectId && !location) {
-      throw new InputValidationError(
-        'Either API Key or Google cloud Project id and location should be' +
-          ' specified.',
-      );
-    }
-    if (!projectId) {
-      throw new InputValidationError(
-        'Missing project id.' + ERROR_MESSAGE_SUFFIX,
-      );
-    }
-    if (!location) {
-      throw new InputValidationError(
-        'Missing location.' + ERROR_MESSAGE_SUFFIX,
-      );
-    }
-  }
-
-  return {
-    evaluate: () => Promise.reject(new Error(NO_CLIENT_MESSAGE)),
-  };
+  /** The client that reaches the service. */
+  client: VertexAiEvalClient;
 }
 
 /** Reads the mean score of the first summary metric, when there is one. */
@@ -149,17 +90,13 @@ export class SingleTurnVertexAiEvalFacade extends Evaluator {
   private readonly expectedInvocationsRequired: boolean;
   private readonly client: VertexAiEvalClient;
 
-  /**
-   * @throws InputValidationError if no client is given and the environment
-   *     carries no usable credentials.
-   */
   constructor(options: VertexAiEvalFacadeOptions) {
     super();
     this.threshold = options.threshold;
     this.metricName = options.metricName;
     this.expectedInvocationsRequired =
       options.expectedInvocationsRequired ?? false;
-    this.client = options.client ?? createUnavailableClient();
+    this.client = options.client;
   }
 
   /**
@@ -169,7 +106,6 @@ export class SingleTurnVertexAiEvalFacade extends Evaluator {
   override async evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-    _conversationScenario?: ConversationScenario,
   ): Promise<EvaluationResult> {
     if (this.expectedInvocationsRequired && expectedInvocations === undefined) {
       throw new InputValidationError(

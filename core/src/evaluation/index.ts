@@ -10,14 +10,7 @@
  * substrate that evaluator stands on.
  */
 
-export type {
-  ConversationScenario,
-  IntermediateData,
-  IntermediateDataType,
-  Invocation,
-  InvocationEvent,
-  InvocationEvents,
-} from './eval_case.js';
+export type {Invocation} from './eval_case.js';
 export {
   EvalStatus,
   PrebuiltMetrics,
@@ -31,10 +24,7 @@ export {ResponseEvaluator} from './response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './rouge_scorer.js';
 export type {RougeScore} from './rouge_scorer.js';
-export {
-  SingleTurnVertexAiEvalFacade,
-  VertexPrebuiltMetric,
-} from './vertex_ai_eval_facade.js';
+export {SingleTurnVertexAiEvalFacade} from './vertex_ai_eval_facade.js';
 export type {
   VertexAggregatedMetricResult,
   VertexAiEvalClient,

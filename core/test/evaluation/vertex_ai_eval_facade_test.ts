@@ -12,7 +12,7 @@ import {
   VertexAiEvalRequest,
   VertexEvaluationResult,
 } from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 function invocation(query: string, response: string): Invocation {
   return {
@@ -40,81 +40,6 @@ function scored(meanScore: number): VertexEvaluationResult {
 }
 
 describe('SingleTurnVertexAiEvalFacade', () => {
-  beforeEach(() => {
-    vi.stubEnv('GOOGLE_API_KEY', undefined);
-    vi.stubEnv('GOOGLE_CLOUD_PROJECT', undefined);
-    vi.stubEnv('GOOGLE_CLOUD_LOCATION', undefined);
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  describe('credentials, when no client is injected', () => {
-    it('accepts an API key on its own', () => {
-      vi.stubEnv('GOOGLE_API_KEY', 'test-api-key');
-
-      expect(
-        () =>
-          new SingleTurnVertexAiEvalFacade({
-            threshold: 0.5,
-            metricName: 'COHERENCE',
-          }),
-      ).not.toThrow();
-    });
-
-    it('rejects a project without a location', () => {
-      vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project');
-
-      expect(
-        () =>
-          new SingleTurnVertexAiEvalFacade({
-            threshold: 0.5,
-            metricName: 'COHERENCE',
-          }),
-      ).toThrow('Missing location.');
-    });
-
-    it('rejects a location without a project', () => {
-      vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'us-central1');
-
-      expect(
-        () =>
-          new SingleTurnVertexAiEvalFacade({
-            threshold: 0.5,
-            metricName: 'COHERENCE',
-          }),
-      ).toThrow('Missing project id.');
-    });
-
-    it('rejects an environment with no credentials at all', () => {
-      expect(
-        () =>
-          new SingleTurnVertexAiEvalFacade({
-            threshold: 0.5,
-            metricName: 'COHERENCE',
-          }),
-      ).toThrow(
-        'Either API Key or Google cloud Project id and location should be specified.',
-      );
-    });
-
-    it('reports the missing transport when the metric runs', async () => {
-      vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project');
-      vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'us-central1');
-      const facade = new SingleTurnVertexAiEvalFacade({
-        threshold: 0.5,
-        metricName: 'COHERENCE',
-      });
-
-      await expect(
-        facade.evaluateInvocations([invocation('q', 'a')]),
-      ).rejects.toThrow(
-        'The Vertex AI Gen AI evaluation service has no JavaScript SDK.',
-      );
-    });
-  });
-
   it('rejects a call without expected invocations when the metric needs them', async () => {
     const facade = new SingleTurnVertexAiEvalFacade({
       threshold: 0.5,
