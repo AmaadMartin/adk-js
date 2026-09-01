@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Content} from '@google/genai';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import type {Invocation} from './eval_case.js';
 import {EvalStatus} from './eval_metrics.js';
@@ -62,6 +63,14 @@ export interface Evaluator {
   ): EvaluationResult | Promise<EvaluationResult>;
 }
 
+/** The result returned when nothing could be evaluated. */
+export function emptyEvaluationResult(): EvaluationResult {
+  return {
+    overallEvalStatus: EvalStatus.NOT_EVALUATED,
+    perInvocationResults: [],
+  };
+}
+
 /**
  * Rejects invocation lists that cannot be paired without truncation.
  *
@@ -81,4 +90,22 @@ export function validateInvocationLengths(
         `got ${actualInvocations.length} and ${expectedInvocations.length}.`,
     );
   }
+}
+
+/** Returns the status of a score, which is absent when nothing was scored. */
+export function getEvalStatus(
+  score: number | undefined,
+  threshold: number,
+): EvalStatus {
+  if (score === undefined) {
+    return EvalStatus.NOT_EVALUATED;
+  }
+  return score >= threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
+}
+
+/** Joins the text parts of a content with newlines. */
+export function getTextFromContent(content?: Content): string {
+  return (content?.parts ?? [])
+    .flatMap((part) => (part.text ? [part.text] : []))
+    .join('\n');
 }
