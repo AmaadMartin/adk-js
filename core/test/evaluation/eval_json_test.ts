@@ -162,6 +162,39 @@ describe('parseEvalSet', () => {
     });
   });
 
+  it('drops array elements that are not objects', () => {
+    const evalSet = parseEvalSet({
+      eval_set_id: 'noisy',
+      eval_cases: [
+        {
+          eval_id: 'case',
+          conversation: [
+            {
+              user_content: {parts: [{text: 'hi'}, 'not a part']},
+              intermediate_data: {
+                tool_uses: [1, {name: 'roll_die'}],
+                tool_responses: 'not a list',
+                intermediate_responses: [
+                  ['root', [{text: 'thinking'}, 7]],
+                  'not a pair',
+                  [42, []],
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const invocation = evalSet.evalCases[0].conversation?.[0];
+    expect(invocation?.userContent.parts).toEqual([{text: 'hi'}]);
+    expect(invocation?.intermediateData).toEqual({
+      toolUses: [{name: 'roll_die'}],
+      toolResponses: [],
+      intermediateResponses: [['root', [{text: 'thinking'}]]],
+    });
+  });
+
   it.each([
     ['a value that is not an object', ['legacy']],
     ['an object with no eval_set_id', {eval_cases: []}],
