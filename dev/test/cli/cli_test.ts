@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {
+  FeatureName,
+  isFeatureEnabled,
+  LogLevel,
+  overrideFeatureEnabled,
+  setLogLevel,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -303,6 +309,44 @@ describe('CLI Entrypoint', () => {
           savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
+      );
+    });
+  });
+
+  describe('feature override flags', () => {
+    afterEach(() => {
+      overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, undefined);
+    });
+
+    it.each([
+      ['run', ['run', 'agent.ts']],
+      ['web', ['web']],
+      ['api_server', ['api_server']],
+    ])('%s applies --enable_features', async (_name, args) => {
+      await parse([
+        ...args,
+        `--enable_features=${FeatureName.PROGRESSIVE_SSE_STREAMING}`,
+      ]);
+
+      expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(
+        true,
+      );
+    });
+
+    it.each([
+      ['run', ['run', 'agent.ts']],
+      ['web', ['web']],
+      ['api_server', ['api_server']],
+    ])('%s applies --disable_features', async (_name, args) => {
+      overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, true);
+
+      await parse([
+        ...args,
+        `--disable_features=${FeatureName.PROGRESSIVE_SSE_STREAMING}`,
+      ]);
+
+      expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(
+        false,
       );
     });
   });

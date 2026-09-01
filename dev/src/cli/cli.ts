@@ -8,9 +8,9 @@
 import {
   BaseArtifactService,
   BaseSessionService,
-  LogLevel,
   getArtifactServiceFromUri,
   getSessionServiceFromUri,
+  LogLevel,
   setLogLevel as setAdkCoreLogLevel,
 } from '@google/adk';
 import {Argument, Command, Option} from 'commander';
@@ -29,6 +29,11 @@ import {
 } from './cli_telemetry.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
+import {
+  applyFeatureOverrides,
+  DISABLE_FEATURES_OPTION,
+  ENABLE_FEATURES_OPTION,
+} from './feature_options.js';
 
 dotenv.config({quiet: true});
 
@@ -261,34 +266,43 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
-    .action(async (agentsDir: string, options: Record<string, string>) => {
-      const logLevel = getLogLevelFromOptions(options);
-      setAdkCoreLogLevel(logLevel);
+    .addOption(ENABLE_FEATURES_OPTION)
+    .addOption(DISABLE_FEATURES_OPTION)
+    .action(
+      async (
+        agentsDir: string,
+        options: Record<string, string>,
+        command: Command,
+      ) => {
+        applyFeatureOverrides(command);
+        const logLevel = getLogLevelFromOptions(options);
+        setAdkCoreLogLevel(logLevel);
 
-      try {
-        const server = new AdkApiServer({
-          logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
-          host: options['host'],
-          port: parseInt(options['port'], 10),
-          serveDebugUI: true,
-          allowOrigins: options['allow_origins'],
-          allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
-          a2aAuthToken: options['a2a_auth_token'],
-          reloadAgents: getBoolean(options['reload_agents']),
-        });
+        try {
+          const server = new AdkApiServer({
+            logLevel,
+            agentsDir: getAbsolutePath(agentsDir),
+            host: options['host'],
+            port: parseInt(options['port'], 10),
+            serveDebugUI: true,
+            allowOrigins: options['allow_origins'],
+            allowedHosts: getAllowedHosts(options['allowed_hosts']),
+            sessionService: getSessionServiceFromOptions(options),
+            artifactService: getArtifactServiceFromOptions(options),
+            otelToCloud: options['otel_to_cloud'] ? true : false,
+            agentFileLoadOptions: getAgentFileOptions(options),
+            a2a: getBoolean(options['a2a']),
+            a2aAuthToken: options['a2a_auth_token'],
+            reloadAgents: getBoolean(options['reload_agents']),
+          });
 
-        await server.start();
-      } catch (error) {
-        logger.error('Error starting web server:', (error as Error).message);
-        process.exit(1);
-      }
-    });
+          await server.start();
+        } catch (error) {
+          logger.error('Error starting web server:', (error as Error).message);
+          process.exit(1);
+        }
+      },
+    );
 
   program
     .command('api_server')
@@ -309,33 +323,42 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
-    .action(async (agentsDir: string, options: Record<string, string>) => {
-      const logLevel = getLogLevelFromOptions(options);
-      setAdkCoreLogLevel(logLevel);
+    .addOption(ENABLE_FEATURES_OPTION)
+    .addOption(DISABLE_FEATURES_OPTION)
+    .action(
+      async (
+        agentsDir: string,
+        options: Record<string, string>,
+        command: Command,
+      ) => {
+        applyFeatureOverrides(command);
+        const logLevel = getLogLevelFromOptions(options);
+        setAdkCoreLogLevel(logLevel);
 
-      try {
-        const server = new AdkApiServer({
-          logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
-          host: options['host'],
-          port: parseInt(options['port'], 10),
-          serveDebugUI: false,
-          allowOrigins: options['allow_origins'],
-          allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
-          a2aAuthToken: options['a2a_auth_token'],
-          reloadAgents: getBoolean(options['reload_agents']),
-        });
-        await server.start();
-      } catch (error) {
-        logger.error('Error starting API server:', (error as Error).message);
-        process.exit(1);
-      }
-    });
+        try {
+          const server = new AdkApiServer({
+            logLevel,
+            agentsDir: getAbsolutePath(agentsDir),
+            host: options['host'],
+            port: parseInt(options['port'], 10),
+            serveDebugUI: false,
+            allowOrigins: options['allow_origins'],
+            allowedHosts: getAllowedHosts(options['allowed_hosts']),
+            sessionService: getSessionServiceFromOptions(options),
+            artifactService: getArtifactServiceFromOptions(options),
+            otelToCloud: options['otel_to_cloud'] ? true : false,
+            agentFileLoadOptions: getAgentFileOptions(options),
+            a2a: getBoolean(options['a2a']),
+            a2aAuthToken: options['a2a_auth_token'],
+            reloadAgents: getBoolean(options['reload_agents']),
+          });
+          await server.start();
+        } catch (error) {
+          logger.error('Error starting API server:', (error as Error).message);
+          process.exit(1);
+        }
+      },
+    );
 
   program
     .command('create')
@@ -405,27 +428,36 @@ export function createProgram(): Command {
     .addOption(BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
-    .action(async (agentPath: string, options: Record<string, string>) => {
-      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+    .addOption(ENABLE_FEATURES_OPTION)
+    .addOption(DISABLE_FEATURES_OPTION)
+    .action(
+      async (
+        agentPath: string,
+        options: Record<string, string>,
+        command: Command,
+      ) => {
+        applyFeatureOverrides(command);
+        setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
-      try {
-        await runAgent({
-          agentPath,
-          inputFile: options['replay'],
-          savedSessionFile: options['resume'],
-          saveSession: getBoolean(options['save_session']),
-          sessionId: options['session_id'],
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          reloadAgents: getBoolean(options['reload_agents']),
-        });
-      } catch (error) {
-        logger.error('Error running agent:', (error as Error).message);
-        process.exit(1);
-      }
-    });
+        try {
+          await runAgent({
+            agentPath,
+            inputFile: options['replay'],
+            savedSessionFile: options['resume'],
+            saveSession: getBoolean(options['save_session']),
+            sessionId: options['session_id'],
+            sessionService: getSessionServiceFromOptions(options),
+            artifactService: getArtifactServiceFromOptions(options),
+            otelToCloud: options['otel_to_cloud'] ? true : false,
+            agentFileLoadOptions: getAgentFileOptions(options),
+            reloadAgents: getBoolean(options['reload_agents']),
+          });
+        } catch (error) {
+          logger.error('Error running agent:', (error as Error).message);
+          process.exit(1);
+        }
+      },
+    );
 
   const DEPLOY_COMMAND = program
     .command('deploy')
