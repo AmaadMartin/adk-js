@@ -26,7 +26,9 @@ This is a port of adk-python's `VertexAiRagMemoryService`, so it implements
 
 The service needs a project and a location. A fully qualified `ragCorpus`
 supplies both, and `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` supply
-them for a bare corpus id. Requests carry Application Default Credentials.
+them for a bare corpus id. A bare id becomes
+`projects/{project}/locations/{location}/ragCorpora/{id}` on the first call.
+Requests carry Application Default Credentials.
 
 ```ts
 import {VertexAiRagMemoryService} from '@google/adk';
