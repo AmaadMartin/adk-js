@@ -106,6 +106,21 @@ valid user ID.
 A `user:` filename needs no session. Every other filename does, and a save
 without one throws `Session ID must be provided for session-scoped artifacts.`
 
+## Untyped artifact input
+
+`SaveArtifactRequest.artifact` accepts a plain object as well as a `Part`, so an
+HTTP body may name the fields the way the wire format does. Every artifact
+service converts `inline_data` to `inlineData` before it reads a field, and
+stores a copy, so a later write to your object cannot reach stored state.
+
+```ts
+await service.saveArtifact({
+  ...key,
+  filename: 'note.txt',
+  artifact: {inline_data: {mime_type: 'text/plain', data: 'aGVsbG8='}},
+});
+```
+
 ## Empty artifacts
 
 `loadArtifact` returns `undefined` for a stored artifact that carries no

@@ -62,6 +62,24 @@ describe('ForwardingArtifactService', () => {
       });
       expect(version).toBe(0);
     });
+
+    it('normalizes a snake_case artifact before it forwards', async () => {
+      const toolContext = makeToolContext();
+      toolContext.saveArtifact.mockResolvedValue(0);
+      const service = new ForwardingArtifactService(toolContext);
+
+      await service.saveArtifact({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 'session',
+        filename: 'file.txt',
+        artifact: {inline_data: {mime_type: 'text/plain', data: 'aGVsbG8='}},
+      });
+
+      expect(toolContext.saveArtifact).toHaveBeenCalledWith('file.txt', {
+        inlineData: {mimeType: 'text/plain', data: 'aGVsbG8='},
+      });
+    });
   });
 
   describe('loadArtifact', () => {
