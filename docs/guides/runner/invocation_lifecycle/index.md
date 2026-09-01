@@ -21,10 +21,11 @@ is answering. Every response in one message must answer calls from the same
 invocation; a message that mixes two is refused rather than attributed to
 whichever came first.
 
-Rewinding is the opposite operation. `rewindAsync` records one event that undoes
-the state an invocation wrote and restores the artifacts it changed. The event
-is a record: readers that rebuild conversation contents do not skip rewound
-events yet.
+Rewinding is the opposite operation, and it is currently a partial one.
+`rewindAsync` undoes the state an invocation wrote and restores the artifacts it
+changed. It does **not** remove the conversation: nothing reads
+`actions.rewindBeforeInvocationId` yet, so the model still sees the rewound
+turns in its history. Use it to roll back side effects, not to erase a turn.
 
 ## Get started
 
@@ -132,12 +133,17 @@ tool. As a runner root it takes the node path, so the `finish_task` arguments
 land on the terminal event's `output`, and `outputKey` writes them to session
 state.
 
-A task agent's events carry an isolation scope, and the agent builds its
-contents from that scope alone. When a task is paused and waiting for the user,
-the runner stamps the new user event with that scope, so the reply is visible to
-the agent that asked for it. The scope closes on a terminal `finish_task`
-result. A `finish_task` response carrying an error leaves it open, because the
-agent sees the error and retries.
+A task agent declared with `isolationScope` builds its contents from that scope
+alone. When such a task is paused and waiting for the user, the runner stamps
+the new user event with the scope, so the reply is visible to the agent that
+asked for it. The scope closes on a terminal `finish_task` result; a
+`finish_task` response carrying an error leaves it open, because the agent sees
+the error and retries.
+
+Only a scope a task-mode agent wrote into counts. Any node may declare
+`isolationScope`, and a plain node never calls `finish_task`, so its scope would
+otherwise look open forever and every later user message would be hidden inside
+it.
 
 ## Rewinding
 
@@ -162,3 +168,7 @@ loaded, with a warning. Artifacts prefixed `user:` are not touched.
 
 `rewindAsync` rejects with `Invocation ID not found: <id>` when no event in the
 session belongs to that invocation.
+
+The conversation itself is untouched. `actions.rewindBeforeInvocationId` records
+the intent, but no reader honours it, so the rewound turns stay in the history
+the model is given.
