@@ -22,7 +22,7 @@ import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
-import {runAgent} from '../../src/cli/cli_run.js';
+import {runAgent, runOnceCli} from '../../src/cli/cli_run.js';
 import {maybePromptForTelemetryConsent} from '../../src/cli/cli_telemetry.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
@@ -50,6 +50,7 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
+  runOnceCli: vi.fn(),
 }));
 
 vi.mock('../../src/cli/cli_telemetry', async (importOriginal) => ({
@@ -322,6 +323,84 @@ describe('CLI Entrypoint', () => {
           savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
+      );
+    });
+  });
+
+  describe('command: run, single-shot mode', () => {
+    let exit: Mock;
+
+    beforeEach(() => {
+      exit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => undefined) as never) as unknown as Mock;
+      (runOnceCli as Mock).mockResolvedValue(0);
+    });
+
+    it('sends a query to runOnceCli instead of the prompt', async () => {
+      await parse(['run', 'agent.ts', 'what is the weather?']);
+
+      expect(runOnceCli).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          query: 'what is the weather?',
+        }),
+      );
+      expect(runAgent).not.toHaveBeenCalled();
+    });
+
+    it('forwards the single-shot options', async () => {
+      await parse([
+        'run',
+        'agent.ts',
+        'hello',
+        '--state',
+        '{"city":"Boston"}',
+        '--timeout',
+        '30s',
+        '--jsonl',
+        '--session_id',
+        'sess-1',
+      ]);
+
+      expect(runOnceCli).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stateStr: '{"city":"Boston"}',
+          timeout: '30s',
+          jsonl: true,
+          sessionId: 'sess-1',
+        }),
+      );
+    });
+
+    it('exits with the code runOnceCli returned', async () => {
+      (runOnceCli as Mock).mockResolvedValue(2);
+
+      await parse(['run', 'agent.ts', 'hello']);
+
+      expect(exit).toHaveBeenCalledWith(2);
+    });
+
+    it('keeps every service in memory under --in_memory', async () => {
+      delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
+
+      await parse(['run', 'agent.ts', 'hello', '--in_memory']);
+
+      expect(runOnceCli).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionService: expect.any(InMemorySessionService),
+          artifactService: expect.any(InMemoryArtifactService),
+          memoryService: expect.any(InMemoryMemoryService),
+        }),
+      );
+    });
+
+    it('opens the prompt when no query is given', async () => {
+      await parse(['run', 'agent.ts', '--jsonl', '--state', '{}']);
+
+      expect(runOnceCli).not.toHaveBeenCalled();
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({jsonl: true, stateStr: '{}'}),
       );
     });
   });

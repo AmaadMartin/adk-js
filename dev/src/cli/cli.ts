@@ -16,7 +16,7 @@ import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
-import {runAgent} from './cli_run.js';
+import {runAgent, runOnceCli} from './cli_run.js';
 import {
   maybePromptForTelemetryConsent,
   registerTelemetryCommands,
@@ -403,6 +403,26 @@ export function createProgram(): Command {
     .command('run')
     .description('Runs agent')
     .argument('<agent>', 'Agent file path (.js or .ts)')
+    .argument(
+      '[query]',
+      'Optional. The user message to send to the agent for a single-step run. Without it, run opens the interactive prompt.',
+    )
+    .option(
+      '--state <string>',
+      'Optional. Initial session state, as a JSON object.',
+    )
+    .option(
+      '--timeout <string>',
+      'Optional. Budget for one query, e.g. 30 (seconds), 30s or 5m.',
+    )
+    .option(
+      '--in_memory',
+      'Optional. Keep the session, artifacts and memory in memory, overriding every other storage option.',
+    )
+    .option(
+      '--jsonl',
+      'Optional. Print one JSON object per event on stdout instead of human-readable text.',
+    )
     .option(
       '--save_session [boolean]',
       'Optional. Whether to save the session to a json file on exit.',
@@ -437,30 +457,55 @@ export function createProgram(): Command {
     .action(
       async (
         agentPath: string,
+        query: string | undefined,
         options: Record<string, string>,
         command: Command,
       ) => {
         applyFeatureOverrides(command);
         setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
+        const services = resolveServices({
+          baseDir: path.dirname(getAbsolutePath(agentPath)),
+          sessionServiceUri: options['session_service_uri'],
+          artifactServiceUri: options['artifact_service_uri'],
+          memoryServiceUri: options['memory_service_uri'],
+          useLocalStorage: resolveUseLocalStorage(command, true),
+          inMemory: getBoolean(options['in_memory']),
+        });
+
         try {
-          await runAgent({
-            agentPath,
-            inputFile: options['replay'],
-            savedSessionFile: options['resume'],
-            saveSession: getBoolean(options['save_session']),
-            sessionId: options['session_id'],
-            ...resolveServices({
-              baseDir: path.dirname(getAbsolutePath(agentPath)),
-              sessionServiceUri: options['session_service_uri'],
-              artifactServiceUri: options['artifact_service_uri'],
-              memoryServiceUri: options['memory_service_uri'],
-              useLocalStorage: resolveUseLocalStorage(command, true),
-            }),
-            otelToCloud: options['otel_to_cloud'] ? true : false,
-            agentFileLoadOptions: getAgentFileOptions(options),
-            reloadAgents: getBoolean(options['reload_agents']),
-          });
+          // adk-python switches to the single-shot run on the query alone, so
+          // a piped stdin still reaches the interactive prompt.
+          if (query !== undefined) {
+            process.exit(
+              await runOnceCli({
+                agentPath,
+                query,
+                stateStr: options['state'],
+                sessionId: options['session_id'],
+                replay: options['replay'],
+                timeout: options['timeout'],
+                jsonl: getBoolean(options['jsonl']),
+                ...services,
+                agentFileLoadOptions: getAgentFileOptions(options),
+              }),
+            );
+          } else {
+            await runAgent({
+              agentPath,
+              inputFile: options['replay'],
+              savedSessionFile: options['resume'],
+              saveSession: getBoolean(options['save_session']),
+              sessionId: options['session_id'],
+              stateStr: options['state'],
+              timeout: options['timeout'],
+              jsonl: getBoolean(options['jsonl']),
+              ...services,
+              otelToCloud: options['otel_to_cloud'] ? true : false,
+              agentFileLoadOptions: getAgentFileOptions(options),
+              reloadAgents: getBoolean(options['reload_agents']),
+            });
+          }
         } catch (error) {
           logger.error('Error running agent:', (error as Error).message);
           process.exit(1);
