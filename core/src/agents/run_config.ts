@@ -51,7 +51,7 @@ export interface HistoryConfig {
 }
 
 /**
- * A {@link LiveConnectConfig} that also carries {@link HistoryConfig}.
+ * A `LiveConnectConfig` that also carries {@link HistoryConfig}.
  *
  * `@google/genai` 2.9.0 does not model `historyConfig` on `LiveConnectConfig`;
  * the Live API accepts it. Delete this and use the SDK type once the
