@@ -12,11 +12,11 @@ import {InvocationContext} from '../agents/invocation_context.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {BaseLlmRequestProcessor} from '../agents/processors/base_llm_processor.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
+import {Event} from '../events/event.js';
 import {
-  Event,
   getFunctionCalls,
   getFunctionResponses,
-} from '../events/event.js';
+} from '../models/llm_response.js';
 import {State} from '../sessions/state.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {camelCaseKeys} from '../utils/case_utils.js';

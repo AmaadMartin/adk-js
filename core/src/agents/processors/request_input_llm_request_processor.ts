@@ -6,11 +6,11 @@
 
 import {FunctionCall} from '@google/genai';
 
+import {Event} from '../../events/event.js';
 import {
-  Event,
   getFunctionCalls,
   getFunctionResponses,
-} from '../../events/event.js';
+} from '../../models/llm_response.js';
 import {ToolConfirmation} from '../../tools/tool_confirmation.js';
 import {AsyncQueue} from '../../utils/async_queue.js';
 import {isNodeTool} from '../../workflow/nodes/node_tool.js';

@@ -8,13 +8,41 @@ import {
   CitationMetadata,
   Content,
   FinishReason,
+  FunctionCall,
+  FunctionResponse,
   GenerateContentResponse,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
   LiveServerGoAway,
   LiveServerSessionResumptionUpdate,
+  LogprobsResult,
   Transcription,
+  TurnCompleteReason,
+  VoiceActivity,
 } from '@google/genai';
+
+import {logger} from '../utils/logger.js';
+import {CacheMetadata} from './cache_metadata.js';
+
+/**
+ * The activity state of a live session, reported alongside `turnComplete`.
+ *
+ * This mirrors the `InteractionStatus` enum of `@google/genai`, which the
+ * pinned version of that package does not export yet. The string values are
+ * the same, so the two are wire-compatible.
+ *
+ * NOTE: this is unrelated to the Interactions API `InteractionStatusUpdate`.
+ */
+export enum InteractionStatus {
+  /** The model reported no activity state. */
+  INTERACTION_STATUS_UNSPECIFIED = 'INTERACTION_STATUS_UNSPECIFIED',
+  /** The model still works on the prompt, and more model turns follow. */
+  IN_PROGRESS = 'IN_PROGRESS',
+  /** @deprecated Use {@link InteractionStatus.IDLE} instead. */
+  REQUIRES_ACTION = 'REQUIRES_ACTION',
+  /** The model finished the prompt and waits for more user input. */
+  IDLE = 'IDLE',
+}
 
 /**
  * LLM response class that provides the first candidate response from the
@@ -47,6 +75,31 @@ export interface LlmResponse {
    * Only used for streaming mode.
    */
   turnComplete?: boolean;
+
+  /**
+   * The reason why the turn is complete.
+   * Only used for streaming mode.
+   */
+  turnCompleteReason?: TurnCompleteReason;
+
+  /**
+   * The activity state of the live session, reported with `turnComplete`.
+   *
+   * Newer live models may answer one user prompt with several model turns, so
+   * `turnComplete` alone no longer means the model is done. This field
+   * separates the two cases:
+   *
+   * * `IN_PROGRESS`: the model still works on the user's prompt, and more
+   *   turns follow. The app must not treat the interaction as finished, and
+   *   must not re-enable the microphone yet.
+   * * `IDLE`: the model finished the user's prompt and waits for more user
+   *   input.
+   *
+   * It stays absent for models that do not report it. A caller that builds a
+   * turn-taking user interface should then treat `turnComplete === true` as
+   * terminal.
+   */
+  interactionStatus?: InteractionStatus;
 
   /**
    * Error code if the response is an error. Code varies by model.
@@ -93,6 +146,11 @@ export interface LlmResponse {
   goAway?: LiveServerGoAway;
 
   /**
+   * Voice activity signal from the Live model.
+   */
+  voiceActivity?: VoiceActivity;
+
+  /**
    * Audio transcription of user input.
    */
   inputTranscription?: Transcription;
@@ -103,15 +161,78 @@ export interface LlmResponse {
   outputTranscription?: Transcription;
 
   /**
+   * Average log probability of the generated tokens.
+   */
+  avgLogprobs?: number;
+
+  /**
+   * Detailed log probabilities for the chosen and the top candidate tokens.
+   */
+  logprobsResult?: LogprobsResult;
+
+  /**
+   * Context cache metadata when caching served this response.
+   *
+   * It carries the cache identity, its use count and its lifecycle. The
+   * context caching request processor populates it.
+   */
+  cacheMetadata?: CacheMetadata;
+
+  /**
    * The interaction ID returned by the model, if any.
    */
   interactionId?: string;
+
+  /**
+   * The execution environment ID from the interactions API.
+   *
+   * An interactions-API agent populates it when it provisions or reuses a
+   * sandbox environment. It is persisted on the resulting Event, so a later
+   * turn can reuse the same environment for stateful work.
+   */
+  environmentId?: string;
 
   /** The model version used to generate the response. */
   modelVersion?: string;
 
   /** The session ID of the Live session. */
   liveSessionId?: string;
+}
+
+/**
+ * Returns the function calls in the response, in the order the model emitted
+ * them.
+ */
+export function getFunctionCalls(response: LlmResponse): FunctionCall[] {
+  const funcCalls = [];
+  if (response.content && response.content.parts) {
+    for (const part of response.content.parts) {
+      if (part.functionCall) {
+        funcCalls.push(part.functionCall);
+      }
+    }
+  }
+
+  return funcCalls;
+}
+
+/**
+ * Returns the function responses in the response, in the order the model
+ * emitted them.
+ */
+export function getFunctionResponses(
+  response: LlmResponse,
+): FunctionResponse[] {
+  const funcResponses = [];
+  if (response.content && response.content.parts) {
+    for (const part of response.content.parts) {
+      if (part.functionResponse) {
+        funcResponses.push(part.functionResponse);
+      }
+    }
+  }
+
+  return funcResponses;
 }
 
 /**
@@ -128,13 +249,19 @@ export function createLlmResponse(
 
   if (response.candidates && response.candidates.length > 0) {
     const candidate = response.candidates[0];
-    if (candidate.content?.parts && candidate.content.parts.length > 0) {
+    if (
+      (candidate.content?.parts && candidate.content.parts.length > 0) ||
+      candidate.finishReason === FinishReason.STOP
+    ) {
       return {
         content: candidate.content,
         groundingMetadata: candidate.groundingMetadata,
         citationMetadata: candidate.citationMetadata,
         usageMetadata: usageMetadata,
         finishReason: candidate.finishReason,
+        avgLogprobs: candidate.avgLogprobs,
+        logprobsResult: candidate.logprobsResult,
+        modelVersion: response.modelVersion,
       };
     }
 
@@ -144,6 +271,9 @@ export function createLlmResponse(
       usageMetadata: usageMetadata,
       citationMetadata: candidate.citationMetadata,
       finishReason: candidate.finishReason,
+      avgLogprobs: candidate.avgLogprobs,
+      logprobsResult: candidate.logprobsResult,
+      modelVersion: response.modelVersion,
     };
   }
 
@@ -152,13 +282,19 @@ export function createLlmResponse(
       errorCode: response.promptFeedback.blockReason,
       errorMessage: response.promptFeedback.blockReasonMessage,
       usageMetadata: usageMetadata,
+      modelVersion: response.modelVersion,
     };
   }
 
-  // The ultimate fallback for an unknown error state
+  // Some model backends legitimately complete a turn without candidates, for
+  // example a tool-driven user-interface turn that carries no text.
+  logger.warn(
+    'Received empty candidates and no prompt feedback in model response. ' +
+      'Treating as a successful empty response.',
+  );
   return {
-    errorCode: 'UNKNOWN_ERROR',
-    errorMessage: 'Unknown error.',
+    content: {role: 'model', parts: []},
     usageMetadata: usageMetadata,
+    modelVersion: response.modelVersion,
   };
 }

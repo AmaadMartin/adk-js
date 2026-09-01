@@ -160,8 +160,6 @@ export type {CompactedEvent} from './events/compacted_event.js';
 export {
   createEvent,
   generateClientFunctionCallId,
-  getFunctionCalls,
-  getFunctionResponses,
   hasThoughts,
   hasTrailingCodeExecutionResult,
   isFinalResponse,
@@ -210,9 +208,19 @@ export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
+export type {
+  ActiveCacheMetadata,
+  CacheMetadata,
+  FingerprintCacheMetadata,
+} from './models/cache_metadata.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export type {LlmRequest} from './models/llm_request.js';
+export {
+  InteractionStatus,
+  getFunctionCalls,
+  getFunctionResponses,
+} from './models/llm_response.js';
 export type {LlmResponse} from './models/llm_response.js';
 export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
