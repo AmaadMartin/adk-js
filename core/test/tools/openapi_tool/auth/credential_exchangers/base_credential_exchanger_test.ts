@@ -4,16 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * Covers the OpenAPI toolset's synchronous `BaseAuthCredentialExchanger`. That
+ * is a different hierarchy from the asynchronous `BaseCredentialExchanger`
+ * interface in `core/src/auth/exchanger/`, which adk-python also keeps
+ * separately. Neither one replaces the other.
+ */
+
 import {describe, expect, it} from 'vitest';
 import {
   AuthCredential,
   AuthCredentialTypes,
-} from '../../../src/auth/auth_credential.js';
-import {AuthScheme} from '../../../src/auth/auth_schemes.js';
+} from '../../../../../src/auth/auth_credential.js';
+import {AuthScheme} from '../../../../../src/auth/auth_schemes.js';
 import {
   AuthCredentialMissingError,
   BaseAuthCredentialExchanger,
-} from '../../../src/tools/openapi_tool/auth/credential_exchangers/base_credential_exchanger.js';
+} from '../../../../../src/tools/openapi_tool/auth/credential_exchangers/base_credential_exchanger.js';
 
 const AUTH_SCHEME: AuthScheme = {
   type: 'apiKey',
