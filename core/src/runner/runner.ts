@@ -176,6 +176,12 @@ export function isRunner(obj: unknown): obj is Runner {
  *   console.log(event);
  * }
  * ```
+ *
+ * adk-python also offers a synchronous `run()`, which drains the async
+ * generator from a background thread. Node has no equivalent: blocking the main
+ * thread stops the very work being driven, and a worker thread cannot hold the
+ * live agents, model clients and services this runner owns. `runAsync` is
+ * already consumable with `for await`, so there is nothing to add.
  */
 export class Runner {
   readonly [RUNNER_SIGNATURE_SYMBOL] = true;
