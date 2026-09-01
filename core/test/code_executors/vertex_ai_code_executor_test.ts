@@ -365,6 +365,8 @@ describe('VertexAiCodeExecutor', () => {
       ['report.pdf', 'application/pdf'],
       ['blob.xyz', 'application/octet-stream'],
       ['noextension', 'application/octet-stream'],
+      ['plot.JPG', 'image/jpeg'],
+      ['jpg', 'image/jpg'],
     ])('maps %s to %s', async (name, mimeType) => {
       client.response = {output_files: [{name, contents: 'AAA='}]};
       const executor = new VertexAiCodeExecutor({
@@ -421,6 +423,20 @@ describe('VertexAiCodeExecutor', () => {
       await expect(
         executor.executeCode(buildParams(buildInput())),
       ).rejects.toThrow('API request failed with status 403: no');
+    });
+
+    it('rejects an execution that has to create an extension without a project', async () => {
+      vi.stubEnv('GOOGLE_CLOUD_PROJECT', undefined);
+      const executor = new VertexAiCodeExecutor({
+        resourceName: RESOURCE_NAME,
+        client,
+      });
+      executor.resourceName = undefined;
+
+      await expect(
+        executor.executeCode(buildParams(buildInput())),
+      ).rejects.toThrow('Project ID is required.');
+      expect(client.importCalls).toEqual([]);
     });
 
     it('reports an unsupported language without calling the client', async () => {

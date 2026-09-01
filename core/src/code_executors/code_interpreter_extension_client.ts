@@ -17,6 +17,21 @@ const EXTENSION_DESCRIPTION =
 
 const EXECUTE_OPERATION_ID = 'execute';
 
+/** The `extensions:import` body that provisions the code interpreter. */
+const IMPORT_REQUEST_BODY = {
+  displayName: EXTENSION_DISPLAY_NAME,
+  description: EXTENSION_DESCRIPTION,
+  manifest: {
+    name: MANIFEST_NAME,
+    description: EXTENSION_DESCRIPTION,
+    apiSpec: {openApiGcsUri: MANIFEST_GCS_URI},
+    authConfig: {
+      authType: 'GOOGLE_SERVICE_ACCOUNT_AUTH',
+      googleServiceAccountConfig: {},
+    },
+  },
+};
+
 /** How many times the import operation is polled before giving up. */
 const IMPORT_MAX_POLL_ATTEMPTS = 180;
 /** How long to wait between two polls of the import operation. */
@@ -114,22 +129,6 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildImportBody() {
-  return {
-    displayName: EXTENSION_DISPLAY_NAME,
-    description: EXTENSION_DESCRIPTION,
-    manifest: {
-      name: MANIFEST_NAME,
-      description: EXTENSION_DESCRIPTION,
-      apiSpec: {openApiGcsUri: MANIFEST_GCS_URI},
-      authConfig: {
-        authType: 'GOOGLE_SERVICE_ACCOUNT_AUTH',
-        googleServiceAccountConfig: {},
-      },
-    },
-  };
-}
-
 /**
  * Reads the extension name out of a finished import operation.
  *
@@ -161,7 +160,7 @@ export class VertexAiCodeInterpreterExtensionClient implements CodeInterpreterEx
     let operation = await this.request<ImportOperation>(
       'POST',
       `${baseUrl}/projects/${projectId}/locations/${location}/extensions:import`,
-      buildImportBody(),
+      IMPORT_REQUEST_BODY,
     );
     const operationUrl = `${baseUrl}/${operation.name}`;
 

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {VertexAiCodeInterpreterExtensionClient} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {VertexAiCodeInterpreterExtensionClient} from '../../src/code_executors/code_interpreter_extension_client.js';
 
 vi.mock('google-auth-library', () => ({
   GoogleAuth: vi.fn(() => ({

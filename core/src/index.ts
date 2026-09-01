@@ -17,12 +17,11 @@ export {
   type AgentEngineSandboxCodeExecutorOptions,
 } from './code_executors/agent_engine_sandbox_code_executor.js';
 export {CodeExecutionLanguage} from './code_executors/code_execution_utils.js';
-export {
-  VertexAiCodeInterpreterExtensionClient,
-  type CodeInterpreterExecuteParams,
-  type CodeInterpreterExecuteResponse,
-  type CodeInterpreterExtensionClient,
-  type CodeInterpreterFile,
+export type {
+  CodeInterpreterExecuteParams,
+  CodeInterpreterExecuteResponse,
+  CodeInterpreterExtensionClient,
+  CodeInterpreterFile,
 } from './code_executors/code_interpreter_extension_client.js';
 export {
   UnsafeLocalCodeExecutor,

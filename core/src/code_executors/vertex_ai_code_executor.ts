@@ -24,9 +24,6 @@ import {
 const EXTENSION_NAME_ENV_VAR = 'CODE_INTERPRETER_EXTENSION_NAME';
 const DEFAULT_LOCATION = 'us-central1';
 
-const SUPPORTED_IMAGE_TYPES = ['png', 'jpg', 'jpeg'];
-const SUPPORTED_DATA_FILE_TYPES = ['csv'];
-
 /**
  * Prepended to every execution so the generated code can rely on a fixed set
  * of libraries and on `explore_df`. Kept byte-for-byte identical to
@@ -130,35 +127,20 @@ function getCodeWithImports(code: string): string {
 /**
  * Maps a file returned by the extension to an ADK file.
  *
- * The image branch reproduces adk-python's `f'image/{file_type}'`, so a `.jpg`
- * becomes `image/jpg` rather than the registered `image/jpeg`. The MIME type
- * reaches the model, so both SDKs must report the same one.
+ * adk-python builds `f'image/{file_type}'`, so a `.jpg` becomes `image/jpg`
+ * rather than the registered `image/jpeg`. The MIME type reaches the model, so
+ * both SDKs must report the same one. Every other extension the reference
+ * special-cases already agrees with `guessMimeType`.
  *
  * @param outputFile The file as returned by the extension.
  * @return The ADK file, with its content still base64-encoded.
  */
 function toOutputFile(outputFile: CodeInterpreterFile): File {
-  const parts = outputFile.name.split('.');
-  const fileType = parts[parts.length - 1];
-
-  if (SUPPORTED_IMAGE_TYPES.includes(fileType)) {
-    return {
-      name: outputFile.name,
-      content: outputFile.contents,
-      mimeType: `image/${fileType}`,
-    };
-  }
-  if (SUPPORTED_DATA_FILE_TYPES.includes(fileType)) {
-    return {
-      name: outputFile.name,
-      content: outputFile.contents,
-      mimeType: `text/${fileType}`,
-    };
-  }
+  const isJpg = outputFile.name.split('.').pop() === 'jpg';
   return {
     name: outputFile.name,
     content: outputFile.contents,
-    mimeType: guessMimeType(outputFile.name),
+    mimeType: isJpg ? 'image/jpg' : guessMimeType(outputFile.name),
   };
 }
 
@@ -202,21 +184,14 @@ export class VertexAiCodeExecutor extends BaseCodeExecutor {
     this.resourceName =
       options.resourceName ?? process.env[EXTENSION_NAME_ENV_VAR];
 
-    if (this.resourceName) {
-      const location = parseExtensionLocation(this.resourceName);
-      if (!location) {
-        throw new Error(
-          `Invalid code interpreter extension resource name: ${this.resourceName}`,
-        );
-      }
-      this.location = location;
-    } else {
-      this.location =
-        options.location ??
-        process.env.GOOGLE_CLOUD_LOCATION ??
-        DEFAULT_LOCATION;
+    if (this.resourceName && !parseExtensionLocation(this.resourceName)) {
+      throw new Error(
+        `Invalid code interpreter extension resource name: ${this.resourceName}`,
+      );
     }
 
+    this.location =
+      options.location ?? process.env.GOOGLE_CLOUD_LOCATION ?? DEFAULT_LOCATION;
     this.projectId = options.projectId ?? process.env.GOOGLE_CLOUD_PROJECT;
     if (!this.resourceName && !this.projectId) {
       throw new Error('Project ID is required.');
@@ -282,11 +257,14 @@ export class VertexAiCodeExecutor extends BaseCodeExecutor {
   }
 
   private async importExtension(): Promise<string> {
+    if (!this.projectId) {
+      throw new Error('Project ID is required.');
+    }
     logger.debug(
       `No ${EXTENSION_NAME_ENV_VAR} found in the environment. Creating a new code interpreter extension.`,
     );
     const resourceName = await this.client.importFromHub(
-      this.projectId!,
+      this.projectId,
       this.location,
     );
     this.resourceName = resourceName;
