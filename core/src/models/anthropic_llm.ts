@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Anthropic, BaseAnthropic} from '@anthropic-ai/sdk';
+import type {Anthropic} from '@anthropic-ai/sdk';
 import {FunctionDeclaration, Part, Tool} from '@google/genai';
 
 import {logger} from '../utils/logger.js';
@@ -61,6 +61,19 @@ const RATE_LIMIT_POSSIBLE_FIX_MESSAGE =
 
 const HTTP_TOO_MANY_REQUESTS = 429;
 
+/**
+ * The start of the message the Anthropic SDK raises when it resolved no
+ * credential at all. The SDK raises a plain `Error` here, so its message is
+ * the only public signal.
+ */
+const SDK_NO_CREDENTIAL_MESSAGE = 'Could not resolve authentication method';
+
+const NO_CREDENTIAL_HINT =
+  'No Anthropic credential was found for calling Claude through the ' +
+  'Anthropic API. Set ANTHROPIC_API_KEY to a key from the Anthropic ' +
+  'Console, e.g. `export ANTHROPIC_API_KEY=<your-key>`, or configure any ' +
+  'other credential the Anthropic SDK can discover.';
+
 /** Pulls the model id out of a full Vertex AI resource name. */
 const VERTEX_MODEL_RESOURCE_NAME =
   /projects\/[^/]+\/locations\/[^/]+\/(?:publishers\/anthropic\/models|endpoints)\/([^/:]+)/;
@@ -77,9 +90,6 @@ const VERTEX_PROJECT_AND_LOCATION = /projects\/([^/]+)\/locations\/([^/]+)\//;
  * implements it.
  */
 export interface AnthropicClient {
-  readonly apiKey: BaseAnthropic['apiKey'];
-  readonly authToken: BaseAnthropic['authToken'];
-  readonly credentials: BaseAnthropic['credentials'];
   readonly messages: AnthropicMessages;
 }
 
@@ -110,7 +120,7 @@ export interface AnthropicLlmParams {
   model?: string;
   /** Upper bound on generated tokens when the request does not set one. */
   maxTokens?: number;
-  /** A pre-configured client. Skips credential resolution entirely. */
+  /** A pre-configured client. Skips the SDK's credential resolution. */
   client?: AnthropicClient;
 }
 
@@ -139,6 +149,28 @@ function isRateLimitError(err: unknown): err is Error {
     err instanceof Error &&
     'status' in err &&
     err.status === HTTP_TOO_MANY_REQUESTS
+  );
+}
+
+/**
+ * Raised when the Anthropic SDK found no credential for the request.
+ *
+ * The SDK resolves a credential asynchronously, from an environment variable
+ * or from the on-disk Anthropic configuration, and only reports the outcome
+ * when a request is made. So the failure is translated here rather than
+ * predicted at construction, which would reject a signed-in profile that has
+ * no environment variable set.
+ */
+export class AnthropicCredentialError extends Error {
+  constructor(cause: Error) {
+    super(`${NO_CREDENTIAL_HINT}\n\n${cause.message}`, {cause});
+    this.name = 'AnthropicCredentialError';
+  }
+}
+
+function isMissingCredentialError(err: unknown): err is Error {
+  return (
+    err instanceof Error && err.message.startsWith(SDK_NO_CREDENTIAL_MESSAGE)
   );
 }
 
@@ -479,11 +511,14 @@ export class AnthropicLlm extends BaseLlm {
       if (isRateLimitError(err)) {
         throw new AnthropicRateLimitError(err);
       }
+      if (isMissingCredentialError(err)) {
+        throw new AnthropicCredentialError(err);
+      }
       throw err;
     }
   }
 
-  override async connect(): Promise<BaseLlmConnection> {
+  override async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
     throw new Error(`Live connection is not supported for ${this.model}.`);
   }
 
@@ -501,30 +536,18 @@ export class AnthropicLlm extends BaseLlm {
   /**
    * Builds the client for this model.
    *
-   * The SDK runs its own credential resolution first and is then asked what it
-   * found. Enumerating credential sources here would reject setups the SDK
-   * handles, such as a signed-in on-disk profile with no environment variable.
-   *
-   * @throws If the SDK resolved no credential.
+   * The SDK resolves the credential itself, from `ANTHROPIC_API_KEY`,
+   * `ANTHROPIC_AUTH_TOKEN`, or the on-disk Anthropic configuration.
    */
   protected async createClient(): Promise<AnthropicClient> {
     if (this.injectedClient) {
       return this.injectedClient;
     }
-    const {Anthropic: AnthropicClientClass} = await loadOptionalPeer(
+    const {Anthropic: AnthropicApiClient} = await loadOptionalPeer(
       ANTHROPIC_SDK,
       () => import('@anthropic-ai/sdk'),
     );
-    const client = new AnthropicClientClass();
-    if (!client.apiKey && !client.authToken && !client.credentials) {
-      throw new Error(
-        'No Anthropic credential was found for calling Claude through the ' +
-          'Anthropic API. Set ANTHROPIC_API_KEY to a key from the Anthropic ' +
-          'Console, e.g. `export ANTHROPIC_API_KEY=<your-key>`, or configure ' +
-          'any other credential the Anthropic SDK can discover.',
-      );
-    }
-    return client;
+    return new AnthropicApiClient();
   }
 
   /** Resolves the model id to send, unwrapping a Vertex resource name. */

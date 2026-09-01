@@ -37,7 +37,7 @@ export interface AnthropicGenerateContentConfig extends GenerateContentConfig {
  * adk-python makes this state unconstructable with a pydantic validator. A
  * TypeScript interface cannot validate at construction, so the check runs when
  * the config is read. Call it eagerly to fail at the point the config is
- * built; {@link buildEffortParam} calls it on every request either way.
+ * built; the request path calls it on every request either way.
  *
  * @param config The config to check.
  * @throws If both `effort` and `thinkingConfig.thinkingLevel` are set.
