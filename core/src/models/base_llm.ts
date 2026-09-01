@@ -42,17 +42,6 @@ export abstract class BaseLlm {
   readonly model: string;
 
   /**
-   * Whether this provider pairs a tool call with its result by id.
-   *
-   * Anthropic-, LiteLLM- and OpenAI-style providers match a tool result to the
-   * call it answers by id, so the `adk-` fallback ids ADK generates must
-   * survive replay instead of being stripped on the way out. Gemini matches by
-   * position and leaves this `false`; a provider implemented outside this
-   * package sets it to `true`.
-   */
-  readonly pairsToolCallsById: boolean = false;
-
-  /**
    * Creates an instance of BaseLLM.
    * @param params The parameters for creating a BaseLlm instance.
    * @param params.model The name of the LLM, e.g. gemini-1.5-flash or

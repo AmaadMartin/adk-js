@@ -67,7 +67,7 @@ export async function* runLlmAgentAsNode(
     // A task node has no delegating function call to state its task, so the
     // node input takes that place. `single_turn` is excluded: it already
     // appends the input as a scoped user turn above.
-    if (nodeInput !== undefined && nodeInput !== null) {
+    if (nodeInput != null) {
       agentIc = agentIc.clone({userContent: toUserContent(nodeInput)});
     }
     yield* runTaskMode(ctx, agentIc, agent);

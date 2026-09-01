@@ -5,9 +5,6 @@
  */
 
 import {
-  BaseAgent,
-  BaseLlm,
-  BaseLlmConnection,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
   createEvent,
@@ -18,7 +15,6 @@ import {
   InvocationContext,
   LlmAgent,
   LlmRequest,
-  LlmResponse,
   PluginManager,
   RunConfig,
   Session,
@@ -75,7 +71,7 @@ function createMockInvocationContext(events: Event[]): InvocationContext {
 
   return new InvocationContext({
     invocationId: 'test-invocation',
-    agent: agent as BaseAgent,
+    agent,
     session,
     pluginManager: new PluginManager([]),
   });
@@ -193,19 +189,7 @@ describe('ContentRequestProcessor', () => {
   });
 });
 
-describe('ContentRequestProcessor — model capabilities', () => {
-  class IdPairingLlm extends BaseLlm {
-    override readonly pairsToolCallsById = true;
-
-    generateContentAsync(): AsyncGenerator<LlmResponse, void, void> {
-      throw new Error('IdPairingLlm does not generate content.');
-    }
-
-    async connect(): Promise<BaseLlmConnection> {
-      throw new Error('IdPairingLlm does not support live mode.');
-    }
-  }
-
+describe('ContentRequestProcessor — function call ids', () => {
   function callAndResponseEvents(): Event[] {
     return [
       createEvent({
@@ -227,19 +211,16 @@ describe('ContentRequestProcessor — model capabilities', () => {
     ];
   }
 
-  async function contentsFor(
-    model: BaseLlm,
-    events: Event[],
-  ): Promise<Content[]> {
+  async function contentsFor(model: Gemini): Promise<Content[]> {
     const session = createSession({
       id: 'test-session',
-      events,
+      events: callAndResponseEvents(),
       appName: 'test-app',
       userId: 'test-user',
     });
     const invocationContext = new InvocationContext({
       invocationId: 'test-invocation',
-      agent: new LlmAgent({name: 'test_agent', model}) as BaseAgent,
+      agent: new LlmAgent({name: 'test_agent', model}),
       session,
       pluginManager: new PluginManager([]),
     });
@@ -260,7 +241,6 @@ describe('ContentRequestProcessor — model capabilities', () => {
   it('strips the adk- ids for a plain Gemini model', async () => {
     const contents = await contentsFor(
       new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
-      callAndResponseEvents(),
     );
 
     expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
@@ -273,16 +253,6 @@ describe('ContentRequestProcessor — model capabilities', () => {
         apiKey: 'test-api-key',
         useInteractionsApi: true,
       }),
-      callAndResponseEvents(),
-    );
-
-    expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
-  });
-
-  it('preserves the adk- ids for a provider that pairs tool calls by id', async () => {
-    const contents = await contentsFor(
-      new IdPairingLlm({model: 'id-pairing-llm'}),
-      callAndResponseEvents(),
     );
 
     expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
@@ -315,7 +285,7 @@ describe('ContentRequestProcessor — thoughts from other agents', () => {
         name: 'test_agent',
         model: new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
         includeContents,
-      }) as BaseAgent,
+      }),
       session,
       pluginManager: new PluginManager([]),
       runConfig,

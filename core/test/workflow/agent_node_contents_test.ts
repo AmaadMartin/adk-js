@@ -131,15 +131,17 @@ class CaptureTaskLlm extends BaseLlm {
   override async *generateContentAsync(
     llmRequest: LlmRequest,
   ): AsyncGenerator<LlmResponse, void> {
-    requests.push(
-      structuredClone({contents: llmRequest.contents}) as LlmRequest,
-    );
+    requests.push({
+      contents: structuredClone(llmRequest.contents),
+      toolsDict: {},
+      liveConnectConfig: {},
+    });
     yield {
       content: {
         role: 'model',
         parts: [{functionCall: {name: 'finish_task', args: {answer: 'done'}}}],
       },
-    } as LlmResponse;
+    };
   }
 
   override connect(): Promise<BaseLlmConnection> {

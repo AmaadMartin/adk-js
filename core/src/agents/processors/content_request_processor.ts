@@ -47,9 +47,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
     const events = getActiveEvents(invocationContext.session.events);
     const model = agent.canonicalModel;
     const options: GetContentsOptions = {
-      preserveFunctionCallIds:
-        (isGemini(model) && model.useInteractionsApi) ||
-        model.pairsToolCallsById,
+      preserveFunctionCallIds: isGemini(model) && model.useInteractionsApi,
       isSingleTurn: agent.mode === 'single_turn',
       userContent: invocationContext.userContent,
     };

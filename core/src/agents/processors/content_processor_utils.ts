@@ -16,7 +16,6 @@ import {
   getFunctionCalls,
   getFunctionResponses,
 } from '../../events/event.js';
-import {applyRewinds} from '../../events/rewind_events.js';
 import {isSegmentPrefix} from '../../utils/branch_trie.js';
 import {logger} from '../../utils/logger.js';
 
@@ -94,10 +93,9 @@ export function getContents(
   currentIsolationScope?: string,
   options: GetContentsOptions = {},
 ): Content[] {
-  const liveEvents = applyRewinds(events);
   const includedEvents: Event[] = [];
 
-  for (const event of liveEvents) {
+  for (const event of events) {
     if (isCompactedEvent(event)) {
       includedEvents.push(convertCompactedEvent(event));
       continue;
@@ -296,14 +294,23 @@ function accumulateTranscriptions(events: Event[]): Event[] {
       if (events[i + 1]?.inputTranscription?.text) {
         continue;
       }
-      result.push(withTranscriptContent(event, 'input', inputTranscript));
+      // Copy the event; the session owns the original.
+      result.push({
+        ...event,
+        inputTranscription: undefined,
+        content: {role: 'user', parts: [{text: inputTranscript}]},
+      });
       inputTranscript = '';
     } else if (outputText) {
       outputTranscript += outputText;
       if (events[i + 1]?.outputTranscription?.text) {
         continue;
       }
-      result.push(withTranscriptContent(event, 'output', outputTranscript));
+      result.push({
+        ...event,
+        outputTranscription: undefined,
+        content: {role: 'model', parts: [{text: outputTranscript}]},
+      });
       outputTranscript = '';
     } else {
       result.push(event);
@@ -311,24 +318,6 @@ function accumulateTranscriptions(events: Event[]): Event[] {
   }
 
   return result;
-}
-
-/**
- * A copy of a content-less transcription event carrying the accumulated text
- * as its content. The session's own event is left untouched.
- */
-function withTranscriptContent(
-  event: Event,
-  kind: 'input' | 'output',
-  text: string,
-): Event {
-  const content: Content = {
-    role: kind === 'input' ? 'user' : 'model',
-    parts: [{text}],
-  };
-  return kind === 'input'
-    ? {...event, inputTranscription: undefined, content}
-    : {...event, outputTranscription: undefined, content};
 }
 
 /**
@@ -500,7 +489,6 @@ export function getCurrentTurnContents(
   options: GetContentsOptions = {},
 ): Content[] {
   // Find the latest event that starts the current turn and process from there.
-  // Rewinds are left to getContents, which applies them to the slice.
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (

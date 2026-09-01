@@ -5,7 +5,6 @@
  */
 
 import {
-  BaseAgent,
   CONTENT_REQUEST_PROCESSOR,
   Gemini,
   InvocationContext,
@@ -159,7 +158,7 @@ describe('isolation scope — end to end through the content processor', () => {
       agent: new LlmAgent({
         name: 'reviewer',
         model: new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
-      }) as BaseAgent,
+      }),
       session,
       pluginManager: new PluginManager([]),
       isolationScope,

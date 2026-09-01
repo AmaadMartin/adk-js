@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  CompactedEvent,
-  createEvent,
-  createEventActions,
-  Event,
-} from '@google/adk';
+import {CompactedEvent, createEvent, Event} from '@google/adk';
 import {Content, Outcome, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
@@ -1852,41 +1847,6 @@ describe('getContents — adk-python parity', () => {
       expect(() => getContents([selfAnswering], 'my_agent')).toThrowError(
         'No function call event found for function responses ids: c1',
       );
-    });
-  });
-
-  describe('rewinds', () => {
-    const rewindMarker = createEvent({
-      author: 'user',
-      invocationId: 'inv-3',
-      actions: createEventActions({rewindBeforeInvocationId: 'inv-2'}),
-    });
-
-    it('drops the rewound invocation from the contents', () => {
-      const contents = getContents(
-        [
-          userTurn('keep me', 'inv-1'),
-          userTurn('rewind me', 'inv-2'),
-          rewindMarker,
-          userTurn('after the rewind', 'inv-4'),
-        ],
-        'my_agent',
-      );
-
-      expect(textsOf(contents)).toEqual(['keep me', 'after the rewind']);
-    });
-
-    it('drops a rewound turn from a current-turn build too', () => {
-      const contents = getCurrentTurnContents(
-        [
-          userTurn('keep me', 'inv-1'),
-          userTurn('rewind me', 'inv-2'),
-          rewindMarker,
-        ],
-        'my_agent',
-      );
-
-      expect(contents).toEqual([]);
     });
   });
 });
