@@ -74,13 +74,26 @@ class StubAgentLoader extends AgentLoader {
   }
 }
 
-/** Logger recording what the factory and the server report. */
+/** Agent loader that cannot list its agents. */
+class FailingAgentLoader extends AgentLoader {
+  override listAgents(): Promise<string[]> {
+    return Promise.reject(new Error('the agents directory is unreadable'));
+  }
+}
+
+/** Logger recording what the factory and the server report at its level. */
 class RecordingLogger implements Logger {
   readonly messages: Array<{level: LogLevel; message: string}> = [];
+  private logLevel = LogLevel.INFO;
 
-  setLogLevel(): void {}
+  setLogLevel(level: LogLevel): void {
+    this.logLevel = level;
+  }
 
   log(level: LogLevel, ...messages: unknown[]): void {
+    if (this.logLevel > level) {
+      return;
+    }
     this.messages.push({level, message: messages.join(' ')});
   }
 
@@ -314,6 +327,21 @@ describe('createApiServer', () => {
       });
     });
 
+    it('holds that report back at a log level above warn', () => {
+      const logger = new RecordingLogger();
+
+      createApiServer({
+        agentsDir,
+        web: false,
+        traceToCloud: true,
+        logger,
+        logLevel: LogLevel.ERROR,
+      });
+
+      expect(serverOptions().otelToCloud).toBe(false);
+      expect(logger.messages).toEqual([]);
+    });
+
     it('is ignored when otelToCloud is already on', () => {
       const logger = new RecordingLogger();
 
@@ -450,6 +478,28 @@ describe('a server built by createApiServer', () => {
     expect(card.body.name).toBe(AGENT_NAME);
   });
 
+  it('advertises bindHost, not host, on the A2A agent card', async () => {
+    const agentLoader = new StubAgentLoader(new LlmAgent({name: AGENT_NAME}));
+    server = createApiServer({
+      agentsDir,
+      web: false,
+      port: 0,
+      a2a: true,
+      agentLoader,
+      host: 'localhost',
+      bindHost: '127.0.0.1',
+    });
+    await server.start();
+
+    const card = await getJson<AgentCard>(
+      `${server.url}/a2a/${APP_NAME}/${AGENT_CARD_PATH}`,
+    );
+
+    // The server keeps one host, so bindHost moves the advertised host too.
+    // Both the option's documentation and the guide say so.
+    expect(new URL(card.body.url).hostname).toBe('127.0.0.1');
+  });
+
   it('mounts no A2A surface by default', async () => {
     const agentLoader = new StubAgentLoader(new LlmAgent({name: AGENT_NAME}));
     server = createApiServer({agentsDir, web: false, port: 0, agentLoader});
@@ -492,6 +542,27 @@ describe('a server built by createApiServer', () => {
     expect(
       logger.messages.filter((entry) => entry.message === 'GET /not-a-route'),
     ).toHaveLength(1);
+  });
+
+  it('reports a failed build to every later caller', async () => {
+    server = createApiServer({
+      agentsDir,
+      web: false,
+      port: 0,
+      a2a: true,
+      agentLoader: new FailingAgentLoader(),
+    });
+
+    await expect(server.buildApp()).rejects.toThrow(
+      'the agents directory is unreadable',
+    );
+    // A retry must not be handed the half-mounted app the first call left.
+    await expect(server.buildApp()).rejects.toThrow(
+      'the agents directory is unreadable',
+    );
+    await expect(server.start()).rejects.toThrow(
+      'the agents directory is unreadable',
+    );
   });
 });
 

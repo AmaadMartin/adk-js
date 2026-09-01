@@ -142,8 +142,8 @@ export class AdkApiServer {
   private readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
-  private initialized = false;
-  private a2aInitialized = false;
+  private initPromise?: Promise<void>;
+  private a2aPromise?: Promise<void>;
 
   constructor(options: ServerOptions) {
     this.host = options.host ?? 'localhost';
@@ -190,12 +190,17 @@ export class AdkApiServer {
     }
   }
 
-  private async initA2A() {
-    if (this.a2aInitialized) {
-      return;
-    }
-    this.a2aInitialized = true;
+  /**
+   * Mounts the A2A surface once, however often it is called. A caller that
+   * arrives while the first call is still mounting waits for it, and one
+   * that arrives after a failed call is told about that failure rather than
+   * being handed a half-mounted surface.
+   */
+  private initA2A(): Promise<void> {
+    return (this.a2aPromise ??= this.mountA2A());
+  }
 
+  private async mountA2A(): Promise<void> {
     const appNames = await this.agentLoader.listAgents();
     const authentication = this.a2aAuthToken
       ? bearerTokenUserBuilder(this.a2aAuthToken)
@@ -228,12 +233,15 @@ export class AdkApiServer {
     }
   }
 
-  private async init() {
-    if (this.initialized) {
-      return;
-    }
-    this.initialized = true;
+  /**
+   * Registers the middleware and routes once, however often it is called,
+   * with the same waiting and failure behaviour as {@link initA2A}.
+   */
+  private init(): Promise<void> {
+    return (this.initPromise ??= this.initApp());
+  }
 
+  private async initApp(): Promise<void> {
     const app = this.app;
     await this.setupTelemetry();
 

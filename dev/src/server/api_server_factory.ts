@@ -58,9 +58,17 @@ export interface ApiServerOptions {
    * `ADK_A2A_AUTH_TOKEN` environment variable.
    */
   a2aAuthToken?: string;
-  /** Host the server binds to, and the host the A2A card advertises. */
+  /**
+   * Host the server binds to, and the host the A2A agent card advertises.
+   * Defaults to `localhost`, which arms the DNS-rebinding guard.
+   */
   host?: string;
-  /** Overrides `host` as the address to bind, leaving the A2A card alone. */
+  /**
+   * Takes the place of `host` when set. `AdkApiServer` keeps one host, so
+   * this is the bind address, the address the DNS-rebinding guard measures,
+   * and the host the A2A agent card advertises -- it does not split the
+   * bind address off from the advertised one.
+   */
   bindHost?: string;
   /** Port the server binds to. Defaults to 8000. */
   port?: number;
@@ -95,6 +103,9 @@ export interface ApiServerOptions {
 export function createApiServer(options: ApiServerOptions): AdkApiServer {
   const agentsDir = getAbsolutePath(options.agentsDir);
   const logger = options.logger ?? createServerLogger();
+  // The factory reports before the server constructor sets the level, so it
+  // has to set the level itself or logLevel cannot suppress what it reports.
+  logger.setLogLevel(options.logLevel ?? LogLevel.INFO);
 
   return new AdkApiServer({
     agentsDir,

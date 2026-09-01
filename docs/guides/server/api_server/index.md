@@ -42,8 +42,13 @@ const app = await createApiServerApp({
   port: 8080,
 });
 
-http.createServer(app).listen(8080);
+http.createServer(app).listen(8080, 'localhost');
 ```
+
+The listener binds `localhost` because `host` defaults to `localhost`, and a
+loopback host arms the DNS-rebinding guard: the app then answers only a
+request whose `Host` header is loopback. Serving it on another address takes
+one more option, described under [Network](#network).
 
 Or let the server own the socket, which is what `adk web` does:
 
@@ -89,9 +94,10 @@ than files under `agentsDir`.
 
 ## Network
 
-`host` is the address the server binds, and the address the A2A agent card
-advertises. `bindHost` overrides the first without touching the second, for a
-server behind a proxy.
+`host` is the address the server binds, the address the DNS-rebinding guard
+measures, and the host the A2A agent card advertises. `bindHost` takes its
+place when set. The server keeps one host, so `bindHost` moves all three
+together; it does not advertise one address and bind another.
 
 A server bound to loopback rejects a request whose `Host` header names
 anything else, which is what stops a DNS-rebinding page from reaching it.
@@ -115,8 +121,9 @@ const app = await createApiServerApp({
 authenticate it; without a token the surface is served unauthenticated, which
 is a local-development setting.
 
-The agent card is built from the configured `host` and `port`, so serve the
-app on those.
+The agent card advertises the configured `host` and `port` -- or `bindHost`
+in place of `host` -- so serve the app on those. A client cannot reach the
+card's URL if you serve the app somewhere else, behind a proxy for instance.
 
 ## Telemetry
 
