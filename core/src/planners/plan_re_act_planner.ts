@@ -91,32 +91,7 @@ const NL_PLANNER_INSTRUCTION = [
 ].join('\n\n');
 
 /**
- * Splits the text by the last occurrence of the separator.
- *
- * @param text The text to split.
- * @param separator The separator to split on.
- * @returns The text up to and including the last separator, and the text after
- *     it. When the separator is absent, the whole text and an empty string.
- */
-export function splitByLastPattern(
-  text: string,
-  separator: string,
-): [string, string] {
-  const index = text.lastIndexOf(separator);
-  if (index === -1) {
-    return [text, ''];
-  }
-  return [
-    text.slice(0, index + separator.length),
-    text.slice(index + separator.length),
-  ];
-}
-
-/**
  * Removes every planning tag from the text.
- *
- * The removal is a literal substring replacement, so model-supplied text is
- * never compiled into a pattern.
  *
  * @param text The text to strip.
  * @returns The text with all planning tags removed.
@@ -124,7 +99,7 @@ export function splitByLastPattern(
 export function stripPlanningTags(text: string): string {
   let stripped = text;
   for (const tag of PLANNING_TAGS) {
-    stripped = stripped.split(tag).join('');
+    stripped = stripped.replaceAll(tag, '');
   }
   return stripped;
 }
@@ -146,15 +121,11 @@ function handleNonFunctionCallPart(
   const text = responsePart.text ?? '';
 
   if (text && text.includes(FINAL_ANSWER_TAG)) {
-    const [beforeAnswer, finalAnswerText] = splitByLastPattern(
-      text,
-      FINAL_ANSWER_TAG,
-    );
-    // splitByLastPattern includes the separator in the left part; drop it so
-    // the reasoning block holds only the reasoning text.
-    const reasoningText = stripPlanningTags(
-      beforeAnswer.slice(0, -FINAL_ANSWER_TAG.length),
-    );
+    // The answer is whatever follows the last tag; everything before it is
+    // reasoning.
+    const index = text.lastIndexOf(FINAL_ANSWER_TAG);
+    const reasoningText = stripPlanningTags(text.slice(0, index));
+    const finalAnswerText = text.slice(index + FINAL_ANSWER_TAG.length);
     if (reasoningText) {
       preservedParts.push({text: reasoningText, thought: true});
     }

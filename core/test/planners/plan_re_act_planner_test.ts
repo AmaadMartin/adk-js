@@ -17,11 +17,11 @@ import {
   REPLANNING_TAG,
   ReadonlyContext,
   createSession,
-  splitByLastPattern,
-  stripPlanningTags,
 } from '@google/adk';
 import {Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+
+import {stripPlanningTags} from '../../src/planners/plan_re_act_planner.js';
 
 function createInvocationContext(): InvocationContext {
   return new InvocationContext({
@@ -275,21 +275,6 @@ describe('PlanReActPlanner.buildPlanningInstruction', () => {
     expect(first).toContain('Below are the requirements for the final answer:');
     expect(first).toContain('Below are the requirements for the tool code:');
     expect(first).toContain('VERY IMPORTANT instruction');
-  });
-});
-
-describe('splitByLastPattern', () => {
-  it('returns the whole text when the separator is absent', () => {
-    expect(splitByLastPattern('no tag here', FINAL_ANSWER_TAG)).toEqual([
-      'no tag here',
-      '',
-    ]);
-  });
-
-  it('keeps the separator on the left side', () => {
-    expect(
-      splitByLastPattern(`a${FINAL_ANSWER_TAG}b`, FINAL_ANSWER_TAG),
-    ).toEqual([`a${FINAL_ANSWER_TAG}`, 'b']);
   });
 });
 

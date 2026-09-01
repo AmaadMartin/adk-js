@@ -230,8 +230,6 @@ export {
   PlanReActPlanner,
   REASONING_TAG,
   REPLANNING_TAG,
-  splitByLastPattern,
-  stripPlanningTags,
 } from './planners/plan_re_act_planner.js';
 export {
   GLOBAL_SCOPE_KEY,
