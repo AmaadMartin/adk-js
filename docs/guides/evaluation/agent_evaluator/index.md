@@ -93,9 +93,11 @@ import {AgentEvaluator} from '@google/adk';
 
 await AgentEvaluator.migrateEvalDataToNewSchema({
   oldEvalDataFile: './tests/dice/roll.test.json',
-  newEvalDataFile: './tests/dice/roll.evalset.json',
+  newEvalDataFile: './tests/dice/roll.migrated.test.json',
   initialSessionFile: './tests/dice/initial.session.json',
 });
 ```
+
+Give the migrated file a `.test.json` name and put the original aside, because `evaluate` only collects `*.test.json`. It reads either format from that name, so the migrated file is picked up in place of the original.
 
 The written file holds an `EvalSet` with snake_case field names, the same form adk-python reads and writes. An explicit initial session belongs only to the original format: once the data is an eval set, the session lives in the eval case's `session_input`, and passing `initialSessionFile` alongside an eval set file is an error.

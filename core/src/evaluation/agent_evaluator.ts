@@ -181,9 +181,7 @@ export interface MigrateEvalDataOptions {
 }
 
 /** Reads the eval config from the test file's own folder. */
-export async function findConfigForTestFile(
-  testFile: string,
-): Promise<EvalConfig> {
+async function findConfigForTestFile(testFile: string): Promise<EvalConfig> {
   return getEvaluationCriteriaOrDefault(
     path.join(path.dirname(testFile), TEST_CONFIG_FILE),
   );
@@ -193,9 +191,7 @@ export async function findConfigForTestFile(
  * Runs one eval set against an agent and throws when a metric falls below its
  * threshold.
  */
-export async function evaluateEvalSet(
-  options: EvaluateEvalSetOptions,
-): Promise<void> {
+async function evaluateEvalSet(options: EvaluateEvalSetOptions): Promise<void> {
   requireAppNameForResultsManager(options);
   const evalConfig = resolveEvalConfig(options);
   const {agent, app} = await getAgentForEval(
@@ -253,7 +249,7 @@ export async function evaluateEvalSet(
  * Each file is evaluated with the config found in its own folder, so one call
  * can cover folders with different criteria.
  */
-export async function evaluate(options: EvaluateOptions): Promise<void> {
+async function evaluate(options: EvaluateOptions): Promise<void> {
   requireAppNameForResultsManager(options);
   const testFiles = await findTestFiles(options.evalDatasetFilePathOrDir);
   const initialSession = await getInitialSession(options.initialSessionFile);
@@ -281,7 +277,7 @@ export async function evaluate(options: EvaluateOptions): Promise<void> {
 }
 
 /** Converts an eval data file in the original format to an eval set file. */
-export async function migrateEvalDataToNewSchema(
+async function migrateEvalDataToNewSchema(
   options: MigrateEvalDataOptions,
 ): Promise<void> {
   if (!options.oldEvalDataFile || !options.newEvalDataFile) {
@@ -408,7 +404,7 @@ async function buildEvalSetsManager(
  * An {@link EvalCaseResult} holds metric results per invocation; a verdict
  * needs every invocation's score for one metric, so this flips the nesting.
  */
-export function groupMetricResultsByMetric(
+function groupMetricResultsByMetric(
   resultsPerEvalId: readonly EvalCaseResult[],
 ): Map<string, EvalMetricResultWithInvocation[]> {
   const byMetric = new Map<string, EvalMetricResultWithInvocation[]>();
@@ -429,7 +425,7 @@ export function groupMetricResultsByMetric(
 }
 
 /** Averages each metric's scores and returns a line per failing metric. */
-export function processMetricsAndGetFailures(
+function processMetricsAndGetFailures(
   metricResults: ReadonlyMap<string, EvalMetricResultWithInvocation[]>,
   printDetailedResults: boolean,
   agentModule: string,
@@ -476,7 +472,7 @@ function overallEvalStatus(
  * with nothing to judge, so the status on the eval case result is the only
  * record that it failed.
  */
-export function getFailuresFromFinalEvalStatus(
+function getFailuresFromFinalEvalStatus(
   evalId: string,
   resultsPerEvalId: readonly EvalCaseResult[],
   agentModule: string,
@@ -549,7 +545,7 @@ function detailRow(
 }
 
 /** Flattens metric results into one row per metric per invocation. */
-export function getResultsAsRows(
+function getResultsAsRows(
   evalSetId: string,
   evalId: string,
   metricResults: ReadonlyMap<string, EvalMetricResultWithInvocation[]>,
@@ -703,7 +699,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * Only the first turn is inspected, which is what adk-python does and is
  * enough to catch a dataset that is missing a whole column.
  */
-export function validateLegacyDataset(
+function validateLegacyDataset(
   data: ReadonlyArray<Record<string, unknown>>,
   criteria: Readonly<Record<string, unknown>>,
 ): void {
@@ -732,9 +728,10 @@ export function validateLegacyDataset(
       continue;
     }
     if (columns.some((column) => !(column in sample))) {
+      const named = columns.map((column) => `'${column}'`).join(' and ');
       throw new InputValidationError(
-        `Samples for ${metric} must include ${columns.join(' and ')} keys. ` +
-          `The sample is ${JSON.stringify(sample)}.`,
+        `Samples for ${metric} must include ${named} keys. The sample is ` +
+          `${JSON.stringify(data)}.`,
       );
     }
   }

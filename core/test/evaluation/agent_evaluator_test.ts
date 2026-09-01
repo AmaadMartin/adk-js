@@ -696,7 +696,7 @@ describe('AgentEvaluator.migrateEvalDataToNewSchema', () => {
         newEvalDataFile: join(workDir, 'out.json'),
       }),
     ).rejects.toThrowError(
-      /Samples for response_match_score must include query and reference keys/,
+      /Samples for response_match_score must include 'query' and 'reference' keys/,
     );
   });
 
@@ -910,8 +910,8 @@ describe('AgentEvaluator.evaluate', () => {
   });
 
   it.each([
-    ['tool_trajectory_avg_score', 'query and expected_tool_use'],
-    ['response_evaluation_score', 'query'],
+    ['tool_trajectory_avg_score', "'query' and 'expected_tool_use'"],
+    ['response_evaluation_score', "'query'"],
   ])('rejects data missing the columns %s needs', async (metric, columns) => {
     const workDir = await makeWorkDir();
     const testFile = join(workDir, 'roll.test.json');
@@ -929,7 +929,8 @@ describe('AgentEvaluator.evaluate', () => {
         evalDatasetFilePathOrDir: testFile,
       }),
     ).rejects.toThrowError(
-      `Samples for ${metric} must include ${columns} keys.`,
+      `Samples for ${metric} must include ${columns} keys. The sample is ` +
+        '[{"reference":"x"}].',
     );
   });
 
