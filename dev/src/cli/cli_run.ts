@@ -11,7 +11,6 @@ import {
   BaseSessionService,
   Event,
   getPendingUserInputRequests,
-  getUserInputRequests,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
@@ -20,129 +19,26 @@ import {
   RunnableRoot,
   Runner,
   Session,
-  UserInputKind,
   UserInputRequest,
 } from '@google/adk';
+import {Content, Part} from '@google/genai';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 
 import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
+import {parseDuration} from '../utils/duration_utils.js';
+import {toErrorMessage} from '../utils/error_utils.js';
 import {
   getAbsolutePath,
   loadFileData,
   saveToFile,
 } from '../utils/file_utils.js';
-
-const HOW_TO_ANSWER: Record<UserInputKind, string> = {
-  input: 'Type your reply at the next prompt to continue.',
-  credential: 'Type the credential at the next prompt to continue.',
-  confirmation: "Reply 'yes' to approve or 'no' to reject.",
-};
-
-/**
- * Formatting only — detection lives in `getUserInputRequests`. This decides how
- * the CLI words a pause and how the user is told to answer it.
- */
-function renderUserInputRequest(request: UserInputRequest): string {
-  const author = request.author ?? 'agent';
-  const lines: string[] = [];
-
-  switch (request.kind) {
-    case 'input':
-      lines.push(`--- [${author}] is waiting for your input ---`);
-      break;
-    case 'credential':
-      lines.push(`--- [${author}] is waiting for a credential ---`);
-      break;
-    case 'confirmation':
-      lines.push(
-        `--- [${author}] is waiting for confirmation ---` +
-          (request.toolName ? `\nTool: ${request.toolName}` : ''),
-      );
-      break;
-    default:
-      break;
-  }
-
-  if (request.message) {
-    lines.push(request.message);
-  }
-  if (request.payload != null) {
-    lines.push(`Payload: ${JSON.stringify(request.payload)}`);
-  }
-  if (request.responseSchema != null) {
-    lines.push(`Expected response: ${JSON.stringify(request.responseSchema)}`);
-  }
-
-  const scheme = request.authConfig?.authScheme as
-    | {type?: string; in?: string; name?: string}
-    | undefined;
-  if (scheme?.type) {
-    const where =
-      scheme.in && scheme.name ? ` (${scheme.in} ${scheme.name})` : '';
-    lines.push(`Auth scheme: ${scheme.type}${where}`);
-  }
-
-  lines.push(HOW_TO_ANSWER[request.kind]);
-
-  return lines.join('\n');
-}
-
-interface PrintEventOptions {
-  /**
-   * Whether to announce the pauses this event raised. Off when replaying a
-   * saved transcript, where a pause shown per event would re-ask questions the
-   * user already answered; the still-open ones are printed once afterwards.
-   */
-  announcePauses?: boolean;
-}
-
-/**
- * Renders a node output for the transcript: a string as itself, anything else
- * as JSON. The empty string is named rather than printed.
- */
-function renderOutput(output: unknown): string {
-  if (typeof output === 'string') {
-    return output === '' ? '(empty response)' : output;
-  }
-  try {
-    return JSON.stringify(output) ?? String(output);
-  } catch {
-    return String(output);
-  }
-}
-
-/** Prints one event's text, plus anything the user would otherwise not see. */
-function printEvent(event: Event, options: PrintEventOptions = {}): void {
-  const {announcePauses = true} = options;
-  const author = event.author ?? 'agent';
-
-  const text = (event.content?.parts ?? [])
-    .map((part) => part.text || '')
-    .join('');
-  if (text) {
-    console.log(`[${author}]: ${text}`);
-  } else if (event.output !== undefined && !event.partial) {
-    console.log(`[${author}]: ${renderOutput(event.output)}`);
-  }
-
-  // Reported on the event, not as a text part, so text-only printing drops it.
-  if (event.errorCode || event.errorMessage) {
-    const detail = [event.errorCode, event.errorMessage]
-      .filter(Boolean)
-      .join(': ');
-    console.error(`[${author}] error: ${detail}`);
-  }
-
-  if (!announcePauses) {
-    return;
-  }
-
-  for (const request of getUserInputRequests(event)) {
-    console.log(renderUserInputRequest(request));
-  }
-}
+import {parseStateOption} from '../utils/json_utils.js';
+import {runWithTimeout} from '../utils/timeout_utils.js';
+import {printEvent, renderUserInputRequest} from './event_printer.js';
+import {buildInterruptResponse} from './hitl_response.js';
+import {withJsonlStdout} from './jsonl_stdout.js';
 
 interface InputFile {
   state: Record<string, unknown>;
@@ -170,13 +66,21 @@ function closeUserInput(): void {
   sharedReadline = undefined;
 }
 
-async function getUserInput(prompt: string): Promise<string> {
+/**
+ * Reads one line from the user.
+ *
+ * @param prompt The prompt to show.
+ * @param echo Whether to repeat the answer on stdout when stdin is a pipe,
+ *     where readline shows the user nothing. Off in JSONL mode, whose stdout
+ *     carries only JSON lines.
+ */
+async function getUserInput(prompt: string, echo = true): Promise<string> {
   const rl = getReadline();
   const answer = await new Promise<string>((resolve) => {
     rl.question(prompt, resolve);
   });
 
-  if (!process.stdin.isTTY) {
+  if (!process.stdin.isTTY && echo) {
     console.log(answer);
   }
   return answer;
@@ -190,6 +94,7 @@ interface RunFromInputFileOptions {
   sessionService: BaseSessionService;
   memoryService?: BaseMemoryService;
   filePath: string;
+  jsonl?: boolean;
 }
 async function runFromInputFile(
   options: RunFromInputFileOptions,
@@ -213,7 +118,9 @@ async function runFromInputFile(
   let waitingOnUser = false;
 
   for (const query of fileContent.queries) {
-    console.log(`[user]: ${query}`);
+    if (!options.jsonl) {
+      console.log(`[user]: ${query}`);
+    }
 
     const runOptions = {
       userId: session.userId,
@@ -226,7 +133,7 @@ async function runFromInputFile(
 
     waitingOnUser = false;
     for await (const event of runner.runAsync(runOptions)) {
-      printEvent(event);
+      printEvent(event, {jsonl: options.jsonl, sessionId: session.id});
       // A scripted run has no prompt to answer at: whatever the pause asked
       // for has to be the next query in the file.
       waitingOnUser = requiresUserInput(event) || waitingOnUser;
@@ -243,6 +150,49 @@ async function runFromInputFile(
   return session;
 }
 
+/**
+ * Asks the user to answer one paused request, and builds the function response
+ * that carries the answer back.
+ */
+async function answerUserInputRequest(
+  request: UserInputRequest,
+  echo: boolean,
+): Promise<Part> {
+  return buildInterruptResponse(request, await getUserInput('[user]: ', echo));
+}
+
+/**
+ * Answers every request a turn left open, as one message.
+ *
+ * Several pending requests are answered together because the run resumes from a
+ * single message: sending them one at a time would resume the invocation with
+ * the first answer and lose the rest.
+ *
+ * @param events The events the turn emitted.
+ * @param answeredIds The interrupts this session has already answered, which
+ *     this call adds to. An agent that raises an interrupt it was already given
+ *     an answer for makes no progress, so the CLI stops answering it rather
+ *     than prompting for it on every turn.
+ * @param echo Whether to repeat the answer on stdout.
+ * @return The message answering the turn, or undefined when it left nothing
+ *     open.
+ */
+async function answerPendingRequests(
+  events: Event[],
+  answeredIds: Set<string>,
+  echo: boolean,
+): Promise<Content | undefined> {
+  const parts: Part[] = [];
+  for (const request of getPendingUserInputRequests(events)) {
+    if (answeredIds.has(request.interruptId)) {
+      continue;
+    }
+    answeredIds.add(request.interruptId);
+    parts.push(await answerUserInputRequest(request, echo));
+  }
+  return parts.length > 0 ? {role: 'user', parts} : undefined;
+}
+
 interface RunInteractivelyOptions {
   rootAgent?: RunnableRoot;
   app?: App;
@@ -250,6 +200,8 @@ interface RunInteractivelyOptions {
   artifactService: BaseArtifactService;
   sessionService: BaseSessionService;
   memoryService?: BaseMemoryService;
+  timeout?: string;
+  jsonl?: boolean;
   onAgentFileReloaded?: (subscribe: (newAgent: RunnableRoot) => void) => void;
 }
 async function runInteractively(
@@ -281,35 +233,64 @@ async function runInteractively(
     console.log(`Agent reloaded. New runner created with existing session.`);
   });
 
-  while (true) {
-    const query = await getUserInput('[user]: ');
+  const timeoutMs = options.timeout
+    ? parseDuration(options.timeout)
+    : undefined;
+  const answeredIds = new Set<string>();
+  let nextMessage: Content | undefined;
 
-    if (!query || !query.trim()) {
+  while (true) {
+    if (!nextMessage) {
+      const query = await getUserInput('[user]: ', !options.jsonl);
+
+      if (!query || !query.trim()) {
+        continue;
+      }
+
+      if (query === 'exit') {
+        break;
+      }
+
+      nextMessage = {role: 'user', parts: [{text: query}]};
+    }
+
+    const message = nextMessage;
+    nextMessage = undefined;
+    const turnEvents: Event[] = [];
+
+    try {
+      const timedOut = await runWithTimeout(timeoutMs, async (abortSignal) => {
+        for await (const event of runner.runAsync({
+          userId: options.session.userId,
+          sessionId: options.session.id,
+          newMessage: message,
+          // Interactive CLI: let a plain-text "yes"/"no" resolve a pending tool
+          // confirmation (opt-in; off by default on non-interactive surfaces).
+          runConfig: {plainTextToolConfirmation: true},
+          abortSignal,
+        })) {
+          turnEvents.push(event);
+          printEvent(event, {
+            jsonl: options.jsonl,
+            sessionId: options.session.id,
+          });
+        }
+      });
+
+      if (timedOut) {
+        console.error(`Error: Command timed out after ${options.timeout}`);
+        continue;
+      }
+    } catch (error: unknown) {
+      console.error(`[ADK CLI] Turn failed: ${toErrorMessage(error)}`);
       continue;
     }
 
-    if (query === 'exit') {
-      break;
-    }
-
-    try {
-      for await (const event of runner.runAsync({
-        userId: options.session.userId,
-        sessionId: options.session.id,
-        newMessage: {role: 'user', parts: [{text: query}]},
-        // Interactive CLI: let a plain-text "yes"/"no" resolve a pending tool
-        // confirmation (opt-in; off by default on non-interactive surfaces).
-        runConfig: {plainTextToolConfirmation: true},
-      })) {
-        printEvent(event);
-      }
-    } catch (error) {
-      console.error(
-        `[ADK CLI] Turn failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
+    nextMessage = await answerPendingRequests(
+      turnEvents,
+      answeredIds,
+      !options.jsonl,
+    );
   }
 }
 
@@ -322,6 +303,12 @@ export interface RunAgentOptions {
   savedSessionFile?: string;
   saveSession?: boolean;
   sessionId?: string;
+  /** Initial session state, as a JSON object. */
+  state?: string;
+  /** Budget for one turn, e.g. `30s` or `5m`. */
+  timeout?: string;
+  /** Whether to write one JSON line per event instead of readable text. */
+  jsonl?: boolean;
   artifactService?: BaseArtifactService;
   sessionService?: BaseSessionService;
   memoryService?: BaseMemoryService;
@@ -329,7 +316,11 @@ export interface RunAgentOptions {
   agentFileLoadOptions?: AgentFileOptions;
   reloadAgents?: boolean;
 }
-export async function runAgent(options: RunAgentOptions): Promise<void> {
+/** Runs the interactive session the options describe. */
+async function runSession(
+  options: RunAgentOptions,
+  initialState: Record<string, unknown> | undefined,
+): Promise<void> {
   const userId = 'test_user';
   const artifactService =
     options.artifactService || new InMemoryArtifactService();
@@ -346,6 +337,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   let session = await sessionService.createSession({
     appName: app?.name ?? rootAgent.name,
     userId,
+    state: initialState,
   });
 
   const reloadSubscribers: Array<(agent: RunnableRoot) => void> = [];
@@ -385,6 +377,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
           sessionService,
           memoryService,
           filePath: options.inputFile,
+          jsonl: options.jsonl,
         })) || session;
     } else if (options.savedSessionFile) {
       const loadedSession = await loadFileData<Session>(
@@ -393,15 +386,21 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
       if (loadedSession) {
         for (const event of loadedSession.events) {
           await sessionService.appendEvent({session, event});
-          printEvent(event, {announcePauses: false});
+          printEvent(event, {
+            announcePauses: false,
+            jsonl: options.jsonl,
+            sessionId: session.id,
+          });
         }
 
         // Only the pauses the transcript never answered are still live, and
         // they are what the prompt below is waiting on.
-        for (const request of getPendingUserInputRequests(
-          loadedSession.events,
-        )) {
-          console.log(renderUserInputRequest(request));
+        if (!options.jsonl) {
+          for (const request of getPendingUserInputRequests(
+            loadedSession.events,
+          )) {
+            console.log(renderUserInputRequest(request));
+          }
         }
       }
 
@@ -412,14 +411,18 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
         sessionService,
         memoryService,
         session,
+        timeout: options.timeout,
+        jsonl: options.jsonl,
         onAgentFileReloaded: options.reloadAgents
           ? onAgentFileReloaded
           : undefined,
       });
     } else {
-      console.log(
-        `Running ${app ? `app ${app.name}` : `agent ${rootAgent.name}`}, type exit to exit.`,
-      );
+      if (!options.jsonl) {
+        console.log(
+          `Running ${app ? `app ${app.name}` : `agent ${rootAgent.name}`}, type exit to exit.`,
+        );
+      }
       await runInteractively({
         rootAgent,
         app,
@@ -427,6 +430,8 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
         sessionService,
         memoryService,
         session,
+        timeout: options.timeout,
+        jsonl: options.jsonl,
         onAgentFileReloaded: options.reloadAgents
           ? onAgentFileReloaded
           : undefined,
@@ -458,4 +463,17 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
     watcher?.close();
     closeUserInput();
   }
+}
+
+export async function runAgent(options: RunAgentOptions): Promise<void> {
+  let initialState: Record<string, unknown> | undefined;
+  try {
+    initialState = parseStateOption(options.state);
+  } catch (error: unknown) {
+    console.error(`Error: ${toErrorMessage(error)}`);
+    return;
+  }
+
+  const run = () => runSession(options, initialState);
+  return options.jsonl ? withJsonlStdout(run) : run();
 }
