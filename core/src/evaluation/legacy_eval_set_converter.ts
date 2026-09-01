@@ -46,7 +46,7 @@ export function convertLegacyEvalSet(
     sessionInput: convertInitialSession(legacyEvalCase.initialSession),
     creationTimestamp,
   }));
-  return {evalSetId, evalCases, creationTimestamp};
+  return {evalSetId, name: evalSetId, evalCases, creationTimestamp};
 }
 
 function convertLegacyInvocation(

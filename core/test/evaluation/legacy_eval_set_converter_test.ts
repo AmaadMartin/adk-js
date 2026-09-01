@@ -23,6 +23,7 @@ describe('convertLegacyEvalSet', () => {
     ]);
 
     expect(evalSet.evalSetId).toBe('set-1');
+    expect(evalSet.name).toBe('set-1');
     expect(evalSet.evalCases).toHaveLength(1);
     const invocation = evalSet.evalCases[0].conversation?.[0];
     expect(evalSet.evalCases[0].evalId).toBe('roll_die');
