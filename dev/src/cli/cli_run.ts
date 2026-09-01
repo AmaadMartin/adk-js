@@ -7,13 +7,11 @@
 import {
   App,
   BaseArtifactService,
+  BaseCredentialService,
   BaseMemoryService,
   BaseSessionService,
   Event,
   getPendingUserInputRequests,
-  InMemoryArtifactService,
-  InMemoryMemoryService,
-  InMemorySessionService,
   isApp,
   requiresUserInput,
   RunnableRoot,
@@ -26,7 +24,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 
-import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
+import {AgentFile} from '../utils/agent_loader.js';
 import {parseDuration} from '../utils/duration_utils.js';
 import {toErrorMessage} from '../utils/error_utils.js';
 import {
@@ -39,6 +37,7 @@ import {runWithTimeout} from '../utils/timeout_utils.js';
 import {printEvent, renderUserInputRequest} from './event_printer.js';
 import {buildInterruptResponse} from './hitl_response.js';
 import {withJsonlStdout} from './jsonl_stdout.js';
+import {createRunContext, RunContextOptions} from './run_context.js';
 
 interface InputFile {
   state: Record<string, unknown>;
@@ -92,7 +91,8 @@ interface RunFromInputFileOptions {
   agent: RunnableRoot;
   artifactService: BaseArtifactService;
   sessionService: BaseSessionService;
-  memoryService?: BaseMemoryService;
+  memoryService: BaseMemoryService;
+  credentialService: BaseCredentialService;
   filePath: string;
   jsonl?: boolean;
 }
@@ -199,7 +199,8 @@ interface RunInteractivelyOptions {
   session: Session;
   artifactService: BaseArtifactService;
   sessionService: BaseSessionService;
-  memoryService?: BaseMemoryService;
+  memoryService: BaseMemoryService;
+  credentialService: BaseCredentialService;
   timeout?: string;
   jsonl?: boolean;
   onAgentFileReloaded?: (subscribe: (newAgent: RunnableRoot) => void) => void;
@@ -219,6 +220,7 @@ async function runInteractively(
     artifactService: options.artifactService,
     sessionService: options.sessionService,
     memoryService: options.memoryService,
+    credentialService: options.credentialService,
   });
 
   options.onAgentFileReloaded?.((newAgent: RunnableRoot) => {
@@ -229,6 +231,7 @@ async function runInteractively(
       artifactService: options.artifactService,
       sessionService: options.sessionService,
       memoryService: options.memoryService,
+      credentialService: options.credentialService,
     });
     console.log(`Agent reloaded. New runner created with existing session.`);
   });
@@ -297,8 +300,7 @@ async function runInteractively(
 /**
  * Runs an interactive CLI for a certain agent.
  */
-export interface RunAgentOptions {
-  agentPath: string;
+export interface RunAgentOptions extends RunContextOptions {
   inputFile?: string;
   savedSessionFile?: string;
   saveSession?: boolean;
@@ -309,11 +311,7 @@ export interface RunAgentOptions {
   timeout?: string;
   /** Whether to write one JSON line per event instead of readable text. */
   jsonl?: boolean;
-  artifactService?: BaseArtifactService;
-  sessionService?: BaseSessionService;
-  memoryService?: BaseMemoryService;
   otelToCloud?: boolean;
-  agentFileLoadOptions?: AgentFileOptions;
   reloadAgents?: boolean;
 }
 /** Runs the interactive session the options describe. */
@@ -321,61 +319,61 @@ async function runSession(
   options: RunAgentOptions,
   initialState: Record<string, unknown> | undefined,
 ): Promise<void> {
-  const userId = 'test_user';
-  const artifactService =
-    options.artifactService || new InMemoryArtifactService();
-  const sessionService = options.sessionService || new InMemorySessionService();
-  const memoryService = options.memoryService || new InMemoryMemoryService();
-  await using agentFile = new AgentFile(
-    getAbsolutePath(options.agentPath),
-    options.agentFileLoadOptions,
-  );
-  const loaded = await agentFile.load();
-  const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
-  const app = isApp(loaded) ? loaded : undefined;
-
-  let session = await sessionService.createSession({
-    appName: app?.name ?? rootAgent.name,
+  const context = await createRunContext(options);
+  const {
+    appName,
+    app,
+    rootAgent,
     userId,
-    state: initialState,
-  });
+    artifactService,
+    sessionService,
+    memoryService,
+    credentialService,
+  } = context;
 
   const reloadSubscribers: Array<(agent: RunnableRoot) => void> = [];
   let watcher: fs.FSWatcher | undefined;
 
-  if (options.reloadAgents) {
-    const agentFilePath = getAbsolutePath(options.agentPath);
-    watcher = fs.watch(agentFilePath, async () => {
-      try {
-        await using reloadedFile = new AgentFile(
-          agentFilePath,
-          options.agentFileLoadOptions,
-        );
-        const reloaded = await reloadedFile.load();
-        const newAgent = isApp(reloaded) ? reloaded.rootAgent : reloaded;
-        for (const subscriber of reloadSubscribers) {
-          subscriber(newAgent);
-        }
-      } catch (err) {
-        console.warn('Failed to reload agent:', (err as Error).message);
-      }
-    });
-  }
-
-  const onAgentFileReloaded = (subscribe: (agent: RunnableRoot) => void) => {
-    reloadSubscribers.push(subscribe);
-  };
-
   try {
+    let session = await sessionService.createSession({
+      appName,
+      userId,
+      state: initialState,
+    });
+
+    if (options.reloadAgents) {
+      const agentFilePath = getAbsolutePath(options.agentPath);
+      watcher = fs.watch(agentFilePath, async () => {
+        try {
+          await using reloadedFile = new AgentFile(
+            agentFilePath,
+            options.agentFileLoadOptions,
+          );
+          const reloaded = await reloadedFile.load();
+          const newAgent = isApp(reloaded) ? reloaded.rootAgent : reloaded;
+          for (const subscriber of reloadSubscribers) {
+            subscriber(newAgent);
+          }
+        } catch (err) {
+          console.warn('Failed to reload agent:', (err as Error).message);
+        }
+      });
+    }
+
+    const onAgentFileReloaded = (subscribe: (agent: RunnableRoot) => void) => {
+      reloadSubscribers.push(subscribe);
+    };
+
     if (options.inputFile) {
       session =
         (await runFromInputFile({
-          appName: app?.name ?? rootAgent.name,
+          appName,
           userId,
           agent: rootAgent,
           artifactService,
           sessionService,
           memoryService,
+          credentialService,
           filePath: options.inputFile,
           jsonl: options.jsonl,
         })) || session;
@@ -410,6 +408,7 @@ async function runSession(
         artifactService,
         sessionService,
         memoryService,
+        credentialService,
         session,
         timeout: options.timeout,
         jsonl: options.jsonl,
@@ -429,6 +428,7 @@ async function runSession(
         artifactService,
         sessionService,
         memoryService,
+        credentialService,
         session,
         timeout: options.timeout,
         jsonl: options.jsonl,
@@ -459,9 +459,11 @@ async function runSession(
     }
   } finally {
     // A throw out of the run or the save step must still release these, or the
-    // shared interface holds stdin open for an in-process caller.
+    // shared interface holds stdin open for an in-process caller and the
+    // compiled agent file stays in the temp directory.
     watcher?.close();
     closeUserInput();
+    await context.agentFile.dispose();
   }
 }
 

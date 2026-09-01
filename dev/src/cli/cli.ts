@@ -398,6 +398,27 @@ export function createProgram(): Command {
       '--jsonl',
       'Optional. Output structured JSONL instead of human-readable text.',
     )
+    .option(
+      '--in_memory',
+      'Optional. Do not persist session data (use in-memory storage).',
+    )
+    .option(
+      '--memory_service_uri <string>',
+      'Optional. The URI of the memory service. Supported URIs: memory:// for the in-memory memory service, and agentengine://<agent_engine_id> for Vertex AI Memory Bank.',
+    )
+    .option(
+      '--use_local_storage [boolean]',
+      "Optional. Persist sessions and artifacts under the agent's .adk folder.",
+      true,
+    )
+    .option(
+      '--no_use_local_storage',
+      "Optional. Do not persist under the agent's .adk folder.",
+    )
+    .option(
+      '--default_llm_model <string>',
+      'Optional. The model used by an agent that does not set one explicitly.',
+    )
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
@@ -420,8 +441,15 @@ export function createProgram(): Command {
           state: options['state'],
           timeout: options['timeout'],
           jsonl: getBoolean(options['jsonl']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
+          inMemory: getBoolean(options['in_memory']),
+          sessionServiceUri:
+            options['session_service_uri'] || process.env.DATABASE_URL,
+          artifactServiceUri: options['artifact_service_uri'],
+          memoryServiceUri: options['memory_service_uri'],
+          useLocalStorage:
+            !options['no_use_local_storage'] &&
+            getBoolean(options['use_local_storage']),
+          defaultLlmModel: options['default_llm_model'],
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           reloadAgents: getBoolean(options['reload_agents']),

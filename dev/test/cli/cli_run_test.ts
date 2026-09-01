@@ -78,6 +78,16 @@ vi.mock('node:readline', () => ({
   createInterface: vi.fn(),
 }));
 
+// The default is to persist under the agent's `.adk` folder; these tests must
+// not write one next to the fake agent file.
+// A plain function, not a spy: `restoreAllMocks` in afterEach would strip a
+// spy's implementation and leave the second test without a decision.
+vi.mock('../../src/cli/local_storage.js', () => ({
+  resolveUseLocalStorage: async () => ({useLocalStorage: false}),
+  createLocalSessionService: vi.fn(),
+  createLocalArtifactService: vi.fn(),
+}));
+
 describe('cli_run', () => {
   let mockAgentFile: AgentFile;
   let mockRootAgent: BaseAgent;
@@ -105,9 +115,11 @@ describe('cli_run', () => {
       name: 'test-agent',
     } as unknown as BaseAgent;
 
+    const disposeAgentFile = vi.fn();
     mockAgentFile = {
       load: vi.fn().mockResolvedValue(mockRootAgent),
-      [Symbol.asyncDispose]: vi.fn(),
+      dispose: disposeAgentFile,
+      [Symbol.asyncDispose]: disposeAgentFile,
     } as unknown as AgentFile;
 
     (AgentFile as unknown as Mock).mockImplementation(() => mockAgentFile);
@@ -959,6 +971,22 @@ describe('cli_run', () => {
     });
   });
 
+  it('gives the runner a credential service and a memory service', async () => {
+    await runAgent({
+      agentPath: 'agent.ts',
+      sessionService: createMockSessionService(),
+    });
+
+    // Without a credential service an authenticating tool cannot finish its
+    // flow, so the runner has to be given one.
+    expect(Runner as unknown as Mock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentialService: expect.anything(),
+        memoryService: expect.anything(),
+      }),
+    );
+  });
+
   describe('--state', () => {
     it('seeds the session with the parsed state', async () => {
       const sessionService = createMockSessionService();
@@ -1007,10 +1035,6 @@ describe('cli_run', () => {
   });
 
   describe('--timeout', () => {
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
     it('abandons a turn that overruns and keeps the REPL alive', async () => {
       const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
       const signals: AbortSignal[] = [];
@@ -1020,10 +1044,12 @@ describe('cli_run', () => {
           turn++;
           if (turn === 1) {
             const signal = params.abortSignal;
-            expect(signal).toBeDefined();
-            signals.push(signal!);
+            if (!signal) {
+              expect.fail('the timed turn ran without an abort signal');
+            }
+            signals.push(signal);
             await new Promise<void>((resolve) => {
-              signal!.addEventListener('abort', () => resolve());
+              signal.addEventListener('abort', () => resolve());
             });
             return;
           }
@@ -1040,20 +1066,19 @@ describe('cli_run', () => {
         .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
           cb('exit'),
         );
-      vi.useFakeTimers();
 
-      const pending = runAgent({
+      // A real one-second deadline, so the abort travels the same path it
+      // does in a real run.
+      await runAgent({
         agentPath: 'agent.ts',
-        timeout: '30s',
+        timeout: '1s',
         sessionService: createMockSessionService(),
       });
-      await vi.advanceTimersByTimeAsync(30000);
-      await pending;
 
       expect(signals[0].aborted).toBe(true);
       expect(
         errors.mock.calls.map((call) => call.join(' ')).join('\n'),
-      ).toContain('Error: Command timed out after 30s');
+      ).toContain('Error: Command timed out after 1s');
       expect(
         (console.log as Mock).mock.calls
           .map((call) => call.join(' '))
