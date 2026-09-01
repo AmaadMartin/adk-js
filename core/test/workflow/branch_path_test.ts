@@ -106,3 +106,27 @@ describe('commonPrefixOf', () => {
     expect(commonPrefixOf([])).toBe('');
   });
 });
+
+describe('BranchPath.getRunIds', () => {
+  it('collects the run id of every segment that carries one', () => {
+    expect(branchPathFromString('parent@1.child@2.node').getRunIds()).toEqual(
+      new Set(['1', '2']),
+    );
+  });
+
+  it('returns nothing for a path whose segments carry no run id', () => {
+    expect(branchPathFromString('parent.child').getRunIds()).toEqual(new Set());
+  });
+
+  it('skips a segment whose separator has no run id after it', () => {
+    expect(branchPathFromString('parent@.child@2').getRunIds()).toEqual(
+      new Set(['2']),
+    );
+  });
+
+  it('reads the run id after the last separator', () => {
+    expect(branchPathFromString('tool@call@7').getRunIds()).toEqual(
+      new Set(['7']),
+    );
+  });
+});
