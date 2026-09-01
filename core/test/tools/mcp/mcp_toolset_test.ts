@@ -10,6 +10,8 @@ import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
 
+import {clientStub} from './mcp_context_test_utils.js';
+
 vi.hoisted(() => {
   vi.resetModules();
 });
@@ -147,19 +149,19 @@ describe('MCPToolset', () => {
 
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
-      const mockClientInstance = {
-        connect: vi.fn().mockResolvedValue(undefined),
-        close: vi.fn().mockResolvedValue(undefined),
+      const mockClientInstance = clientStub({
         listTools: vi.fn().mockRejectedValue(new Error('List tools failed')),
-      };
-      vi.mocked(Client).mockImplementationOnce(
-        () => mockClientInstance as unknown as Client,
-      );
+      });
+      // getTools retries a failed listing once, so both attempts need a
+      // failing client for the error to reach the caller.
+      vi.mocked(Client)
+        .mockImplementationOnce(() => mockClientInstance)
+        .mockImplementationOnce(() => mockClientInstance);
 
       const spy = vi.spyOn(toolset['mcpSessionManager'], 'closeSession');
 
       await expect(toolset.getTools()).rejects.toThrow('List tools failed');
-      expect(spy).toHaveBeenCalledOnce();
+      expect(spy).toHaveBeenCalledTimes(2);
       expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(0);
     });
   });

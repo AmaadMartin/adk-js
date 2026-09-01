@@ -29,6 +29,22 @@ function logTransportError(err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
 }
 
+/** The `name` every {@link McpConnectionError} carries. */
+export const MCP_CONNECTION_ERROR_NAME = 'McpConnectionError';
+
+/**
+ * Raised when an MCP operation fails, naming the operation that failed.
+ *
+ * The original failure is kept as `cause`, so a caller can still inspect the
+ * transport error underneath the contextual message.
+ */
+export class McpConnectionError extends Error {
+  constructor(message: string, options?: {cause?: unknown}) {
+    super(message, options);
+    this.name = MCP_CONNECTION_ERROR_NAME;
+  }
+}
+
 /**
  * Defines the parameters for establishing a connection to an MCP server using
  * standard input/output (stdio). This is typically used for running MCP servers
@@ -37,6 +53,11 @@ function logTransportError(err: unknown): void {
 export interface StdioConnectionParams {
   type: 'StdioConnectionParams';
   serverParams: StdioServerParameters;
+  /**
+   * Deadline in seconds for a single MCP call, matching adk-python's
+   * `StdioConnectionParams.timeout`. When it passes, the MCP SDK cancels the
+   * request and rejects. Unset falls back to the SDK's own 60 second default.
+   */
   timeout?: number;
 }
 
@@ -59,6 +80,12 @@ export interface StreamableHTTPConnectionParams {
    * This field will be ignored if transportOptions is provided even if no headers are specified in transportOptions.
    */
   header?: Record<string, unknown>;
+  /**
+   * Deadline in seconds for a single MCP call, matching adk-python's
+   * `StreamableHTTPConnectionParams.timeout`. When it passes, the MCP SDK
+   * cancels the request and rejects. Unset falls back to the SDK's own 60
+   * second default.
+   */
   timeout?: number;
   sseReadTimeout?: number;
   terminateOnClose?: boolean;

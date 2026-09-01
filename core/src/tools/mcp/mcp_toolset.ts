@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import type {RequestOptions} from '@modelcontextprotocol/sdk/shared/protocol.js';
 import type {
   BlobResourceContents,
   ListResourcesResult,
@@ -13,13 +15,89 @@ import type {
   TextResourceContents,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import {
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+  REQUEST_INPUT_FUNCTION_CALL_NAME,
+  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
+} from '../../agents/framework_function_calls.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
+import {formatError, isAbortError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
+import {retryOnce} from '../../utils/retry_utils.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
-import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
+import {
+  MCP_CONNECTION_ERROR_NAME,
+  McpConnectionError,
+  MCPConnectionParams,
+  MCPSessionManager,
+} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
+
+/**
+ * Tool names the ADK framework owns.
+ *
+ * An MCP server that advertises one of these would shadow a framework function
+ * call, so the toolset drops it instead of exposing it to the model.
+ */
+const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+  REQUEST_INPUT_FUNCTION_CALL_NAME,
+  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
+]);
+
+/**
+ * Whether `err` is an {@link McpConnectionError}.
+ *
+ * `name` is matched rather than the class, so the check still holds when two
+ * copies of the package share one runtime.
+ */
+function isMcpConnectionError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'name' in err &&
+    err.name === MCP_CONNECTION_ERROR_NAME
+  );
+}
+
+/**
+ * Names the MCP operation that produced `err`, so a bare transport string
+ * reaches the caller as `<operation>: <root cause>`.
+ *
+ * A cancellation passes through untouched: the caller has to keep seeing an
+ * `AbortError` rather than a connection failure. An {@link McpConnectionError}
+ * also passes through, because it already names an operation.
+ */
+function nameFailedOperation(operation: string, err: unknown): unknown {
+  if (isAbortError(err) || isMcpConnectionError(err)) {
+    return err;
+  }
+  return new McpConnectionError(`${operation}: ${formatError(err)}`, {
+    cause: err,
+  });
+}
+
+/**
+ * The trailing `RequestOptions` argument of an MCP call, as a spreadable
+ * tuple: empty when no timeout is configured, so the call reaches the SDK
+ * exactly as it did before and takes the SDK's own default deadline.
+ *
+ * The SDK cancels a request that outlives its timeout — it sends
+ * `notifications/cancelled` to the server and rejects with an `McpError` — so
+ * the deadline belongs to the SDK rather than to a race around it.
+ *
+ * @param timeoutSeconds The configured deadline in seconds, if there is one.
+ * @return The argument tuple to spread into an SDK call.
+ */
+function callOptions(
+  timeoutSeconds: number | undefined,
+): [RequestOptions] | [] {
+  return timeoutSeconds === undefined ? [] : [{timeout: timeoutSeconds * 1000}];
+}
 
 /**
  * A toolset that dynamically discovers and provides tools from a Model Context
@@ -52,6 +130,8 @@ import {MCPTool} from './mcp_tool.js';
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
+  /** Carries `connectionParams.timeout` into every call this toolset makes. */
+  private readonly callOptions: [RequestOptions] | [];
 
   constructor(
     connectionParams: MCPConnectionParams,
@@ -59,31 +139,94 @@ export class MCPToolset extends BaseToolset {
     prefix?: string,
   ) {
     super(toolFilter, prefix);
+    this.callOptions = callOptions(connectionParams.timeout);
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
   }
 
-  async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    const session = await this.mcpSessionManager.createSession();
-
-    let listResult: ListToolsResult;
+  /**
+   * Opens a session, runs `run` on it, and closes it again.
+   *
+   * This is the single place a failed MCP call is turned into an
+   * {@link McpConnectionError}: `operation` names what was being attempted, so
+   * the caller learns which MCP call failed instead of reading a bare
+   * transport string. The session is closed on every exit path.
+   *
+   * @param operation Short description of the attempt, used as the message
+   *   prefix on failure.
+   * @param run Receives the open session.
+   * @return Whatever `run` resolves to.
+   * @throws {McpConnectionError} when opening the session or running `run`
+   *   fails for any reason other than cancellation.
+   */
+  private async executeWithSession<T>(
+    operation: string,
+    run: (session: Client) => Promise<T>,
+  ): Promise<T> {
+    let session: Client | undefined;
     try {
-      listResult = (await session.listTools()) as ListToolsResult;
+      session = await this.mcpSessionManager.createSession();
+      return await run(session);
+    } catch (err: unknown) {
+      throw nameFailedOperation(operation, err);
     } finally {
-      await this.mcpSessionManager.closeSession(session);
+      if (session) {
+        await this.mcpSessionManager.closeSession(session);
+      }
     }
+  }
+
+  /**
+   * Returns the tools the MCP server advertises.
+   *
+   * A failed listing is retried once: `tools/list` is idempotent, so a second
+   * attempt costs a round trip and cannot duplicate a side effect.
+   *
+   * @param context Context used to filter the tools available to the agent.
+   * @return The tools that survive the reserved-name skip and the tool filter.
+   */
+  async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
+    return retryOnce(() => this.listAndBuildTools(context), 'MCP getTools');
+  }
+
+  /** Lists the server's tools once and wraps them as {@link MCPTool}s. */
+  private async listAndBuildTools(
+    context?: ReadonlyContext,
+  ): Promise<BaseTool[]> {
+    const listResult = await this.executeWithSession(
+      'Failed to get tools from MCP server',
+      async (session) =>
+        (await session.listTools(
+          undefined,
+          ...this.callOptions,
+        )) as ListToolsResult,
+    );
+
     logger.debug(`number of tools: ${listResult.tools.length}`);
     for (const tool of listResult.tools) {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    const tools = listResult.tools.map((tool) => {
-      // Create a cloned tool definition with the prefixed name
-      const toolWithPrefix = {
-        ...tool,
-        name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
-      };
-      return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
-    });
+    const tools = listResult.tools
+      // Skip rather than expose: a reserved name would shadow a framework
+      // function call, and dropping one tool beats failing the whole listing.
+      .filter((tool) => {
+        if (!RESERVED_TOOL_NAMES.has(tool.name)) {
+          return true;
+        }
+        logger.warn(
+          `Skipping MCP tool '${tool.name}' because it collides with a ` +
+            'reserved ADK framework tool name.',
+        );
+        return false;
+      })
+      .map((tool) => {
+        // Create a cloned tool definition with the prefixed name
+        const toolWithPrefix = {
+          ...tool,
+          name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
+        };
+        return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
+      });
 
     // Apply toolFilter when specified.
     // An empty array (the default) means no filter — all tools are returned.
@@ -117,13 +260,20 @@ export class MCPToolset extends BaseToolset {
    * @return The resource names available on the server.
    */
   async listResources(): Promise<string[]> {
-    const session = await this.mcpSessionManager.createSession();
-    try {
-      const result = (await session.listResources()) as ListResourcesResult;
-      return result.resources.map((resource) => resource.name);
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const result = await this.listResourcesResult();
+    return result.resources.map((resource) => resource.name);
+  }
+
+  /** Runs one `resources/list` call against the MCP server. */
+  private async listResourcesResult(): Promise<ListResourcesResult> {
+    return this.executeWithSession(
+      'Failed to list resources from MCP server',
+      async (session) =>
+        (await session.listResources(
+          undefined,
+          ...this.callOptions,
+        )) as ListResourcesResult,
+    );
   }
 
   /**
@@ -134,13 +284,7 @@ export class MCPToolset extends BaseToolset {
    * @throws If no resource with the given name is advertised by the server.
    */
   async getResourceInfo(name: string): Promise<Resource> {
-    const session = await this.mcpSessionManager.createSession();
-    let result: ListResourcesResult;
-    try {
-      result = (await session.listResources()) as ListResourcesResult;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const result = await this.listResourcesResult();
 
     const resource = result.resources.find(
       (candidate) => candidate.name === name,
@@ -170,15 +314,15 @@ export class MCPToolset extends BaseToolset {
       throw new Error(`Resource '${name}' has no URI.`);
     }
 
-    const session = await this.mcpSessionManager.createSession();
-    try {
-      const result = (await session.readResource({
-        uri: resourceInfo.uri,
-      })) as ReadResourceResult;
-      return result.contents;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const result = await this.executeWithSession(
+      `Failed to get resource ${name} from MCP server`,
+      async (session) =>
+        (await session.readResource(
+          {uri: resourceInfo.uri},
+          ...this.callOptions,
+        )) as ReadResourceResult,
+    );
+    return result.contents;
   }
 
   async close(): Promise<void> {
