@@ -9,6 +9,15 @@
 export * from './a2a/index.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
+// Node-only: the checkpointer thread id is a `node:crypto` digest, and the web
+// bundle aliases `node:crypto` to a shim that provides only `randomUUID`. So
+// this barrel and not `common.ts`, which `index_web.ts` re-exports wholesale.
+export {LangGraphAgent, isLangGraphAgent} from './agents/langgraph_agent.js';
+export type {
+  CompiledLangGraph,
+  LangGraphAgentConfig,
+  LangGraphThreadConfig,
+} from './agents/langgraph_agent.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
 export {GcsArtifactService} from './artifacts/gcs_artifact_service.js';
 export {getArtifactServiceFromUri} from './artifacts/registry.js';
