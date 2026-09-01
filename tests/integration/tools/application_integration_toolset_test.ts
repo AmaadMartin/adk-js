@@ -18,6 +18,7 @@ import {
 } from '../test_case_utils.js';
 
 vi.mock('google-auth-library', () => ({
+  // ServiceAccountCredentialExchanger mints the tool's own token with a JWT.
   JWT: class {
     getAccessToken = async () => ({token: 'sa-token'});
     authorize = async () => ({access_token: 'sa-token'});

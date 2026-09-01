@@ -1,5 +1,9 @@
 # ApplicationIntegrationToolset
 
+> Reference documentation for ADK lives at [adk.dev](https://adk.dev/), from
+> the [google/adk-docs](https://github.com/google/adk-docs) repository. This
+> page covers the TypeScript toolset only.
+
 `ApplicationIntegrationToolset` turns a Google Cloud Application Integration
 resource into agent tools. Reach for it when your agent must act on a system
 that Integration Connectors already reaches — Jira, Salesforce, ServiceNow,

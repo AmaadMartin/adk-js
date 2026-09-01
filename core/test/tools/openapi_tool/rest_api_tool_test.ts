@@ -760,6 +760,39 @@ describe('RestApiTool Utilities', () => {
       expect(result.url).toBe('https://api.example.com/things');
     });
 
+    it('encodes a hash in a path parameter instead of truncating the URL', () => {
+      const endpoint = {
+        baseUrl: 'https://api.example.com',
+        path: '/things/{thingId}/parts',
+        method: 'GET',
+      };
+      const parameters = [
+        {
+          name: 'thing_id',
+          originalName: 'thingId',
+          paramLocation: 'path',
+          paramSchema: {},
+          required: true,
+        },
+        {
+          name: 'q',
+          originalName: 'q',
+          paramLocation: 'query',
+          paramSchema: {},
+          required: false,
+        },
+      ];
+
+      const result = prepareRequestParams(endpoint, parameters, {
+        thing_id: 'a#b',
+        q: 'kept',
+      });
+
+      expect(result.url).toBe(
+        'https://api.example.com/things/a%23b/parts?q=kept',
+      );
+    });
+
     it('should map query, path, and header parameters correctly', () => {
       const endpoint = {
         baseUrl: 'http://api.example.com',

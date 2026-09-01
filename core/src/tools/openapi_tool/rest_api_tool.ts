@@ -234,18 +234,22 @@ export function prepareRequestParams(
     }
   }
 
+  // A spec may give two operations the same endpoint and tell them apart by
+  // fragment. The fragment names the operation and is not part of the request,
+  // so it is dropped. Splitting the declared path, before any value is
+  // substituted in, keeps caller data out of reach of the split: encoding a
+  // value is what stops it truncating the URL, and this does not rely on it.
+  const [declaredPath] = endpoint.path.split('#');
+
   // Placeholders are resolved against the path only, so a path parameter can
   // never reach the host. `hasOwn`, because a spec may name a path parameter
   // `constructor`, which a bare lookup would resolve off Object.prototype.
-  const resolvedPath = endpoint.path.replace(
+  const resolvedPath = declaredPath.replace(
     /\{([^{}]+)\}/g,
     (placeholder, name: string) =>
       Object.hasOwn(pathParams, name) ? pathParams[name] : placeholder,
   );
-  // A spec may give two operations the same endpoint and tell them apart by
-  // fragment. The fragment names the operation and is not part of the request,
-  // so it is dropped instead of sent as part of a query value.
-  let url = `${endpoint.baseUrl}${resolvedPath}`.split('#')[0];
+  let url = `${endpoint.baseUrl}${resolvedPath}`;
 
   // Extract query parameters from path if any
   const urlParts = url.split('?');

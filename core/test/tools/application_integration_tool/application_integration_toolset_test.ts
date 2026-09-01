@@ -9,14 +9,18 @@ import {
   AuthCredentialTypes,
   BaseTool,
   Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
   ReadonlyContext,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {State} from '../../../src/sessions/state.js';
 import {logger} from '../../../src/utils/logger.js';
 
 vi.mock('google-auth-library', () => ({
+  // ServiceAccountCredentialExchanger mints the tool's own token with a JWT.
   JWT: class {
     getAccessToken = async () => ({token: 'sa-token'});
     authorize = async () => ({access_token: 'sa-token'});
@@ -165,12 +169,26 @@ function createConnectionToolset(overrides: Partial<ToolsetOptions> = {}) {
   });
 }
 
+/** A real Context, so a generated tool runs against genuine ADK plumbing. */
 function createContext(): Context {
-  return {
-    state: new State(),
-    getAuthResponse: vi.fn().mockReturnValue(undefined),
-    requestCredential: vi.fn(),
-  } as unknown as Context;
+  return new Context({
+    invocationContext: newInvocationContext(),
+    functionCallId: 'call-1',
+  });
+}
+
+/** A real ReadonlyContext, for the filters that take one. */
+function createReadonlyContext(): ReadonlyContext {
+  return new ReadonlyContext(newInvocationContext());
+}
+
+function newInvocationContext(): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'invocation-1',
+    agent: new LlmAgent({name: 'test_agent'}),
+    session: createSession({id: 'session-1', appName: 'test_app'}),
+    pluginManager: new PluginManager(),
+  });
 }
 
 /**
@@ -403,7 +421,9 @@ describe('ApplicationIntegrationToolset', () => {
         pending: true,
         message: 'Needs your authorization to access your data.',
       });
-      expect(toolContext.requestCredential).toHaveBeenCalled();
+      expect(
+        toolContext.eventActions.requestedAuthConfigs['call-1'],
+      ).toBeDefined();
     });
 
     it('honours a tool predicate filter', async () => {
@@ -412,7 +432,7 @@ describe('ApplicationIntegrationToolset', () => {
       const tools = await createConnectionToolset({
         entityOperations: {Issues: []},
         toolFilter: (tool) => tool.name.startsWith('get'),
-      }).getTools({} as ReadonlyContext);
+      }).getTools(createReadonlyContext());
 
       expect(tools.map((tool) => tool.name)).toEqual(['get__issues']);
     });
@@ -423,7 +443,7 @@ describe('ApplicationIntegrationToolset', () => {
       const tools = await createConnectionToolset({
         entityOperations: {Issues: []},
         toolFilter: ['get__issues'],
-      }).getTools({} as ReadonlyContext);
+      }).getTools(createReadonlyContext());
 
       expect(tools.map((tool) => tool.name)).toEqual(['get__issues']);
     });

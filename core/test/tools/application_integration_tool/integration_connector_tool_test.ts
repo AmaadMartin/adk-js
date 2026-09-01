@@ -8,12 +8,15 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
   IntegrationConnectorTool,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
   RestApiTool,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {State} from '../../../src/sessions/state.js';
 import {logger} from '../../../src/utils/logger.js';
 
 /** An operation whose body carries both model arguments and injected ones. */
@@ -94,12 +97,20 @@ function createTool(
   return {connectorTool, runAsync};
 }
 
-function createContext(authResponse?: AuthCredential): Context {
-  return {
-    state: new State(),
-    getAuthResponse: vi.fn().mockReturnValue(authResponse),
-    requestCredential: vi.fn(),
-  } as unknown as Context;
+/**
+ * A real Context, so the tool runs against genuine ADK plumbing. The function
+ * call id is what lets the tool record a credential request on it.
+ */
+function createContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'invocation-1',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'session-1', appName: 'test_app'}),
+      pluginManager: new PluginManager(),
+    }),
+    functionCallId: 'call-1',
+  });
 }
 
 const BEARER_SCHEME: OpenAPIV3.SecuritySchemeObject = {
@@ -301,7 +312,9 @@ describe('IntegrationConnectorTool', () => {
         message: 'Needs your authorization to access your data.',
       });
       expect(runAsync).not.toHaveBeenCalled();
-      expect(toolContext.requestCredential).toHaveBeenCalled();
+      expect(
+        toolContext.eventActions.requestedAuthConfigs['call-1'],
+      ).toBeDefined();
     });
 
     it('never logs the access token', async () => {

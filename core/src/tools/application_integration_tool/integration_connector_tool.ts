@@ -6,10 +6,10 @@
 
 import {FunctionDeclaration} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
-import {Context} from '../../agents/context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
+import {isRecord} from '../../utils/type_guards.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {ToolAuthHandler} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 import {RestApiTool} from '../openapi_tool/rest_api_tool.js';
@@ -96,7 +96,7 @@ export class IntegrationConnectorTool extends BaseTool {
 
   @experimental
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    const toolContext = request.toolContext as Context;
+    const {toolContext} = request;
     const authHandler = ToolAuthHandler.fromToolContext(
       toolContext,
       this.authScheme,
@@ -169,8 +169,4 @@ function pruneConnectorSchema(
   }
 
   return pruned;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

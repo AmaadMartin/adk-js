@@ -23,11 +23,13 @@ import {
   ConnectionDetails,
   ConnectionsClient,
 } from './clients/connections_client.js';
-import {readConnectorExtension} from './clients/connector_spec_builders.js';
+import {
+  readConnectorExtension,
+  readConnectorOperation,
+} from './clients/connector_spec_builders.js';
 import {IntegrationClient} from './clients/integration_client.js';
+import {CLOUD_PLATFORM_SCOPE} from './constants.js';
 import {IntegrationConnectorTool} from './integration_connector_tool.js';
-
-const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
 /** Which resource the toolset generates its tools from. */
 type ToolsetMode =
@@ -139,14 +141,9 @@ export class ApplicationIntegrationToolset extends BaseToolset {
     if (this.openApiToolset) {
       return this.openApiToolset.getTools(context);
     }
-    return this.connectorTools.filter((tool) => {
-      // A name list needs no context, so it applies either way. Only a
-      // predicate is skipped when there is no context to give it.
-      if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
-        return this.toolFilter.includes(tool.name);
-      }
-      return context ? this.isToolSelected(tool, context) : true;
-    });
+    return this.connectorTools.filter((tool) =>
+      this.isToolSelected(tool, context),
+    );
   }
 
   @experimental
@@ -213,7 +210,10 @@ export class ApplicationIntegrationToolset extends BaseToolset {
         connectionServiceName: connectionDetails.serviceName,
         entity: readConnectorExtension(parsed.operation, 'x-entity'),
         action: readConnectorExtension(parsed.operation, 'x-action'),
-        operation: readConnectorExtension(parsed.operation, 'x-operation')!,
+        operation: readConnectorOperation(
+          parsed.operation,
+          parsed.endpoint.path,
+        ),
         restApiTool,
         authScheme: connectorAuth.authScheme,
         authCredential: connectorAuth.authCredential,
