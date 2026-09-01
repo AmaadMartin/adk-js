@@ -64,6 +64,11 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  /**
+   * Free-form metadata accumulated over one invocation. A clone reuses the
+   * same object, so a sub-agent writes into the store its parent reads.
+   */
+  customMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -268,6 +273,14 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * Free-form metadata accumulated over this invocation, reached through
+   * {@link Context.customMetadata}. Mirrors Python
+   * `InvocationContext._custom_metadata`. `clone()` carries the object over by
+   * reference, so every context of one invocation shares one store.
+   */
+  readonly customMetadata: Record<string, unknown>;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -289,6 +302,7 @@ export class InvocationContext {
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
+    this.customMetadata = params.customMetadata ?? {};
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop

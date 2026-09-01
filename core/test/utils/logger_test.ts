@@ -6,7 +6,7 @@
 
 import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {resetLogger} from '../../src/utils/logger.js';
+import {isDebugEnabled, resetLogger} from '../../src/utils/logger.js';
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -139,6 +139,55 @@ describe('setLogger', () => {
       const logger = getLogger();
 
       expect(logger.constructor.name).toBe('SimpleLogger');
+    });
+  });
+
+  describe('isDebugEnabled', () => {
+    it('reports true at DEBUG', () => {
+      setLogLevel(LogLevel.DEBUG);
+      expect(isDebugEnabled()).toBe(true);
+    });
+
+    it.each([LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR])(
+      'reports false above DEBUG (%i)',
+      (level) => {
+        setLogLevel(level);
+        expect(isDebugEnabled()).toBe(false);
+      },
+    );
+
+    it('reports false for a disabled logger', () => {
+      setLogger(null);
+      expect(isDebugEnabled()).toBe(false);
+    });
+
+    it('reports false for a custom logger that omits the probe', () => {
+      const customLogger: Logger = {
+        setLogLevel: () => {},
+        log: () => {},
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+      };
+      setLogger(customLogger);
+
+      expect(isDebugEnabled()).toBe(false);
+    });
+
+    it('defers to a custom logger that implements the probe', () => {
+      const customLogger: Logger = {
+        setLogLevel: () => {},
+        log: () => {},
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        isDebugEnabled: () => true,
+      };
+      setLogger(customLogger);
+
+      expect(isDebugEnabled()).toBe(true);
     });
   });
 });

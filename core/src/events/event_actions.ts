@@ -10,6 +10,8 @@ import {AuthConfig} from '../auth/auth_tool.js';
 import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
+import {UiWidget} from './ui_widget.js';
+
 /**
  * Represents the actions attached to an event.
  */
@@ -71,6 +73,14 @@ export interface EventActions {
    * execution for this invocation. Mirrors Python `EventActions.end_of_agent`.
    */
   endOfAgent?: boolean;
+
+  /**
+   * UI widgets the host should render alongside this event, appended by
+   * `Context.renderUiWidget`. Mirrors Python
+   * `EventActions.render_ui_widgets`, which defaults to `None`, so the field
+   * stays unset until a widget is pushed.
+   */
+  renderUiWidgets?: UiWidget[];
 }
 
 /**
@@ -105,6 +115,10 @@ export function createEventActions(
  * least one entry, or when any scalar field has been explicitly set (including
  * being set to `false`).
  *
+ * A pushed UI widget counts as a signal too: a tool that renders a widget and
+ * nothing else still has something for the host to draw, so its event must
+ * survive the callers that drop default-only actions.
+ *
  * @param actions - The actions to inspect.
  * @returns `true` when every field is at its default value.
  */
@@ -114,6 +128,7 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     isEmpty(actions.artifactDelta) &&
     isEmpty(actions.requestedAuthConfigs) &&
     isEmpty(actions.requestedToolConfirmations) &&
+    isEmpty(actions.renderUiWidgets) &&
     actions.skipSummarization === undefined &&
     actions.transferToAgent === undefined &&
     actions.escalate === undefined
@@ -132,6 +147,9 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
  *    last-writer-wins: the value from the last source that sets the field is
  *    kept.
+ * 3. **List fields** (`renderUiWidgets`) — the widgets of every source are
+ *    concatenated in source order. A source that sets nothing contributes
+ *    nothing, so the result stays `undefined` when no source sets it.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -169,6 +187,13 @@ export function mergeEventActions(
         result.requestedToolConfirmations,
         source.requestedToolConfirmations,
       );
+    }
+
+    if (source.renderUiWidgets) {
+      result.renderUiWidgets = [
+        ...(result.renderUiWidgets ?? []),
+        ...source.renderUiWidgets,
+      ];
     }
 
     if (source.skipSummarization !== undefined) {

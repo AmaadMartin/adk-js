@@ -12,9 +12,15 @@
  * asserting the checker is wrong.
  */
 
-/** Whether the value is a non-null object, and so safe to index. */
+/**
+ * Whether the value is a keyed object, and so safe to index.
+ *
+ * Arrays and `null` are rejected, matching Python's `isinstance(x, dict)`, so
+ * a caller reading `value['key']` after this guard cannot be reading an array
+ * index by mistake.
+ */
 export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Whether the value is an array holding only strings. */

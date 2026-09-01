@@ -13,6 +13,7 @@ import type {
   Progress,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
+import {context, propagation} from '@opentelemetry/api';
 
 import {Context} from '../../agents/context.js';
 import {
@@ -32,17 +33,56 @@ import {
 } from '../../features/feature_registry.js';
 import {formatError} from '../../utils/error_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
-import {logger} from '../../utils/logger.js';
+import {isDebugEnabled, logger} from '../../utils/logger.js';
+import {retryOnce} from '../../utils/retry_utils.js';
 import {isRecord, isStringArray} from '../../utils/type_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {ToolAuthHandler} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 import {applyConfirmationGate} from '../tool_confirmation.js';
 
+import {
+  HttpDebugExchange,
+  runWithHttpDebugSink,
+} from './http_debug_recorder.js';
 import {createMcpAuthConfig, McpAuthOptions} from './mcp_auth.js';
 import {MCPSessionManager} from './mcp_session_manager.js';
 
 /** The `error.type` reported for a call the MCP server marked as failed. */
 const MCP_TOOL_ERROR = 'MCP_TOOL_ERROR';
+
+/** The scheme an MCP App UI resource is served under. */
+const UI_RESOURCE_SCHEME = 'ui://';
+
+/** Widget provider identifier for an MCP App iframe. */
+const MCP_WIDGET_PROVIDER = 'mcp';
+
+/** Where a run's recorded HTTP exchanges land on the invocation. */
+const HTTP_DEBUG_METADATA_KEY = 'http_debug_info';
+
+/** Returns `value` when it is an MCP App UI resource URI. */
+function asUiResourceUri(value: unknown): string | undefined {
+  return typeof value === 'string' && value.startsWith(UI_RESOURCE_SCHEME)
+    ? value
+    : undefined;
+}
+
+/**
+ * Appends `exchanges` to the invocation's `http_debug_info`, leaving the key
+ * absent when nothing was recorded.
+ */
+function appendHttpDebugInfo(
+  toolContext: Context,
+  exchanges: HttpDebugExchange[],
+): void {
+  if (exchanges.length === 0) {
+    return;
+  }
+  const metadata = toolContext.customMetadata;
+  const recorded = metadata[HTTP_DEBUG_METADATA_KEY];
+  metadata[HTTP_DEBUG_METADATA_KEY] = Array.isArray(recorded)
+    ? [...recorded, ...exchanges]
+    : exchanges;
+}
 
 /** The `ui` block a tool declares in its `_meta`, when it declares one. */
 function uiMeta(tool: Tool): Record<string, unknown> | undefined {
@@ -87,12 +127,6 @@ const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([
   REQUEST_INPUT_FUNCTION_CALL_NAME,
   TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
 ]);
-
-/**
- * How many times session setup is attempted. Only setup is retried: nothing has
- * reached the server yet, so a second attempt cannot repeat a tool call.
- */
-const SESSION_SETUP_ATTEMPTS = 2;
 
 /** A progress notification from a long-running MCP tool call. */
 export type McpProgressCallback = (progress: Progress) => void | Promise<void>;
@@ -374,6 +408,45 @@ export class MCPTool extends BaseTool {
       : undefined;
   }
 
+  /**
+   * The MCP tool declaration this tool wraps, as the server sent it.
+   *
+   * A server may declare fields ADK does not model. Read them here rather than
+   * off the ADK wrapper, which exposes only what it understands.
+   */
+  get rawMcpTool(): Tool {
+    return this.mcpTool;
+  }
+
+  /**
+   * The MCP App UI resource URI this tool declares, or `undefined`.
+   *
+   * An MCP App declares its UI resource in the tool's `_meta`, either nested
+   * as `{ui: {resourceUri: 'ui://...'}}` or flat as
+   * `{'ui/resourceUri': 'ui://...'}`. The flat form is specified by the MCP
+   * apps extension:
+   * https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx
+   *
+   * `_meta` arrives from a remote server, so anything that is not a `ui://`
+   * string reads as "no MCP App declared" rather than raising.
+   */
+  get mcpAppResourceUri(): string | undefined {
+    const meta = this.mcpTool._meta;
+    if (!isRecord(meta)) {
+      return undefined;
+    }
+
+    const ui = meta['ui'];
+    if (isRecord(ui)) {
+      const nested = asUiResourceUri(ui['resourceUri']);
+      if (nested) {
+        return nested;
+      }
+    }
+
+    return asUiResourceUri(meta['ui/resourceUri']);
+  }
+
   override _getDeclaration(): FunctionDeclaration {
     if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
       return {
@@ -431,7 +504,7 @@ export class MCPTool extends BaseTool {
       }
     }
     try {
-      return await this.callMcpTool(request);
+      return await this.callWithHttpDebug(request);
     } catch (e: unknown) {
       if (
         !isFeatureEnabled(FeatureName.MCP_GRACEFUL_ERROR_HANDLING) ||
@@ -440,6 +513,30 @@ export class MCPTool extends BaseTool {
         throw e;
       }
       return toErrorResult(e);
+    }
+  }
+
+  /**
+   * Runs the call, recording its HTTP exchanges onto the invocation while
+   * debug logging is on. With debug logging off the call runs untouched, so an
+   * ordinary run records nothing.
+   */
+  private async callWithHttpDebug(
+    request: RunAsyncToolRequest,
+  ): Promise<unknown> {
+    if (!isDebugEnabled()) {
+      return this.callMcpTool(request);
+    }
+
+    const exchanges: HttpDebugExchange[] = [];
+    try {
+      return await runWithHttpDebugSink(exchanges, () =>
+        this.callMcpTool(request),
+      );
+    } finally {
+      // In a `finally` so a failed call still reports what it sent, which is
+      // the exchange an operator is usually after.
+      appendHttpDebugInfo(request.toolContext, exchanges);
     }
   }
 
@@ -470,14 +567,16 @@ export class MCPTool extends BaseTool {
     const session = await this.openSession(toolContext, headers);
 
     try {
-      return await callGuarded(
+      const result = await callGuarded(
         session,
-        {name: this.originalName, arguments: request.args},
+        this.buildCallParams(request.args),
         {
           signal: toolContext.abortSignal,
           ...(progressCallback ? {onprogress: progressCallback} : {}),
         },
       );
+      this.pushUiWidget(toolContext, request.args);
+      return result;
     } finally {
       await this.mcpSessionManager.closeSession(session);
     }
@@ -492,17 +591,10 @@ export class MCPTool extends BaseTool {
     toolContext: Context,
     headers: Record<string, string> | undefined,
   ): Promise<Client> {
-    for (let attempt = 1; attempt < SESSION_SETUP_ATTEMPTS; attempt++) {
-      try {
-        return await this.mcpSessionManager.createSession({headers});
-      } catch (err: unknown) {
-        if (toolContext.abortSignal?.aborted) {
-          throw err;
-        }
-        logger.debug(`Retrying MCP session setup for ${this.name}.`);
-      }
-    }
-    return this.mcpSessionManager.createSession({headers});
+    return retryOnce(() => this.mcpSessionManager.createSession({headers}), {
+      label: `MCP session setup for ${this.name}`,
+      abortSignal: toolContext.abortSignal,
+    });
   }
 
   /** Merges the auth headers with the dynamic ones, which win a collision. */
@@ -537,5 +629,55 @@ export class MCPTool extends BaseTool {
       ? progressCallbackFactory(this.name, {callbackContext: toolContext})
       : progressCallback;
     return callback ? toProgressCallback(callback) : undefined;
+  }
+
+  /**
+   * Builds the `tools/call` params, carrying the active trace context in
+   * `_meta` so the server's spans join this trace. See
+   * https://agentclientprotocol.com/protocol/extensibility#the-meta-field
+   *
+   * With no propagator registered and no active span the carrier is empty, and
+   * the key is left off entirely.
+   */
+  private buildCallParams(
+    args: Record<string, unknown>,
+  ): CallToolRequest['params'] {
+    const params: CallToolRequest['params'] = {
+      name: this.originalName,
+      arguments: args,
+    };
+
+    const traceCarrier: Record<string, string> = {};
+    propagation.inject(context.active(), traceCarrier);
+    if (Object.keys(traceCarrier).length > 0) {
+      params._meta = traceCarrier;
+    }
+
+    return params;
+  }
+
+  /**
+   * Hands a UI host what it needs to render this tool's MCP App next to the
+   * function response. The widget is keyed by the function call id, so a call
+   * without one renders nothing.
+   */
+  private pushUiWidget(
+    toolContext: Context,
+    args: Record<string, unknown>,
+  ): void {
+    const resourceUri = this.mcpAppResourceUri;
+    if (!resourceUri || !toolContext.functionCallId) {
+      return;
+    }
+
+    toolContext.renderUiWidget({
+      id: toolContext.functionCallId,
+      provider: MCP_WIDGET_PROVIDER,
+      payload: {
+        resource_uri: resourceUri,
+        tool: this.mcpTool,
+        tool_args: args,
+      },
+    });
   }
 }

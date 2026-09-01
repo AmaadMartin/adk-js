@@ -20,6 +20,8 @@ import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
+import {createRecordingFetch, getHttpDebugSink} from './http_debug_recorder.js';
+
 /**
  * The optional peer backing every MCP connection.
  *
@@ -152,6 +154,21 @@ function mergeHeaders(
     merged[name] = value;
   });
   return merged;
+}
+
+/**
+ * Returns `options` with a recording `fetch` installed, but only while a debug
+ * sink is active. With no sink the caller's options are handed back untouched,
+ * so an ordinary run sends exactly the bytes it sends today.
+ */
+function withHttpDebugRecording(
+  options: StreamableHTTPClientTransportOptions,
+): StreamableHTTPClientTransportOptions {
+  const sink = getHttpDebugSink();
+  if (!sink) {
+    return options;
+  }
+  return {...options, fetch: createRecordingFetch(sink, options.fetch)};
 }
 
 /**
@@ -304,7 +321,7 @@ export class MCPSessionManager {
           );
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
-            transportOptions,
+            withHttpDebugRecording(transportOptions),
           );
           transport.onerror = (err) => logTransportError(err, errlog);
           await client.connect(transport);
