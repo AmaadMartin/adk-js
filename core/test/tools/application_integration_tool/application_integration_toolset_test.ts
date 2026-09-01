@@ -428,12 +428,33 @@ describe('ApplicationIntegrationToolset', () => {
       expect(tools.map((tool) => tool.name)).toEqual(['get__issues']);
     });
 
-    it('returns every tool when getTools is called with no context', async () => {
+    it('honours a tool name filter with no context', async () => {
       routeFetch({entityOperations: ['LIST', 'GET']});
 
       const tools = await createConnectionToolset({
         entityOperations: {Issues: []},
         toolFilter: ['get__issues'],
+      }).getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['get__issues']);
+    });
+
+    it('skips a tool predicate with no context, and returns every tool', async () => {
+      routeFetch({entityOperations: ['LIST', 'GET']});
+
+      const tools = await createConnectionToolset({
+        entityOperations: {Issues: []},
+        toolFilter: (tool) => tool.name.startsWith('get'),
+      }).getTools();
+
+      expect(tools).toHaveLength(2);
+    });
+
+    it('returns every tool when no filter is set', async () => {
+      routeFetch({entityOperations: ['LIST', 'GET']});
+
+      const tools = await createConnectionToolset({
+        entityOperations: {Issues: []},
       }).getTools();
 
       expect(tools).toHaveLength(2);

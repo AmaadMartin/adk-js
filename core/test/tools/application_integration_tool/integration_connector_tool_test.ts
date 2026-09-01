@@ -249,6 +249,22 @@ describe('IntegrationConnectorTool', () => {
       });
     });
 
+    it('treats an empty token string as no token', async () => {
+      const {connectorTool, runAsync} = createTool({
+        authScheme: BEARER_SCHEME,
+        authCredential: {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: ''}},
+        },
+      });
+
+      await connectorTool.runAsync({args: {}, toolContext: createContext()});
+
+      expect(runAsync.mock.calls[0][0].args['dynamic_auth_config']).toEqual({
+        'oauth2_auth_code_flow.access_token': {},
+      });
+    });
+
     it('passes an empty token when the resolved credential carries none', async () => {
       const {connectorTool, runAsync} = createTool({
         authScheme: BEARER_SCHEME,

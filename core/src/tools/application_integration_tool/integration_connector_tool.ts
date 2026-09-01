@@ -119,8 +119,8 @@ export class IntegrationConnectorTool extends BaseTool {
     if (authResult.authCredential) {
       const token = authResult.authCredential.http?.credentials?.token;
       // The connector requires the key. An empty object is the "no token"
-      // form it accepts.
-      args['dynamic_auth_config'] = {[DYNAMIC_AUTH_TOKEN_KEY]: token ?? {}};
+      // form it accepts, and an empty string is no token.
+      args['dynamic_auth_config'] = {[DYNAMIC_AUTH_TOKEN_KEY]: token || {}};
     }
 
     args['connection_name'] = this.connectionName;

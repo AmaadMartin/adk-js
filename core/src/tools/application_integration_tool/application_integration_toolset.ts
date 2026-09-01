@@ -139,9 +139,14 @@ export class ApplicationIntegrationToolset extends BaseToolset {
     if (this.openApiToolset) {
       return this.openApiToolset.getTools(context);
     }
-    return this.connectorTools.filter(
-      (tool) => !context || this.isToolSelected(tool, context),
-    );
+    return this.connectorTools.filter((tool) => {
+      // A name list needs no context, so it applies either way. Only a
+      // predicate is skipped when there is no context to give it.
+      if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
+        return this.toolFilter.includes(tool.name);
+      }
+      return context ? this.isToolSelected(tool, context) : true;
+    });
   }
 
   @experimental
