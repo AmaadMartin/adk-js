@@ -11,7 +11,10 @@ import {
   IntegrationClient,
   IntegrationClientOptions,
 } from '@google/adk';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+
+const authGetClient = vi.fn();
+const authGetProjectId = vi.fn();
 
 vi.mock('google-auth-library', () => ({
   JWT: class {
@@ -19,8 +22,8 @@ vi.mock('google-auth-library', () => ({
   },
   GoogleAuth: class {
     getAccessToken = async () => 'adc-token';
-    getClient = async () => ({quotaProjectId: 'quota-project'});
-    getProjectId = async () => 'adc-project';
+    getClient = authGetClient;
+    getProjectId = authGetProjectId;
   },
 }));
 
@@ -94,8 +97,14 @@ function pathFor(spec: ConnectorSpecDocument, fragment: string): string {
 }
 
 describe('IntegrationClient', () => {
+  beforeEach(() => {
+    authGetClient.mockResolvedValue({quotaProjectId: 'quota-project'});
+    authGetProjectId.mockResolvedValue('adc-project');
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('getOpenApiSpecForIntegration', () => {
@@ -162,15 +171,59 @@ describe('IntegrationClient', () => {
       expect(init?.headers).toMatchObject({'Authorization': 'Bearer sa-token'});
     });
 
-    it('returns an empty spec when the API omits openApiSpec', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({}));
+    it('falls back to the project when ADC declares no quota project', async () => {
+      authGetClient.mockResolvedValue({quotaProjectId: undefined});
+      authGetProjectId.mockResolvedValue('');
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({openApiSpec: '{}'}));
 
-      const spec = await createClient({
+      await createClient({
         integration: 'test-integration',
         triggers: ['t'],
       }).getOpenApiSpecForIntegration();
 
-      expect(spec).toEqual({});
+      const [, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+      expect(init?.headers).toMatchObject({'x-goog-user-project': 'p'});
+    });
+
+    it('fails when the API returns no spec', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({}));
+
+      const error = await createClient({
+        integration: 'test-integration',
+        triggers: ['t'],
+      })
+        .getOpenApiSpecForIntegration()
+        .catch((e: unknown) => e);
+
+      expect((error as ApplicationIntegrationError).code).toBe(
+        ApplicationIntegrationErrorCode.REQUEST_FAILED,
+      );
+      expect((error as Error).message).toBe(
+        'Application Integration returned no OpenAPI spec for integration' +
+          ' test-integration.',
+      );
+    });
+
+    it('fails when the returned spec is not JSON', async () => {
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({openApiSpec: 'not json'}));
+
+      const error = await createClient({
+        integration: 'test-integration',
+        triggers: ['t'],
+      })
+        .getOpenApiSpecForIntegration()
+        .catch((e: unknown) => e);
+
+      expect((error as ApplicationIntegrationError).code).toBe(
+        ApplicationIntegrationErrorCode.REQUEST_FAILED,
+      );
+      expect((error as Error).message).toMatch(
+        /returned an unreadable OpenAPI spec for integration test-integration/,
+      );
     });
 
     it.each([

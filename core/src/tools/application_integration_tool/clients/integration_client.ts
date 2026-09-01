@@ -94,9 +94,12 @@ export class IntegrationClient {
 
     // An explicit service account key already names the project to bill, so
     // the quota header is only needed for Application Default Credentials.
-    const quotaProjectId = await this.transport.getQuotaProjectId();
-    const headers: Record<string, string> = quotaProjectId
-      ? {'x-goog-user-project': quotaProjectId}
+    const usingDefaultCredentials = !this.options.serviceAccountJson;
+    const headers: Record<string, string> = usingDefaultCredentials
+      ? {
+          'x-goog-user-project':
+            (await this.transport.getQuotaProjectId()) || project,
+        }
       : {};
 
     const response = await this.transport.post(
@@ -110,8 +113,10 @@ export class IntegrationClient {
       headers,
     );
 
-    const spec = (response as {openApiSpec?: string}).openApiSpec;
-    return JSON.parse(spec ?? '{}') as OpenAPIV3.Document;
+    return parseGeneratedSpec(
+      (response as {openApiSpec?: string}).openApiSpec,
+      integration,
+    );
   }
 
   /**
@@ -229,6 +234,37 @@ export class IntegrationClient {
       `/v2/projects/${project}/locations/${location}/integrations/` +
       `${integrationName}:execute?triggerId=api_trigger/${integrationName}` +
       `#${fragment}`
+    );
+  }
+}
+
+/**
+ * Reads the spec out of a `:generateOpenApiSpec` response.
+ *
+ * @throws {ApplicationIntegrationError} With code `REQUEST_FAILED` when the
+ *     response carries no spec, or one that is not JSON. Either would
+ *     otherwise leave the caller with an agent that has no tools and no
+ *     explanation.
+ */
+function parseGeneratedSpec(
+  spec: string | undefined,
+  integration: string,
+): OpenAPIV3.Document {
+  if (!spec) {
+    throw new ApplicationIntegrationError(
+      ApplicationIntegrationErrorCode.REQUEST_FAILED,
+      `Application Integration returned no OpenAPI spec for integration` +
+        ` ${integration}.`,
+    );
+  }
+  try {
+    return JSON.parse(spec) as OpenAPIV3.Document;
+  } catch (error) {
+    throw new ApplicationIntegrationError(
+      ApplicationIntegrationErrorCode.REQUEST_FAILED,
+      `Application Integration returned an unreadable OpenAPI spec for` +
+        ` integration ${integration}: ${(error as Error).message}`,
+      {cause: error},
     );
   }
 }

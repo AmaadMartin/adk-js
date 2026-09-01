@@ -323,10 +323,10 @@ describe('readConnectorExtension', () => {
   });
 
   it('ignores an extension that is not a string', () => {
-    const operation = {
-      responses: {},
-      'x-operation': 42,
-    } as unknown as OpenAPIV3.OperationObject;
+    const operation: OpenAPIV3.OperationObject = Object.assign(
+      {responses: {}},
+      {'x-operation': 42},
+    );
 
     expect(readConnectorExtension(operation, 'x-operation')).toBeUndefined();
   });
