@@ -190,6 +190,27 @@ describe('SequentialAgent', () => {
   });
 });
 
+/** A sub-agent that yields one event on the live path. */
+class LiveSubAgent extends BaseAgent {
+  constructor(name: string) {
+    super({name});
+  }
+
+  protected async *runAsyncImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
+
+  protected async *runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: `live ${this.name}`}]},
+    });
+  }
+}
+
 /** An LlmAgent whose live run yields nothing, so no model is contacted. */
 class SilentLiveLlmAgent extends LlmAgent {
   protected async *runLiveImpl(
@@ -525,6 +546,17 @@ describe('SequentialAgent live mode', () => {
     ).toHaveLength(1);
     // The suffix is appended once, alongside the single tool.
     expect(String(sub.instruction).split('task_completed').length - 1).toBe(1);
+  });
+
+  it('forwards the events of each sub-agent in order', async () => {
+    const seq = new SequentialAgent({
+      name: 'seq',
+      subAgents: [new LiveSubAgent('sub1'), new LiveSubAgent('sub2')],
+    });
+
+    const events = await collectLive(seq, makeContext(seq));
+
+    expect(events.map((e) => e.author)).toEqual(['sub1', 'sub2']);
   });
 
   it('emits no events for an empty sub-agent list', async () => {
