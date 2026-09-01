@@ -97,6 +97,30 @@ describe('getAllowedRequestHosts', () => {
   it('still disables the guard for "*" even with extraAllowedHosts set', () => {
     expect(getAllowedRequestHosts('*', ['proxy.example'])).toBeNull();
   });
+
+  it('collects the hostname of every origin in a list', () => {
+    const hosts = getAllowedRequestHosts([
+      'http://proxy.example',
+      'https://console.example:8443',
+    ]);
+    expect(hosts).toEqual(new Set(['proxy.example', 'console.example']));
+  });
+
+  it('disables the guard for a list containing a wildcard origin', () => {
+    expect(getAllowedRequestHosts(['http://proxy.example', '*'])).toBeNull();
+  });
+
+  it('keeps the parseable origins of a list holding a malformed one', () => {
+    const hosts = getAllowedRequestHosts([
+      'not a valid url',
+      'http://proxy.example',
+    ]);
+    expect(hosts).toEqual(new Set(['proxy.example']));
+  });
+
+  it('vouches for no host for an empty list', () => {
+    expect(getAllowedRequestHosts([])).toEqual(new Set());
+  });
 });
 
 describe('isDnsRebindingRequest', () => {
