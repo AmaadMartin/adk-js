@@ -7,6 +7,7 @@
 import {
   BaseAgent,
   CONTENT_REQUEST_PROCESSOR,
+  Gemini,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -49,12 +50,12 @@ describe('isolation scope — content filtering', () => {
     expect(textsOf(getContents(events, 'agent'))).toEqual(['shared']);
   });
 
-  it('shows a scoped reader its own events plus untagged ones', () => {
+  it('shows a scoped reader only its own events', () => {
     expect(textsOf(getContents(events, 'agent', undefined, 'scope-a'))).toEqual(
-      ['shared', 'mine'],
+      ['mine'],
     );
     expect(textsOf(getContents(events, 'agent', undefined, 'scope-b'))).toEqual(
-      ['shared', 'theirs'],
+      ['theirs'],
     );
   });
 
@@ -157,7 +158,7 @@ describe('isolation scope — end to end through the content processor', () => {
       invocationId: 'inv-1',
       agent: new LlmAgent({
         name: 'reviewer',
-        model: 'gemini-2.5-flash',
+        model: new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
       }) as BaseAgent,
       session,
       pluginManager: new PluginManager([]),
@@ -182,7 +183,6 @@ describe('isolation scope — end to end through the content processor', () => {
     ];
 
     expect(await contentsFor(events, 'wf.critic@1')).toEqual([
-      'the original question',
       'critique the summary',
     ]);
   });

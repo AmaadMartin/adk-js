@@ -236,7 +236,7 @@ describe('getContents', () => {
     expect(contents[3].parts?.[0].functionResponse?.id).toBe('id2');
   });
 
-  it('should throw an error when last responses do not match the expected subset criteria of function calls', () => {
+  it('should prune a trailing response whose function call is not in the history', () => {
     const e0 = createEvent({
       author: 'user',
       content: {
@@ -276,14 +276,14 @@ describe('getContents', () => {
       },
     });
 
-    expect(() => getContents([e0, e1, e2], 'my_agent')).toThrowError(
-      'No function call event found for function responses ids: id2',
-    );
+    const contents = getContents([e0, e1, e2], 'my_agent');
+
+    expect(contents).toHaveLength(2);
+    expect(contents[0].parts?.[0].text).toBe('hello');
+    expect(contents[1].parts?.[0].functionCall?.id).toBe('id1');
   });
 
-  it('should throw subset error when response is for an id from a call event, but contains other unexpected ids', () => {
-    // Actually, the subset error occurs when functionResponsesIds is NOT a subset of functionCallIds.
-    // e.g. the last event has responses for id1 and id2, but the matched call event only has id1.
+  it('should prune the orphaned part of a response event and keep the paired one', () => {
     const e0 = createEvent({
       author: 'my_agent',
       content: {
@@ -329,7 +329,50 @@ describe('getContents', () => {
       },
     });
 
-    expect(() => getContents([e0, e0_5, e1], 'my_agent')).toThrowError(
+    const contents = getContents([e0, e0_5, e1], 'my_agent');
+
+    const responses = contents.flatMap(
+      (content) =>
+        content.parts?.flatMap((part) =>
+          part.functionResponse ? [part.functionResponse] : [],
+        ) ?? [],
+    );
+    expect(responses.map((response) => response.id)).toEqual(['id1']);
+  });
+
+  it('should still throw the subset error when responses span two call events', () => {
+    const callOne = createEvent({
+      author: 'my_agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'tool1', id: 'id1', args: {}}}],
+      },
+    });
+    const callTwo = createEvent({
+      author: 'my_agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'tool2', id: 'id2', args: {}}}],
+      },
+    });
+    const filler = createEvent({
+      author: 'user',
+      content: {role: 'user', parts: [{text: 'hello'}]},
+    });
+    const responses = createEvent({
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {name: 'tool1', id: 'id1', response: {}}},
+          {functionResponse: {name: 'tool2', id: 'id2', response: {}}},
+        ],
+      },
+    });
+
+    expect(() =>
+      getContents([callOne, callTwo, filler, responses], 'my_agent'),
+    ).toThrowError(
       'Last response event should only contain the responses for the function calls in the same function call event.',
     );
   });
@@ -1004,7 +1047,7 @@ describe('getContents', () => {
     expect(contents).toEqual([]);
   });
 
-  it('should handle events with no parts in isAuthEvent and isToolConfirmationEvent', () => {
+  it('should skip a user event that carries no parts', () => {
     const event = createEvent({
       author: 'my_agent',
       content: {
@@ -1012,11 +1055,10 @@ describe('getContents', () => {
       },
     });
     const contents = getContents([event], 'my_agent');
-    expect(contents).toHaveLength(1);
-    expect(contents[0].role).toBe('user');
+    expect(contents).toEqual([]);
   });
 
-  it('should return input event in convertForeignEvent if content or parts length is 0', () => {
+  it('should skip a foreign event whose parts list is empty', () => {
     const event = createEvent({
       author: 'other_agent',
       content: {
@@ -1025,10 +1067,10 @@ describe('getContents', () => {
       },
     });
     const contents = getContents([event], 'current_agent');
-    expect(contents).toHaveLength(1);
+    expect(contents).toEqual([]);
   });
 
-  it('should handle event without parts in isToolConfirmationEvent', () => {
+  it('should skip a model event that carries no parts', () => {
     const e0 = createEvent({
       author: 'my_agent',
       content: {
@@ -1036,9 +1078,7 @@ describe('getContents', () => {
       },
     });
     const contents = getContents([e0], 'my_agent');
-    expect(contents).toHaveLength(1);
-    expect(contents[0].role).toBe('model');
-    expect(contents[0].parts).toBeUndefined();
+    expect(contents).toEqual([]);
   });
 
   it('should skip events with no role in getContents', () => {

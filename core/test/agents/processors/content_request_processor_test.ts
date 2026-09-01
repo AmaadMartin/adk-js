@@ -10,6 +10,7 @@ import {
   CONTENT_REQUEST_PROCESSOR,
   Event,
   EventActions,
+  Gemini,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -62,7 +63,7 @@ function createMockInvocationContext(events: Event[]): InvocationContext {
 
   const agent = new LlmAgent({
     name: 'test_agent',
-    model: 'gemini-2.5-flash',
+    model: new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
   });
 
   return new InvocationContext({
