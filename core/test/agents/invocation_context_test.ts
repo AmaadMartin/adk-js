@@ -172,3 +172,36 @@ describe('InvocationContext LLM-call cost tracking', () => {
     expect(events).toHaveLength(3);
   });
 });
+
+describe('InvocationContext customMetadata', () => {
+  function makeContext(
+    customMetadata?: Record<string, unknown>,
+  ): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'loop', subAgents: []}),
+      session: makeSession(),
+      pluginManager: new PluginManager([]),
+      customMetadata,
+    });
+  }
+
+  it('defaults to an empty store', () => {
+    expect(makeContext().customMetadata).toEqual({});
+  });
+
+  it('keeps the store it was given', () => {
+    const store = {http_debug_info: []};
+
+    expect(makeContext(store).customMetadata).toBe(store);
+  });
+
+  it('shares one store with every clone of the invocation', () => {
+    const context = makeContext();
+
+    const child = context.clone();
+    child.customMetadata['http_debug_info'] = ['recorded'];
+
+    expect(context.customMetadata['http_debug_info']).toEqual(['recorded']);
+  });
+});

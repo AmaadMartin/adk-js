@@ -12,6 +12,8 @@ import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
+import {createRecordingFetch, getHttpDebugSink} from './http_debug_recorder.js';
+
 /**
  * The optional peer backing every MCP connection.
  *
@@ -153,13 +155,20 @@ export class MCPSessionManager {
             };
           }
 
+          // Recording is off unless a caller opened a sink, and the caller's
+          // options object is left untouched when it is.
+          const sink = getHttpDebugSink();
+          const transportOptions = sink
+            ? {...options, fetch: createRecordingFetch(sink, options.fetch)}
+            : options;
+
           const {StreamableHTTPClientTransport} = await loadOptionalPeer(
             MCP_SDK,
             () => import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
           );
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
-            options,
+            transportOptions,
           );
           transport.onerror = logTransportError;
           await client.connect(transport);
