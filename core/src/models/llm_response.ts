@@ -21,6 +21,7 @@ import {
   VoiceActivity,
 } from '@google/genai';
 
+import {logger} from '../utils/logger.js';
 import {CacheMetadata} from './cache_metadata.js';
 
 /**
@@ -285,10 +286,15 @@ export function createLlmResponse(
     };
   }
 
-  // The ultimate fallback for an unknown error state
+  // Some model backends legitimately complete a turn without candidates, for
+  // example a tool-driven user-interface turn that carries no text.
+  logger.warn(
+    'Received empty candidates and no prompt feedback in model response. ' +
+      'Treating as a successful empty response.',
+  );
   return {
-    errorCode: 'UNKNOWN_ERROR',
-    errorMessage: 'Unknown error.',
+    content: {role: 'model', parts: []},
     usageMetadata: usageMetadata,
+    modelVersion: response.modelVersion,
   };
 }
