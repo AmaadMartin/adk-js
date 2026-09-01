@@ -122,7 +122,7 @@ describe('OAuth2CredentialExchanger', () => {
     const exchange = () =>
       createExchanger().exchange({
         authScheme: createAuthScheme(),
-        authCredential: undefined as unknown as AuthCredential,
+        authCredential: undefined,
       });
 
     await expect(exchange()).rejects.toThrow(CredentialExchangeError);
