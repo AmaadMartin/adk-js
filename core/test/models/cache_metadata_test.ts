@@ -4,14 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  CacheMetadata,
-  formatCacheMetadata,
-  isCacheExpiringSoon,
-} from '@google/adk';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {CacheMetadata} from '@google/adk';
+import {describe, expect, it} from 'vitest';
 
-/** Fixed wall clock so every expiry figure in this file is deterministic. */
 const NOW_SECONDS = 1_700_000_000;
 
 const FINGERPRINT_ONLY: CacheMetadata = {
@@ -29,60 +24,6 @@ function activeMetadata(expireTime: number): CacheMetadata {
     createdAt: NOW_SECONDS - 60,
   };
 }
-
-function pinClock(): void {
-  vi.useFakeTimers();
-  vi.setSystemTime(NOW_SECONDS * 1000);
-}
-
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-describe('isCacheExpiringSoon', () => {
-  it('returns false for fingerprint-only metadata', () => {
-    pinClock();
-    expect(isCacheExpiringSoon(FINGERPRINT_ONLY)).toBe(false);
-  });
-
-  it('returns true when the cache expires inside the 120s buffer', () => {
-    pinClock();
-    expect(isCacheExpiringSoon(activeMetadata(NOW_SECONDS + 119))).toBe(true);
-  });
-
-  it('returns false when the cache expires beyond the 120s buffer', () => {
-    pinClock();
-    expect(isCacheExpiringSoon(activeMetadata(NOW_SECONDS + 121))).toBe(false);
-  });
-
-  it('returns true for a cache that already expired', () => {
-    pinClock();
-    expect(isCacheExpiringSoon(activeMetadata(NOW_SECONDS - 600))).toBe(true);
-  });
-});
-
-describe('formatCacheMetadata', () => {
-  it('reports the contents count and the fingerprint prefix when no cache is active', () => {
-    pinClock();
-    expect(formatCacheMetadata(FINGERPRINT_ONLY)).toBe(
-      'Fingerprint-only: 3 contents, fingerprint=abcdef01...',
-    );
-  });
-
-  it('reports the cache id, usage and minutes to expiry when a cache is active', () => {
-    pinClock();
-    expect(formatCacheMetadata(activeMetadata(NOW_SECONDS + 630))).toBe(
-      'Cache 456: used 7 invocations, cached 5 contents, expires in 10.5min',
-    );
-  });
-
-  it('reports a negative expiry for a cache that already expired', () => {
-    pinClock();
-    expect(formatCacheMetadata(activeMetadata(NOW_SECONDS - 90))).toContain(
-      'expires in -1.5min',
-    );
-  });
-});
 
 describe('CacheMetadata narrowing', () => {
   it('exposes the active fields once cacheName is known to be set', () => {

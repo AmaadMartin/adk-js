@@ -208,10 +208,6 @@ export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
-export {
-  formatCacheMetadata,
-  isCacheExpiringSoon,
-} from './models/cache_metadata.js';
 export type {
   ActiveCacheMetadata,
   CacheMetadata,

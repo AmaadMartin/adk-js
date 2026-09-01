@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/** Headroom before the true expiry, which covers request processing time. */
-const EXPIRY_BUFFER_SECONDS = 120;
-
-/** How many fingerprint characters {@link formatCacheMetadata} prints. */
-const FINGERPRINT_PREFIX_LENGTH = 8;
-
-const SECONDS_PER_MINUTE = 60;
-
 /** Fields that both cache states carry. */
 interface CacheMetadataBase {
   /**
@@ -50,11 +42,7 @@ export interface ActiveCacheMetadata extends CacheMetadataBase {
   readonly invocationsUsed: number;
 }
 
-/**
- * Metadata for a fingerprinted content prefix that has no cache behind it.
- *
- * The request processor uses it to match a prefix before it creates a cache.
- */
+/** Metadata for a fingerprinted content prefix that has no cache behind it. */
 export interface FingerprintCacheMetadata extends CacheMetadataBase {
   readonly cacheName?: undefined;
   readonly expireTime?: undefined;
@@ -70,35 +58,3 @@ export interface FingerprintCacheMetadata extends CacheMetadataBase {
  * does not type-check, so no runtime validator is needed.
  */
 export type CacheMetadata = ActiveCacheMetadata | FingerprintCacheMetadata;
-
-/**
- * Returns whether the cache expires within the processing buffer.
- *
- * Fingerprint-only metadata has no expiry, so it never expires soon.
- */
-export function isCacheExpiringSoon(metadata: CacheMetadata): boolean {
-  if (metadata.expireTime === undefined) {
-    return false;
-  }
-  return Date.now() / 1000 > metadata.expireTime - EXPIRY_BUFFER_SECONDS;
-}
-
-/** Returns a readable one-line description of the cache, for logging. */
-export function formatCacheMetadata(metadata: CacheMetadata): string {
-  if (metadata.cacheName === undefined) {
-    const prefix = metadata.fingerprint.slice(0, FINGERPRINT_PREFIX_LENGTH);
-    return (
-      `Fingerprint-only: ${metadata.contentsCount} contents, ` +
-      `fingerprint=${prefix}...`
-    );
-  }
-
-  const cacheId = metadata.cacheName.split('/').pop();
-  const minutesToExpiry =
-    (metadata.expireTime - Date.now() / 1000) / SECONDS_PER_MINUTE;
-  return (
-    `Cache ${cacheId}: used ${metadata.invocationsUsed} invocations, ` +
-    `cached ${metadata.contentsCount} contents, ` +
-    `expires in ${minutesToExpiry.toFixed(1)}min`
-  );
-}
