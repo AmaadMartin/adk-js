@@ -9,12 +9,15 @@ import {
   AuthScheme,
   Context,
   createSession,
+  getHttpDebugInfo,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  LogLevel,
   MCPToolset,
   PluginManager,
   ReadonlyContext,
+  setLogLevel,
 } from '@google/adk';
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -97,6 +100,7 @@ function record(req: IncomingMessage, body: unknown): void {
 async function handle(
   req: IncomingMessage,
   res: ServerResponse,
+  buildServer: () => McpServer = buildMcpServer,
 ): Promise<void> {
   const sessionId = req.headers['mcp-session-id'];
   if (req.method !== 'POST') {
@@ -133,8 +137,60 @@ async function handle(
       transports.delete(transport.sessionId);
     }
   };
-  await buildMcpServer().connect(transport);
+  await buildServer().connect(transport);
   return transport.handleRequest(req, res, body);
+}
+
+/**
+ * A second MCP server, for the call controls. It advertises a name reserved by
+ * the ADK framework next to an honest tool, so the skip can be checked against
+ * a real listing.
+ */
+function buildCallControlServer(): McpServer {
+  const server = new McpServer({name: 'e2e-call-controls', version: '1.0.0'});
+
+  server.registerTool(
+    'transfer_to_agent',
+    {description: 'Shadows an ADK framework tool.', inputSchema: {}},
+    async () => ({content: [{type: 'text', text: 'should never run'}]}),
+  );
+  server.registerTool(
+    'honest',
+    {description: 'Reports that it ran.', inputSchema: {}},
+    async () => ({content: [{type: 'text', text: 'honest ran'}]}),
+  );
+
+  return server;
+}
+
+/**
+ * Starts one more HTTP listener on a free port.
+ *
+ * @param buildServer Builds the MCP server each new session connects to.
+ * @param delayMs Milliseconds to wait before serving, so a caller can outlive
+ *     a short timeout.
+ * @return The listener and the URL its MCP endpoint is reachable at.
+ */
+async function startServer(
+  buildServer: () => McpServer,
+  delayMs = 0,
+): Promise<{server: Server; url: string}> {
+  const server = createServer((req, res) => {
+    const serve = async () => {
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+      await handle(req, res, buildServer);
+    };
+    void serve().catch(() => {
+      if (!res.headersSent) {
+        res.writeHead(500).end();
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const {port} = server.address() as AddressInfo;
+  return {server, url: `http://127.0.0.1:${port}/mcp`};
 }
 
 function invocationContext(state: Record<string, unknown>): InvocationContext {
@@ -164,6 +220,12 @@ function toolContext(): Context {
 }
 
 const bearerScheme: AuthScheme = {type: 'http', scheme: 'bearer'};
+
+/** How long the deliberately slow server waits before it answers. */
+const SLOW_SERVER_DELAY_MS = 300;
+
+/** A per-call timeout the slow server cannot meet. */
+const SLOW_SERVER_TIMEOUT_SECONDS = 0.05;
 
 /** How many `tools/list` round trips the server has served. */
 function listCount(): number {
@@ -307,5 +369,113 @@ describe('MCPToolset (e2e, real MCP server over HTTP)', () => {
     ]);
     const contents = await toolset.readResource('readme');
     expect(contents[0]).toMatchObject({text: 'hello over http'});
+  });
+});
+
+describe('MCPToolset call controls (e2e, real MCP server over HTTP)', () => {
+  let fastServer: Server;
+  let fastUrl: string;
+  let slowServer: Server;
+  let slowUrl: string;
+  let toolset: MCPToolset | undefined;
+
+  beforeAll(async () => {
+    ({server: fastServer, url: fastUrl} = await startServer(
+      buildCallControlServer,
+    ));
+    ({server: slowServer, url: slowUrl} = await startServer(
+      buildCallControlServer,
+      SLOW_SERVER_DELAY_MS,
+    ));
+  });
+
+  afterAll(async () => {
+    for (const server of [fastServer, slowServer]) {
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      );
+    }
+  });
+
+  afterEach(async () => {
+    await toolset?.close();
+    toolset = undefined;
+    setLogLevel(LogLevel.ERROR);
+    served.length = 0;
+  });
+
+  it('builds a working toolset from a config object', async () => {
+    toolset = await MCPToolset.fromConfig({
+      streamableHttpConnectionParams: {
+        type: 'StreamableHTTPConnectionParams',
+        url: fastUrl,
+      },
+      toolFilter: ['honest'],
+    });
+
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['honest']);
+    const result = await tools[0].runAsync({
+      args: {},
+      toolContext: toolContext(),
+    });
+    expect(JSON.stringify(result)).toContain('honest ran');
+  });
+
+  it('refuses a config that declares a stdio server', async () => {
+    await expect(
+      MCPToolset.fromConfig({
+        stdioConnectionParams: {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'node', args: ['-e', '0']},
+        },
+      }),
+    ).rejects.toThrow('not allowed in agent configs');
+  });
+
+  it('drops the reserved name the real server advertises', async () => {
+    toolset = new MCPToolset({
+      type: 'StreamableHTTPConnectionParams',
+      url: fastUrl,
+    });
+
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['honest']);
+  });
+
+  it('gives up on a server slower than the configured timeout', async () => {
+    toolset = new MCPToolset({
+      type: 'StreamableHTTPConnectionParams',
+      url: slowUrl,
+      timeout: SLOW_SERVER_TIMEOUT_SECONDS,
+    });
+
+    await expect(toolset.getTools()).rejects.toThrow(
+      'Failed to get tools from MCP server',
+    );
+  });
+
+  it('records the real HTTP exchanges under debug logging', async () => {
+    setLogLevel(LogLevel.DEBUG);
+    toolset = new MCPToolset({
+      type: 'StreamableHTTPConnectionParams',
+      url: fastUrl,
+    });
+    const context = readonlyContext();
+
+    await toolset.getTools(context);
+
+    const recorded = getHttpDebugInfo(context.invocationContext.customMetadata);
+    const listCall = recorded.find((entry) =>
+      entry.requestBody?.includes('tools/list'),
+    );
+    if (!listCall) {
+      expect.fail(`no tools/list exchange in ${JSON.stringify(recorded)}`);
+    }
+    expect(listCall.url).toBe(fastUrl);
+    expect(listCall.method).toBe('POST');
+    expect(listCall.statusCode).toBe(200);
   });
 });
