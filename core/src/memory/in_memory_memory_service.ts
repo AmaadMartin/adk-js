@@ -23,6 +23,9 @@ const UNKNOWN_SESSION_ID = '__unknown_session_id__';
 /** The largest number of memories a single search returns. */
 const MAX_SEARCH_RESULTS = 10;
 
+/** Matches text that holds at least one non-ASCII character. */
+const NON_ASCII = /[^\p{ASCII}]/u;
+
 /** An event that is known to carry at least one content part. */
 type EventWithParts = Event & {content: Content & {parts: Part[]}};
 
@@ -86,7 +89,10 @@ export class InMemoryMemoryService implements BaseMemoryService {
 
     for (const events of sessions?.values() ?? []) {
       for (const event of events) {
-        const eventText = joinPartTexts(event.content.parts);
+        const eventText = event.content.parts
+          .map((part) => part.text)
+          .filter((text) => !!text)
+          .join(' ');
         const wordsInEvent = extractWordsLower(eventText);
         if (!wordsInEvent.size) {
           continue;
@@ -156,19 +162,6 @@ function hasContentParts(event: Event): event is EventWithParts {
 }
 
 /**
- * Joins the non-empty text of the parts with a single space.
- *
- * @param parts The parts to join.
- * @return The joined text.
- */
-function joinPartTexts(parts: Part[]): string {
-  return parts
-    .map((part) => part.text)
-    .filter((text) => !!text)
-    .join(' ');
-}
-
-/**
  * Extracts the words from the text.
  *
  * The pattern matches Unicode letters, numbers and underscore, the equivalent
@@ -183,16 +176,6 @@ function extractWordsLower(text: string): Set<string> {
       match[0].toLowerCase(),
     ),
   );
-}
-
-/**
- * Reports whether every character of the text is ASCII.
- *
- * @param text The text to inspect.
- * @return Whether the text is ASCII.
- */
-function isAscii(text: string): boolean {
-  return [...text].every((char) => char.charCodeAt(0) < 128);
 }
 
 /**
@@ -217,7 +200,7 @@ function countMatchedWords(
   for (const queryWord of wordsInQuery) {
     if (
       wordsInEvent.has(queryWord) ||
-      (!isAscii(queryWord) && eventTextLower.includes(queryWord))
+      (NON_ASCII.test(queryWord) && eventTextLower.includes(queryWord))
     ) {
       matched++;
     }
