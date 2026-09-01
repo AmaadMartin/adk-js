@@ -21,6 +21,7 @@ import {
   createEvent,
   createEventsCompactionConfig,
   createResumabilityConfig,
+  isLlmCallsLimitExceededError,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -801,6 +802,22 @@ describe('InvocationContext LLM-call limit errors', () => {
     expect(() => context.incrementLlmCallCount()).toThrowError(
       LlmCallsLimitExceededError,
     );
+  });
+
+  it('recognises the error through the type guard, and nothing else', () => {
+    const context = makeContext({runConfig: {maxLlmCalls: 1}});
+    context.incrementLlmCallCount();
+
+    let thrown: unknown;
+    try {
+      context.incrementLlmCallCount();
+    } catch (error: unknown) {
+      thrown = error;
+    }
+
+    expect(isLlmCallsLimitExceededError(thrown)).toBe(true);
+    expect(isLlmCallsLimitExceededError(new Error('other'))).toBe(false);
+    expect(isLlmCallsLimitExceededError('not an error')).toBe(false);
   });
 
   it('does not enforce a non-positive limit', () => {

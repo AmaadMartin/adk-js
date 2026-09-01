@@ -159,7 +159,10 @@ export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
 export {InputValidationError} from './errors/input_validation_error.js';
-export {LlmCallsLimitExceededError} from './errors/llm_calls_limit_exceeded_error.js';
+export {
+  LlmCallsLimitExceededError,
+  isLlmCallsLimitExceededError,
+} from './errors/llm_calls_limit_exceeded_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
