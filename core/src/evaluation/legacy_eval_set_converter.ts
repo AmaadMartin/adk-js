@@ -15,12 +15,10 @@
 
 import {Content, createPartFromText, FunctionCall, Part} from '@google/genai';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {nowInSeconds} from '../utils/time_utils.js';
 import {EvalCase, Invocation, SessionInput} from './eval_case.js';
 import {isRecord} from './eval_json.js';
 import {EvalSet} from './eval_set.js';
-
-/** Milliseconds per second, for the epoch-seconds timestamps eval data uses. */
-const MILLIS_PER_SECOND = 1000;
 
 /** One eval case in the original format. */
 export interface LegacyEvalCase {
@@ -39,7 +37,7 @@ export function convertLegacyEvalSet(
   evalSetId: string,
   legacyEvalCases: LegacyEvalCase[],
 ): EvalSet {
-  const creationTimestamp = Date.now() / MILLIS_PER_SECOND;
+  const creationTimestamp = nowInSeconds();
   const evalCases: EvalCase[] = legacyEvalCases.map((legacyEvalCase) => ({
     evalId: legacyEvalCase.name,
     conversation: legacyEvalCase.data.map(convertLegacyInvocation),
@@ -63,7 +61,7 @@ function convertLegacyInvocation(
         legacyInvocation['expected_intermediate_agent_responses'],
       ),
     },
-    creationTimestamp: Date.now() / MILLIS_PER_SECOND,
+    creationTimestamp: nowInSeconds(),
   };
 }
 

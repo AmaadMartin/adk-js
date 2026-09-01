@@ -50,11 +50,11 @@ export interface EvalMetric {
   metricName: string;
 
   /**
-   * @deprecated Use {@link criterion} instead.
+   * How the metric is judged. Required, so that a metric cannot reach a
+   * verdict with no threshold to compare against. adk-python also carries a
+   * bare `threshold`, which it documents as on its way out.
    */
-  threshold?: number;
-
-  criterion?: BaseCriterion;
+  criterion: BaseCriterion;
 
   /** Path to the scoring function, when this is a custom metric. */
   customFunctionPath?: string;
@@ -77,21 +77,4 @@ export interface EvalMetricResultPerInvocation {
   expectedInvocation?: Invocation;
 
   evalMetricResults: EvalMetricResult[];
-}
-
-/**
- * Returns the threshold configured for a metric.
- *
- * @throws If the metric carries neither a criterion nor a threshold.
- */
-export function getMetricThreshold(evalMetric: EvalMetric): number {
-  if (evalMetric.criterion !== undefined) {
-    return evalMetric.criterion.threshold;
-  }
-  if (evalMetric.threshold !== undefined) {
-    return evalMetric.threshold;
-  }
-  throw new Error(
-    `Evaluation metric '${evalMetric.metricName}' requires a threshold.`,
-  );
 }

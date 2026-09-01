@@ -8,21 +8,8 @@ import {Invocation} from './eval_case.js';
 import {EvalMetric} from './eval_metrics.js';
 import {EvalCaseResult} from './eval_result.js';
 
-/** Inferences and evaluations run this many eval cases at a time. */
-export const DEFAULT_EVAL_PARALLELISM = 4;
-
 /** How the agent is run to produce the inferences an eval scores. */
 export interface InferenceConfig {
-  /** Labels with user-defined metadata, to break down billed charges. */
-  labels?: Record<string, string>;
-
-  /**
-   * How many inferences to run at a time. Raising it consumes model quota
-   * faster and puts more load on the agent's tools. Defaults to
-   * {@link DEFAULT_EVAL_PARALLELISM}.
-   */
-  parallelism?: number;
-
   /**
    * Whether to run in live (bidirectional streaming) mode, which Live API
    * models require.
@@ -76,12 +63,9 @@ export interface InferenceResult {
   errorMessage?: string;
 }
 
-/** Which metrics to score, and how fast. */
+/** Which metrics to score. */
 export interface EvaluateConfig {
   evalMetrics: EvalMetric[];
-
-  /** Defaults to {@link DEFAULT_EVAL_PARALLELISM}. */
-  parallelism?: number;
 }
 
 /** A request to score inferences against a set of metrics. */

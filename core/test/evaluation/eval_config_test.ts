@@ -155,7 +155,6 @@ describe('getEvalMetricsFromConfig', () => {
     expect(metrics).toEqual([
       {
         metricName: 'response_match_score',
-        threshold: 0.8,
         criterion: {threshold: 0.8},
         customFunctionPath: undefined,
       },
@@ -173,7 +172,6 @@ describe('getEvalMetricsFromConfig', () => {
     expect(metrics).toEqual([
       {
         metricName: 'my_metric',
-        threshold: 0.5,
         criterion,
         customFunctionPath: './metrics.js#score',
       },

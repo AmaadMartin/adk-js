@@ -155,10 +155,7 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
-export {
-  DEFAULT_EVAL_PARALLELISM,
-  InferenceStatus,
-} from './evaluation/base_eval_service.js';
+export {InferenceStatus} from './evaluation/base_eval_service.js';
 export type {
   BaseEvalService,
   EvaluateConfig,
@@ -194,11 +191,7 @@ export type {
   EvalConfig,
   LiveModelConfig,
 } from './evaluation/eval_config.js';
-export {
-  EvalStatus,
-  PrebuiltMetrics,
-  getMetricThreshold,
-} from './evaluation/eval_metrics.js';
+export {EvalStatus, PrebuiltMetrics} from './evaluation/eval_metrics.js';
 export type {
   BaseCriterion,
   EvalMetric,

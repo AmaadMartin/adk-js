@@ -196,11 +196,6 @@ export function getEvalMetricsFromConfig(evalConfig: EvalConfig): EvalMetric[] {
       evalConfig.customMetrics?.[metricName]?.codeConfig.name;
     const resolved: BaseCriterion =
       typeof criterion === 'number' ? {threshold: criterion} : criterion;
-    return {
-      metricName,
-      threshold: resolved.threshold,
-      criterion: resolved,
-      customFunctionPath,
-    };
+    return {metricName, criterion: resolved, customFunctionPath};
   });
 }

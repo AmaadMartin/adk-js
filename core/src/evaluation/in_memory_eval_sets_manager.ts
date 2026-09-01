@@ -6,12 +6,10 @@
 
 import {AlreadyExistsError} from '../errors/already_exists_error.js';
 import {NotFoundError} from '../errors/not_found_error.js';
+import {nowInSeconds} from '../utils/time_utils.js';
 import {EvalCase} from './eval_case.js';
 import {EvalSet} from './eval_set.js';
 import {EvalSetsManager} from './eval_sets_manager.js';
-
-/** Milliseconds per second, for the epoch-seconds timestamps eval data uses. */
-const MILLIS_PER_SECOND = 1000;
 
 /**
  * Holds eval sets in memory.
@@ -40,7 +38,7 @@ export class InMemoryEvalSetsManager implements EvalSetsManager {
     const evalSet: EvalSet = {
       evalSetId,
       evalCases: [],
-      creationTimestamp: Date.now() / MILLIS_PER_SECOND,
+      creationTimestamp: nowInSeconds(),
     };
     setsForApp.set(evalSetId, evalSet);
     return evalSet;

@@ -155,7 +155,7 @@ function parseInvocation(raw: unknown): Invocation {
   if (!isRecord(raw)) {
     throw new EvalSetSchemaError('Every invocation must be a JSON object.');
   }
-  const userContent = asContent(raw['userContent']);
+  const userContent = parseContent(raw['userContent']);
   if (!userContent) {
     throw new EvalSetSchemaError(
       'Every invocation must have a `user_content`.',
@@ -164,19 +164,20 @@ function parseInvocation(raw: unknown): Invocation {
   return {
     invocationId: stringOrEmpty(raw['invocationId']),
     userContent,
-    finalResponse: asContent(raw['finalResponse']),
+    finalResponse: parseContent(raw['finalResponse']),
     intermediateData: asIntermediateData(raw['intermediateData']),
     creationTimestamp: numberOrZero(raw['creationTimestamp']),
   };
 }
 
-/**
- * Accepts a record as `Content`. The genai types are all-optional bags of
- * fields, so this checks that the value is an object and trusts the writer for
- * the rest, exactly as an unvalidated `JSON.parse` result would be trusted.
- */
-function asContent(value: unknown): Content | undefined {
-  return isRecord(value) ? (value as Content) : undefined;
+function parseContent(value: unknown): Content | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return {
+    role: optionalString(value['role']),
+    parts: objectsIn<Part>(value['parts']),
+  };
 }
 
 function asIntermediateData(value: unknown): IntermediateDataType | undefined {
@@ -188,12 +189,43 @@ function asIntermediateData(value: unknown): IntermediateDataType | undefined {
     return {invocationEvents: events.map(parseInvocationEvent)};
   }
   return {
-    toolUses: asArray<FunctionCall>(value['toolUses']),
-    toolResponses: asArray<FunctionResponse>(value['toolResponses']),
-    intermediateResponses: asArray<[string, Part[]]>(
+    toolUses: objectsIn<FunctionCall>(value['toolUses']),
+    toolResponses: objectsIn<FunctionResponse>(value['toolResponses']),
+    intermediateResponses: parseIntermediateResponses(
       value['intermediateResponses'],
     ),
   };
+}
+
+/** Reads the `[author, parts]` pairs, dropping anything of another shape. */
+function parseIntermediateResponses(value: unknown): Array<[string, Part[]]> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const responses: Array<[string, Part[]]> = [];
+  for (const entry of value) {
+    if (Array.isArray(entry) && typeof entry[0] === 'string') {
+      responses.push([entry[0], objectsIn<Part>(entry[1])]);
+    }
+  }
+  return responses;
+}
+
+/**
+ * Reads a JSON array as a list of genai payloads, dropping every element that
+ * is not an object.
+ *
+ * Every field of a genai payload is optional, so being an object is as far as
+ * a structural check can go, and the fields this module reads are all guarded
+ * at their use. What the filter rules out is the element that is not an object
+ * at all: a `tool_uses` of `[1, 2, 3]` would otherwise reach the eval service
+ * as tool calls and fail on the first property read.
+ */
+function objectsIn<T>(value: unknown): T[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord) as T[];
 }
 
 function parseInvocationEvent(raw: unknown): InvocationEvent {
@@ -202,16 +234,8 @@ function parseInvocationEvent(raw: unknown): InvocationEvent {
   }
   return {
     author: stringOrEmpty(raw['author']),
-    content: asContent(raw['content']),
+    content: parseContent(raw['content']),
   };
-}
-
-/**
- * Accepts a JSON array as a list of `T`, mirroring {@link asContent}: the
- * element types are genai payloads whose fields this module never reads.
- */
-function asArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : [];
 }
 
 function optionalString(value: unknown): string | undefined {
