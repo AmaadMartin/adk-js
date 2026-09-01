@@ -39,6 +39,8 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
 - [adkToMcpToolType and geminiToJsonSchema](tools/mcp_conversion_utils/index.md) -
   Convert an ADK tool into an MCP tool descriptor so an MCP server can
   advertise it.
+- [APIHubToolset](tools/apihub_toolset/index.md) - Building agent tools from an
+  API Hub specification, and controlling when it is fetched.
 - [LlamaIndexRetrievalTool](tools/llama_index_retrieval/index.md) - Grounding an
   agent in a LlamaIndex.TS index you already built, without adding the
   dependency to ADK.

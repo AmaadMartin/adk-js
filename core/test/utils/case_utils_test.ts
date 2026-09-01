@@ -49,6 +49,45 @@ describe('case_utils', () => {
       expect(snakeCase('___')).toBe('');
       expect(snakeCase('')).toBe('');
     });
+
+    it('should split lowerCamelCase', () => {
+      expect(snakeCase('camelCase')).toBe('camel_case');
+      expect(snakeCase('emptyDescTest')).toBe('empty_desc_test');
+    });
+
+    it('should split UpperCamelCase', () => {
+      expect(snakeCase('UpperCamelCase')).toBe('upper_camel_case');
+    });
+
+    it('should split a digit from the word that follows it', () => {
+      expect(snakeCase('oauth2Client')).toBe('oauth2_client');
+    });
+
+    it('should keep an acronym together and split the word after it', () => {
+      expect(snakeCase('RESTClient')).toBe('rest_client');
+      expect(snakeCase('Mock API')).toBe('mock_api');
+      expect(snakeCase('Empty Description API')).toBe('empty_description_api');
+    });
+
+    it('should replace runs of non-alphanumeric characters with one underscore', () => {
+      expect(snakeCase('space separated')).toBe('space_separated');
+      expect(snakeCase('dash-and.dot')).toBe('dash_and_dot');
+      expect(snakeCase('many   spaces')).toBe('many_spaces');
+    });
+
+    it('should trim leading and trailing underscores', () => {
+      expect(snakeCase('__wrapped__')).toBe('wrapped');
+      expect(snakeCase('  padded  ')).toBe('padded');
+    });
+
+    it('should leave a snake_case string unchanged', () => {
+      expect(snakeCase('already_snake_case')).toBe('already_snake_case');
+    });
+
+    it('should return an empty string when nothing survives', () => {
+      expect(snakeCase('')).toBe('');
+      expect(snakeCase('---')).toBe('');
+    });
   });
 
   describe('camelCaseKeys', () => {
