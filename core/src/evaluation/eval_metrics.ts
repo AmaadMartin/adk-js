@@ -15,8 +15,9 @@ export interface BaseCriterion {
 /**
  * How actual tool calls are matched against the expected trajectory.
  *
- * The member names are the values an adk-python eval config accepts under
- * `match_type`, which is where this enum crosses the language boundary.
+ * The member names are the names of adk-python's `MatchType`, which its
+ * criterion accepts as strings under `match_type`. That is where this enum
+ * crosses the language boundary.
  */
 export enum ToolTrajectoryMatchType {
   /** The actual calls equal the expected ones, none extra and none missing. */
@@ -92,22 +93,6 @@ export function normalizeToolTrajectoryMatchType(
   return MATCH_TYPES_BY_NAME.get(
     value.trim().toUpperCase().replace(/[- ]/g, '_'),
   );
-}
-
-/**
- * Normalizes a match type supplied as an enum member or a string.
- *
- * @throws {InputValidationError} When the value names no known match type.
- */
-export function parseToolTrajectoryMatchType(
-  value: unknown,
-): ToolTrajectoryMatchType {
-  const matchType = normalizeToolTrajectoryMatchType(value);
-  if (matchType === undefined) {
-    throw new InputValidationError(`Unsupported match type ${String(value)}`);
-  }
-
-  return matchType;
 }
 
 /**

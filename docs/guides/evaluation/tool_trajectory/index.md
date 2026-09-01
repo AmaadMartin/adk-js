@@ -76,22 +76,12 @@ The match type decides how strict the comparison is. It defaults to `EXACT`.
 `ANY_ORDER` respects multiplicity: an expected call that repeats needs the
 actual trajectory to hold it as many times.
 
-```ts
-import {ToolTrajectoryMatchType, TrajectoryEvaluator} from '@google/adk';
-
-const evaluator = new TrajectoryEvaluator({
-  evalMetric: {
-    metricName: 'tool_trajectory_avg_score',
-    criterion: {threshold: 0.5, matchType: ToolTrajectoryMatchType.ANY_ORDER},
-  },
-});
-```
-
 ## Configuration from an eval config
 
 A criterion usually arrives as parsed JSON, where the match type is a string.
 The evaluator trims it, upper-cases it, and reads a dash or a space as an
 underscore, so `'any order'`, `'ANY-ORDER'` and `'any_order'` all resolve.
+adk-python normalizes the same spellings, so one eval config drives both.
 
 ```ts
 import {TrajectoryEvaluator, type BaseCriterion} from '@google/adk';
@@ -114,14 +104,5 @@ not. `overallScore` is the mean over the invocations, and the status is
 `PASSED` when that mean is at or above the threshold.
 
 Scoring an empty list evaluates nothing: `overallScore` is absent and the
-status is `NOT_EVALUATED`.
-
-## Failure modes
-
-The evaluator throws `InputValidationError` when:
-
-- the constructor gets both a `threshold` and an `evalMetric`, or neither;
-- the metric carries a criterion whose threshold or match type it cannot read;
-- the metric carries neither a criterion nor a threshold;
-- `evaluateInvocations` gets no expected invocations;
-- the two invocation lists have different lengths.
+status is `NOT_EVALUATED`. Bad input throws `InputValidationError`; the
+`@throws` tags on the constructor and on `evaluateInvocations` list each case.

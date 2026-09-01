@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  getAllToolCalls,
-  isInvocationEvents,
-  type InvocationEvents,
-} from '@google/adk';
+import {getAllToolCalls, type InvocationEvents} from '@google/adk';
 import type {FunctionCall} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {isInvocationEvents} from '../../src/evaluation/eval_case.js';
 
 const SEARCH_CALL: FunctionCall = {name: 'search', args: {query: 'adk'}};
 const SUMMARIZE_CALL: FunctionCall = {name: 'summarize', args: {}};

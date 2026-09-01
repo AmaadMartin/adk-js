@@ -121,30 +121,23 @@ const TOOL_CALL_MATCHERS: Record<ToolTrajectoryMatchType, ToolCallMatcher> = {
 /** A per-invocation result this metric always scores. */
 type ScoredInvocationResult = PerInvocationResult & {score: number};
 
-/** A criterion whose threshold and match type are both known good. */
-interface ResolvedCriterion {
-  threshold: number;
-  matchType: ToolTrajectoryMatchType;
-}
-
 /**
- * Reads a criterion as a {@link ToolTrajectoryCriterion}.
+ * Returns the match type a criterion asks for, or `undefined` when the
+ * criterion is not a usable {@link ToolTrajectoryCriterion}.
  *
- * Returns `undefined` when the criterion carries no usable threshold, or a
- * match type this metric does not know. A criterion parsed from a config file
- * is untrusted, so both fields are checked at runtime.
+ * A criterion parsed from a config file is untrusted, so its threshold is
+ * checked at runtime as well.
  */
-function resolveToolTrajectoryCriterion(
+function resolveCriterionMatchType(
   criterion: BaseCriterion | ToolTrajectoryCriterion,
-): ResolvedCriterion | undefined {
-  const matchType = normalizeToolTrajectoryMatchType(
-    'matchType' in criterion ? criterion.matchType : undefined,
-  );
-  if (matchType === undefined || !Number.isFinite(criterion.threshold)) {
+): ToolTrajectoryMatchType | undefined {
+  if (!Number.isFinite(criterion.threshold)) {
     return undefined;
   }
 
-  return {threshold: criterion.threshold, matchType};
+  return normalizeToolTrajectoryMatchType(
+    'matchType' in criterion ? criterion.matchType : undefined,
+  );
 }
 
 /**
@@ -174,15 +167,17 @@ export class TrajectoryEvaluator implements Evaluator {
 
     let matchType = ToolTrajectoryMatchType.EXACT;
     if (evalMetric?.criterion !== undefined) {
-      const criterion = resolveToolTrajectoryCriterion(evalMetric.criterion);
-      if (criterion === undefined) {
+      const criterionMatchType = resolveCriterionMatchType(
+        evalMetric.criterion,
+      );
+      if (criterionMatchType === undefined) {
         throw new InputValidationError(
           `\`${evalMetric.metricName}\` metric expects a criterion of type` +
             ' `ToolTrajectoryCriterion`.',
         );
       }
-      this.threshold = criterion.threshold;
-      matchType = criterion.matchType;
+      this.threshold = evalMetric.criterion.threshold;
+      matchType = criterionMatchType;
     } else if (evalMetric !== undefined) {
       this.threshold = getMetricThreshold(evalMetric);
     } else if (threshold !== undefined) {

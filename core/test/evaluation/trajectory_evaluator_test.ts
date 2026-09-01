@@ -5,7 +5,6 @@
  */
 
 import {
-  areToolCallsAnyOrderMatch,
   EvalStatus,
   InputValidationError,
   ToolTrajectoryMatchType,
@@ -16,6 +15,7 @@ import {
 } from '@google/adk';
 import type {Content, FunctionCall} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {areToolCallsAnyOrderMatch} from '../../src/evaluation/trajectory_evaluator.js';
 
 const USER_CONTENT: Content = {parts: [{text: 'User input here.'}]};
 const METRIC_NAME = 'tool_trajectory_avg_score';
@@ -171,6 +171,23 @@ describe('TrajectoryEvaluator', () => {
             ' `ToolTrajectoryCriterion`.',
         ),
       );
+    });
+
+    it('matches exactly when the criterion names no match type', () => {
+      const evaluator = new TrajectoryEvaluator({
+        evalMetric: {
+          metricName: METRIC_NAME,
+          criterion: {threshold: THRESHOLD},
+        },
+      });
+
+      const result = evaluator.evaluateInvocations(
+        [invocation(t1, t2)],
+        [invocation(t2, t1)],
+      );
+
+      expect(result.overallScore).toBe(0.0);
+      expect(result.overallEvalStatus).toBe(EvalStatus.FAILED);
     });
 
     it('reads a criterion parsed from an eval config file', () => {

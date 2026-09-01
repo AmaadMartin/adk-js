@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {InputValidationError, ToolTrajectoryMatchType} from '@google/adk';
+import {describe, expect, it} from 'vitest';
 import {
   getMetricThreshold,
-  InputValidationError,
-  parseToolTrajectoryMatchType,
-  ToolTrajectoryMatchType,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+  normalizeToolTrajectoryMatchType,
+} from '../../src/evaluation/eval_metrics.js';
 
 const METRIC_NAME = 'tool_trajectory_avg_score';
 
@@ -47,9 +46,9 @@ describe('eval_metrics', () => {
     });
   });
 
-  describe('parseToolTrajectoryMatchType', () => {
+  describe('normalizeToolTrajectoryMatchType', () => {
     it('defaults to EXACT when no match type is given', () => {
-      expect(parseToolTrajectoryMatchType(undefined)).toBe(
+      expect(normalizeToolTrajectoryMatchType(undefined)).toBe(
         ToolTrajectoryMatchType.EXACT,
       );
     });
@@ -70,21 +69,19 @@ describe('eval_metrics', () => {
       ['ANY-ORDER', ToolTrajectoryMatchType.ANY_ORDER],
       ['any_order', ToolTrajectoryMatchType.ANY_ORDER],
     ])('normalizes %s', (spelling, expected) => {
-      expect(parseToolTrajectoryMatchType(spelling)).toBe(expected);
+      expect(normalizeToolTrajectoryMatchType(spelling)).toBe(expected);
     });
 
     it('accepts an enum member', () => {
       expect(
-        parseToolTrajectoryMatchType(ToolTrajectoryMatchType.ANY_ORDER),
+        normalizeToolTrajectoryMatchType(ToolTrajectoryMatchType.ANY_ORDER),
       ).toBe(ToolTrajectoryMatchType.ANY_ORDER);
     });
 
     it.each([['random string'], [null], [7], [{}]])(
-      'rejects %s',
+      'reads %s as no match type',
       (value: unknown) => {
-        expect(() => parseToolTrajectoryMatchType(value)).toThrowError(
-          InputValidationError,
-        );
+        expect(normalizeToolTrajectoryMatchType(value)).toBeUndefined();
       },
     );
   });
