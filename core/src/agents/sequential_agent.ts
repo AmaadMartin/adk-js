@@ -8,7 +8,7 @@ import {FunctionTool} from '../tools/function_tool.js';
 
 import {deprecated} from '../utils/deprecated.js';
 import {logger} from '../utils/logger.js';
-import {BaseAgent, BaseAgentConfig, BaseAgentState} from './base_agent.js';
+import {BaseAgent, BaseAgentState} from './base_agent.js';
 import {appendInstruction} from './instructions.js';
 import {InvocationContext} from './invocation_context.js';
 import {isLlmAgent} from './llm_agent.js';
@@ -21,24 +21,8 @@ const COMPLETION_INSTRUCTION = `If you finished the user's request according to 
 } function to exit so the next agents can take over. When calling this function, do not generate any text other than the function call.`;
 
 /**
- * The key {@link SequentialAgentState} is persisted under.
- *
- * Snake case, because the payload lands verbatim in the session store: the
- * event case transform preserves the keys inside `actions.agent_state`. A
- * camelCase key would make a checkpoint written by adk-python unreadable here.
- */
-const CURRENT_SUB_AGENT_KEY = 'current_sub_agent';
-
-/**
- * The configuration options for creating a {@link SequentialAgent}.
- *
- * Mirrors adk-python `SequentialAgentConfig`. A `SequentialAgent` adds no
- * options of its own, so this is an alias rather than an extension.
- */
-export type SequentialAgentConfig = BaseAgentConfig;
-
-/**
- * The resumption checkpoint of a {@link SequentialAgent}.
+ * The resumption checkpoint of a {@link SequentialAgent}, exactly as it is
+ * persisted on `actions.agentState`.
  *
  * Mirrors adk-python `SequentialAgentState`.
  */
@@ -47,7 +31,7 @@ export type SequentialAgentState = {
    * The name of the sub-agent to run next. Empty once the whole sequence has
    * finished.
    */
-  currentSubAgent: string;
+  current_sub_agent: string;
 };
 
 /**
@@ -63,20 +47,20 @@ export type SequentialAgentState = {
  */
 function parseSequentialAgentState(raw: BaseAgentState): SequentialAgentState {
   for (const key of Object.keys(raw)) {
-    if (key !== CURRENT_SUB_AGENT_KEY) {
+    if (key !== 'current_sub_agent') {
       throw new Error(
         `Invalid SequentialAgent state: unexpected field "${key}".`,
       );
     }
   }
-  const currentSubAgent = raw[CURRENT_SUB_AGENT_KEY] ?? '';
+  const currentSubAgent = raw['current_sub_agent'] ?? '';
   if (typeof currentSubAgent !== 'string') {
     throw new Error(
-      `Invalid SequentialAgent state: "${CURRENT_SUB_AGENT_KEY}" must be a ` +
-        `string, got ${typeof currentSubAgent}.`,
+      'Invalid SequentialAgent state: "current_sub_agent" must be a string, ' +
+        `got ${typeof currentSubAgent}.`,
     );
   }
-  return {currentSubAgent};
+  return {current_sub_agent: currentSubAgent};
 }
 
 /**
@@ -97,16 +81,16 @@ function getStartIndex(
   if (!agentState) {
     return 0;
   }
-  if (!agentState.currentSubAgent) {
+  if (!agentState.current_sub_agent) {
     return subAgents.length;
   }
   const index = subAgents.findIndex(
-    (subAgent) => subAgent.name === agentState.currentSubAgent,
+    (subAgent) => subAgent.name === agentState.current_sub_agent,
   );
   if (index === -1) {
     logger.warn(
-      `Sub-agent ${agentState.currentSubAgent} was removed so the agent name ` +
-        `is not found. Restarting from the beginning.`,
+      `Sub-agent ${agentState.current_sub_agent} was removed, so its name is ` +
+        `not found. Restarting from the beginning.`,
     );
     return 0;
   }
@@ -152,7 +136,7 @@ export function isSequentialAgent(obj: unknown): obj is SequentialAgent {
   'SequentialAgent is deprecated in favor of Workflow and will be removed in a' +
     ' future version. Workflow cannot yet be used as an LlmAgent sub-agent.',
 )
-export class SequentialAgent extends BaseAgent<SequentialAgentConfig> {
+export class SequentialAgent extends BaseAgent {
   /**
    * A unique symbol to identify ADK sequential agent class.
    */
@@ -178,7 +162,7 @@ export class SequentialAgent extends BaseAgent<SequentialAgentConfig> {
       // history, so emitting it again would duplicate it.
       if (!resumingSubAgent && context.isResumable) {
         context.setAgentState(this.name, {
-          agentState: {[CURRENT_SUB_AGENT_KEY]: subAgent.name},
+          agentState: {current_sub_agent: subAgent.name},
         });
         yield this.createAgentStateEvent(context);
       }
@@ -219,10 +203,6 @@ export class SequentialAgent extends BaseAgent<SequentialAgentConfig> {
   protected async *runLiveImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    if (this.subAgents.length === 0) {
-      return;
-    }
-
     for (const subAgent of this.subAgents) {
       if (isLlmAgent(subAgent)) {
         const agentTools = await subAgent.canonicalTools(

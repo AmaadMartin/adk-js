@@ -129,6 +129,8 @@ resumes into is already in the session.
 
 The persisted key is `current_sub_agent`, in snake case. That is the key
 adk-python writes, so a session written by either SDK is readable by the other.
+The exported `SequentialAgentState` type declares the same name, so it
+describes the payload you read off an event.
 
 ## Pausing on a long-running call
 

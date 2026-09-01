@@ -338,8 +338,9 @@ export class InvocationContext {
   /**
    * Whether this invocation can be paused and resumed later.
    *
-   * Derived rather than stored so it survives the `{...parentContext}` spread
-   * that builds child contexts, which copies own properties but not accessors.
+   * Recomputed on a child context from the `resumabilityConfig` the
+   * `{...parentContext}` spread carries over, rather than stored as an own
+   * field the spread would have to copy.
    */
   get isResumable(): boolean {
     return this.resumabilityConfig?.isResumable ?? false;
