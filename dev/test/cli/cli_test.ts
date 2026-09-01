@@ -19,7 +19,16 @@ import {
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  Mock,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent, runOnceCli} from '../../src/cli/cli_run.js';
@@ -328,13 +337,13 @@ describe('CLI Entrypoint', () => {
   });
 
   describe('command: run, single-shot mode', () => {
-    let exit: Mock;
+    let exit: MockInstance<typeof process.exit>;
 
     beforeEach(() => {
       exit = vi
         .spyOn(process, 'exit')
-        .mockImplementation((() => undefined) as never) as unknown as Mock;
-      (runOnceCli as Mock).mockResolvedValue(0);
+        .mockImplementation((() => undefined) as never);
+      vi.mocked(runOnceCli).mockResolvedValue(0);
     });
 
     it('sends a query to runOnceCli instead of the prompt', async () => {
@@ -374,7 +383,7 @@ describe('CLI Entrypoint', () => {
     });
 
     it('exits with the code runOnceCli returned', async () => {
-      (runOnceCli as Mock).mockResolvedValue(2);
+      vi.mocked(runOnceCli).mockResolvedValue(2);
 
       await parse(['run', 'agent.ts', 'hello']);
 
