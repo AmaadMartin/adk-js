@@ -16,6 +16,7 @@ import {
   LlmAgent,
   RunnableRoot,
 } from '@google/adk';
+import {Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
@@ -25,6 +26,7 @@ import {AgentFile, AgentLoader} from '../../src/utils/agent_loader.js';
 const RUN_LIVE_PATH = '/run_live';
 
 const LIVE_APP_NAME = 'testApp';
+const ECHO_APP_NAME = 'echoApp';
 const LIVE_USER_ID = 'testUser';
 const LIVE_SESSION_ID = 'liveSession';
 
@@ -33,7 +35,12 @@ const LIVE_SESSION_ID = 'liveSession';
  * is the contract the dev UI already speaks, so this port keeps that spelling
  * rather than the camelCase the JSON request bodies use.
  */
-const LIVE_QUERY = `app_name=${LIVE_APP_NAME}&user_id=${LIVE_USER_ID}&session_id=${LIVE_SESSION_ID}`;
+function liveQuery(appName: string): string {
+  return `app_name=${appName}&user_id=${LIVE_USER_ID}&session_id=${LIVE_SESSION_ID}`;
+}
+
+const LIVE_QUERY = liveQuery(LIVE_APP_NAME);
+const ECHO_QUERY = liveQuery(ECHO_APP_NAME);
 
 /** Python's `b"\x00\xFF"`. `Blob.data` is base64 in `@google/genai`. */
 const LIVE_AUDIO_BASE64 = 'AP8=';
@@ -48,6 +55,9 @@ const TEXT_REQUEST: LiveRequest = {
 const BLOB_REQUEST: LiveRequest = {
   blob: {mimeType: 'audio/pcm', data: LIVE_AUDIO_BASE64},
 };
+
+/** How many frames {@link EchoLiveAgent} reads before it ends the run. */
+const ECHOED_REQUEST_COUNT = 2;
 
 /**
  * Bound on every socket wait. It sits under Vitest's 5s per-test budget so a
@@ -96,12 +106,40 @@ class LiveTestAgent extends LlmAgent {
   }
 }
 
-const LIVE_TEST_AGENT = new LiveTestAgent({
-  name: 'liveTestAgent',
-  description: 'agent that scripts the adk-python live events',
-});
+/** The parts a model reply carries when it echoes an inbound frame back. */
+function echoedParts(request: LiveRequest): Part[] {
+  return request.blob
+    ? [{inlineData: request.blob}]
+    : (request.content?.parts ?? []);
+}
 
-/** Serves {@link LIVE_TEST_AGENT} without reading or compiling a file. */
+/**
+ * Echoes back every frame the client sends up, so a test can assert that the
+ * endpoint parses inbound frames into the agent's live request queue at all.
+ * It reads {@link ECHOED_REQUEST_COUNT} frames and then ends the run.
+ */
+class EchoLiveAgent extends LlmAgent {
+  protected override async *runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const liveRequestQueue = context.liveRequestQueue;
+    if (!liveRequestQueue) {
+      return;
+    }
+
+    for (let read = 0; read < ECHOED_REQUEST_COUNT; read++) {
+      const request = await liveRequestQueue.get(context.abortSignal);
+      yield createEvent({
+        invocationId: context.invocationId,
+        author: this.name,
+        branch: context.branch,
+        content: {role: 'model', parts: echoedParts(request)},
+      });
+    }
+  }
+}
+
+/** Serves one agent without reading or compiling a file. */
 class LiveAgentFile extends AgentFile {
   constructor(private readonly liveAgent: RunnableRoot) {
     super('live_test_agent.ts');
@@ -112,16 +150,29 @@ class LiveAgentFile extends AgentFile {
   }
 }
 
-/** Loader that serves the one app the live tests drive. */
+/** Loader that serves the two apps the live tests drive. */
 class LiveAgentLoader extends AgentLoader {
-  private readonly agentFile = new LiveAgentFile(LIVE_TEST_AGENT);
+  private readonly agentFiles: Record<string, AgentFile> = {
+    [LIVE_APP_NAME]: new LiveAgentFile(
+      new LiveTestAgent({
+        name: 'liveTestAgent',
+        description: 'agent that scripts the adk-python live events',
+      }),
+    ),
+    [ECHO_APP_NAME]: new LiveAgentFile(
+      new EchoLiveAgent({
+        name: 'echoLiveAgent',
+        description: 'agent that echoes the frames the client sends up',
+      }),
+    ),
+  };
 
   override listAgents(): Promise<string[]> {
-    return Promise.resolve([LIVE_APP_NAME]);
+    return Promise.resolve(Object.keys(this.agentFiles));
   }
 
-  override getAgentFile(): Promise<AgentFile> {
-    return Promise.resolve(this.agentFile);
+  override getAgentFile(agentName: string): Promise<AgentFile> {
+    return Promise.resolve(this.agentFiles[agentName]);
   }
 }
 
@@ -191,17 +242,10 @@ class LiveClient {
   }
 
   /** Waits for the event at `index` in the stream and returns it. */
-  async eventAt(index: number): Promise<Event> {
-    await vi.waitFor(
-      () =>
-        expect(
-          this.events.length,
-          `events received on ${RUN_LIVE_PATH}`,
-        ).toBeGreaterThan(index),
-      {timeout: SOCKET_TIMEOUT_MS},
-    );
-
-    return this.events[index]!;
+  eventAt(index: number): Promise<Event> {
+    return vi.waitUntil(() => this.events[index], {
+      timeout: SOCKET_TIMEOUT_MS,
+    });
   }
 
   close(): void {
@@ -310,6 +354,28 @@ describe('AdkApiServer live endpoint', () => {
 
       expect(event.interrupted).toBe(true);
       expect(event.content).toBeUndefined();
+    });
+
+    it('feeds the frames the client sends into the live request queue', async () => {
+      await sessionService.createSession({
+        appName: ECHO_APP_NAME,
+        userId: LIVE_USER_ID,
+        sessionId: LIVE_SESSION_ID,
+      });
+
+      const client = new LiveClient(server.url, ECHO_QUERY);
+      await client.opened;
+      client.send(TEXT_REQUEST);
+      client.send(BLOB_REQUEST);
+
+      const text = await client.eventAt(0);
+      const audio = await client.eventAt(1);
+
+      expect(text.content?.parts?.[0].text).toBe('Hello via WebSocket');
+      expect(audio.content?.parts?.[0].inlineData?.mimeType).toBe('audio/pcm');
+      expect(audio.content?.parts?.[0].inlineData?.data).toBe(
+        LIVE_AUDIO_BASE64,
+      );
     });
 
     it('closes with 1002 when the session does not exist', async () => {
