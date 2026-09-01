@@ -35,6 +35,10 @@ import {
   MCPSessionManager,
 } from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
+import {
+  McpToolsetConfig,
+  resolveMcpConnectionParams,
+} from './mcp_toolset_config.js';
 
 /**
  * Tool names the ADK framework owns.
@@ -141,6 +145,23 @@ export class MCPToolset extends BaseToolset {
     super(toolFilter, prefix);
     this.callOptions = callOptions(connectionParams.timeout);
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
+  }
+
+  /**
+   * Builds a toolset from the declarative configuration an agent config
+   * supplies.
+   *
+   * @param config The agent-config fields describing the MCP server.
+   * @return The configured toolset.
+   * @throws If the config does not declare exactly one transport, or declares
+   *   a stdio server that the operator has not opted into.
+   */
+  static fromConfig(config: McpToolsetConfig): MCPToolset {
+    return new MCPToolset(
+      resolveMcpConnectionParams(config),
+      config.toolFilter ?? [],
+      config.toolNamePrefix,
+    );
   }
 
   /**
