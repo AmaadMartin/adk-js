@@ -90,6 +90,22 @@ export function toSnakeKeys(value: unknown): unknown {
 }
 
 /**
+ * Returns true when the JSON declares itself an eval set, rather than eval
+ * data in ADK's original format.
+ *
+ * This is the check that decides which reader to use, kept apart from
+ * {@link parseEvalSet} so that a file that says it is an eval set but is
+ * malformed fails loudly instead of being read as legacy data.
+ */
+export function isEvalSetJson(raw: unknown): boolean {
+  return (
+    isRecord(raw) &&
+    typeof raw['eval_set_id'] === 'string' &&
+    Array.isArray(raw['eval_cases'])
+  );
+}
+
+/**
  * Converts a JSON value to an {@link EvalSet}.
  *
  * Only the fields the interfaces declare are carried across; a field written
