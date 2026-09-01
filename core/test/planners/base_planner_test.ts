@@ -21,20 +21,20 @@ import {describe, expect, it} from 'vitest';
 const PLANNER_SIGNATURE = Symbol.for('google.adk.basePlanner');
 
 function createInvocationContext(): InvocationContext {
-  const session = {
+  const session: Session = {
     id: 'session-1',
     appName: 'app',
     userId: 'user',
     state: {},
     events: [],
     lastUpdateTime: Date.now(),
-  } as Session;
+  };
 
   return new InvocationContext({
     invocationId: 'inv-1',
     session,
     agent: {name: 'test_agent'} as BaseAgent,
-    pluginManager: {} as PluginManager,
+    pluginManager: new PluginManager(),
   });
 }
 
@@ -168,9 +168,7 @@ describe('BasePlanner', () => {
     ]);
 
     expect(instruction).toBeUndefined();
-    expect(instruction).not.toBeNull();
     expect(processed).toBeUndefined();
-    expect(processed).not.toBeNull();
   });
 
   it('keeps an empty result distinct from undefined', () => {
@@ -181,7 +179,6 @@ describe('BasePlanner', () => {
     ]);
 
     expect(processed).toEqual([]);
-    expect(processed === undefined).toBe(false);
   });
 
   it('lets a subclass return a new array without mutating the input', () => {
