@@ -163,6 +163,13 @@ export type {
   SessionInput,
 } from './evaluation/eval_case.js';
 export {
+  convertEventsToEvalInvocations,
+  generateInferencesFromAgentModule,
+  generateInferencesFromRootAgent,
+  generateResponsesFromSession,
+} from './evaluation/evaluation_generator.js';
+export type {EvalRow} from './evaluation/evaluation_generator.js';
+export {
   UserSimulatorStatus,
   validateNextUserMessage,
 } from './evaluation/simulation/user_simulator.js';
