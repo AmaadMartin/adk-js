@@ -159,3 +159,28 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/**
+ * Whether a thrown value carries an HTTP status and a message, the shape an
+ * SDK client throws for a failed request.
+ *
+ * The check is duck-typed rather than an `instanceof` test against the SDK's
+ * error class: two copies of one package in a single runtime give that test
+ * two different classes, so it reports false for an error the other copy
+ * threw.
+ *
+ * @param err The thrown or rejected value to inspect.
+ * @return True when the value reports both a message and a numeric status.
+ */
+export function isHttpStatusError(
+  err: unknown,
+): err is {message: string; status: number} {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'status' in err &&
+    typeof err.status === 'number' &&
+    'message' in err &&
+    typeof err.message === 'string'
+  );
+}
