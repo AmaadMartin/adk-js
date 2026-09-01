@@ -1,13 +1,16 @@
 # ADK Developer Guides
 
 This directory contains specific developer guides for the ADK TypeScript
-implementation, mirroring the `docs/guides/` tree in adk-python. For the
-official ADK documentation, visit [adk.dev](https://adk.dev/).
+implementation, mirroring the `docs/guides/` tree in
+[google/adk-python](https://github.com/google/adk-python/tree/main/docs/guides),
+one directory per topic and one guide per feature. For the official ADK
+documentation, visit [adk.dev](https://adk.dev/).
 
 ## Index
 
 ### Agents
 
+- [InvocationContext](agents/invocation_context/index.md) - The per-run context: event selection by branch, resumability, the event queue, and the LLM-call limit.
 - [LangGraphAgent](agents/langgraph_agent/index.md) - Running a compiled
   LangGraph state graph as an ADK agent.
 - [LlmAgent single-turn and task modes](agents/llm_agent/single_turn.md) - Exposing a sub-agent to its parent as a callable tool that runs inline.
