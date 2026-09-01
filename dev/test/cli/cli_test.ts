@@ -9,6 +9,7 @@ import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
+import {maybePromptForTelemetryConsent} from '../../src/cli/cli_telemetry.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
@@ -35,6 +36,11 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
+}));
+
+vi.mock('../../src/cli/cli_telemetry', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/cli/cli_telemetry.js')>()),
+  maybePromptForTelemetryConsent: vi.fn(),
 }));
 
 vi.mock('../../src/version', () => ({
@@ -297,6 +303,28 @@ describe('CLI Entrypoint', () => {
           savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
+      );
+    });
+  });
+
+  describe('command: telemetry', () => {
+    it('registers the group and its three subcommands', () => {
+      const telemetry = program.commands.find(
+        (command) => command.name() === 'telemetry',
+      );
+
+      expect(telemetry?.description()).toBe('Manage telemetry settings');
+      expect(
+        telemetry?.commands.map((command) => command.name()).sort(),
+      ).toEqual(['disable', 'enable', 'status']);
+    });
+
+    it('asks for consent before another subcommand runs', async () => {
+      await parse(['web']);
+
+      expect(maybePromptForTelemetryConsent).toHaveBeenCalledWith(
+        'web',
+        process.argv,
       );
     });
   });

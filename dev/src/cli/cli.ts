@@ -23,6 +23,10 @@ import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
+import {
+  maybePromptForTelemetryConsent,
+  registerTelemetryCommands,
+} from './cli_telemetry.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
 
@@ -231,6 +235,12 @@ export function createProgram(): Command {
     .action(() => {
       console.log(version);
     });
+
+  registerTelemetryCommands(program);
+
+  program.hook('preSubcommand', async (_program, subcommand) => {
+    await maybePromptForTelemetryConsent(subcommand.name(), process.argv);
+  });
 
   program
     .command('web')
