@@ -301,6 +301,8 @@ export type {
   BuildPlanningInstructionParams,
   ProcessPlanningResponseParams,
 } from './planners/base_planner.js';
+export {BuiltInPlanner, isBuiltInPlanner} from './planners/built_in_planner.js';
+export type {BuiltInPlannerOptions} from './planners/built_in_planner.js';
 export {
   ACTION_TAG,
   FINAL_ANSWER_TAG,
