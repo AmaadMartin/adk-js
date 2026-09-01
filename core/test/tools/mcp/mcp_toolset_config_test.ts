@@ -86,13 +86,16 @@ describe('resolveConfigConnectionParams', () => {
   });
 
   it('treats a null transport field as absent', () => {
-    // JSON and YAML produce null for a field a config leaves blank.
-    const config = {
-      stdioConnectionParams: null,
-      streamableHttpConnectionParams: httpParams,
-    } as unknown as McpToolsetConfig;
+    // Parsed rather than written out, because a null is what a config file
+    // delivers for a field it leaves blank, and the type forbids writing one.
+    const config: McpToolsetConfig = JSON.parse(
+      JSON.stringify({
+        stdioConnectionParams: null,
+        streamableHttpConnectionParams: httpParams,
+      }),
+    );
 
-    expect(resolveConfigConnectionParams(config)).toBe(httpParams);
+    expect(resolveConfigConnectionParams(config)).toEqual(httpParams);
   });
 
   it('does not accept a non-transport field in place of one', () => {

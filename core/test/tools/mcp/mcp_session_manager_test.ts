@@ -47,6 +47,19 @@ vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => {
   };
 });
 
+/**
+ * Builds a stdio transport test double.
+ *
+ * `StdioClientTransport` is a class with private state, so no object literal
+ * satisfies it structurally. The cast lives here rather than at each stub site.
+ *
+ * @param stderr The stderr stream the transport exposes, if any.
+ * @return The stub, typed as a transport.
+ */
+function stdioTransportStub(stderr: PassThrough | null): StdioClientTransport {
+  return {stderr} as unknown as StdioClientTransport;
+}
+
 describe('MCPSessionManager', () => {
   it('creates an stdio client', async () => {
     const manager = new MCPSessionManager({
@@ -368,8 +381,8 @@ describe('MCPSessionManager', () => {
       const written: string[] = [];
       errlog.on('data', (chunk: Buffer) => written.push(chunk.toString()));
       const serverStderr = new PassThrough();
-      vi.mocked(StdioClientTransport).mockImplementationOnce(
-        () => ({stderr: serverStderr}) as unknown as StdioClientTransport,
+      vi.mocked(StdioClientTransport).mockImplementationOnce(() =>
+        stdioTransportStub(serverStderr),
       );
 
       const manager = new MCPSessionManager(
@@ -393,8 +406,8 @@ describe('MCPSessionManager', () => {
     });
 
     it('closes a stdio session whose transport exposes no stderr', async () => {
-      vi.mocked(StdioClientTransport).mockImplementationOnce(
-        () => ({stderr: null}) as unknown as StdioClientTransport,
+      vi.mocked(StdioClientTransport).mockImplementationOnce(() =>
+        stdioTransportStub(null),
       );
       const manager = new MCPSessionManager(
         {

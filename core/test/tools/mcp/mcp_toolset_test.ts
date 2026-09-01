@@ -179,10 +179,11 @@ describe('MCPToolset', () => {
         close: vi.fn().mockResolvedValue(undefined),
         listTools: vi.fn().mockRejectedValue(new Error('List tools failed')),
       };
-      // Two stubs, because getTools retries a failed listing once.
+      const stub = mockClientInstance as unknown as Client;
+      // Two attempts, because getTools retries a failed listing once.
       vi.mocked(Client)
-        .mockImplementationOnce(() => mockClientInstance as unknown as Client)
-        .mockImplementationOnce(() => mockClientInstance as unknown as Client);
+        .mockImplementationOnce(() => stub)
+        .mockImplementationOnce(() => stub);
 
       const spy = vi.spyOn(toolset['mcpSessionManager'], 'closeSession');
 
