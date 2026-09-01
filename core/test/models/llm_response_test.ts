@@ -205,15 +205,12 @@ describe('createLlmResponse', () => {
     });
   });
 
-  describe('unknown fallback', () => {
-    it('returns UNKNOWN_ERROR code when no candidates or promptFeedback', () => {
+  describe('no candidates and no promptFeedback', () => {
+    it('reports no error when the response carries neither', () => {
       const result = createLlmResponse(makeResponse({}));
-      expect(result.errorCode).toBe('UNKNOWN_ERROR');
-    });
-
-    it('returns the unknown error message', () => {
-      const result = createLlmResponse(makeResponse({}));
-      expect(result.errorMessage).toBe('Unknown error.');
+      expect(result.errorCode).toBeUndefined();
+      expect(result.errorMessage).toBeUndefined();
+      expect(result.finishReason).toBeUndefined();
     });
 
     it('includes usageMetadata in the fallback response', () => {
@@ -222,14 +219,19 @@ describe('createLlmResponse', () => {
       expect(result.usageMetadata).toBe(usageMetadata);
     });
 
-    it('does not set content', () => {
+    it('sets empty model content', () => {
       const result = createLlmResponse(makeResponse({}));
-      expect(result.content).toBeUndefined();
+      expect(result.content?.role).toBe('model');
+      expect(result.content?.parts).toEqual([]);
     });
 
-    it('returns UNKNOWN_ERROR when candidates array is empty', () => {
-      const result = createLlmResponse(makeResponse({candidates: []}));
-      expect(result.errorCode).toBe('UNKNOWN_ERROR');
+    it('reports no error when the candidates array is empty', () => {
+      const result = createLlmResponse(
+        makeResponse({candidates: [], modelVersion: 'gemini-2.5-flash'}),
+      );
+      expect(result.errorCode).toBeUndefined();
+      expect(result.content?.role).toBe('model');
+      expect(result.modelVersion).toBe('gemini-2.5-flash');
     });
   });
 });
