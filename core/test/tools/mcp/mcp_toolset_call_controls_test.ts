@@ -138,7 +138,7 @@ describe('MCPToolset.fromConfig', () => {
   });
 
   it('builds a toolset from the declared remote transport', async () => {
-    const toolset = await MCPToolset.fromConfig({
+    const toolset = MCPToolset.fromConfig({
       streamableHttpConnectionParams: httpParams,
     });
 
@@ -146,7 +146,7 @@ describe('MCPToolset.fromConfig', () => {
   });
 
   it('applies the declared tool filter and prefix', async () => {
-    const toolset = await MCPToolset.fromConfig({
+    const toolset = MCPToolset.fromConfig({
       streamableHttpConnectionParams: httpParams,
       toolFilter: ['fs_read_file'],
       prefix: 'fs',
@@ -158,7 +158,7 @@ describe('MCPToolset.fromConfig', () => {
   });
 
   it('exposes every tool when the config names no filter', async () => {
-    const toolset = await MCPToolset.fromConfig({
+    const toolset = MCPToolset.fromConfig({
       streamableHttpConnectionParams: httpParams,
     });
 
@@ -174,7 +174,7 @@ describe('MCPToolset.fromConfig', () => {
       oauth2: {accessToken: 'token'},
     };
 
-    const toolset = await MCPToolset.fromConfig({
+    const toolset = MCPToolset.fromConfig({
       streamableHttpConnectionParams: httpParams,
       authScheme,
       authCredential,
@@ -187,7 +187,7 @@ describe('MCPToolset.fromConfig', () => {
   });
 
   it('adds the resource tool when the config asks for resources', async () => {
-    const toolset = await MCPToolset.fromConfig({
+    const toolset = MCPToolset.fromConfig({
       streamableHttpConnectionParams: httpParams,
       useMcpResources: true,
     });
@@ -198,7 +198,7 @@ describe('MCPToolset.fromConfig', () => {
   });
 
   it('omits the resource tool by default', async () => {
-    const toolset = await MCPToolset.fromConfig({
+    const toolset = MCPToolset.fromConfig({
       streamableHttpConnectionParams: httpParams,
     });
 
@@ -208,7 +208,7 @@ describe('MCPToolset.fromConfig', () => {
   });
 
   it('honours the declared tool list cache', async () => {
-    const toolset = await MCPToolset.fromConfig({
+    const toolset = MCPToolset.fromConfig({
       streamableHttpConnectionParams: httpParams,
       toolListCacheTtlSeconds: 60,
     });
@@ -219,13 +219,13 @@ describe('MCPToolset.fromConfig', () => {
     expect(vi.mocked(Client)).toHaveBeenCalledTimes(1);
   });
 
-  it('refuses a config-declared stdio server without the opt-in', async () => {
-    await expect(
+  it('refuses a config-declared stdio server without the opt-in', () => {
+    expect(() =>
       MCPToolset.fromConfig({stdioConnectionParams: stdioParams}),
-    ).rejects.toThrow('not allowed in agent configs');
+    ).toThrow('not allowed in agent configs');
   });
 
-  it('opens no local process for a stdio server hidden in the remote field', async () => {
+  it('opens no local process for a stdio server hidden in the remote field', () => {
     // MCPSessionManager dispatches on `type`, so a config that puts a stdio
     // params object under the remote field would otherwise spawn a process.
     const hostile: McpToolsetConfig = JSON.parse(
@@ -237,7 +237,7 @@ describe('MCPToolset.fromConfig', () => {
       }),
     );
 
-    await expect(MCPToolset.fromConfig(hostile)).rejects.toThrow(
+    expect(() => MCPToolset.fromConfig(hostile)).toThrow(
       'must declare connection params of type',
     );
     expect(vi.mocked(StdioClientTransport)).not.toHaveBeenCalled();
@@ -246,20 +246,11 @@ describe('MCPToolset.fromConfig', () => {
   it('accepts a config-declared stdio server once the host opts in', async () => {
     setAllowConfigStdioServers(true);
 
-    const toolset = await MCPToolset.fromConfig({
+    const toolset = MCPToolset.fromConfig({
       stdioConnectionParams: stdioParams,
     });
 
     expect(toolset.connectionParams).toBe(stdioParams);
-  });
-
-  it('ignores the config path it is handed for symmetry', async () => {
-    const toolset = await MCPToolset.fromConfig(
-      {streamableHttpConnectionParams: httpParams},
-      '/agents/fs/root_agent.yaml',
-    );
-
-    expect(toolset.connectionParams).toBe(httpParams);
   });
 });
 

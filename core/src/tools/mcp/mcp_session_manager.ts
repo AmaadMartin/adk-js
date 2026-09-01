@@ -20,6 +20,7 @@ import type {Stream, Writable} from 'node:stream';
 import {formatError} from '../../utils/error_utils.js';
 import {
   describeHttpExchange,
+  headersToRecord,
   isCapturingHttpDebug,
   recordHttpExchange,
 } from '../../utils/http_debug_utils.js';
@@ -131,11 +132,7 @@ function mergeHeaders(
   for (const [name, value] of Object.entries(extra)) {
     headers.set(name, value);
   }
-  const merged: Record<string, string> = {};
-  headers.forEach((value, name) => {
-    merged[name] = value;
-  });
-  return merged;
+  return headersToRecord(headers);
 }
 
 /**

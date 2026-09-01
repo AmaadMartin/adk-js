@@ -89,8 +89,17 @@ function redactHeaders(
   );
 }
 
-/** Flattens `Headers` into a plain, lower-cased record. */
-function headersToRecord(headers: Headers): Record<string, string> {
+/**
+ * Flattens `Headers` into a plain, lower-cased record.
+ *
+ * `Object.fromEntries(headers)` is not available: `tsconfig.json` sets
+ * `lib: ["ES2022", "DOM"]` without `DOM.Iterable`, so `Headers` is not
+ * iterable here.
+ *
+ * @param headers The headers to flatten.
+ * @return One entry per header, keyed by its lower-cased name.
+ */
+export function headersToRecord(headers: Headers): Record<string, string> {
   const record: Record<string, string> = {};
   headers.forEach((value, key) => {
     record[key] = value;

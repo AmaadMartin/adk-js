@@ -262,18 +262,12 @@ export class MCPToolset extends BaseToolset {
    * because the config-supplied command runs as a local process.
    *
    * @param config The declared MCP server and its options.
-   * @param _configAbsPath Absolute path of the config file the declaration
-   *     came from. Unused here — no field of {@link McpToolsetConfig} names a
-   *     file — and accepted so that one loader can call every tool's
-   *     `fromConfig` the same way.
    * @return The configured toolset.
-   * @throws If the config does not declare exactly one connection param, or
-   *     declares a stdio server without the opt-in.
+   * @throws If the config does not declare exactly one connection param, if a
+   *     params object contradicts the field it is declared under, or if the
+   *     config declares a stdio server without the opt-in.
    */
-  static async fromConfig(
-    config: McpToolsetConfig,
-    _configAbsPath?: string,
-  ): Promise<MCPToolset> {
+  static fromConfig(config: McpToolsetConfig): MCPToolset {
     return new MCPToolset(
       resolveConfigConnectionParams(config),
       config.toolFilter ?? [],

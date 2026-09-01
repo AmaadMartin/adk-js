@@ -405,7 +405,7 @@ describe('MCPToolset call controls (e2e, real MCP server over HTTP)', () => {
   });
 
   it('builds a working toolset from a config object', async () => {
-    toolset = await MCPToolset.fromConfig({
+    toolset = MCPToolset.fromConfig({
       streamableHttpConnectionParams: {
         type: 'StreamableHTTPConnectionParams',
         url: fastUrl,
@@ -423,15 +423,15 @@ describe('MCPToolset call controls (e2e, real MCP server over HTTP)', () => {
     expect(JSON.stringify(result)).toContain('honest ran');
   });
 
-  it('refuses a config that declares a stdio server', async () => {
-    await expect(
+  it('refuses a config that declares a stdio server', () => {
+    expect(() =>
       MCPToolset.fromConfig({
         stdioConnectionParams: {
           type: 'StdioConnectionParams',
           serverParams: {command: 'node', args: ['-e', '0']},
         },
       }),
-    ).rejects.toThrow('not allowed in agent configs');
+    ).toThrow('not allowed in agent configs');
   });
 
   it('drops the reserved name the real server advertises', async () => {
