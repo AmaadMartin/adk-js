@@ -220,7 +220,11 @@ export type {
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export type {LlmRequest} from './models/llm_request.js';
-export {getFunctionCalls, getFunctionResponses} from './models/llm_response.js';
+export {
+  InteractionStatus,
+  getFunctionCalls,
+  getFunctionResponses,
+} from './models/llm_response.js';
 export type {LlmResponse} from './models/llm_response.js';
 export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
