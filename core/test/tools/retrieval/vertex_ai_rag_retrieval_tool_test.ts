@@ -6,20 +6,20 @@
 
 import {
   Context,
+  createSession,
   FunctionTool,
+  InvocationContext,
+  LlmAgent,
   LlmRequest,
+  PluginManager,
   VertexAiRagRetrievalTool,
 } from '@google/adk';
-import {GenerateContentConfig, Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 
 const RAG_CORPUS =
   'projects/123456789/locations/us-central1/ragCorpora/1234567890';
 const TOOL_NAME = 'rag_retrieval';
-
-/** An `LlmRequest` whose `config` is guaranteed present, so tests can index it. */
-type LlmRequestWithConfig = LlmRequest & {config: GenerateContentConfig};
 
 function makeTool(): VertexAiRagRetrievalTool {
   return new VertexAiRagRetrievalTool({
@@ -29,7 +29,7 @@ function makeTool(): VertexAiRagRetrievalTool {
   });
 }
 
-function makeLlmRequest(model: string): LlmRequestWithConfig {
+function makeLlmRequest(model: string): LlmRequest {
   return {
     model,
     config: {},
@@ -39,18 +39,14 @@ function makeLlmRequest(model: string): LlmRequestWithConfig {
   };
 }
 
-// The tool only reads `llmRequest`; the context is never touched, so an empty
-// stand-in is enough.
 function makeToolContext(): Context {
-  return {} as Context;
-}
-
-/**
- * `config.tools` is a `ToolUnion[]` (`Tool | CallableTool`); the tool under test
- * only ever pushes plain declarative `Tool`s, so narrow to that member.
- */
-function toolAt(llmRequest: LlmRequestWithConfig, index: number): Tool {
-  return llmRequest.config.tools![index] as Tool;
+  const invocationContext = new InvocationContext({
+    invocationId: 'test-invocation',
+    agent: new LlmAgent({name: 'root_agent'}),
+    session: createSession({id: 'test-session', appName: 'test-app'}),
+    pluginManager: new PluginManager([]),
+  });
+  return new Context({invocationContext});
 }
 
 describe('VertexAiRagRetrievalTool', () => {
@@ -64,10 +60,9 @@ describe('VertexAiRagRetrievalTool', () => {
         toolContext: makeToolContext(),
       });
 
-      expect(llmRequest.config.tools).toHaveLength(1);
-      expect(toolAt(llmRequest, 0).functionDeclarations![0].name).toBe(
-        TOOL_NAME,
-      );
+      expect(llmRequest.config?.tools).toMatchObject([
+        {functionDeclarations: [{name: TOOL_NAME}]},
+      ]);
       expect(llmRequest.toolsDict[TOOL_NAME]).toBe(tool);
     });
 
@@ -90,10 +85,9 @@ describe('VertexAiRagRetrievalTool', () => {
         toolContext: makeToolContext(),
       });
 
-      const declarations = toolAt(llmRequest, 0).functionDeclarations!;
-      expect(declarations).toHaveLength(2);
-      expect(declarations[0].name).toBe(TOOL_NAME);
-      expect(declarations[1].name).toBe('noop_tool');
+      expect(llmRequest.config?.tools).toMatchObject([
+        {functionDeclarations: [{name: TOOL_NAME}, {name: 'noop_tool'}]},
+      ]);
       expect(llmRequest.toolsDict[TOOL_NAME]).toBe(tool);
     });
 
@@ -106,7 +100,7 @@ describe('VertexAiRagRetrievalTool', () => {
         toolContext: makeToolContext(),
       });
 
-      expect(llmRequest.config.tools).toEqual([
+      expect(llmRequest.config?.tools).toEqual([
         {retrieval: {vertexRagStore: {ragCorpora: [RAG_CORPUS]}}},
       ]);
       // `toolsDict` is a plain object, so a bare lookup walks
@@ -126,10 +120,9 @@ describe('VertexAiRagRetrievalTool', () => {
         toolContext: makeToolContext(),
       });
 
-      expect(llmRequest.config.tools).toHaveLength(1);
-      expect(toolAt(llmRequest, 0).functionDeclarations![0].name).toBe(
-        TOOL_NAME,
-      );
+      expect(llmRequest.config?.tools).toMatchObject([
+        {functionDeclarations: [{name: TOOL_NAME}]},
+      ]);
       expect(llmRequest.toolsDict[TOOL_NAME]).toBe(tool);
     });
   });
