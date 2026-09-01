@@ -250,6 +250,29 @@ function writeAnthropicProfile(configDir: string): void {
   );
 }
 
+/**
+ * Removes the named environment variables and returns a restore function.
+ *
+ * Only these keys are touched. Replacing `process.env` wholesale would swap
+ * Node's case-insensitive Windows environment for a plain object, which then
+ * breaks any test that spawns a child process.
+ */
+function withoutEnv(...names: string[]): () => void {
+  const saved = new Map(names.map((name) => [name, process.env[name]]));
+  for (const name of names) {
+    delete process.env[name];
+  }
+  return () => {
+    for (const [name, value] of saved) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  };
+}
+
 /** An error shaped like the SDK's `RateLimitError`, which carries a status. */
 function rateLimitError(): Error {
   return Object.assign(new Error('Rate limit exceeded, please slow down.'), {
@@ -1291,25 +1314,14 @@ describe('AnthropicLlm error handling', () => {
 });
 
 describe('Claude on Vertex AI', () => {
-  const savedProject = process.env['GOOGLE_CLOUD_PROJECT'];
-  const savedLocation = process.env['GOOGLE_CLOUD_LOCATION'];
+  let restoreEnv = () => {};
 
   beforeEach(() => {
-    delete process.env['GOOGLE_CLOUD_PROJECT'];
-    delete process.env['GOOGLE_CLOUD_LOCATION'];
+    restoreEnv = withoutEnv('GOOGLE_CLOUD_PROJECT', 'GOOGLE_CLOUD_LOCATION');
   });
 
   afterEach(() => {
-    if (savedProject === undefined) {
-      delete process.env['GOOGLE_CLOUD_PROJECT'];
-    } else {
-      process.env['GOOGLE_CLOUD_PROJECT'] = savedProject;
-    }
-    if (savedLocation === undefined) {
-      delete process.env['GOOGLE_CLOUD_LOCATION'];
-    } else {
-      process.env['GOOGLE_CLOUD_LOCATION'] = savedLocation;
-    }
+    restoreEnv();
   });
 
   it('accepts an injected Vertex client', async () => {
@@ -1354,20 +1366,23 @@ describe('Claude on Vertex AI', () => {
 });
 
 describe('AnthropicLlm credential resolution', () => {
-  const savedEnv = {...process.env};
+  let restoreEnv = () => {};
+  let configDir = '';
 
   beforeEach(() => {
-    delete process.env['ANTHROPIC_API_KEY'];
-    delete process.env['ANTHROPIC_AUTH_TOKEN'];
+    restoreEnv = withoutEnv(
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_AUTH_TOKEN',
+      'ANTHROPIC_CONFIG_DIR',
+    );
     // Point the SDK at an empty directory so a developer's own signed-in
     // Anthropic profile cannot make these tests pass or fail.
-    process.env['ANTHROPIC_CONFIG_DIR'] = mkdtempSync(
-      join(tmpdir(), 'adk-anthropic-'),
-    );
+    configDir = mkdtempSync(join(tmpdir(), 'adk-anthropic-'));
+    process.env['ANTHROPIC_CONFIG_DIR'] = configDir;
   });
 
   afterEach(() => {
-    process.env = {...savedEnv};
+    restoreEnv();
     vi.restoreAllMocks();
   });
 
@@ -1409,7 +1424,7 @@ describe('AnthropicLlm credential resolution', () => {
   });
 
   it('accepts a credential the SDK resolved without an environment variable', async () => {
-    writeAnthropicProfile(process.env['ANTHROPIC_CONFIG_DIR']!);
+    writeAnthropicProfile(configDir);
     const fetchStub = stubAnthropicFetch();
 
     const responses = await collect(new AnthropicLlm(), request());
@@ -1423,16 +1438,15 @@ describe('AnthropicLlm credential resolution', () => {
 });
 
 describe('Claude Vertex client construction', () => {
-  const savedEnv = {...process.env};
+  let restoreEnv = () => {};
 
   beforeEach(() => {
     vertexSdk.constructorOptions.length = 0;
-    delete process.env['GOOGLE_CLOUD_PROJECT'];
-    delete process.env['GOOGLE_CLOUD_LOCATION'];
+    restoreEnv = withoutEnv('GOOGLE_CLOUD_PROJECT', 'GOOGLE_CLOUD_LOCATION');
   });
 
   afterEach(() => {
-    process.env = {...savedEnv};
+    restoreEnv();
   });
 
   it('takes the project and the region from the environment', async () => {
