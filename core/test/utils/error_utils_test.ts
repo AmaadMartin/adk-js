@@ -237,6 +237,12 @@ describe('isAbortError', () => {
     expect(isAbortError(outer)).toBe(true);
   });
 
+  it('finds a cancellation two causes deep', () => {
+    const inner = Object.assign(new Error('cancelled'), {name: 'AbortError'});
+    const middle = new Error('transport closed', {cause: inner});
+    expect(isAbortError(new Error('call failed', {cause: middle}))).toBe(true);
+  });
+
   it('finds a cancellation inside an AggregateError', () => {
     const inner = new Error('aborted');
     inner.name = 'AbortError';

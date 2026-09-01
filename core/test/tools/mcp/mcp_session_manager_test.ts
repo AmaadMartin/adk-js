@@ -23,6 +23,10 @@ import {
   HttpDebugExchange,
   runWithHttpDebugSink,
 } from '../../../src/tools/mcp/http_debug_recorder.js';
+import {
+  HttpExchange,
+  runWithHttpDebugCapture,
+} from '../../../src/utils/http_debug_utils.js';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {captureHttpDebug} from '../../../src/utils/http_debug_utils.js';
@@ -52,6 +56,19 @@ vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => {
     StreamableHTTPClientTransport: vi.fn(),
   };
 });
+
+/**
+ * Builds a stdio transport test double.
+ *
+ * `StdioClientTransport` is a class with private state, so no object literal
+ * satisfies it structurally. The cast lives here rather than at each stub site.
+ *
+ * @param stderr The stderr stream the transport exposes, if any.
+ * @return The stub, typed as a transport.
+ */
+function stdioTransportStub(stderr: PassThrough | null): StdioClientTransport {
+  return {stderr} as unknown as StdioClientTransport;
+}
 
 describe('MCPSessionManager', () => {
   it('creates an stdio client', async () => {
@@ -319,14 +336,10 @@ describe('MCPSessionManager', () => {
   });
 
   describe('errlog', () => {
-    /**
-     * Installs a stdio transport exposing `stderr`. The one cast lives here:
-     * the SDK module is `vi.mock`ed, so the stub carries only the property
-     * the manager reads, which cannot satisfy the full transport type.
-     */
+    /** Installs a stdio transport double exposing `stderr`. */
     function stubStdioTransport(stderr: PassThrough | null): void {
-      vi.mocked(StdioClientTransport).mockImplementationOnce(
-        () => ({stderr}) as unknown as StdioClientTransport,
+      vi.mocked(StdioClientTransport).mockImplementationOnce(() =>
+        stdioTransportStub(stderr),
       );
     }
 
@@ -431,8 +444,8 @@ describe('MCPSessionManager', () => {
       );
 
       const client = await manager.createSession();
-      await manager.closeSession(client);
 
+      await expect(manager.closeSession(client)).resolves.toBeUndefined();
       expect(errlog.text()).toBe('');
       expect(manager.getActiveSessions()).toHaveLength(0);
     });
@@ -456,6 +469,89 @@ describe('MCPSessionManager', () => {
       expect(errorSpy).not.toHaveBeenCalled();
 
       errorSpy.mockRestore();
+    });
+  });
+
+  describe('HTTP debug capture', () => {
+    it('records no exchange for a session opened outside a capture', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(new Response('pong', {status: 200})),
+      );
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+      await manager.createSession();
+      const options = vi
+        .mocked(StreamableHTTPClientTransport)
+        .mock.calls.at(-1)?.[1];
+      if (!options?.fetch) {
+        expect.fail('the transport was given no fetch');
+      }
+      const transportFetch = options.fetch;
+
+      const exchanges: HttpExchange[] = [];
+      await runWithHttpDebugCapture(exchanges, () =>
+        transportFetch('http://test-url/mcp', {method: 'POST'}),
+      );
+
+      vi.unstubAllGlobals();
+      expect(exchanges).toEqual([]);
+    });
+
+    it('records an exchange the global fetch performs', async () => {
+      const globalFetch = vi
+        .fn()
+        .mockResolvedValue(new Response('pong', {status: 200}));
+      vi.stubGlobal('fetch', globalFetch);
+      const exchanges: HttpExchange[] = [];
+
+      await runWithHttpDebugCapture(exchanges, async () => {
+        const manager = new MCPSessionManager({
+          type: 'StreamableHTTPConnectionParams',
+          url: 'http://test-url',
+        });
+        await manager.createSession();
+        const options = vi
+          .mocked(StreamableHTTPClientTransport)
+          .mock.calls.at(-1)?.[1];
+        if (!options?.fetch) {
+          expect.fail('the transport was given no fetch');
+        }
+        await options.fetch('http://test-url/mcp', {method: 'POST'});
+      });
+
+      vi.unstubAllGlobals();
+      expect(globalFetch).toHaveBeenCalledOnce();
+      expect(exchanges).toHaveLength(1);
+      expect(exchanges[0].responseBody).toBe('pong');
+    });
+
+    it('records a request that names no method as a GET', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(new Response('pong', {status: 200})),
+      );
+      const exchanges: HttpExchange[] = [];
+
+      await runWithHttpDebugCapture(exchanges, async () => {
+        const manager = new MCPSessionManager({
+          type: 'StreamableHTTPConnectionParams',
+          url: 'http://test-url',
+        });
+        await manager.createSession();
+        const options = vi
+          .mocked(StreamableHTTPClientTransport)
+          .mock.calls.at(-1)?.[1];
+        if (!options?.fetch) {
+          expect.fail('the transport was given no fetch');
+        }
+        await options.fetch('http://test-url/mcp');
+      });
+
+      vi.unstubAllGlobals();
+      expect(exchanges[0].method).toBe('GET');
     });
   });
 

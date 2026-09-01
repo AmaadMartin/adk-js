@@ -6,12 +6,10 @@
 
 import {Event} from '../../events/event.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
-import {
-  TRANSFER_TO_AGENT_TOOL_NAME,
-  TransferToAgentTool,
-} from '../../tools/transfer_to_agent_tool.js';
+import {TransferToAgentTool} from '../../tools/transfer_to_agent_tool.js';
 import {BaseAgent} from '../base_agent.js';
 import {Context} from '../context.js';
+import {TRANSFER_TO_AGENT_FUNCTION_CALL_NAME} from '../framework_function_calls.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent, LlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
@@ -79,7 +77,7 @@ If you are the best to answer the question according to your description, you
 can answer it.
 
 If another agent is better for answering the question according to its
-description, call \`${TRANSFER_TO_AGENT_TOOL_NAME}\` function to transfer the
+description, call \`${TRANSFER_TO_AGENT_FUNCTION_CALL_NAME}\` function to transfer the
 question to that agent. When transferring, do not generate any text other than
 the function call.
 `;

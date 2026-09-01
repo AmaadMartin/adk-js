@@ -93,20 +93,17 @@ describe('MCPToolset', () => {
     const toolset = new MCPToolset(stdioParams);
     const tools = await toolset.getTools();
 
-    expect(tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(['test-tool', 'other-tool']),
-    );
-    expect(tools).toHaveLength(2);
+    expect(tools.map((tool) => tool.name)).toEqual(['other-tool', 'test-tool']);
   });
 
   it('discovers tools with prefix applied', async () => {
     const toolset = new MCPToolset(stdioParams, [], 'myprefix');
     const tools = await toolset.getTools();
 
-    expect(tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(['myprefix_test-tool', 'myprefix_other-tool']),
-    );
-    expect(tools).toHaveLength(2);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'myprefix_other-tool',
+      'myprefix_test-tool',
+    ]);
   });
 
   describe('toolFilter', () => {
@@ -188,14 +185,16 @@ describe('MCPToolset', () => {
         close: vi.fn().mockResolvedValue(undefined),
         listTools: vi.fn().mockRejectedValue(new Error('List tools failed')),
       };
-      vi.mocked(Client).mockImplementationOnce(
-        () => mockClientInstance as unknown as Client,
-      );
+      const stub = mockClientInstance as unknown as Client;
+      // Two attempts, because getTools retries a failed listing once.
+      vi.mocked(Client)
+        .mockImplementationOnce(() => stub)
+        .mockImplementationOnce(() => stub);
 
       const spy = vi.spyOn(toolset['mcpSessionManager'], 'closeSession');
 
       await expect(toolset.getTools()).rejects.toThrow('List tools failed');
-      expect(spy).toHaveBeenCalledOnce();
+      expect(spy).toHaveBeenCalledTimes(2);
       expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(0);
     });
   });
@@ -354,14 +353,24 @@ describe('MCPToolset', () => {
 
   describe('error context', () => {
     /** Installs a one-shot client whose `listTools` rejects with `err`. */
-    async function clientRejectingListTools(err: unknown): Promise<void> {
+    /**
+     * Stubs a rejecting client for each getTools attempt. getTools retries a
+     * failed discovery once, so two attempts are the default; a cancellation
+     * is not retried and needs only one.
+     */
+    async function clientRejectingListTools(
+      err: unknown,
+      attempts = 2,
+    ): Promise<void> {
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
-      vi.mocked(Client).mockImplementationOnce(() =>
-        clientStub({
-          listTools: vi.fn().mockRejectedValue(err),
-        }),
-      );
+      for (let i = 0; i < attempts; i++) {
+        vi.mocked(Client).mockImplementationOnce(() =>
+          clientStub({
+            listTools: vi.fn().mockRejectedValue(err),
+          }),
+        );
+      }
     }
 
     it('names the failed operation when listTools rejects', async () => {
@@ -388,11 +397,13 @@ describe('MCPToolset', () => {
     it('names the failed operation when the session cannot be opened', async () => {
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
-      vi.mocked(Client).mockImplementationOnce(() =>
+      const refusing = () =>
         clientStub({
           connect: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
-        }),
-      );
+        });
+      vi.mocked(Client)
+        .mockImplementationOnce(refusing)
+        .mockImplementationOnce(refusing);
       const toolset = new MCPToolset(stdioParams);
 
       await expect(toolset.getTools()).rejects.toThrow(
@@ -403,7 +414,7 @@ describe('MCPToolset', () => {
     it('leaves a cancellation untouched instead of naming it', async () => {
       const aborted = new Error('The operation was aborted');
       aborted.name = 'AbortError';
-      await clientRejectingListTools(aborted);
+      await clientRejectingListTools(aborted, 1);
       const toolset = new MCPToolset(stdioParams);
 
       const error = await toolset.getTools().catch((err: unknown) => err);

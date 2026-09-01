@@ -65,8 +65,9 @@ export interface InvocationContextParams {
    */
   a2aMetadata?: Record<string, unknown>;
   /**
-   * Free-form metadata accumulated over one invocation. A clone reuses the
-   * same object, so a sub-agent writes into the store its parent reads.
+   * Free-form metadata accumulated by tools and services over one invocation.
+   * A clone reuses the same object, so a sub-agent's tool writes into the
+   * store its parent reads.
    */
   customMetadata?: Record<string, unknown>;
 }
@@ -273,10 +274,15 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
-   * Free-form metadata accumulated over this invocation, reached through
-   * {@link Context.customMetadata}. Mirrors Python
-   * `InvocationContext._custom_metadata`. `clone()` carries the object over by
-   * reference, so every context of one invocation shares one store.
+   * Free-form metadata accumulated by tools and services during this
+   * invocation, reached through {@link Context.customMetadata}. Mirrors Python
+   * `InvocationContext._custom_metadata`. Starts empty and is written to as
+   * the invocation runs.
+   *
+   * The object is shared with every copy of this context: {@link clone} and
+   * `BaseAgent.createInvocationContext` carry it over by reference, so a
+   * sub-agent writes into the same record the parent reads. `adk-js` has no
+   * `RunConfig.customMetadata`, so unlike adk-python nothing seeds it.
    */
   readonly customMetadata: Record<string, unknown>;
 

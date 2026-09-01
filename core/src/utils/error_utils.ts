@@ -16,12 +16,14 @@ import {isRecord} from './type_utils.js';
 /**
  * Maximum number of characters of a request or response body kept in a log or
  * an error message before it is truncated. Bounds both log volume and the
- * exposure of potentially sensitive payloads.
+ * exposure of potentially sensitive payloads. Shared through
+ * {@link truncateBody}, so that a body reported through an error and the same
+ * body captured for debugging are cut at the same point.
  */
 export const MAX_LOG_BODY_LENGTH = 1000;
 
 /** Marker appended to a body that exceeds {@link MAX_LOG_BODY_LENGTH}. */
-const TRUNCATION_MARKER = '... [truncated]';
+export const TRUNCATION_MARKER = '... [truncated]';
 
 /** Returned by {@link formatError} when the input carries no usable message. */
 const UNKNOWN_ERROR = 'Unknown error';
@@ -38,8 +40,9 @@ const MAX_HTTP_STATUS = 599;
 const CANCELLATION_ERROR_NAMES = new Set(['AbortError', 'TimeoutError']);
 
 /**
- * Narrows `value` to a record, or returns `undefined` when `value` is null or
- * not a non-null object. Used to safely inspect duck-typed shapes without
+ * Narrows `value` to an indexable record, or returns `undefined` when `value`
+ * is null or not a non-null object. Used to safely inspect duck-typed error
+ * shapes without
  * resorting to `any`.
  */
 export function asRecord(value: unknown): Record<string, unknown> | undefined {

@@ -40,10 +40,12 @@ export interface Logger {
   isDebugEnabled?(): boolean;
 
   /**
-   * Whether a message at `level` would be emitted.
+   * Whether a message at `level` would be emitted. Lets a caller skip work
+   * that only exists to produce a log line.
    *
-   * Optional so an existing third-party {@link Logger} keeps compiling; the
-   * module-level logger defaults it to `false`.
+   * Optional so an existing third-party {@link Logger} keeps compiling; a
+   * caller must treat an absent implementation as "not enabled", which is what
+   * the module-level logger defaults it to.
    */
   isEnabledFor?(level: LogLevel): boolean;
 }
@@ -190,8 +192,12 @@ export function isDebugEnabled(): boolean {
 
 /**
  * The logger instance for ADK.
+ *
+ * `isEnabledFor` is required here even though {@link Logger} leaves it
+ * optional: the facade answers for a custom logger that does not implement it,
+ * so a caller never has to.
  */
-export const logger: Logger = {
+export const logger: Logger & Required<Pick<Logger, 'isEnabledFor'>> = {
   setLogLevel(level: LogLevel): void {
     currentLogger.setLogLevel(level);
   },

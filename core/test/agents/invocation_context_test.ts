@@ -195,6 +195,20 @@ describe('InvocationContext customMetadata', () => {
     expect(context.customMetadata).toEqual({http_debug_info: []});
   });
 
+  it('accepts the very record the caller supplied, not a copy', () => {
+    const seeded = {seeded: true};
+
+    const context = new InvocationContext({
+      invocationId: 'inv-meta',
+      agent: new LoopAgent({name: 'noop'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      customMetadata: seeded,
+    });
+
+    expect(context.customMetadata).toBe(seeded);
+  });
+
   it('shares the bag with a cloned context', () => {
     const context = new InvocationContext({
       invocationId: 'inv-1',
@@ -205,5 +219,19 @@ describe('InvocationContext customMetadata', () => {
     context.clone().customMetadata['key'] = 'value';
 
     expect(context.customMetadata).toEqual({key: 'value'});
+  });
+
+  it('shares the record with a clone, so a child writes where a parent reads', () => {
+    const parent = new InvocationContext({
+      invocationId: 'inv-meta',
+      agent: new LoopAgent({name: 'noop'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    const child = parent.clone({invocationId: 'inv-meta-child'});
+    child.customMetadata['written_by_child'] = 1;
+
+    expect(parent.customMetadata['written_by_child']).toBe(1);
   });
 });

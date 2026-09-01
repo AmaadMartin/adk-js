@@ -15,3 +15,4 @@ export * from './mcp_auth.js';
 export * from './mcp_session_manager.js';
 export * from './mcp_tool.js';
 export * from './mcp_toolset.js';
+export * from './mcp_toolset_config.js';

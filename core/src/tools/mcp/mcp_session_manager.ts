@@ -7,6 +7,7 @@
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
 import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {FetchLike} from '@modelcontextprotocol/sdk/shared/transport.js';
 import type {
   ClientCapabilities,
   CreateMessageRequest,
@@ -17,7 +18,12 @@ import type {
 import type {Stream, Writable} from 'node:stream';
 
 import {formatError} from '../../utils/error_utils.js';
-import {instrumentFetch} from '../../utils/http_debug_utils.js';
+import {
+  describeHttpExchange,
+  instrumentFetch,
+  isCapturingHttpDebug,
+  recordHttpExchange,
+} from '../../utils/http_debug_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
@@ -174,14 +180,49 @@ function withHttpDebugRecording(
 
 /**
  * Returns `options` with an instrumented `fetch` installed. This is the second
- * of the two debug recorders. Unlike the first it is always installed, because
- * its capture can start after the session is open; it records only while a
- * capture is active, and delegates untouched otherwise.
+ * of the three debug recorders. Unlike the other two it is always installed,
+ * because its capture can start after the session is open; it records only
+ * while a capture is active, and delegates untouched otherwise.
  */
 function withInstrumentedFetch(
   options: StreamableHTTPClientTransportOptions,
 ): StreamableHTTPClientTransportOptions {
   return {...options, fetch: instrumentFetch(options.fetch)};
+}
+
+/**
+ * Wraps `baseFetch` so that each exchange it performs is described and
+ * recorded as an `HttpExchange`. A caller-supplied `fetch` is called, never
+ * replaced.
+ */
+function recordingFetch(baseFetch?: FetchLike): FetchLike {
+  const doFetch: FetchLike = baseFetch ?? ((url, init) => fetch(url, init));
+  return async (url, init) => {
+    const response = await doFetch(url, init);
+    const request = {
+      url: String(url),
+      method: init?.method ?? 'GET',
+      headers: new Headers(init?.headers),
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    };
+    recordHttpExchange(await describeHttpExchange(request, response));
+    return response;
+  };
+}
+
+/**
+ * Returns `options` with {@link recordingFetch} installed, but only while an
+ * exchange capture is open. This is the third debug recorder; it reads the
+ * response body eagerly, so it stays off unless a capture is already waiting
+ * for the exchanges.
+ */
+function withExchangeRecording(
+  options: StreamableHTTPClientTransportOptions,
+): StreamableHTTPClientTransportOptions {
+  if (!isCapturingHttpDebug()) {
+    return options;
+  }
+  return {...options, fetch: recordingFetch(options.fetch)};
 }
 
 /**
@@ -192,6 +233,10 @@ function withInstrumentedFetch(
 export interface StdioConnectionParams {
   type: 'StdioConnectionParams';
   serverParams: StdioServerParameters;
+  /**
+   * How long one MCP call may take, in seconds — the unit adk-python uses.
+   * A call that outlives it rejects. Unset means no bound.
+   */
   timeout?: number;
 }
 
@@ -214,6 +259,10 @@ export interface StreamableHTTPConnectionParams {
    * This field will be ignored if transportOptions is provided even if no headers are specified in transportOptions.
    */
   header?: Record<string, unknown>;
+  /**
+   * How long one MCP call may take, in seconds — the unit adk-python uses.
+   * A call that outlives it rejects. Unset means no bound.
+   */
   timeout?: number;
   sseReadTimeout?: number;
   terminateOnClose?: boolean;
@@ -332,13 +381,15 @@ export class MCPSessionManager {
             MCP_SDK,
             () => import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
           );
-          // Two recorders can sit in front of the transport's fetch, one per
-          // debug sink. Each installs itself only while its own sink is
+          // Three recorders can sit in front of the transport's fetch, one
+          // per debug sink. Each installs itself only while its own sink is
           // active, so an ordinary session sends exactly the bytes it sends
-          // today, and a session under both captures reports to both.
+          // today, and a session under several captures reports to each.
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
-            withInstrumentedFetch(withHttpDebugRecording(transportOptions)),
+            withExchangeRecording(
+              withInstrumentedFetch(withHttpDebugRecording(transportOptions)),
+            ),
           );
           transport.onerror = (err) => logTransportError(err, errlog);
           await client.connect(transport);
