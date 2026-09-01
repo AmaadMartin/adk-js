@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {formatError} from './error_utils.js';
+import {formatError, isAbortError} from './error_utils.js';
 import {logger} from './logger.js';
-import {isRecord} from './type_utils.js';
-
-/** The `name` an aborted operation carries, per the DOM `AbortError`. */
-const ABORT_ERROR_NAME = 'AbortError';
 
 /** Options for {@link retryOnce}. */
 export interface RetryOnceOptions {
@@ -17,28 +13,6 @@ export interface RetryOnceOptions {
   label: string;
   /** When already aborted, the failure is a cancellation and is not retried. */
   abortSignal?: AbortSignal;
-}
-
-/**
- * Returns whether an abort is the reason `error` was thrown.
- *
- * A cancellation is often translated into a transport error while the
- * connection tears down, so the original `AbortError` survives only in the
- * `cause` chain. Mirrors Python's `_has_cancelled_error_context`.
- */
-function isCancellation(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  let current: unknown = error;
-
-  while (isRecord(current) && !seen.has(current)) {
-    seen.add(current);
-    if (current['name'] === ABORT_ERROR_NAME) {
-      return true;
-    }
-    current = current['cause'];
-  }
-
-  return false;
 }
 
 /**
@@ -63,7 +37,11 @@ export async function retryOnce<T>(
   try {
     return await operation();
   } catch (error: unknown) {
-    if (options.abortSignal?.aborted || isCancellation(error)) {
+    // `isAbortError` searches the whole error graph. A cancellation is often
+    // translated into a transport error while the connection tears down, so
+    // the original `AbortError` survives only in the `cause` chain or in an
+    // `AggregateError`. Mirrors Python's `_has_cancelled_error_context`.
+    if (options.abortSignal?.aborted || isAbortError(error)) {
       throw error;
     }
 

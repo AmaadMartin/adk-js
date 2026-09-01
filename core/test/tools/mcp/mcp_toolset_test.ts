@@ -180,16 +180,14 @@ describe('MCPToolset', () => {
 
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
-      const mockClientInstance = {
-        connect: vi.fn().mockResolvedValue(undefined),
-        close: vi.fn().mockResolvedValue(undefined),
+      const mockClientInstance = clientStub({
         listTools: vi.fn().mockRejectedValue(new Error('List tools failed')),
-      };
-      const stub = mockClientInstance as unknown as Client;
-      // Two attempts, because getTools retries a failed listing once.
+      });
+      // getTools retries a failed listing once, so both attempts need a
+      // failing client for the error to reach the caller.
       vi.mocked(Client)
-        .mockImplementationOnce(() => stub)
-        .mockImplementationOnce(() => stub);
+        .mockImplementationOnce(() => mockClientInstance)
+        .mockImplementationOnce(() => mockClientInstance);
 
       const spy = vi.spyOn(toolset['mcpSessionManager'], 'closeSession');
 

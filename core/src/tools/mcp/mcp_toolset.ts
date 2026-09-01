@@ -7,6 +7,7 @@
 import type {Writable} from 'node:stream';
 
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import type {RequestOptions} from '@modelcontextprotocol/sdk/shared/protocol.js';
 import type {
   BlobResourceContents,
   ClientCapabilities,
@@ -29,6 +30,7 @@ import {
   runWithHttpDebugCapture,
 } from '../../utils/http_debug_utils.js';
 import {logger, LogLevel} from '../../utils/logger.js';
+import {retryOnce} from '../../utils/retry_utils.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {RESERVED_TOOL_NAMES} from '../reserved_tool_names.js';
@@ -165,6 +167,26 @@ function isMcpConnectionError(err: unknown): boolean {
 }
 
 /**
+ * The trailing `RequestOptions` argument of an MCP call, as a spreadable
+ * tuple: empty when no timeout is configured, so the call reaches the SDK
+ * exactly as it did before and takes the SDK's own default deadline.
+ *
+ * The SDK cancels a request that outlives its timeout — it sends
+ * `notifications/cancelled` to the server and rejects with an `McpError` — so
+ * the server stops working on a call nobody is waiting for. {@link withTimeout}
+ * bounds the same call from the outside; the two are complementary, because a
+ * transport that never calls back never trips the SDK's own timer.
+ *
+ * @param timeoutSeconds The configured deadline in seconds, if there is one.
+ * @return The argument tuple to spread into an SDK call.
+ */
+function callOptions(
+  timeoutSeconds: number | undefined,
+): [RequestOptions] | [] {
+  return timeoutSeconds === undefined ? [] : [{timeout: timeoutSeconds * 1000}];
+}
+
+/**
  * Rejects when `call` outlives `timeoutSeconds`, and clears the timer on both
  * the success and the failure path.
  *
@@ -239,6 +261,8 @@ export class MCPToolset extends BaseToolset {
   private readonly options: McpToolsetOptions;
   private readonly authConfig?: AuthConfig;
   private readonly params: MCPConnectionParams;
+  /** Carries `connectionParams.timeout` into every call this toolset makes. */
+  private readonly callOptions: [RequestOptions] | [];
   /** Ordered least- to most-recently used, so the cap evicts from the front. */
   private readonly toolListCache = new Map<string, CachedToolList>();
 
@@ -260,6 +284,7 @@ export class MCPToolset extends BaseToolset {
 
     this.options = options;
     this.params = connectionParams;
+    this.callOptions = callOptions(connectionParams.timeout);
     this.authConfig = createMcpAuthConfig(options);
     this.mcpSessionManager = new MCPSessionManager(connectionParams, {
       errlog: options.errlog,
@@ -352,15 +377,9 @@ export class MCPToolset extends BaseToolset {
    * @return The tools this toolset exposes, ordered by name.
    */
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    try {
-      return await this.discoverTools(context);
-    } catch (err: unknown) {
-      if (isAbortError(err)) {
-        throw err;
-      }
-      logger.debug(`Retrying getTools due to error: ${formatError(err)}`);
-      return this.discoverTools(context);
-    }
+    return retryOnce(() => this.discoverTools(context), {
+      label: 'MCP getTools',
+    });
   }
 
   /** One attempt at listing, filtering and wrapping the server's tools. */
@@ -402,20 +421,31 @@ export class MCPToolset extends BaseToolset {
   }
 
   /**
-   * Whether the exposed name of `tool` is free to use, warning when it is not.
+   * Whether the name of `tool` is free to use, warning when it is not.
    *
    * A server tool that adopts a framework tool name is dropped rather than
    * allowed through, so that one such name cannot take the server's honest
    * tools down with it.
+   *
+   * Both the exposed name and the server's own name are matched. The model
+   * can only call the exposed name, so that one has to be checked; and a
+   * prefix must not launder a reserved name the server advertised, so the raw
+   * one has to be checked too.
    */
   private acceptToolName(tool: Tool): boolean {
-    const name = this.prefix ? `${this.prefix}_${tool.name}` : tool.name;
-    if (!RESERVED_TOOL_NAMES.has(name)) {
+    const exposed = this.prefix ? `${this.prefix}_${tool.name}` : tool.name;
+    let collision: string | undefined;
+    if (RESERVED_TOOL_NAMES.has(tool.name)) {
+      collision = tool.name;
+    } else if (RESERVED_TOOL_NAMES.has(exposed)) {
+      collision = exposed;
+    }
+    if (collision === undefined) {
       return true;
     }
     logger.warn(
-      `Skipping MCP tool '${name}' because it collides with a reserved ADK ` +
-        'framework tool name.',
+      `Skipping MCP tool '${collision}' because it collides with a reserved ` +
+        'ADK framework tool name.',
     );
     return false;
   }
@@ -478,9 +508,10 @@ export class MCPToolset extends BaseToolset {
     const result = await this.executeWithSession(
       `Failed to get resource ${name} from MCP server`,
       async (session) =>
-        (await session.readResource({
-          uri: resourceInfo.uri,
-        })) as ReadResourceResult,
+        (await session.readResource(
+          {uri: resourceInfo.uri},
+          ...this.callOptions,
+        )) as ReadResourceResult,
       context,
     );
     return result.contents;
@@ -588,7 +619,11 @@ export class MCPToolset extends BaseToolset {
   ): Promise<Tool[]> {
     const result = await this.executeWithSession(
       'Failed to get tools from MCP server',
-      async (session) => (await session.listTools()) as ListToolsResult,
+      async (session) =>
+        (await session.listTools(
+          undefined,
+          ...this.callOptions,
+        )) as ListToolsResult,
       context,
       headers,
     );
@@ -601,7 +636,11 @@ export class MCPToolset extends BaseToolset {
   ): Promise<ListResourcesResult> {
     return this.executeWithSession(
       'Failed to list resources from MCP server',
-      async (session) => (await session.listResources()) as ListResourcesResult,
+      async (session) =>
+        (await session.listResources(
+          undefined,
+          ...this.callOptions,
+        )) as ListResourcesResult,
       context,
     );
   }
