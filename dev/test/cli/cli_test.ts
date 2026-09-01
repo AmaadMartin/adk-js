@@ -450,6 +450,32 @@ describe('CLI Entrypoint', () => {
       );
     });
 
+    it.each([
+      ['a successful run', undefined],
+      ['a failing run', new Error('agent exploded')],
+    ])(
+      'run releases the sqlite connection after %s',
+      async (_name, failure) => {
+        // Without this the sqlite driver keeps the event loop alive and the
+        // interactive `adk run` never exits after the user types "exit".
+        delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
+        const close = vi.spyOn(DatabaseSessionService.prototype, 'close');
+        vi.spyOn(process, 'exit').mockImplementation(
+          (() => undefined) as never,
+        );
+        if (failure) {
+          vi.mocked(runAgent).mockRejectedValueOnce(failure);
+        }
+
+        await parse(['run', path.join(agentsDir, 'agent.ts')]);
+
+        expect(
+          vi.mocked(runAgent).mock.calls[0][0].sessionService,
+        ).toBeInstanceOf(DatabaseSessionService);
+        expect(close).toHaveBeenCalledOnce();
+      },
+    );
+
     it('web stores under .adk by default', async () => {
       delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
 
@@ -495,7 +521,7 @@ describe('CLI Entrypoint', () => {
       );
     });
 
-    it('deploy agent_engine forwards the memory URI and opts out of local storage', async () => {
+    it('deploy agent_engine forwards the memory URI', async () => {
       await parse([
         'deploy',
         'agent_engine',
@@ -506,7 +532,6 @@ describe('CLI Entrypoint', () => {
 
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         memoryServiceUri: 'agentengine://123',
-        useLocalStorage: false,
       });
     });
   });

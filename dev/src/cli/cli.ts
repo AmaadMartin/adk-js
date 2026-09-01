@@ -29,6 +29,7 @@ import {
   ENABLE_FEATURES_OPTION,
 } from './feature_options.js';
 import {
+  closeServices,
   MEMORY_SERVICE_URI_OPTION,
   NO_USE_LOCAL_STORAGE_OPTION,
   resolveServices,
@@ -473,23 +474,22 @@ export function createProgram(): Command {
           inMemory: getBoolean(options['in_memory']),
         });
 
+        let exitCode = 0;
         try {
           // adk-python switches to the single-shot run on the query alone, so
           // a piped stdin still reaches the interactive prompt.
           if (query !== undefined) {
-            process.exit(
-              await runOnceCli({
-                agentPath,
-                query,
-                stateStr: options['state'],
-                sessionId: options['session_id'],
-                replay: options['replay'],
-                timeout: options['timeout'],
-                jsonl: getBoolean(options['jsonl']),
-                ...services,
-                agentFileLoadOptions: getAgentFileOptions(options),
-              }),
-            );
+            exitCode = await runOnceCli({
+              agentPath,
+              query,
+              stateStr: options['state'],
+              sessionId: options['session_id'],
+              replay: options['replay'],
+              timeout: options['timeout'],
+              jsonl: getBoolean(options['jsonl']),
+              ...services,
+              agentFileLoadOptions: getAgentFileOptions(options),
+            });
           } else {
             await runAgent({
               agentPath,
@@ -508,7 +508,15 @@ export function createProgram(): Command {
           }
         } catch (error) {
           logger.error('Error running agent:', (error as Error).message);
-          process.exit(1);
+          exitCode = 1;
+        } finally {
+          // The database session service keeps a sqlite connection on the
+          // event loop, so the command never exits until it is released.
+          await closeServices(services);
+        }
+
+        if (exitCode !== 0) {
+          process.exit(exitCode);
         }
       },
     );
@@ -612,41 +620,32 @@ export function createProgram(): Command {
       .addOption(A2A_OPTION)
       .addOption(AGENT_ENGINE_ID_OPTION)
       .addOption(MEMORY_SERVICE_URI_OPTION)
-      .addOption(USE_LOCAL_STORAGE_OPTION)
-      .addOption(NO_USE_LOCAL_STORAGE_OPTION)
-      .action(
-        async (
-          agentPath: string,
-          options: Record<string, string>,
-          command: Command,
-        ) => {
-          try {
-            await deployToAgentEngine({
-              agentPath: getAbsolutePath(agentPath),
-              project: options['project'],
-              region: options['region'],
-              displayName: options['display_name'],
-              description: options['description'],
-              repository: options['repository'],
-              tempFolder: options['temp_folder'],
-              port: 8080, // Agent Engine requires fixed port of 8080
-              withUi: getBoolean(options['with_ui']),
-              logLevel: options['log_level'],
-              adkVersion: options['adk_version'],
-              allowOrigins: options['allow_origins'],
-              sessionServiceUri: options['session_service_uri'],
-              artifactServiceUri: options['artifact_service_uri'],
-              memoryServiceUri: options['memory_service_uri'],
-              useLocalStorage: resolveUseLocalStorage(command, false),
-              agentFileLoadOptions: getAgentFileOptions(options),
-              a2a: getBoolean(options['a2a']),
-              agentEngineId: options['agent_engine_id'],
-            });
-          } catch (error) {
-            logger.error('Error deploying agent:', (error as Error).message);
-          }
-        },
-      );
+      .action(async (agentPath: string, options: Record<string, string>) => {
+        try {
+          await deployToAgentEngine({
+            agentPath: getAbsolutePath(agentPath),
+            project: options['project'],
+            region: options['region'],
+            displayName: options['display_name'],
+            description: options['description'],
+            repository: options['repository'],
+            tempFolder: options['temp_folder'],
+            port: 8080, // Agent Engine requires fixed port of 8080
+            withUi: getBoolean(options['with_ui']),
+            logLevel: options['log_level'],
+            adkVersion: options['adk_version'],
+            allowOrigins: options['allow_origins'],
+            sessionServiceUri: options['session_service_uri'],
+            artifactServiceUri: options['artifact_service_uri'],
+            memoryServiceUri: options['memory_service_uri'],
+            agentFileLoadOptions: getAgentFileOptions(options),
+            a2a: getBoolean(options['a2a']),
+            agentEngineId: options['agent_engine_id'],
+          });
+        } catch (error) {
+          logger.error('Error deploying agent:', (error as Error).message);
+        }
+      });
   };
 
   registerAgentEngineCommand(DEPLOY_COMMAND.command('agent_engine'));

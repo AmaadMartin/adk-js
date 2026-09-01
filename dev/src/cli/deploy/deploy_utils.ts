@@ -46,12 +46,6 @@ export interface CreateDockerFileContentOptions {
   sessionServiceUri?: string;
   artifactServiceUri?: string;
   memoryServiceUri?: string;
-  /**
-   * Whether the deployed server stores sessions and artifacts under
-   * `<agents_dir>/.adk`. Left undefined, the deployed server picks its own
-   * default.
-   */
-  useLocalStorage?: boolean;
   otelToCloud?: boolean;
   a2a?: boolean;
 }
@@ -148,20 +142,6 @@ export function createDockerFileContent(
     assertNoDockerfileNewline(options.memoryServiceUri, 'memoryServiceUri');
     adkServerOptions.push(
       `--memory_service_uri=${shellQuote(options.memoryServiceUri)}`,
-    );
-  }
-
-  // The deployed server rejects a storage flag combined with a session or
-  // artifact URI, so the flag is only forwarded when neither URI is.
-  if (
-    options.useLocalStorage !== undefined &&
-    !options.sessionServiceUri &&
-    !options.artifactServiceUri
-  ) {
-    adkServerOptions.push(
-      options.useLocalStorage
-        ? '--use_local_storage'
-        : '--no_use_local_storage',
     );
   }
 

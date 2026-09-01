@@ -207,6 +207,30 @@ export interface ResolvedServices {
   memoryService: BaseMemoryService;
 }
 
+/** A service that holds something open until it is told to let go. */
+interface Closable {
+  close(): Promise<void> | void;
+}
+
+function isClosable(value: object): value is Closable {
+  return 'close' in value && typeof value.close === 'function';
+}
+
+/**
+ * Releases whatever the resolved services hold open.
+ *
+ * The database session service keeps a sqlite connection on the event loop, so
+ * a command that builds one and does not close it never exits. Every caller of
+ * {@link resolveServices} that outlives its own run must call this.
+ */
+export async function closeServices(services: ResolvedServices): Promise<void> {
+  await Promise.all(
+    Object.values(services)
+      .filter(isClosable)
+      .map((service) => service.close()),
+  );
+}
+
 /**
  * Builds the session, artifact and memory services for a command.
  *

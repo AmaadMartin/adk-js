@@ -185,31 +185,9 @@ describe('createDockerFileContent', () => {
     ).toThrow(/Invalid memoryServiceUri/);
   });
 
-  it.each([
-    [true, '--use_local_storage'],
-    [false, '--no_use_local_storage'],
-  ])('should forward useLocalStorage %s', (useLocalStorage, flag) => {
-    const content = createDockerFileContent({
-      ...defaultOptions,
-      useLocalStorage,
-    });
-
-    expect(content).toContain(flag);
-  });
-
-  it('should omit the storage flag when a service URI is forwarded', () => {
-    // The deployed server rejects the two together, so forwarding both would
-    // stop the container from starting.
-    const content = createDockerFileContent({
-      ...defaultOptions,
-      useLocalStorage: false,
-      sessionServiceUri: 'memory://',
-    });
-
-    expect(content).not.toContain('use_local_storage');
-  });
-
-  it('should omit the storage flag when useLocalStorage is unset', () => {
+  it('should never emit a storage flag into the generated CMD', () => {
+    // The Dockerfile installs @google/adk-devtools@latest, so the deployed CLI
+    // can be older than this one and would reject an unknown flag on start-up.
     expect(createDockerFileContent(defaultOptions)).not.toContain(
       'use_local_storage',
     );

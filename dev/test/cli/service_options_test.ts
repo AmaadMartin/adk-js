@@ -16,8 +16,9 @@ import {Command, Option} from 'commander';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  closeServices,
   MEMORY_SERVICE_URI_OPTION,
   NO_USE_LOCAL_STORAGE_OPTION,
   resolveEffectiveLocalStorage,
@@ -208,6 +209,24 @@ describe('service_options', () => {
       expect(resolveEffectiveLocalStorage(baseDir, true)).toEqual({
         enabled: true,
       });
+    });
+  });
+
+  describe('closeServices', () => {
+    it('closes a service that holds a connection open', async () => {
+      const close = vi.spyOn(DatabaseSessionService.prototype, 'close');
+      const services = resolveServices({baseDir, useLocalStorage: true});
+
+      await closeServices(services);
+
+      expect(services.sessionService).toBeInstanceOf(DatabaseSessionService);
+      expect(close).toHaveBeenCalledOnce();
+    });
+
+    it('leaves the services that hold nothing open alone', async () => {
+      const services = resolveServices({baseDir, useLocalStorage: false});
+
+      await expect(closeServices(services)).resolves.toBeUndefined();
     });
   });
 
