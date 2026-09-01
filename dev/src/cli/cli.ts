@@ -16,7 +16,10 @@ import {
 import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
-import {AdkApiServer} from '../server/adk_api_server.js';
+import {
+  ApiServerOptions,
+  createApiServer,
+} from '../server/api_server_factory.js';
 import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
@@ -90,6 +93,32 @@ function getBoolean(option?: string | boolean): boolean {
   }
 
   return false;
+}
+
+/**
+ * Maps the options `web` and `api_server` share onto the API server factory.
+ * The caller supplies `web`, the one thing the two commands disagree on.
+ */
+function getApiServerOptions(
+  agentsDir: string,
+  logLevel: LogLevel,
+  options: Record<string, string>,
+): Omit<ApiServerOptions, 'web'> {
+  return {
+    logLevel,
+    agentsDir,
+    host: options['host'],
+    port: parseInt(options['port'], 10),
+    allowOrigins: options['allow_origins'],
+    allowedHosts: getAllowedHosts(options['allowed_hosts']),
+    sessionServiceUri: options['session_service_uri'],
+    artifactServiceUri: options['artifact_service_uri'],
+    otelToCloud: options['otel_to_cloud'] ? true : false,
+    agentFileLoadOptions: getAgentFileOptions(options),
+    a2a: getBoolean(options['a2a']),
+    a2aAuthToken: options['a2a_auth_token'],
+    reloadAgents: getBoolean(options['reload_agents']),
+  };
 }
 
 /**
@@ -256,21 +285,9 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(logLevel);
 
       try {
-        const server = new AdkApiServer({
-          logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
-          host: options['host'],
-          port: parseInt(options['port'], 10),
-          serveDebugUI: true,
-          allowOrigins: options['allow_origins'],
-          allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
-          a2aAuthToken: options['a2a_auth_token'],
-          reloadAgents: getBoolean(options['reload_agents']),
+        const server = createApiServer({
+          ...getApiServerOptions(agentsDir, logLevel, options),
+          web: true,
         });
 
         await server.start();
@@ -304,22 +321,11 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(logLevel);
 
       try {
-        const server = new AdkApiServer({
-          logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
-          host: options['host'],
-          port: parseInt(options['port'], 10),
-          serveDebugUI: false,
-          allowOrigins: options['allow_origins'],
-          allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
-          a2aAuthToken: options['a2a_auth_token'],
-          reloadAgents: getBoolean(options['reload_agents']),
+        const server = createApiServer({
+          ...getApiServerOptions(agentsDir, logLevel, options),
+          web: false,
         });
+
         await server.start();
       } catch (error) {
         logger.error('Error starting API server:', (error as Error).message);
