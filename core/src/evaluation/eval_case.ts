@@ -4,7 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, FunctionCall, FunctionResponse, Part} from '@google/genai';
+import {
+  Content,
+  FunctionCall,
+  FunctionResponse,
+  GroundingMetadata,
+  Part,
+} from '@google/genai';
+
+import {AppDetails} from './app_details.js';
 
 /**
  * Intermediate data an agent produces on its way to a final answer.
@@ -32,6 +40,9 @@ export interface InvocationEvent {
   author: string;
 
   content?: Content;
+
+  /** The grounding metadata the model attached to the event. */
+  groundingMetadata?: GroundingMetadata;
 }
 
 /** Events that occurred during one invocation. */
@@ -48,8 +59,8 @@ export type IntermediateDataType = IntermediateData | InvocationEvents;
 
 /** One turn of a conversation, from the user's message to the agent's reply. */
 export interface Invocation {
-  /** Unique identifier for the invocation. Empty when not recorded. */
-  invocationId: string;
+  /** Unique identifier for the invocation. Defaults to an empty string. */
+  invocationId?: string;
 
   userContent: Content;
 
@@ -58,8 +69,13 @@ export interface Invocation {
   /** The route the agent took to reach {@link finalResponse}. */
   intermediateData?: IntermediateDataType;
 
-  /** Creation time in seconds since the epoch, for debugging. */
-  creationTimestamp: number;
+  /**
+   * Creation time in seconds since the epoch, for debugging. Defaults to 0.
+   */
+  creationTimestamp?: number;
+
+  /** Details about the app that served this invocation. */
+  appDetails?: AppDetails;
 }
 
 /** Values that initialize the session an eval case runs in. */
@@ -76,7 +92,8 @@ export interface SessionInput {
    */
   sessionId?: string;
 
-  state: Record<string, unknown>;
+  /** The state the session starts from. Applied only when creating it. */
+  state?: Record<string, unknown>;
 }
 
 /** One evaluation case: a conversation plus the session it runs in. */
