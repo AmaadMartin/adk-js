@@ -85,9 +85,9 @@ type CrewaiEntryPoint = (args: unknown, context?: Context) => unknown;
  * A structural check rather than an `instanceof`, so a tool built by a second
  * copy of a CrewAI package in the same runtime is still accepted.
  */
-export function isCrewaiToolLike(value: unknown): value is CrewaiToolLike & {
-  run: (args: unknown, context?: Context) => unknown;
-} {
+export function isCrewaiToolLike(
+  value: unknown,
+): value is Required<Pick<CrewaiToolLike, 'run'>> & CrewaiToolLike {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -113,8 +113,7 @@ function resolveEntryPoint(tool: CrewaiToolLike): CrewaiEntryPoint {
   if (!isCrewaiToolLike(tool)) {
     throw new Error("Tool must be a CrewAI tool with a 'run' method.");
   }
-  const {run} = tool;
-  return (args, context) => run.call(tool, args, context);
+  return tool.run.bind(tool);
 }
 
 function resolveName(options: CrewaiToolOptions): string {
@@ -264,8 +263,6 @@ export class CrewaiTool extends FunctionTool<Schema> {
         ToolErrorType.BAD_REQUEST,
       );
     }
-    // An empty `name` or `description` counts as absent: the constructor
-    // reads both truthily, as adk-python's `if name:` does.
     return new CrewaiTool({
       tool,
       name: config.name,
