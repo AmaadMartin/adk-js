@@ -12,6 +12,7 @@
  * other.
  */
 
+import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {LlmAgent} from '../../src/agents/llm_agent.js';
 import {createEvent, Event} from '../../src/events/event.js';
@@ -157,9 +158,9 @@ describe('task-mode agent node — request contents', () => {
       isolationScope: true,
       instruction: 'answer',
       outputSchema: {
-        type: 'OBJECT',
-        properties: {answer: {type: 'STRING'}},
-      } as never,
+        type: Type.OBJECT,
+        properties: {answer: {type: Type.STRING}},
+      },
     });
     const wf = new Workflow({name: 'wf', edges: [['START', agent]]});
 

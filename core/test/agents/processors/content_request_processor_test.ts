@@ -11,6 +11,7 @@ import {
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
   createEvent,
+  createSession,
   Event,
   EventActions,
   Gemini,
@@ -230,12 +231,12 @@ describe('ContentRequestProcessor — model capabilities', () => {
     model: BaseLlm,
     events: Event[],
   ): Promise<Content[]> {
-    const session = {
+    const session = createSession({
       id: 'test-session',
       events,
       appName: 'test-app',
       userId: 'test-user',
-    } as unknown as Session;
+    });
     const invocationContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: new LlmAgent({name: 'test_agent', model}) as BaseAgent,
@@ -302,12 +303,12 @@ describe('ContentRequestProcessor — thoughts from other agents', () => {
     includeContents: 'default' | 'none',
     runConfig?: RunConfig,
   ): Promise<string[]> {
-    const session = {
+    const session = createSession({
       id: 'test-session',
       events: [thinkingEvent],
       appName: 'test-app',
       userId: 'test-user',
-    } as unknown as Session;
+    });
     const invocationContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: new LlmAgent({

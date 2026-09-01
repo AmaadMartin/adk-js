@@ -18,6 +18,7 @@ import {
   mergeFunctionResponseEvents,
   removeClientFunctionCallId,
 } from '../../../src/agents/processors/content_processor_utils.js';
+import {createCompactedEvent} from '../../../src/events/compacted_event.js';
 
 describe('getContents', () => {
   it('should handle object responses in convertForeignEvent', () => {
@@ -1809,13 +1810,14 @@ describe('getContents — adk-python parity', () => {
 
   describe('the current-turn scan', () => {
     it('can start the turn on a compacted summary', () => {
-      const compacted = {
-        isCompacted: true,
+      const compacted = createCompactedEvent({
         author: 'summarizer',
         compactedContent: 'earlier turns',
+        startTime: 1,
+        endTime: 1,
         timestamp: 1,
         invocationId: 'inv-1',
-      } as unknown as CompactedEvent;
+      });
 
       const reply = createEvent({
         author: 'my_agent',
