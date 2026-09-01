@@ -169,6 +169,34 @@ describe('VertexAiRagMemoryService constructor', () => {
     );
   });
 
+  it('qualifies a bare corpus id on every rag call', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-location');
+    const qualified =
+      'projects/env-project/locations/env-location/ragCorpora/bare-id';
+    const client = createFakeClient();
+    const service = createService(client, {ragCorpus: 'bare-id'});
+
+    await service.addSessionToMemory(session());
+    await service.searchMemory(ALICE_REQUEST);
+
+    expect(client.uploadRagFile.mock.calls[0][0].ragCorpus).toBe(qualified);
+    expect(client.listRagFiles.mock.calls[0][0].ragCorpus).toBe(qualified);
+    expect(retrieveCall(client).vertexRagStore.ragResources).toEqual([
+      {ragCorpus: qualified, ragFileIds: ['alice-1']},
+    ]);
+  });
+
+  it('passes a qualified corpus name through unchanged', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-location');
+    const client = createFakeClient();
+
+    await createService(client).addSessionToMemory(session());
+
+    expect(client.uploadRagFile.mock.calls[0][0].ragCorpus).toBe(CORPUS);
+  });
+
   it('defers an unresolvable project and location to the first call', async () => {
     const client = createFakeClient();
 
@@ -518,6 +546,17 @@ describe('VertexAiRagMemoryService.addSessionToMemory', () => {
     });
 
     expect(memoryTexts(response.memories)).toEqual(['sensitive memory']);
+  });
+
+  it('rejects a bare corpus id it cannot qualify, before uploading', async () => {
+    const client = createFakeClient();
+
+    await expect(
+      createService(client, {ragCorpus: 'bare-id'}).addSessionToMemory(
+        session(),
+      ),
+    ).rejects.toThrow('needs a project and a location');
+    expect(client.uploadRagFile).not.toHaveBeenCalled();
   });
 
   it('rejects an empty corpus name before uploading', async () => {

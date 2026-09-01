@@ -119,7 +119,7 @@ export class VertexAiRagMemoryService implements BaseMemoryService {
       throw new Error('ragCorpus must be set.');
     }
     return this.apiClient().uploadRagFile({
-      ragCorpus: this.ragCorpus,
+      ragCorpus: this.corpusName(),
       displayName: buildSourceDisplayName({
         appName: session.appName,
         userId: session.userId,
@@ -133,14 +133,15 @@ export class VertexAiRagMemoryService implements BaseMemoryService {
     request: SearchMemoryRequest,
   ): Promise<SearchMemoryResponse> {
     const endpoint = this.endpoint();
-    const ragFileIds = await this.tenantRagFileIds(request);
+    const ragCorpus = this.corpusName();
+    const ragFileIds = await this.tenantRagFileIds(ragCorpus, request);
     if (ragFileIds?.length === 0) {
       return {memories: []};
     }
 
     const response = await this.apiClient().retrieveContexts({
       parent: `projects/${endpoint.project}/locations/${endpoint.location}`,
-      vertexRagStore: this.ragStore({ragCorpus: this.ragCorpus, ragFileIds}),
+      vertexRagStore: this.ragStore({ragCorpus, ragFileIds}),
       query: {
         text: request.query,
         ragRetrievalConfig:
@@ -165,17 +166,14 @@ export class VertexAiRagMemoryService implements BaseMemoryService {
    * instead hide the caller's own memories.
    */
   private async tenantRagFileIds(
+    ragCorpus: string,
     request: SearchMemoryRequest,
   ): Promise<string[] | undefined> {
-    if (!this.ragCorpus) {
+    if (!ragCorpus) {
       return undefined;
     }
     try {
-      return await listTenantRagFileIds(
-        this.apiClient(),
-        this.ragCorpus,
-        request,
-      );
+      return await listTenantRagFileIds(this.apiClient(), ragCorpus, request);
     } catch (e: unknown) {
       logger.warn(
         'Listing the corpus failed, so retrieval is not scoped to the ' +
@@ -183,6 +181,21 @@ export class VertexAiRagMemoryService implements BaseMemoryService {
       );
       return undefined;
     }
+  }
+
+  /**
+   * Returns the corpus resource name. A bare corpus id is qualified with the
+   * resolved project and location, which every RAG call needs in the path.
+   */
+  private corpusName(): string {
+    if (!this.ragCorpus || this.ragCorpus.startsWith('projects/')) {
+      return this.ragCorpus;
+    }
+    const endpoint = this.endpoint();
+    return (
+      `projects/${endpoint.project}/locations/${endpoint.location}` +
+      `/ragCorpora/${this.ragCorpus}`
+    );
   }
 
   /** Builds the store a retrieval runs against. */
