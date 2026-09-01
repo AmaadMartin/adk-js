@@ -12,7 +12,14 @@ import {
 } from '../../events/event.js';
 
 export const SCHEMA_VERSION_KEY = 'schema_version';
+/**
+ * The legacy schema written by adk-python before event data moved to JSON.
+ * It stores event actions as a Python pickle, which this SDK cannot read.
+ */
+export const SCHEMA_VERSION_0_PICKLE = '0';
 export const SCHEMA_VERSION_1_JSON = '1';
+export const METADATA_TABLE_NAME = 'adk_internal_metadata';
+export const EVENTS_TABLE_NAME = 'events';
 export const STORAGE_KEY_COLUMN_LENGTH = 191;
 
 /**
@@ -36,7 +43,7 @@ class CamelCaseToSnakeCaseJsonType extends JsonType {
   }
 }
 
-@Entity({tableName: 'adk_internal_metadata'})
+@Entity({tableName: METADATA_TABLE_NAME})
 export class StorageMetadata {
   @PrimaryKey({type: 'string'})
   key!: string;
@@ -135,7 +142,7 @@ export class StorageSession {
   [PrimaryKey.name]?: [string, string, string];
 }
 
-@Entity({tableName: 'events'})
+@Entity({tableName: EVENTS_TABLE_NAME})
 export class StorageEvent {
   @PrimaryKey({type: 'string', length: STORAGE_KEY_COLUMN_LENGTH})
   id!: string;
