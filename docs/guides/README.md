@@ -6,8 +6,8 @@ official ADK documentation, visit [adk.dev](https://adk.dev/).
 
 ## Index
 
-### Tools
+### Examples
 
-- [VertexAiExampleStore](tools/vertex_ai_example_store/index.md) - Reading
+- [VertexAiExampleStore](examples/vertex_ai_example_store/index.md) - Reading
   few-shot examples from a curated Vertex AI Example Store instead of from an
   array in your source.

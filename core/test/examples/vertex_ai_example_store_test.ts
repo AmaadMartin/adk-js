@@ -4,24 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {VertexAiExampleStore} from '@google/adk';
+import {Content, Part} from '@google/genai';
+import type {gaxios} from 'google-auth-library';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   SearchExamplesResponse,
   SimilarExample,
-  VertexAiExampleStore,
-} from '@google/adk';
-import {Content, Part} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
-
-interface SearchOptions {
-  url: string;
-  method: string;
-  data: unknown;
-}
+} from '../../src/examples/vertex_ai_example_store.js';
 
 const {googleAuth, searchRequest} = vi.hoisted(() => {
   const searchRequest =
     vi.fn<
-      (options: SearchOptions) => Promise<{data: SearchExamplesResponse}>
+      (options: gaxios.GaxiosOptions) => Promise<{data: SearchExamplesResponse}>
     >();
   return {searchRequest, googleAuth: vi.fn(() => ({request: searchRequest}))};
 });

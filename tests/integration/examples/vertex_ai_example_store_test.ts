@@ -10,24 +10,14 @@ import {
   LlmAgent,
   LlmRequest,
   Runner,
-  SearchExamplesResponse,
   VertexAiExampleStore,
 } from '@google/adk';
 import {createUserContent} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {GeminiWithMockResponses} from '../test_case_utils.js';
 
-interface SearchOptions {
-  url: string;
-  method: string;
-  data: unknown;
-}
-
 const {googleAuth, searchRequest} = vi.hoisted(() => {
-  const searchRequest =
-    vi.fn<
-      (options: SearchOptions) => Promise<{data: SearchExamplesResponse}>
-    >();
+  const searchRequest = vi.fn();
   return {searchRequest, googleAuth: vi.fn(() => ({request: searchRequest}))};
 });
 
@@ -114,18 +104,19 @@ describe('VertexAiExampleStore integration', () => {
         ],
       },
     });
-    let systemInstruction: unknown;
+    let captured: LlmRequest | undefined;
 
     await runOneTurn(
       makeAgent((request) => {
-        systemInstruction = request.config?.systemInstruction;
+        captured = request;
       }),
       'what is the weather?',
     );
 
-    expect(systemInstruction).toContain('<EXAMPLES>');
-    expect(systemInstruction).toContain('what is the weather in London?');
-    expect(systemInstruction).toContain("get_weather(city='London')");
+    const instruction = captured?.config?.systemInstruction;
+    expect(instruction).toContain('<EXAMPLES>');
+    expect(instruction).toContain('what is the weather in London?');
+    expect(instruction).toContain("get_weather(city='London')");
     expect(searchRequest).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         url:
