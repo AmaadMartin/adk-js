@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {formatError, isAbortError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,46 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('isAbortError', () => {
+  it('matches an error named AbortError', () => {
+    const err = Object.assign(new Error('cancelled'), {name: 'AbortError'});
+    expect(isAbortError(err)).toBe(true);
+  });
+
+  it('matches an error named TimeoutError', () => {
+    const err = Object.assign(new Error('too slow'), {name: 'TimeoutError'});
+    expect(isAbortError(err)).toBe(true);
+  });
+
+  it('matches a cancellation wrapped in a cause chain', () => {
+    const inner = Object.assign(new Error('cancelled'), {name: 'AbortError'});
+    const middle = new Error('transport closed', {cause: inner});
+    expect(isAbortError(new Error('call failed', {cause: middle}))).toBe(true);
+  });
+
+  it('matches a cancellation inside an AggregateError', () => {
+    const inner = Object.assign(new Error('cancelled'), {name: 'AbortError'});
+    expect(isAbortError(new AggregateError([new Error('a'), inner]))).toBe(
+      true,
+    );
+  });
+
+  it('reports false for an ordinary failure', () => {
+    expect(isAbortError(new Error('boom'))).toBe(false);
+  });
+
+  it('terminates on a cyclic cause graph', () => {
+    const err: Error & {cause?: unknown} = new Error('boom');
+    err.cause = err;
+    expect(isAbortError(err)).toBe(false);
+  });
+
+  it('reports false for null, undefined and a primitive', () => {
+    expect(isAbortError(null)).toBe(false);
+    expect(isAbortError(undefined)).toBe(false);
+    expect(isAbortError('AbortError')).toBe(false);
   });
 });

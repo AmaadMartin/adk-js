@@ -12,7 +12,12 @@ import {
   CreateMessageRequestSchema,
   ElicitRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import {PassThrough} from 'node:stream';
 import {describe, expect, it, vi} from 'vitest';
+import {
+  HttpExchange,
+  runWithHttpDebugCapture,
+} from '../../../src/utils/http_debug_utils.js';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {logger} from '../../../src/utils/logger.js';
@@ -300,6 +305,179 @@ describe('MCPSessionManager', () => {
       );
 
       errorSpy.mockRestore();
+    });
+  });
+
+  describe('errlog', () => {
+    it('writes a transport error to errlog instead of the logger', async () => {
+      const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      const errlog = new PassThrough();
+      const written: string[] = [];
+      errlog.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+
+      const manager = new MCPSessionManager(
+        {type: 'StreamableHTTPConnectionParams', url: 'http://test-url'},
+        {errlog},
+      );
+      await manager.createSession();
+
+      const transport = vi
+        .mocked(StreamableHTTPClientTransport)
+        .mock.instances.at(-1);
+      transport?.onerror?.(new Error('background stream died'));
+
+      expect(written.join('')).toContain(
+        'MCP transport error: background stream died',
+      );
+      expect(errorSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+
+    it('asks a stdio transport to pipe its stderr', async () => {
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog: new PassThrough()},
+      );
+
+      await manager.createSession();
+
+      expect(StdioClientTransport).toHaveBeenCalledWith({
+        command: 'test-command',
+        stderr: 'pipe',
+      });
+    });
+
+    it('leaves the stdio server params alone without an errlog', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+
+      await manager.createSession();
+
+      expect(StdioClientTransport).toHaveBeenCalledWith({
+        command: 'test-command',
+      });
+    });
+
+    it('forwards the server stderr and stops on close', async () => {
+      const errlog = new PassThrough();
+      const written: string[] = [];
+      errlog.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+      const serverStderr = new PassThrough();
+      vi.mocked(StdioClientTransport).mockImplementationOnce(
+        () => ({stderr: serverStderr}) as unknown as StdioClientTransport,
+      );
+
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog},
+      );
+      const client = await manager.createSession();
+      serverStderr.write('server said hello\n');
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(written.join('')).toBe('server said hello\n');
+
+      await manager.closeSession(client);
+      serverStderr.write('after close\n');
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(written.join('')).toBe('server said hello\n');
+    });
+
+    it('closes a stdio session whose transport exposes no stderr', async () => {
+      vi.mocked(StdioClientTransport).mockImplementationOnce(
+        () => ({stderr: null}) as unknown as StdioClientTransport,
+      );
+      const manager = new MCPSessionManager(
+        {
+          type: 'StdioConnectionParams',
+          serverParams: {command: 'test-command'},
+        },
+        {errlog: new PassThrough()},
+      );
+
+      const client = await manager.createSession();
+
+      await expect(manager.closeSession(client)).resolves.toBeUndefined();
+      expect(manager.getActiveSessions()).toHaveLength(0);
+    });
+  });
+
+  describe('HTTP debug capture', () => {
+    it('installs no fetch wrapper outside a capture', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession();
+
+      const options = vi
+        .mocked(StreamableHTTPClientTransport)
+        .mock.calls.at(-1)?.[1];
+      expect(options?.fetch).toBeUndefined();
+    });
+
+    it('records an exchange the global fetch performs', async () => {
+      const globalFetch = vi
+        .fn()
+        .mockResolvedValue(new Response('pong', {status: 200}));
+      vi.stubGlobal('fetch', globalFetch);
+      const exchanges: HttpExchange[] = [];
+
+      await runWithHttpDebugCapture(exchanges, async () => {
+        const manager = new MCPSessionManager({
+          type: 'StreamableHTTPConnectionParams',
+          url: 'http://test-url',
+        });
+        await manager.createSession();
+        const options = vi
+          .mocked(StreamableHTTPClientTransport)
+          .mock.calls.at(-1)?.[1];
+        if (!options?.fetch) {
+          expect.fail('the transport was given no fetch');
+        }
+        await options.fetch('http://test-url/mcp', {method: 'POST'});
+      });
+
+      vi.unstubAllGlobals();
+      expect(globalFetch).toHaveBeenCalledOnce();
+      expect(exchanges).toHaveLength(1);
+      expect(exchanges[0].responseBody).toBe('pong');
+    });
+
+    it('records a request that names no method as a GET', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(new Response('pong', {status: 200})),
+      );
+      const exchanges: HttpExchange[] = [];
+
+      await runWithHttpDebugCapture(exchanges, async () => {
+        const manager = new MCPSessionManager({
+          type: 'StreamableHTTPConnectionParams',
+          url: 'http://test-url',
+        });
+        await manager.createSession();
+        const options = vi
+          .mocked(StreamableHTTPClientTransport)
+          .mock.calls.at(-1)?.[1];
+        if (!options?.fetch) {
+          expect.fail('the transport was given no fetch');
+        }
+        await options.fetch('http://test-url/mcp');
+      });
+
+      vi.unstubAllGlobals();
+      expect(exchanges[0].method).toBe('GET');
     });
   });
 

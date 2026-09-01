@@ -163,8 +163,12 @@ export function setLogLevel(level: LogLevel) {
 
 /**
  * The logger instance for ADK.
+ *
+ * `isEnabledFor` is required here even though {@link Logger} leaves it
+ * optional: the facade answers for a custom logger that does not implement it,
+ * so a caller never has to.
  */
-export const logger: Logger = {
+export const logger: Logger & Required<Pick<Logger, 'isEnabledFor'>> = {
   setLogLevel(level: LogLevel): void {
     currentLogger.setLogLevel(level);
   },

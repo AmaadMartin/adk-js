@@ -172,3 +172,44 @@ describe('InvocationContext LLM-call cost tracking', () => {
     expect(events).toHaveLength(3);
   });
 });
+
+describe('customMetadata', () => {
+  it('starts empty', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-meta',
+      agent: new LoopAgent({name: 'noop'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    expect(context.customMetadata).toEqual({});
+  });
+
+  it('accepts a record supplied by the caller', () => {
+    const seeded = {seeded: true};
+
+    const context = new InvocationContext({
+      invocationId: 'inv-meta',
+      agent: new LoopAgent({name: 'noop'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      customMetadata: seeded,
+    });
+
+    expect(context.customMetadata).toBe(seeded);
+  });
+
+  it('shares the record with a clone, so a child writes where a parent reads', () => {
+    const parent = new InvocationContext({
+      invocationId: 'inv-meta',
+      agent: new LoopAgent({name: 'noop'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    const child = parent.clone({invocationId: 'inv-meta-child'});
+    child.customMetadata['written_by_child'] = 1;
+
+    expect(parent.customMetadata['written_by_child']).toBe(1);
+  });
+});

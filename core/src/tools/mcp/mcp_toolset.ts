@@ -147,11 +147,6 @@ function compareByName(a: BaseTool, b: BaseTool): number {
   return a.name > b.name ? 1 : 0;
 }
 
-/** Whether debug logging is on for a logger that reports it. */
-function isDebugLoggingEnabled(): boolean {
-  return logger.isEnabledFor?.(LogLevel.DEBUG) ?? false;
-}
-
 /**
  * Rejects when `call` outlives `timeoutSeconds`, and clears the timer on both
  * the success and the failure path.
@@ -553,7 +548,7 @@ export class MCPToolset extends BaseToolset {
         this.options.headerProvider,
         context,
       ));
-    if (context === undefined || !isDebugLoggingEnabled()) {
+    if (context === undefined || !logger.isEnabledFor(LogLevel.DEBUG)) {
       return this.openSessionAndRun(operation, resolvedHeaders, call);
     }
     const exchanges: HttpExchange[] = [];
