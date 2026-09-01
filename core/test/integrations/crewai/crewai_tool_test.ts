@@ -12,6 +12,7 @@ import {
   CrewaiToolLike,
   InvocationContext,
   isBaseTool,
+  isCrewaiToolLike,
   isFunctionTool,
   LlmAgent,
   PluginManager,
@@ -229,17 +230,19 @@ describe('CrewaiTool', () => {
       expect(calls[0].context).toBe(toolContext);
     });
 
-    it('strips the framework-reserved arguments', async () => {
+    it('forwards a context-shaped argument without displacing the context', async () => {
       const {tool, calls} = createEchoTool();
       const crewaiTool = new CrewaiTool({tool, name: 'test_tool'});
       const toolContext = createContext();
+      const args = {
+        search_query: 'q',
+        self: 'spoofed',
+        tool_context: 'spoofed',
+      };
 
-      await crewaiTool.runAsync({
-        args: {search_query: 'q', self: 'spoofed', tool_context: 'spoofed'},
-        toolContext,
-      });
+      await crewaiTool.runAsync({args, toolContext});
 
-      expect(calls[0].args).toEqual({search_query: 'q'});
+      expect(calls[0].args).toEqual(args);
       expect(calls[0].context).toBe(toolContext);
     });
 
@@ -374,6 +377,28 @@ describe('CrewaiTool', () => {
 
       expect(crewaiTool.name).toBe('configured_tool');
       expect(crewaiTool.description).toBe('Configured tool');
+    });
+  });
+
+  describe('isCrewaiToolLike', () => {
+    it('accepts a value with a callable run', () => {
+      expect(isCrewaiToolLike({run: () => 1})).toBe(true);
+    });
+
+    it('rejects a value that is not an object', () => {
+      expect(isCrewaiToolLike(42)).toBe(false);
+    });
+
+    it('rejects null, whose typeof is object', () => {
+      expect(isCrewaiToolLike(null)).toBe(false);
+    });
+
+    it('rejects an object with no run', () => {
+      expect(isCrewaiToolLike({})).toBe(false);
+    });
+
+    it('rejects an object whose run is not callable', () => {
+      expect(isCrewaiToolLike({run: 'not a function'})).toBe(false);
     });
   });
 });

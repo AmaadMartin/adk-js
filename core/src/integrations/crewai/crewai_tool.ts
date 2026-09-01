@@ -14,12 +14,6 @@ import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {toJsonSchema} from '../../utils/schema.js';
 import {isZodSchema} from '../../utils/simple_zod_to_json.js';
 
-/**
- * Argument names the framework manages. A model can emit any of them, so they
- * are removed before the arguments reach the wrapped tool.
- */
-const RESERVED_ARG_NAMES: readonly string[] = ['self', 'tool_context'];
-
 /** The shape of a CrewAI-style tool that {@link CrewaiTool} can wrap. */
 export interface CrewaiToolLike {
   /** The tool's own name, used unless the caller overrides it. */
@@ -49,6 +43,21 @@ export interface CrewaiToolConfig {
   name?: string;
   /** Overrides the wrapped tool's description. */
   description?: string;
+}
+
+/**
+ * Whether a value has the shape {@link CrewaiTool} can wrap.
+ *
+ * A structural check rather than an `instanceof`, so a tool built by a second
+ * copy of a CrewAI package in the same runtime is still accepted.
+ */
+export function isCrewaiToolLike(value: unknown): value is CrewaiToolLike {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'run' in value &&
+    typeof (value as CrewaiToolLike).run === 'function'
+  );
 }
 
 /** The wrapped tool's entry point, bound to the tool. */
@@ -133,16 +142,6 @@ function resolveSchema(tool: CrewaiToolLike): ResolvedSchema {
   }
 }
 
-function stripReservedArgs(
-  args: Record<string, unknown>,
-): Record<string, unknown> {
-  const stripped = {...args};
-  for (const name of RESERVED_ARG_NAMES) {
-    delete stripped[name];
-  }
-  return stripped;
-}
-
 function missingArgsError(name: string, missing: readonly string[]): string {
   return (
     `Invoking \`${name}()\` failed as the following mandatory input parameters are not present:\n` +
@@ -156,9 +155,10 @@ function missingArgsError(name: string, missing: readonly string[]): string {
  *
  * The model-facing declaration comes from the wrapped tool's `argsSchema`, and
  * every argument the model supplies is passed on to `run` — the CrewAI
- * `**kwargs` contract — except the framework-reserved names. A call that omits
- * a required argument returns a retry hint instead of throwing, so the model
- * can correct itself.
+ * `**kwargs` contract. The ADK context arrives as `run`'s second argument, so
+ * it cannot collide with an argument name. A call that omits a required
+ * argument returns a retry hint instead of throwing, so the model can correct
+ * itself.
  *
  * `@google/adk` takes no dependency on CrewAI: the wrapped tool is described
  * structurally by {@link CrewaiToolLike}.
@@ -190,11 +190,10 @@ export class CrewaiTool extends FunctionTool<Schema> {
   }
 
   override async runAsync(req: RunAsyncToolRequest): Promise<unknown> {
-    const args = stripReservedArgs(req.args);
-    const missing = this.requiredArgs.filter((name) => !(name in args));
+    const missing = this.requiredArgs.filter((name) => !(name in req.args));
     if (missing.length > 0) {
       return {error: missingArgsError(this.name, missing)};
     }
-    return super.runAsync({...req, args});
+    return super.runAsync(req);
   }
 }
