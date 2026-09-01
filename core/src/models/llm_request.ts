@@ -18,7 +18,7 @@ import {
   ToolUnion,
 } from '@google/genai';
 
-import {ContextCacheConfig} from '../apps/context_cache_config.js';
+import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import type {BaseTool} from '../tools/base_tool.js';
 import {logger} from '../utils/logger.js';
 import {CacheMetadata} from './cache_metadata.js';
@@ -78,12 +78,6 @@ export interface LlmRequest {
   cacheableContentsTokenCount?: number;
 
   /**
-   * Dynamic instructions contributed by tools, resolved later into the
-   * finalized contents and system instruction. Internal request state.
-   */
-  dynamicInstructions?: string[];
-
-  /**
    * Whether the request carries non-text static-instruction content. Such
    * content must stay a stable request prefix across turns, so that
    * provider-side context caching can key off it. Internal request state.
@@ -97,54 +91,22 @@ export interface LlmRequest {
   staticInstructionPrefixEndIndex?: number;
 }
 
-/**
- * The accepted shapes of the `instructions` argument of
- * {@link appendInstructions}.
- */
-export type InstructionsInput =
-  | {kind: 'strings'; strings: string[]}
-  | {kind: 'content'; content: Content};
-
-function describe(value: unknown): string {
-  if (value === null) {
-    return 'null';
-  }
-  if (Array.isArray(value)) {
-    return 'array';
-  }
-  return typeof value;
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === 'string')
+  );
 }
 
 /**
  * `Content` is a structural interface, so there is no constructor to test
  * against. A non-array object carrying either of its two fields is one.
  */
-function isContentLike(value: unknown): value is Content {
+function isContent(value: unknown): value is Content {
   return (
     typeof value === 'object' &&
     value !== null &&
+    !Array.isArray(value) &&
     ('parts' in value || 'role' in value)
-  );
-}
-
-/**
- * Classifies the `instructions` argument of {@link appendInstructions}.
- *
- * @param instructions The value to classify.
- * @returns The classified input.
- * @throws TypeError if the value is neither a `string[]` nor a `Content`.
- */
-export function classifyInstructions(instructions: unknown): InstructionsInput {
-  if (Array.isArray(instructions)) {
-    const items: unknown[] = instructions;
-    if (items.every((item): item is string => typeof item === 'string')) {
-      return {kind: 'strings', strings: items};
-    }
-  } else if (isContentLike(instructions)) {
-    return {kind: 'content', content: instructions};
-  }
-  throw new TypeError(
-    `instructions must be string[] or Content, got ${describe(instructions)}.`,
   );
 }
 
@@ -285,32 +247,20 @@ export function appendInstructions(
   llmRequest: LlmRequest,
   instructions: string[] | Content,
 ): Content[] {
-  const input = classifyInstructions(instructions);
   const config = ensureConfig(llmRequest);
 
-  if (input.kind === 'content') {
-    return appendContentInstructions(config, llmRequest, input.content);
+  if (isStringArray(instructions)) {
+    if (instructions.length) {
+      appendToSystemInstruction(config, instructions.join('\n\n'));
+    }
+    return [];
   }
-
-  if (input.strings.length) {
-    appendToSystemInstruction(config, input.strings.join('\n\n'));
+  if (isContent(instructions)) {
+    return appendContentInstructions(config, llmRequest, instructions);
   }
-  return [];
-}
-
-/**
- * Appends dynamic instructions contributed by tools to the request.
- *
- * @param instructions The instructions to append.
- */
-export function appendDynamicInstructions(
-  llmRequest: LlmRequest,
-  instructions: string[],
-): void {
-  if (!llmRequest.dynamicInstructions) {
-    llmRequest.dynamicInstructions = [];
-  }
-  llmRequest.dynamicInstructions.push(...instructions);
+  throw new TypeError(
+    `instructions must be string[] or Content, got ${typeof instructions}.`,
+  );
 }
 
 function hasFunctionDeclarations(tool: ToolUnion): tool is Tool {

@@ -16,10 +16,8 @@ import {
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
-  appendDynamicInstructions,
   appendInstructions,
   appendTools,
-  classifyInstructions,
   findToolWithFunctionDeclarations,
   insertTransientUserContent,
   setOutputSchema,
@@ -315,60 +313,34 @@ describe('appendInstructions with a non-string system instruction', () => {
   });
 });
 
-describe('classifyInstructions', () => {
-  it('classifies a string array', () => {
-    expect(classifyInstructions(['a', 'b'])).toEqual({
-      kind: 'strings',
-      strings: ['a', 'b'],
-    });
-  });
-
-  it('classifies a Content that carries only parts', () => {
-    expect(classifyInstructions({parts: [{text: 'a'}]})).toEqual({
-      kind: 'content',
-      content: {parts: [{text: 'a'}]},
-    });
-  });
-
-  it.each([
-    ['single string', 'string'],
-    [123, 'number'],
-    [['valid string', 123], 'array'],
-    [{instruction: 'test'}, 'object'],
-    [null, 'null'],
-  ])('rejects %o', (value, described) => {
-    expect(() => classifyInstructions(value)).toThrow(TypeError);
-    expect(() => classifyInstructions(value)).toThrow(
-      `instructions must be string[] or Content, got ${described}.`,
-    );
-  });
-
+describe('appendInstructions with an unsupported input', () => {
   it('rejects an object carrying neither role nor parts', () => {
     const request = createRequest();
 
+    expect(() => appendInstructions(request, {})).toThrow(TypeError);
     expect(() => appendInstructions(request, {})).toThrow(
       'instructions must be string[] or Content, got object.',
     );
     expect(request.config?.systemInstruction).toBeUndefined();
-  });
-});
-
-describe('appendDynamicInstructions', () => {
-  it('creates the array on the first call', () => {
-    const request = createRequest();
-
-    appendDynamicInstructions(request, ['first']);
-
-    expect(request.dynamicInstructions).toEqual(['first']);
+    expect(request.contents).toEqual([]);
   });
 
-  it('accumulates across calls in order', () => {
+  it('rejects an array holding a non-string', () => {
+    // Parsed JSON is the realistic way a non-string reaches a `string[]`
+    // parameter: the guard exists for callers TypeScript does not check.
+    const parsed: string[] = JSON.parse('["valid string", 123]');
     const request = createRequest();
 
-    appendDynamicInstructions(request, ['first']);
-    appendDynamicInstructions(request, ['second', 'third']);
+    expect(() => appendInstructions(request, parsed)).toThrow(TypeError);
+    expect(request.config?.systemInstruction).toBeUndefined();
+  });
 
-    expect(request.dynamicInstructions).toEqual(['first', 'second', 'third']);
+  it('accepts a Content that carries only parts', () => {
+    const request = createRequest();
+
+    appendInstructions(request, {parts: [{text: 'Be brief.'}]});
+
+    expect(request.config?.systemInstruction).toBe('Be brief.');
   });
 });
 

@@ -5,14 +5,6 @@
  */
 
 /**
- * A cache is refreshed this many seconds before it actually expires, so a
- * request that is already in flight cannot outlive it.
- */
-const EXPIRY_BUFFER_SECONDS = 120;
-
-const MILLISECONDS_PER_SECOND = 1000;
-
-/**
  * Metadata for the context cache associated with an LLM response.
  *
  * A record is in one of two states:
@@ -52,53 +44,4 @@ export interface CacheMetadata {
 
   /** Unix timestamp in seconds when the cache was created. */
   createdAt?: number;
-}
-
-/**
- * Creates a {@link CacheMetadata} and enforces its state invariant.
- *
- * @param params The metadata fields.
- * @returns The validated metadata.
- * @throws Error if the active-cache fields are partially set, or if a count is
- *     negative.
- */
-export function createCacheMetadata(params: CacheMetadata): CacheMetadata {
-  const activeFieldsSet = [
-    params.cacheName,
-    params.expireTime,
-    params.invocationsUsed,
-  ].map((field) => field !== undefined);
-
-  if (new Set(activeFieldsSet).size > 1) {
-    throw new Error(
-      'cacheName, expireTime, and invocationsUsed must all be set (active ' +
-        'cache) or all be undefined (fingerprint-only state)',
-    );
-  }
-
-  if (params.invocationsUsed !== undefined && params.invocationsUsed < 0) {
-    throw new Error('invocationsUsed must not be negative');
-  }
-
-  if (params.contentsCount < 0) {
-    throw new Error('contentsCount must not be negative');
-  }
-
-  return params;
-}
-
-/**
- * Whether the cache expires within the refresh buffer.
- *
- * @param metadata The cache metadata to check.
- * @returns `false` when the metadata carries no expiry.
- */
-export function cacheExpiresSoon(metadata: CacheMetadata): boolean {
-  if (metadata.expireTime === undefined) {
-    return false;
-  }
-  return (
-    Date.now() / MILLISECONDS_PER_SECOND >
-    metadata.expireTime - EXPIRY_BUFFER_SECONDS
-  );
 }

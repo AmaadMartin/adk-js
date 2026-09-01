@@ -94,33 +94,14 @@ inline part followed by a file part yields `inline_data_0` then `file_data_1`.
 ## Context caching fields
 
 `LlmRequest` carries three fields a caching layer reads: `cacheConfig`,
-`cacheMetadata` and `cacheableContentsTokenCount`. `CacheMetadata` is in one of
-two states, and `createCacheMetadata` enforces that:
+`cacheMetadata` and `cacheableContentsTokenCount`. They are plain data on the
+request. adk-js has no caching layer yet, so nothing in this package writes or
+reads them today.
 
-```ts
-import {cacheExpiresSoon, createCacheMetadata} from '@google/adk';
-
-const fingerprintOnly = createCacheMetadata({
-  fingerprint: 'a1b2c3',
-  contentsCount: 4,
-});
-
-const active = createCacheMetadata({
-  cacheName: 'projects/1/locations/us-central1/cachedContents/2',
-  expireTime: Date.now() / 1000 + 600,
-  invocationsUsed: 3,
-  fingerprint: 'a1b2c3',
-  contentsCount: 4,
-});
-
-cacheExpiresSoon(fingerprintOnly); // false: no expiry to compare against
-cacheExpiresSoon(active); // false until 120 seconds before expireTime
-```
-
-`cacheName`, `expireTime` and `invocationsUsed` describe an active cache. They
-must all be present or all be absent; a partial set throws. `cacheExpiresSoon`
-reports the cache as expiring two minutes before `expireTime`, so a request
-already in flight cannot outlive it.
+`CacheMetadata` is valid in one of two states. An active cache sets
+`cacheName`, `expireTime` and `invocationsUsed` together. A fingerprint-only
+record leaves all three absent and describes the cacheable prefix with
+`fingerprint` and `contentsCount` alone.
 
 ## Failure modes
 
