@@ -9,6 +9,7 @@ import {Session} from '../sessions/session.js';
 
 import {
   BaseMemoryService,
+  createSearchMemoryResponse,
   SearchMemoryRequest,
   SearchMemoryResponse,
 } from './base_memory_service.js';
@@ -19,7 +20,7 @@ import {MemoryEntry} from './memory_entry.js';
  *
  * Uses keyword matching instead of semantic search.
  */
-export class InMemoryMemoryService implements BaseMemoryService {
+export class InMemoryMemoryService extends BaseMemoryService {
   private readonly memories: MemoryEntry[] = [];
   /**
    * A map from user key to a map from session ID to events.
@@ -49,11 +50,11 @@ export class InMemoryMemoryService implements BaseMemoryService {
   async searchMemory(req: SearchMemoryRequest): Promise<SearchMemoryResponse> {
     const userKey = getUserKey(req.appName, req.userId);
     if (!this.sessionEvents[userKey]) {
-      return Promise.resolve({memories: []});
+      return createSearchMemoryResponse();
     }
 
     const wordsInQuery = req.query.toLowerCase().split(/\s+/);
-    const response: SearchMemoryResponse = {memories: []};
+    const response = createSearchMemoryResponse();
 
     for (const sessionEvents of Object.values(this.sessionEvents[userKey])) {
       for (const event of sessionEvents) {

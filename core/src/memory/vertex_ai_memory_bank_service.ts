@@ -21,7 +21,10 @@ import {
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
 import {
+  AddEventsToMemoryRequest,
+  AddMemoryRequest,
   BaseMemoryService,
+  createSearchMemoryResponse,
   SearchMemoryRequest,
   SearchMemoryResponse,
 } from './base_memory_service.js';
@@ -112,7 +115,7 @@ export interface VertexAiMemoryBankServiceOptions {
 /**
  * Implementation of the BaseMemoryService using Vertex AI Memory Bank.
  */
-export class VertexAiMemoryBankService implements BaseMemoryService {
+export class VertexAiMemoryBankService extends BaseMemoryService {
   private readonly projectId?: string;
   private readonly location?: string;
   private readonly agentEngineId: string;
@@ -120,6 +123,8 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
   private readonly memories: Memories;
 
   constructor(options: VertexAiMemoryBankServiceOptions) {
+    super();
+
     if (!options.agentEngineId) {
       throw new Error(
         'agentEngineId is required for VertexAiMemoryBankService.',
@@ -168,13 +173,7 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
   /**
    * Adds events to Vertex AI Memory Bank via memories.generate.
    */
-  async addEventsToMemory(request: {
-    appName: string;
-    userId: string;
-    events: Event[];
-    sessionId?: string;
-    customMetadata?: Record<string, unknown>;
-  }): Promise<void> {
+  async addEventsToMemory(request: AddEventsToMemoryRequest): Promise<void> {
     await this.addEventsToMemoryFromEvents({
       appName: request.appName,
       userId: request.userId,
@@ -186,12 +185,7 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
   /**
    * Adds explicit memory items using Vertex Memory Bank.
    */
-  async addMemory(request: {
-    appName: string;
-    userId: string;
-    memories: MemoryEntry[];
-    customMetadata?: Record<string, unknown>;
-  }): Promise<void> {
+  async addMemory(request: AddMemoryRequest): Promise<void> {
     if (isConsolidationEnabled(request.customMetadata)) {
       return this.addMemoriesViaGenerateDirectMemoriesSource(request);
     }
@@ -232,7 +226,7 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       }
     }
 
-    return {memories: memoryEvents};
+    return createSearchMemoryResponse({memories: memoryEvents});
   }
 
   private async addEventsToMemoryFromEvents(request: {
