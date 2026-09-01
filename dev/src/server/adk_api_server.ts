@@ -35,7 +35,7 @@ import * as path from 'node:path';
 import {version} from '../version.js';
 
 import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
-import {AdkLogger} from '../utils/logger.js';
+import {createServerLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
   hrTimeToNanoseconds,
@@ -73,7 +73,8 @@ interface ServerOptions {
   agentLoader?: AgentLoader;
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
-  allowOrigins?: string;
+  /** Origin, or list of origins, CORS accepts. `'*'` accepts every origin. */
+  allowOrigins?: string | string[];
   /**
    * Additional Host header values the DNS-rebinding guard accepts besides
    * loopback and any host derivable from `allowOrigins`. Independent of
@@ -126,7 +127,7 @@ export class AdkApiServer {
   private readonly memoryService: BaseMemoryService;
   private readonly artifactService: BaseArtifactService;
   private readonly serveDebugUI: boolean;
-  private readonly allowOrigins?: string;
+  private readonly allowOrigins?: string | string[];
   private readonly allowedHosts?: string[];
   private readonly otelToCloud: boolean;
   private readonly registerProcessors?: (
@@ -141,6 +142,8 @@ export class AdkApiServer {
   private readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
+  private initPromise?: Promise<void>;
+  private a2aPromise?: Promise<void>;
 
   constructor(options: ServerOptions) {
     this.host = options.host ?? 'localhost';
@@ -163,16 +166,7 @@ export class AdkApiServer {
     this.otelToCloud = options.otelToCloud ?? false;
     this.registerProcessors = options.registerProcessors;
     this.memoryExporter = new InMemoryExporter(this.sessionTraceDict);
-    this.logger =
-      options.logger ??
-      new AdkLogger({
-        label: 'ADK API Server',
-        timestamp: true,
-        colorize: {level: true},
-        printFormat: (info) => {
-          return `${info.level}: [${info.label}] ${info.timestamp} ${info.message}`;
-        },
-      });
+    this.logger = options.logger ?? createServerLogger();
     this.logger.setLogLevel(options.logLevel ?? LogLevel.INFO);
     this.a2a = options.a2a ?? false;
     // An exported-but-empty value means "no token"; anything else is handed
@@ -196,7 +190,17 @@ export class AdkApiServer {
     }
   }
 
-  private async initA2A() {
+  /**
+   * Mounts the A2A surface once, however often it is called. A caller that
+   * arrives while the first call is still mounting waits for it, and one
+   * that arrives after a failed call is told about that failure rather than
+   * being handed a half-mounted surface.
+   */
+  private initA2A(): Promise<void> {
+    return (this.a2aPromise ??= this.mountA2A());
+  }
+
+  private async mountA2A(): Promise<void> {
     const appNames = await this.agentLoader.listAgents();
     const authentication = this.a2aAuthToken
       ? bearerTokenUserBuilder(this.a2aAuthToken)
@@ -229,7 +233,15 @@ export class AdkApiServer {
     }
   }
 
-  private async init() {
+  /**
+   * Registers the middleware and routes once, however often it is called,
+   * with the same waiting and failure behaviour as {@link initA2A}.
+   */
+  private init(): Promise<void> {
+    return (this.initPromise ??= this.initApp());
+  }
+
+  private async initApp(): Promise<void> {
     const app = this.app;
     await this.setupTelemetry();
 
@@ -289,10 +301,10 @@ export class AdkApiServer {
       res.status(200).json({version});
     });
 
-    if (this.allowOrigins) {
+    if (this.allowOrigins?.length) {
       app.use(
         cors({
-          origin: this.allowOrigins!,
+          origin: this.allowOrigins,
         }),
       );
     }
@@ -1119,6 +1131,25 @@ export class AdkApiServer {
         }
       }
     });
+  }
+
+  /**
+   * Registers the middleware, routes and -- when `a2a` is enabled -- the A2A
+   * surface on the Express app, then returns it without binding a port. Use
+   * this to serve the app from a listener you create yourself; `start()`
+   * binds one for you.
+   *
+   * The A2A agent card advertises the configured `host` and `port`, so serve
+   * the app on those.
+   */
+  async buildApp(): Promise<express.Application> {
+    await this.init();
+
+    if (this.a2a) {
+      await this.initA2A();
+    }
+
+    return this.app;
   }
 
   async start(): Promise<void> {

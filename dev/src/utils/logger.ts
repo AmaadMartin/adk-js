@@ -30,6 +30,21 @@ export interface AdkLoggerOptions {
 }
 
 /**
+ * Builds the logger the ADK API server logs through by default, so that the
+ * server and whatever wires it up -- the CLI, `createApiServer` -- share one
+ * format.
+ */
+export function createServerLogger(): AdkLogger {
+  return new AdkLogger({
+    label: 'ADK API Server',
+    timestamp: true,
+    colorize: {level: true},
+    printFormat: (info) =>
+      `${info.level}: [${info.label}] ${info.timestamp} ${info.message}`,
+  });
+}
+
+/**
  * Logger implementation for the ADK CLI.
  */
 export class AdkLogger implements Logger {
