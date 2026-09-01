@@ -16,8 +16,8 @@ import {
   actionRequest,
   actionResponse,
   ConnectorPathItemObject,
-  connectorPayload,
   ConnectorSpecDocument,
+  convertJsonSchemaToOpenApiSchema,
   createOperation,
   createOperationRequest,
   deleteOperation,
@@ -174,7 +174,8 @@ export class IntegrationClient {
         await connectionsClient.getEntitySchemaAndOperations(entity);
       // An empty list means every operation the connector supports.
       const selected = requested.length ? requested : operations;
-      schemas[`connectorInputPayload_${entity}`] = connectorPayload(schema);
+      schemas[`connectorInputPayload_${entity}`] =
+        convertJsonSchemaToOpenApiSchema(schema);
 
       const schemaAsString = JSON.stringify(schema);
       for (const operation of selected) {
@@ -203,13 +204,11 @@ export class IntegrationClient {
         schemas[`${displayName}_Request`] = executeCustomQueryRequest();
       } else {
         schemas[`${displayName}_Request`] = actionRequest(displayName);
-        schemas[`connectorInputPayload_${displayName}`] = connectorPayload(
-          details.inputSchema,
-        );
+        schemas[`connectorInputPayload_${displayName}`] =
+          convertJsonSchemaToOpenApiSchema(details.inputSchema);
       }
-      schemas[`connectorOutputPayload_${displayName}`] = connectorPayload(
-        details.outputSchema,
-      );
+      schemas[`connectorOutputPayload_${displayName}`] =
+        convertJsonSchemaToOpenApiSchema(details.outputSchema);
       schemas[`${displayName}_Response`] = actionResponse(displayName);
 
       paths[this.executePath(integrationName, action)] = getActionOperation(
@@ -284,58 +283,50 @@ interface EntityOperation {
 }
 
 /**
+ * How each supported entity operation builds its path item and its request
+ * schema. The key is the operation name, lowercased.
+ */
+const ENTITY_OPERATIONS: Record<
+  string,
+  (request: EntityOperationRequest) => EntityOperation
+> = {
+  create: ({entity, toolName, toolInstructions}) => ({
+    pathItem: createOperation(entity, toolName, toolInstructions),
+    requestSchema: createOperationRequest(entity),
+  }),
+  update: ({entity, toolName, toolInstructions}) => ({
+    pathItem: updateOperation(entity, toolName, toolInstructions),
+    requestSchema: updateOperationRequest(entity),
+  }),
+  delete: ({entity, toolName, toolInstructions}) => ({
+    pathItem: deleteOperation(entity, toolName, toolInstructions),
+    requestSchema: deleteOperationRequest(),
+  }),
+  list: ({entity, schemaAsString, toolName, toolInstructions}) => ({
+    pathItem: listOperation(entity, schemaAsString, toolName, toolInstructions),
+    requestSchema: listOperationRequest(),
+  }),
+  get: ({entity, schemaAsString, toolName, toolInstructions}) => ({
+    pathItem: getOperation(entity, schemaAsString, toolName, toolInstructions),
+    requestSchema: getOperationRequest(),
+  }),
+};
+
+/**
  * Builds the path item and the request schema for one entity operation.
  *
  * @throws {ApplicationIntegrationError} With code `INVALID_REQUEST` when the
  *     connector does not support the operation.
  */
-function buildEntityOperation({
-  operation,
-  entity,
-  schemaAsString,
-  toolName,
-  toolInstructions,
-}: EntityOperationRequest): EntityOperation {
-  switch (operation) {
-    case 'create':
-      return {
-        pathItem: createOperation(entity, toolName, toolInstructions),
-        requestSchema: createOperationRequest(entity),
-      };
-    case 'update':
-      return {
-        pathItem: updateOperation(entity, toolName, toolInstructions),
-        requestSchema: updateOperationRequest(entity),
-      };
-    case 'delete':
-      return {
-        pathItem: deleteOperation(entity, toolName, toolInstructions),
-        requestSchema: deleteOperationRequest(),
-      };
-    case 'list':
-      return {
-        pathItem: listOperation(
-          entity,
-          schemaAsString,
-          toolName,
-          toolInstructions,
-        ),
-        requestSchema: listOperationRequest(),
-      };
-    case 'get':
-      return {
-        pathItem: getOperation(
-          entity,
-          schemaAsString,
-          toolName,
-          toolInstructions,
-        ),
-        requestSchema: getOperationRequest(),
-      };
-    default:
-      throw new ApplicationIntegrationError(
-        ApplicationIntegrationErrorCode.INVALID_REQUEST,
-        `Invalid operation: ${operation} for entity: ${entity}`,
-      );
+function buildEntityOperation(
+  request: EntityOperationRequest,
+): EntityOperation {
+  const build = ENTITY_OPERATIONS[request.operation];
+  if (!build) {
+    throw new ApplicationIntegrationError(
+      ApplicationIntegrationErrorCode.INVALID_REQUEST,
+      `Invalid operation: ${request.operation} for entity: ${request.entity}`,
+    );
   }
+  return build(request);
 }

@@ -5,6 +5,12 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {isRecord} from '../../../utils/type_guards.js';
+import {CLOUD_PLATFORM_SCOPE} from '../constants.js';
+import {
+  ApplicationIntegrationError,
+  ApplicationIntegrationErrorCode,
+} from '../errors.js';
 
 /**
  * The Integrations endpoint the generated spec targets.
@@ -13,8 +19,6 @@ import {OpenAPIV3} from 'openapi-types';
  * `ExecuteConnection` integration is addressed by its full resource path.
  */
 const INTEGRATIONS_ENDPOINT = 'https://integrations.googleapis.com';
-
-const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
 const EXECUTE_CONNECTOR_RESPONSE_REF =
   '#/components/schemas/execute-connector_Response';
@@ -66,6 +70,31 @@ export function readConnectorExtension(
 ): string | undefined {
   const value = (operation as Record<string, unknown>)[key];
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Reads the connector operation an entry of the generated spec runs.
+ *
+ * Every operation the builders emit carries `x-operation`. One that does not
+ * is not a connector operation, and a tool built from it would post
+ * `operation: undefined` and fail at the connector with no explanation.
+ *
+ * @throws {ApplicationIntegrationError} With code `INVALID_REQUEST` when the
+ *     operation carries no `x-operation`.
+ */
+export function readConnectorOperation(
+  operation: OpenAPIV3.OperationObject,
+  path: string,
+): string {
+  const value = readConnectorExtension(operation, 'x-operation');
+  if (!value) {
+    throw new ApplicationIntegrationError(
+      ApplicationIntegrationErrorCode.INVALID_REQUEST,
+      `The operation at ${path} carries no x-operation extension, so it is` +
+        ' not an Integration Connectors operation.',
+    );
+  }
+  return value;
 }
 
 /** The shared skeleton every generated connector spec starts from. */
@@ -382,27 +411,22 @@ export function updateOperationRequest(entity: string): OpenAPIV3.SchemaObject {
 
 /** The request schema for the get operation. */
 export function getOperationRequest(): OpenAPIV3.SchemaObject {
-  return {
-    type: 'object',
-    required: [
-      'entityId',
-      'operation',
-      'connectionName',
-      'serviceName',
-      'host',
-      'entity',
-    ],
-    properties: {
-      entityId: {$ref: '#/components/schemas/entityId'},
-      ...CONNECTION_PROPERTIES,
-      entity: {$ref: '#/components/schemas/entity'},
-      dynamicAuthConfig: {$ref: '#/components/schemas/dynamicAuthConfig'},
-    },
-  };
+  return entityIdRequest({filterClause: false});
 }
 
 /** The request schema for the delete operation. */
 export function deleteOperationRequest(): OpenAPIV3.SchemaObject {
+  return entityIdRequest({filterClause: true});
+}
+
+/**
+ * The request schema shared by the operations that address one record by id.
+ *
+ * @param options.filterClause Whether the operation narrows the record set.
+ */
+function entityIdRequest(options: {
+  filterClause: boolean;
+}): OpenAPIV3.SchemaObject {
   return {
     type: 'object',
     required: [
@@ -418,7 +442,9 @@ export function deleteOperationRequest(): OpenAPIV3.SchemaObject {
       ...CONNECTION_PROPERTIES,
       entity: {$ref: '#/components/schemas/entity'},
       dynamicAuthConfig: {$ref: '#/components/schemas/dynamicAuthConfig'},
-      filterClause: {$ref: '#/components/schemas/filterClause'},
+      ...(options.filterClause
+        ? {filterClause: {$ref: '#/components/schemas/filterClause'}}
+        : {}),
     },
   };
 }
@@ -498,13 +524,6 @@ export function executeCustomQueryRequest(): OpenAPIV3.SchemaObject {
       dynamicAuthConfig: {$ref: '#/components/schemas/dynamicAuthConfig'},
     },
   };
-}
-
-/** Converts a connector entity or action schema into an OpenAPI schema. */
-export function connectorPayload(
-  jsonSchema: Record<string, unknown>,
-): OpenAPIV3.SchemaObject {
-  return convertJsonSchemaToOpenApiSchema(jsonSchema);
 }
 
 /**
@@ -602,8 +621,4 @@ function readProperties(
     }
   }
   return converted;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

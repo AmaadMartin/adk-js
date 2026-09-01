@@ -5,26 +5,22 @@
  */
 
 import {
-  ApiTransport,
   ApplicationIntegrationError,
   ApplicationIntegrationErrorCode,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {ApiTransport} from '../../../../src/tools/application_integration_tool/clients/api_transport.js';
 
-const jwtGetAccessToken = vi.fn();
+const authConstructor = vi.fn();
 const authGetAccessToken = vi.fn();
 const authGetClient = vi.fn();
 const authGetProjectId = vi.fn();
-const jwtConstructor = vi.fn();
 
 vi.mock('google-auth-library', () => ({
-  JWT: class {
-    constructor(options: unknown) {
-      jwtConstructor(options);
-    }
-    getAccessToken = jwtGetAccessToken;
-  },
   GoogleAuth: class {
+    constructor(options: unknown) {
+      authConstructor(options);
+    }
     getAccessToken = authGetAccessToken;
     getClient = authGetClient;
     getProjectId = authGetProjectId;
@@ -57,7 +53,6 @@ function createTransport(serviceAccountJson?: string) {
 
 describe('ApiTransport', () => {
   beforeEach(() => {
-    jwtGetAccessToken.mockResolvedValue({token: 'sa-token'});
     authGetAccessToken.mockResolvedValue('adc-token');
     authGetClient.mockResolvedValue({quotaProjectId: 'quota-project'});
     authGetProjectId.mockResolvedValue('adc-project');
@@ -71,25 +66,31 @@ describe('ApiTransport', () => {
   it('mints a token from an explicit service account key', async () => {
     const token = await createTransport(KEY_FILE).getAccessToken();
 
-    expect(token).toBe('sa-token');
-    expect(jwtConstructor).toHaveBeenCalledWith({
-      email: 'sa@example.com',
-      key: 'private-key',
+    expect(token).toBe('adc-token');
+    expect(authConstructor).toHaveBeenCalledWith({
+      credentials: {
+        client_email: 'sa@example.com',
+        private_key: 'private-key',
+      },
       scopes: ['https://www.googleapis.com/auth/cloud-platform'],
     });
   });
 
   it('mints a token from default credentials', async () => {
     expect(await createTransport().getAccessToken()).toBe('adc-token');
+    expect(authConstructor).toHaveBeenCalledWith({
+      credentials: undefined,
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    });
   });
 
-  it('reuses the credential source across calls', async () => {
+  it('reuses the auth client across calls', async () => {
     const transport = createTransport(KEY_FILE);
 
     await transport.getAccessToken();
     await transport.getAccessToken();
 
-    expect(jwtConstructor).toHaveBeenCalledTimes(1);
+    expect(authConstructor).toHaveBeenCalledTimes(1);
   });
 
   it('reports an unparsable key file as a credentials error', async () => {
@@ -140,8 +141,12 @@ describe('ApiTransport', () => {
     expect(await createTransport().getQuotaProjectId()).toBe('adc-project');
   });
 
-  it('reports no quota project for an explicit service account', async () => {
-    expect(await createTransport(KEY_FILE).getQuotaProjectId()).toBeUndefined();
+  it('reads the quota project for an explicit service account too', async () => {
+    authGetClient.mockResolvedValue({quotaProjectId: 'key-quota-project'});
+
+    expect(await createTransport(KEY_FILE).getQuotaProjectId()).toBe(
+      'key-quota-project',
+    );
   });
 
   it('sends an authenticated GET', async () => {

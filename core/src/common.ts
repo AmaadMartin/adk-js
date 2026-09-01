@@ -373,22 +373,6 @@ export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
-export {ApiTransport} from './tools/application_integration_tool/clients/api_transport.js';
-export type {ApiTransportOptions} from './tools/application_integration_tool/clients/api_transport.js';
-export {ConnectionsClient} from './tools/application_integration_tool/clients/connections_client.js';
-export type {
-  ActionSchema,
-  ConnectionDetails,
-  ConnectionsClientOptions,
-  EntitySchemaAndOperations,
-} from './tools/application_integration_tool/clients/connections_client.js';
-export type {
-  ConnectorOperationObject,
-  ConnectorPathItemObject,
-  ConnectorSpecDocument,
-} from './tools/application_integration_tool/clients/connector_spec_builders.js';
-export {IntegrationClient} from './tools/application_integration_tool/clients/integration_client.js';
-export type {IntegrationClientOptions} from './tools/application_integration_tool/clients/integration_client.js';
 export {
   ApplicationIntegrationError,
   ApplicationIntegrationErrorCode,

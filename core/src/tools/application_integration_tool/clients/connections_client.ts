@@ -5,6 +5,7 @@
  */
 
 import {experimental} from '../../../utils/experimental.js';
+import {isRecord} from '../../../utils/type_guards.js';
 import {
   ApplicationIntegrationError,
   ApplicationIntegrationErrorCode,
@@ -181,9 +182,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return isRecord(value) ? value : {};
 }
 
 function readString(value: unknown): string {

@@ -7,12 +7,11 @@
 import {
   ApplicationIntegrationError,
   ApplicationIntegrationErrorCode,
-  ConnectionsClient,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {ConnectionsClient} from '../../../../src/tools/application_integration_tool/clients/connections_client.js';
 
 vi.mock('google-auth-library', () => ({
-  JWT: class {},
   GoogleAuth: class {
     getAccessToken = async () => 'adc-token';
     getClient = async () => ({quotaProjectId: 'quota-project'});

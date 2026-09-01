@@ -7,21 +7,25 @@
 import {
   ApplicationIntegrationError,
   ApplicationIntegrationErrorCode,
-  ConnectorSpecDocument,
-  IntegrationClient,
-  IntegrationClientOptions,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {ConnectorSpecDocument} from '../../../../src/tools/application_integration_tool/clients/connector_spec_builders.js';
+import {
+  IntegrationClient,
+  IntegrationClientOptions,
+} from '../../../../src/tools/application_integration_tool/clients/integration_client.js';
 
 const authGetClient = vi.fn();
 const authGetProjectId = vi.fn();
 
 vi.mock('google-auth-library', () => ({
-  JWT: class {
-    getAccessToken = async () => ({token: 'sa-token'});
-  },
   GoogleAuth: class {
-    getAccessToken = async () => 'adc-token';
+    private readonly token: string;
+    constructor(options: {credentials?: unknown}) {
+      // The real client mints from the key file when one is given.
+      this.token = options.credentials ? 'sa-token' : 'adc-token';
+    }
+    getAccessToken = async () => this.token;
     getClient = authGetClient;
     getProjectId = authGetProjectId;
   },

@@ -4,23 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleAuth, JWT} from 'google-auth-library';
+import {GoogleAuth} from 'google-auth-library';
 import {parseServiceAccountJson} from '../../../utils/service_account_utils.js';
+import {CLOUD_PLATFORM_SCOPE} from '../constants.js';
 import {
   ApplicationIntegrationError,
   ApplicationIntegrationErrorCode,
 } from '../errors.js';
 
-const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
-
 /** Statuses the APIs use to report a malformed or unknown resource. */
 const INVALID_REQUEST_STATUSES = new Set([400, 404]);
-
-/** An auth client reduced to what the transport asks of it. */
-interface CredentialSource {
-  getAccessToken(): Promise<string | null | undefined>;
-  getQuotaProjectId(): Promise<string | undefined>;
-}
 
 export interface ApiTransportOptions {
   project: string;
@@ -47,8 +40,8 @@ export class ApiTransport {
   private readonly serviceAccountJson?: string;
   private readonly resourceDescription: string;
 
-  /** The credential source, created on first use and reused afterwards. */
-  private source?: CredentialSource;
+  /** The auth client, created on first use and reused afterwards. */
+  private auth?: GoogleAuth;
 
   constructor(options: ApiTransportOptions) {
     this.project = options.project;
@@ -66,7 +59,7 @@ export class ApiTransport {
   async getAccessToken(): Promise<string> {
     let token: string | null | undefined;
     try {
-      token = await this.getSource().getAccessToken();
+      token = await this.getAuth().getAccessToken();
     } catch (error) {
       throw credentialsError(error);
     }
@@ -84,12 +77,10 @@ export class ApiTransport {
   /**
    * The project to bill and enforce quota against, for callers that send
    * `x-goog-user-project`.
-   *
-   * Undefined when an explicit service account is in use: that key already
-   * names its own project.
    */
   async getQuotaProjectId(): Promise<string | undefined> {
-    return this.getSource().getQuotaProjectId();
+    const auth = this.getAuth();
+    return (await auth.getClient()).quotaProjectId ?? auth.getProjectId();
   }
 
   /** Sends an authenticated GET and returns the parsed JSON body. */
@@ -110,13 +101,20 @@ export class ApiTransport {
     });
   }
 
-  private getSource(): CredentialSource {
-    if (!this.source) {
-      this.source = this.serviceAccountJson
-        ? createServiceAccountSource(this.serviceAccountJson)
-        : createDefaultCredentialSource();
+  /**
+   * `GoogleAuth` mints from an explicit key file and from Application Default
+   * Credentials alike, so one client covers both.
+   */
+  private getAuth(): GoogleAuth {
+    if (!this.auth) {
+      this.auth = new GoogleAuth({
+        credentials: this.serviceAccountJson
+          ? readKeyFile(this.serviceAccountJson)
+          : undefined,
+        scopes: [CLOUD_PLATFORM_SCOPE],
+      });
     }
-    return this.source;
+    return this.auth;
   }
 
   private async send(
@@ -164,37 +162,22 @@ export class ApiTransport {
   }
 }
 
-/** Mints tokens from an explicit service account key file. */
-function createServiceAccountSource(
-  serviceAccountJson: string,
-): CredentialSource {
-  let credential;
+/**
+ * Reads a key file into the snake_case shape `GoogleAuth` expects.
+ *
+ * @throws {ApplicationIntegrationError} With code `CREDENTIALS` when the file
+ *     is unreadable.
+ */
+function readKeyFile(serviceAccountJson: string) {
   try {
-    credential = parseServiceAccountJson(serviceAccountJson);
+    const credential = parseServiceAccountJson(serviceAccountJson);
+    return {
+      client_email: credential.clientEmail,
+      private_key: credential.privateKey,
+    };
   } catch (error) {
     throw credentialsError(error);
   }
-
-  const client = new JWT({
-    email: credential.clientEmail,
-    key: credential.privateKey,
-    scopes: [CLOUD_PLATFORM_SCOPE],
-  });
-
-  return {
-    getAccessToken: async () => (await client.getAccessToken()).token,
-    getQuotaProjectId: async () => undefined,
-  };
-}
-
-/** Mints tokens from Application Default Credentials. */
-function createDefaultCredentialSource(): CredentialSource {
-  const auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
-  return {
-    getAccessToken: () => auth.getAccessToken(),
-    getQuotaProjectId: async () =>
-      (await auth.getClient()).quotaProjectId ?? auth.getProjectId(),
-  };
 }
 
 async function fetchOrThrow(url: string, init: Parameters<typeof fetch>[1]) {

@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  ApplicationIntegrationError,
+  ApplicationIntegrationErrorCode,
+} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 import {
   actionRequest,
   actionResponse,
-  connectorPayload,
   convertJsonSchemaToOpenApiSchema,
   createOperation,
   createOperationRequest,
@@ -23,6 +26,7 @@ import {
   listOperation,
   listOperationRequest,
   readConnectorExtension,
+  readConnectorOperation,
   updateOperation,
   updateOperationRequest,
 } from '../../../../src/tools/application_integration_tool/clients/connector_spec_builders.js';
@@ -332,6 +336,34 @@ describe('readConnectorExtension', () => {
   });
 });
 
+describe('readConnectorOperation', () => {
+  it('reads the operation the builders wrote', () => {
+    const {post} = listOperation('Issues');
+
+    expect(readConnectorOperation(post, '/some/path')).toBe('LIST_ENTITIES');
+  });
+
+  it('rejects an operation that carries no x-operation', () => {
+    const operation: OpenAPIV3.OperationObject = {responses: {}};
+
+    let thrown: unknown;
+    try {
+      readConnectorOperation(operation, '/some/path');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ApplicationIntegrationError);
+    expect((thrown as ApplicationIntegrationError).code).toBe(
+      ApplicationIntegrationErrorCode.INVALID_REQUEST,
+    );
+    expect((thrown as Error).message).toBe(
+      'The operation at /some/path carries no x-operation extension, so it' +
+        ' is not an Integration Connectors operation.',
+    );
+  });
+});
+
 describe('convertJsonSchemaToOpenApiSchema', () => {
   it('keeps a plain type and its description', () => {
     expect(
@@ -429,10 +461,10 @@ describe('convertJsonSchemaToOpenApiSchema', () => {
   });
 });
 
-describe('connectorPayload', () => {
+describe('the connector payload conversion', () => {
   it('converts the entity schema the Connectors API returns', () => {
     expect(
-      connectorPayload({
+      convertJsonSchemaToOpenApiSchema({
         type: 'object',
         properties: {key: {type: ['string', 'null'], description: 'the key'}},
       }),
