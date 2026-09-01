@@ -117,7 +117,7 @@ export class MCPTool extends BaseTool {
    * string reads as "no MCP App declared" rather than raising.
    */
   get mcpAppResourceUri(): string | undefined {
-    const meta = this.mcpTool._meta;
+    const meta = this.rawMcpTool._meta;
     if (!isRecord(meta)) {
       return undefined;
     }
@@ -176,7 +176,8 @@ export class MCPTool extends BaseTool {
 
     const session = await retryOnce(
       () => this.mcpSessionManager.createSession(),
-      {label: 'MCP session setup', abortSignal: toolContext.abortSignal},
+      'MCP session setup',
+      toolContext.abortSignal,
     );
 
     try {
@@ -236,7 +237,7 @@ export class MCPTool extends BaseTool {
       provider: MCP_WIDGET_PROVIDER,
       payload: {
         resource_uri: resourceUri,
-        tool: this.mcpTool,
+        tool: this.rawMcpTool,
         tool_args: args,
       },
     });

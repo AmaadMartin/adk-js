@@ -11,14 +11,6 @@ import {isRecord} from './type_utils.js';
 /** The `name` an aborted operation carries, per the DOM `AbortError`. */
 const ABORT_ERROR_NAME = 'AbortError';
 
-/** Options for {@link retryOnce}. */
-export interface RetryOnceOptions {
-  /** Names the operation in the retry log line. */
-  label: string;
-  /** When already aborted, the failure is a cancellation and is not retried. */
-  abortSignal?: AbortSignal;
-}
-
 /**
  * Returns whether an abort is the reason `error` was thrown.
  *
@@ -51,25 +43,26 @@ function isCancellation(error: unknown): boolean {
  * `retry_on_errors` decorator.
  *
  * @param operation The operation to run.
- * @param options Log label, and the signal that marks a cancellation.
+ * @param label Names the operation in the retry log line.
+ * @param abortSignal When already aborted, the failure is a cancellation and
+ *     the operation is not retried.
  * @returns The value of whichever attempt succeeded.
  * @throws The error of the second attempt, or of the first when it was
  *     cancelled.
  */
 export async function retryOnce<T>(
   operation: () => Promise<T>,
-  options: RetryOnceOptions,
+  label: string,
+  abortSignal?: AbortSignal,
 ): Promise<T> {
   try {
     return await operation();
   } catch (error: unknown) {
-    if (options.abortSignal?.aborted || isCancellation(error)) {
+    if (abortSignal?.aborted || isCancellation(error)) {
       throw error;
     }
 
-    logger.debug(
-      `Retrying ${options.label} after error: ${formatError(error)}`,
-    );
+    logger.debug(`Retrying ${label} after error: ${formatError(error)}`);
     return operation();
   }
 }

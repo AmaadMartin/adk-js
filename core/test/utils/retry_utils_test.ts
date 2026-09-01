@@ -18,9 +18,7 @@ describe('retryOnce', () => {
   it('returns the first attempt when it succeeds', async () => {
     const operation = vi.fn().mockResolvedValue('session');
 
-    await expect(retryOnce(operation, {label: 'setup'})).resolves.toBe(
-      'session',
-    );
+    await expect(retryOnce(operation, 'setup')).resolves.toBe('session');
     expect(operation).toHaveBeenCalledTimes(1);
   });
 
@@ -30,9 +28,7 @@ describe('retryOnce', () => {
       .mockRejectedValueOnce(new Error('transport reset'))
       .mockResolvedValue('session');
 
-    await expect(retryOnce(operation, {label: 'setup'})).resolves.toBe(
-      'session',
-    );
+    await expect(retryOnce(operation, 'setup')).resolves.toBe('session');
     expect(operation).toHaveBeenCalledTimes(2);
   });
 
@@ -42,16 +38,14 @@ describe('retryOnce', () => {
       .mockRejectedValueOnce(new Error('first'))
       .mockRejectedValueOnce(new Error('second'));
 
-    await expect(retryOnce(operation, {label: 'setup'})).rejects.toThrow(
-      'second',
-    );
+    await expect(retryOnce(operation, 'setup')).rejects.toThrow('second');
     expect(operation).toHaveBeenCalledTimes(2);
   });
 
   it('does not retry a cancellation', async () => {
     const operation = vi.fn().mockRejectedValue(abortError());
 
-    await expect(retryOnce(operation, {label: 'setup'})).rejects.toThrow(
+    await expect(retryOnce(operation, 'setup')).rejects.toThrow(
       'The operation was aborted',
     );
     expect(operation).toHaveBeenCalledTimes(1);
@@ -63,7 +57,7 @@ describe('retryOnce', () => {
     });
     const operation = vi.fn().mockRejectedValue(wrapped);
 
-    await expect(retryOnce(operation, {label: 'setup'})).rejects.toThrow(
+    await expect(retryOnce(operation, 'setup')).rejects.toThrow(
       'transport closed',
     );
     expect(operation).toHaveBeenCalledTimes(1);
@@ -75,7 +69,7 @@ describe('retryOnce', () => {
     const operation = vi.fn().mockRejectedValue(new Error('transport reset'));
 
     await expect(
-      retryOnce(operation, {label: 'setup', abortSignal: controller.signal}),
+      retryOnce(operation, 'setup', controller.signal),
     ).rejects.toThrow('transport reset');
     expect(operation).toHaveBeenCalledTimes(1);
   });
@@ -88,7 +82,7 @@ describe('retryOnce', () => {
       .mockResolvedValue('session');
 
     await expect(
-      retryOnce(operation, {label: 'setup', abortSignal: controller.signal}),
+      retryOnce(operation, 'setup', controller.signal),
     ).resolves.toBe('session');
     expect(operation).toHaveBeenCalledTimes(2);
   });
@@ -102,9 +96,7 @@ describe('retryOnce', () => {
       .mockRejectedValueOnce(second)
       .mockResolvedValue('session');
 
-    await expect(retryOnce(operation, {label: 'setup'})).resolves.toBe(
-      'session',
-    );
+    await expect(retryOnce(operation, 'setup')).resolves.toBe('session');
     expect(operation).toHaveBeenCalledTimes(2);
   });
 
@@ -114,9 +106,7 @@ describe('retryOnce', () => {
       .mockRejectedValueOnce('transport reset')
       .mockResolvedValue('session');
 
-    await expect(retryOnce(operation, {label: 'setup'})).resolves.toBe(
-      'session',
-    );
+    await expect(retryOnce(operation, 'setup')).resolves.toBe('session');
     expect(operation).toHaveBeenCalledTimes(2);
   });
 });
