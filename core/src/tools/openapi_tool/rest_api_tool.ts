@@ -63,6 +63,17 @@ export class RestApiTool extends BaseTool {
     this.credentialKey = credentialKey;
   }
 
+  /**
+   * The JSON schema of this operation's arguments.
+   *
+   * A tool that wraps this one needs the schema to build its own declaration.
+   * The returned object is fresh, so a caller may edit it.
+   */
+  @experimental
+  public getJsonSchema(): Record<string, unknown> {
+    return this.operationParser.getJsonSchema();
+  }
+
   @experimental
   override _getDeclaration(): FunctionDeclaration {
     const schema = this.operationParser.getJsonSchema();
@@ -231,7 +242,10 @@ export function prepareRequestParams(
     (placeholder, name: string) =>
       Object.hasOwn(pathParams, name) ? pathParams[name] : placeholder,
   );
-  let url = `${endpoint.baseUrl}${resolvedPath}`;
+  // A spec may give two operations the same endpoint and tell them apart by
+  // fragment. The fragment names the operation and is not part of the request,
+  // so it is dropped instead of sent as part of a query value.
+  let url = `${endpoint.baseUrl}${resolvedPath}`.split('#')[0];
 
   // Extract query parameters from path if any
   const urlParts = url.split('?');
