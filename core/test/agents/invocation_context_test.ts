@@ -297,7 +297,10 @@ function makeLongRunningCallEvent(callId: string): Event {
   return createEvent({
     invocationId: 'inv-1',
     author: 'agent1',
-    content: {role: 'model', parts: [{functionCall: {id: callId, name: 'ask'}}]},
+    content: {
+      role: 'model',
+      parts: [{functionCall: {id: callId, name: 'ask'}}],
+    },
     longRunningToolIds: [callId],
   });
 }
@@ -306,6 +309,13 @@ describe('InvocationContext.shouldPauseInvocation', () => {
   it('does not pause an event with no long-running tool id', () => {
     const event = makeLongRunningCallEvent('call-1');
     event.longRunningToolIds = [];
+
+    expect(makeContext().shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('does not pause an event that omits the long-running id field', () => {
+    const event = makeLongRunningCallEvent('call-1');
+    delete event.longRunningToolIds;
 
     expect(makeContext().shouldPauseInvocation(event)).toBe(false);
   });
