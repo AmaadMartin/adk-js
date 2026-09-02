@@ -9,6 +9,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  effectiveGoogleapisEndpoint,
   getApiEndpoint,
   loadDefaultClientCerts,
   useClientCertEffective,
@@ -354,4 +355,65 @@ describe('loadDefaultClientCerts', () => {
       /^(?!.*PRIVATE KEY)/s,
     );
   });
+});
+
+describe('effectiveGoogleapisEndpoint', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    [
+      'preserves the path and the query',
+      'https://apihub.googleapis.com/v1/x?y=1',
+      'https://apihub.mtls.googleapis.com/v1/x?y=1',
+    ],
+    [
+      'preserves a non-default port',
+      'https://apihub.googleapis.com:8443/v1/x',
+      'https://apihub.mtls.googleapis.com:8443/v1/x',
+    ],
+    [
+      'rewrites a multi-label host',
+      'https://us-central1-apihub.googleapis.com/v1',
+      'https://us-central1-apihub.mtls.googleapis.com/v1',
+    ],
+    [
+      'leaves a non-googleapis host untouched',
+      'https://example.com/v1/x',
+      'https://example.com/v1/x',
+    ],
+    [
+      'leaves an mTLS host untouched',
+      'https://apihub.mtls.googleapis.com/v1/x',
+      'https://apihub.mtls.googleapis.com/v1/x',
+    ],
+    ['leaves a string that is not a URL untouched', 'not a url', 'not a url'],
+  ])('%s', (_name, input, expected) => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', undefined);
+
+    expect(effectiveGoogleapisEndpoint(input)).toBe(expected);
+  });
+
+  it.each(['never', 'NEVER'])(
+    'returns the input when the setting is %s',
+    (setting) => {
+      vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', setting);
+
+      expect(
+        effectiveGoogleapisEndpoint('https://apihub.googleapis.com/v1'),
+      ).toBe('https://apihub.googleapis.com/v1');
+    },
+  );
+
+  it.each(['auto', 'always', 'nonsense'])(
+    'rewrites the host when the setting is %s',
+    (setting) => {
+      vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', setting);
+
+      expect(
+        effectiveGoogleapisEndpoint('https://apihub.googleapis.com/v1'),
+      ).toBe('https://apihub.mtls.googleapis.com/v1');
+    },
+  );
 });

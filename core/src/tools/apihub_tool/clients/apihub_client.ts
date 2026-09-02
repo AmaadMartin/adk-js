@@ -4,8 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleAuth, JWTInput} from 'google-auth-library';
+import {AuthClient, GoogleAuth, JWTInput} from 'google-auth-library';
+import type {IncomingMessage} from 'node:http';
+import * as https from 'node:https';
 import {base64Decode} from '../../../utils/env_aware_utils.js';
+import {logger} from '../../../utils/logger.js';
+import {
+  effectiveGoogleapisEndpoint,
+  loadDefaultClientCerts,
+  MtlsClientCerts,
+  useClientCertEffective,
+} from '../../../utils/mtls_utils.js';
 
 const APIHUB_ROOT_URL = 'https://apihub.googleapis.com/v1';
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -62,15 +71,84 @@ export interface ApiHubApiVersion {
   specs?: string[];
 }
 
-/** The response of the API Hub `apis.list` method. */
-interface ApiHubApiList {
-  apis?: ApiHubApi[];
+/** One HTTP response, as both transports below report it. */
+interface HttpResponse {
+  status: number;
+  body: string;
 }
 
-/** The response of the API Hub `specs.contents` method. */
-interface ApiHubSpecContents {
-  /** The base64-encoded spec text. */
-  contents?: string;
+/** Reports whether a parsed JSON value is a string-keyed object. */
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Validates the JSON object API Hub returned. */
+function jsonObject(value: unknown): Record<string, unknown> {
+  if (!isJsonObject(value)) {
+    throw new Error('API Hub returned a non-object JSON response.');
+  }
+  return value;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === 'string')
+  );
+}
+
+/** Validates a JSON array whose members must all be strings. */
+function stringList(value: unknown, field: string): string[] {
+  if (!isStringArray(value)) {
+    throw new Error(`API Hub field '${field}' must be a list of strings.`);
+  }
+  return value;
+}
+
+function isObjectArray(
+  value: unknown,
+): value is Array<Record<string, unknown>> {
+  return Array.isArray(value) && value.every(isJsonObject);
+}
+
+/** Validates a JSON array whose members must all be string-keyed objects. */
+function objectList(
+  value: unknown,
+  field: string,
+): Array<Record<string, unknown>> {
+  if (!isObjectArray(value)) {
+    throw new Error(`API Hub field '${field}' must be a list of objects.`);
+  }
+  return value;
+}
+
+/** Validates an optional JSON string field. */
+function stringField(value: unknown, field: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`API Hub field '${field}' must be a string.`);
+  }
+  return value;
+}
+
+/** Narrows a validated API Hub payload onto {@link ApiHubApi}. */
+function toApi(payload: Record<string, unknown>): ApiHubApi {
+  const versions = payload['versions'];
+  return {
+    name: stringField(payload['name'], 'name'),
+    versions:
+      versions === undefined ? undefined : stringList(versions, 'versions'),
+  };
+}
+
+/** Narrows a validated API Hub payload onto {@link ApiHubApiVersion}. */
+function toApiVersion(payload: Record<string, unknown>): ApiHubApiVersion {
+  const specs = payload['specs'];
+  return {
+    name: stringField(payload['name'], 'name'),
+    specs: specs === undefined ? undefined : stringList(specs, 'specs'),
+  };
 }
 
 /** Returns the segment that follows `keyword`, if the path has one. */
@@ -174,11 +252,73 @@ function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
   }
 }
 
+/** One GET over the global `fetch`, which presents no client certificate. */
+async function getWithFetch(
+  url: string,
+  headers: Record<string, string>,
+): Promise<HttpResponse> {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  return {status: response.status, body: await response.text()};
+}
+
+/**
+ * One GET presenting a client certificate.
+ *
+ * `globalThis.fetch` cannot present a client certificate in Node, which is why
+ * this transport is `node:https`.
+ */
+function getWithClientCert(
+  url: string,
+  headers: Record<string, string>,
+  certs: MtlsClientCerts,
+): Promise<HttpResponse> {
+  return new Promise((resolve, reject) => {
+    const collect = (response: IncomingMessage) => {
+      let body = '';
+      response.setEncoding('utf-8');
+      response.on('data', (chunk: string) => {
+        body += chunk;
+      });
+      response.on('error', reject);
+      response.on('end', () => {
+        resolve({status: response.statusCode ?? 0, body});
+      });
+    };
+
+    const request = https.request(
+      url,
+      {
+        method: 'GET',
+        headers,
+        timeout: REQUEST_TIMEOUT_MS,
+        agent: new https.Agent(certs),
+      },
+      collect,
+    );
+
+    // A timeout only fires the event; the request stays open until destroyed.
+    request.on('timeout', () => {
+      request.destroy(
+        new Error(
+          `API Hub request timed out after ${REQUEST_TIMEOUT_MS} ms: ${url}`,
+        ),
+      );
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 /** Reads APIs, API versions and API specs from the API Hub service. */
 export class APIHubClient implements BaseAPIHubClient {
   private readonly accessToken?: string;
   private readonly serviceAccountJson?: string;
   private auth?: GoogleAuth;
+  private certs?: Promise<MtlsClientCerts | undefined>;
 
   /**
    * Set either `accessToken` or `serviceAccountJson`. With neither, the client
@@ -197,10 +337,10 @@ export class APIHubClient implements BaseAPIHubClient {
    * @returns The APIs, or an empty list when the project has none.
    */
   async listApis(project: string, location: string): Promise<ApiHubApi[]> {
-    const list = await this.get<ApiHubApiList>(
+    const payload = await this.get(
       `${APIHUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
     );
-    return list.apis ?? [];
+    return objectList(payload['apis'] ?? [], 'apis').map(toApi);
   }
 
   /**
@@ -209,7 +349,7 @@ export class APIHubClient implements BaseAPIHubClient {
    * @param apiResourceName `projects/p/locations/l/apis/a`.
    */
   async getApi(apiResourceName: string): Promise<ApiHubApi> {
-    return this.get<ApiHubApi>(`${APIHUB_ROOT_URL}/${apiResourceName}`);
+    return toApi(await this.get(`${APIHUB_ROOT_URL}/${apiResourceName}`));
   }
 
   /**
@@ -218,7 +358,7 @@ export class APIHubClient implements BaseAPIHubClient {
    * @param apiVersionName `projects/p/locations/l/apis/a/versions/v`.
    */
   async getApiVersion(apiVersionName: string): Promise<ApiHubApiVersion> {
-    return this.get<ApiHubApiVersion>(`${APIHUB_ROOT_URL}/${apiVersionName}`);
+    return toApiVersion(await this.get(`${APIHUB_ROOT_URL}/${apiVersionName}`));
   }
 
   /**
@@ -257,43 +397,75 @@ export class APIHubClient implements BaseAPIHubClient {
       apiSpecResourceName = specs[0];
     }
 
-    const {contents} = await this.get<ApiHubSpecContents>(
+    const payload = await this.get(
       `${APIHUB_ROOT_URL}/${apiSpecResourceName}:contents`,
     );
+    const contents = stringField(payload['contents'], 'contents');
     return contents ? base64Decode(contents) : '';
   }
 
-  private async get<T>(url: string): Promise<T> {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'accept': 'application/json, text/plain, */*',
-        'Authorization': `Bearer ${await this.getAccessToken()}`,
-      },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(
-        `API Hub request failed with status ${response.status}: ${text}`,
-      );
+  private async get(url: string): Promise<Record<string, unknown>> {
+    const headers = {
+      'accept': 'application/json, text/plain, */*',
+      'Authorization': `Bearer ${await this.getAccessToken()}`,
+    };
+    const certs = await this.clientCerts();
+    const {status, body} = certs
+      ? await getWithClientCert(
+          effectiveGoogleapisEndpoint(url),
+          headers,
+          certs,
+        )
+      : await getWithFetch(url, headers);
+
+    if (status < 200 || status > 299) {
+      throw new Error(`API Hub request failed with status ${status}: ${body}`);
     }
-    return (await response.json()) as T;
+    return jsonObject(JSON.parse(body));
+  }
+
+  /**
+   * Returns the client certificate to present, or `undefined` when the
+   * environment asks for none or none can be loaded.
+   *
+   * The certificate provider is a child process, so the load runs at most once
+   * per client. A provider failure is a warning and falls back to the plain
+   * transport, as adk-python's `configure_session_for_mtls` does.
+   */
+  private clientCerts(): Promise<MtlsClientCerts | undefined> {
+    if (!useClientCertEffective()) {
+      return Promise.resolve(undefined);
+    }
+    this.certs ??= loadDefaultClientCerts().catch((error: unknown) => {
+      logger.warn(
+        `Could not load a client certificate for API Hub, continuing without ` +
+          `one: ${String(error)}`,
+      );
+      return undefined;
+    });
+    return this.certs;
   }
 
   private async getAccessToken(): Promise<string> {
     if (this.accessToken) {
       return this.accessToken;
     }
-    // google-auth-library caches the token and refreshes it when it expires.
+    // google-auth-library caches the client and refreshes the token when it
+    // expires.
     this.auth ??= this.createAuth();
 
-    let token: string | null | undefined;
+    let client: AuthClient;
     try {
-      token = await this.auth.getAccessToken();
+      client = await this.auth.getClient();
     } catch (e: unknown) {
+      if (this.serviceAccountJson) {
+        // A key was configured, so the fault is that key, not missing ADC.
+        throw e;
+      }
       throw new Error(NO_CREDENTIAL_MESSAGE, {cause: e});
     }
+
+    const {token} = await client.getAccessToken();
     if (!token) {
       throw new Error(NO_CREDENTIAL_MESSAGE);
     }

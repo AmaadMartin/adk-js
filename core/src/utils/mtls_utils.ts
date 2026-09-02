@@ -45,6 +45,55 @@ export function getApiEndpoint(
   );
 }
 
+const GOOGLEAPIS_SUFFIX = '.googleapis.com';
+const MTLS_GOOGLEAPIS_SUFFIX = '.mtls.googleapis.com';
+
+/** Reports whether `url` names a `*.googleapis.com` host without the mTLS infix. */
+function isNonMtlsGoogleapisEndpoint(url: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  return (
+    hostname.endsWith(GOOGLEAPIS_SUFFIX) &&
+    !hostname.includes(MTLS_GOOGLEAPIS_SUFFIX)
+  );
+}
+
+/**
+ * Rewrites a `*.googleapis.com` URL to its `*.mtls.googleapis.com` variant.
+ *
+ * `GOOGLE_API_USE_MTLS_ENDPOINT=never` opts out, case insensitively. A host
+ * that is not a `googleapis.com` host, a host that is already a mutual-TLS
+ * host, and a string that is not a URL are all returned unchanged, so a
+ * non-Google provider is never affected. Scheme, port, path, query and
+ * fragment are preserved.
+ *
+ * Call this only once a client certificate is loaded. The mutual-TLS host
+ * rejects a connection that presents no certificate.
+ *
+ * @param url The URL the caller would otherwise request.
+ * @return The URL to request.
+ */
+export function effectiveGoogleapisEndpoint(url: string): string {
+  if (!isNonMtlsGoogleapisEndpoint(url)) {
+    return url;
+  }
+  if (
+    (process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] ?? '').toLowerCase() ===
+    'never'
+  ) {
+    return url;
+  }
+  const parsed = new URL(url);
+  parsed.hostname =
+    parsed.hostname.slice(0, -GOOGLEAPIS_SUFFIX.length) +
+    MTLS_GOOGLEAPIS_SUFFIX;
+  return parsed.toString();
+}
+
 /**
  * Client-certificate material for a mutual-TLS connection.
  *

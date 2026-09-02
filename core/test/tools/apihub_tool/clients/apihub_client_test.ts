@@ -7,22 +7,100 @@
 import {APIHubClient} from '@google/adk';
 import {GoogleAuth} from 'google-auth-library';
 import {Buffer} from 'node:buffer';
+import {EventEmitter} from 'node:events';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   ApiHubResourceNames,
   extractResourceName,
 } from '../../../../src/tools/apihub_tool/clients/apihub_client.js';
+import {logger} from '../../../../src/utils/logger.js';
+import type {MtlsClientCerts} from '../../../../src/utils/mtls_utils.js';
 
-const {googleAuthMock, getAccessTokenMock} = vi.hoisted(() => {
-  const getAccessTokenMock = vi.fn<() => Promise<string | null>>();
-  const googleAuthMock = vi.fn((options: unknown) => ({
-    options,
-    getAccessToken: getAccessTokenMock,
-  }));
-  return {googleAuthMock, getAccessTokenMock};
-});
+const {googleAuthMock, getAccessTokenMock, getClientMock, defaultGetClient} =
+  vi.hoisted(() => {
+    const getAccessTokenMock = vi.fn<() => Promise<string | null>>();
+    // The client resolves credentials with `getClient()` and only then asks
+    // for a token, so the default `getClient()` surfaces a
+    // `getAccessTokenMock` rejection as a resolution failure, which is what
+    // real application default credentials do.
+    const defaultGetClient = async () => {
+      const token = await getAccessTokenMock();
+      return {getAccessToken: () => Promise.resolve({token})};
+    };
+    const getClientMock = vi.fn(defaultGetClient);
+    const googleAuthMock = vi.fn((options: unknown) => ({
+      options,
+      getClient: getClientMock,
+      getAccessToken: getAccessTokenMock,
+    }));
+    return {
+      googleAuthMock,
+      getAccessTokenMock,
+      getClientMock,
+      defaultGetClient,
+    };
+  });
 
 vi.mock('google-auth-library', () => ({GoogleAuth: googleAuthMock}));
+
+/** The `https.ClientRequest` surface the client uses. */
+interface FakeRequestHandle {
+  end(): void;
+  destroy(error?: Error): void;
+}
+
+/** The `https.request` options the client sets. */
+interface FakeRequestOptions {
+  method?: string;
+  headers?: Record<string, string>;
+  timeout?: number;
+  agent?: unknown;
+}
+
+/** The `http.IncomingMessage` surface the client reads. */
+interface FakeResponseStub extends EventEmitter {
+  statusCode?: number;
+  setEncoding(encoding: string): void;
+}
+
+type FakeHttpsRequest = (
+  url: string,
+  options: FakeRequestOptions,
+  callback: (response: FakeResponseStub) => void,
+) => FakeRequestHandle;
+
+const {requestMock, agentMock} = vi.hoisted(() => ({
+  requestMock: vi.fn<FakeHttpsRequest>(),
+  agentMock: vi.fn<(options: MtlsClientCerts) => void>(),
+}));
+
+vi.mock('node:https', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:https')>();
+  return {
+    ...actual,
+    default: {...actual, request: requestMock, Agent: agentMock},
+    request: requestMock,
+    Agent: agentMock,
+  };
+});
+
+const {useClientCertEffectiveMock, loadDefaultClientCertsMock} = vi.hoisted(
+  () => ({
+    useClientCertEffectiveMock: vi.fn<() => boolean>(() => false),
+    loadDefaultClientCertsMock:
+      vi.fn<() => Promise<MtlsClientCerts | undefined>>(),
+  }),
+);
+
+// `effectiveGoogleapisEndpoint` stays real, so the host rewrite is exercised
+// end to end rather than asserted against a stub.
+vi.mock('../../../../src/utils/mtls_utils.js', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../../../../src/utils/mtls_utils.js')
+  >()),
+  useClientCertEffective: useClientCertEffectiveMock,
+  loadDefaultClientCerts: loadDefaultClientCertsMock,
+}));
 
 const ROOT = 'https://apihub.googleapis.com/v1';
 const PROJECT = 'test-project';
@@ -102,6 +180,69 @@ function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
     () => undefined,
     (error: unknown) => error,
   );
+}
+
+const MTLS_ROOT = 'https://apihub.mtls.googleapis.com/v1';
+
+const NO_CREDENTIAL_MESSAGE =
+  'Please provide a service account or an access token to API Hub client.';
+
+const CLIENT_CERTS: MtlsClientCerts = {
+  cert: '-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----',
+  key: '-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----',
+  passphrase: 'fake-passphrase',
+};
+
+/** A `https.ClientRequest` stand-in. `destroy(error)` emits it, as Node does. */
+class FakeRequest extends EventEmitter implements FakeRequestHandle {
+  end(): void {}
+
+  destroy(error?: Error): void {
+    if (error) {
+      this.emit('error', error);
+    }
+  }
+}
+
+function fakeResponse(status?: number): FakeResponseStub {
+  return Object.assign(new EventEmitter(), {
+    statusCode: status,
+    setEncoding: () => {},
+  });
+}
+
+/** Answers every `https.request` with one status and one body. */
+function respondOverHttps(status: number | undefined, body: string): void {
+  requestMock.mockImplementation((_url, _options, callback) => {
+    const response = fakeResponse(status);
+    queueMicrotask(() => {
+      callback(response);
+      response.emit('data', body);
+      response.emit('end');
+    });
+    return new FakeRequest();
+  });
+}
+
+/** Answers every `https.request` by emitting `event` on the request. */
+function failRequestOverHttps(event: 'error' | 'timeout', error?: Error): void {
+  requestMock.mockImplementation(() => {
+    const request = new FakeRequest();
+    queueMicrotask(() => request.emit(event, error));
+    return request;
+  });
+}
+
+/** Answers every `https.request` with a response stream that then errors. */
+function failResponseOverHttps(error: Error): void {
+  requestMock.mockImplementation((_url, _options, callback) => {
+    const response = fakeResponse(200);
+    queueMicrotask(() => {
+      callback(response);
+      response.emit('error', error);
+    });
+    return new FakeRequest();
+  });
 }
 
 describe('APIHubClient', () => {
@@ -886,5 +1027,265 @@ describe('apihub_client', () => {
       expect(GoogleAuth).toHaveBeenCalledTimes(1);
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+describe('APIHubClient mutual TLS', () => {
+  const API_LIST_URL = `projects/${PROJECT}/locations/${LOCATION}/apis`;
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    requestMock.mockReset();
+    agentMock.mockClear();
+    getAccessTokenMock.mockReset();
+    getAccessTokenMock.mockResolvedValue('adc_token');
+    loadDefaultClientCertsMock.mockReset();
+    loadDefaultClientCertsMock.mockResolvedValue(CLIENT_CERTS);
+    useClientCertEffectiveMock.mockReturnValue(true);
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', undefined);
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    useClientCertEffectiveMock.mockReturnValue(false);
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  function client(): APIHubClient {
+    return new APIHubClient({accessToken: 'mocked_token'});
+  }
+
+  it('should present the certificate and request the mTLS host', async () => {
+    respondOverHttps(200, JSON.stringify(MOCK_API_LIST));
+
+    expect(await client().listApis(PROJECT, LOCATION)).toEqual(
+      MOCK_API_LIST.apis,
+    );
+    expect(requestMock.mock.calls[0][0]).toBe(`${MTLS_ROOT}/${API_LIST_URL}`);
+    expect(requestMock.mock.calls[0][1].headers).toEqual(EXPECTED_HEADERS);
+    expect(agentMock).toHaveBeenCalledWith({
+      cert: CLIENT_CERTS.cert,
+      key: CLIENT_CERTS.key,
+      passphrase: CLIENT_CERTS.passphrase,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('should keep the default host when no certificate loads', async () => {
+    loadDefaultClientCertsMock.mockResolvedValue(undefined);
+    alwaysRespondWith(MOCK_API_LIST);
+
+    await client().listApis(PROJECT, LOCATION);
+
+    expect(fetchMock.mock.calls[0][0]).toBe(`${ROOT}/${API_LIST_URL}`);
+    expect(requestMock).not.toHaveBeenCalled();
+  });
+
+  it('should not look for a certificate when none is asked for', async () => {
+    useClientCertEffectiveMock.mockReturnValue(false);
+    alwaysRespondWith(MOCK_API_LIST);
+
+    await client().listApis(PROJECT, LOCATION);
+
+    expect(loadDefaultClientCertsMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0][0]).toBe(`${ROOT}/${API_LIST_URL}`);
+  });
+
+  it('should present the certificate but keep the default host on never', async () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'never');
+    respondOverHttps(200, JSON.stringify(MOCK_API_LIST));
+
+    await client().listApis(PROJECT, LOCATION);
+
+    expect(requestMock.mock.calls[0][0]).toBe(`${ROOT}/${API_LIST_URL}`);
+    expect(agentMock).toHaveBeenCalledWith(CLIENT_CERTS);
+  });
+
+  it('should warn and fall back to fetch when the certificate fails to load', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    loadDefaultClientCertsMock.mockRejectedValue(new Error('provider failed'));
+    alwaysRespondWith(MOCK_API_LIST);
+
+    expect(await client().listApis(PROJECT, LOCATION)).toEqual(
+      MOCK_API_LIST.apis,
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('provider failed'),
+    );
+    expect(requestMock).not.toHaveBeenCalled();
+  });
+
+  it('should load the certificate once across two requests', async () => {
+    respondOverHttps(200, JSON.stringify(MOCK_API_LIST));
+    const apihubClient = client();
+
+    await apihubClient.listApis(PROJECT, LOCATION);
+    await apihubClient.listApis(PROJECT, LOCATION);
+
+    expect(loadDefaultClientCertsMock).toHaveBeenCalledTimes(1);
+    expect(requestMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('should surface a non-2xx response from the certificate transport', async () => {
+    respondOverHttps(403, 'forbidden');
+
+    await expect(client().listApis(PROJECT, LOCATION)).rejects.toThrow(
+      'API Hub request failed with status 403: forbidden',
+    );
+  });
+
+  it('should treat a response with no status code as a failure', async () => {
+    respondOverHttps(undefined, 'no status line');
+
+    await expect(client().listApis(PROJECT, LOCATION)).rejects.toThrow(
+      'API Hub request failed with status 0: no status line',
+    );
+  });
+
+  it('should reject when the certificate transport errors', async () => {
+    failRequestOverHttps('error', new Error('socket hang up'));
+
+    await expect(client().listApis(PROJECT, LOCATION)).rejects.toThrow(
+      'socket hang up',
+    );
+  });
+
+  it('should reject when the response stream errors', async () => {
+    failResponseOverHttps(new Error('stream aborted'));
+
+    await expect(client().listApis(PROJECT, LOCATION)).rejects.toThrow(
+      'stream aborted',
+    );
+  });
+
+  it('should destroy the request when the certificate transport times out', async () => {
+    failRequestOverHttps('timeout');
+
+    await expect(client().listApis(PROJECT, LOCATION)).rejects.toThrow(
+      `API Hub request timed out after 30000 ms: ${MTLS_ROOT}/${API_LIST_URL}`,
+    );
+  });
+});
+
+describe('APIHubClient payload validation', () => {
+  let client: APIHubClient;
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    getAccessTokenMock.mockReset();
+    getAccessTokenMock.mockResolvedValue('adc_token');
+    vi.stubGlobal('fetch', fetchMock);
+    client = new APIHubClient({accessToken: 'mocked_token'});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each<[string, () => Promise<unknown>]>([
+    ['listApis', () => client.listApis(PROJECT, LOCATION)],
+    ['getApi', () => client.getApi(API_NAME)],
+    ['getApiVersion', () => client.getApiVersion(VERSION_NAME)],
+    ['getSpecContent', () => client.getSpecContent(SPEC_NAME)],
+  ])('should reject a body that is not an object from %s', async (_n, call) => {
+    for (const body of [[], 'text', null, 7]) {
+      alwaysRespondWith(body);
+
+      await expect(call()).rejects.toThrow(
+        'API Hub returned a non-object JSON response.',
+      );
+    }
+  });
+
+  it.each<[string, unknown]>([
+    ['a list of strings', {apis: ['api1']}],
+    ['not a list', {apis: 'api1'}],
+  ])('should reject an apis field that is %s', async (_name, body) => {
+    alwaysRespondWith(body);
+
+    await expect(client.listApis(PROJECT, LOCATION)).rejects.toThrow(
+      "API Hub field 'apis' must be a list of objects.",
+    );
+  });
+
+  it('should reject a versions field that is not a list of strings', async () => {
+    alwaysRespondWith({name: API_NAME, versions: [1]});
+
+    await expect(client.getSpecContent(API_NAME)).rejects.toThrow(
+      "API Hub field 'versions' must be a list of strings.",
+    );
+  });
+
+  it('should reject a specs field that is not a list of strings', async () => {
+    alwaysRespondWith({name: VERSION_NAME, specs: [{}]});
+
+    await expect(client.getSpecContent(VERSION_NAME)).rejects.toThrow(
+      "API Hub field 'specs' must be a list of strings.",
+    );
+  });
+
+  it('should reject a contents field that is not a string', async () => {
+    alwaysRespondWith({contents: 7});
+
+    await expect(client.getSpecContent(SPEC_NAME)).rejects.toThrow(
+      "API Hub field 'contents' must be a string.",
+    );
+  });
+
+  it('should reject a name field that is not a string', async () => {
+    alwaysRespondWith({name: 7});
+
+    await expect(client.getApi(API_NAME)).rejects.toThrow(
+      "API Hub field 'name' must be a string.",
+    );
+  });
+});
+
+describe('APIHubClient credential failures', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    getAccessTokenMock.mockReset();
+    getAccessTokenMock.mockResolvedValue('adc_token');
+    vi.stubGlobal('fetch', fetchMock);
+    alwaysRespondWith(MOCK_API_DETAIL);
+  });
+
+  afterEach(() => {
+    getClientMock.mockImplementation(defaultGetClient);
+    vi.unstubAllGlobals();
+  });
+
+  it('should report missing application default credentials', async () => {
+    const cause = new Error('Could not load the default credentials');
+    getClientMock.mockRejectedValue(cause);
+
+    const error = await rejectionOf(new APIHubClient().getApi(API_NAME));
+
+    expect(error).toHaveProperty('message', NO_CREDENTIAL_MESSAGE);
+    expect(error).toHaveProperty('cause', cause);
+  });
+
+  it('should propagate the failure of a configured service account', async () => {
+    getClientMock.mockRejectedValue(new Error('invalid_grant: bad key'));
+
+    const failure = new APIHubClient({
+      serviceAccountJson: SERVICE_ACCOUNT_JSON,
+    }).getApi(API_NAME);
+
+    await expect(failure).rejects.toThrow('invalid_grant: bad key');
+    await expect(failure).rejects.not.toThrow(NO_CREDENTIAL_MESSAGE);
+  });
+
+  it('should propagate a token refresh failure', async () => {
+    getClientMock.mockResolvedValue({
+      getAccessToken: () => Promise.reject(new Error('network flaked')),
+    });
+
+    const failure = new APIHubClient().getApi(API_NAME);
+
+    await expect(failure).rejects.toThrow('network flaked');
+    await expect(failure).rejects.not.toThrow(NO_CREDENTIAL_MESSAGE);
   });
 });
