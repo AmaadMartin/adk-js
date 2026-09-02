@@ -318,8 +318,6 @@ describe('CLI Entrypoint', () => {
         'sess-123',
         '--replay',
         'replay.json',
-        '--resume',
-        'resume.json',
         '--otel_to_cloud',
       ]);
 
@@ -329,9 +327,16 @@ describe('CLI Entrypoint', () => {
           saveSession: true,
           sessionId: 'sess-123',
           inputFile: 'replay.json',
-          savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
+      );
+    });
+
+    it('should pass --resume to runAgent as the saved session file', async () => {
+      await parse(['run', 'agent.ts', '--resume', 'resume.json']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({savedSessionFile: 'resume.json'}),
       );
     });
   });
