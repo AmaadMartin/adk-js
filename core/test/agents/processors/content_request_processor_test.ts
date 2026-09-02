@@ -282,7 +282,10 @@ describe('ContentRequestProcessor modelInputContext', () => {
   });
 
   it('copies the context so the caller array is not aliased', async () => {
-    const caller: Content = {role: 'user', parts: [{text: 'Today is Tuesday.'}]};
+    const caller: Content = {
+      role: 'user',
+      parts: [{text: 'Today is Tuesday.'}],
+    };
     const llmRequest = await runProcessor(
       createContextWithModelInputContext({
         events,
