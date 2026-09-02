@@ -114,7 +114,10 @@ await service.close(); // `orm` stays open; the caller closes it.
 ```
 
 `close()` only disposes an ORM this service created. It is safe to call twice,
-and safe to call before `init()`.
+and safe to call before `init()`. It does not retire the service: a later call
+connects again, which is what the adk-python service does too. Note what that
+means for `sqlite://:memory:`, whose database lives inside the connection —
+reconnecting there opens a new, empty one.
 
 A connection string accepts a second argument of MikroORM options, merged over
 the ones derived from the URI:
@@ -139,3 +142,19 @@ The v0 schema is the one adk-python wrote before event data moved to JSON. It
 stores event actions as a Python pickle, which this SDK cannot read, so
 `init()` refuses the database rather than upgrading it in place. Migrate it
 with the adk-python `adk migrate session` command first.
+
+## Timestamp precision
+
+Every stored timestamp column keeps three fractional digits, so an
+`Event.timestamp` survives the round trip to the millisecond. On MySQL and
+MariaDB that is the difference between `datetime(3)` and `datetime`, which
+holds whole seconds. Millisecond precision is what makes two events one
+millisecond apart distinguishable, both to the revision marker and to the
+event ordering.
+
+A database created by an earlier release still has the whole-second column,
+because table creation runs in safe mode and does not alter an existing one.
+The service reads each revision back from storage after it writes, so the
+marker describes the stored value and a held session keeps working there. What
+that database cannot do is tell two writes in the same second apart, so alter
+the columns to `datetime(3)` to get the full guarantee.

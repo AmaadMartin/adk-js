@@ -21,8 +21,11 @@ import {
   SCHEMA_VERSION_1_JSON,
   SCHEMA_VERSION_KEY,
   STORAGE_KEY_COLUMN_LENGTH,
+  StorageAppState,
   StorageEvent,
   StorageMetadata,
+  StorageSession,
+  StorageUserState,
 } from '../../../src/sessions/db/schema.js';
 
 // Mock dynamic imports for drivers that might not be installed in dev
@@ -70,6 +73,36 @@ describe('operations', () => {
         return total + eventProperties[keyProperty].length! * 4;
       }, 0);
       expect(utf8mb4KeyBytes).toBeLessThanOrEqual(3072);
+    });
+
+    it('declares millisecond precision on every timestamp column', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+
+      // MySQL and MariaDB emit `datetime` with no fractional digits unless the
+      // property declares a length, and the whole-second value that column
+      // holds would round away the millisecond the revision marker and the
+      // event ordering both compare.
+      const timestampColumns: Array<[string, string]> = [
+        [StorageSession.name, 'createTime'],
+        [StorageSession.name, 'updateTime'],
+        [StorageAppState.name, 'updateTime'],
+        [StorageUserState.name, 'updateTime'],
+        [StorageEvent.name, 'timestamp'],
+      ];
+
+      for (const [entity, property] of timestampColumns) {
+        const properties = orm.getMetadata().get(entity).properties as Record<
+          string,
+          {length?: number}
+        >;
+        // Asserted against the literal, not the constant, so that lowering the
+        // constant fails here instead of moving both sides together.
+        expect(properties[property].length).toBe(3);
+      }
     });
   });
 

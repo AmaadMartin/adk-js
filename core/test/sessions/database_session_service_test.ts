@@ -1051,6 +1051,90 @@ describe('DatabaseSessionService stale session detection', () => {
   });
 });
 
+describe('DatabaseSessionService with a whole-second timestamp column', () => {
+  let orm: MikroORM;
+  let service: DatabaseSessionService;
+  const appName = 'app';
+  const userId = 'u1';
+  const sessionId = 's1';
+
+  beforeEach(async () => {
+    orm = await MikroORM.init({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      pool: {min: 1, max: 1},
+    });
+    service = new DatabaseSessionService(orm);
+    await service.init();
+
+    // MySQL and MariaDB round a `DATETIME` column with no fractional digits to
+    // the whole second, which a database created before this schema declared
+    // millisecond precision still does. SQLite keeps the column as an integer
+    // of milliseconds, so these triggers reproduce that rounding here.
+    const key =
+      'id = new.id and app_name = new.app_name and user_id = new.user_id';
+    const connection = orm.em.getConnection();
+    await connection.execute(
+      'create trigger round_insert after insert on sessions begin ' +
+        'update sessions set ' +
+        'create_time = cast(new.create_time / 1000 as integer) * 1000, ' +
+        'update_time = cast(new.update_time / 1000 as integer) * 1000 ' +
+        `where ${key}; end`,
+    );
+    await connection.execute(
+      'create trigger round_update after update of update_time on sessions ' +
+        'when new.update_time % 1000 <> 0 begin ' +
+        'update sessions set ' +
+        'update_time = cast(new.update_time / 1000 as integer) * 1000 ' +
+        `where ${key}; end`,
+    );
+  });
+
+  afterEach(async () => {
+    await service.close();
+    await orm.close();
+  });
+
+  it('accepts repeated appends through one held session', async () => {
+    const session = await service.createSession({appName, userId, sessionId});
+    const base = 1_700_000_000_000;
+
+    for (const offset of [414, 1_900, 2_001]) {
+      await expect(
+        service.appendEvent({
+          session,
+          event: createEvent({timestamp: base + offset}),
+        }),
+      ).resolves.toBeDefined();
+    }
+
+    const reloaded = await service.getSession({appName, userId, sessionId});
+    expect(reloaded?.events).toHaveLength(3);
+    expect(reloaded?.storageUpdateMarker).toBe(session.storageUpdateMarker);
+  });
+
+  it('still rejects a writer that storage has moved past', async () => {
+    await service.createSession({appName, userId, sessionId});
+    const first = await service.getSession({appName, userId, sessionId});
+    const second = await service.getSession({appName, userId, sessionId});
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+
+    await service.appendEvent({
+      session: first!,
+      event: createEvent({timestamp: 1_700_000_005_000}),
+    });
+
+    await expect(
+      service.appendEvent({
+        session: second!,
+        event: createEvent({timestamp: 1_700_000_009_000}),
+      }),
+    ).rejects.toBeInstanceOf(StaleSessionError);
+  });
+});
+
 describe('DatabaseSessionService typed errors', () => {
   let orm: MikroORM;
   let service: DatabaseSessionService;
@@ -1275,7 +1359,7 @@ describe('DatabaseSessionService lifecycle', () => {
     await orm.close();
   });
 
-  it('initializes once when called twice and when called concurrently', async () => {
+  it('stays usable when init is called twice and concurrently', async () => {
     const service = new DatabaseSessionService('sqlite://:memory:');
     await Promise.all([service.init(), service.init()]);
     await service.init();
@@ -1285,8 +1369,6 @@ describe('DatabaseSessionService lifecycle', () => {
       userId: 'u1',
       sessionId: 's1',
     });
-    // A second MikroORM instance would open a second, empty in-memory
-    // database, and this read would miss the session written through the first.
     await expect(
       service.getSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
     ).resolves.toBeDefined();

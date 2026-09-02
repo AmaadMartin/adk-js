@@ -92,6 +92,28 @@ function updateMarkerOf(storageSession: StorageSession): string {
   return storageSession.updateTime.toISOString();
 }
 
+/**
+ * Reads a session row back after a write, and reports the revision it reached.
+ *
+ * The marker is compared for exact equality against the marker rebuilt on the
+ * next append, so it has to describe what the column holds rather than what
+ * the caller wrote. A database created before the timestamp columns declared
+ * millisecond precision rounds `update_time` to the whole second, and a marker
+ * taken from the in-memory value would then never match the row again. Reading
+ * inside the write transaction is safe: no other writer can reach the row.
+ */
+async function readRevision(
+  em: EntityManager,
+  storageSession: StorageSession,
+): Promise<{lastUpdateTime: number; marker: string}> {
+  await em.flush();
+  const stored = (await em.refresh(storageSession)) ?? storageSession;
+  return {
+    lastUpdateTime: stored.updateTime.getTime(),
+    marker: updateMarkerOf(stored),
+  };
+}
+
 /** Read options that take a row-level write lock when `enabled`. */
 function writeLock(enabled: boolean): {lockMode?: LockMode} {
   return enabled ? {lockMode: LockMode.PESSIMISTIC_WRITE} : {};
@@ -196,12 +218,15 @@ export class DatabaseSessionService extends BaseSessionService {
   }
 
   private async connect(): Promise<void> {
-    this.orm ??= await MikroORM.init(await this.resolveOptions());
+    // Hold the instance locally: a `close()` that lands while this is in
+    // flight clears the field, and the rest of the method would then run
+    // against nothing.
+    const orm = (this.orm ??= await MikroORM.init(await this.resolveOptions()));
 
     // Detect before creating anything: `ensureDatabaseCreated` adds the v1
     // `event_data` column to a legacy `events` table, which erases the
     // evidence the detection reads.
-    const version = await detectDatabaseSchemaVersion(this.orm);
+    const version = await detectDatabaseSchemaVersion(orm);
     if (version === SCHEMA_VERSION_0_PICKLE) {
       throw new Error(
         'This database uses the legacy v0 session schema, which stores event ' +
@@ -210,8 +235,8 @@ export class DatabaseSessionService extends BaseSessionService {
       );
     }
 
-    await ensureDatabaseCreated(this.orm);
-    await validateDatabaseSchemaVersion(this.orm);
+    await ensureDatabaseCreated(orm);
+    await validateDatabaseSchemaVersion(orm);
     this.initialized = true;
   }
 
@@ -289,8 +314,9 @@ export class DatabaseSessionService extends BaseSessionService {
     });
     em.persist(storageSession);
 
+    let revision: {lastUpdateTime: number; marker: string};
     try {
-      await em.flush();
+      revision = await readRevision(em, storageSession);
     } catch (error: unknown) {
       // A concurrent createSession can commit this id between the probe above
       // and this write. Drivers report that as a unique-constraint violation
@@ -313,8 +339,8 @@ export class DatabaseSessionService extends BaseSessionService {
       userId,
       state: mergedState,
       events: [],
-      lastUpdateTime: storageSession.updateTime.getTime(),
-      storageUpdateMarker: updateMarkerOf(storageSession),
+      lastUpdateTime: revision.lastUpdateTime,
+      storageUpdateMarker: revision.marker,
     });
   }
 
@@ -634,11 +660,8 @@ export class DatabaseSessionService extends BaseSessionService {
 
       storageSession.updateTime = new Date(event.timestamp);
       // Read the revision before the commit resolves, so the values reported
-      // back describe exactly what was written.
-      return {
-        lastUpdateTime: storageSession.updateTime.getTime(),
-        marker: updateMarkerOf(storageSession),
-      };
+      // back describe exactly what storage now holds.
+      return readRevision(txEm, storageSession);
     });
   }
 
