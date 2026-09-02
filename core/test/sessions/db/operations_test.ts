@@ -135,7 +135,7 @@ describe('operations', () => {
       expect(options.driver).toBe(SqliteDriver);
     });
 
-    it('should throw error for unsupported driver', async () => {
+    it('should throw error for unsupported backend', async () => {
       await expect(
         getConnectionOptionsFromUri('invalid://user:pass@localhost/db'),
       ).rejects.toThrow('Unsupported database URI');

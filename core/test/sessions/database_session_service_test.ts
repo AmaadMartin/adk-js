@@ -283,15 +283,16 @@ describe('DatabaseSessionService', () => {
     expect(after?.events[0].id).toBe(e2.id);
     expect(after?.events[1].id).toBe(e3.id);
 
-    // Test afterTimestamp
+    // Test afterTimestamp. It is inclusive, so e2 comes back with e3.
     const after2 = await service.getSession({
       appName: 'test-app',
       userId: 'user1',
       sessionId: 's1',
       config: {afterTimestamp: now},
     });
-    expect(after2?.events.length).toBe(1);
-    expect(after2?.events[0].id).toBe(e3.id);
+    expect(after2?.events.length).toBe(2);
+    expect(after2?.events[0].id).toBe(e2.id);
+    expect(after2?.events[1].id).toBe(e3.id);
   });
 
   it('should filter sessions by userId in listSessions', async () => {
