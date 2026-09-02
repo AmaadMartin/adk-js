@@ -5,6 +5,9 @@
  */
 
 import {
+  BaseArtifactService,
+  BaseMemoryService,
+  BaseSessionService,
   getArtifactServiceFromUri,
   getSessionServiceFromUri,
   Logger,
@@ -40,6 +43,18 @@ export interface ApiServerOptions {
   sessionServiceUri?: string;
   /** URI of the artifact service. Defaults to `memory://`. */
   artifactServiceUri?: string;
+  /**
+   * Session service to serve from, for a caller that built one itself. It
+   * takes the place of {@link sessionServiceUri}.
+   */
+  sessionService?: BaseSessionService;
+  /**
+   * Artifact service to serve from, for a caller that built one itself. It
+   * takes the place of {@link artifactServiceUri}.
+   */
+  artifactService?: BaseArtifactService;
+  /** Memory service to serve from. Defaults to the in-memory one. */
+  memoryService?: BaseMemoryService;
   /** Origin, or list of origins, CORS accepts. */
   allowOrigins?: string | string[];
   /**
@@ -86,8 +101,9 @@ export interface ApiServerOptions {
 /**
  * Assembles an ADK API server from configuration: it resolves the session and
  * artifact services from their URIs and applies the defaults the `adk web`
- * and `adk api_server` commands use. The server supplies the in-memory
- * memory service, which is the only one adk-js has.
+ * and `adk api_server` commands use. A caller that builds its own services,
+ * as the CLI does for local storage and for the memory bank, passes them
+ * instead of their URIs.
  *
  * The returned server is not listening. Call `start()` to bind a port, or
  * `buildApp()` to serve the Express app yourself.
@@ -103,12 +119,15 @@ export function createApiServer(options: ApiServerOptions): AdkApiServer {
     agentsDir,
     agentLoader: options.agentLoader,
     agentFileLoadOptions: options.agentFileLoadOptions,
-    sessionService: getSessionServiceFromUri(
-      options.sessionServiceUri || process.env.DATABASE_URL || IN_MEMORY_URI,
-    ),
-    artifactService: getArtifactServiceFromUri(
-      options.artifactServiceUri || IN_MEMORY_URI,
-    ),
+    sessionService:
+      options.sessionService ??
+      getSessionServiceFromUri(
+        options.sessionServiceUri || process.env.DATABASE_URL || IN_MEMORY_URI,
+      ),
+    artifactService:
+      options.artifactService ??
+      getArtifactServiceFromUri(options.artifactServiceUri || IN_MEMORY_URI),
+    memoryService: options.memoryService,
     serveDebugUI: options.web,
     allowOrigins: options.allowOrigins,
     allowedHosts: options.allowedHosts,

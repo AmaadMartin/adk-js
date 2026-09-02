@@ -704,6 +704,52 @@ describe('DatabaseSessionService', () => {
   });
 });
 
+describe('DatabaseSessionService.close', () => {
+  const newService = () =>
+    new DatabaseSessionService({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      allowGlobalContext: true,
+    });
+
+  it('releases the connection the service opened', async () => {
+    const service = newService();
+    await service.init();
+    const orm = (service as unknown as {orm: MikroORM}).orm;
+
+    await service.close();
+
+    await expect(orm.isConnected()).resolves.toBe(false);
+  });
+
+  it('does nothing on a service that was never used', async () => {
+    await expect(newService().close()).resolves.toBeUndefined();
+  });
+
+  it('can be called twice', async () => {
+    const service = newService();
+    await service.init();
+
+    await service.close();
+
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it('reconnects when the service is used again', async () => {
+    const service = newService();
+    await service.init();
+    await service.close();
+
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+    });
+
+    expect(session.id).toBeDefined();
+    await service.close();
+  });
+});
+
 describe('isDatabaseConnectionString', () => {
   it('should identify valid URI connection strings', () => {
     expect(

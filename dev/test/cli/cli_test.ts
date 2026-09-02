@@ -4,11 +4,35 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {
+  DatabaseSessionService,
+  FeatureName,
+  FileArtifactService,
+  InMemoryArtifactService,
+  InMemoryMemoryService,
+  InMemorySessionService,
+  isFeatureEnabled,
+  LogLevel,
+  overrideFeatureEnabled,
+  setLogLevel,
+} from '@google/adk';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  Mock,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
-import {runAgent} from '../../src/cli/cli_run.js';
+import {runAgent, runOnceCli} from '../../src/cli/cli_run.js';
+import {maybePromptForTelemetryConsent} from '../../src/cli/cli_telemetry.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
@@ -35,6 +59,12 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
+  runOnceCli: vi.fn(),
+}));
+
+vi.mock('../../src/cli/cli_telemetry', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/cli/cli_telemetry.js')>()),
+  maybePromptForTelemetryConsent: vi.fn(),
 }));
 
 vi.mock('../../src/version', () => ({
@@ -54,11 +84,16 @@ describe('CLI Entrypoint', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Local storage is the default now, so a bare `web` would write a .adk
+    // directory into the repository. The storage behaviour itself is covered
+    // by the "local storage" block below, against a temporary directory.
+    process.env['ADK_DISABLE_LOCAL_STORAGE'] = '1';
     program = createProgram();
     program.exitOverride();
   });
 
   afterEach(() => {
+    delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
     vi.restoreAllMocks();
   });
 
@@ -297,6 +332,266 @@ describe('CLI Entrypoint', () => {
           savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
+      );
+    });
+  });
+
+  describe('command: run, single-shot mode', () => {
+    let exit: MockInstance<typeof process.exit>;
+
+    beforeEach(() => {
+      exit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => undefined) as never);
+      vi.mocked(runOnceCli).mockResolvedValue(0);
+    });
+
+    it('sends a query to runOnceCli instead of the prompt', async () => {
+      await parse(['run', 'agent.ts', 'what is the weather?']);
+
+      expect(runOnceCli).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          query: 'what is the weather?',
+        }),
+      );
+      expect(runAgent).not.toHaveBeenCalled();
+    });
+
+    it('forwards the single-shot options', async () => {
+      await parse([
+        'run',
+        'agent.ts',
+        'hello',
+        '--state',
+        '{"city":"Boston"}',
+        '--timeout',
+        '30s',
+        '--jsonl',
+        '--session_id',
+        'sess-1',
+      ]);
+
+      expect(runOnceCli).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stateStr: '{"city":"Boston"}',
+          timeout: '30s',
+          jsonl: true,
+          sessionId: 'sess-1',
+        }),
+      );
+    });
+
+    it('exits with the code runOnceCli returned', async () => {
+      vi.mocked(runOnceCli).mockResolvedValue(2);
+
+      await parse(['run', 'agent.ts', 'hello']);
+
+      expect(exit).toHaveBeenCalledWith(2);
+    });
+
+    it('keeps every service in memory under --in_memory', async () => {
+      delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
+
+      await parse(['run', 'agent.ts', 'hello', '--in_memory']);
+
+      expect(runOnceCli).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionService: expect.any(InMemorySessionService),
+          artifactService: expect.any(InMemoryArtifactService),
+          memoryService: expect.any(InMemoryMemoryService),
+        }),
+      );
+    });
+
+    it('opens the prompt when no query is given', async () => {
+      await parse(['run', 'agent.ts', '--jsonl', '--state', '{}']);
+
+      expect(runOnceCli).not.toHaveBeenCalled();
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({jsonl: true, stateStr: '{}'}),
+      );
+    });
+  });
+
+  describe('service URI and local storage options', () => {
+    let agentsDir: string;
+
+    beforeEach(() => {
+      agentsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-cli-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(agentsDir, {recursive: true, force: true});
+    });
+
+    it.each([['web'], ['api_server']])(
+      '%s forwards --memory_service_uri',
+      async (command) => {
+        await parse([command, agentsDir, '--memory_service_uri', 'memory://']);
+
+        const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+        expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+      },
+    );
+
+    it('run forwards --memory_service_uri', async () => {
+      await parse([
+        'run',
+        path.join(agentsDir, 'agent.ts'),
+        '--memory_service_uri',
+        'memory://',
+      ]);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          memoryService: expect.any(InMemoryMemoryService),
+        }),
+      );
+    });
+
+    it.each([
+      ['a successful run', undefined],
+      ['a failing run', new Error('agent exploded')],
+    ])(
+      'run releases the sqlite connection after %s',
+      async (_name, failure) => {
+        // Without this the sqlite driver keeps the event loop alive and the
+        // interactive `adk run` never exits after the user types "exit".
+        delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
+        const close = vi.spyOn(DatabaseSessionService.prototype, 'close');
+        vi.spyOn(process, 'exit').mockImplementation(
+          (() => undefined) as never,
+        );
+        if (failure) {
+          vi.mocked(runAgent).mockRejectedValueOnce(failure);
+        }
+
+        await parse(['run', path.join(agentsDir, 'agent.ts')]);
+
+        expect(
+          vi.mocked(runAgent).mock.calls[0][0].sessionService,
+        ).toBeInstanceOf(DatabaseSessionService);
+        expect(close).toHaveBeenCalledOnce();
+      },
+    );
+
+    it('web stores under .adk by default', async () => {
+      delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
+
+      await parse(['web', agentsDir]);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(DatabaseSessionService);
+      expect(args.artifactService).toBeInstanceOf(FileArtifactService);
+      expect(fs.existsSync(path.join(agentsDir, '.adk'))).toBe(true);
+    });
+
+    it('web keeps everything in memory under --no_use_local_storage', async () => {
+      delete process.env['ADK_DISABLE_LOCAL_STORAGE'];
+
+      await parse(['web', agentsDir, '--no_use_local_storage']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(InMemorySessionService);
+      expect(args.artifactService).toBeInstanceOf(InMemoryArtifactService);
+      expect(fs.existsSync(path.join(agentsDir, '.adk'))).toBe(false);
+    });
+
+    it('rejects a storage flag combined with a service URI', async () => {
+      const exit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => undefined) as never);
+      const stderr = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation(() => true);
+
+      await parse([
+        'web',
+        agentsDir,
+        '--use_local_storage',
+        '--session_service_uri',
+        'memory://',
+      ]);
+
+      expect(exit).toHaveBeenCalledWith(2);
+      expect(stderr.mock.calls.flat().join('')).toContain(
+        '--use_local_storage/--no_use_local_storage cannot be used with ' +
+          '--session_service_uri or --artifact_service_uri.',
+      );
+    });
+
+    it('deploy agent_engine forwards the memory URI', async () => {
+      await parse([
+        'deploy',
+        'agent_engine',
+        agentsDir,
+        '--memory_service_uri',
+        'agentengine://123',
+      ]);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        memoryServiceUri: 'agentengine://123',
+      });
+    });
+  });
+
+  describe('feature override flags', () => {
+    afterEach(() => {
+      overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, undefined);
+    });
+
+    it.each([
+      ['run', ['run', 'agent.ts']],
+      ['web', ['web']],
+      ['api_server', ['api_server']],
+    ])('%s applies --enable_features', async (_name, args) => {
+      await parse([
+        ...args,
+        `--enable_features=${FeatureName.PROGRESSIVE_SSE_STREAMING}`,
+      ]);
+
+      expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(
+        true,
+      );
+    });
+
+    it.each([
+      ['run', ['run', 'agent.ts']],
+      ['web', ['web']],
+      ['api_server', ['api_server']],
+    ])('%s applies --disable_features', async (_name, args) => {
+      overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, true);
+
+      await parse([
+        ...args,
+        `--disable_features=${FeatureName.PROGRESSIVE_SSE_STREAMING}`,
+      ]);
+
+      expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(
+        false,
+      );
+    });
+  });
+
+  describe('command: telemetry', () => {
+    it('registers the group and its three subcommands', () => {
+      const telemetry = program.commands.find(
+        (command) => command.name() === 'telemetry',
+      );
+
+      expect(telemetry?.description()).toBe('Manage telemetry settings');
+      expect(
+        telemetry?.commands.map((command) => command.name()).sort(),
+      ).toEqual(['disable', 'enable', 'status']);
+    });
+
+    it('asks for consent before another subcommand runs', async () => {
+      await parse(['web']);
+
+      expect(maybePromptForTelemetryConsent).toHaveBeenCalledWith(
+        'web',
+        process.argv,
       );
     });
   });
