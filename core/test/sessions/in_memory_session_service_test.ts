@@ -549,6 +549,19 @@ describe('InMemorySessionService', () => {
       ]);
     });
 
+    it('offset without limit skips the first sessions', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      for (const id of ['s1', 's2', 's3']) {
+        await service.createSession({appName, userId, sessionId: id});
+      }
+
+      const response = await service.listSessions({appName, userId, offset: 1});
+
+      expect(response.sessions.map((s) => s.id)).toEqual(['s2', 's3']);
+      expect(response.totalItems).toBe(3);
+    });
+
     it('limit on empty result → returns pagination metadata with zeros', async () => {
       const response = await service.listSessions({
         appName: 'app',
