@@ -127,7 +127,8 @@ export function isGemini35LiveTranslate(
  * Check if the model is a Gemini 3.x Live model.
  *
  * Live Translate models are excluded. They are Gemini 3.x live models, but they
- * support a different feature set.
+ * support a different feature set. Use {@link isGemini35LiveTranslate} for
+ * those.
  *
  * @param modelString Either a simple model name or path-based model name
  * @return true if it's a Gemini 3.x Live model, false otherwise.
