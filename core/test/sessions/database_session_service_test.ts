@@ -13,9 +13,23 @@ import {
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {mkdtemp, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {ENTITIES, StorageSession} from '../../src/sessions/db/schema.js';
+import {ENTITIES_V0, StorageEventV0} from '../../src/sessions/db/schema_v0.js';
+import {logger} from '../../src/utils/logger.js';
 
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
@@ -649,6 +663,163 @@ describe('DatabaseSessionService', () => {
     });
   });
 
+  describe('listSessions ordering', () => {
+    const appName = 'ordering-app';
+
+    async function createSessionAt(
+      userId: string,
+      sessionId: string,
+      updateTime: number,
+    ): Promise<void> {
+      const session = await service.createSession({appName, userId, sessionId});
+      await service.appendEvent({
+        session,
+        event: createEvent({timestamp: updateTime}),
+      });
+    }
+
+    it('returns sessions oldest-first when order is omitted', async () => {
+      // Insertion order differs from update-time order, so an unordered query
+      // cannot pass by accident.
+      await createSessionAt('u1', 's-a', 2000);
+      await createSessionAt('u1', 's-b', 3000);
+      await createSessionAt('u1', 's-c', 1000);
+
+      const response = await service.listSessions({appName, userId: 'u1'});
+
+      expect(response.sessions.map((s) => s.id)).toEqual(['s-c', 's-a', 's-b']);
+    });
+
+    it('breaks a tie on user id and then session id, in both directions', async () => {
+      await createSessionAt('u2', 's-b', 5000);
+      await createSessionAt('u1', 's-z', 5000);
+      await createSessionAt('u1', 's-a', 5000);
+      await createSessionAt('u2', 's-a', 5000);
+      const tieBroken = ['s-a', 's-z', 's-a', 's-b'];
+
+      const ascending = await service.listSessions({appName});
+      const descending = await service.listSessions({appName, order: 'desc'});
+
+      expect(ascending.sessions.map((s) => s.id)).toEqual(tieBroken);
+      expect(ascending.sessions.map((s) => s.userId)).toEqual([
+        'u1',
+        'u1',
+        'u2',
+        'u2',
+      ]);
+      expect(descending.sessions.map((s) => s.id)).toEqual(tieBroken);
+    });
+
+    it('filters on an empty user id rather than dropping the filter', async () => {
+      await createSessionAt('u1', 's-a', 1000);
+
+      const response = await service.listSessions({appName, userId: ''});
+
+      expect(response.sessions).toEqual([]);
+      expect(response.totalItems).toBe(0);
+    });
+  });
+
+  describe('getSession event query', () => {
+    const appName = 'events-app';
+    const userId = 'u1';
+    const sessionId = 's1';
+
+    async function appendAt(timestamps: number[]): Promise<Event[]> {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId,
+      });
+      const events = timestamps.map((timestamp) => createEvent({timestamp}));
+      for (const event of events) {
+        await service.appendEvent({session, event});
+      }
+      return events;
+    }
+
+    it('returns no events for numRecentEvents: 0', async () => {
+      await appendAt([1000, 2000]);
+
+      const session = await service.getSession({
+        appName,
+        userId,
+        sessionId,
+        config: {numRecentEvents: 0},
+      });
+
+      expect(session).toBeDefined();
+      expect(session?.events).toEqual([]);
+    });
+
+    it('includes an event whose timestamp equals afterTimestamp', async () => {
+      const [, e2] = await appendAt([1000, 2000]);
+
+      const session = await service.getSession({
+        appName,
+        userId,
+        sessionId,
+        config: {afterTimestamp: 2000},
+      });
+
+      expect(session?.events.map((e) => e.id)).toEqual([e2.id]);
+    });
+
+    it('applies afterTimestamp before numRecentEvents', async () => {
+      const [, , e3, e4] = await appendAt([1000, 2000, 3000, 4000]);
+
+      const session = await service.getSession({
+        appName,
+        userId,
+        sessionId,
+        config: {afterTimestamp: 2000, numRecentEvents: 2},
+      });
+
+      expect(session?.events.map((e) => e.id)).toEqual([e3.id, e4.id]);
+    });
+
+    it('returns tied events in the same order on every read', async () => {
+      const tied = await appendAt([7000, 7000]);
+      const expected = tied.map((e) => e.id).sort();
+
+      const reads: string[][] = [];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const session = await service.getSession({
+          appName,
+          userId,
+          sessionId,
+        });
+        if (!session) {
+          expect.fail('expected the session to exist');
+        }
+        reads.push(session.events.map((e) => e.id));
+      }
+
+      expect(reads).toEqual([expected, expected, expected]);
+    });
+
+    it('picks the same tied event for numRecentEvents: 1 on every read', async () => {
+      const tied = await appendAt([7000, 7000]);
+      const newest = tied.map((e) => e.id).sort()[1];
+
+      const picks: string[] = [];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const session = await service.getSession({
+          appName,
+          userId,
+          sessionId,
+          config: {numRecentEvents: 1},
+        });
+        if (!session) {
+          expect.fail('expected the session to exist');
+        }
+        picks.push(session.events[0].id);
+      }
+
+      expect(picks).toEqual([newest, newest, newest]);
+    });
+  });
+
   describe('Alignment Verification', () => {
     it('should trim temp state from event before persistence', async () => {
       const session = await service.createSession({
@@ -702,6 +873,302 @@ describe('DatabaseSessionService', () => {
 
       expect(storedSession.updateTime.getTime()).toBe(timestamp);
     });
+  });
+});
+
+describe('DatabaseSessionService construction', () => {
+  const EXACTLY_ONE_SOURCE =
+    'Exactly one of a database URL, MikroORM options, or a MikroORM instance' +
+    ' must be provided.';
+
+  function openOrm(dbName = ':memory:'): Promise<MikroORM> {
+    return MikroORM.init({
+      dbName,
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      allowGlobalContext: true,
+    });
+  }
+
+  it('rejects an absent source', () => {
+    expect(
+      () => new DatabaseSessionService(undefined as unknown as string),
+    ).toThrow(EXACTLY_ONE_SOURCE);
+    expect(() => new DatabaseSessionService('')).toThrow(EXACTLY_ONE_SOURCE);
+  });
+
+  it('rejects a bad URL from the constructor, before init runs', () => {
+    expect(
+      () =>
+        new DatabaseSessionService('postgresql+asyncpg://user:pw@host:5432/db'),
+    ).toThrow("names the 'asyncpg' driver in its scheme");
+    expect(() => new DatabaseSessionService('oracle://host/db')).toThrow(
+      'Unsupported database URI',
+    );
+  });
+
+  it('serves a MikroORM instance the caller built and leaves it open', async () => {
+    const orm = await openOrm();
+    const service = new DatabaseSessionService(orm);
+
+    await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    const stored = await service.getSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    expect(stored?.id).toBe('s1');
+
+    await service.close();
+
+    // The caller still owns the instance, so it still answers.
+    expect(await orm.em.fork().count(StorageSession, {})).toBe(1);
+    const afterClose = await service.listSessions({appName: 'app'});
+    expect(afterClose.sessions.map((s) => s.id)).toEqual(['s1']);
+
+    await orm.close();
+  });
+
+  it('disposes an ORM it opened itself', async () => {
+    const service = new DatabaseSessionService({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      allowGlobalContext: true,
+    });
+    await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+
+    await service.close();
+
+    // A fresh in-memory database is empty, so the session is only missing if
+    // the previous connection was really disposed.
+    const afterClose = await service.listSessions({appName: 'app'});
+    expect(afterClose.sessions).toEqual([]);
+    await service.close();
+  });
+
+  it('does nothing when closed before init', async () => {
+    const service = new DatabaseSessionService('sqlite://:memory:');
+
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it('rejects options combined with a MikroORM instance', async () => {
+    const orm = await openOrm();
+
+    expect(() => new DatabaseSessionService(orm, {dbName: 'other.db'})).toThrow(
+      'Options cannot be applied to a MikroORM instance the caller already' +
+        ' built.',
+    );
+
+    await orm.close();
+  });
+
+  it('rejects an options object with no driver', () => {
+    expect(() => new DatabaseSessionService({dbName: ':memory:'})).toThrow(
+      'Driver is required when passing options object.',
+    );
+  });
+
+  it('applies overrides on top of the options a URL implies', async () => {
+    const service = new DatabaseSessionService('sqlite://:memory:', {
+      allowGlobalContext: true,
+      pool: {min: 1, max: 3},
+    });
+
+    const created = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+
+    expect(created.id).toBe('s1');
+    await service.close();
+  });
+});
+
+describe('DatabaseSessionService on a legacy v0 database', () => {
+  const appName = 'legacy-app';
+  const userId = 'u1';
+  const sessionId = 's1';
+  const READ_ONLY_MESSAGE =
+    'adk-js can read such a database but cannot write to it';
+
+  let directory: string;
+  let databasePath: string;
+  let service: DatabaseSessionService;
+  let warn: MockInstance<typeof logger.warn>;
+
+  beforeEach(async () => {
+    warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    directory = await mkdtemp(join(tmpdir(), 'adk-legacy-sessions-'));
+    databasePath = join(directory, 'legacy.db');
+
+    const legacyOrm = await MikroORM.init({
+      dbName: databasePath,
+      driver: SqliteDriver,
+      entities: ENTITIES_V0,
+      allowGlobalContext: true,
+    });
+    await legacyOrm.schema.createSchema();
+
+    const em = legacyOrm.em.fork();
+    em.create(StorageSession, {
+      id: sessionId,
+      appName,
+      userId,
+      state: {seeded: true},
+      createTime: new Date(1000),
+      updateTime: new Date(2000),
+    });
+    em.create(StorageEventV0, {
+      id: 'e1',
+      appName,
+      userId,
+      sessionId,
+      invocationId: 'inv-1',
+      author: 'user',
+      timestamp: new Date(1500),
+      content: {role: 'user', parts: [{text: 'hello'}]},
+      actions: Buffer.from('\x80\x04\x95pickled', 'binary'),
+      longRunningToolIdsJson: JSON.stringify(['tool-1']),
+    });
+    await em.flush();
+    await legacyOrm.close();
+
+    service = new DatabaseSessionService(`sqlite://${databasePath}`);
+  });
+
+  afterEach(async () => {
+    await service.close();
+    await rm(directory, {recursive: true, force: true});
+    warn.mockRestore();
+  });
+
+  it('reads a session and its event, with empty actions', async () => {
+    const session = await service.getSession({appName, userId, sessionId});
+
+    expect(session?.state['seeded']).toBe(true);
+    expect(session?.events.map((e) => e.id)).toEqual(['e1']);
+    expect(session?.events[0].content).toEqual({
+      role: 'user',
+      parts: [{text: 'hello'}],
+    });
+    expect(session?.events[0].longRunningToolIds).toEqual(['tool-1']);
+    expect(session?.events[0].actions).toEqual({
+      stateDelta: {},
+      artifactDelta: {},
+      requestedAuthConfigs: {},
+      requestedToolConfirmations: {},
+    });
+  });
+
+  it('lists the sessions it holds', async () => {
+    const response = await service.listSessions({appName, userId});
+
+    expect(response.sessions.map((s) => s.id)).toEqual([sessionId]);
+  });
+
+  it('applies afterTimestamp to a legacy event', async () => {
+    const included = await service.getSession({
+      appName,
+      userId,
+      sessionId,
+      config: {afterTimestamp: 1500},
+    });
+    const excluded = await service.getSession({
+      appName,
+      userId,
+      sessionId,
+      config: {afterTimestamp: 1501},
+    });
+
+    expect(included?.events.map((e) => e.id)).toEqual(['e1']);
+    expect(excluded?.events).toEqual([]);
+  });
+
+  it('deletes a session and its legacy events', async () => {
+    await service.deleteSession({appName, userId, sessionId});
+
+    const gone = await service.getSession({appName, userId, sessionId});
+    expect(gone).toBeUndefined();
+
+    const remaining = await service.listSessions({appName, userId});
+    expect(remaining.sessions).toEqual([]);
+  });
+
+  it('warns once that legacy actions come back empty', async () => {
+    await service.getSession({appName, userId, sessionId});
+    await service.getSession({appName, userId, sessionId});
+
+    const actionWarnings = warn.mock.calls.filter((call) =>
+      String(call[0]).includes('come back empty'),
+    );
+    expect(actionWarnings).toHaveLength(1);
+  });
+
+  it('refuses to create a session', async () => {
+    await expect(
+      service.createSession({appName, userId, sessionId: 's2'}),
+    ).rejects.toThrow(READ_ONLY_MESSAGE);
+  });
+
+  it('refuses to append an event', async () => {
+    const session = await service.getSession({appName, userId, sessionId});
+    if (!session) {
+      expect.fail('expected the seeded session to load');
+    }
+
+    await expect(
+      service.appendEvent({session, event: createEvent({timestamp: 9000})}),
+    ).rejects.toThrow(READ_ONLY_MESSAGE);
+  });
+
+  it('leaves the database untouched', async () => {
+    await service.getSession({appName, userId, sessionId});
+    await service.close();
+
+    const inspector = await MikroORM.init({
+      dbName: databasePath,
+      driver: SqliteDriver,
+      entities: ENTITIES_V0,
+      allowGlobalContext: true,
+    });
+    const connection = inspector.em.getConnection();
+    const tables: Array<{name: string}> = await connection.execute(
+      "select name from sqlite_master where type = 'table'",
+    );
+    const columns: Array<{name: string}> = await connection.execute(
+      "pragma table_info('events')",
+    );
+    await inspector.close();
+
+    expect(tables.map((t) => t.name)).not.toContain('adk_internal_metadata');
+    expect(columns.map((c) => c.name)).not.toContain('event_data');
+    expect(columns.map((c) => c.name)).toContain('actions');
+  });
+
+  it('refuses a caller-supplied MikroORM instance', async () => {
+    const orm = await MikroORM.init({
+      dbName: databasePath,
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      allowGlobalContext: true,
+    });
+    const callerOwned = new DatabaseSessionService(orm);
+
+    await expect(
+      callerOwned.getSession({appName, userId, sessionId}),
+    ).rejects.toThrow('connection it opened itself');
+
+    await orm.close();
   });
 });
 
