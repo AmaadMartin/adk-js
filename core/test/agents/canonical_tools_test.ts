@@ -38,7 +38,7 @@ function makeAgent(withTool: boolean): LlmAgent {
           new FunctionTool({
             name: 'ping',
             description: 'ping',
-            fn: () => 'pong',
+            execute: () => 'pong',
           }),
         ]
       : [],

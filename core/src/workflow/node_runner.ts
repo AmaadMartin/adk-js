@@ -174,13 +174,15 @@ async function runChildNode({
   const childIc =
     branch === parent.invocationContext.branch &&
     effectiveAbortSignal === parent.invocationContext.abortSignal &&
-    isolationScope === parent.invocationContext.isolationScope
+    isolationScope === parent.invocationContext.isolationScope &&
+    nodePath === parent.invocationContext.nodePath
       ? parent.invocationContext
       : new InvocationContext({
           ...parent.invocationContext,
           branch,
           abortSignal: effectiveAbortSignal,
           isolationScope,
+          nodePath,
         });
 
   const child = new NodeContext({

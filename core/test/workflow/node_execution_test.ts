@@ -493,3 +493,34 @@ describe('outputFor — which nodes an output answers for', () => {
     }
   });
 });
+
+describe('node path on the invocation context', () => {
+  it('gives each child node its own path rather than its parent path', async () => {
+    let innerPath: string | undefined;
+    const inner = new FnNode('inner', (ctx) => {
+      innerPath = ctx.getInvocationContext().nodePath;
+      return 'ok';
+    });
+    const outer = new FnNode('outer', async (ctx) => {
+      await ctx.runNode(inner, undefined);
+      return ctx.getInvocationContext().nodePath;
+    });
+
+    const channel = new AsyncQueue<Event>();
+    const root = new NodeContext({
+      invocationContext: createIc(),
+      channel,
+      nodePath: '',
+      runId: 'root',
+    });
+    const child = await executeChildNode({
+      parent: root,
+      node: outer,
+      input: undefined,
+    });
+
+    expect(child.invocationContext.nodePath).toBe('outer');
+    expect(innerPath).toBe('outer.inner');
+    expect(root.invocationContext.nodePath).toBeUndefined();
+  });
+});

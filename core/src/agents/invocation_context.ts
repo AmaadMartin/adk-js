@@ -74,6 +74,8 @@ export interface InvocationContextParams {
   abortSignal?: AbortSignal;
   workflowInstructionScope?: WorkflowInstructionScope;
   isolationScope?: string;
+  /** The path of the workflow node this invocation runs, if any. */
+  nodePath?: string;
   /** Nesting depth of node-as-tool executions; used to bound recursion. */
   nodeToolDepth?: number;
   liveRequestQueue?: LiveRequestQueue;
@@ -264,6 +266,14 @@ export class InvocationContext {
   isolationScope?: string;
 
   /**
+   * The path of the workflow node this invocation runs, such as
+   * `outer.inner`, or `undefined` outside a workflow. Set by the node runner
+   * so an agent running as a node reports its position in the graph on its
+   * telemetry span. Mirrors `node_path` in `google/adk-python`.
+   */
+  readonly nodePath?: string;
+
+  /**
    * Nesting depth of node-as-tool ({@link NodeTool}) executions in this
    * invocation. Incremented each time a node runs as a tool (via a depth+1
    * clone), so `NodeTool` can bound `node -> tool -> node` recursion.
@@ -315,6 +325,7 @@ export class InvocationContext {
     this.abortSignal = params.abortSignal;
     this.workflowInstructionScope = params.workflowInstructionScope;
     this.isolationScope = params.isolationScope;
+    this.nodePath = params.nodePath;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
     // Inherit the parent invocation's cost manager when one is available.

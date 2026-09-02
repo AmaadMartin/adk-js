@@ -124,6 +124,37 @@ describe('Telemetry Tracing Functions', () => {
         'gen_ai.conversation.id': 'test-session-id',
       });
     });
+
+    it('should omit the node path outside a workflow', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceAgentInvocation({
+        agent: mockAgent,
+        invocationContext: mockInvocationContext,
+      });
+
+      expect(mockSpan.setAttribute).not.toHaveBeenCalledWith(
+        'adk.node.path',
+        expect.anything(),
+      );
+    });
+
+    it('should report the node path of an agent running as a node', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceAgentInvocation({
+        agent: mockAgent,
+        invocationContext: {
+          ...mockInvocationContext,
+          nodePath: 'outer.inner',
+        } as InvocationContext,
+      });
+
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'adk.node.path',
+        'outer.inner',
+      );
+    });
   });
 
   describe('traceToolCall', () => {
