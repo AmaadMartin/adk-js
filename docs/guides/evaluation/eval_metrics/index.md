@@ -22,8 +22,12 @@ calls extends it with a match type. An evaluator reads only the fields its own
 criterion names, so one config can carry criteria for several metrics.
 
 The property names here are the wire names. `adk-python` serializes these
-models with a camelCase alias generator, so a config file or an eval result
-written by either SDK reads in the other one.
+models with a camelCase alias generator, so the property names of a config
+file or an eval result match in either SDK. One value does not:
+`ToolTrajectoryMatchType` carries member names where `adk-python` carries the
+integers 0, 1 and 2. `adk-python` reads a name, so a criterion written here
+loads there, but a criterion `adk-python` serialized carries an integer this
+SDK does not resolve.
 
 ## Get started
 
@@ -97,9 +101,9 @@ must be at least 1. Both must be integers.
 
 ## Tool trajectory match types
 
-A tool trajectory criterion accepts its match type as the
-`ToolTrajectoryMatchType` enum or as a string, because a config file writes a
-string. `normalizeToolTrajectoryMatchType` reads either. It trims the string,
+`ToolTrajectoryCriterion.matchType` is a `ToolTrajectoryMatchType`. A config
+file writes a string instead, so a loader reads that string through
+`normalizeToolTrajectoryMatchType` first. The function trims the string,
 upper-cases it, and reads dashes and spaces as underscores.
 
 ```ts
@@ -159,28 +163,3 @@ const provider: MetricInfoProvider = {
 
 An `Interval` is closed at both ends unless `openAtMin` or `openAtMax` says
 otherwise.
-
-## The scoring function path a config declares
-
-A custom metric names its scoring function. `EvalMetric.customFunctionPath` is
-the public field, and whoever writes the payload sets it. The path an eval
-config declared is kept apart, in a table this module owns:
-
-```ts
-import {
-  getConfigCustomFunctionPath,
-  setConfigCustomFunctionPath,
-  type EvalMetric,
-} from '@google/adk';
-
-const metric: EvalMetric = {metricName: 'my_metric', threshold: 0.5};
-
-setConfigCustomFunctionPath(metric, 'my_module.score');
-getConfigCustomFunctionPath(metric); // 'my_module.score'
-```
-
-The table is a `WeakMap` keyed by the metric object, so a metric parsed from an
-inbound payload cannot carry a path: `JSON.parse` reaches object properties and
-nothing else. That is the property `adk-python` gets from a pydantic
-`PrivateAttr`. Passing `undefined` clears the recorded path, and an entry is
-collected together with its metric.

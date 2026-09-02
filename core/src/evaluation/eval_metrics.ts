@@ -9,10 +9,6 @@ import {InputValidationError} from '../errors/input_validation_error.js';
 import type {Invocation} from './eval_case.js';
 import type {Rubric, RubricScore} from './eval_rubrics.js';
 
-// The rubric types are part of this module's surface, as they are in
-// adk-python's `eval_metrics`.
-export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
-
 /** The verdict for one metric, or for a whole eval case. */
 export enum EvalStatus {
   PASSED = 1,
@@ -190,9 +186,10 @@ export interface LlmBackedUserSimulatorCriterion extends LlmAsAJudgeCriterion {
 /**
  * How actual tool calls are matched against the expected trajectory.
  *
- * The member names are the names of adk-python's `MatchType`, which its
- * criterion accepts as strings under `match_type`. That is where this enum
- * crosses the language boundary.
+ * The members carry their own names as values, where adk-python's `MatchType`
+ * carries the integers 0, 1 and 2. adk-python reads a name, so a criterion
+ * written here loads there; a criterion adk-python serialized carries an
+ * integer that {@link normalizeToolTrajectoryMatchType} does not resolve.
  */
 export enum ToolTrajectoryMatchType {
   /** The actual calls equal the expected ones, none extra and none missing. */
@@ -214,10 +211,11 @@ export enum ToolTrajectoryMatchType {
 /** Criterion for scoring a tool trajectory against a reference one. */
 export interface ToolTrajectoryCriterion extends BaseCriterion {
   /**
-   * Defaults to {@link ToolTrajectoryMatchType.EXACT}. Accepts the enum, or a
-   * string spelling such as `'in order'`, `'IN-ORDER'` or `'in_order'`.
+   * Defaults to {@link ToolTrajectoryMatchType.EXACT}. A raw string from a
+   * config file becomes a member through
+   * {@link normalizeToolTrajectoryMatchType}.
    */
-  matchType?: ToolTrajectoryMatchType | string;
+  matchType?: ToolTrajectoryMatchType;
 
   /**
    * When true only tool names are compared and arguments are ignored.
@@ -254,42 +252,6 @@ export interface EvalMetric {
 
   /** Path to the scoring function, when this is a custom metric. */
   customFunctionPath?: string;
-}
-
-/**
- * The scoring function paths that eval configs declared, keyed by metric.
- *
- * The path lives beside the metric rather than on it, so a metric parsed from
- * an inbound payload cannot carry one: `JSON.parse` reaches object properties
- * but not this table. That is the property adk-python gets from `PrivateAttr`.
- * An entry is collected with its metric.
- */
-const configCustomFunctionPaths = new WeakMap<EvalMetric, string>();
-
-/**
- * Records the scoring function path the eval config declared for a metric.
- *
- * Passing `undefined` clears the recorded path.
- */
-export function setConfigCustomFunctionPath(
-  metric: EvalMetric,
-  path: string | undefined,
-): void {
-  if (path === undefined) {
-    configCustomFunctionPaths.delete(metric);
-    return;
-  }
-  configCustomFunctionPaths.set(metric, path);
-}
-
-/**
- * Returns the scoring function path the eval config declared for a metric, or
- * `undefined` when the config declared none.
- */
-export function getConfigCustomFunctionPath(
-  metric: EvalMetric,
-): string | undefined {
-  return configCustomFunctionPaths.get(metric);
 }
 
 /** Supporting detail a metric reports alongside its score. */

@@ -10,15 +10,12 @@ import {
   DEFAULT_JUDGE_PARALLELISM_LIMIT,
   DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
-  getConfigCustomFunctionPath,
   getMetricThreshold,
   InputValidationError,
   normalizeToolTrajectoryMatchType,
   PrebuiltMetrics,
   resolveJudgeModelOptions,
-  setConfigCustomFunctionPath,
   ToolTrajectoryMatchType,
-  type EvalMetric,
   type EvalMetricResult,
   type HallucinationsCriterion,
   type LlmBackedUserSimulatorCriterion,
@@ -179,48 +176,6 @@ describe('resolveJudgeModelOptions', () => {
         'judgeModelOptions.numSamples must be an integer, but got 2.5.',
       ),
     );
-  });
-});
-
-describe('the config-owned custom function path', () => {
-  it('reads back the path the config declared', () => {
-    const metric: EvalMetric = {metricName: METRIC_NAME, threshold: 0.5};
-
-    setConfigCustomFunctionPath(metric, 'my_module.score');
-
-    expect(getConfigCustomFunctionPath(metric)).toBe('my_module.score');
-  });
-
-  it('reads undefined for a metric no config wrote to', () => {
-    expect(
-      getConfigCustomFunctionPath({metricName: METRIC_NAME, threshold: 0.5}),
-    ).toBeUndefined();
-  });
-
-  it('clears the path when it is set to undefined', () => {
-    const metric: EvalMetric = {metricName: METRIC_NAME, threshold: 0.5};
-    setConfigCustomFunctionPath(metric, 'my_module.score');
-
-    setConfigCustomFunctionPath(metric, undefined);
-
-    expect(getConfigCustomFunctionPath(metric)).toBeUndefined();
-  });
-
-  it('does not carry the path to another config\u2019s metric', () => {
-    const configured: EvalMetric = {metricName: METRIC_NAME, threshold: 0.5};
-    const other: EvalMetric = {metricName: METRIC_NAME, threshold: 0.5};
-    setConfigCustomFunctionPath(configured, 'my_module.score');
-
-    expect(getConfigCustomFunctionPath(other)).toBeUndefined();
-  });
-
-  it('cannot be set through a parsed metric payload', () => {
-    const metric: EvalMetric = JSON.parse(
-      '{"metricName":"m","threshold":0.5,' +
-        '"_config_custom_function_path":"math.floor"}',
-    );
-
-    expect(getConfigCustomFunctionPath(metric)).toBeUndefined();
   });
 });
 

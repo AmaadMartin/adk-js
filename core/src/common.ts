@@ -170,11 +170,9 @@ export {
   EvalStatus,
   PrebuiltMetrics,
   ToolTrajectoryMatchType,
-  getConfigCustomFunctionPath,
   getMetricThreshold,
   normalizeToolTrajectoryMatchType,
   resolveJudgeModelOptions,
-  setConfigCustomFunctionPath,
 } from './evaluation/eval_metrics.js';
 export type {
   BaseCriterion,
