@@ -208,18 +208,20 @@ class PlainToolset extends BaseToolset {
   }
 }
 
-function readonlyContextFor(invocationId: string): ReadonlyContext {
-  return new ReadonlyContext(
-    new InvocationContext({
-      invocationId,
-      session: createSession({
-        id: 'session-1',
-        appName: 'test_app',
-        userId: 'test_user',
-      }),
-      pluginManager: new PluginManager([]),
+function invocationContextFor(invocationId: string): InvocationContext {
+  return new InvocationContext({
+    invocationId,
+    session: createSession({
+      id: 'session-1',
+      appName: 'test_app',
+      userId: 'test_user',
     }),
-  );
+    pluginManager: new PluginManager([]),
+  });
+}
+
+function readonlyContextFor(invocationId: string): ReadonlyContext {
+  return new ReadonlyContext(invocationContextFor(invocationId));
 }
 
 describe('BaseToolset.getToolsWithPrefix', () => {
@@ -462,7 +464,7 @@ describe('BaseToolset.getToolsWithPrefix function declarations', () => {
       liveConnectConfig: {},
     };
     const toolContext = new Context({
-      invocationContext: {session: {state: {}}} as unknown as InvocationContext,
+      invocationContext: invocationContextFor('inv-1'),
     });
 
     await copy.processLlmRequest({toolContext, llmRequest});

@@ -8,8 +8,11 @@ import {
   BaseTool,
   BaseToolset,
   Context,
+  createSession,
   InvocationContext,
+  LlmAgent,
   LlmRequest,
+  PluginManager,
   ReadonlyContext,
   Skill,
   SkillToolset,
@@ -18,6 +21,29 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
+
+const TEST_AGENT_NAME = 'test-agent';
+
+/**
+ * A real `ReadonlyContext` whose activated-skill state is the array passed in,
+ * so a test can activate a skill after the context exists.
+ */
+function readonlyContextFor(activatedSkills: string[]): ReadonlyContext {
+  const agent = new LlmAgent({name: TEST_AGENT_NAME});
+  return new ReadonlyContext(
+    new InvocationContext({
+      invocationId: 'inv-1',
+      agent,
+      session: createSession({
+        id: 'session-1',
+        appName: 'test_app',
+        userId: 'test_user',
+        state: {[`_adk_activated_skill_${TEST_AGENT_NAME}`]: activatedSkills},
+      }),
+      pluginManager: new PluginManager([]),
+    }),
+  );
+}
 
 describe('skill_toolset', () => {
   const mockSkill: Skill = {
@@ -351,10 +377,7 @@ describe('skill_toolset', () => {
         additionalTools: [new NestedToolset()],
       });
 
-      const context = {
-        agentName: 'test-agent',
-        state: {get: vi.fn().mockReturnValue(['skill-with-nested'])},
-      } as unknown as ReadonlyContext;
+      const context = readonlyContextFor(['skill-with-nested']);
 
       const tools = await toolset.getTools(context);
 
@@ -387,11 +410,7 @@ describe('skill_toolset', () => {
       });
 
       const activated: string[] = [];
-      const context = {
-        invocationId: 'inv-1',
-        agentName: 'test-agent',
-        state: {get: () => activated},
-      } as unknown as ReadonlyContext;
+      const context = readonlyContextFor(activated);
 
       const before = await toolset.getToolsWithPrefix(context);
       expect(before.map((t) => t.name)).not.toContain('late_tool');

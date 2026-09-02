@@ -1489,7 +1489,16 @@ describe('LlmAgent.canonicalTools toolset prefixing', () => {
       liveConnectConfig: {},
     };
     const toolContext = new Context({
-      invocationContext: {session: {state: {}}} as unknown as InvocationContext,
+      invocationContext: new InvocationContext({
+        invocationId: 'inv-1',
+        agent,
+        session: createSession({
+          id: 'session-1',
+          appName: 'test_app',
+          userId: 'test_user',
+        }),
+        pluginManager: new PluginManager([]),
+      }),
     });
 
     for (const tool of await agent.canonicalTools()) {
