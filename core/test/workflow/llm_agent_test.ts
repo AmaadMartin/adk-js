@@ -83,20 +83,19 @@ function echoAgent(name = 'echo'): LlmAgent {
 
 /**
  * An agent whose instruction is `template`, answering with the instruction as
- * the model received it — i.e. after placeholder resolution. The agent's own
- * identity preamble comes first in the system instruction, so the reply is the
- * last non-empty line of it.
+ * the model received it — i.e. after placeholder resolution. Transfer is
+ * disabled so the identity processor adds no preamble, leaving the resolved
+ * instruction as the whole system instruction.
  */
 function templateProbeAgent(template: string, name = 'probe'): LlmAgent {
   return new LlmAgent({
     name,
     instruction: template,
-    model: new ScriptedLlm((request) => {
-      const lines = String(request.config?.systemInstruction ?? '')
-        .split('\n')
-        .filter((line) => line.trim());
-      return lines[lines.length - 1] ?? '';
-    }),
+    disallowTransferToParent: true,
+    disallowTransferToPeers: true,
+    model: new ScriptedLlm((request) =>
+      String(request.config?.systemInstruction ?? '').trim(),
+    ),
   });
 }
 
