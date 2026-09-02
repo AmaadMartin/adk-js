@@ -7,8 +7,8 @@
 import {Content} from '@google/genai';
 
 import {AuthCredential} from '../auth/auth_credential.js';
+import {ReadonlyState, ReadonlyStateView} from '../sessions/readonly_state.js';
 import type {Session} from '../sessions/session.js';
-import {State} from '../sessions/state.js';
 
 import {InvocationContext} from './invocation_context.js';
 import type {RunConfig} from './run_config.js';
@@ -56,13 +56,14 @@ export class ReadonlyContext {
   }
 
   /**
-   * The state of the current session.
+   * A read-only view of the state of the current session.
+   *
+   * Reads are live: a value a writer commits to the session after this view
+   * was taken is visible through it. A write through the view throws
+   * {@link ReadonlyStateError}.
    */
-  get state(): Readonly<State> {
-    return new State(
-      this.invocationContext.session.state,
-      {},
-    ) as Readonly<State>;
+  get state(): ReadonlyStateView {
+    return new ReadonlyState(this.invocationContext.session.state);
   }
 
   /**

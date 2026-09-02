@@ -40,7 +40,18 @@ const {storeCredential} = vi.hoisted(() => ({
 
 vi.mock('../../src/auth/auth_handler.js', () => ({
   AuthHandler: class {
-    parseAndStoreAuthResponse = storeCredential;
+    constructor(
+      private readonly authConfig: {exchangedAuthCredential?: unknown},
+    ) {}
+
+    // The real handler returns the credential it stored, and the preprocessor
+    // records that return value on the invocation, so the double returns it
+    // too. For the non-oauth2 schemes these tests use, the real handler
+    // returns the credential the response carried.
+    async parseAndStoreAuthResponse(state: unknown) {
+      await storeCredential(state);
+      return this.authConfig.exchangedAuthCredential;
+    }
   },
 }));
 
@@ -191,6 +202,8 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
+      // The real InvocationContext always builds this map.
+      credentialByKey: Object.create(null),
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -269,6 +282,8 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
+      // The real InvocationContext always builds this map.
+      credentialByKey: Object.create(null),
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -347,6 +362,8 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
+      // The real InvocationContext always builds this map.
+      credentialByKey: Object.create(null),
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -544,6 +561,8 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
+      // The real InvocationContext always builds this map.
+      credentialByKey: Object.create(null),
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -613,6 +632,8 @@ describe('AuthPreprocessor', () => {
             }),
           ],
         },
+        // The real InvocationContext always builds this map.
+        credentialByKey: Object.create(null),
       } as unknown as InvocationContext;
     }
 

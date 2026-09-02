@@ -163,7 +163,17 @@ async function storeAuthAndCollectResumeTargets(
       continue;
     }
     authorizedKeys.add(authConfig.credentialKey);
-    await new AuthHandler(authConfig).parseAndStoreAuthResponse(state);
+    const credential = await new AuthHandler(
+      authConfig,
+    ).parseAndStoreAuthResponse(state);
+    if (credential) {
+      // The rest of the invocation reads this through
+      // `ReadonlyContext.getCredential`, which a toolset or an instruction
+      // provider can reach; only a tool context can read session state. A
+      // toolset resumes no tool call, so this store is the only way its
+      // credential stays reachable.
+      credentialByKey[authConfig.credentialKey] = credential;
+    }
 
     const functionCallId = request.args?.functionCallId;
     if (
@@ -171,15 +181,6 @@ async function storeAuthAndCollectResumeTargets(
       !functionCallId.startsWith(TOOLSET_AUTH_CREDENTIAL_ID_PREFIX)
     ) {
       toolsToResume.add(functionCallId);
-      continue;
-    }
-
-    // A toolset resumes no tool call, so its credential has to be reachable
-    // some other way: the invocation carries it under the key the request
-    // named, for `ReadonlyContext.getCredential` to read back.
-    const credential = authConfig.exchangedAuthCredential;
-    if (credential) {
-      credentialByKey[authConfig.credentialKey] = credential;
     }
   }
 

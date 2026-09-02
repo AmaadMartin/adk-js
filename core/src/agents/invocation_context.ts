@@ -409,9 +409,10 @@ export class InvocationContext {
 
   /**
    * Credentials resolved during this invocation, keyed by the credential key
-   * of the auth config that produced them. Held here rather than in session
-   * state so a credential resolved for one invocation cannot leak into
-   * another. Read through `ReadonlyContext.getCredential`.
+   * of the auth config that produced them. Written by `AuthPreprocessor` when
+   * the client answers a credential request, and read through
+   * `ReadonlyContext.getCredential`. Held here rather than in session state so
+   * a credential resolved for one invocation cannot leak into another.
    *
    * Created with `Object.create(null)`, as `InMemoryCredentialService` creates
    * its buckets: the credential key is attacker-influenced, and on a `{}`

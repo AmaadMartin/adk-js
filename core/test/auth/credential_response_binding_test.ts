@@ -176,6 +176,8 @@ function sessionAnswering(request: AuthConfig, response: unknown) {
         }),
       ] as Event[],
     },
+    // The real InvocationContext always builds this map.
+    credentialByKey: Object.create(null),
   } as unknown as InvocationContext;
 
   return {invocationContext, state};

@@ -32,14 +32,20 @@ export class AuthHandler {
     return state.get<AuthCredential>(credentialKey);
   }
 
-  async parseAndStoreAuthResponse(state: State): Promise<void> {
+  /**
+   * Stores the credential the client returned in `state` and returns it, so a
+   * caller can also record it on the invocation it resolved for.
+   */
+  async parseAndStoreAuthResponse(
+    state: State,
+  ): Promise<AuthCredential | undefined> {
     const credentialKey = 'temp:' + this.authConfig.credentialKey;
 
     const authSchemeType = this.authConfig.authScheme.type;
     if (!OAUTH_CONSENT_SCHEME_TYPES.includes(authSchemeType)) {
       state.set(credentialKey, this.authConfig.exchangedAuthCredential);
 
-      return;
+      return this.authConfig.exchangedAuthCredential;
     }
 
     if (this.authConfig.exchangedAuthCredential) {
@@ -49,7 +55,11 @@ export class AuthHandler {
         authScheme: this.authConfig.authScheme,
       });
       state.set(credentialKey, exchangedCredential.credential);
+
+      return exchangedCredential.credential;
     }
+
+    return undefined;
   }
 
   generateAuthRequest(): AuthConfig {

@@ -2,8 +2,8 @@
 
 `ReadonlyContext` is the read-only view of an invocation that ADK hands to
 instruction providers, toolsets and plugins. Reach for it when a callback needs
-to read what the invocation is doing — the session, the run config — without
-being able to change it.
+to read what the invocation is doing — the session, the state, the run config —
+without being able to change it.
 
 ## Introduction
 
@@ -16,13 +16,17 @@ a `BaseToolset` decides which tools to expose. Both only read.
 getters. The wrapper is what ADK passes to those extension points, so an
 instruction provider cannot end the invocation by accident.
 
-The view is shallow. `session` returns the live `Session` object, not a copy or
-a frozen view, so a caller that reaches into it can still change it. The class
-is a narrowed surface, not a security boundary.
+`Context` (and through it `ToolContext` and `CallbackContext`) extends
+`ReadonlyContext` and adds the write surface. A tool that must change state
+receives one of those, not this one.
+
+The wrapper is shallow. `session` returns the live `Session` object, not a copy
+or a frozen view, so a caller that reaches into it can still change it. The
+class is a narrowed surface, not a security boundary.
 
 ## Get started
 
-An instruction provider reads the session and the run config:
+An instruction provider reads the state, the session and the run config:
 
 ```ts
 import {LlmAgent, ReadonlyContext, StreamingMode} from '@google/adk';
@@ -31,16 +35,72 @@ const agent = new LlmAgent({
   name: 'assistant',
   model: 'gemini-2.5-flash',
   instruction: (context: ReadonlyContext) => {
+    const tone = context.state.get<string>('tone', 'neutral');
     const turns = context.session.events.length;
     const live = context.runConfig?.streamingMode === StreamingMode.BIDI;
     return `You are helping ${context.userId} in app ${context.session.appName}.
-Turns so far: ${turns}. Keep answers short: ${live}.`;
+Tone: ${tone}. Turns so far: ${turns}. Keep answers short: ${live}.`;
   },
 });
 ```
 
 `runConfig` is `undefined` when the invocation was built without one, so read it
 with `?.` as above.
+
+## The state view
+
+`state` returns a read-only view of the session state. Reads pass through to the
+live session, so a value a tool commits after the view was taken is visible
+through it:
+
+```ts
+const view = readonlyContext.state;
+
+view.get<string>('preferred_model'); // reads the live session state
+view.has('preferred_model');
+view.toRecord();
+```
+
+The view has no `set` and no `update` in its type. A JavaScript caller that
+reaches one anyway gets a `ReadonlyStateError`, which extends `TypeError`:
+
+```ts
+import {isReadonlyStateError} from '@google/adk';
+
+try {
+  writeThroughTheView();
+} catch (e: unknown) {
+  if (isReadonlyStateError(e)) {
+    // The session state is unchanged.
+  }
+}
+```
+
+The view is shallow. A nested object returned by `get` is the live object and
+stays mutable, so a caller that reaches into it can still change it. The class
+is a narrowed surface, not a security boundary. To write state, use a `Context`:
+`toolContext.state.set('preferred_model', 'gemini-2.5-flash')`.
+
+## Resolved credentials
+
+`getCredential(key)` returns a credential that this invocation already resolved,
+keyed by the credential key of the auth config that asked for it. It returns
+`undefined` for a key that no credential was resolved for:
+
+```ts
+const credential = readonlyContext.getCredential(authConfig.credentialKey);
+```
+
+A credential appears there when the client answers a credential request: the
+auth preprocessor binds the response to the request the agent raised, stores the
+credential, and records it on the invocation. A toolset or an instruction
+provider holds only a `ReadonlyContext`, so this accessor is how it reads a
+credential that a tool obtained earlier in the same run.
+
+The store lives on the `InvocationContext`, not in session state, so a
+credential resolved for one invocation cannot leak into another. It is shared by
+reference with every child context, so a credential resolved on a sub-agent
+branch is visible to the parent.
 
 ## When there is no agent
 

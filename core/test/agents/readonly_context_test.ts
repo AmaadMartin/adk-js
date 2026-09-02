@@ -8,11 +8,14 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   BaseAgent,
+  Context,
   Event,
   InvocationContext,
   InvocationContextParams,
   PluginManager,
   ReadonlyContext,
+  ReadonlyState,
+  ReadonlyStateError,
   RunConfig,
   StreamingMode,
   createSession,
@@ -174,5 +177,56 @@ describe('ReadonlyContext', () => {
     invocationContext.credentialByKey['late-key'] = credential;
 
     expect(context.getCredential('late-key')).toBe(credential);
+  });
+});
+
+describe('ReadonlyContext.state as a read-only view', () => {
+  it('rejects a write and leaves the session state unchanged', () => {
+    const invocationContext = makeContext();
+    const view = new ReadonlyContext(invocationContext).state;
+
+    // The declared view type hides `set`; a JavaScript caller still reaches
+    // it, which is the write this narrowing exercises.
+    if (!(view instanceof ReadonlyState)) {
+      expect.fail('ReadonlyContext.state did not return a read-only view');
+    }
+
+    expect(() => view.set('key1', 'hacked')).toThrow(ReadonlyStateError);
+    expect(invocationContext.session.state['key1']).toBe('value1');
+  });
+
+  it('rejects an update and leaves the session state unchanged', () => {
+    const invocationContext = makeContext();
+    const view = new ReadonlyContext(invocationContext).state;
+
+    if (!(view instanceof ReadonlyState)) {
+      expect.fail('ReadonlyContext.state did not return a read-only view');
+    }
+
+    expect(() => view.update({key1: 'hacked'})).toThrow(ReadonlyStateError);
+    expect(invocationContext.session.state['key1']).toBe('value1');
+  });
+
+  it('reads a value a Context wrote after the view was taken', () => {
+    const invocationContext = makeContext();
+    const view = new ReadonlyContext(invocationContext).state;
+    const writer = new Context({invocationContext});
+
+    writer.state.set('key1', 'written');
+    writer.state.set('key3', 'value3');
+
+    expect(view.get('key1')).toBe('written');
+    expect(view.get('key3')).toBe('value3');
+  });
+
+  it('hands out a view that reads the session state as a record', () => {
+    const context = new ReadonlyContext(makeContext());
+
+    expect(context.state.toRecord()).toEqual({
+      key1: 'value1',
+      key2: 'value2',
+    });
+    expect(context.state.has('key1')).toBe(true);
+    expect(context.state.has('missing')).toBe(false);
   });
 });
