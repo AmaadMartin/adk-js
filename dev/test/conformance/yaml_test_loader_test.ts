@@ -6,8 +6,12 @@
 
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
+import {Readable} from 'node:stream';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
-import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
+import {
+  batchLoadTestSpecs,
+  batchLoadYamlTestDefs,
+} from '../../src/conformance/yaml_test_loader.js';
 
 vi.mock('fast-glob', () => ({
   default: {
@@ -49,6 +53,11 @@ recordings:
           parts:
             - text: hi
 `;
+
+/** Feeds the glob a fixed list of spec files, as the stream fast-glob returns. */
+function mockSpecFiles(files: string[]): void {
+  vi.mocked(fg.stream).mockReturnValue(Readable.from(files));
+}
 
 describe('batchLoadYamlTestDefs', () => {
   beforeEach(() => {
@@ -156,6 +165,48 @@ describe('batchLoadYamlTestDefs', () => {
 
     await expect(batchLoadYamlTestDefs(rootDir)).rejects.toThrow(
       'File not found',
+    );
+  });
+});
+
+describe('batchLoadTestSpecs', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reads the spec alone, without any generated file', async () => {
+    mockSpecFiles(['/root/tests/category/test1/spec.yaml']);
+    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
+      throw new Error(`File not found: ${filePath}`);
+    });
+
+    const testCases = await batchLoadTestSpecs('/root/tests');
+
+    expect(testCases).toHaveLength(1);
+    expect(testCases[0]).toMatchObject({
+      name: 'category/test1',
+      dir: '/root/tests/category/test1',
+      category: 'category',
+    });
+    expect(testCases[0].spec.agent).toBe('test-agent');
+  });
+
+  it('leaves the category empty for a case at the root of the search', async () => {
+    mockSpecFiles(['/root/tests/test1/spec.yaml']);
+    (fs.readFile as Mock).mockResolvedValue(SPEC_YAML);
+
+    const testCases = await batchLoadTestSpecs('/root/tests');
+
+    expect(testCases[0]).toMatchObject({name: 'test1', category: ''});
+  });
+
+  it('rejects a spec that is not a YAML mapping', async () => {
+    mockSpecFiles(['/root/tests/test1/spec.yaml']);
+    (fs.readFile as Mock).mockResolvedValue('just a string');
+
+    await expect(batchLoadTestSpecs('/root/tests')).rejects.toThrow(
+      'Spec file must be a YAML mapping',
     );
   });
 });
