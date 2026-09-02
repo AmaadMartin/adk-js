@@ -280,6 +280,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       const executionResult = await new Promise<{
         stdout: string;
         stderr: string;
+        exitCode: number | null;
       }>((resolve) => {
         const child = spawn(command, args, {
           cwd: tempDir,
@@ -371,7 +372,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             // `os._exit`. Reporting nothing would show the model a clean run.
             stderr = `Code execution exited with status ${exitStatus}.`;
           }
-          resolve({stdout, stderr});
+          resolve({stdout, stderr, exitCode: exitStatus});
         });
       });
 
@@ -418,6 +419,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         stdout: executionResult.stdout,
         stderr: executionResult.stderr,
         outputFiles,
+        exitCode: executionResult.exitCode,
       };
     } finally {
       if (tempDir) {
