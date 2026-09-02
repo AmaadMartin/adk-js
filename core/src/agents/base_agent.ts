@@ -101,12 +101,6 @@ export interface AgentClass<
 }
 
 /**
- * A callable of unknown shape, used where a value is only known to be a
- * function — a config field {@link BaseAgent.clone} inspects, for instance.
- */
-type UnknownFunction = (...args: unknown[]) => unknown;
-
-/**
  * The config keys holding callbacks, and the constructor field each maps to.
  *
  * A config file names them in the plural, as adk-python's schema does, while
@@ -116,15 +110,6 @@ const CONFIG_CALLBACK_FIELDS = [
   {configKey: 'beforeAgentCallbacks', field: 'beforeAgentCallback'},
   {configKey: 'afterAgentCallbacks', field: 'afterAgentCallback'},
 ] as const;
-
-/**
- * Maps a callback {@link BaseAgent.clone} rebound to a clone back to the
- * method it came from.
- *
- * Cloning a clone must rebind to the newest copy. Without this the second
- * clone would keep the first clone's wrapper and act on the first clone.
- */
-const reboundMethods = new WeakMap<object, UnknownFunction>();
 
 /**
  * A unique symbol to identify ADK agent classes.
@@ -182,7 +167,7 @@ export abstract class BaseAgent<
    * }
    * ```
    *
-   * @deprecated Use the `@google/adk-dev` agent loader to build an agent from a
+   * @deprecated Use the `@google/adk-devtools` agent loader to build an agent from a
    *     config file. This entry point exists for parity with adk-python and
    *     will be removed.
    */
@@ -293,10 +278,10 @@ export abstract class BaseAgent<
    * `LlmAgent` gets a fresh `requestProcessors` array rather than sharing the
    * original's. See google/adk-js#534.
    *
-   * A callback that is one of this agent's own methods is rebound to the clone,
-   * so it acts on the clone rather than on this agent. A function bound to
-   * another object with `bind`, or an arrow closure, is left alone: JavaScript
-   * cannot report what such a function captured.
+   * A callback that is one of this agent's own methods acts on the clone when
+   * the clone runs it, because a lifecycle callback is invoked with the agent
+   * running it as its receiver. A function bound to another object with `bind`,
+   * or an arrow closure, keeps whatever receiver it captured.
    *
    * @param overrides Config fields to override on the clone. Overriding
    *     `parentAgent` is rejected, and an override key this agent cannot place
@@ -319,27 +304,6 @@ export abstract class BaseAgent<
     // None); the rebuilt parent constructor re-parents any cloned children.
     merged.parentAgent = undefined;
 
-    // The clone does not exist while the config is being rebuilt, so a rebound
-    // callback reads it when it runs. A callback only runs after construction,
-    // so it is always set by then.
-    let cloned: this | undefined = undefined;
-    const rebind = (value: unknown): unknown => {
-      if (!isFunction(value)) {
-        return value;
-      }
-
-      const origin = reboundMethods.get(value) ?? value;
-      if (!isMethodOf(this, origin)) {
-        return value;
-      }
-
-      const rebound = (...args: unknown[]): unknown =>
-        origin.apply(cloned, args);
-      reboundMethods.set(rebound, origin);
-
-      return rebound;
-    };
-
     // Shallow-copy any list-typed field not provided in overrides so the clone
     // never shares a mutable array (e.g. `tools`) with the original, mirroring
     // adk-python's per-field list copy.
@@ -349,9 +313,9 @@ export abstract class BaseAgent<
         continue;
       }
       const value = mergedRecord[key];
-      mergedRecord[key] = Array.isArray(value)
-        ? value.map((item) => rebind(item))
-        : rebind(value);
+      if (Array.isArray(value)) {
+        mergedRecord[key] = value.slice();
+      }
     }
 
     // Recursively clone sub-agents unless explicitly overridden, so the rebuilt
@@ -362,9 +326,8 @@ export abstract class BaseAgent<
     }
 
     const ctor = this.constructor as new (config: TConfig) => this;
-    cloned = new ctor(merged);
 
-    return cloned;
+    return new ctor(merged);
   }
 
   /**
@@ -690,7 +653,11 @@ export abstract class BaseAgent<
     }
 
     for (const callback of this.beforeAgentCallback) {
-      const content = await callback(callbackContext);
+      // Called with this agent as the receiver, so a callback that is one of
+      // the agent's own methods acts on the agent running it — the clone when
+      // a clone runs it. Mirrors adk-python, where such a callback is a bound
+      // method. A function bound elsewhere, or an arrow closure, ignores this.
+      const content = await callback.call(this, callbackContext);
 
       if (invocationContext.abortSignal?.aborted) {
         return;
@@ -747,7 +714,8 @@ export abstract class BaseAgent<
     }
 
     for (const callback of this.afterAgentCallback) {
-      const content = await callback(callbackContext);
+      // Receiver as in handleBeforeAgentCallback.
+      const content = await callback.call(this, callbackContext);
 
       if (invocationContext.abortSignal?.aborted) {
         return;
@@ -814,7 +782,7 @@ export abstract class BaseAgent<
    * @returns A new instance of the class this was called on.
    * @throws If `config` is not a plain object, if it fails {@link configType},
    *     or if it holds an unresolved reference.
-   * @deprecated Use the `@google/adk-dev` agent loader to build an agent from a
+   * @deprecated Use the `@google/adk-devtools` agent loader to build an agent from a
    *     config file. This entry point exists for parity with adk-python and
    *     will be removed.
    */
@@ -846,12 +814,10 @@ export abstract class BaseAgent<
     assertResolvedSubAgents(this.name, record);
     mapConfigCallbacks(this.name, record);
 
-    let kwargs: BaseAgentConfig = {...record, name: parsed.data.name};
-    // Comparing the functions themselves tells an override from the inherited
-    // default, which every subclass shares.
-    if (this.parseConfig !== BaseAgent.parseConfig) {
-      kwargs = this.parseConfig(config, configAbsPath, kwargs);
-    }
+    const kwargs = this.parseConfig(config, configAbsPath, {
+      ...record,
+      name: parsed.data.name,
+    });
 
     // A config record is only known to satisfy the subclass's own required
     // fields at runtime, through `configType`, which the subclass owns. This
@@ -869,7 +835,7 @@ export abstract class BaseAgent<
    * @param kwargs The constructor arguments derived so far.
    * @returns The constructor arguments to build the agent with.
    * @deprecated Declare the field on the class instead, or use the
-   *     `@google/adk-dev` agent loader. This hook exists for parity with
+   *     `@google/adk-devtools` agent loader. This hook exists for parity with
    *     adk-python and will be removed.
    */
   static parseConfig(
@@ -1015,45 +981,6 @@ function unresolvedReferenceError(className: string, field: string): Error {
       'reference. adk-js does not resolve config references, so pass values ' +
       'that are already constructed, or build the agent directly.',
   );
-}
-
-/**
- * Narrows a value of unknown type to a callable.
- *
- * @param value The value to test.
- * @return True when the value is a function.
- */
-function isFunction(value: unknown): value is UnknownFunction {
-  return typeof value === 'function';
-}
-
-/**
- * Reports whether `fn` is a method of `owner`, declared either on `owner`
- * itself or anywhere on its prototype chain below `Object.prototype`.
- *
- * Descriptors are read rather than the properties themselves, so a getter such
- * as `rootAgent` is never invoked by the search.
- *
- * @param owner The object to search.
- * @param fn The candidate method.
- * @return True when `owner` exposes `fn` as a method.
- */
-function isMethodOf(owner: object, fn: UnknownFunction): boolean {
-  for (
-    let scope: object | null = owner;
-    scope !== null && scope !== Object.prototype;
-    scope = Object.getPrototypeOf(scope)
-  ) {
-    const current = scope;
-    const found = Reflect.ownKeys(current).some(
-      (key) => Object.getOwnPropertyDescriptor(current, key)?.value === fn,
-    );
-    if (found) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 /**

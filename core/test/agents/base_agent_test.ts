@@ -890,7 +890,7 @@ describe('BaseAgent', () => {
     });
   });
 
-  describe('clone callback rebinding', () => {
+  describe("callbacks that are the agent's own methods", () => {
     class AnnouncingAgent extends MockAgent {
       constructor(config: BaseAgentConfig) {
         super({
@@ -904,28 +904,34 @@ describe('BaseAgent', () => {
       }
     }
 
-    it("rebinds a callback that is one of the agent's own methods", async () => {
+    it('run against the agent that owns them', async () => {
+      const agent = new AnnouncingAgent({name: 'original'});
+
+      const events = await run(agent);
+
+      expect(events[0].content).toEqual(said('announced by original'));
+    });
+
+    it('run against the clone when the clone runs them', async () => {
       const original = new AnnouncingAgent({name: 'original'});
 
-      const clone = original.clone({name: 'copy'});
-      const events = await run(clone);
+      const events = await run(original.clone({name: 'copy'}));
 
       expect(events[0].content).toEqual(said('announced by copy'));
     });
 
-    it('rebinds a callback given in a list', async () => {
+    it('run against the clone when given in a list', async () => {
       const original = new AnnouncingAgent({
         name: 'original',
         beforeAgentCallback: [AnnouncingAgent.prototype.announce],
       });
 
-      const clone = original.clone({name: 'copy'});
-      const events = await run(clone);
+      const events = await run(original.clone({name: 'copy'}));
 
       expect(events[0].content).toEqual(said('announced by copy'));
     });
 
-    it('rebinds to the newest copy when a clone is cloned', async () => {
+    it('run against the newest copy when a clone is cloned', async () => {
       const original = new AnnouncingAgent({name: 'original'});
 
       const events = await run(
@@ -937,17 +943,30 @@ describe('BaseAgent', () => {
       expect(events[0].content).toEqual(said('announced by second'));
     });
 
-    it('leaves the original agent untouched', () => {
+    it('still answer for the original after it was cloned', async () => {
       const original = new AnnouncingAgent({name: 'original'});
 
       original.clone({name: 'copy'});
+      const events = await run(original);
 
+      expect(events[0].content).toEqual(said('announced by original'));
       expect(original.beforeAgentCallback[0]).toBe(
         AnnouncingAgent.prototype.announce,
       );
     });
 
-    it('leaves a callback bound to another object alone', async () => {
+    it('run against the agent from an after-agent callback too', async () => {
+      const original = new MockAgent({
+        name: 'original',
+        afterAgentCallback: AnnouncingAgent.prototype.announce,
+      });
+
+      const events = await run(original.clone({name: 'copy'}));
+
+      expect(events[1].content).toEqual(said('announced by copy'));
+    });
+
+    it('do not disturb a callback bound to another object', async () => {
       const recorder = {
         label: 'recorder',
         mark(): Content {
@@ -964,7 +983,7 @@ describe('BaseAgent', () => {
       expect(events[0].content).toEqual(said('recorder'));
     });
 
-    it('leaves a closure over the original agent alone', async () => {
+    it('do not disturb a closure over the original agent', async () => {
       const original: MockAgent = new MockAgent({
         name: 'original',
         beforeAgentCallback: (): Content =>
@@ -976,7 +995,7 @@ describe('BaseAgent', () => {
       expect(events[0].content).toEqual(said('closed over original'));
     });
 
-    it('does not rebind a callback the caller overrode', async () => {
+    it('give way to a callback the caller overrode', async () => {
       const original = new AnnouncingAgent({name: 'original'});
 
       const events = await run(
