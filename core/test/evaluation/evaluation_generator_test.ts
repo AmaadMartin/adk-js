@@ -61,11 +61,11 @@ import {
   generateInferencesForSingleUserInvocation,
   generateInferencesForSingleUserInvocationLive,
   getAppDetailsByInvocationId,
-  LiveEventQueue,
   processQueryWithSession,
   sendAudioToLive,
   toInstructionText,
 } from '../../src/evaluation/evaluation_generator.js';
+import {LiveEventQueue} from '../../src/evaluation/live_session.js';
 import {RequestIntercepterPlugin} from '../../src/evaluation/request_intercepter_plugin.js';
 import {isEvent} from '../../src/events/event.js';
 
