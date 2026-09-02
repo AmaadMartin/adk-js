@@ -46,9 +46,9 @@ export interface GoogleApiToolOptions {
  * configuration. It configures the instance it is given rather than a copy, so
  * the wrapped tool carries the credentials afterwards.
  *
- * The intended producer is a Google API toolset, which builds one of these per
- * operation of a Discovery document. That toolset is not ported yet, so for
- * now a caller wraps each `RestApiTool` it already holds.
+ * The intended producer is `GoogleApiToolset`, which builds one of these per
+ * operation of a Discovery document. A caller can also wrap a `RestApiTool` it
+ * already holds.
  *
  * @example
  * ```ts

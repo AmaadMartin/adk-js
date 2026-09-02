@@ -13,6 +13,8 @@ import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {formatError} from './error_utils.js';
 import {logger} from './logger.js';
+import {loadOptionalPeer} from './optional_peer.js';
+import type {HttpDispatcher} from './ssl_utils.js';
 
 /**
  * Resolves the regional API host to call, choosing the mutual-TLS host when
@@ -313,6 +315,27 @@ export async function clientCertsToPresent(): Promise<
     );
     return undefined;
   }
+}
+
+/**
+ * Builds the `fetch` dispatcher that presents a client certificate.
+ *
+ * `globalThis.fetch` has no option for one, so the certificate travels on an
+ * `undici` `Agent`. `undici` is an optional peer dependency, and it is loaded
+ * only when a caller actually holds a certificate.
+ *
+ * @param certs The certificate material to present.
+ * @return The dispatcher to attach to the request.
+ * @throws If `undici` is not installed.
+ */
+export async function clientCertDispatcher(
+  certs: MtlsClientCerts,
+): Promise<HttpDispatcher> {
+  const undici = await loadOptionalPeer(
+    {packageName: 'undici', feature: 'a mutual-TLS client certificate'},
+    () => import('undici'),
+  );
+  return new undici.Agent({connect: {...certs}});
 }
 
 /** The status and the body of one response, decoded as text. */

@@ -116,6 +116,8 @@ export type {
 } from './tools/application_integration_tool/clients/connector_spec_builders.js';
 export {IntegrationClient} from './tools/application_integration_tool/clients/integration_client.js';
 export type {IntegrationClientOptions} from './tools/application_integration_tool/clients/integration_client.js';
+export {GoogleApiToolset} from './tools/google_api_tool/google_api_toolset.js';
+export type {GoogleApiToolsetOptions} from './tools/google_api_tool/google_api_toolset.js';
 export {
   GoogleApiToOpenApiConverter,
   convertDiscoveryDocument,
