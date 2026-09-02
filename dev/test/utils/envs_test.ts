@@ -44,9 +44,10 @@ async function loadEnvs() {
   const debug = vi
     .spyOn(AdkLogger.prototype, 'debug')
     .mockImplementation(() => {});
-  const {loadDotenvForAgent} = await import('../../src/utils/envs.js');
+  const {loadDotenvForAgent, loadDotenvFromCwd} =
+    await import('../../src/utils/envs.js');
 
-  return {loadDotenvForAgent, warn, debug};
+  return {loadDotenvForAgent, loadDotenvFromCwd, warn, debug};
 }
 
 describe('loadDotenvForAgent', () => {
@@ -68,6 +69,7 @@ describe('loadDotenvForAgent', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.doUnmock('dotenv');
+    vi.doUnmock('node:fs');
     for (const key of Object.keys(process.env)) {
       if (!(key in originalEnv)) {
         delete process.env[key];
@@ -286,5 +288,131 @@ describe('loadDotenvForAgent', () => {
     loadDotenvForAgent('weather', parentDir);
 
     expect(process.env[EXPLICIT]).toBeUndefined();
+  });
+
+  it('treats an ancestor it may not stat as having no file', async () => {
+    fs.writeFileSync(
+      path.join(parentDir, '.env'),
+      `${FROM_FILE}=from-parent\n`,
+    );
+    const unreadable = path.join(agentDir, '.env');
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs')>();
+      // envs.ts makes exactly one call shape, so the fake covers only it.
+      const statSync = (
+        target: fs.PathLike,
+        options: {throwIfNoEntry: false},
+      ): fs.Stats | undefined => {
+        if (target === unreadable) {
+          throw Object.assign(new Error('EACCES: permission denied'), {
+            code: 'EACCES',
+          });
+        }
+        return actual.statSync(target, options);
+      };
+      return {...actual, default: {...actual, statSync}, statSync};
+    });
+    const {loadDotenvForAgent} = await loadEnvs();
+
+    expect(() => loadDotenvForAgent('weather', parentDir)).not.toThrow();
+    expect(process.env[FROM_FILE]).toBe('from-parent');
+  });
+});
+
+describe('loadDotenvFromCwd', () => {
+  let originalEnv: typeof process.env;
+  let workingDir: string;
+  let agentDir: string;
+
+  beforeEach(() => {
+    originalEnv = {...process.env};
+    workingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-envs-cwd-'));
+    agentDir = path.join(workingDir, 'weather');
+    fs.mkdirSync(agentDir);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const key of Object.keys(process.env)) {
+      if (!(key in originalEnv)) {
+        delete process.env[key];
+      }
+    }
+    Object.assign(process.env, originalEnv);
+    fs.rmSync(workingDir, {recursive: true, force: true});
+  });
+
+  it('loads the .env of the working directory', async () => {
+    fs.writeFileSync(path.join(workingDir, '.env'), `${FROM_FILE}=from-root\n`);
+    const {loadDotenvFromCwd} = await loadEnvs();
+    vi.spyOn(process, 'cwd').mockReturnValue(workingDir);
+
+    loadDotenvFromCwd();
+
+    expect(process.env[FROM_FILE]).toBe('from-root');
+  });
+
+  it.each(['1', 'true', 'TRUE'])(
+    'reads no file when %s disables the load',
+    async (value) => {
+      fs.writeFileSync(
+        path.join(workingDir, '.env'),
+        `${FROM_FILE}=from-root\n`,
+      );
+      process.env[DISABLE_FLAG] = value;
+      const {loadDotenvFromCwd} = await loadEnvs();
+      vi.spyOn(process, 'cwd').mockReturnValue(workingDir);
+
+      loadDotenvFromCwd();
+
+      expect(process.env[FROM_FILE]).toBeUndefined();
+    },
+  );
+
+  it('keeps a variable the user exported', async () => {
+    process.env[EXPLICIT] = 'from-shell';
+    fs.writeFileSync(
+      path.join(workingDir, '.env'),
+      `${EXPLICIT}=from-root\n${FROM_FILE}=from-root\n`,
+    );
+    const {loadDotenvFromCwd} = await loadEnvs();
+    vi.spyOn(process, 'cwd').mockReturnValue(workingDir);
+
+    loadDotenvFromCwd();
+
+    expect(process.env[EXPLICIT]).toBe('from-shell');
+    expect(process.env[FROM_FILE]).toBe('from-root');
+  });
+
+  it('does nothing when the working directory has no .env', async () => {
+    const {loadDotenvFromCwd, debug} = await loadEnvs();
+    vi.spyOn(process, 'cwd').mockReturnValue(workingDir);
+
+    loadDotenvFromCwd(ABSENT_FILENAME);
+
+    expect(process.env[FROM_FILE]).toBeUndefined();
+    expect(debug.mock.calls.flat().join(' ')).toContain(
+      `No ${ABSENT_FILENAME} file found in the working directory`,
+    );
+  });
+
+  it("lets the agent's .env override the working-directory .env", async () => {
+    process.env[EXPLICIT] = 'from-shell';
+    fs.writeFileSync(
+      path.join(workingDir, '.env'),
+      `${EXPLICIT}=from-root\n${FROM_FILE}=from-root\n`,
+    );
+    fs.writeFileSync(
+      path.join(agentDir, '.env'),
+      `${EXPLICIT}=from-agent\n${FROM_FILE}=from-agent\n`,
+    );
+    const {loadDotenvFromCwd, loadDotenvForAgent} = await loadEnvs();
+    vi.spyOn(process, 'cwd').mockReturnValue(workingDir);
+
+    loadDotenvFromCwd();
+    loadDotenvForAgent('weather', workingDir);
+
+    expect(process.env[FROM_FILE]).toBe('from-agent');
+    expect(process.env[EXPLICIT]).toBe('from-shell');
   });
 });

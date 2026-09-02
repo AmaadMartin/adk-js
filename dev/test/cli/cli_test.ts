@@ -17,6 +17,7 @@ import {loadDotenvForAgent} from '../../src/utils/envs.js';
 
 vi.mock('../../src/utils/envs.js', () => ({
   loadDotenvForAgent: vi.fn(),
+  loadDotenvFromCwd: vi.fn(),
 }));
 
 vi.mock('../../src/server/adk_api_server', () => {
