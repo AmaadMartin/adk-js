@@ -26,6 +26,7 @@ export class RestApiTool extends BaseTool {
 
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
+  private defaultHeaders: Record<string, string> = {};
 
   constructor(
     name: string,
@@ -61,6 +62,21 @@ export class RestApiTool extends BaseTool {
   @experimental
   public configureCredentialKey(credentialKey: string) {
     this.credentialKey = credentialKey;
+  }
+
+  /**
+   * Sets the headers this tool sends when the request does not already carry
+   * them. The map replaces the map an earlier call set.
+   *
+   * A default header never replaces a header the request already carries, so
+   * it cannot clobber the `Authorization` header set from the exchanged
+   * credential.
+   *
+   * @param headers The default headers.
+   */
+  @experimental
+  public setDefaultHeaders(headers: Record<string, string>) {
+    this.defaultHeaders = headers;
   }
 
   @experimental
@@ -130,6 +146,10 @@ export class RestApiTool extends BaseTool {
       Object.assign(headers, providerHeaders);
     }
 
+    // The default headers are last: a default never replaces a header the
+    // request already carries.
+    addMissingHeaders(headers, this.defaultHeaders);
+
     try {
       const response = await globalThis.fetch(url, {
         method,
@@ -179,6 +199,24 @@ function encodePathParamValue(name: string, value: string): string {
     );
   }
   return encodeURIComponent(value);
+}
+
+/**
+ * Adds the headers the request does not carry yet, and leaves the ones it
+ * does. Names are compared without case, because `fetch` sends both spellings
+ * when a record holds two of one header name.
+ */
+function addMissingHeaders(
+  headers: Record<string, string>,
+  additions: Record<string, string> = {},
+): void {
+  const present = new Set(Object.keys(headers).map((key) => key.toLowerCase()));
+  for (const [key, value] of Object.entries(additions)) {
+    if (!present.has(key.toLowerCase())) {
+      headers[key] = value;
+      present.add(key.toLowerCase());
+    }
+  }
 }
 
 export function prepareRequestParams(
