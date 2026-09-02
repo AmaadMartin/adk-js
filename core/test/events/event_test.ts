@@ -9,7 +9,6 @@ import {
   createEvent,
   createEventActions,
   Event,
-  getEventMessage,
   getFunctionCalls,
   getFunctionResponses,
   getNodeName,
@@ -572,17 +571,7 @@ describe('createEvent message parameter', () => {
   });
 });
 
-describe('event message alias', () => {
-  it('returns the content by reference', () => {
-    const content: Content = {role: 'model', parts: [{text: 'hello'}]};
-    const event = createEvent({content});
-    expect(getEventMessage(event)).toBe(event.content);
-  });
-
-  it('returns undefined when there is no content', () => {
-    expect(getEventMessage(createEvent())).toBeUndefined();
-  });
-
+describe('setEventMessage', () => {
   it('sets a Content unchanged', () => {
     const event = createEvent();
     const content: Content = {role: 'model', parts: [{text: 'updated'}]};
@@ -625,7 +614,6 @@ describe('event message serialization', () => {
       transformToSnakeCaseEvent(event),
     );
     expect(restored.content!.parts![0].text).toBe('Hello!');
-    expect(getEventMessage(restored)!.parts![0].text).toBe('Hello!');
   });
 });
 

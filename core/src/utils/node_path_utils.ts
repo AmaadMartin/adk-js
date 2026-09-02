@@ -36,21 +36,22 @@ function runIdOf(segment: string): string {
   return index === -1 ? '' : segment.slice(index + 1);
 }
 
+/** Returns the last segment of `path`, or `''` when there is none. */
+function leafOf(path?: string): string {
+  const segments = segmentsOf(path);
+  return segments.length === 0 ? '' : segments[segments.length - 1];
+}
+
 /** Returns the leaf node name of `path`, without its run id. */
 export function nodeNameFromPath(path?: string): string {
-  const segments = segmentsOf(path);
-  if (segments.length === 0) {
-    return '';
-  }
-  const leaf = segments[segments.length - 1];
+  const leaf = leafOf(path);
   const index = leaf.lastIndexOf(RUN_ID_SEPARATOR);
   return index === -1 ? leaf : leaf.slice(0, index);
 }
 
 /** Returns the run id of the leaf segment of `path`, or `''` when absent. */
 export function runIdFromPath(path?: string): string {
-  const segments = segmentsOf(path);
-  return segments.length === 0 ? '' : runIdOf(segments[segments.length - 1]);
+  return runIdOf(leafOf(path));
 }
 
 /**

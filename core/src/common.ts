@@ -160,7 +160,6 @@ export type {CompactedEvent} from './events/compacted_event.js';
 export {
   createEvent,
   generateClientFunctionCallId,
-  getEventMessage,
   getFunctionCalls,
   getFunctionResponses,
   getNodeName,

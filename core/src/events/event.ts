@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Content,
-  ContentUnion,
-  FunctionCall,
-  FunctionResponse,
-} from '@google/genai';
+import {ContentUnion, FunctionCall, FunctionResponse} from '@google/genai';
 
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {LlmResponse} from '../models/llm_response.js';
@@ -271,16 +266,6 @@ export function createEvent(params: CreateEventParams = {}): Event {
         ? {...rest.nodeInfo, path: nodePath}
         : (rest.nodeInfo ?? {path: ''}),
   };
-}
-
-/**
- * Returns the user-facing message of the event: an alias for `event.content`,
- * returned by reference.
- *
- * Mirrors the `google/adk-python` `Event.message` getter.
- */
-export function getEventMessage(event: Event): Content | undefined {
-  return event.content;
 }
 
 /**

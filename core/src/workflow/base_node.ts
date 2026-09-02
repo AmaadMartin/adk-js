@@ -252,8 +252,6 @@ export function isBaseNode(value: unknown): value is BaseNode {
   );
 }
 
-export {isContent};
-
 /**
  * The sentinel node marking the entry point of a workflow graph. It is never
  * executed — the orchestrator seeds triggers for its successors directly.

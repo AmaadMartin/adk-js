@@ -9,7 +9,6 @@ import {
   createEventActions,
   DatabaseSessionService,
   Event,
-  getEventMessage,
   getNodeName,
   getParentNodeRunId,
   State,
@@ -193,7 +192,7 @@ describe('DatabaseSessionService', () => {
     const stored = loaded!.events[0];
     expect(getNodeName(stored)).toBe('child');
     expect(getParentNodeRunId(stored.nodeInfo)).toBe('1');
-    expect(getEventMessage(stored)!.parts![0].text).toBe('hi');
+    expect(stored.content!.parts![0].text).toBe('hi');
     expect(stored.actions.stateDelta).toEqual({k: 1});
     expect(stored.longRunningToolIds).toEqual(['aaa', 'zzz']);
   });
