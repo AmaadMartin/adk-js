@@ -112,6 +112,67 @@ reason and any grounding metadata. Tool-call fragments are accumulated across
 chunks, including providers that split one call's arguments over many deltas
 or that give every parallel call the same index.
 
+A tool call's arguments are read as strict JSON first. Some providers finalize
+a call whose payload is a Python dict literal, or whose object keys are
+unquoted, so both are accepted as fallbacks. When none of them parses, the
+error from the original JSON parse is thrown, because it names the position in
+the payload the provider actually sent.
+
+A Gemma 4 model reads tool results under the role `tool_responses` rather than
+`tool`. Its chat template does not recognise them under any other role, and the
+model then re-issues the same tool call. `LiteLlm` picks the role from the
+model name, so `ollama/gemma4:e2b` and `google/gemma-4-26B-A4B` need no
+configuration. Gemma 3 and earlier do not support tool use at all.
+
+`LiteLlm` reports `capabilities.outputSchemaAndTools` as `true` for every
+model. LiteLLM reconciles tools and `response_format` per provider: a provider
+with native support gets both passed through, and the rest are converted to a
+JSON tool call with `tool_choice` enforcement.
+
+## Prompt caching
+
+A provider that caches by marked prefix, such as Claude, caches only what the
+request marks. Set `cacheConfig` on the request and `LiteLlm` sends
+`cache_control_injection_points` naming two places to mark: the system
+instruction, which is the stable head of the prompt, and the last message,
+which caches the conversation so far.
+
+```ts
+import {LiteLlm, LlmRequest} from '@google/adk';
+
+const model = new LiteLlm({
+  model: 'anthropic/claude-sonnet-4',
+  apiBase: 'http://localhost:4000/v1',
+});
+
+const llmRequest: LlmRequest = {
+  contents: [{role: 'user', parts: [{text: 'Summarize the document.'}]}],
+  liveConnectConfig: {},
+  toolsDict: {},
+  cacheConfig: {cacheIntervals: 10, ttlSeconds: 3600, minTokens: 0},
+};
+
+let answer = '';
+for await (const response of model.generateContentAsync(llmRequest)) {
+  answer += response.content?.parts?.[0]?.text ?? '';
+}
+```
+
+A `ttlSeconds` of an hour or more asks for the hour-long cache, which costs
+more to write; anything shorter gets the default. `minTokens` gates on the
+previous turn's measured prompt size, which is unknown on the first turn, so
+that turn is always marked. Injection points you name yourself through
+`additionalArgs` are sent unchanged, because you know your provider better than
+an app-level config does.
+
+## Request attribution
+
+A Vertex AI or Gemini endpoint reached through LiteLLM receives ADK's
+`x-goog-api-client` and `user-agent` headers, so the call is attributable to
+ADK. Every other provider receives neither. A header you set yourself is kept:
+the ADK labels your value does not already carry are appended to it, rather
+than replacing it.
+
 ## Supplying your own client
 
 `LiteLlmClient` has two methods, one per mode. Implementing it replaces the
