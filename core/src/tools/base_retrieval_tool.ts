@@ -6,6 +6,7 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {BaseTool} from './base_tool.js';
 
 /**
@@ -48,7 +49,26 @@ export abstract class BaseRetrievalTool extends BaseTool {
   /** A unique symbol to identify ADK retrieval tool class. */
   readonly [BASE_RETRIEVAL_TOOL_SIGNATURE_SYMBOL] = true;
 
+  /**
+   * The `JSON_SCHEMA_FOR_FUNC_DECL` feature selects the declaration shape, and
+   * is read on every call so a host can toggle it without rebuilding the tool.
+   */
   override _getDeclaration(): FunctionDeclaration {
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.name,
+        description: this.description,
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'The query to retrieve.',
+            },
+          },
+        },
+      };
+    }
     return {
       name: this.name,
       description: this.description,

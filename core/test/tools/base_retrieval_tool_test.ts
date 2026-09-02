@@ -7,11 +7,17 @@
 import {
   BaseRetrievalTool,
   Context,
+  createSession,
+  FeatureName,
   FunctionTool,
+  InvocationContext,
   isBaseRetrievalTool,
   isBaseTool,
+  LlmAgent,
   LlmRequest,
+  PluginManager,
   RunAsyncToolRequest,
+  withTemporaryFeatureOverride,
 } from '@google/adk';
 import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
@@ -25,6 +31,21 @@ const EXPECTED_DECLARATION = {
     properties: {
       query: {
         type: Type.STRING,
+        description: 'The query to retrieve.',
+      },
+    },
+  },
+};
+
+/** The same declaration with `JSON_SCHEMA_FOR_FUNC_DECL` enabled. */
+const EXPECTED_JSON_SCHEMA_DECLARATION = {
+  name: 'test_retrieval',
+  description: 'A test retrieval tool.',
+  parametersJsonSchema: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
         description: 'The query to retrieve.',
       },
     },
@@ -51,10 +72,15 @@ function makeLlmRequest(): LlmRequest {
   };
 }
 
-// The inherited `processLlmRequest` only reads `llmRequest`; the context is
-// never touched, so an empty stand-in is enough.
 function makeToolContext(): Context {
-  return {} as Context;
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
 }
 
 describe('BaseRetrievalTool', () => {
@@ -120,6 +146,80 @@ describe('BaseRetrievalTool', () => {
     await expect(
       tool.processLlmRequest({llmRequest, toolContext}),
     ).rejects.toThrow('Duplicate tool name: test_retrieval');
+  });
+});
+
+describe('BaseRetrievalTool with JSON_SCHEMA_FOR_FUNC_DECL', () => {
+  it('declares a genai Schema while the feature is disabled', async () => {
+    const tool = new TestRetrievalTool();
+
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      false,
+      () => tool._getDeclaration(),
+    );
+
+    expect(declaration.name).toBe('test_retrieval');
+    expect(declaration.description).toBe('A test retrieval tool.');
+    expect(declaration.parametersJsonSchema).toBeUndefined();
+    expect(declaration.parameters?.type).toBe(Type.OBJECT);
+    expect(declaration.parameters?.properties).toHaveProperty('query');
+  });
+
+  it('declares a raw JSON schema while the feature is enabled', async () => {
+    const tool = new TestRetrievalTool();
+
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      true,
+      () => tool._getDeclaration(),
+    );
+
+    expect(declaration.parameters).toBeUndefined();
+    expect(declaration).toEqual(EXPECTED_JSON_SCHEMA_DECLARATION);
+  });
+
+  it('leaves the query optional in the JSON schema shape too', async () => {
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      true,
+      () => new TestRetrievalTool()._getDeclaration(),
+    );
+
+    expect(declaration.parametersJsonSchema).not.toHaveProperty('required');
+  });
+
+  it('reads the feature on every call, not at construction', async () => {
+    const tool = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      false,
+      () => new TestRetrievalTool(),
+    );
+
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      true,
+      () => tool._getDeclaration(),
+    );
+
+    expect(declaration).toEqual(EXPECTED_JSON_SCHEMA_DECLARATION);
+  });
+
+  it('sends the feature-selected shape to the model', async () => {
+    const tool = new TestRetrievalTool();
+    const llmRequest = makeLlmRequest();
+
+    await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      true,
+      () =>
+        tool.processLlmRequest({llmRequest, toolContext: makeToolContext()}),
+    );
+
+    expect(llmRequest.config?.tools).toEqual([
+      {functionDeclarations: [EXPECTED_JSON_SCHEMA_DECLARATION]},
+    ]);
+    expect(llmRequest.toolsDict['test_retrieval']).toBe(tool);
   });
 });
 
