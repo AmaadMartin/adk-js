@@ -60,3 +60,9 @@ ADK treats the pair as one setting: the request processor that reads
 `LlmAgent.outputSchema` always writes both. It also skips them for a task-mode
 agent, because that agent finishes through the `finish_task` tool and function
 calling is incompatible with a JSON response mime type.
+
+Never set `responseMimeType` to `application/json` without a
+`responseSchema`. The model then answers in JSON with nothing to answer
+against, and you only find out from its reply. ADK's own writer rejects that
+combination: it throws before it touches the request, so a request that fails
+validation keeps the config it had.

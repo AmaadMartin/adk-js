@@ -18,6 +18,7 @@ import {Content, FunctionDeclaration, Schema, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 import {
+  MISSING_OUTPUT_SCHEMA_MESSAGE,
   appendTools,
   findToolWithFunctionDeclarations,
   setOutputSchema,
@@ -209,6 +210,20 @@ describe('appendTools consolidation', () => {
     ).toHaveLength(3);
   });
 
+  it('consolidates across successive calls', () => {
+    const request = createRequest();
+
+    appendTools(request, [createStubTool('one')]);
+    appendTools(request, [createStubTool('two')]);
+
+    expect(request.config?.tools).toHaveLength(1);
+    expect(
+      findToolWithFunctionDeclarations(request)?.functionDeclarations.map(
+        (declaration) => declaration.name,
+      ),
+    ).toEqual(['one', 'two']);
+  });
+
   it('creates the config and the tool list when the request has neither', () => {
     const request = createBareRequest();
 
@@ -306,5 +321,34 @@ describe('setOutputSchema', () => {
 
     expect(request.config?.responseSchema).toBe(SCHEMA);
     expect(request.config?.responseMimeType).toBe('application/json');
+  });
+
+  it('throws and leaves the request untouched for an undefined schema', () => {
+    const request = createRequest();
+
+    expect(() => {
+      setOutputSchema(request, undefined);
+    }).toThrowError(MISSING_OUTPUT_SCHEMA_MESSAGE);
+    expect(request.config?.responseSchema).toBeUndefined();
+    expect(request.config?.responseMimeType).toBeUndefined();
+  });
+
+  it('throws and leaves the request untouched for a null schema', () => {
+    const request = createRequest();
+
+    expect(() => {
+      setOutputSchema(request, null);
+    }).toThrowError(MISSING_OUTPUT_SCHEMA_MESSAGE);
+    expect(request.config?.responseSchema).toBeUndefined();
+    expect(request.config?.responseMimeType).toBeUndefined();
+  });
+
+  it('does not create the config when it throws', () => {
+    const request = createBareRequest();
+
+    expect(() => {
+      setOutputSchema(request, undefined);
+    }).toThrowError(MISSING_OUTPUT_SCHEMA_MESSAGE);
+    expect(request.config).toBeUndefined();
   });
 });
