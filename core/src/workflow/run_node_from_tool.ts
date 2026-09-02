@@ -91,7 +91,7 @@ export async function runNodeFromToolContext({
     // not the node name doubled.
     nodePath: '',
     runId,
-    resumeInputs: collectResumeInputs(toolContext),
+    resumeInputs: toolContext.resumeInputs,
   });
 
   const childCtx = await executeChildNode({
@@ -137,18 +137,4 @@ async function forwardNodeEvents(
     channel.close();
     return error;
   }
-}
-
-/**
- * Collects resume inputs for the node from the tool context. When the tool call
- * is being resumed after a `RequestInput`, the user's response is threaded
- * through `toolConfirmation.payload` keyed by interrupt id (see the request-input
- * resume processor).
- */
-function collectResumeInputs(toolContext: Context): Record<string, unknown> {
-  const payload = toolContext.toolConfirmation?.payload;
-  if (payload && typeof payload === 'object') {
-    return payload as Record<string, unknown>;
-  }
-  return {};
 }
