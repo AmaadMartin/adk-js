@@ -72,7 +72,8 @@ export function asSafePartForLlm(artifact: Part, artifactName: string): Part {
       const decoded = decodedBuffer.toString('utf8');
       return {text: decoded};
     } catch {
-      // Fallback
+      // A buffer over Node's maximum string length cannot be decoded, so the
+      // size description below is all that is left to send.
     }
   }
 
