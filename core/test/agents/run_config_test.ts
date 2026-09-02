@@ -137,6 +137,13 @@ describe('createRunConfig with ADK_MAX_LLM_CALLS', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  it('warns and falls back to 500 for a whitespace-only env var', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    process.env.ADK_MAX_LLM_CALLS = '   ';
+    expect(createRunConfig().maxLlmCalls).toBe(500);
+    expect(warnSpy).toHaveBeenCalledOnce();
+  });
+
   it('accepts 0 from the env var and warns about the missing limit', () => {
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     process.env.ADK_MAX_LLM_CALLS = '0';
@@ -180,37 +187,14 @@ describe('createRunConfig audio transcription defaults', () => {
   });
 });
 
-describe('createRunConfig toolThreadPoolConfig', () => {
-  it('leaves the field unset when it is omitted', () => {
-    expect(createRunConfig().toolThreadPoolConfig).toBeUndefined();
-  });
-
-  it('defaults maxWorkers to 4', () => {
-    expect(createRunConfig({toolThreadPoolConfig: {}})).toMatchObject({
-      toolThreadPoolConfig: {maxWorkers: 4},
-    });
-  });
-
-  it('keeps an explicit maxWorkers', () => {
-    expect(
-      createRunConfig({toolThreadPoolConfig: {maxWorkers: 8}}),
-    ).toMatchObject({toolThreadPoolConfig: {maxWorkers: 8}});
-  });
-
-  it('does not mutate the caller params', () => {
-    const toolThreadPoolConfig: ToolThreadPoolConfig = {};
-    createRunConfig({toolThreadPoolConfig});
-    expect(toolThreadPoolConfig.maxWorkers).toBeUndefined();
-  });
-
-  it.each([0, -1])('throws when maxWorkers is %i', (maxWorkers) => {
-    expect(() => createRunConfig({toolThreadPoolConfig: {maxWorkers}})).toThrow(
-      'toolThreadPoolConfig.maxWorkers must be at least 1.',
+describe('createRunConfig parity fields', () => {
+  it('returns the tool thread pool config unchanged', () => {
+    const toolThreadPoolConfig: ToolThreadPoolConfig = {maxWorkers: 8};
+    expect(createRunConfig({toolThreadPoolConfig}).toolThreadPoolConfig).toBe(
+      toolThreadPoolConfig,
     );
   });
-});
 
-describe('createRunConfig parity fields', () => {
   it('returns customMetadata, getSessionConfig and modelInputContext as given', () => {
     const customMetadata = {tenant: 'acme'};
     const getSessionConfig = {numRecentEvents: 50};

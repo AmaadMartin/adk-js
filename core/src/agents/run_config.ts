@@ -26,16 +26,6 @@ const DEFAULT_MAX_LLM_CALLS = 500;
 const MAX_LLM_CALLS_ENV_VAR = 'ADK_MAX_LLM_CALLS';
 
 /**
- * A plain integer, with optional surrounding whitespace and an optional sign.
- * This matches what Python's `int()` accepts, so `'1.5'` is rejected instead of
- * being truncated the way `Number.parseInt` truncates it.
- */
-const INTEGER_PATTERN = /^\s*[+-]?\d+\s*$/;
-
-/** Default worker count for {@link ToolThreadPoolConfig}. */
-const DEFAULT_TOOL_THREAD_POOL_MAX_WORKERS = 4;
-
-/**
  * The streaming mode for the run config.
  */
 export enum StreamingMode {
@@ -51,15 +41,13 @@ export enum StreamingMode {
 /**
  * Configuration for running tools in a thread pool for live mode.
  *
- * Accepted and validated so that one configuration can drive several ADK SDKs,
- * but inert in adk-js: a tool callback is not structured-cloneable, so Node
- * cannot move it onto a worker thread. Tools always run on the main event loop.
+ * Accepted so that one configuration can drive several ADK SDKs, but inert in
+ * adk-js: a tool callback is not structured-cloneable, so Node cannot move it
+ * onto a worker thread. Tools always run on the main event loop, and nothing
+ * here reads this field.
  */
 export interface ToolThreadPoolConfig {
-  /**
-   * Maximum number of worker threads in the pool. Must be at least 1. Defaults
-   * to 4.
-   */
+  /** Maximum number of worker threads in the pool. adk-python defaults it to 4. */
   maxWorkers?: number;
 }
 
@@ -252,7 +240,6 @@ export interface RunConfig {
  * @param params - Optional partial {@link RunConfig} overriding defaults.
  * @returns A merged {@link RunConfig} object.
  * @throws {Error} When `params.maxLlmCalls` exceeds `Number.MAX_SAFE_INTEGER`.
- * @throws {Error} When `params.toolThreadPoolConfig.maxWorkers` is below 1.
  */
 export function createRunConfig(params: Partial<RunConfig> = {}) {
   return {
@@ -269,9 +256,6 @@ export function createRunConfig(params: Partial<RunConfig> = {}) {
     maxLlmCalls: validateMaxLlmCalls(
       params.maxLlmCalls ?? resolveDefaultMaxLlmCalls(),
     ),
-    toolThreadPoolConfig: resolveToolThreadPoolConfig(
-      params.toolThreadPoolConfig,
-    ),
   };
 }
 
@@ -286,26 +270,15 @@ function resolveDefaultMaxLlmCalls(): number {
   if (!envValue) {
     return DEFAULT_MAX_LLM_CALLS;
   }
-  if (!INTEGER_PATTERN.test(envValue)) {
+  // Number('  ') is 0, so a blank value must not read as a limit of zero.
+  const parsed = envValue.trim() ? Number(envValue) : Number.NaN;
+  if (!Number.isInteger(parsed)) {
     logger.warn(
       `Invalid value for ${MAX_LLM_CALLS_ENV_VAR} env var: ${envValue}. Using default ${DEFAULT_MAX_LLM_CALLS}.`,
     );
     return DEFAULT_MAX_LLM_CALLS;
   }
-  return Number(envValue);
-}
-
-function resolveToolThreadPoolConfig(
-  config?: ToolThreadPoolConfig,
-): ToolThreadPoolConfig | undefined {
-  if (!config) {
-    return undefined;
-  }
-  const maxWorkers = config.maxWorkers ?? DEFAULT_TOOL_THREAD_POOL_MAX_WORKERS;
-  if (maxWorkers < 1) {
-    throw new Error('toolThreadPoolConfig.maxWorkers must be at least 1.');
-  }
-  return {...config, maxWorkers};
+  return parsed;
 }
 
 function validateMaxLlmCalls(value: number): number {
