@@ -9,10 +9,33 @@ import {FunctionTool} from '../tools/function_tool.js';
 import {deprecated} from '../utils/deprecated.js';
 import {BaseAgent} from './base_agent.js';
 import {InvocationContext} from './invocation_context.js';
-import {isLlmAgent} from './llm_agent.js';
+import {InstructionProvider, isLlmAgent} from './llm_agent.js';
 import {ReadonlyContext} from './readonly_context.js';
 
 const TASK_COMPLETED_TOOL_NAME = 'task_completed';
+
+const TASK_COMPLETED_INSTRUCTION = `If you finished the user's request according to its description, call the ${TASK_COMPLETED_TOOL_NAME} function to exit so the next agents can take over. When calling this function, do not generate any text other than the function call.`;
+
+/**
+ * Appends a suffix to an agent instruction and keeps a provider callable.
+ *
+ * Concatenating onto an `InstructionProvider` replaces it with its own source
+ * text, so a provider is wrapped in a provider that awaits the original.
+ *
+ * @param instruction The instruction to append to.
+ * @param suffix The text to append.
+ * @returns The instruction with the suffix appended.
+ */
+function appendInstruction(
+  instruction: string | InstructionProvider,
+  suffix: string,
+): string | InstructionProvider {
+  if (typeof instruction === 'string') {
+    return instruction + suffix;
+  }
+  return async (context: ReadonlyContext) =>
+    (await instruction(context)) + suffix;
+}
 
 /**
  * A unique symbol to identify ADK agent classes.
@@ -95,9 +118,10 @@ export class SequentialAgent extends BaseAgent {
               execute: () => 'Task completion signaled.',
             }),
           );
-          subAgent.instruction += `If you finished the user's request according to its description, call the ${
-            TASK_COMPLETED_TOOL_NAME
-          } function to exit so the next agents can take over. When calling this function, do not generate any text other than the function call.`;
+          subAgent.instruction = appendInstruction(
+            subAgent.instruction,
+            TASK_COMPLETED_INSTRUCTION,
+          );
         }
       }
     }
