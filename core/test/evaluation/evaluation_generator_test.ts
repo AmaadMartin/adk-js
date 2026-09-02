@@ -44,6 +44,7 @@ import {
   normalizeLiveTranscriptions,
   PluginManager,
   Runner,
+  SequentialAgent,
   Session,
   setLogger,
   UserSimulator,
@@ -2196,16 +2197,56 @@ describe('generateInferencesFromRootAgentLive', () => {
     expect(llm.connections[0]?.closed).toBe(true);
   });
 
-  it('refuses a workflow root', async () => {
+  it('drives a workflow root and grades every turn', async () => {
+    const userSimulator = new ScriptedUserSimulator(['turn one', 'turn two']);
+
+    const invocations = await generateInferencesFromRootAgentLive({
+      rootAgent: new Workflow({
+        name: 'live_workflow',
+        edges: [['START', createLiveAgent([LIVE_TEXT_TURN, LIVE_TEXT_TURN])]],
+      }),
+      userSimulator,
+    });
+
+    expect(invocations).toHaveLength(2);
+    expect(
+      invocations.map((invocation) => invocation.userContent.parts?.[0]?.text),
+    ).toEqual(['turn one', 'turn two']);
+    expect(
+      invocations.map(
+        (invocation) => invocation.finalResponse?.parts?.[0]?.text,
+      ),
+    ).toEqual(['sunny', 'sunny']);
+  });
+
+  it('records the instructions each workflow agent was shown', async () => {
+    const invocations = await generateInferencesFromRootAgentLive({
+      rootAgent: new Workflow({
+        name: 'live_workflow',
+        edges: [['START', createLiveAgent([LIVE_TEXT_TURN])]],
+      }),
+      userSimulator: new ScriptedUserSimulator(['hello']),
+    });
+
+    const invocation = invocations[0];
+    if (invocation === undefined) {
+      expect.fail('the live run produced no invocation');
+    }
+    expect(
+      invocation.appDetails?.agentDetails?.[LIVE_AGENT_NAME]?.instructions,
+    ).toContain(LIVE_INSTRUCTION);
+  });
+
+  it('refuses a root with no live path', async () => {
     await expect(
       generateInferencesFromRootAgentLive({
-        rootAgent: new Workflow({
-          name: 'eval_workflow',
-          edges: [['START', new LlmAgent({name: 'node_agent'})]],
+        rootAgent: new SequentialAgent({
+          name: 'eval_sequence',
+          subAgents: [new LlmAgent({name: 'step_agent'})],
         }),
         userSimulator: new ScriptedUserSimulator(['hello']),
       }),
-    ).rejects.toThrow('eval_workflow');
+    ).rejects.toThrow('eval_sequence');
   });
 });
 

@@ -1,10 +1,11 @@
 # Generating eval inferences over a live connection
 
-`generateInferencesFromRootAgentLive` drives an agent through a whole simulated
-conversation on a bidirectional (live) connection and returns the same
-gradable `Invocation[]` the non-live generator returns. Reach for it when the
-conversation you want to grade is audio, and for nothing else: the non-live
-`generateInferencesFromRootAgent` is simpler and covers every text case.
+`generateInferencesFromRootAgentLive` drives an `LlmAgent` or a `Workflow`
+through a whole simulated conversation on a bidirectional (live) connection. It
+returns the same gradable `Invocation[]` the non-live generator returns. Reach
+for it when the conversation you want to grade is audio, and for nothing else:
+the non-live `generateInferencesFromRootAgent` is simpler and covers every text
+case.
 
 ## Introduction
 
@@ -13,6 +14,10 @@ as a transcription on an event that carries no content. An evaluator grades
 text, so an audio conversation is ungradable until something folds those
 transcriptions back into content. That, plus owning the connection the
 conversation runs on, is what this path adds.
+
+`EvalLiveSession` has one driver per root shape. An `LlmAgent` runs through its
+own live flow. A `Workflow` runs as a node, which drives the agents in its graph
+over the same connection.
 
 The connection outlives the conversation, which is the structural difference
 from the non-live path. There, one call to `runner.runAsync` is one turn: it
@@ -123,6 +128,43 @@ connection. The driver does not run them again. This differs from adk-python,
 whose eval driver runs the tools a second time; adk-js's live flow already does
 the whole job.
 
+## Driving a workflow root
+
+Pass a `Workflow` as `rootAgent` and the eval run drives its graph. Each agent
+in the graph answers over the one live connection, so the transcript reads as a
+single conversation.
+
+```typescript
+import {LlmAgent, Workflow, generateInferencesFromRootAgentLive} from '@google/adk';
+
+const triage = new LlmAgent({
+  name: 'triage',
+  model: 'gemini-live-2.5-flash-native-audio',
+  instruction: 'Answer in one short sentence.',
+});
+
+const invocations = await generateInferencesFromRootAgentLive({
+  rootAgent: new Workflow({name: 'support', edges: [['START', triage]]}),
+  userSimulator: new ScriptedUserSimulator(['what is the weather?']),
+});
+```
+
+A workflow serves several agents on one stream, so the driver records one
+request per agent up front and fires `afterModelCallback` with the context of
+the agent that authored each event. An autorater therefore sees each agent's own
+instructions and tools.
+
+Only the agents in the top-level `graph.nodes` are recorded. An agent nested in
+a sub-workflow or behind a wrapper node is not, so its events fire no
+`afterModelCallback`. A workflow built from `dynamicEntry` has no graph and
+records nothing. If recording one agent fails, the driver logs a warning, skips
+that agent and runs the conversation anyway.
+
+A call that ends the agent and hands off — `finish_task`, `transfer_to_agent`
+or `task_completed` — opens no tool round, so the `turnComplete` after it ends
+the turn. One ordinary call is enough to hold the turn open, even alongside a
+handoff call.
+
 ## Shutdown
 
 `generateInferencesFromRootAgentLive` closes the live session and the runner on
@@ -141,9 +183,9 @@ from `close`.
 
 ## Failure modes
 
-- A root that is not an `LlmAgent` raises an `InputValidationError` before any
-  service or connection is built. adk-js drives a live run through the
-  `LlmAgent` live flow, so a workflow root has no live path at all.
+- A root that is neither an `LlmAgent` nor a `Workflow` raises an
+  `InputValidationError` before any service or connection is built. A
+  `SequentialAgent` and a custom `BaseAgent` have no live path in adk-js.
 - A model that never completes a turn within `liveTimeoutSeconds` (default
   `DEFAULT_LIVE_TIMEOUT_SECONDS`, 300) fails the run with a timeout error.
 - `EvalLiveSession.start` called twice throws, and `close` called before

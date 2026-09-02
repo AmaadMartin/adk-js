@@ -9,15 +9,14 @@ import {FunctionTool} from '../tools/function_tool.js';
 import {deprecated} from '../utils/deprecated.js';
 import {logger} from '../utils/logger.js';
 import {BaseAgent, BaseAgentState} from './base_agent.js';
+import {TASK_COMPLETED_FUNCTION_CALL_NAME} from './framework_function_calls.js';
 import {appendInstruction} from './instructions.js';
 import {InvocationContext} from './invocation_context.js';
 import {isLlmAgent} from './llm_agent.js';
 import {ReadonlyContext} from './readonly_context.js';
 
-const TASK_COMPLETED_TOOL_NAME = 'task_completed';
-
 const COMPLETION_INSTRUCTION = `If you finished the user's request according to its description, call the ${
-  TASK_COMPLETED_TOOL_NAME
+  TASK_COMPLETED_FUNCTION_CALL_NAME
 } function to exit so the next agents can take over. When calling this function, do not generate any text other than the function call.`;
 
 /**
@@ -209,13 +208,13 @@ export class SequentialAgent extends BaseAgent {
           new ReadonlyContext(context),
         );
         const taskCompletedToolAlreadyAdded = agentTools.some(
-          (tool) => tool.name === TASK_COMPLETED_TOOL_NAME,
+          (tool) => tool.name === TASK_COMPLETED_FUNCTION_CALL_NAME,
         );
 
         if (!taskCompletedToolAlreadyAdded) {
           subAgent.tools.push(
             new FunctionTool({
-              name: TASK_COMPLETED_TOOL_NAME,
+              name: TASK_COMPLETED_FUNCTION_CALL_NAME,
               description: `Signals that the model has successfully completed the user's question or task.`,
               execute: () => 'Task completion signaled.',
             }),

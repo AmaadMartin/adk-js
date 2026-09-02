@@ -37,6 +37,16 @@ export const ADK_FRAMEWORK_FUNCTION_CALL_NAME = 'adk_framework';
 export const TRANSFER_TO_AGENT_FUNCTION_CALL_NAME = 'transfer_to_agent';
 
 /**
+ * The built-in tool a sub-agent of a `SequentialAgent` calls to end its own
+ * turn, so the next agent in the sequence takes over.
+ *
+ * `SequentialAgent` registers the tool under this name. The live eval driver
+ * reads it from here too, so a rename cannot leave the driver matching a name
+ * nothing emits.
+ */
+export const TASK_COMPLETED_FUNCTION_CALL_NAME = 'task_completed';
+
+/**
  * Names reserved for the framework's own control-plane calls.
  *
  * These are questions the framework asks — approve this, authenticate that,
