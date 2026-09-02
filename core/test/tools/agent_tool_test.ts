@@ -28,6 +28,7 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
       appName: config?.appName,
       sessionService: config?.sessionService,
       runAsync: vi.fn(),
+      close: vi.fn(),
     })),
   };
 });
@@ -79,6 +80,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -147,6 +149,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -202,6 +205,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -285,6 +289,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -341,6 +346,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 
@@ -391,6 +397,7 @@ describe('AgentTool', () => {
           appName: config?.appName,
           sessionService: config?.sessionService,
           runAsync: mockRunAsync,
+          close: vi.fn(),
         }) as unknown as Runner,
     );
 
@@ -440,6 +447,7 @@ describe('AgentTool', () => {
           appName: config?.appName,
           sessionService: config?.sessionService,
           runAsync: mockRunAsync,
+          close: vi.fn(),
         }) as unknown as Runner,
     );
 
@@ -491,6 +499,7 @@ describe('AgentTool', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     });
 

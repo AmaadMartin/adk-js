@@ -477,11 +477,26 @@ export class Runner {
       );
     } finally {
       span.end();
-      const toolsets = isBaseAgent(this.agent)
-        ? getAllToolsets(this.agent)
-        : [];
-      await Promise.allSettled(toolsets.map((t) => t.close()));
+      await this.close();
     }
+  }
+
+  /**
+   * Releases the toolsets held by this runner's agent and its sub-agents.
+   *
+   * `runAsync` already calls this when its generator completes or is disposed.
+   * It is public so that a caller which builds a runner for one nested run —
+   * an `AgentTool` — can release those toolsets at a point it chooses. A runner
+   * is reusable across runs, so every call closes the toolsets again rather
+   * than latching after the first.
+   *
+   * A toolset that fails to close does not stop the others and does not reject
+   * this promise. Plugins and the session service are left alone: an
+   * `AgentTool` borrows both from the caller, which still owns them.
+   */
+  async close(): Promise<void> {
+    const toolsets = isBaseAgent(this.agent) ? getAllToolsets(this.agent) : [];
+    await Promise.allSettled(toolsets.map((t) => t.close()));
   }
 
   /**
