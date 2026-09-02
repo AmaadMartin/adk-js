@@ -1122,7 +1122,7 @@ describe('InMemorySessionService', () => {
       expect(stored?.state).toEqual({count: 1});
     });
 
-    it('keeps two distinct events that share an id', async () => {
+    it('revises the stored event when a later one reuses its id', async () => {
       const appName = 'app';
       const userId = 'user';
       const session = await service.createSession({appName, userId});
@@ -1149,7 +1149,37 @@ describe('InMemorySessionService', () => {
         userId,
         sessionId: session.id,
       });
-      expect(stored?.events.map((e) => e.author)).toEqual(['user', 'agent']);
+      expect(stored?.events.map((e) => e.author)).toEqual(['agent']);
+      expect(session.events.map((e) => e.author)).toEqual(['agent']);
+    });
+
+    it('keeps the stored events in step with the caller session', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      const first = createEvent({id: 'e1', timestamp: 1000, author: 'user'});
+      const second = createEvent({id: 'e2', timestamp: 2000, author: 'agent'});
+
+      await service.appendEvent({session, event: first});
+      await service.appendEvent({session, event: second});
+      await service.appendEvent({
+        session,
+        event: createEvent({id: 'e1', timestamp: 3000, author: 'compactor'}),
+      });
+
+      const stored = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      expect(stored?.events.map((e) => e.author)).toEqual([
+        'compactor',
+        'agent',
+      ]);
+      expect(session.events.map((e) => e.author)).toEqual([
+        'compactor',
+        'agent',
+      ]);
     });
   });
 

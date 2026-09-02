@@ -228,14 +228,30 @@ export abstract class BaseSessionService {
     if (event.actions?.stateDelta) {
       applyStateDelta(session.state, event.actions.stateDelta);
     }
-    const index = session.events.findIndex((e) => e.id === event.id);
-    if (index >= 0) {
-      session.events[index] = event;
-    } else {
-      session.events.push(event);
-    }
+    upsertEvent(session.events, event);
 
     return event;
+  }
+}
+
+/**
+ * Appends an event to an event list, replacing an entry that already carries
+ * the same id.
+ *
+ * An event id names one logical event, so an event that reuses a stored id
+ * revises that entry instead of adding a second one. Every event list a
+ * session service keeps follows this rule, so a caller's session and the
+ * stored session hold the same events.
+ *
+ * @param events The event list to write into.
+ * @param event The event to append or revise.
+ */
+export function upsertEvent(events: Event[], event: Event): void {
+  const index = events.findIndex((e) => e.id === event.id);
+  if (index >= 0) {
+    events[index] = event;
+  } else {
+    events.push(event);
   }
 }
 

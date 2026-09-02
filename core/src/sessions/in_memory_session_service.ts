@@ -22,6 +22,7 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
+  upsertEvent,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
 
@@ -310,8 +311,9 @@ export class InMemorySessionService extends BaseSessionService {
     const storageSession: Session = this.sessions[appName][userId][sessionId];
     // A broadcast can deliver one event to several references of the same
     // session, as the same object or as an equal copy, and applying its state
-    // delta twice would double-count it. Two distinct events that merely share
-    // an id are not equal, so both are kept.
+    // delta twice would double-count it. An event that reuses a stored id with
+    // new content is a revision, not a re-delivery, so it is not equal and
+    // `upsertEvent` replaces the stored entry.
     if (
       storageSession.events.some((e) => e.id === event.id && isEqual(e, event))
     ) {
@@ -322,7 +324,7 @@ export class InMemorySessionService extends BaseSessionService {
     session.lastUpdateTime = event.timestamp;
 
     if (storageSession !== session) {
-      storageSession.events.push(event);
+      upsertEvent(storageSession.events, event);
       storageSession.lastUpdateTime = event.timestamp;
     }
 
