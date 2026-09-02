@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content} from '@google/genai';
+import {cloneDeep, isEqual} from 'lodash-es';
+
 import {getActiveEvents} from '../../context/compaction_utils.js';
 import {Event} from '../../events/event.js';
 import {LlmRequest} from '../../models/llm_request.js';
@@ -62,8 +65,43 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       );
     }
 
+    addModelInputContextToUserContent(
+      llmRequest,
+      invocationContext.userContent,
+      invocationContext.runConfig?.modelInputContext,
+    );
+
     return;
   }
+}
+
+/**
+ * Inserts the run's transient context immediately before the user's message.
+ *
+ * The request holds a deep copy, so the caller's array is never aliased into
+ * it, and nothing here reaches the session. Without a matching user message the
+ * context goes to the front of the request.
+ */
+function addModelInputContextToUserContent(
+  llmRequest: LlmRequest,
+  userContent: Content | undefined,
+  modelInputContext: Content[] | undefined,
+): void {
+  if (!modelInputContext?.length) {
+    return;
+  }
+
+  let insertIndex = 0;
+  if (userContent) {
+    for (let i = llmRequest.contents.length - 1; i >= 0; i--) {
+      if (isEqual(llmRequest.contents[i], userContent)) {
+        insertIndex = i;
+        break;
+      }
+    }
+  }
+
+  llmRequest.contents.splice(insertIndex, 0, ...cloneDeep(modelInputContext));
 }
 
 export const CONTENT_REQUEST_PROCESSOR = new ContentRequestProcessor();
