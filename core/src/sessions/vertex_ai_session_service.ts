@@ -64,6 +64,9 @@ const HTTP_BAD_REQUEST = 400;
  */
 const WORKFLOW_CUSTOM_METADATA_KEY = '_workflow';
 
+/** The only characters the Agent Engine Sessions API accepts in a session id. */
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
 /**
  * Checks if the given URI is a Vertex AI session service URI.
  */
@@ -81,6 +84,71 @@ export function isVertexAiConnectionString(uri?: string): boolean {
 export function quoteFilterLiteral(value: string): string {
   const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `"${escaped}"`;
+}
+
+/**
+ * Reduces a full session resource name
+ * (`projects/P/locations/L/reasoningEngines/E/sessions/S`) to the short id `S`
+ * the Sessions API expects, and returns any other value unchanged.
+ *
+ * The Agent Engine REST API hands callers the full resource name, so a caller
+ * that passes it straight back would otherwise address
+ * `reasoningEngines/E/sessions/projects/P/.../sessions/S`.
+ *
+ * @throws if the name embeds a reasoning engine other than `expectedEngineId`,
+ *     which would otherwise query a different engine's session.
+ */
+export function extractShortSessionId(
+  sessionId: string,
+  expectedEngineId?: string,
+): string {
+  const parts = sessionId.split('/');
+  if (parts.length < 2 || parts[parts.length - 2] !== 'sessions') {
+    return sessionId;
+  }
+  const embeddedEngineId =
+    parts.length >= 4 && parts[parts.length - 4] === 'reasoningEngines'
+      ? parts[parts.length - 3]
+      : undefined;
+  if (
+    expectedEngineId &&
+    embeddedEngineId &&
+    embeddedEngineId !== expectedEngineId
+  ) {
+    throw new Error(
+      `Session resource name mismatch: session belongs to reasoningEngine ` +
+        `'${embeddedEngineId}', but service is configured for ` +
+        `'${expectedEngineId}'.`,
+    );
+  }
+  return parts[parts.length - 1];
+}
+
+/**
+ * Rejects a session id that would escape its URL path segment.
+ *
+ * @throws if `sessionId` does not match {@link SESSION_ID_PATTERN}.
+ */
+export function validateSessionId(sessionId: string): void {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    throw new Error(
+      `Invalid sessionId '${sessionId}': must match ` +
+        `${SESSION_ID_PATTERN.source}.`,
+    );
+  }
+}
+
+/**
+ * Reduces a caller-supplied session id to its short form and rejects it when it
+ * cannot be safely interpolated into a resource name.
+ *
+ * The two steps are always applied in this order: validating first would reject
+ * every legitimate full resource name.
+ */
+function resolveSessionId(sessionId: string, engineId: string): string {
+  const shortId = extractShortSessionId(sessionId, engineId);
+  validateSessionId(shortId);
+  return shortId;
 }
 
 export interface VertexAiSessionServiceOptions {
@@ -185,13 +253,16 @@ export class VertexAiSessionService extends BaseSessionService {
     }
 
     const reasoningEngineId = this.getReasoningEngineId(appName);
+    const shortSessionId = sessionId
+      ? resolveSessionId(sessionId, reasoningEngineId)
+      : undefined;
     const filteredState = state ? trimTempState(state) : undefined;
     let apiResponse = await this.sessions.createInternal({
       name: `reasoningEngines/${reasoningEngineId}`,
       userId: userId,
       config: {
         ...(filteredState ? {sessionState: filteredState} : {}),
-        ...(sessionId ? {sessionId} : {}),
+        ...(shortSessionId ? {sessionId: shortSessionId} : {}),
         ...(ttl != null ? {ttl} : {}),
         ...(expireTime != null ? {expireTime} : {}),
       },
@@ -239,7 +310,10 @@ export class VertexAiSessionService extends BaseSessionService {
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`;
+    // Outside the try/catch: a rejected id is a caller error, not an API
+    // failure, so it must not be logged as one nor swallowed as NOT_FOUND.
+    const shortSessionId = resolveSessionId(sessionId, reasoningEngineId);
+    const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`;
 
     try {
       let getSessionResponse: VertexAiSession | undefined;
@@ -274,12 +348,12 @@ export class VertexAiSessionService extends BaseSessionService {
 
       if (sessionObj.userId !== userId) {
         throw new Error(
-          `Session ${sessionId} does not belong to user ${userId}.`,
+          `Session ${shortSessionId} does not belong to user ${userId}.`,
         );
       }
 
       const session = createSession({
-        id: sessionId,
+        id: shortSessionId,
         appName,
         userId,
         state: sessionObj.sessionState,
@@ -410,6 +484,7 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
+    const shortSessionId = resolveSessionId(sessionId, reasoningEngineId);
 
     // A session may only be deleted by the user it belongs to. getSession
     // already enforces this and throws when the stored session's userId does
@@ -419,7 +494,7 @@ export class VertexAiSessionService extends BaseSessionService {
     const session = await this.getSession({
       appName,
       userId,
-      sessionId,
+      sessionId: shortSessionId,
       config: {numRecentEvents: 0},
     });
     if (!session) {
@@ -427,7 +502,7 @@ export class VertexAiSessionService extends BaseSessionService {
     }
 
     await this.sessions.delete({
-      name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
+      name: `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`,
     });
   }
 
@@ -438,6 +513,9 @@ export class VertexAiSessionService extends BaseSessionService {
     await super.appendEvent({session, event});
     session.lastUpdateTime = event.timestamp;
 
+    // The session object already carries a short id, so validate it without
+    // extracting.
+    validateSessionId(session.id);
     const reasoningEngineId = this.getReasoningEngineId(session.appName);
 
     const customMetadata: Record<string, unknown> = {...event.customMetadata};
