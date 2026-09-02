@@ -255,7 +255,6 @@ export interface RunConfig {
  * @throws {Error} When `params.toolThreadPoolConfig.maxWorkers` is below 1.
  */
 export function createRunConfig(params: Partial<RunConfig> = {}) {
-  validateStreamingMode(params.streamingMode);
   return {
     saveInputBlobsAsArtifacts: false,
     supportCfc: false,
@@ -307,14 +306,6 @@ function resolveToolThreadPoolConfig(
     throw new Error('toolThreadPoolConfig.maxWorkers must be at least 1.');
   }
   return {...config, maxWorkers};
-}
-
-function validateStreamingMode(streamingMode?: StreamingMode): void {
-  if (streamingMode === StreamingMode.BIDI) {
-    throw new Error(
-      'StreamingMode.BIDI is not supported; use StreamingMode.SSE.',
-    );
-  }
 }
 
 function validateMaxLlmCalls(value: number): number {
