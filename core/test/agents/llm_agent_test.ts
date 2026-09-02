@@ -1490,7 +1490,7 @@ describe('LlmAgent toolset load failures', () => {
     });
     const invocationContext = new InvocationContext({
       invocationId: 'inv_toolset',
-      session: createSession({appName: 'app', userId: 'user'}),
+      session: createSession({id: 'sess_toolset', appName: 'app'}),
       agent,
       pluginManager: new PluginManager(),
     });
