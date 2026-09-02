@@ -38,14 +38,20 @@ const OPAQUE_KEYS: ReadonlySet<string> = new Set([
   'final_session_state',
   'finalSessionState',
   // A `Session` carried on an eval case result holds maps whose keys are user
-  // data: session state keys, artifact file names, and an opaque agent state
-  // snapshot. Renaming those keys corrupts them.
+  // data: session state keys, artifact file names, an opaque agent state
+  // snapshot, a node's structured output and the model's custom metadata.
+  // Renaming those keys corrupts them. `PRESERVE_KEYS_CAMEL_CASE` in
+  // `events/event.ts` is the same set for the event converter; `route` needs
+  // no entry, because its value is a string or an array of strings.
   'state_delta',
   'stateDelta',
   'artifact_delta',
   'artifactDelta',
   'agent_state',
   'agentState',
+  'custom_metadata',
+  'customMetadata',
+  'output',
 ]);
 
 /** Narrows an unknown value to a plain (non-array) record. */

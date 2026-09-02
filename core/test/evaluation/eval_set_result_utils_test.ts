@@ -129,6 +129,9 @@ function recordedSession(): Session {
         invocationId: 'invocation_1',
         author: 'home_assistant',
         timestamp: TIMESTAMP,
+        customMetadata: {trace_id: 'abc', 'my_file.png': 1},
+        output: {node_output_key: 'lights_on'},
+        route: 'next_node',
         actions: {
           stateDelta: {user_name: 'Ada'},
           artifactDelta: {'my_file.png': 1},
@@ -349,14 +352,20 @@ describe('parseEvalSetResultJson with every declared field', () => {
     if (!parsedSession) {
       expect.fail('the round-trip dropped the recorded session');
     }
-    const actions = parsedSession.events[0].actions;
+    const parsedEvent = parsedSession.events[0];
 
     expect(parsedSession.appName).toBe(APP_NAME);
     expect(parsedSession.userId).toBe(USER_ID);
     expect(parsedSession.lastUpdateTime).toBe(TIMESTAMP);
     expect(parsedSession.state).toEqual({user_name: 'Ada'});
-    expect(actions.stateDelta).toEqual({user_name: 'Ada'});
-    expect(actions.artifactDelta).toEqual({'my_file.png': 1});
-    expect(actions.agentState).toEqual({last_node: 'lights'});
+    expect(parsedEvent.actions.stateDelta).toEqual({user_name: 'Ada'});
+    expect(parsedEvent.actions.artifactDelta).toEqual({'my_file.png': 1});
+    expect(parsedEvent.actions.agentState).toEqual({last_node: 'lights'});
+    expect(parsedEvent.customMetadata).toEqual({
+      trace_id: 'abc',
+      'my_file.png': 1,
+    });
+    expect(parsedEvent.output).toEqual({node_output_key: 'lights_on'});
+    expect(parsedEvent.route).toBe('next_node');
   });
 });
