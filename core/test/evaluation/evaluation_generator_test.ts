@@ -8,44 +8,61 @@ import {
   App,
   BasePlugin,
   Context,
+  convertEventsToEvalInvocations,
+  createEvent,
   CreateEventParams,
+  EvalCase,
   EvalRow,
+  EvalSet,
   Event,
+  generateInferencesFromAgentModule,
+  generateInferencesFromRootAgent,
+  generateResponses,
+  generateResponsesFromSession,
+  getAllToolCalls,
+  getLogger,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
+  Invocation,
   InvocationContext,
+  InvocationEvent,
+  isInvocationEvents,
+  LiveRequest,
+  LiveRequestQueue,
   LlmAgent,
   LlmRequest,
   LlmResponse,
+  Logger,
   NextUserMessage,
+  normalizeLiveTranscriptions,
   PluginManager,
   Runner,
   Session,
+  setLogger,
   UserSimulator,
   UserSimulatorStatus,
-  convertEventsToEvalInvocations,
-  createEvent,
-  generateInferencesFromAgentModule,
-  generateInferencesFromRootAgent,
-  generateResponsesFromSession,
 } from '@google/adk';
 import {Content, Part} from '@google/genai';
 import {mkdtemp, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 import {
   buildEvalRunnerConfig,
   collectEventsByInvocationId,
   generateInferencesForSingleUserInvocation,
+  generateInferencesForSingleUserInvocationLive,
   getAppDetailsByInvocationId,
+  LiveEventQueue,
   processQueryWithSession,
+  sendAudioToLive,
   toInstructionText,
 } from '../../src/evaluation/evaluation_generator.js';
 import {RequestIntercepterPlugin} from '../../src/evaluation/request_intercepter_plugin.js';
+import {isEvent} from '../../src/events/event.js';
 
 import {ScriptedLlm} from './test_helpers.js';
 
@@ -53,6 +70,12 @@ const TESTDATA_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   'testdata',
 );
+
+/** Bytes the generator sends per realtime message. */
+const AUDIO_CHUNK_BYTES = 16000;
+
+const TIMEOUT_WARNING =
+  'Timed out waiting for model turn completion in live mode.';
 
 function fixtureModulePath(fileName: string): string {
   return pathToFileURL(path.join(TESTDATA_DIR, fileName)).href;
@@ -102,6 +125,21 @@ class ScriptedUserSimulator implements UserSimulator {
 /** A plugin the caller owns, used to assert how eval merges plugin lists. */
 class SpyPlugin extends BasePlugin {}
 
+/** Captures the warnings the generator emits, in place of the ADK logger. */
+class RecordingLogger implements Logger {
+  readonly warnings: string[] = [];
+
+  log(): void {}
+  debug(): void {}
+  info(): void {}
+  error(): void {}
+  setLogLevel(): void {}
+
+  warn(...args: unknown[]): void {
+    this.warnings.push(args.join(' '));
+  }
+}
+
 function createScriptedAgent(name: string, replies: string[]): LlmAgent {
   return new LlmAgent({name, model: new ScriptedLlm(replies)});
 }
@@ -136,6 +174,37 @@ async function interceptRequest(
   return llmResponse.customMetadata ?? {};
 }
 
+/** Returns everything sent to a live queue, in order, and closes the queue. */
+async function drainLiveRequests(
+  queue: LiveRequestQueue,
+): Promise<LiveRequest[]> {
+  queue.close();
+  const requests: LiveRequest[] = [];
+  for await (const request of queue) {
+    if (request.close) {
+      break;
+    }
+    requests.push(request);
+  }
+  return requests;
+}
+
+/** Returns the invocation's recorded events, failing if it holds none. */
+function intermediateEvents(invocation: Invocation): InvocationEvent[] {
+  const intermediateData = invocation.intermediateData;
+  if (intermediateData === undefined || !isInvocationEvents(intermediateData)) {
+    expect.fail('the invocation carries no invocation events');
+  }
+  return intermediateData.invocationEvents;
+}
+
+function audioContent(base64Audio: string, mimeType = 'audio/pcm'): Content {
+  return {
+    role: 'user',
+    parts: [{inlineData: {mimeType, data: base64Audio}}],
+  };
+}
+
 describe('convertEventsToEvalInvocations', () => {
   it('returns nothing for no events', () => {
     expect(convertEventsToEvalInvocations([])).toEqual([]);
@@ -153,9 +222,7 @@ describe('convertEventsToEvalInvocations', () => {
     expect(invocations[0].invocationId).toBe('inv1');
     expect(invocations[0].userContent.parts?.[0].text).toBe('Hello');
     expect(invocations[0].finalResponse?.parts?.[0].text).toBe('Hi there!');
-    expect(
-      invocations[0].intermediateData?.invocationEvents ?? [],
-    ).toHaveLength(0);
+    expect(intermediateEvents(invocations[0])).toHaveLength(0);
   });
 
   it('takes the user timestamp as the invocation timestamp', () => {
@@ -179,6 +246,18 @@ describe('convertEventsToEvalInvocations', () => {
     expect(invocation.appDetails).toBeUndefined();
   });
 
+  it('skips a user event that carries no content', () => {
+    const events = [
+      createEvent({author: 'user', invocationId: 'inv1', timestamp: 4242}),
+      buildEvent('agent', [{text: 'Unprompted'}], 'inv1'),
+    ];
+
+    const invocation = convertEventsToEvalInvocations(events)[0];
+
+    expect(invocation.userContent).toEqual({parts: []});
+    expect(invocation.creationTimestamp).toBe(0);
+  });
+
   it('keeps the text response over a trailing audio-only event', () => {
     const events = [
       buildEvent('user', [{text: 'Hi'}], 'inv1'),
@@ -193,7 +272,7 @@ describe('convertEventsToEvalInvocations', () => {
     const invocation = convertEventsToEvalInvocations(events)[0];
 
     expect(invocation.finalResponse?.parts?.[0].text).toBe('Hello there.');
-    const intermediate = invocation.intermediateData?.invocationEvents ?? [];
+    const intermediate = intermediateEvents(invocation);
     expect(intermediate).toHaveLength(1);
     expect(intermediate[0].content?.parts?.[0].inlineData?.data).toBe(
       'ZmFrZS1hdWRpbw==',
@@ -214,11 +293,23 @@ describe('convertEventsToEvalInvocations', () => {
     const invocation = convertEventsToEvalInvocations(events)[0];
 
     expect(invocation.finalResponse?.parts?.[0].text).toBe('Hello there.');
-    const intermediate = invocation.intermediateData?.invocationEvents ?? [];
+    const intermediate = intermediateEvents(invocation);
     expect(intermediate).toHaveLength(1);
     expect(intermediate[0].content?.parts?.[0].inlineData?.data).toBe(
       'ZmFrZS1hdWRpbw==',
     );
+  });
+
+  it('replaces an earlier text response with a later one', () => {
+    const events = [
+      buildEvent('user', [{text: 'Hi'}], 'inv1'),
+      buildEvent('agent', [{text: 'First.'}], 'inv1'),
+      buildEvent('agent', [{text: 'Second.'}], 'inv1'),
+    ];
+
+    expect(
+      convertEventsToEvalInvocations(events)[0].finalResponse?.parts?.[0].text,
+    ).toBe('Second.');
   });
 
   it('reports a tool-only turn with no final response', () => {
@@ -235,7 +326,7 @@ describe('convertEventsToEvalInvocations', () => {
 
     expect(invocation.userContent.parts?.[0].text).toBe('what is the weather?');
     expect(invocation.finalResponse).toBeUndefined();
-    const intermediate = invocation.intermediateData?.invocationEvents ?? [];
+    const intermediate = intermediateEvents(invocation);
     expect(intermediate).toHaveLength(1);
     expect(intermediate[0].author).toBe('agent');
     expect(intermediate[0].content?.parts?.[0].functionCall?.name).toBe(
@@ -259,7 +350,7 @@ describe('convertEventsToEvalInvocations', () => {
     expect(invocation.finalResponse?.parts?.[0].text).toBe(
       'It is sunny in SF.',
     );
-    const intermediate = invocation.intermediateData?.invocationEvents ?? [];
+    const intermediate = intermediateEvents(invocation);
     expect(intermediate).toHaveLength(1);
     expect(intermediate[0].content?.parts?.[0].functionCall?.name).toBe(
       'get_weather',
@@ -300,11 +391,9 @@ describe('convertEventsToEvalInvocations', () => {
     const invocation = convertEventsToEvalInvocations(events)[0];
 
     expect(invocation.finalResponse?.parts?.[0].text).toBe('All done.');
-    expect(
-      (invocation.intermediateData?.invocationEvents ?? []).map(
-        (e) => e.author,
-      ),
-    ).toEqual(['root_agent', 'sub_agent_1', 'sub_agent_1', 'sub_agent_2']);
+    expect(intermediateEvents(invocation).map((event) => event.author)).toEqual(
+      ['root_agent', 'sub_agent_1', 'sub_agent_1', 'sub_agent_2'],
+    );
   });
 
   it('keeps the last final response and demotes the earlier one', () => {
@@ -317,7 +406,7 @@ describe('convertEventsToEvalInvocations', () => {
     const invocation = convertEventsToEvalInvocations(events)[0];
 
     expect(invocation.finalResponse?.parts?.[0].text).toBe('Second response');
-    const intermediate = invocation.intermediateData?.invocationEvents ?? [];
+    const intermediate = intermediateEvents(invocation);
     expect(intermediate).toHaveLength(1);
     expect(intermediate[0].author).toBe('agent1');
     expect(intermediate[0].content?.parts?.[0].text).toBe('First response');
@@ -332,9 +421,9 @@ describe('convertEventsToEvalInvocations', () => {
       }),
     ];
 
-    const invocationEvents =
-      convertEventsToEvalInvocations(events)[0].intermediateData
-        ?.invocationEvents ?? [];
+    const invocationEvents = intermediateEvents(
+      convertEventsToEvalInvocations(events)[0],
+    );
 
     expect(invocationEvents).toHaveLength(1);
     expect(invocationEvents[0].content).toBeUndefined();
@@ -349,9 +438,9 @@ describe('convertEventsToEvalInvocations', () => {
       buildEvent('agent', [{text: 'Here you go.'}], 'inv1'),
     ];
 
-    const invocationEvents =
-      convertEventsToEvalInvocations(events)[0].intermediateData
-        ?.invocationEvents ?? [];
+    const invocationEvents = intermediateEvents(
+      convertEventsToEvalInvocations(events)[0],
+    );
 
     expect(invocationEvents).toHaveLength(1);
     expect(invocationEvents[0]).toMatchObject({groundingMetadata});
@@ -365,8 +454,7 @@ describe('convertEventsToEvalInvocations', () => {
     ];
 
     expect(
-      convertEventsToEvalInvocations(events)[0].intermediateData
-        ?.invocationEvents ?? [],
+      intermediateEvents(convertEventsToEvalInvocations(events)[0]),
     ).toHaveLength(0);
   });
 
@@ -392,9 +480,9 @@ describe('convertEventsToEvalInvocations', () => {
       buildEvent('agent', [{text: 'All done.'}], 'inv1'),
     ];
 
-    const intermediate =
-      convertEventsToEvalInvocations(events)[0].intermediateData
-        ?.invocationEvents ?? [];
+    const intermediate = intermediateEvents(
+      convertEventsToEvalInvocations(events)[0],
+    );
 
     expect(intermediate).toHaveLength(1);
     expect(intermediate[0].author).toBe('agent');
@@ -415,18 +503,17 @@ describe('convertEventsToEvalInvocations', () => {
           },
         ],
         'inv1',
-        {actions: {skipSummarization: true, stateDelta: {}, artifactDelta: {}}},
+        {actions: {skipSummarization: true}},
       ),
     ];
 
-    const intermediate =
-      convertEventsToEvalInvocations(events)[0].intermediateData
-        ?.invocationEvents ?? [];
+    const invocation = convertEventsToEvalInvocations(events)[0];
 
-    expect(intermediate).toHaveLength(1);
-    expect(intermediate[0].content?.parts?.[0].functionCall?.name).toBe(
-      'execute_sql',
-    );
+    expect(intermediateEvents(invocation)).toHaveLength(1);
+    // A tool call dropped here silently zeroes the tool trajectory score.
+    expect(
+      getAllToolCalls(invocation.intermediateData).map((call) => call.name),
+    ).toEqual(['execute_sql']);
   });
 
   it('attaches the app details of the matching invocation', () => {
@@ -730,6 +817,21 @@ describe('buildEvalRunnerConfig', () => {
     expect(config.app?.rootAgent).toBe(subAgent);
     expect(app.rootAgent).toBe(fullRoot);
   });
+
+  it('names the merged app after the session, not after the app', () => {
+    const rootAgent = createScriptedAgent('root_agent', ['hi']);
+    const app = new App({name: 'my_app', rootAgent});
+
+    const config = buildEvalRunnerConfig({
+      rootAgent,
+      appName: 'session_app',
+      app,
+      internalEvalPlugins: [],
+      sessionService,
+    });
+
+    expect(config.app?.name).toBe('session_app');
+  });
 });
 
 describe('generateInferencesForSingleUserInvocation', () => {
@@ -761,6 +863,13 @@ describe('generateInferencesForSingleUserInvocation', () => {
     expect(events[0].content).toBe(userContent);
     expect(events[0].invocationId).toBe(events[1].invocationId);
     expect(events.filter((event) => event.author === 'user')).toHaveLength(1);
+
+    const reloaded = await sessionService.getSession({
+      appName: 'eval_app',
+      userId: 'test_user',
+      sessionId: session.id,
+    });
+    expect(reloaded?.events.length).toBeGreaterThan(0);
   });
 });
 
@@ -816,6 +925,21 @@ describe('generateInferencesFromRootAgent', () => {
 
     expect(invocations).toHaveLength(2);
     expect(invocations[0].userContent.parts?.[0].text).toBe('message 1');
+  });
+
+  it('hands the simulator events that are still branded events', async () => {
+    const branded: boolean[] = [];
+    const simulator = new ScriptedUserSimulator(['message 1'], (events) => {
+      branded.push(...events.map(isEvent));
+    });
+
+    await generateInferencesFromRootAgent({
+      rootAgent: createScriptedAgent('agent', ['reply 1']),
+      userSimulator: simulator,
+    });
+
+    expect(branded.length).toBeGreaterThan(0);
+    expect(branded.every((isBranded) => isBranded)).toBe(true);
   });
 
   it('calls resetFunc once, before the run', async () => {
@@ -1057,7 +1181,7 @@ describe('generateInferencesFromAgentModule', () => {
         userSimulator: new ScriptedUserSimulator([]),
       }),
     ).rejects.toThrow(
-      `Module '${modulePath}' does not expose agent.root_agent.`,
+      `Module '${modulePath}' does not expose agent.rootAgent.`,
     );
   });
 
@@ -1067,7 +1191,7 @@ describe('generateInferencesFromAgentModule', () => {
         modulePath: fixtureModulePath('uncallable_reset_agent.ts'),
         userSimulator: new ScriptedUserSimulator([]),
       }),
-    ).rejects.toThrow('agent.reset_data must be callable when provided.');
+    ).rejects.toThrow('agent.resetData must be callable when provided.');
   });
 
   it('rejects a sub-agent name under a workflow root, which holds none', async () => {
@@ -1088,6 +1212,468 @@ describe('generateInferencesFromAgentModule', () => {
         agentName: 'missing_agent',
       }),
     ).rejects.toThrow("Sub-Agent 'missing_agent' not found.");
+  });
+});
+
+describe('generateResponses', () => {
+  function buildEvalSet(evalIds: string[]): EvalSet {
+    return {
+      evalSetId: 'test_set',
+      creationTimestamp: 0,
+      evalCases: evalIds.map((evalId) => ({evalId, creationTimestamp: 0})),
+    };
+  }
+
+  it('repeats each case and builds a fresh simulator per repeat', async () => {
+    const created: ScriptedUserSimulator[] = [];
+    const gradedCases: EvalCase[] = [];
+
+    const results = await generateResponses({
+      evalSet: buildEvalSet(['case_0', 'case_1']),
+      agentModulePath: fixtureModulePath('root_agent.ts'),
+      repeatNum: 2,
+      createUserSimulator: (evalCase) => {
+        gradedCases.push(evalCase);
+        const simulator = new ScriptedUserSimulator(['hello']);
+        created.push(simulator);
+        return simulator;
+      },
+    });
+
+    expect(results.map((result) => result.evalCase.evalId)).toEqual([
+      'case_0',
+      'case_1',
+    ]);
+    expect(results[0].responses).toHaveLength(2);
+    expect(results[1].responses).toHaveLength(2);
+    expect(results[0].responses[0][0].finalResponse?.parts?.[0].text).toBe(
+      'from the root agent',
+    );
+    expect(created).toHaveLength(4);
+    expect(new Set(created).size).toBe(4);
+    expect(gradedCases.map((evalCase) => evalCase.evalId)).toEqual([
+      'case_0',
+      'case_0',
+      'case_1',
+      'case_1',
+    ]);
+  });
+
+  it('repeats three times when the caller asks for no count', async () => {
+    const results = await generateResponses({
+      evalSet: buildEvalSet(['case_0']),
+      agentModulePath: fixtureModulePath('root_agent.ts'),
+      createUserSimulator: () => new ScriptedUserSimulator([]),
+    });
+
+    expect(results[0].responses).toHaveLength(3);
+  });
+
+  it('runs each case in the session its sessionInput asks for', async () => {
+    const {recordedSessions} =
+      await import('./testdata/session_recording_agent.js');
+    recordedSessions.length = 0;
+    const evalSet: EvalSet = {
+      evalSetId: 'test_set',
+      creationTimestamp: 0,
+      evalCases: [
+        {
+          evalId: 'case_0',
+          creationTimestamp: 0,
+          sessionInput: {
+            appName: 'pinned_app',
+            userId: 'pinned_user',
+            sessionId: 'pinned_session',
+          },
+        },
+      ],
+    };
+
+    await generateResponses({
+      evalSet,
+      agentModulePath: fixtureModulePath('session_recording_agent.ts'),
+      repeatNum: 1,
+      createUserSimulator: () => new ScriptedUserSimulator(['hello']),
+    });
+
+    expect(recordedSessions).toEqual([
+      {
+        appName: 'pinned_app',
+        userId: 'pinned_user',
+        sessionId: 'pinned_session',
+      },
+    ]);
+  });
+
+  it('evaluates the named sub-agent of every case', async () => {
+    const results = await generateResponses({
+      evalSet: buildEvalSet(['case_0']),
+      agentModulePath: fixtureModulePath('root_agent.ts'),
+      repeatNum: 1,
+      agentName: 'fixture_sub_agent',
+      createUserSimulator: () => new ScriptedUserSimulator(['hello']),
+    });
+
+    expect(results[0].responses[0][0].finalResponse?.parts?.[0].text).toBe(
+      'from the sub agent',
+    );
+  });
+});
+
+describe('normalizeLiveTranscriptions', () => {
+  function transcriptionEvent(
+    author: string,
+    text: string,
+    options: {partial?: boolean; isInput?: boolean} = {},
+  ): Event {
+    return createEvent({
+      author,
+      invocationId: 'inv1',
+      partial: options.partial,
+      inputTranscription: options.isInput ? {text} : undefined,
+      outputTranscription: options.isInput ? undefined : {text},
+    });
+  }
+
+  it('turns an output transcription into model content', () => {
+    const normalized = normalizeLiveTranscriptions([
+      transcriptionEvent('agent', 'Hello there.'),
+    ]);
+
+    expect(normalized[0].content).toEqual({
+      role: 'model',
+      parts: [{text: 'Hello there.'}],
+    });
+    expect(normalized[0].outputTranscription).toBeUndefined();
+  });
+
+  it('turns an input transcription into user content', () => {
+    const normalized = normalizeLiveTranscriptions([
+      transcriptionEvent('user', 'Kick off a task.', {isInput: true}),
+    ]);
+
+    expect(normalized[0].content).toEqual({
+      role: 'user',
+      parts: [{text: 'Kick off a task.'}],
+    });
+    expect(normalized[0].inputTranscription).toBeUndefined();
+  });
+
+  it('leaves a partial transcription alone', () => {
+    const partial = transcriptionEvent('agent', 'Hel', {partial: true});
+
+    const normalized = normalizeLiveTranscriptions([partial]);
+
+    expect(normalized[0]).toBe(partial);
+    expect(normalized[0].content).toBeUndefined();
+    expect(normalized[0].outputTranscription?.text).toBe('Hel');
+  });
+
+  it('leaves an event that already carries content alone', () => {
+    const audio = buildEvent(
+      'agent',
+      [{inlineData: {mimeType: 'audio/pcm', data: 'YQ=='}}],
+      'inv1',
+    );
+
+    expect(normalizeLiveTranscriptions([audio])[0]).toBe(audio);
+  });
+
+  it('leaves an event with no content and no transcription alone', () => {
+    const empty = createEvent({author: 'agent', invocationId: 'inv1'});
+
+    expect(normalizeLiveTranscriptions([empty])[0]).toBe(empty);
+  });
+
+  it('leaves an empty transcription alone', () => {
+    const empty = transcriptionEvent('agent', '');
+
+    expect(normalizeLiveTranscriptions([empty])[0]).toBe(empty);
+  });
+
+  it('returns events that still satisfy isEvent', () => {
+    const normalized = normalizeLiveTranscriptions([
+      transcriptionEvent('agent', 'Hello there.'),
+    ]);
+
+    expect(isEvent(normalized[0])).toBe(true);
+  });
+});
+
+describe('sendAudioToLive', () => {
+  it('brackets the audio with one activity start and one activity end', async () => {
+    const queue = new LiveRequestQueue();
+
+    sendAudioToLive(queue, audioContent('MTIzNA=='));
+
+    const requests = await drainLiveRequests(queue);
+    expect(requests.filter((request) => request.activityStart)).toHaveLength(1);
+    expect(requests.filter((request) => request.activityEnd)).toHaveLength(1);
+    expect(requests[0].activityStart).toBeDefined();
+    expect(requests[requests.length - 1].activityEnd).toBeDefined();
+    expect(requests.filter((request) => request.blob)).toHaveLength(1);
+  });
+
+  it('splits audio larger than one chunk, preserving the bytes', async () => {
+    const audio = Buffer.alloc(AUDIO_CHUNK_BYTES * 2 + 8000, 7);
+    const queue = new LiveRequestQueue();
+
+    sendAudioToLive(queue, audioContent(audio.toString('base64')));
+
+    const blobs = (await drainLiveRequests(queue)).flatMap((request) =>
+      request.blob ? [request.blob] : [],
+    );
+    expect(blobs).toHaveLength(3);
+    const sent = Buffer.concat(
+      blobs.map((blob) => Buffer.from(blob.data ?? '', 'base64')),
+    );
+    expect(sent.equals(audio)).toBe(true);
+  });
+
+  it('carries the source mime type on every chunk', async () => {
+    const audio = Buffer.alloc(AUDIO_CHUNK_BYTES + 1, 1);
+    const queue = new LiveRequestQueue();
+
+    sendAudioToLive(
+      queue,
+      audioContent(audio.toString('base64'), 'audio/pcm;rate=16000'),
+    );
+
+    const blobs = (await drainLiveRequests(queue)).flatMap((request) =>
+      request.blob ? [request.blob] : [],
+    );
+    expect(blobs).toHaveLength(2);
+    expect(blobs.map((blob) => blob.mimeType)).toEqual([
+      'audio/pcm;rate=16000',
+      'audio/pcm;rate=16000',
+    ]);
+  });
+
+  it('brackets a turn that carries no parts', async () => {
+    const queue = new LiveRequestQueue();
+
+    sendAudioToLive(queue, {role: 'user'});
+
+    const requests = await drainLiveRequests(queue);
+    expect(requests.map((request) => Object.keys(request)[0])).toEqual([
+      'activityStart',
+      'activityEnd',
+    ]);
+  });
+
+  it('skips a part that carries no audio', async () => {
+    const queue = new LiveRequestQueue();
+
+    sendAudioToLive(queue, {
+      role: 'user',
+      parts: [{text: 'no audio here'}, {inlineData: {mimeType: 'audio/pcm'}}],
+    });
+
+    const requests = await drainLiveRequests(queue);
+    expect(requests.filter((request) => request.blob)).toHaveLength(0);
+    expect(requests).toHaveLength(2);
+  });
+});
+
+describe('LiveEventQueue', () => {
+  it('returns what was pushed and empties itself', () => {
+    const queue = new LiveEventQueue();
+    const event = buildEvent('agent', [{text: 'a'}], 'inv1');
+
+    queue.push(event);
+
+    expect(queue.drain()).toEqual([event]);
+    expect(queue.drain()).toEqual([]);
+  });
+});
+
+describe('generateInferencesForSingleUserInvocationLive', () => {
+  let recordingLogger: RecordingLogger;
+  let previousLogger: Logger;
+
+  beforeEach(() => {
+    recordingLogger = new RecordingLogger();
+    previousLogger = getLogger();
+    setLogger(recordingLogger);
+  });
+
+  afterEach(() => {
+    setLogger(previousLogger);
+  });
+
+  it('yields the user event first and sends a text turn unchanged', async () => {
+    const liveRequestQueue = new LiveRequestQueue();
+    const eventQueue = new LiveEventQueue();
+    const userMessage: Content = {role: 'user', parts: [{text: 'User query'}]};
+    const agentEvent = buildEvent('agent', [{text: 'Agent response'}], 'inv1');
+
+    const turn = generateInferencesForSingleUserInvocationLive({
+      liveRequestQueue,
+      eventQueue,
+      userMessage,
+      currentInvocationId: 'inv1',
+      turnComplete: Promise.resolve(),
+    });
+
+    const first = await turn.next();
+    expect(first.value?.author).toBe('user');
+    expect(first.value?.content).toBe(userMessage);
+    expect(first.value?.invocationId).toBe('inv1');
+
+    eventQueue.push(agentEvent);
+    const second = await turn.next();
+    expect(second.value).toBe(agentEvent);
+    expect((await turn.next()).done).toBe(true);
+
+    const requests = await drainLiveRequests(liveRequestQueue);
+    expect(requests).toEqual([{content: userMessage}]);
+  });
+
+  it('streams a message carrying audio while keeping its full content', async () => {
+    const liveRequestQueue = new LiveRequestQueue();
+    const eventQueue = new LiveEventQueue();
+    const userMessage: Content = {
+      role: 'user',
+      parts: [
+        {text: 'User query'},
+        {inlineData: {mimeType: 'audio/pcm', data: 'ZmFrZS1hdWRpbw=='}},
+      ],
+    };
+
+    const turn = generateInferencesForSingleUserInvocationLive({
+      liveRequestQueue,
+      eventQueue,
+      userMessage,
+      currentInvocationId: 'inv1',
+      turnComplete: Promise.resolve(),
+    });
+
+    const first = await turn.next();
+    expect(first.value?.content?.parts).toHaveLength(2);
+    await turn.next();
+
+    const requests = await drainLiveRequests(liveRequestQueue);
+    expect(requests.filter((request) => request.content)).toHaveLength(0);
+    expect(requests.filter((request) => request.activityStart)).toHaveLength(1);
+    const blobs = requests.flatMap((request) =>
+      request.blob ? [request.blob] : [],
+    );
+    expect(blobs).toHaveLength(1);
+    expect(blobs[0].data).toBe('ZmFrZS1hdWRpbw==');
+  });
+
+  it('sends a turn that carries no parts as content', async () => {
+    const liveRequestQueue = new LiveRequestQueue();
+    const userMessage: Content = {role: 'user'};
+
+    const turn = generateInferencesForSingleUserInvocationLive({
+      liveRequestQueue,
+      eventQueue: new LiveEventQueue(),
+      userMessage,
+      currentInvocationId: 'inv1',
+      turnComplete: Promise.resolve(),
+    });
+
+    await turn.next();
+    expect((await turn.next()).done).toBe(true);
+
+    expect(await drainLiveRequests(liveRequestQueue)).toEqual([
+      {content: userMessage},
+    ]);
+  });
+
+  it('does not yield an event queued for another invocation', async () => {
+    const liveRequestQueue = new LiveRequestQueue();
+    const eventQueue = new LiveEventQueue();
+    const mine = buildEvent('agent', [{text: 'mine'}], 'inv1');
+    const theirs = buildEvent('agent', [{text: 'theirs'}], 'inv2');
+
+    const turn = generateInferencesForSingleUserInvocationLive({
+      liveRequestQueue,
+      eventQueue,
+      userMessage: {role: 'user', parts: [{text: 'hi'}]},
+      currentInvocationId: 'inv1',
+      turnComplete: Promise.resolve(),
+    });
+
+    await turn.next();
+    eventQueue.push(mine);
+    eventQueue.push(theirs);
+
+    const yielded: Event[] = [];
+    for await (const event of turn) {
+      yielded.push(event);
+    }
+
+    expect(yielded).toEqual([mine]);
+  });
+
+  it('yields transcription events as they arrived', async () => {
+    const liveRequestQueue = new LiveRequestQueue();
+    const eventQueue = new LiveEventQueue();
+    const partial = createEvent({
+      author: 'agent',
+      invocationId: 'inv1',
+      outputTranscription: {text: 'Hello '},
+      partial: true,
+    });
+    const consolidated = createEvent({
+      author: 'agent',
+      invocationId: 'inv1',
+      outputTranscription: {text: 'Hello there.'},
+    });
+
+    const turn = generateInferencesForSingleUserInvocationLive({
+      liveRequestQueue,
+      eventQueue,
+      userMessage: {role: 'user', parts: [{text: 'hi'}]},
+      currentInvocationId: 'inv1',
+      turnComplete: Promise.resolve(),
+    });
+
+    await turn.next();
+    eventQueue.push(partial);
+    eventQueue.push(consolidated);
+
+    const yielded: Event[] = [];
+    for await (const event of turn) {
+      yielded.push(event);
+    }
+
+    expect(yielded).toEqual([partial, consolidated]);
+  });
+
+  it('fails and warns when the model never completes its turn', async () => {
+    const liveRequestQueue = new LiveRequestQueue();
+    const turn = generateInferencesForSingleUserInvocationLive({
+      liveRequestQueue,
+      eventQueue: new LiveEventQueue(),
+      userMessage: {role: 'user', parts: [{text: 'hi'}]},
+      currentInvocationId: 'inv1',
+      turnComplete: new Promise<void>(() => {}),
+      liveTimeoutSeconds: 0.01,
+    });
+
+    await turn.next();
+
+    await expect(turn.next()).rejects.toThrow(TIMEOUT_WARNING);
+    expect(recordingLogger.warnings).toEqual([TIMEOUT_WARNING]);
+  });
+
+  it('does not warn when the turn completes in time', async () => {
+    const liveRequestQueue = new LiveRequestQueue();
+    const turn = generateInferencesForSingleUserInvocationLive({
+      liveRequestQueue,
+      eventQueue: new LiveEventQueue(),
+      userMessage: {role: 'user', parts: [{text: 'hi'}]},
+      currentInvocationId: 'inv1',
+      turnComplete: Promise.resolve(),
+      liveTimeoutSeconds: 30,
+    });
+
+    await turn.next();
+    expect((await turn.next()).done).toBe(true);
+    expect(recordingLogger.warnings).toEqual([]);
   });
 });
 
@@ -1135,11 +1721,11 @@ describe('processQueryWithSession and generateResponsesFromSession', () => {
 
     expect(results).toHaveLength(1);
     const [first, second] = results[0];
-    expect(first['actualToolUse']).toEqual([
-      {toolName: 'roll_die', toolInput: {sides: 6}},
+    expect(first['actual_tool_use']).toEqual([
+      {tool_name: 'roll_die', tool_input: {sides: 6}},
     ]);
     expect(first['response']).toBe('I rolled a 4.');
-    expect(second['actualToolUse']).toEqual([]);
+    expect(second['actual_tool_use']).toEqual([]);
     expect(second['response']).toBe('You are welcome.');
   });
 
@@ -1148,7 +1734,7 @@ describe('processQueryWithSession and generateResponsesFromSession', () => {
       {query: 'Roll a 20 sided dice'},
     ]);
 
-    expect(results[0]['actualToolUse']).toEqual([]);
+    expect(results[0]['actual_tool_use']).toEqual([]);
     expect(results[0]['response']).toBeUndefined();
   });
 
@@ -1168,7 +1754,7 @@ describe('processQueryWithSession and generateResponsesFromSession', () => {
       {query: 'Roll a 6 sided dice'},
     ]);
 
-    expect(results[0]['actualToolUse']).toEqual([]);
+    expect(results[0]['actual_tool_use']).toEqual([]);
     expect(results[0]['response']).toBe('I rolled a 4.');
   });
 

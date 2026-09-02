@@ -20,11 +20,15 @@ user turn, this is the answer, these are the steps taken to reach it.
 `convertEventsToEvalInvocations` performs that grouping, keyed on the
 invocation id the runner assigns.
 
-There are two ways in. `generateInferencesFromRootAgent` runs the agent now: a
-`UserSimulator` supplies each user turn and decides when the conversation ends,
-so a multi-turn eval case needs no recorded script.
-`convertEventsToEvalInvocations` works from events you already have, so a
-session recorded in production can be graded without running anything.
+There are several ways in. `generateInferencesFromRootAgent` runs the agent
+now: a `UserSimulator` supplies each user turn and decides when the
+conversation ends, so a multi-turn eval case needs no recorded script.
+`generateInferencesFromAgentModule` loads the agent from a module path first,
+then does the same. `generateResponses` runs every case of an `EvalSet`,
+several times each. `convertEventsToEvalInvocations` works from events you
+already have, so a session recorded in production can be graded without running
+anything, and `generateResponsesFromSession` annotates eval rows from a
+recorded session file.
 
 The generator also records what each agent was _shown_. Autorater metrics grade
 against the instructions and the tool declarations that reached the model, and
@@ -84,7 +88,29 @@ const invocations = await generateInferencesFromRootAgent({
 ```
 
 The simulator receives a deep copy of the conversation so far on every call, so
-it cannot disturb the record the generator keeps.
+it cannot disturb the record the generator keeps. A simulator is stateful
+across the turns it drives, so create one per run.
+
+## Running a whole eval set
+
+`generateResponses` runs every case of an `EvalSet`. A model answers the same
+prompt differently on each run, so it repeats each case — three times by
+default — and returns one `EvalCaseResponses` per case, holding the invocations
+of every repeat. It calls the `createUserSimulator` factory once per repeat,
+because a simulator cannot be reused.
+
+```typescript
+import {generateResponses} from '@google/adk';
+
+const perCase = await generateResponses({
+  evalSet,
+  agentModulePath: '/path/to/my_agent.js',
+  repeatNum: 5,
+  createUserSimulator: (evalCase) => new ScriptedUserSimulator(turns(evalCase)),
+});
+
+// perCase[0].responses[2] -> the invocations of the third run of the first case
+```
 
 ## Grading a recorded session
 
@@ -124,6 +150,9 @@ Pinning `initialSession.sessionId` reuses a session that already exists rather
 than replacing it, so you can prepare state and history and evaluate against
 them. `initialSession.state` then applies only when the session is created.
 
+The artifact and memory services work the same way: the run uses the ones you
+pass, and creates in-memory ones otherwise.
+
 ## Loading the agent from a module
 
 `generateInferencesFromAgentModule` imports a module and evaluates the agent it
@@ -145,6 +174,44 @@ const invocations = await generateInferencesFromAgentModule({
 The module may also export `agent.resetData`, a function the generator calls
 once before the run to clear agent-owned state.
 
+## Annotating an eval dataset
+
+`generateResponsesFromSession` reads a `Session` from a JSON file and fills in
+what the agent did, without running anything. Each row it returns is a copy
+carrying two added keys, `actual_tool_use` and `response`.
+
+```typescript
+import {generateResponsesFromSession} from '@google/adk';
+
+const dataset = [[{query: 'roll a die'}]];
+const annotated = await generateResponsesFromSession(
+  '/tmp/session.json',
+  dataset,
+);
+
+annotated[0][0]['actual_tool_use']; // [{tool_name: 'roll_die', tool_input: {sides: 6}}]
+annotated[0][0]['response']; // the agent's final text
+```
+
+The keys stay snake_case because they are the eval-data format adk-python
+writes and reads. A query the session never saw yields an empty
+`actual_tool_use` and an undefined `response`.
+
+## Live mode
+
+Two pieces of the live (bidi) path are available. `sendAudioToLive` streams a
+turn's audio to a `LiveRequestQueue` as realtime input, in 16000-byte chunks
+bracketed by one activity start and one activity end.
+`generateInferencesForSingleUserInvocationLive` runs one turn against a live
+connection and yields the events of that invocation, failing after
+`DEFAULT_LIVE_TIMEOUT_SECONDS` if the model never reports its turn complete.
+
+`normalizeLiveTranscriptions` rewrites the transcription events a native-audio
+model produces into text content events, so an evaluator has text to grade.
+
+The driver that wires these to a live connection is not ported. Building it
+needs `Runner.runLive` support that adk-js does not have yet.
+
 ## Failure modes
 
 - A module exposing neither `app` nor `rootAgent` raises an
@@ -154,3 +221,5 @@ once before the run to clear agent-owned state.
 - A simulator that returns `SUCCESS` without a message, or a message without
   `SUCCESS`, raises an `Error`. `validateNextUserMessage` performs this check
   and is exported, so a simulator can apply it to itself.
+- A dataset row whose `query` is not a string raises an
+  `InputValidationError`.

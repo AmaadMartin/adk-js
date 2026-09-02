@@ -243,9 +243,14 @@ export {
   convertEventsToEvalInvocations,
   generateInferencesFromAgentModule,
   generateInferencesFromRootAgent,
+  generateResponses,
   generateResponsesFromSession,
+  normalizeLiveTranscriptions,
 } from './evaluation/evaluation_generator.js';
-export type {EvalRow} from './evaluation/evaluation_generator.js';
+export type {
+  EvalCaseResponses,
+  EvalRow,
+} from './evaluation/evaluation_generator.js';
 export type {
   EvaluationResult,
   Evaluator,
