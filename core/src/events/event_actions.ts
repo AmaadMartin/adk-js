@@ -6,9 +6,15 @@
 
 import {isEmpty} from 'lodash-es';
 
-import {AuthConfig} from '../auth/auth_tool.js';
+import {AuthConfig, isAuthConfig} from '../auth/auth_tool.js';
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {toJsonSerializable} from '../utils/json_utils.js';
+import {logger} from '../utils/logger.js';
+// `event.ts` imports this module at runtime, so `Route` is imported as a type
+// to keep the dependency one-way.
+import type {Route} from './event.js';
 
 /**
  * Represents the actions attached to an event.
@@ -71,6 +77,27 @@ export interface EventActions {
    * execution for this invocation. Mirrors Python `EventActions.end_of_agent`.
    */
   endOfAgent?: boolean;
+
+  /**
+   * The reason for transferring to the target agent. Mirrors Python
+   * `EventActions.transfer_reason`.
+   */
+  transferReason?: string;
+
+  /**
+   * The route key(s) emitted by a routing node, used by the graph to select the
+   * matching outgoing edge(s). Mirrors Python `EventActions.route`.
+   *
+   * The workflow engine reads {@link Event.route}; {@link createEvent} keeps
+   * the two in sync so a route set by either side survives the wire.
+   */
+  route?: Route;
+
+  /**
+   * The structured output a model produced for this event. Mirrors Python
+   * `EventActions.set_model_response`, which is untyped there too.
+   */
+  setModelResponse?: unknown;
 }
 
 /**
@@ -87,13 +114,37 @@ export interface EventActions {
 export function createEventActions(
   state: Partial<EventActions> = {},
 ): EventActions {
-  return {
+  const actions = {
     stateDelta: {},
     artifactDelta: {},
     requestedAuthConfigs: {},
     requestedToolConfirmations: {},
     ...state,
   };
+  validateRequestedAuthConfigs(actions.requestedAuthConfigs);
+  return actions;
+}
+
+/**
+ * Rejects a `requestedAuthConfigs` entry that is not an {@link AuthConfig}.
+ *
+ * Mirrors the reference's `_parse_auth_configs` validator, which runs
+ * `AuthConfig.model_validate` on every entry. An event rehydrated from storage
+ * carries plain objects here, and one that has lost `authScheme` or
+ * `credentialKey` fails much later, inside the auth flow.
+ *
+ * @throws {InputValidationError} When an entry is not an {@link AuthConfig}.
+ */
+function validateRequestedAuthConfigs(configs: {
+  [key: string]: AuthConfig;
+}): void {
+  for (const [key, config] of Object.entries(configs)) {
+    if (!isAuthConfig(config)) {
+      throw new InputValidationError(
+        `requestedAuthConfigs['${key}'] is not a valid AuthConfig: expected an object with 'authScheme' and 'credentialKey'.`,
+      );
+    }
+  }
 }
 
 /**
@@ -116,7 +167,10 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     isEmpty(actions.requestedToolConfirmations) &&
     actions.skipSummarization === undefined &&
     actions.transferToAgent === undefined &&
-    actions.escalate === undefined
+    actions.escalate === undefined &&
+    actions.transferReason === undefined &&
+    actions.route === undefined &&
+    actions.setModelResponse === undefined
   );
 }
 
@@ -180,6 +234,66 @@ export function mergeEventActions(
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
     }
+    if (source.transferReason !== undefined) {
+      result.transferReason = source.transferReason;
+    }
+    if (source.route !== undefined) {
+      result.route = source.route;
+    }
+    if (source.setModelResponse !== undefined) {
+      result.setModelResponse = source.setModelResponse;
+    }
   }
   return result;
+}
+
+/**
+ * Returns actions whose `stateDelta` and `agentState` are safe to hand to
+ * `JSON.stringify`.
+ *
+ * A tool can write anything into session state, including a callback or a
+ * bigint. Persisting such an event used to throw or drop the offending key
+ * along with its siblings. Mirrors the reference's `_serialize_state_delta`
+ * and `_serialize_agent_state` wrap serializers: the value is sanitized, a
+ * warning names the keys that changed, and the event still persists.
+ *
+ * @param actions The actions about to be persisted.
+ * @returns `actions` itself when nothing needs sanitizing, otherwise a shallow
+ *   copy holding the sanitized fields. Never throws.
+ */
+export function serializeEventActions(actions: EventActions): EventActions {
+  const stateDelta = sanitizeState(actions.stateDelta, 'stateDelta');
+  const agentState =
+    actions.agentState === undefined
+      ? undefined
+      : sanitizeState(actions.agentState, 'agentState');
+
+  if (stateDelta === actions.stateDelta && agentState === actions.agentState) {
+    return actions;
+  }
+  return {...actions, stateDelta, agentState};
+}
+
+function sanitizeState(
+  state: Record<string, unknown>,
+  field: string,
+): Record<string, unknown> {
+  const replacedKeys: string[] = [];
+  const sanitized: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(state)) {
+    sanitized[key] = toJsonSerializable(value, (path) =>
+      replacedKeys.push(path === '' ? key : `${key}.${path}`),
+    );
+  }
+
+  if (replacedKeys.length === 0) {
+    return state;
+  }
+  logger.warn(
+    `Failed to serialize \`${field}\`; some values are not JSON-serializable ` +
+      `(e.g. functions) and will be replaced with a string representation in ` +
+      `the persisted event. Replaced: ${replacedKeys.join(', ')}.`,
+  );
+  return sanitized;
 }

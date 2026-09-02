@@ -169,17 +169,28 @@ export interface CreateEventParams extends Omit<Partial<Event>, 'actions'> {
  * @returns The event.
  */
 export function createEvent(params: CreateEventParams = {}): Event {
-  return {
+  const actions = createEventActions(params.actions);
+  const event: Event = {
     ...params,
     [EVENT_SIGNATURE_SYMBOL]: true,
     id: params.id || createNewEventId(),
     invocationId: params.invocationId || '',
     author: params.author,
-    actions: createEventActions(params.actions),
+    actions,
     longRunningToolIds: params.longRunningToolIds || [],
     branch: params.branch,
     timestamp: params.timestamp || Date.now(),
   };
+
+  // The workflow engine reads `event.route`, while `google/adk-python` stores
+  // the route on `actions.route` and only that copy crosses the wire. Keep
+  // both set so a route survives a round trip through either side.
+  const route = params.route ?? actions.route;
+  if (route !== undefined) {
+    event.route = route;
+    actions.route = route;
+  }
+  return event;
 }
 
 /**
@@ -383,6 +394,8 @@ const PRESERVE_KEYS_CAMEL_CASE = [
   'output',
   'route',
   'actions.agentState',
+  // Arbitrary structured model output: its keys are the model's, not ours.
+  'actions.setModelResponse',
 ];
 
 /**
@@ -407,6 +420,8 @@ const PRESERVE_KEYS_SNAKE_CASE = [
   'output',
   'route',
   'actions.agent_state',
+  // See the camelCase list above.
+  'actions.set_model_response',
 ];
 
 /**

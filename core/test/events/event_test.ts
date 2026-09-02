@@ -5,7 +5,6 @@
  */
 
 import {
-  AuthConfig,
   createEvent,
   createEventActions,
   getFunctionCalls,
@@ -78,8 +77,9 @@ describe('Event Utils', () => {
         actions: createEventActions({
           requestedAuthConfigs: {
             'tool-id': {
+              authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
               credentialKey: 'testKey',
-            } as unknown as AuthConfig,
+            },
           },
         }),
       });
