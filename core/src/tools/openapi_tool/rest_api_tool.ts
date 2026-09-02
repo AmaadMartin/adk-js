@@ -67,14 +67,22 @@ export interface RestApiToolOptions {
 }
 
 /**
- * Merges timeout overrides over {@link DEFAULT_REQUEST_TIMEOUT}.
+ * Merges timeout overrides over {@link DEFAULT_REQUEST_TIMEOUT}. A phase whose
+ * override is `undefined` keeps its default, so an absent configuration value
+ * does not have to be stripped by the caller.
  *
  * @throws {Error} If a supplied budget is not a finite number above zero.
  */
 export function resolveRequestTimeout(
   overrides: Partial<RequestTimeout> = {},
 ): RequestTimeout {
-  const timeout = {...DEFAULT_REQUEST_TIMEOUT, ...overrides};
+  const supplied = Object.entries(overrides).filter(
+    ([, budget]) => budget !== undefined,
+  );
+  const timeout = {
+    ...DEFAULT_REQUEST_TIMEOUT,
+    ...Object.fromEntries(supplied),
+  };
   for (const [phase, budget] of Object.entries(timeout)) {
     if (!Number.isFinite(budget) || budget <= 0) {
       throw new Error(
@@ -108,7 +116,7 @@ export class RestApiTool extends BaseTool {
 
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
-  private readonly timeout: RequestTimeout;
+  private timeout: RequestTimeout;
 
   constructor(
     name: string,
@@ -141,6 +149,16 @@ export class RestApiTool extends BaseTool {
   @experimental
   public configureCredentialKey(credentialKey: string) {
     this.credentialKey = credentialKey;
+  }
+
+  /**
+   * Replaces the request budgets. A phase left out returns to its default.
+   *
+   * @throws {Error} If a supplied budget is not a finite number above zero.
+   */
+  @experimental
+  public configureTimeouts(timeout?: Partial<RequestTimeout>) {
+    this.timeout = resolveRequestTimeout(timeout);
   }
 
   @experimental

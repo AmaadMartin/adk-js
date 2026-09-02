@@ -1241,6 +1241,12 @@ describe('RestApiTool request timeouts', () => {
       });
     });
 
+    it('keeps the default of a phase whose override is undefined', () => {
+      expect(resolveRequestTimeout({readMs: undefined})).toEqual(
+        DEFAULT_REQUEST_TIMEOUT,
+      );
+    });
+
     it.each([
       ['connectMs', 0],
       ['poolMs', -1],
@@ -1291,6 +1297,39 @@ describe('RestApiTool request timeouts', () => {
       });
 
       expect(deadlineSpy).toHaveBeenCalledWith(610_500);
+    });
+
+    it('deadlines a reconfigured request after the new phases', async () => {
+      const deadlineSpy = vi.spyOn(AbortSignal, 'timeout');
+      stubFetch();
+      const tool = buildTool();
+
+      tool.configureTimeouts({
+        connectMs: 1_000,
+        poolMs: 1_000,
+        readMs: 5_000,
+        writeMs: 5_000,
+      });
+      await tool.runAsync({args: {}, toolContext: callContext()});
+
+      expect(deadlineSpy).toHaveBeenCalledWith(7_000);
+    });
+
+    it('returns every phase to its default when reconfigured with nothing', async () => {
+      const deadlineSpy = vi.spyOn(AbortSignal, 'timeout');
+      stubFetch();
+      const tool = buildTool({timeout: {connectMs: 500}});
+
+      tool.configureTimeouts();
+      await tool.runAsync({args: {}, toolContext: callContext()});
+
+      expect(deadlineSpy).toHaveBeenCalledWith(620_000);
+    });
+
+    it('rejects an invalid budget passed to the setter', () => {
+      expect(() => buildTool().configureTimeouts({readMs: -1})).toThrowError(
+        /Invalid request timeout 'readMs'/,
+      );
     });
 
     it('reports an aborted request as a timeout', async () => {

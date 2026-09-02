@@ -237,17 +237,25 @@ describe('timeoutErrorName', () => {
     expect(timeoutErrorName(err)).toBe('BodyTimeoutError');
   });
 
-  it('falls back to the code when the name is not a timeout name', () => {
+  it('reports the code when the name is not a timeout name', () => {
     const err = Object.assign(new Error('connect ETIMEDOUT'), {
       code: 'ETIMEDOUT',
     });
-    expect(timeoutErrorName(err)).toBe('Error');
+    expect(timeoutErrorName(err)).toBe('ETIMEDOUT');
   });
 
   it('reports the code of a timeout that carries no name', () => {
     expect(timeoutErrorName({code: 'UND_ERR_HEADERS_TIMEOUT'})).toBe(
       'UND_ERR_HEADERS_TIMEOUT',
     );
+  });
+
+  it('prefers a timeout name over the code that accompanies it', () => {
+    const err = Object.assign(new Error('read stalled'), {
+      name: 'BodyTimeoutError',
+      code: 'UND_ERR_BODY_TIMEOUT',
+    });
+    expect(timeoutErrorName(err)).toBe('BodyTimeoutError');
   });
 
   it('returns undefined for a plain error', () => {

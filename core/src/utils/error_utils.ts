@@ -182,7 +182,8 @@ export function formatError(err: unknown): string {
 
 /**
  * Returns the timeout name a single value carries, ignoring anything it wraps.
- * A value with a timeout code but no name reports the code instead.
+ * A value recognised by its code reports that code, because the name of such
+ * an error is usually the bare `Error` and tells a reader nothing.
  */
 function ownTimeoutName(record: Record<string, unknown>): string | undefined {
   const name = firstString(record['name']);
@@ -190,10 +191,7 @@ function ownTimeoutName(record: Record<string, unknown>): string | undefined {
     return name;
   }
   const code = firstString(record['code']);
-  if (code !== undefined && TIMEOUT_ERROR_CODES.has(code)) {
-    return name ?? code;
-  }
-  return undefined;
+  return code !== undefined && TIMEOUT_ERROR_CODES.has(code) ? code : undefined;
 }
 
 /**

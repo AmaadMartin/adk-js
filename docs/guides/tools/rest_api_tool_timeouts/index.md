@@ -17,8 +17,8 @@ it, so `RestApiTool` sums the phases that run in sequence into one deadline:
 `poolMs + connectMs + max(readMs, writeMs)`. With the defaults that is 620 000
 milliseconds.
 
-Tools that `OpenAPIToolset` builds use the defaults, as they do in adk-python.
-Construct a `RestApiTool` yourself to change them.
+`OpenAPIToolset` takes the same option and gives it to every tool it builds. A
+tool also accepts new budgets after construction, through `configureTimeouts`.
 
 ## Get started
 
@@ -36,8 +36,22 @@ const tool = new RestApiTool(
 );
 ```
 
-The two phases you do not name keep their defaults. This tool aborts after
-`10_000 + 2_000 + max(30_000, 600_000)` milliseconds.
+The two phases you do not name keep their defaults, so this tool aborts after
+`10_000 + 2_000 + max(30_000, 600_000)` milliseconds. Lower every phase, not
+one of them, when you want a call to fail fast: the deadline is a sum, and the
+default `writeMs` of 600 000 dominates it.
+
+The same option configures a whole specification:
+
+```ts
+import {OpenAPIToolset} from '@google/adk';
+import {readFile} from 'node:fs/promises';
+
+const toolset = new OpenAPIToolset({
+  specStr: await readFile('petstore.json', 'utf-8'),
+  timeout: {connectMs: 2_000, poolMs: 2_000, readMs: 30_000, writeMs: 30_000},
+});
+```
 
 ## The budgets
 
@@ -61,7 +75,15 @@ requestDeadlineMs(DEFAULT_REQUEST_TIMEOUT); // 620000
 
 A budget must be a finite number of milliseconds above zero. The constructor
 throws on anything else, naming the phase, because the value comes from your
-application rather than from the model.
+application rather than from the model. A budget you pass as `undefined` keeps
+its default, so a configuration value you did not set needs no stripping.
+
+`configureTimeouts` replaces the budgets of a tool that already exists, and
+resets a phase you leave out to its default:
+
+```ts
+tool.configureTimeouts({connectMs: 2_000, poolMs: 2_000});
+```
 
 ## What the model sees
 
