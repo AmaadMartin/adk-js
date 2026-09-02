@@ -11,12 +11,18 @@ import {
   Part,
 } from '@google/genai';
 
+import {ContextCacheConfig} from '../agents/context_cache_config.js';
+import {mergeTrackingHeaders} from '../utils/client_labels.js';
 import {logger} from '../utils/logger.js';
 
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
 import {FetchLiteLlmClient, LiteLlmClient} from './lite_llm_client.js';
-import {mapFinishReason} from './lite_llm_model_utils.js';
+import {
+  isLiteLlmGeminiModel,
+  isLiteLlmVertexModel,
+  mapFinishReason,
+} from './lite_llm_model_utils.js';
 import {
   appendFallbackUserContentIfMissing,
   buildRequestLog,
@@ -33,9 +39,15 @@ import {
   modelResponseToGenerateContentResponse,
   parseToolCallArguments,
 } from './lite_llm_response_converters.js';
-import {CompletionArgs, ToolCall} from './lite_llm_types.js';
+import {
+  CacheControl,
+  CacheControlInjectionPoint,
+  CompletionArgs,
+  ToolCall,
+} from './lite_llm_types.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
+import {resolveCacheConfig, useOneHourTtl} from './prompt_cache.js';
 
 /**
  * Keys a caller may not set through `additionalArgs`: the class owns them, and
@@ -50,6 +62,51 @@ const TRUNCATED_TOOL_CALL_MESSAGE =
 
 /** Milliseconds per second, for the `HttpOptions.timeout` conversion. */
 const MILLISECONDS_PER_SECOND = 1000;
+
+/**
+ * Describes the prefix LiteLLM should mark as cacheable.
+ *
+ * LiteLLM applies these itself and then lets each provider decide what to do
+ * with them, so the same two points are correct whatever the model turns out
+ * to be: a provider that caches by marked prefix, such as Claude, honours
+ * them, and a provider that caches automatically or not at all has them
+ * dropped before the request leaves.
+ *
+ * The system instruction is one point because it is the stable head of the
+ * prompt. The final message is the other, which caches the conversation so far
+ * and moves forward on its own as the conversation grows. Tool definitions get
+ * no point of their own, because LiteLLM's only tool-level location is
+ * specific to one provider.
+ */
+function cacheControlInjectionPoints(
+  cacheConfig: ContextCacheConfig,
+): CacheControlInjectionPoint[] {
+  const control: CacheControl = {type: 'ephemeral'};
+  if (useOneHourTtl(cacheConfig)) {
+    control.ttl = '1h';
+  }
+  return [
+    {location: 'message', role: 'system', control},
+    {location: 'message', index: -1, control},
+  ];
+}
+
+/** Folds the request's `HttpOptions` into the request body. */
+function applyHttpOptions(args: CompletionArgs, httpOptions: HttpOptions) {
+  if (httpOptions.headers) {
+    args.extra_headers = {...args.extra_headers, ...httpOptions.headers};
+  }
+  if (httpOptions.timeout !== undefined) {
+    // HttpOptions.timeout is milliseconds; the wire field is seconds.
+    args.timeout = httpOptions.timeout / MILLISECONDS_PER_SECOND;
+  }
+  if (httpOptions.retryOptions?.attempts !== undefined) {
+    args.num_retries = httpOptions.retryOptions.attempts;
+  }
+  if (httpOptions.extraBody !== undefined) {
+    args.extra_body = httpOptions.extraBody;
+  }
+}
 
 /** Constructor parameters for {@link LiteLlm}. */
 export interface LiteLlmParams {
@@ -171,11 +228,7 @@ export class LiteLlm extends BaseLlm {
 
     const effectiveModel = llmRequest.model ?? this.model;
     const inputs = getCompletionInputs(llmRequest, effectiveModel);
-    const args = this.buildCompletionArgs(
-      effectiveModel,
-      inputs,
-      llmRequest.config?.httpOptions,
-    );
+    const args = this.buildCompletionArgs(effectiveModel, inputs, llmRequest);
 
     if (!stream) {
       const response = await this.client.completion(args, abortSignal);
@@ -196,7 +249,7 @@ export class LiteLlm extends BaseLlm {
   private buildCompletionArgs(
     model: string,
     inputs: CompletionInputs,
-    httpOptions?: HttpOptions,
+    llmRequest: LlmRequest,
   ): CompletionArgs {
     const args: CompletionArgs = {
       model,
@@ -209,22 +262,24 @@ export class LiteLlm extends BaseLlm {
     if (inputs.toolChoice !== undefined) {
       args.tool_choice = inputs.toolChoice;
     }
-    if (!httpOptions) {
-      return args;
+
+    // A caller who named their own injection points at construction has said
+    // more about their provider than the app-level config can, so leave those
+    // alone.
+    const cacheConfig = resolveCacheConfig(llmRequest);
+    if (cacheConfig && !args.cache_control_injection_points) {
+      args.cache_control_injection_points =
+        cacheControlInjectionPoints(cacheConfig);
     }
 
-    if (httpOptions.headers) {
-      args.extra_headers = {...args.extra_headers, ...httpOptions.headers};
+    const httpOptions = llmRequest.config?.httpOptions;
+    if (httpOptions) {
+      applyHttpOptions(args, httpOptions);
     }
-    if (httpOptions.timeout !== undefined) {
-      // HttpOptions.timeout is milliseconds; the wire field is seconds.
-      args.timeout = httpOptions.timeout / MILLISECONDS_PER_SECOND;
-    }
-    if (httpOptions.retryOptions?.attempts !== undefined) {
-      args.num_retries = httpOptions.retryOptions.attempts;
-    }
-    if (httpOptions.extraBody !== undefined) {
-      args.extra_body = httpOptions.extraBody;
+
+    // Last, so a caller's own header value is present to de-duplicate against.
+    if (isLiteLlmVertexModel(model) || isLiteLlmGeminiModel(model)) {
+      args.extra_headers = mergeTrackingHeaders(args.extra_headers);
     }
     return args;
   }
