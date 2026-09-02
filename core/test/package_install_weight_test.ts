@@ -51,6 +51,7 @@ const OPTIONAL_SUBSYSTEM_PEERS = [
   '@mikro-orm/postgresql',
   '@mikro-orm/sqlite',
   '@modelcontextprotocol/sdk',
+  '@toolbox-sdk/core',
   'express',
 ];
 
@@ -77,6 +78,7 @@ describe('core/package.json install weight', () => {
     '@google-cloud/storage',
     '@mikro-orm/sqlite',
     '@modelcontextprotocol/sdk',
+    '@toolbox-sdk/core',
     'express',
   ])(
     '%s is still a devDependency so the repo can build and test against it',
@@ -112,6 +114,7 @@ describe('core/package.json subpath exports', () => {
       './sessions/database',
       './telemetry/gcp',
       './tools/mcp',
+      './tools/toolbox',
     ]);
   });
 
