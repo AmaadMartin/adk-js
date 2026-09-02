@@ -17,6 +17,7 @@ import {logger} from '../utils/logger.js';
 
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {LlmCapabilities} from './capabilities.js';
 import {FetchLiteLlmClient, LiteLlmClient} from './lite_llm_client.js';
 import {
   isLiteLlmGeminiModel,
@@ -215,6 +216,20 @@ export class LiteLlm extends BaseLlm {
       delete scrubbed[key];
     }
     this.additionalArgs = scrubbed;
+  }
+
+  /**
+   * LiteLLM reconciles tools and a response format per provider: a provider
+   * with native support gets both passed through, and the rest get a JSON tool
+   * call with `tool_choice` enforcement. Every route therefore honours an
+   * output schema alongside tools, whatever the model name says.
+   *
+   * Declared without `override`: `BaseLlm` carries no such member yet, so the
+   * modifier does not compile here. PR #1486 adds the base declaration, which
+   * this getter then answers for a LiteLLM-routed model.
+   */
+  get capabilities(): LlmCapabilities {
+    return {outputSchemaAndTools: true};
   }
 
   override async *generateContentAsync(

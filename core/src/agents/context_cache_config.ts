@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {HttpOptions} from '@google/genai';
+
 /**
  * Configuration for context caching across all agents in an app.
  *
@@ -16,6 +18,12 @@
  * change in future releases.
  */
 export interface ContextCacheConfig {
+  /**
+   * Maximum number of invocations to reuse the same cache before refreshing
+   * it. Must be an integer from 1 to 100.
+   */
+  cacheIntervals: number;
+
   /** Time-to-live for the cache in seconds. Must be an integer above 0. */
   ttlSeconds: number;
 
@@ -26,4 +34,7 @@ export interface ContextCacheConfig {
    * integer.
    */
   minTokens: number;
+
+  /** HTTP options for the cache-creation call. */
+  createHttpOptions?: HttpOptions;
 }

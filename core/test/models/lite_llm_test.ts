@@ -101,7 +101,7 @@ const THOUGHT_SIGNATURE = 'c2lnbmF0dXJl';
 function cacheConfig(
   overrides: Partial<ContextCacheConfig> = {},
 ): ContextCacheConfig {
-  return {ttlSeconds: 1800, minTokens: 0, ...overrides};
+  return {cacheIntervals: 10, ttlSeconds: 1800, minTokens: 0, ...overrides};
 }
 
 /** A non-streaming response carrying one tool call. */
@@ -183,6 +183,14 @@ describe('LiteLlm', () => {
 
     it('is not registered with the model registry', () => {
       expect(() => LLMRegistry.resolve('openai/gpt-4o')).toThrow();
+    });
+
+    it('declares that it pairs an output schema with tools', () => {
+      const client = new RecordingClient(textResponse());
+
+      expect(
+        new LiteLlm({model: 'openai/gpt-4o', client}).capabilities,
+      ).toEqual({outputSchemaAndTools: true});
     });
 
     it('drops the request fields it owns and keeps the rest', async () => {

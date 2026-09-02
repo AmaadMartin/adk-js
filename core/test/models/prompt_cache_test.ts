@@ -17,7 +17,7 @@ import {
 function cacheConfig(
   overrides: Partial<ContextCacheConfig> = {},
 ): ContextCacheConfig {
-  return {ttlSeconds: 1800, minTokens: 0, ...overrides};
+  return {cacheIntervals: 10, ttlSeconds: 1800, minTokens: 0, ...overrides};
 }
 
 /** Builds a request carrying only the fields the resolver reads. */
