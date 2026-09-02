@@ -44,10 +44,14 @@ export interface WorkflowInstructionScope {
   outputsByNode?: Record<string, unknown>;
 }
 
-/** How {@link InvocationContext.setAgentState} updates one agent's state. */
+/**
+ * How {@link InvocationContext.setAgentState} updates one agent's state. An
+ * empty bag resets the agent. A caller that never resets can use the stricter
+ * {@link AgentStateUpdate}, which this accepts.
+ */
 export interface SetAgentStateOptions {
   /** The state to record. Ignored when `endOfAgent` is true. */
-  agentState?: Record<string, unknown>;
+  agentState?: AgentState;
 
   /** Whether the agent has finished running. */
   endOfAgent?: boolean;
@@ -89,9 +93,37 @@ export interface InvocationContextParams {
    */
   customMetadata?: Record<string, unknown>;
   resumabilityConfig?: ResumabilityConfig;
-  agentStates?: Record<string, Record<string, unknown>>;
+  agentStates?: Record<string, AgentState>;
   endOfAgents?: Record<string, boolean>;
 }
+
+/**
+ * The resumption checkpoint one agent records for an invocation.
+ *
+ * A workflow agent describes its own progress here — which sub-agent is
+ * running, how many times a loop has run — and the record is persisted verbatim
+ * on `EventActions.agentState`, so the shape is open rather than closed. An
+ * agent with nothing more specific to restore records the empty object, which
+ * still says "this agent started".
+ */
+export type AgentState = Record<string, unknown>;
+
+/**
+ * The checkpoint {@link InvocationContext.setAgentState} records for one agent:
+ * where it got to, or that it has finished. The two are exclusive, so a caller
+ * cannot ask for a state that would be discarded.
+ */
+export type AgentStateUpdate =
+  | {
+      /** The agent's state at this point in the invocation. */
+      agentState: AgentState;
+      endOfAgent?: false;
+    }
+  | {
+      agentState?: undefined;
+      /** The agent has finished running in this invocation. */
+      endOfAgent: true;
+    };
 
 /**
  * A container to keep track of the cost of invocation.
@@ -294,19 +326,6 @@ export class InvocationContext {
    */
   readonly a2aMetadata?: Record<string, unknown>;
 
-  /** Resumability for every agent under this invocation. */
-  resumabilityConfig?: ResumabilityConfig;
-
-  /**
-   * The recorded state of each agent in this invocation, keyed by the agent's
-   * node path or name. Shared by reference with contexts made by
-   * {@link clone}, so a sub-agent's checkpoint is visible to its parent.
-   */
-  agentStates: Record<string, Record<string, unknown>>;
-
-  /** Which agents have finished running, keyed like {@link agentStates}. */
-  endOfAgents: Record<string, boolean>;
-
   /**
    * Free-form metadata accumulated by tools and services during this
    * invocation, reached through {@link Context.customMetadata}. Mirrors Python
@@ -319,6 +338,29 @@ export class InvocationContext {
    * `RunConfig.customMetadata`, so unlike adk-python nothing seeds it.
    */
   readonly customMetadata: Record<string, unknown>;
+
+  /**
+   * The resumption checkpoint of each agent in this invocation, keyed by the
+   * agent's name, or by its node path in a workflow.
+   *
+   * Every context of one invocation shares this record by reference, because
+   * both {@link clone} and `BaseAgent.createInvocationContext` build a child by
+   * spreading the parent. A checkpoint a sub-agent writes on its own branch is
+   * therefore visible to the parent that fanned out. `readonly` protects the
+   * reference, not the entries.
+   */
+  readonly agentStates: Record<string, AgentState>;
+
+  /**
+   * Whether each agent in this invocation has finished, keyed by agent name.
+   * Shared by reference with child contexts, like {@link agentStates}.
+   */
+  readonly endOfAgents: Record<string, boolean>;
+
+  /**
+   * The resumability config that applies to every agent under this invocation.
+   */
+  readonly resumabilityConfig?: ResumabilityConfig;
 
   /**
    * @param params The parameters for creating an invocation context.
@@ -355,6 +397,9 @@ export class InvocationContext {
         .invocationCostManager ?? new InvocationCostManager();
     this.liveRequestQueue = params.liveRequestQueue;
     this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
+    // Read from params for the same reason as the cost manager above: a child
+    // context must share the parent's records, so one agent's checkpoint is
+    // recorded once for the whole invocation.
     this.resumabilityConfig = params.resumabilityConfig;
     this.agentStates = params.agentStates ?? {};
     this.endOfAgents = params.endOfAgents ?? {};
