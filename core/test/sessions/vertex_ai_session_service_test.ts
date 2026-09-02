@@ -257,13 +257,18 @@ describe('VertexAiSessionService', () => {
       expect(clientConstructor).not.toHaveBeenCalled();
     });
 
-    it('authenticates the sessions client with the API key', () => {
+    it('authenticates the sessions client with the API key', async () => {
       new VertexAiSessionService({expressModeApiKey: 'test-api-key'});
 
       expect(sessionsConstructor).toHaveBeenCalledTimes(1);
       const apiClient = sessionsConstructor.mock.calls[0][0] as ApiClient;
       expect(apiClient.getApiKey()).toBe('test-api-key');
       expect(apiClient.isVertexAI()).toBe(true);
+      // The key has to reach the auth object, not just the client options, or
+      // requests go out unauthenticated. No credentials are read: NodeAuth
+      // returns the key header without constructing GoogleAuth.
+      const headers = await apiClient.getAuthHeaders();
+      expect(headers.get('x-goog-api-key')).toBe('test-api-key');
     });
 
     it('keeps using project and location when an API key is also in the environment', () => {
