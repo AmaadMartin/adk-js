@@ -199,6 +199,21 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {
+  AgentEvaluator,
+  EvalFailureError,
+  NUM_RUNS,
+} from './evaluation/agent_evaluator.js';
+export type {
+  EvaluateEvalSetOptions,
+  EvaluateOptions,
+} from './evaluation/agent_evaluator.js';
+export {resolveAgentForEval} from './evaluation/agent_module_loader.js';
+export type {
+  AgentModuleExports,
+  AgentModuleRef,
+  ResolvedAgent,
+} from './evaluation/agent_module_loader.js';
 export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
 export {
   DEFAULT_EVAL_PARALLELISM,
@@ -259,6 +274,11 @@ export type {
   ToolTrajectoryCriterion,
 } from './evaluation/eval_metrics.js';
 export type {EvalCaseResult} from './evaluation/eval_result.js';
+export {getEvalRuntime, setEvalRuntime} from './evaluation/eval_runtime.js';
+export type {
+  EvalRuntime,
+  EvalServiceParams,
+} from './evaluation/eval_runtime.js';
 export type {EvalSet} from './evaluation/eval_set.js';
 export type {
   EvalSetResult,
