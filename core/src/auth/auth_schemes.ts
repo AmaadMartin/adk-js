@@ -24,12 +24,51 @@ export interface OpenIdConnectWithConfig
 }
 
 /**
- * AuthSchemes contains SecuritySchemes from OpenAPI 3.0 and an extra flattened
- * OpenIdConnectWithConfig.
+ * A flexible base for custom authentication schemes.
+ *
+ * Extend it to declare a scheme outside the OpenAPI 3.0 set. The extending
+ * interface fixes `type` to its own literal, which is what lets a consumer tell
+ * one custom scheme from another. That literal is also the key the scheme's
+ * provider is registered under in `AuthProviderRegistry`.
+ */
+export interface CustomAuthScheme {
+  type: string;
+}
+
+/**
+ * Security scheme types defined by OpenAPI 3.0.
+ *
+ * The values are the OpenAPI wire names, so they compare directly against the
+ * `type` of an {@link AuthScheme}.
+ */
+export enum AuthSchemeType {
+  API_KEY = 'apiKey',
+  HTTP = 'http',
+  OAUTH2 = 'oauth2',
+  OPEN_ID_CONNECT = 'openIdConnect',
+}
+
+/**
+ * OAuth2 scheme that carries the issuer URL used to discover its endpoints.
+ *
+ * Pass {@link ExtendedOAuth2.issuerUrl} to
+ * `OAuth2DiscoveryManager.discoverAuthServerMetadata` to read the authorization
+ * and token endpoints from the issuer instead of declaring them by hand.
+ * @experimental  (Experimental, subject to change)
+ */
+export interface ExtendedOAuth2 extends OpenAPIV3.OAuth2SecurityScheme {
+  /** Issuer URL used to discover the authorization and token endpoints. */
+  issuerUrl?: string;
+}
+
+/**
+ * AuthSchemes contains SecuritySchemes from OpenAPI 3.0, an extra flattened
+ * OpenIdConnectWithConfig, and external schemes that extend CustomAuthScheme.
  */
 export type AuthScheme =
   | OpenAPIV3.SecuritySchemeObject
-  | OpenIdConnectWithConfig;
+  | OpenIdConnectWithConfig
+  | CustomAuthScheme;
 
 /**
  * Represents the OAuth2 flow (or grant type).
