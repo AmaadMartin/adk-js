@@ -1038,7 +1038,9 @@ describe('LlmAgent Default Request Processors', () => {
       disallowTransferToPeers: true,
     });
 
-    expect(agent.requestProcessors).toEqual(new SingleFlow().requestProcessors);
+    expect(agent.requestProcessors).toStrictEqual(
+      new SingleFlow().requestProcessors,
+    );
   });
 
   it('appends the agent transfer processor when transfer is enabled', () => {
@@ -1047,7 +1049,7 @@ describe('LlmAgent Default Request Processors', () => {
       subAgents: [new LlmAgent({name: 'sub_agent'})],
     });
 
-    expect(agent.requestProcessors).toEqual([
+    expect(agent.requestProcessors).toStrictEqual([
       ...new SingleFlow().requestProcessors,
       AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
     ]);
@@ -1056,7 +1058,7 @@ describe('LlmAgent Default Request Processors', () => {
   it('takes its default response pipeline from SingleFlow', () => {
     const agent = new LlmAgent({name: 'test_agent'});
 
-    expect(agent.responseProcessors).toEqual(
+    expect(agent.responseProcessors).toStrictEqual(
       new SingleFlow().responseProcessors,
     );
     expect(agent.responseProcessors).toContain(
@@ -1073,7 +1075,7 @@ describe('LlmAgent Default Request Processors', () => {
       contextCompactors: [{shouldCompact: () => true, compact: () => {}}],
     });
 
-    expect(agent.requestProcessors).toEqual([AUTH_PREPROCESSOR]);
+    expect(agent.requestProcessors).toStrictEqual([AUTH_PREPROCESSOR]);
   });
 });
 

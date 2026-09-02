@@ -8,6 +8,7 @@ import {
   BaseContextCompactor,
   BaseLlm,
   BaseLlmConnection,
+  BaseLlmRequestProcessor,
   ContextCompactorRequestProcessor,
   createSession,
   Event,
@@ -45,7 +46,7 @@ const OUTPUT_SCHEMA: Schema = {
   properties: {answer: {type: Type.STRING}},
 };
 
-const EXPECTED_ORDER = [
+const EXPECTED_ORDER: BaseLlmRequestProcessor[] = [
   BASIC_LLM_REQUEST_PROCESSOR,
   AUTH_PREPROCESSOR,
   REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
@@ -89,7 +90,7 @@ function createInvocationContext(agent: LlmAgent): InvocationContext {
 
 describe('SingleFlow', () => {
   it('builds the reference request pipeline when no compactor is given', () => {
-    expect(new SingleFlow().requestProcessors).toEqual(EXPECTED_ORDER);
+    expect(new SingleFlow().requestProcessors).toStrictEqual(EXPECTED_ORDER);
   });
 
   it('runs instructions before identity', () => {
@@ -136,29 +137,21 @@ describe('SingleFlow', () => {
       compact: () => {},
     };
 
-    const processors = new SingleFlow([compactor]).requestProcessors;
-
-    const contentIndex = processors.indexOf(CONTENT_REQUEST_PROCESSOR);
-    expect(processors[contentIndex - 1]).toBeInstanceOf(
-      ContextCompactorRequestProcessor,
+    const expected = [...EXPECTED_ORDER];
+    expected.splice(
+      EXPECTED_ORDER.indexOf(CONTENT_REQUEST_PROCESSOR),
+      0,
+      new ContextCompactorRequestProcessor([compactor]),
     );
-    expect(
-      processors.filter(
-        (p) => !(p instanceof ContextCompactorRequestProcessor),
-      ),
-    ).toEqual(EXPECTED_ORDER);
+
+    expect(new SingleFlow([compactor]).requestProcessors).toStrictEqual(
+      expected,
+    );
   });
 
   it('inserts no compaction processor for an empty or absent compactor list', () => {
-    for (const processors of [
-      new SingleFlow().requestProcessors,
-      new SingleFlow([]).requestProcessors,
-    ]) {
-      expect(
-        processors.some((p) => p instanceof ContextCompactorRequestProcessor),
-      ).toBe(false);
-      expect(processors).toHaveLength(EXPECTED_ORDER.length);
-    }
+    expect(new SingleFlow([]).requestProcessors).toStrictEqual(EXPECTED_ORDER);
+    expect(new SingleFlow().requestProcessors).toStrictEqual(EXPECTED_ORDER);
   });
 
   it('drives the compactors it was constructed with', async () => {
@@ -188,7 +181,7 @@ describe('SingleFlow', () => {
   });
 
   it('builds the reference response pipeline', () => {
-    expect(new SingleFlow().responseProcessors).toEqual([
+    expect(new SingleFlow().responseProcessors).toStrictEqual([
       CODE_EXECUTION_RESPONSE_PROCESSOR,
     ]);
   });
@@ -200,8 +193,8 @@ describe('SingleFlow', () => {
     first.requestProcessors.push(AGENT_TRANSFER_LLM_REQUEST_PROCESSOR);
     first.responseProcessors.length = 0;
 
-    expect(second.requestProcessors).toEqual(EXPECTED_ORDER);
-    expect(second.responseProcessors).toEqual([
+    expect(second.requestProcessors).toStrictEqual(EXPECTED_ORDER);
+    expect(second.responseProcessors).toStrictEqual([
       CODE_EXECUTION_RESPONSE_PROCESSOR,
     ]);
   });
