@@ -304,6 +304,12 @@ describe('operations', () => {
       );
     });
 
+    it('rejects a scheme that only names an Object prototype member', () => {
+      expect(rejectionMessage('constructor://host/db')).toContain(
+        'Unsupported database URI',
+      );
+    });
+
     it.each([
       ['postgresql+asyncpg', 'postgresql'],
       ['postgresql+psycopg2', 'postgresql'],
@@ -357,7 +363,9 @@ describe('operations', () => {
     });
 
     it('disclaims a scheme that only names an Object prototype member', () => {
-      expect(namesSupportedDatabaseBackend('toString://host/db')).toBe(false);
+      expect(namesSupportedDatabaseBackend('constructor://host/db')).toBe(
+        false,
+      );
     });
   });
 

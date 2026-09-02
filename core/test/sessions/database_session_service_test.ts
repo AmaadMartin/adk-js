@@ -752,6 +752,45 @@ describe('DatabaseSessionService', () => {
       expect(session?.events).toEqual([]);
     });
 
+    it('never queries the events table for numRecentEvents: 0', async () => {
+      const statements: string[] = [];
+      const orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+        allowGlobalContext: true,
+        debug: ['query'],
+        logger: (message) => statements.push(message),
+      });
+      const quiet = new DatabaseSessionService(orm);
+      const session = await quiet.createSession({
+        appName,
+        userId,
+        sessionId,
+      });
+      await quiet.appendEvent({
+        session,
+        event: createEvent({timestamp: 1000}),
+      });
+      statements.length = 0;
+
+      const loaded = await quiet.getSession({
+        appName,
+        userId,
+        sessionId,
+        config: {numRecentEvents: 0},
+      });
+
+      expect(loaded?.events).toEqual([]);
+      expect(statements.filter((sql) => sql.includes('`events`'))).toEqual([]);
+      // The read did run, so the assertion above is not vacuous.
+      expect(
+        statements.filter((sql) => sql.includes('`sessions`')).length,
+      ).toBeGreaterThan(0);
+
+      await orm.close();
+    });
+
     it('includes an event whose timestamp equals afterTimestamp', async () => {
       const [, e2] = await appendAt([1000, 2000]);
 
