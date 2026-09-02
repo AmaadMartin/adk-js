@@ -1159,9 +1159,11 @@ describe('GoogleLlm', () => {
 
       const error = await drain(llm, false).catch((e: unknown) => e);
 
-      expect(error).toBeInstanceOf(ApiError);
       expect(error).not.toBeInstanceOf(ResourceExhaustedError);
-      expect((error as ApiError).status).toBe(500);
+      if (!(error instanceof ApiError)) {
+        expect.fail('expected an ApiError');
+      }
+      expect(error.status).toBe(500);
       expect(generateContent).toHaveBeenCalledTimes(1);
     });
 
@@ -1173,7 +1175,10 @@ describe('GoogleLlm', () => {
       const error = await drain(llm, true).catch((e: unknown) => e);
 
       expect(error).not.toBeInstanceOf(ResourceExhaustedError);
-      expect((error as ApiError).status).toBe(500);
+      if (!(error instanceof ApiError)) {
+        expect.fail('expected an ApiError');
+      }
+      expect(error.status).toBe(500);
       expect(generateContentStream).toHaveBeenCalledTimes(1);
     });
 
@@ -1186,7 +1191,10 @@ describe('GoogleLlm', () => {
       const error = await drain(llm, false).catch((e: unknown) => e);
 
       expect(error).not.toBeInstanceOf(ResourceExhaustedError);
-      expect((error as Error).message).toBe('network down');
+      if (!(error instanceof Error)) {
+        expect.fail('expected an Error');
+      }
+      expect(error.message).toBe('network down');
     });
   });
 

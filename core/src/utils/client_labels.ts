@@ -84,17 +84,12 @@ export function getClientLabels(): string[] {
   return labels;
 }
 
-/** The HTTP headers that identify a call as coming from ADK. */
-const TRACKING_HEADER_NAMES = ['x-goog-api-client', 'user-agent'] as const;
-
 /**
  * Returns the tracking headers that identify a call as coming from ADK.
  */
 export function getTrackingHeaders(): Record<string, string> {
   const headerValue = getClientLabels().join(' ');
-  return Object.fromEntries(
-    TRACKING_HEADER_NAMES.map((name) => [name, headerValue]),
-  );
+  return {'x-goog-api-client': headerValue, 'user-agent': headerValue};
 }
 
 /**

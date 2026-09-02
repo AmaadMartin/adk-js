@@ -6,7 +6,6 @@
 
 import {Gemini, LlmRequest, ResourceExhaustedError} from '@google/adk';
 import * as http from 'node:http';
-import {AddressInfo} from 'node:net';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 /** Budget for the retry test, which waits out one real backoff delay. */
@@ -77,14 +76,21 @@ describe('Gemini endpoint configuration (no mocks)', () => {
         apiClientHeader: Array.isArray(header) ? header.join(' ') : header,
       });
       req.resume();
-      const reply = replies.length > 1 ? replies.shift()! : replies[0];
+      const reply = replies[0];
+      if (replies.length > 1) {
+        replies.shift();
+      }
       res.writeHead(reply.status, {'content-type': 'application/json'});
       res.end(reply.body);
     });
     await new Promise<void>((resolve) =>
       server.listen(0, '127.0.0.1', resolve),
     );
-    baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('the test server reported no port');
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`;
   });
 
   afterEach(async () => {

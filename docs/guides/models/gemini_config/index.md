@@ -67,9 +67,10 @@ the Gemini API.
 ## Bringing your own client
 
 `client` takes a `GoogleGenAI` you built yourself. ADK then uses it for every
-call, including live connections, and builds no client of its own. None of
-`baseUrl`, `apiVersion`, `retryOptions` or `clientKwargs` applies, because
-nothing is left for them to configure.
+call, including live connections, and builds no client of its own. `baseUrl`,
+`retryOptions` and `clientKwargs` no longer apply, because nothing is left for
+them to configure. `apiVersion` still does: it is set on each request, so an
+injected client honours it too.
 
 ```ts
 import {GoogleGenAI} from '@google/genai';

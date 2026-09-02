@@ -531,8 +531,8 @@ export class Gemini extends BaseLlm {
     }
 
     if (llmRequest.config && hasComputerUseTool(llmRequest.config.tools)) {
-      // Swapping the computer-use `wait` tool for a 5-second variant follows
-      // the computer-use toolset port.
+      // Computer use ignores a system instruction; the wait-tool swap lands
+      // with the computer-use toolset port.
       llmRequest.config.systemInstruction = undefined;
     }
 
