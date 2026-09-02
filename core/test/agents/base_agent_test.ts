@@ -8,6 +8,7 @@ import {
   AgentTransferLlmRequestProcessor,
   BaseAgent,
   BaseAgentConfig,
+  BaseAgentState,
   Event,
   FunctionTool,
   InvocationContext,
@@ -310,14 +311,23 @@ type ProbeState = {step: number};
  * Exercises the protected agent-state helpers through the public `runAsync`,
  * so the test never widens their visibility. Each run yields the checkpoint
  * event, then an event whose text reports what `loadAgentState` returned.
+ *
+ * `parse` is injectable so that a test can make it throw.
  */
 class AgentStateProbe extends BaseAgent {
+  constructor(
+    config: BaseAgentConfig,
+    private readonly parse: (raw: BaseAgentState) => ProbeState = (raw) => ({
+      step: Number(raw['step']),
+    }),
+  ) {
+    super(config);
+  }
+
   protected async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    const loaded = this.loadAgentState(context, (raw) => ({
-      step: Number(raw['step']),
-    }));
+    const loaded = this.loadAgentState(context, this.parse);
     yield this.createAgentStateEvent(context);
     yield createEvent({
       invocationId: context.invocationId,
@@ -387,6 +397,18 @@ describe('BaseAgent agent state helpers', () => {
     const events = await collectEvents(agent, context);
 
     expect(events[1].content?.parts?.[0].text).toBe('undefined');
+  });
+
+  it('loadAgentState propagates the error a parse throws', async () => {
+    const agent = new AgentStateProbe({name: 'probe'}, () => {
+      throw new Error('unreadable checkpoint');
+    });
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {agentState: {step: 'nonsense'}});
+
+    await expect(collectEvents(agent, context)).rejects.toThrowError(
+      /unreadable checkpoint/,
+    );
   });
 
   it('createAgentStateEvent carries the author, branch and invocation id', async () => {
