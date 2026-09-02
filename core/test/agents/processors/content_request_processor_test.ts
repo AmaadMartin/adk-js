@@ -8,6 +8,7 @@ import {
   BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
+  createSession,
   Event,
   EventActions,
   InvocationContext,
@@ -203,19 +204,19 @@ describe('ContentRequestProcessor with instruction contents', () => {
     };
   }
 
-  function createContextFor(agent: LlmAgent, events: Event[]) {
-    const session = {
-      id: 'test-session',
-      events,
-      appName: 'test-app',
-      userId: 'test-user',
-      state: {},
-    } as unknown as Session;
-
+  function createContextFor(
+    agent: LlmAgent,
+    events: Event[],
+  ): InvocationContext {
     return new InvocationContext({
       invocationId: 'test-invocation',
-      agent: agent as BaseAgent,
-      session,
+      agent,
+      session: createSession({
+        id: 'test-session',
+        events,
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       pluginManager: new PluginManager([]),
     });
   }
