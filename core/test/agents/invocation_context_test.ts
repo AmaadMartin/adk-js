@@ -9,6 +9,7 @@ import {
   BaseAgent,
   BaseAgentConfig,
   Event,
+  InMemoryCredentialService,
   InvocationContext,
   LoopAgent,
   PluginManager,
@@ -304,5 +305,37 @@ describe('drainInvocationEvents', () => {
     // producer that would wait on it again.
     await expect(enqueued).resolves.toBeUndefined();
     expect(queue.isClosed).toBe(true);
+  });
+});
+
+describe('InvocationContext.credentialService', () => {
+  const credentialService = new InMemoryCredentialService();
+
+  it('is undefined when the caller passes none', () => {
+    expect(makeContext().credentialService).toBeUndefined();
+  });
+
+  it('is the service the caller passed', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-credential-service',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+
+    expect(context.credentialService).toBe(credentialService);
+  });
+
+  it('reaches a cloned context', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-credential-service-clone',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+
+    expect(context.clone().credentialService).toBe(credentialService);
   });
 });
