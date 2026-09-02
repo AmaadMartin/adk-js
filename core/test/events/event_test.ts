@@ -8,15 +8,23 @@ import {
   AuthConfig,
   createEvent,
   createEventActions,
+  Event,
+  getEventMessage,
   getFunctionCalls,
   getFunctionResponses,
+  getNodeName,
+  getNodePathName,
+  getNodeRunId,
+  getParentNodeRunId,
   hasThoughts,
   hasTrailingCodeExecutionResult,
+  InputValidationError,
   isFinalResponse,
   pruneThoughts,
+  setEventMessage,
   stringifyContent,
 } from '@google/adk';
-import {Outcome} from '@google/genai';
+import {Content, Outcome} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   createNewEventId,
@@ -463,5 +471,309 @@ describe('Event Utils', () => {
       populateClientFunctionCallId(event);
       expect(event.content!.parts![0].text).toBe('hello');
     });
+  });
+});
+
+describe('node info accessors', () => {
+  describe('getNodeRunId', () => {
+    it('returns the run id of the leaf segment', () => {
+      expect(getNodeRunId({path: 'wf@1.node@2'})).toBe('2');
+    });
+
+    it('returns an empty string when the leaf carries no run id', () => {
+      expect(getNodeRunId({path: 'node'})).toBe('');
+    });
+
+    it('returns an empty string for an empty or absent path', () => {
+      expect(getNodeRunId({path: ''})).toBe('');
+      expect(getNodeRunId({})).toBe('');
+      expect(getNodeRunId(undefined)).toBe('');
+    });
+
+    it('splits on the last separator so a name may contain one', () => {
+      expect(getNodeRunId({path: 'node@a@b'})).toBe('b');
+    });
+  });
+
+  describe('getParentNodeRunId', () => {
+    it('returns the run id of the second-to-last segment', () => {
+      expect(getParentNodeRunId({path: 'wf@1.node@2'})).toBe('1');
+      expect(getParentNodeRunId({path: 'a@1.b@2.c@3'})).toBe('2');
+    });
+
+    it('returns undefined when the parent carries no run id', () => {
+      expect(getParentNodeRunId({path: 'wf.node@2'})).toBeUndefined();
+    });
+
+    it('returns undefined for a single segment', () => {
+      expect(getParentNodeRunId({path: 'node@2'})).toBeUndefined();
+    });
+
+    it('returns undefined for an empty or absent path', () => {
+      expect(getParentNodeRunId({path: ''})).toBeUndefined();
+      expect(getParentNodeRunId(undefined)).toBeUndefined();
+    });
+  });
+
+  describe('getNodePathName', () => {
+    it('strips the run id from the leaf segment', () => {
+      expect(getNodePathName({path: 'wf@1.node@2'})).toBe('node');
+    });
+
+    it('returns the leaf segment when it carries no run id', () => {
+      expect(getNodePathName({path: 'wf.node'})).toBe('node');
+    });
+
+    it('returns an empty string for an empty or absent path', () => {
+      expect(getNodePathName({path: ''})).toBe('');
+      expect(getNodePathName(undefined)).toBe('');
+    });
+  });
+});
+
+describe('getNodeName', () => {
+  it('returns the name of the emitting node', () => {
+    expect(getNodeName(createEvent({nodePath: 'wf@1.review@3'}))).toBe(
+      'review',
+    );
+  });
+
+  it('returns an empty string for an agent state event', () => {
+    const event = createEvent({
+      nodePath: 'wf@1.review@3',
+      actions: createEventActions({agentState: {foo: 1}}),
+    });
+    expect(getNodeName(event)).toBe('');
+  });
+
+  it('returns an empty string for an end-of-agent event', () => {
+    const event = createEvent({
+      nodePath: 'wf@1.review@3',
+      actions: createEventActions({endOfAgent: true}),
+    });
+    expect(getNodeName(event)).toBe('');
+  });
+
+  it('returns the name when the agent state snapshot is empty', () => {
+    const event = createEvent({
+      nodePath: 'wf@1.review@3',
+      actions: createEventActions({agentState: {}}),
+    });
+    expect(getNodeName(event)).toBe('review');
+  });
+
+  it('returns an empty string when the event has no node info', () => {
+    expect(getNodeName(createEvent())).toBe('');
+  });
+});
+
+describe('message alias', () => {
+  it('converts a string message to user content', () => {
+    const event = createEvent({message: 'Hello!'});
+    expect(event.content!.parts![0].text).toBe('Hello!');
+    expect(event.content!.role).toBe('user');
+  });
+
+  it('stores a Content message unchanged', () => {
+    const content: Content = {role: 'model', parts: [{text: 'from Content'}]};
+    expect(createEvent({message: content}).content).toBe(content);
+  });
+
+  it('converts a single part', () => {
+    const event = createEvent({message: {text: 'from Part'}});
+    expect(event.content!.parts![0].text).toBe('from Part');
+  });
+
+  it('converts a list of parts and keeps their order', () => {
+    const event = createEvent({message: [{text: 'part1'}, {text: 'part2'}]});
+    expect(event.content!.parts!.map((part) => part.text)).toEqual([
+      'part1',
+      'part2',
+    ]);
+  });
+
+  it('rejects a message given together with content', () => {
+    expect(() =>
+      createEvent({message: 'hello', content: {parts: [{text: 'world'}]}}),
+    ).toThrow(InputValidationError);
+    expect(() =>
+      createEvent({message: 'hello', content: {parts: [{text: 'world'}]}}),
+    ).toThrow(/mutually exclusive/);
+  });
+
+  it('leaves content alone when no message is given', () => {
+    const content: Content = {role: 'model', parts: [{text: 'via content'}]};
+    expect(createEvent({content}).content).toBe(content);
+    expect(createEvent().content).toBeUndefined();
+  });
+
+  it('reads the content back through getEventMessage', () => {
+    const event = createEvent({message: 'Hello!'});
+    expect(getEventMessage(event)).toBe(event.content);
+    expect(getEventMessage(createEvent())).toBeUndefined();
+  });
+
+  it('sets the content through setEventMessage', () => {
+    const event = createEvent();
+    setEventMessage(event, 'updated');
+    expect(event.content!.parts![0].text).toBe('updated');
+    expect(event.content!.role).toBe('user');
+
+    const content: Content = {role: 'model', parts: [{text: 'replaced'}]};
+    setEventMessage(event, content);
+    expect(event.content).toBe(content);
+  });
+
+  it('clears the content when set to undefined or null', () => {
+    const event = createEvent({message: 'hello'});
+    setEventMessage(event, undefined);
+    expect(event.content).toBeUndefined();
+
+    setEventMessage(event, 'hello again');
+    setEventMessage(event, null);
+    expect(event.content).toBeUndefined();
+  });
+
+  it('serializes as content, never as message', () => {
+    const snake = transformToSnakeCaseEvent(createEvent({message: 'Hello!'}));
+    expect(snake['content']).toBeDefined();
+    expect('message' in snake).toBe(false);
+
+    const restored = transformToCamelCaseEvent(snake);
+    expect(restored.content!.parts![0].text).toBe('Hello!');
+  });
+});
+
+describe('convenience construction kwargs', () => {
+  it('routes state to the state delta', () => {
+    expect(createEvent({state: {key: 'value'}}).actions.stateDelta).toEqual({
+      key: 'value',
+    });
+    expect(createEvent().actions.stateDelta).toEqual({});
+  });
+
+  it('keeps the other actions when state is given', () => {
+    const event = createEvent({
+      state: {key: 'value'},
+      actions: {skipSummarization: true},
+    });
+    expect(event.actions.stateDelta).toEqual({key: 'value'});
+    expect(event.actions.skipSummarization).toBe(true);
+  });
+
+  it('routes nodePath to the node info path', () => {
+    expect(createEvent({nodePath: 'root.node'}).nodeInfo!.path).toBe(
+      'root.node',
+    );
+  });
+
+  it('keeps the other node info fields when nodePath is given', () => {
+    const event = createEvent({nodePath: 'x', nodeInfo: {outputFor: ['a']}});
+    expect(event.nodeInfo!.path).toBe('x');
+    expect(event.nodeInfo!.outputFor).toEqual(['a']);
+  });
+
+  it('accepts every convenience option at once', () => {
+    const event = createEvent({
+      message: 'hello',
+      state: {key: 'value'},
+      route: 'next',
+      nodePath: 'a.b',
+    });
+    expect(event.content!.parts![0].text).toBe('hello');
+    expect(event.actions.stateDelta).toEqual({key: 'value'});
+    expect(event.route).toBe('next');
+    expect(event.nodeInfo!.path).toBe('a.b');
+  });
+
+  it('does not mutate the params it is given', () => {
+    const params = {
+      message: 'Hello!',
+      state: {key: 'value'},
+      route: 'next',
+      nodePath: 'root.node',
+      nodeInfo: {outputFor: ['a']},
+      actions: {skipSummarization: true},
+    };
+    const original = structuredClone(params);
+
+    createEvent(params);
+
+    expect(params).toEqual(original);
+  });
+
+  it('does not copy the convenience options onto the event', () => {
+    const event = createEvent({
+      message: 'hello',
+      state: {key: 'value'},
+      nodePath: 'a.b',
+    });
+    expect('message' in event).toBe(false);
+    expect('state' in event).toBe(false);
+    expect('nodePath' in event).toBe(false);
+  });
+});
+
+describe('longRunningToolIds serialization', () => {
+  const toolIds = ['call_1', 'call_2', 'call_3', 'call_4', 'zzz', 'mmm', 'kkk'];
+
+  /** An event literal that never passed through `createEvent`. */
+  function rehydratedEvent(longRunningToolIds: string[]): Event {
+    return {
+      id: 'stored-id',
+      invocationId: 'inv-1',
+      author: 'user',
+      actions: createEventActions(),
+      longRunningToolIds,
+      timestamp: 1,
+    };
+  }
+
+  it('sorts the ids of an event built by the factory', () => {
+    const event = createEvent({author: 'user', longRunningToolIds: toolIds});
+    expect(event.longRunningToolIds).toEqual([...toolIds].sort());
+    expect(transformToSnakeCaseEvent(event)['long_running_tool_ids']).toEqual(
+      [...toolIds].sort(),
+    );
+  });
+
+  it('sorts the ids of an event that bypassed the factory', () => {
+    const snake = transformToSnakeCaseEvent(
+      rehydratedEvent(['zzz', 'aaa', 'mmm']),
+    );
+    expect(snake['long_running_tool_ids']).toEqual(['aaa', 'mmm', 'zzz']);
+  });
+
+  it('collapses duplicates', () => {
+    expect(
+      createEvent({longRunningToolIds: ['zzz', 'aaa', 'aaa']})
+        .longRunningToolIds,
+    ).toEqual(['aaa', 'zzz']);
+    expect(
+      transformToSnakeCaseEvent(rehydratedEvent(['zzz', 'aaa', 'aaa']))[
+        'long_running_tool_ids'
+      ],
+    ).toEqual(['aaa', 'zzz']);
+  });
+
+  it('does not reorder the array of the event it serializes', () => {
+    const ids = ['zzz', 'aaa'];
+    transformToSnakeCaseEvent(rehydratedEvent(ids));
+    expect(ids).toEqual(['zzz', 'aaa']);
+  });
+
+  it('leaves an unset value as the empty default and round-trips it', () => {
+    const event = createEvent({author: 'user'});
+    expect(event.longRunningToolIds).toEqual([]);
+
+    const restored = transformToCamelCaseEvent(
+      transformToSnakeCaseEvent(event),
+    );
+    expect(restored.longRunningToolIds).toEqual([]);
+  });
+
+  it('still marks an event with ids as the final response', () => {
+    const event = createEvent({longRunningToolIds: ['zzz', 'aaa']});
+    expect(isFinalResponse(event)).toBe(true);
   });
 });
