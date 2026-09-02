@@ -684,7 +684,17 @@ async function getTypeFromPackageJson(dir: string): Promise<FileModuleType> {
   return getTypeFromPackageJson(parentDir);
 }
 
-async function linkProjectNodeModules(
+/**
+ * Points a compilation output directory at the source project's dependencies.
+ *
+ * A compiled file lives outside the project, so Node cannot resolve the bare
+ * imports left in it. The symlink puts the project's `node_modules` where the
+ * resolver looks.
+ *
+ * @param outputDir Directory holding the compiled file.
+ * @param sourceDir Directory of the file that was compiled.
+ */
+export async function linkProjectNodeModules(
   outputDir: string,
   sourceDir: string,
 ): Promise<void> {

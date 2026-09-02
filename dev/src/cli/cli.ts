@@ -15,6 +15,7 @@ import {
 } from '@google/adk';
 import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
+import * as path from 'node:path';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
@@ -25,6 +26,7 @@ import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
+import {getServiceRegistry, loadServicesModule} from './service_registry.js';
 
 dotenv.config({quiet: true});
 
@@ -55,16 +57,25 @@ function getLogLevelFromOptions(options: {
 function getSessionServiceFromOptions(options: {
   session_service_uri?: string;
 }): BaseSessionService {
-  return getSessionServiceFromUri(
-    options['session_service_uri'] || process.env.DATABASE_URL || 'memory://',
+  const uri =
+    options['session_service_uri'] || process.env.DATABASE_URL || 'memory://';
+
+  // The registry first, so an agent's own backend cannot be shadowed by a
+  // built-in scheme of the same name.
+  return (
+    getServiceRegistry().createSessionService(uri) ??
+    getSessionServiceFromUri(uri)
   );
 }
 
 function getArtifactServiceFromOptions(options: {
   artifact_service_uri?: string;
 }): BaseArtifactService | undefined {
-  return getArtifactServiceFromUri(
-    options['artifact_service_uri'] || 'memory://',
+  const uri = options['artifact_service_uri'] || 'memory://';
+
+  return (
+    getServiceRegistry().createArtifactService(uri) ??
+    getArtifactServiceFromUri(uri)
   );
 }
 
@@ -399,6 +410,10 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
       try {
+        // Before the services are built: a services file beside the agent may
+        // be what serves the scheme the URI options name.
+        await loadServicesModule(path.dirname(getAbsolutePath(agentPath)));
+
         await runAgent({
           agentPath,
           inputFile: options['replay'],
