@@ -21,6 +21,7 @@ import {State} from '../sessions/state.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {logger} from '../utils/logger.js';
+import {AuthCredential} from './auth_credential.js';
 import {AuthHandler} from './auth_handler.js';
 import {AuthConfig} from './auth_tool.js';
 import {bindCredentialResponse} from './credential_response_binding.js';
@@ -77,6 +78,7 @@ async function storeAuthAndCollectResumeTargets(
   authResponses: Record<string, unknown>,
   state: State,
   agentName: string,
+  credentialByKey: Record<string, AuthCredential>,
 ): Promise<Set<string>> {
   const requests = requestedAuthConfigs(events, authFcIds, agentName);
 
@@ -105,7 +107,15 @@ async function storeAuthAndCollectResumeTargets(
       );
       continue;
     }
-    await new AuthHandler(authConfig).parseAndStoreAuthResponse(state);
+    const credential = await new AuthHandler(
+      authConfig,
+    ).parseAndStoreAuthResponse(state);
+    if (credential) {
+      // The rest of the invocation reads this through
+      // `ReadonlyContext.getCredential`, which a toolset or an instruction
+      // provider can reach; only a tool context can read session state.
+      credentialByKey[authConfig.credentialKey] = credential;
+    }
 
     const functionCallId = request.args?.functionCallId;
     if (
@@ -175,6 +185,7 @@ export class AuthPreprocessor extends BaseLlmRequestProcessor {
       authResponses,
       state,
       agent.name,
+      invocationContext.credentialByKey,
     );
 
     if (toolsToResume.size === 0) {
