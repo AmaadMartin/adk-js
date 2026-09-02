@@ -297,7 +297,7 @@ describe('CLI Entrypoint', () => {
         expect.objectContaining({
           port: 8000,
           serviceName: 'adk-default-service-name',
-          adkVersion: 'latest',
+          adkVersion: '1.0.0-test',
           withUi: false,
         }),
       );
@@ -343,6 +343,14 @@ describe('CLI Entrypoint', () => {
       });
     });
 
+    it('should let --adk_version=latest override the CLI version default', async () => {
+      await parse(['deploy', 'cloud_run', '--adk_version=latest']);
+
+      expect((deployToCloudRun as Mock).mock.calls[0][0]).toMatchObject({
+        adkVersion: 'latest',
+      });
+    });
+
     it('should pass a2a flag to deployToCloudRun when --a2a is set', async () => {
       await parse(['deploy', 'cloud_run', '--a2a']);
 
@@ -377,7 +385,7 @@ describe('CLI Entrypoint', () => {
       expect(deployToAgentEngine).toHaveBeenCalledWith(
         expect.objectContaining({
           port: 8080,
-          adkVersion: 'latest',
+          adkVersion: '1.0.0-test',
           withUi: false,
         }),
       );
@@ -442,7 +450,7 @@ describe('CLI Entrypoint', () => {
       expect(deployToAgentEngine).toHaveBeenCalledWith(
         expect.objectContaining({
           port: 8080,
-          adkVersion: 'latest',
+          adkVersion: '1.0.0-test',
           withUi: false,
         }),
       );
