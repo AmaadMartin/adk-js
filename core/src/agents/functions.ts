@@ -62,10 +62,12 @@ export {
   findMatchingFunctionCall,
 } from '../events/event_filters.js';
 export {
+  ADK_FRAMEWORK_FUNCTION_CALL_NAME,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
   reservedFunctionCallName,
+  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
 } from './framework_function_calls.js';
 
 // Export these items for testing purposes only

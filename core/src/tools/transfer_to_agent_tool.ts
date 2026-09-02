@@ -8,10 +8,17 @@ import {FunctionDeclaration} from '@google/genai';
 import {z} from 'zod';
 
 import {Context} from '../agents/context.js';
+import {TRANSFER_TO_AGENT_FUNCTION_CALL_NAME} from '../agents/framework_function_calls.js';
 import {FunctionTool} from './function_tool.js';
 
-/** The name the model calls to hand off control to another agent. */
-export const TRANSFER_TO_AGENT_TOOL_NAME = 'transfer_to_agent';
+/**
+ * The name the model calls to hand off control to another agent.
+ *
+ * This tool registers itself under the name, and the content processor
+ * recognises the resulting call by it. Both read the name from
+ * `framework_function_calls`, so a rename cannot break the pairing silently.
+ */
+export const TRANSFER_TO_AGENT_TOOL_NAME = TRANSFER_TO_AGENT_FUNCTION_CALL_NAME;
 
 /** The model-facing parameter that carries the target agent. */
 const AGENT_NAME_PARAMETER = 'agentName';

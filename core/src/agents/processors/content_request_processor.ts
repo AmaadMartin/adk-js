@@ -7,7 +7,10 @@
 import {getActiveEvents} from '../../context/compaction_utils.js';
 import {Event} from '../../events/event.js';
 import {isGemini} from '../../models/google_llm.js';
-import {LlmRequest} from '../../models/llm_request.js';
+import {
+  insertTransientUserContent,
+  LlmRequest,
+} from '../../models/llm_request.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
@@ -53,9 +56,9 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       userContent: invocationContext.userContent,
     };
 
-    // The instructions processor is the only producer of contents this early,
-    // and only for a static instruction, whose content must stay a stable
-    // request prefix. The reassignment below would otherwise discard it.
+    // Contents an earlier processor put on the request — a static instruction,
+    // the dynamic instruction that rides behind it — would be lost by the
+    // reassignment below.
     const instructionContents = llmRequest.contents;
 
     if (
@@ -99,7 +102,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       );
     }
 
-    llmRequest.contents.unshift(...instructionContents);
+    insertTransientUserContent(llmRequest, instructionContents);
 
     return;
   }
