@@ -10,6 +10,7 @@ import {
   createEvent,
   createEventActions,
   createSession,
+  Event,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -532,18 +533,19 @@ interface NestedRun {
   newMessage?: Content;
 }
 
+/** The nested run this file's `Runner` stub performs. */
+type StubRun = (params: {
+  runConfig?: RunConfig;
+  newMessage: Content;
+}) => AsyncGenerator<Event, void, void>;
+
 /**
- * Installs a `Runner` mock that records what `AgentTool` hands the nested run,
- * then yields one model event carrying `replyText`.
+ * Installs a `Runner` stub that runs `run` and reports whether it was closed.
  *
- * The single cast is the mock pattern this file already uses: a partial stub
+ * The one cast is the mock pattern this file already uses: a partial stub
  * cannot satisfy the whole `Runner` shape.
  */
-function captureNestedRun(replyText = 'done'): {
-  nested: NestedRun;
-  close: Mock;
-} {
-  const nested: NestedRun = {};
+function stubRunner(run: StubRun): Mock {
   const close = vi.fn();
   vi.mocked(Runner).mockImplementation(
     (config) =>
@@ -551,16 +553,29 @@ function captureNestedRun(replyText = 'done'): {
         appName: config?.appName,
         sessionService: config?.sessionService,
         close,
-        async *runAsync(params: {runConfig?: RunConfig; newMessage: Content}) {
-          nested.runConfig = params.runConfig;
-          nested.newMessage = params.newMessage;
-          yield createEvent({
-            author: 'sub-agent',
-            content: {role: 'model', parts: [{text: replyText}]},
-          });
-        },
+        runAsync: run,
       }) as unknown as Runner,
   );
+  return close;
+}
+
+/**
+ * Installs a `Runner` stub that records what `AgentTool` hands the nested run,
+ * then answers with `replyText`.
+ */
+function captureNestedRun(replyText = 'done'): {
+  nested: NestedRun;
+  close: Mock;
+} {
+  const nested: NestedRun = {};
+  const close = stubRunner(async function* (params) {
+    nested.runConfig = params.runConfig;
+    nested.newMessage = params.newMessage;
+    yield createEvent({
+      author: 'sub-agent',
+      content: {role: 'model', parts: [{text: replyText}]},
+    });
+  });
   return {nested, close};
 }
 
@@ -587,7 +602,10 @@ function createToolContext(
   });
 }
 
-const SUB_AGENT = {name: 'sub-agent'} as unknown as LlmAgent;
+const SUB_AGENT = new LlmAgent({
+  name: 'sub-agent',
+  model: 'gemini-2.5-flash',
+});
 
 describe('AgentTool nested run config', () => {
   it('forwards the caller run config to the nested run', async () => {
@@ -686,27 +704,18 @@ describe('AgentTool runner lifecycle', () => {
   });
 
   it('closes the nested runner when the caller aborts mid-run', async () => {
-    const close = vi.fn();
     const controller = new AbortController();
-    vi.mocked(Runner).mockImplementation(
-      (config) =>
-        ({
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          close,
-          async *runAsync() {
-            yield createEvent({
-              author: 'sub-agent',
-              content: {role: 'model', parts: [{text: 'first'}]},
-            });
-            controller.abort();
-            yield createEvent({
-              author: 'sub-agent',
-              content: {role: 'model', parts: [{text: 'second'}]},
-            });
-          },
-        }) as unknown as Runner,
-    );
+    const close = stubRunner(async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'first'}]},
+      });
+      controller.abort();
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'second'}]},
+      });
+    });
 
     const result = await new AgentTool({agent: SUB_AGENT}).runAsync({
       args: {request: 'hello'},
@@ -718,22 +727,13 @@ describe('AgentTool runner lifecycle', () => {
   });
 
   it('closes the nested runner when the nested run throws mid-stream', async () => {
-    const close = vi.fn();
-    vi.mocked(Runner).mockImplementation(
-      (config) =>
-        ({
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          close,
-          async *runAsync() {
-            yield createEvent({
-              author: 'sub-agent',
-              content: {role: 'model', parts: [{text: 'partial'}]},
-            });
-            throw new Error('sub-agent exploded');
-          },
-        }) as unknown as Runner,
-    );
+    const close = stubRunner(async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'partial'}]},
+      });
+      throw new Error('sub-agent exploded');
+    });
 
     await expect(
       new AgentTool({agent: SUB_AGENT}).runAsync({
