@@ -13,6 +13,7 @@ import {
   isFileUriSupported,
   isHttpUrl,
   isLiteLlmGeminiModel,
+  isLiteLlmVertexModel,
   looksLikeOpenAiFileId,
   mapFinishReason,
   redactFileUriForLog,
@@ -84,6 +85,23 @@ describe('litellm model classification', () => {
     expect(isLiteLlmGeminiModel('gemini/gemini-2.5-pro')).toBe(true);
     expect(isLiteLlmGeminiModel('vertex_ai/gemini-2.5-flash')).toBe(true);
     expect(isLiteLlmGeminiModel('vertex_ai/claude-4')).toBe(false);
+  });
+
+  it('recognises a gemini model behind the proxy prefix', () => {
+    expect(
+      isLiteLlmGeminiModel('litellm_proxy/vertex_ai/gemini-2.5-flash'),
+    ).toBe(true);
+    expect(isLiteLlmGeminiModel('litellm_proxy/gemini/gemini-2.5-pro')).toBe(
+      true,
+    );
+    expect(isLiteLlmGeminiModel('litellm_proxy/openai/gpt-4o')).toBe(false);
+  });
+
+  it('recognises vertex models on both routes', () => {
+    expect(isLiteLlmVertexModel('vertex_ai/gemini-2.5-flash')).toBe(true);
+    expect(isLiteLlmVertexModel('vertex_ai/claude-4')).toBe(true);
+    expect(isLiteLlmVertexModel('litellm_proxy/vertex_ai/claude-4')).toBe(true);
+    expect(isLiteLlmVertexModel('openai/gpt-4o')).toBe(false);
   });
 });
 

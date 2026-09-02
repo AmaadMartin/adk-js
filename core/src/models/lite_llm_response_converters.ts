@@ -20,6 +20,7 @@ import {
 import {isJsonObject} from './lite_llm_request_converters.js';
 import {
   ChatMessage,
+  JsonValue,
   MessageContent,
   ModelResponse,
   ModelResponseStream,
@@ -38,6 +39,17 @@ const REASONING_TEXT_KEYS = [
 
 /** Matches an unquoted JSON object key. */
 const UNQUOTED_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
+
+/**
+ * The separator LiteLLM uses to embed a thought signature in a tool call id.
+ * Gemini's thought-signature requirement is documented at
+ * https://ai.google.dev/gemini-api/docs/thought-signatures.
+ */
+const THOUGHT_SIGNATURE_SEPARATOR = '__thought__';
+
+/** Rejects anything outside the base64 alphabet or with bad padding. */
+const BASE64_RE =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 /**
  * Usage metadata plus the cache-write count LiteLLM reports for Anthropic and
@@ -533,6 +545,68 @@ export function extractGroundingMetadata(
   return undefined;
 }
 
+/**
+ * Returns the value when it is a non-empty base64 string, and `undefined`
+ * otherwise.
+ */
+function validThoughtSignature(value: JsonValue): string | undefined {
+  if (typeof value === 'string' && value && BASE64_RE.test(value)) {
+    return value;
+  }
+  logger.debug(
+    'LiteLlm: dropped a thought signature that is not a base64 string.',
+  );
+  return undefined;
+}
+
+/**
+ * Reads `thought_signature` out of a provider payload, ignoring an absent or
+ * empty one so the next location gets its turn.
+ */
+function nestedThoughtSignature(
+  container: JsonValue | undefined,
+): JsonValue | undefined {
+  if (!isJsonObject(container)) {
+    return undefined;
+  }
+  const signature = container['thought_signature'];
+  return signature ? signature : undefined;
+}
+
+/** Reads the thought signature LiteLLM embedded in a tool call id. */
+function embeddedThoughtSignature(toolCallId = ''): string | undefined {
+  const separator = toolCallId.indexOf(THOUGHT_SIGNATURE_SEPARATOR);
+  if (separator === -1) {
+    return undefined;
+  }
+  return toolCallId.slice(separator + THOUGHT_SIGNATURE_SEPARATOR.length);
+}
+
+/**
+ * Extracts the thought signature a Gemini thinking model attached to a tool
+ * call, or `undefined` when there is none to be had.
+ *
+ * The signature reaches us in one of four places depending on the provider
+ * path, and the first one that carries a value decides. A malformed payload is
+ * dropped rather than raised: the tool call itself is still usable.
+ *
+ * See https://ai.google.dev/gemini-api/docs/thought-signatures.
+ */
+export function extractThoughtSignatureFromToolCall(
+  toolCall: ToolCall,
+): string | undefined {
+  const extraContent = toolCall.extra_content;
+  const googleFields = isJsonObject(extraContent)
+    ? extraContent['google']
+    : undefined;
+  const signature =
+    nestedThoughtSignature(googleFields) ??
+    nestedThoughtSignature(toolCall.provider_specific_fields) ??
+    nestedThoughtSignature(toolCall.function?.provider_specific_fields) ??
+    embeddedThoughtSignature(toolCall.id);
+  return signature === undefined ? undefined : validThoughtSignature(signature);
+}
+
 /** Converts a chat message into the `LlmResponse` it represents. */
 export function messageToGenerateContentResponse(
   message: ChatMessage,
@@ -551,13 +625,18 @@ export function messageToGenerateContentResponse(
     if (toolCall.type !== 'function') {
       continue;
     }
-    parts.push({
+    const part: Part = {
       functionCall: {
         id: toolCall.id,
         name: toolCall.function?.name,
         args: parseToolCallArguments(toolCall.function?.arguments),
       },
-    });
+    };
+    const thoughtSignature = extractThoughtSignatureFromToolCall(toolCall);
+    if (thoughtSignature) {
+      part.thoughtSignature = thoughtSignature;
+    }
+    parts.push(part);
   }
 
   return {
