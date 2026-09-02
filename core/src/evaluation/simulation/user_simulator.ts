@@ -7,6 +7,7 @@
 import {Content} from '@google/genai';
 
 import {Event} from '../../events/event.js';
+import {EvalCase} from '../eval_case.js';
 
 /** The resulting status of {@link UserSimulator.getNextUserMessage}. */
 export enum UserSimulatorStatus {
@@ -50,6 +51,63 @@ export interface UserSimulator {
    * @returns The next user message, or a status explaining why there is none.
    */
   getNextUserMessage(events: Event[]): Promise<NextUserMessage>;
+}
+
+/**
+ * Base configuration for a user simulator.
+ *
+ * `type` is the discriminator a concrete simulator registers under, and the
+ * base carries none of its own: a config without a `type` names no simulator.
+ * A concrete simulator ships its own config extending this one, pinning
+ * `type` to the literal it registered.
+ */
+export interface BaseUserSimulatorConfig {
+  /**
+   * Names the simulator implementation this config belongs to, as passed to
+   * {@link registerUserSimulator}.
+   */
+  type?: string;
+}
+
+/** Builds the simulator registered for a config type, for one eval case. */
+export type UserSimulatorFactory = (params: {
+  config: BaseUserSimulatorConfig;
+  evalCase: EvalCase;
+}) => UserSimulator;
+
+const SIMULATOR_BY_CONFIG_TYPE = new Map<string, UserSimulatorFactory>();
+
+/**
+ * Registers the simulator that a config `type` selects.
+ *
+ * This is the extension point for new simulator types. A simulator ships its
+ * own config type and calls this once from its own module, at import time.
+ * Registering a type that is already registered replaces its factory.
+ *
+ * @param type The `type` discriminator the config carries.
+ * @param factory Builds the simulator for one eval case.
+ */
+export function registerUserSimulator(
+  type: string,
+  factory: UserSimulatorFactory,
+): void {
+  SIMULATOR_BY_CONFIG_TYPE.set(type, factory);
+}
+
+/**
+ * The factories registered so far, keyed by config `type`.
+ *
+ * The registry lives on this module rather than on `UserSimulatorProvider` so
+ * that a simulator can register itself from its own module without importing
+ * the provider, which imports every built-in simulator in turn.
+ *
+ * @returns A read-only view of the registry.
+ */
+export function userSimulatorRegistry(): ReadonlyMap<
+  string,
+  UserSimulatorFactory
+> {
+  return SIMULATOR_BY_CONFIG_TYPE;
 }
 
 /**

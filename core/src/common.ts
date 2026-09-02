@@ -348,14 +348,19 @@ export {
   EnsureRetryOptionsPlugin,
   addDefaultRetryOptionsIfNotPresent,
 } from './evaluation/retry_options_utils.js';
+export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
 export {
   UserSimulatorStatus,
+  registerUserSimulator,
   validateNextUserMessage,
 } from './evaluation/simulation/user_simulator.js';
 export type {
+  BaseUserSimulatorConfig,
   NextUserMessage,
   UserSimulator,
+  UserSimulatorFactory,
 } from './evaluation/simulation/user_simulator.js';
+export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
 export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
 export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
