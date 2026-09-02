@@ -777,8 +777,10 @@ export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
 export {APIHubClient} from './tools/apihub_tool/clients/apihub_client.js';
 export type {
+  APIHubClientOptions,
   ApiHubApi,
   ApiHubApiVersion,
+  BaseAPIHubClient,
 } from './tools/apihub_tool/clients/apihub_client.js';
 export {ApplicationIntegrationToolset} from './tools/application_integration_tool/application_integration_toolset.js';
 export type {ApplicationIntegrationToolsetOptions} from './tools/application_integration_tool/application_integration_toolset.js';

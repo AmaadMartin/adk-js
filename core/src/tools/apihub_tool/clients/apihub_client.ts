@@ -4,13 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleAuth, JWTInput} from 'google-auth-library';
+import {AuthClient, GoogleAuth, JWTInput} from 'google-auth-library';
+import {z} from 'zod';
 import {base64Decode} from '../../../utils/env_aware_utils.js';
 import {
+  MtlsClientCerts,
   TextResponse,
   clientCertsToPresent,
   effectiveGoogleapisEndpoint,
   getWithClientCert,
+  useClientCertEffective,
 } from '../../../utils/mtls_utils.js';
 
 const APIHUB_ROOT_URL = 'https://apihub.googleapis.com/v1';
@@ -68,34 +71,65 @@ export interface ApiHubApiVersion {
   specs?: string[];
 }
 
-/** The response of the API Hub `apis.list` method. */
-interface ApiHubApiList {
-  apis?: ApiHubApi[];
-}
+const NON_OBJECT_MESSAGE = 'API Hub returned a non-object JSON response.';
 
-/** The response of the API Hub `specs.contents` method. */
-interface ApiHubSpecContents {
-  /** The base64-encoded spec text. */
-  contents?: string;
+/**
+ * The message each field raises when it holds the wrong type.
+ *
+ * adk-python's `_response_object`, `_string_list` and `_object_list` raise
+ * these strings verbatim, so they are part of the cross-SDK contract and
+ * replace zod's own wording.
+ */
+const FIELD_MESSAGES: Record<string, string> = {
+  apis: "API Hub field 'apis' must be a list of objects.",
+  contents: "API Hub field 'contents' must be a string.",
+  name: "API Hub field 'name' must be a string.",
+  specs: "API Hub field 'specs' must be a list of strings.",
+  versions: "API Hub field 'versions' must be a list of strings.",
+};
+
+const ApiSchema = z.object({
+  name: z.string().optional(),
+  versions: z.array(z.string()).optional(),
+});
+
+const ApiVersionSchema = z.object({
+  name: z.string().optional(),
+  specs: z.array(z.string()).optional(),
+});
+
+/**
+ * The `apis.list` response. Its members only have to be objects, which is what
+ * adk-python's `_object_list` requires; each one is then parsed with
+ * {@link ApiSchema}, so a bad field names itself rather than the list.
+ */
+const ApiListSchema = z.object({
+  apis: z.array(z.record(z.string(), z.unknown())).optional(),
+});
+
+const SpecContentsSchema = z.object({
+  contents: z.string().optional(),
+});
+
+/**
+ * Parses an API Hub payload, reporting the field that failed.
+ *
+ * A failure inside a field carries that field first in its path. A payload
+ * that is not an object at all carries an empty path.
+ */
+function parsePayload<T>(schema: z.ZodType<T>, payload: unknown): T {
+  const result = schema.safeParse(payload);
+  if (result.success) {
+    return result.data;
+  }
+  const field = result.error.issues[0]?.path[0];
+  const message = typeof field === 'string' ? FIELD_MESSAGES[field] : undefined;
+  throw new Error(message ?? NON_OBJECT_MESSAGE);
 }
 
 /** Reports whether a value is a JSON object. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Validates an API Hub field that must be an array of strings.
- *
- * @throws If the field holds anything else.
- */
-function requireStringList(value: unknown, field: string): void {
-  const isStringList =
-    Array.isArray(value) &&
-    value.every((item: unknown) => typeof item === 'string');
-  if (!isStringList) {
-    throw new Error(`API Hub field '${field}' must be a list of strings.`);
-  }
 }
 
 /** One authenticated GET over `globalThis.fetch`. */
@@ -222,6 +256,7 @@ export class APIHubClient implements BaseAPIHubClient {
   private readonly accessToken?: string;
   private readonly serviceAccountJson?: string;
   private auth?: GoogleAuth;
+  private certs?: Promise<MtlsClientCerts | undefined>;
 
   /**
    * Set either `accessToken` or `serviceAccountJson`. With neither, the client
@@ -240,14 +275,13 @@ export class APIHubClient implements BaseAPIHubClient {
    * @returns The APIs, or an empty list when the project has none.
    */
   async listApis(project: string, location: string): Promise<ApiHubApi[]> {
-    const list = await this.get<ApiHubApiList>(
-      `${APIHUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
+    const {apis} = parsePayload(
+      ApiListSchema,
+      await this.get(
+        `${APIHUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
+      ),
     );
-    const apis = list.apis ?? [];
-    if (!Array.isArray(apis) || !apis.every(isRecord)) {
-      throw new Error("API Hub field 'apis' must be a list of objects.");
-    }
-    return apis;
+    return (apis ?? []).map((api) => parsePayload(ApiSchema, api));
   }
 
   /**
@@ -256,7 +290,10 @@ export class APIHubClient implements BaseAPIHubClient {
    * @param apiResourceName `projects/p/locations/l/apis/a`.
    */
   async getApi(apiResourceName: string): Promise<ApiHubApi> {
-    return this.get<ApiHubApi>(`${APIHUB_ROOT_URL}/${apiResourceName}`);
+    return parsePayload(
+      ApiSchema,
+      await this.get(`${APIHUB_ROOT_URL}/${apiResourceName}`),
+    );
   }
 
   /**
@@ -265,7 +302,10 @@ export class APIHubClient implements BaseAPIHubClient {
    * @param apiVersionName `projects/p/locations/l/apis/a/versions/v`.
    */
   async getApiVersion(apiVersionName: string): Promise<ApiHubApiVersion> {
-    return this.get<ApiHubApiVersion>(`${APIHUB_ROOT_URL}/${apiVersionName}`);
+    return parsePayload(
+      ApiVersionSchema,
+      await this.get(`${APIHUB_ROOT_URL}/${apiVersionName}`),
+    );
   }
 
   /**
@@ -284,7 +324,6 @@ export class APIHubClient implements BaseAPIHubClient {
     if (!apiVersionResourceName) {
       const versions =
         (await this.getApi(names.apiResourceName)).versions ?? [];
-      requireStringList(versions, 'versions');
       if (versions.length === 0) {
         throw new Error(
           `No versions found in API Hub resource: ${names.apiResourceName}`,
@@ -297,7 +336,6 @@ export class APIHubClient implements BaseAPIHubClient {
     if (apiVersionResourceName && !apiSpecResourceName) {
       const specs =
         (await this.getApiVersion(apiVersionResourceName)).specs ?? [];
-      requireStringList(specs, 'specs');
       if (specs.length === 0) {
         throw new Error(
           `No specs found in API Hub version: ${apiVersionResourceName}`,
@@ -310,12 +348,10 @@ export class APIHubClient implements BaseAPIHubClient {
       throw new Error(`No API Hub resource found in path: ${path}`);
     }
 
-    const {contents} = await this.get<ApiHubSpecContents>(
-      `${APIHUB_ROOT_URL}/${apiSpecResourceName}:contents`,
+    const {contents} = parsePayload(
+      SpecContentsSchema,
+      await this.get(`${APIHUB_ROOT_URL}/${apiSpecResourceName}:contents`),
     );
-    if (contents !== undefined && typeof contents !== 'string') {
-      throw new Error("API Hub field 'contents' must be a string.");
-    }
     return contents ? base64Decode(contents) : '';
   }
 
@@ -327,13 +363,13 @@ export class APIHubClient implements BaseAPIHubClient {
    * honoured. Without a certificate the host stays as it is: the mutual-TLS
    * host rejects a connection that presents none.
    */
-  private async get<T>(url: string): Promise<T> {
+  private async get(url: string): Promise<unknown> {
     const headers = {
       'accept': 'application/json, text/plain, */*',
       'Authorization': `Bearer ${await this.getAccessToken()}`,
     };
 
-    const certs = await clientCertsToPresent();
+    const certs = await this.clientCerts();
     const {status, body} = certs
       ? await getWithClientCert(
           effectiveGoogleapisEndpoint(url),
@@ -346,26 +382,45 @@ export class APIHubClient implements BaseAPIHubClient {
     if (status < 200 || status >= 300) {
       throw new Error(`API Hub request failed with status ${status}: ${body}`);
     }
-    const payload: unknown = JSON.parse(body);
-    if (!isRecord(payload)) {
-      throw new Error('API Hub returned a non-object JSON response.');
+    return JSON.parse(body);
+  }
+
+  /**
+   * Returns the client certificate to present, or `undefined` when the
+   * environment asks for none or none can be loaded.
+   *
+   * The certificate provider is a child process, so the load runs at most once
+   * per client. The environment is read on every call, so the cache only ever
+   * holds a certificate the caller asked for.
+   */
+  private clientCerts(): Promise<MtlsClientCerts | undefined> {
+    if (!useClientCertEffective()) {
+      return Promise.resolve(undefined);
     }
-    return payload as T;
+    this.certs ??= clientCertsToPresent();
+    return this.certs;
   }
 
   private async getAccessToken(): Promise<string> {
     if (this.accessToken) {
       return this.accessToken;
     }
-    // google-auth-library caches the token and refreshes it when it expires.
+    // google-auth-library caches the client and refreshes the token when it
+    // expires.
     this.auth ??= this.createAuth();
 
-    let token: string | null | undefined;
+    let client: AuthClient;
     try {
-      token = await this.auth.getAccessToken();
+      client = await this.auth.getClient();
     } catch (e: unknown) {
+      if (this.serviceAccountJson) {
+        // A key was configured, so the fault is that key, not missing ADC.
+        throw e;
+      }
       throw new Error(NO_CREDENTIAL_MESSAGE, {cause: e});
     }
+
+    const {token} = await client.getAccessToken();
     if (!token) {
       throw new Error(NO_CREDENTIAL_MESSAGE);
     }

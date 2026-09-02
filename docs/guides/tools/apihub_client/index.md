@@ -88,6 +88,34 @@ await client.getSpecContent(
 );
 ```
 
+## Mutual TLS
+
+An organisation that enforces context-aware access requires a client
+certificate on every call. Set `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` and the
+client loads the SecureConnect certificate named by
+`~/.secureConnect/context_aware_metadata.json`, presents it on the connection,
+and sends the request to `https://apihub.mtls.googleapis.com/v1` instead of the
+default host.
+
+```sh
+GOOGLE_API_USE_CLIENT_CERTIFICATE=true node my-agent.js
+```
+
+Three rules govern the behaviour:
+
+- Without the variable, the client looks for no certificate and runs the
+  certificate provider not at all.
+- The host changes only when a certificate actually loaded. The mutual-TLS host
+  rejects a connection that presents nothing, so asking for a certificate you
+  do not have keeps the default host.
+- `GOOGLE_API_USE_MTLS_ENDPOINT=never` keeps the default host but still
+  presents the certificate.
+
+The certificate provider is a child process, so the client runs it at most once
+and reuses the result for every later request. A provider that fails is a
+warning, not an error: the client logs it and falls back to the plain
+transport.
+
 ## Failure modes
 
 Every failure is an `Error`.
@@ -98,9 +126,13 @@ Every failure is an `Error`.
   resource that is empty.
 - API Hub answers with a non-2xx status. The message carries the status and the
   response body.
-- No credential is available, or the credential yields no token. The message
-  asks you to supply a service account or an access token. When the credential
-  lookup itself failed, the client keeps that failure on `error.cause`.
+- Application Default Credentials cannot be resolved. The message asks you to
+  supply a service account or an access token, and keeps the underlying failure
+  on `error.cause`. A configured `serviceAccountJson` that fails, and a token
+  refresh that fails, both keep their own error instead.
+- The response is not a JSON object, or a field holds the wrong type. The
+  message names the field, for example
+  `API Hub field 'versions' must be a list of strings.`
 
 A spec whose `contents` field is empty returns an empty string rather than
 throwing.

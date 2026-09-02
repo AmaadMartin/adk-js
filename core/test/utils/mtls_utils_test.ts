@@ -440,6 +440,17 @@ describe('effectiveGoogleapisEndpoint', () => {
   it.each(['', 'not a url'])('leaves "%s" alone, which is no url', (url) => {
     expect(effectiveGoogleapisEndpoint(url)).toBe(url);
   });
+
+  it.each(['auto', 'always', 'nonsense'])(
+    'rewrites the host when the setting is %s',
+    (setting) => {
+      vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', setting);
+
+      expect(
+        effectiveGoogleapisEndpoint('https://apihub.googleapis.com/v1'),
+      ).toBe('https://apihub.mtls.googleapis.com/v1');
+    },
+  );
 });
 
 describe('clientCertsToPresent', () => {
@@ -604,6 +615,23 @@ describe('getWithClientCert', () => {
     await expect(
       getWithClientCert(URL, HEADERS, CERTS, TIMEOUT_MS),
     ).resolves.toEqual({status: 0, body: ''});
+  });
+
+  it('rejects when the response stream errors', async () => {
+    httpsRequestMock.mockImplementation((_url, _options, onResponse) =>
+      fakeRequest(() => {
+        const response: FakeResponse = Object.assign(new EventEmitter(), {
+          statusCode: 200,
+          setEncoding: () => {},
+        });
+        onResponse(response);
+        response.emit('error', new Error('stream aborted'));
+      }),
+    );
+
+    await expect(
+      getWithClientCert(URL, HEADERS, CERTS, TIMEOUT_MS),
+    ).rejects.toThrow('stream aborted');
   });
 
   // The rejection value is asserted rather than matched with
