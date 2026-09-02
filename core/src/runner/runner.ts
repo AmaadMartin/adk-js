@@ -19,7 +19,6 @@ import {
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
-import {canTransferBetweenAgents} from '../agents/transfer_utils.js';
 import {App} from '../apps/app.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
@@ -38,8 +37,8 @@ import {BasePlugin} from '../plugins/base_plugin.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {
-  extractResumeInputs,
   findUserMessageForInvocation,
+  hasResumeResponses,
   resolveInvocationId,
   resolveInvocationIdFromFunctionResponses,
   validateNewMessage,
@@ -188,14 +187,6 @@ function resolveApp(input: RunnerConfig): App {
 function typeName(value: object): string {
   return value.constructor?.name ?? typeof value;
 }
-
-/**
- * The app names already warned about running agent transfer with no cache.
- *
- * Module-level, so the warning is raised once per app name per process rather
- * than once per runner: a dev server builds a runner per request.
- */
-const UNCACHED_TRANSFER_APPS = new Set<string>();
 
 /**
  * Defaults a root `LlmAgent` to chat mode, and refuses a root in any other
@@ -386,7 +377,6 @@ export class Runner {
     this.autoCreateSession = input.autoCreateSession ?? false;
     this.taskAgentNames = findTaskAgentNames(this.agent);
     this.enforceAppNameAlignment(inferAgentOrigin(this.agent));
-    this.warnUncachedAgentTransfer();
   }
 
   /**
@@ -418,31 +408,6 @@ export class Runner {
       `${mismatch} Ensure the runner appName matches that directory or pass ` +
       'appName explicitly when constructing the runner.';
     logger.warn(`App name mismatch detected. ${mismatch}`);
-  }
-
-  /**
-   * Warns once per app name per process when the agent tree can transfer.
-   *
-   * adk-python gates this on `app.context_cache_config` and points the reader
-   * at it. adk-js has no context cache configuration, so there is no remedy to
-   * name and nothing to skip on; add both the guard and the remedy when
-   * context caching lands. Ported from `google/adk-python`
-   * `runners.py::Runner._warn_uncached_agent_transfer`.
-   */
-  private warnUncachedAgentTransfer(): void {
-    if (UNCACHED_TRANSFER_APPS.has(this.appName)) {
-      return;
-    }
-    if (!canTransferBetweenAgents(this.agent)) {
-      return;
-    }
-    UNCACHED_TRANSFER_APPS.add(this.appName);
-    logger.warn(
-      `App "${this.appName}" can transfer between agents but has no context ` +
-        'cache. Every transfer swaps the system instruction and the tool ' +
-        'set, so the request prefix changes and the whole prompt is re-sent ' +
-        'uncached after each transfer.',
-    );
   }
 
   /**
@@ -629,10 +594,9 @@ export class Runner {
           // =====================================================================
           // Decide which invocation this run belongs to
           // =====================================================================
-          const resumeInputs = extractResumeInputs(newMessage);
           const runsAsNode = rootRunsAsNode(this.agent);
           if (runsAsNode) {
-            validateNewMessage(newMessage, resumeInputs);
+            validateNewMessage(newMessage);
           }
           const activeTaskScope = findActiveTaskScope(
             session,
@@ -710,7 +674,9 @@ export class Runner {
           // a reply to a paused task are both genuinely new content.
           const isNewTurn = Boolean(
             newMessage &&
-            (resumeInputs || continuesPausedTask || !existingUserContent),
+            (hasResumeResponses(newMessage) ||
+              continuesPausedTask ||
+              !existingUserContent),
           );
 
           if (isNewTurn && newMessage) {

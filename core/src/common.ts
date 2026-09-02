@@ -71,10 +71,7 @@ export {StreamingMode} from './agents/run_config.js';
 export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
-export {
-  canTransferBetweenAgents,
-  getTransferTargets,
-} from './agents/transfer_utils.js';
+export {getTransferTargets} from './agents/transfer_utils.js';
 export {
   getPendingUserInputRequests,
   getUserInputRequests,

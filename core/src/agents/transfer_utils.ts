@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {RunnableRoot} from '../workflow/run_node_as_invocation.js';
-import {BaseAgent, isBaseAgent} from './base_agent.js';
+import {BaseAgent} from './base_agent.js';
 import {isLlmAgent, LlmAgent} from './llm_agent.js';
 
 /**
@@ -36,26 +35,4 @@ export function getTransferTargets(agent: LlmAgent): BaseAgent[] {
   }
 
   return targets;
-}
-
-/**
- * Whether any agent in the tree rooted at `root` can transfer to another agent.
- *
- * A bare node is never transferable: transfer is a property of the agent tree,
- * and a workflow keeps its structure in edges instead. Ported from
- * `google/adk-python` `agents/_agent_router.py::can_transfer_between_agents`.
- */
-export function canTransferBetweenAgents(root: RunnableRoot): boolean {
-  if (!isBaseAgent(root)) {
-    return false;
-  }
-  const pending: BaseAgent[] = [root];
-  for (let i = 0; i < pending.length; i++) {
-    const agent = pending[i];
-    if (isLlmAgent(agent) && getTransferTargets(agent).length > 0) {
-      return true;
-    }
-    pending.push(...agent.subAgents);
-  }
-  return false;
 }

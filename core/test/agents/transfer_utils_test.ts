@@ -6,12 +6,9 @@
 
 import {
   BaseAgent,
-  canTransferBetweenAgents,
   getTransferTargets,
   LlmAgent,
-  node,
   SequentialAgent,
-  Workflow,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -64,43 +61,5 @@ describe('getTransferTargets', () => {
     new SequentialAgent({name: 'root', subAgents: [child, agent('peer')]});
 
     expect(getTransferTargets(child)).toEqual([]);
-  });
-});
-
-describe('canTransferBetweenAgents', () => {
-  it('reports a coordinator with sub-agents', () => {
-    expect(canTransferBetweenAgents(agent('root', [agent('a')]))).toBe(true);
-  });
-
-  it('reports a lone agent as unable to transfer', () => {
-    expect(canTransferBetweenAgents(agent('root'))).toBe(false);
-  });
-
-  it('finds a transferable agent below a workflow agent', () => {
-    const root = new SequentialAgent({
-      name: 'root',
-      subAgents: [
-        new SequentialAgent({name: 'mid', subAgents: [agent('leaf')]}),
-      ],
-    });
-
-    // The leaf has no sub-agents of its own, so `mid` is what makes it
-    // transferable: the walk has to reach the leaf's parent to see that.
-    expect(canTransferBetweenAgents(root)).toBe(false);
-
-    const withPeer = new SequentialAgent({
-      name: 'root2',
-      subAgents: [agent('mid2', [agent('leaf2')])],
-    });
-    expect(canTransferBetweenAgents(withPeer)).toBe(true);
-  });
-
-  it('reports a workflow root as unable to transfer', () => {
-    const workflow = new Workflow({
-      name: 'wf',
-      edges: [['START', node(() => 'done', {name: 'step'})]],
-    });
-
-    expect(canTransferBetweenAgents(workflow)).toBe(false);
   });
 });

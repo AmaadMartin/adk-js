@@ -81,13 +81,6 @@ more than one:
 `plugins` belongs to the `App`. Passing it alongside `app` is refused. Passing
 it alongside `agent` still works and is deprecated.
 
-## Agent transfer and prompt caching
-
-A runner whose agent tree can transfer warns once per app name per process. Each
-transfer swaps the system instruction and the tool set, so the request prefix
-changes and the whole prompt is re-sent uncached after every transfer. The
-warning is informational: adk-js has no context cache configuration yet.
-
 ## Failure modes
 
 | What you did                                         | What you get                                            |
