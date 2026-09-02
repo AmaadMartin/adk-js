@@ -307,6 +307,10 @@ export class DatabaseSessionService extends BaseSessionService {
       );
     }
     const options = await this.resolveOptions();
+    // Drop the reference before closing it. A second `init` that fails would
+    // otherwise leave a closed instance installed, and every later call would
+    // run against it instead of connecting again.
+    this.orm = undefined;
     await orm.close();
     this.orm = await MikroORM.init({...options, entities: ENTITIES_V0});
   }

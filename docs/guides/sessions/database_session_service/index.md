@@ -54,6 +54,18 @@ cost upfront instead. It is safe to call twice and safe to call concurrently.
 On sqlite, every pooled connection is opened with `PRAGMA foreign_keys = ON`.
 sqlite reads that pragma per connection and defaults it to off.
 
+Every other backend reaches the database over a socket, which a server, a proxy
+or a firewall can close while the connection sits idle in the pool. The pool
+therefore sends `select 1` before it reuses a connection, and discards one that
+does not answer. That costs a round trip per checkout. Replace the hook through
+`driverOptions` to drop it:
+
+```ts
+const service = new DatabaseSessionService('postgres://localhost/adk', {
+  driverOptions: {pool: {}}, // no liveness check
+});
+```
+
 ## Reading part of a conversation
 
 `getSession` takes a config that narrows the events it returns:

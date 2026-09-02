@@ -117,6 +117,60 @@ export function enableSqliteForeignKeys(
   );
 }
 
+/** The statement the liveness check sends. Every supported dialect answers it. */
+const LIVENESS_PROBE_SQL = 'select 1';
+
+/**
+ * The part of a pooled connection the liveness check uses.
+ *
+ * The drivers behind `postgres`, `mysql` and `mariadb` all take a statement
+ * and a callback here.
+ */
+interface QueryableRawConnection {
+  query(sql: string, callback: (error: Error | null) => void): unknown;
+}
+
+function isQueryableConnection(
+  connection: unknown,
+): connection is QueryableRawConnection {
+  return (
+    typeof connection === 'object' &&
+    connection !== null &&
+    'query' in connection &&
+    typeof connection.query === 'function'
+  );
+}
+
+/**
+ * Reports whether a pooled connection still answers, before the pool hands it
+ * out.
+ *
+ * A server, a proxy or a firewall can drop an idle connection without the
+ * client noticing, and the caller then sees the driver's socket error on a
+ * statement it did not cause. This is adk-python's `pool_pre_ping=True`, which
+ * it sets for every non-sqlite URL, and it costs one round trip per checkout
+ * of an already-open connection. Pass `driverOptions` through the service's
+ * `overrides` argument to replace or drop it.
+ *
+ * A driver whose raw connection takes no statement, such as the one behind
+ * `mssql`, is left to the liveness check knex makes for its own dialect.
+ *
+ * @param connection The connection the pool is about to hand out.
+ */
+export async function connectionIsAlive(connection: unknown): Promise<boolean> {
+  if (!isQueryableConnection(connection)) {
+    return true;
+  }
+  return new Promise<boolean>((resolve) => {
+    try {
+      connection.query(LIVENESS_PROBE_SQL, (error) => resolve(!error));
+    } catch {
+      // A driver that rejects the probe synchronously is not usable either.
+      resolve(false);
+    }
+  });
+}
+
 /** Why a connection URI is not one this service can open. */
 export enum DatabaseUriProblem {
   /** The string carries no URI scheme at all. */
@@ -250,6 +304,9 @@ async function deriveConnectionOptionsFromUri(
     entities: ENTITIES,
     clientUrl: uri,
     driver,
+    // Every backend but sqlite reaches this service over a socket that can be
+    // closed while the connection sits idle in the pool.
+    driverOptions: {pool: {validate: connectionIsAlive}},
   } as MikroORMOptions;
 }
 

@@ -11,6 +11,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  connectionIsAlive,
   detectDatabaseSchemaVersion,
   enableSqliteForeignKeys,
   ensureDatabaseCreated,
@@ -200,11 +201,13 @@ describe('operations', () => {
       });
     });
 
-    it('installs no driver hook for a non-sqlite backend', async () => {
+    it('installs the liveness check on a non-sqlite backend', async () => {
       const options = await getConnectionOptionsFromUri(
         'postgres://user:pass@localhost:5432/db',
       );
-      expect(options.driverOptions).toBeUndefined();
+      expect(options.driverOptions).toEqual({
+        pool: {validate: connectionIsAlive},
+      });
     });
 
     it('reports a string that is not a URI at all', async () => {
@@ -392,6 +395,95 @@ describe('operations', () => {
         expect(results.map((rows) => rows[0].foreign_keys)).toEqual(
           Array.from({length: 8}, () => 1),
         );
+      } finally {
+        await orm.close();
+        await rm(directory, {recursive: true, force: true});
+      }
+    });
+  });
+
+  /** The statement method a raw `sqlite3` connection exposes. */
+  interface SqliteAllConnection {
+    all(sql: string, callback: (error: Error | null) => void): void;
+  }
+
+  describe('connectionIsAlive', () => {
+    it('reports a connection that answers the probe', async () => {
+      const statements: string[] = [];
+      const connection = {
+        query(sql: string, callback: (error: Error | null) => void) {
+          statements.push(sql);
+          callback(null);
+        },
+      };
+
+      await expect(connectionIsAlive(connection)).resolves.toBe(true);
+      expect(statements).toEqual(['select 1']);
+    });
+
+    it('reports a connection whose probe fails', async () => {
+      const connection = {
+        query(sql: string, callback: (error: Error | null) => void) {
+          callback(new Error(`server closed the connection: ${sql}`));
+        },
+      };
+
+      await expect(connectionIsAlive(connection)).resolves.toBe(false);
+    });
+
+    it('reports a connection that rejects the probe synchronously', async () => {
+      const connection = {
+        query(): never {
+          throw new Error('connection is destroyed');
+        },
+      };
+
+      await expect(connectionIsAlive(connection)).resolves.toBe(false);
+    });
+
+    it('leaves a driver that takes no statement to knex', async () => {
+      await expect(connectionIsAlive({execSql: () => undefined})).resolves.toBe(
+        true,
+      );
+    });
+
+    it('is consulted by the pool before it reuses a connection', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'adk-sqlite-validate-'));
+      const checks: boolean[] = [];
+      const orm = await MikroORM.init({
+        dbName: join(directory, 'sessions.db'),
+        driver: SqliteDriver,
+        entities: ENTITIES,
+        pool: {min: 0, max: 1},
+        driverOptions: {
+          pool: {
+            // sqlite3 names its statement method `all`, so the probe reaches a
+            // real pooled connection through this adapter. A socket backend
+            // exposes `query` and needs none.
+            async validate(connection: SqliteAllConnection) {
+              checks.push(
+                await connectionIsAlive({
+                  query: (
+                    sql: string,
+                    callback: (error: Error | null) => void,
+                  ) => connection.all(sql, callback),
+                }),
+              );
+              return true;
+            },
+          },
+        },
+      });
+
+      try {
+        const connection = orm.em.getConnection();
+        await connection.execute('select 1 as probe', [], 'all');
+        await connection.execute('select 1 as probe', [], 'all');
+
+        // The first statement opens the connection, so only its reuse is
+        // validated. A hook the pool never calls would leave this empty.
+        expect(checks.length).toBeGreaterThan(0);
+        expect(checks.every((alive) => alive)).toBe(true);
       } finally {
         await orm.close();
         await rm(directory, {recursive: true, force: true});
