@@ -76,7 +76,9 @@ Three consequences are worth knowing:
 
 - The program has no `__file__`, and `sys.argv[0]` is `-c`. Arguments passed in
   `codeExecutionInput.args` are still in `sys.argv[1:]`.
-- The program cannot read stdin: the executor has already read it to the end.
+- The program cannot read stdin: the executor has already read it to the end,
+  so `input()` raises `EOFError` rather than blocking until the timeout. The
+  executor closes stdin for the other languages too, for the same reason.
 - A traceback carries the program's own frames only. The frame belonging to
   ADK's wrapper is removed, because the model can do nothing with it.
 

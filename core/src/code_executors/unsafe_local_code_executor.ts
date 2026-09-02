@@ -338,12 +338,16 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         }, timeoutSeconds * 1000);
 
         if (child.stdout) {
+          // Decode as the chunks arrive, so a multi-byte character split
+          // across a chunk boundary is not corrupted.
+          child.stdout.setEncoding('utf-8');
           child.stdout.on('data', (data) => {
             stdout += data.toString();
           });
         }
 
         if (child.stderr) {
+          child.stderr.setEncoding('utf-8');
           child.stderr.on('data', (data) => {
             stderr += data.toString();
           });
@@ -360,8 +364,10 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             logger.debug(`Could not write the program to python: ${err}`);
           });
           child.stdin?.write(code);
-          child.stdin?.end();
         }
+        // Closed on every path, so a program in any language that reads stdin
+        // sees end-of-file instead of blocking until the timeout.
+        child.stdin?.end();
 
         child.on('close', (exitCode, signal) => {
           clearTimeout(timer);
