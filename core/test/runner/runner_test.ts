@@ -375,12 +375,15 @@ describe('Runner.determineAgentForResumption', () => {
       userId: TEST_USER_ID,
     });
     const seen: Array<EventsCompactionConfig | undefined> = [];
-    vi.spyOn(rootAgent, 'runAsync').mockImplementation(
-      // eslint-disable-next-line require-yield -- the spy records the context and emits nothing.
-      async function* (context: InvocationContext) {
-        seen.push(context.eventsCompactionConfig);
-      },
-    );
+    vi.spyOn(rootAgent, 'runAsync').mockImplementation(async function* (
+      context: InvocationContext,
+    ) {
+      seen.push(context.eventsCompactionConfig);
+      yield createEvent({
+        author: rootAgent.name,
+        invocationId: context.invocationId,
+      });
+    });
 
     for await (const _ of appRunner.runAsync({
       userId: TEST_USER_ID,
@@ -399,12 +402,15 @@ describe('Runner.determineAgentForResumption', () => {
       userId: TEST_USER_ID,
     });
     const seen: Array<EventsCompactionConfig | undefined> = [];
-    vi.spyOn(rootAgent, 'runAsync').mockImplementation(
-      // eslint-disable-next-line require-yield -- the spy records the context and emits nothing.
-      async function* (context: InvocationContext) {
-        seen.push(context.eventsCompactionConfig);
-      },
-    );
+    vi.spyOn(rootAgent, 'runAsync').mockImplementation(async function* (
+      context: InvocationContext,
+    ) {
+      seen.push(context.eventsCompactionConfig);
+      yield createEvent({
+        author: rootAgent.name,
+        invocationId: context.invocationId,
+      });
+    });
 
     for await (const _ of runner.runAsync({
       userId: TEST_USER_ID,

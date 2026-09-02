@@ -89,9 +89,8 @@ describe('ContextCompactorRequestProcessor', () => {
 
 /** A model that is never asked for a response, only carried by the agent. */
 class StubLlm extends BaseLlm {
-  // eslint-disable-next-line require-yield -- BaseLlm mandates the generator; this stub emits nothing.
   async *generateContentAsync(): AsyncGenerator<LlmResponse, void, void> {
-    return;
+    yield {content: {role: 'model', parts: [{text: 'stub'}]}};
   }
 
   connect(): Promise<BaseLlmConnection> {
