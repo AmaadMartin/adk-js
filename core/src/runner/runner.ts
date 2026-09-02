@@ -477,17 +477,8 @@ export class Runner {
       );
     } finally {
       span.end();
-      await this.closeToolsets();
+      await this.close();
     }
-  }
-
-  /**
-   * Closes every toolset the root declares, and reports no failure: a toolset
-   * that throws must not hide the failure of the run that led here.
-   */
-  private async closeToolsets(): Promise<void> {
-    const toolsets = isBaseAgent(this.agent) ? getAllToolsets(this.agent) : [];
-    await Promise.allSettled(toolsets.map((t) => t.close()));
   }
 
   /**
@@ -495,10 +486,12 @@ export class Runner {
    *
    * Call it when the runner is no longer needed. It is safe to call after
    * `runAsync`, which closes the toolsets itself, because closing a toolset
-   * twice is not an error.
+   * twice is not an error. A toolset that throws is reported as no failure: it
+   * must not hide the failure of the run that led here.
    */
   async close(): Promise<void> {
-    await this.closeToolsets();
+    const toolsets = isBaseAgent(this.agent) ? getAllToolsets(this.agent) : [];
+    await Promise.allSettled(toolsets.map((t) => t.close()));
   }
 
   /**

@@ -13,7 +13,7 @@ import {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
-import {parseWithSchema, SchemaLike} from '../utils/schema.js';
+import {parseWithSchema} from '../utils/schema.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
@@ -133,7 +133,11 @@ export class AgentTool extends BaseTool {
     // returned verbatim below, which is the intended effect of
     // skipSummarization.
 
-    const inputSchema = agentInputSchema(this.agent);
+    // The source form is preferred: converting a schema into the genai dialect
+    // drops the Zod refinements and transforms that validation needs.
+    const inputSchema = isLlmAgent(this.agent)
+      ? (this.agent.inputSchemaSource ?? this.agent.inputSchema)
+      : undefined;
     const content: Content = {
       role: 'user',
       parts: [
@@ -224,27 +228,12 @@ export class AgentTool extends BaseTool {
 }
 
 /**
- * The schema the wrapped agent declares for its input, or `undefined` when it
- * declares none.
- *
- * The source form is preferred over the converted `inputSchema`, because the
- * conversion into the genai dialect drops Zod refinements and transforms that
- * validation needs.
- */
-function agentInputSchema(agent: BaseAgent): SchemaLike | undefined {
-  if (!isLlmAgent(agent)) {
-    return undefined;
-  }
-  return agent.inputSchemaSource ?? agent.inputSchema;
-}
-
-/**
  * The run config for the nested run, derived from the caller's.
  *
  * The wrapped agent runs as part of the caller's invocation, so it obeys the
  * caller's run settings. Without this the nested run falls back to the
  * `RunConfig` defaults: a `maxLlmCalls` ceiling of 500 whatever the caller
- * asked for, and no custom metadata or HTTP options at all. The count stays
+ * asked for, and none of the caller's own settings. The count stays
  * per-invocation, so the ceiling bounds the nested run rather than being
  * shared with the caller's.
  *

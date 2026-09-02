@@ -769,9 +769,7 @@ describe('AgentTool input schema', () => {
       toolContext: createToolContext({agent}),
     });
 
-    const text = nested.newMessage?.parts?.[0].text;
-    expect(text).toBeDefined();
-    expect(JSON.parse(text!)).toEqual({city: 'Paris'});
+    expect(nested.newMessage?.parts?.[0].text).toBe('{"city":"Paris"}');
   });
 
   it('passes the validated arguments as bare JSON', async () => {
@@ -783,8 +781,6 @@ describe('AgentTool input schema', () => {
       toolContext: createToolContext({agent}),
     });
 
-    const text = nested.newMessage?.parts?.[0].text;
-    expect(text).toBeDefined();
-    expect(JSON.parse(text!)).toEqual({city: 'Paris'});
+    expect(nested.newMessage?.parts?.[0].text).toBe('{"city":"Paris"}');
   });
 });
