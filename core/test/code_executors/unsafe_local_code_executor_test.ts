@@ -56,9 +56,11 @@ const EXPECTED_POWERSHELL_ARGS = [
 // Every case in the outer suite launches a real interpreter: the outer
 // beforeEach restores spawnMock to realSpawn. Those need a budget above
 // vitest's 5000ms default, because process cold-start on the windows-latest CI
-// runner alone can exceed it. The budget must also exceed
-// UnsafeLocalCodeExecutor's default timeoutSeconds (30) so a hung child reports
-// the executor's own timeout error instead of an opaque vitest timeout; see
+// runner alone can exceed it. On Windows the default shell is Windows
+// PowerShell, whose cold start under V8 coverage instrumentation does not
+// reliably fit either. The budget must also exceed UnsafeLocalCodeExecutor's
+// default timeoutSeconds (30) so a hung child reports the executor's own
+// timeout error instead of an opaque vitest timeout; see
 // core/src/code_executors/unsafe_local_code_executor.ts
 const TEST_EXECUTION_TIMEOUT = 40000;
 vi.setConfig({testTimeout: TEST_EXECUTION_TIMEOUT});
