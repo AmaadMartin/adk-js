@@ -14,9 +14,9 @@ import {
   OpenAPIToolset,
   PluginManager,
 } from '@google/adk';
-import * as fs from 'fs';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type {OpenAPIV3} from 'openapi-types';
-import * as path from 'path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 describe('OpenAPIToolset Integration', () => {
