@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {canonicalToolsFor} from '../agents/canonical_tools.js';
 import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   handleFunctionCallsAsync,
@@ -11,7 +12,6 @@ import {
 import {InvocationContext} from '../agents/invocation_context.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {BaseLlmRequestProcessor} from '../agents/processors/base_llm_processor.js';
-import {ReadonlyContext} from '../agents/readonly_context.js';
 import {
   Event,
   getFunctionCalls,
@@ -193,8 +193,9 @@ export class AuthPreprocessor extends BaseLlmRequestProcessor {
       );
 
       if (hasMatchingCall) {
-        const canonicalTools = await agent.canonicalTools(
-          new ReadonlyContext(invocationContext),
+        const canonicalTools = await canonicalToolsFor(
+          agent,
+          invocationContext,
         );
         const toolsDict: Record<string, BaseTool> = {};
         for (const tool of canonicalTools) {

@@ -13,6 +13,7 @@ import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 
@@ -286,6 +287,13 @@ export class InvocationContext {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   readonly a2aMetadata?: Record<string, unknown>;
+
+  /**
+   * The agent's tools as resolved for the current model step, or `undefined`
+   * before anything resolved them. Read and written through
+   * `canonicalToolsFor`; the empty array is a resolved set, not a miss.
+   */
+  canonicalToolsCache?: BaseTool[];
 
   /**
    * @param params The parameters for creating an invocation context.

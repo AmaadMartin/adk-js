@@ -20,13 +20,13 @@ import {
   responseSchemasByInterruptId,
 } from '../../workflow/utils/hitl_utils.js';
 import {unwrapResponse} from '../../workflow/utils/rehydration_utils.js';
+import {canonicalToolsFor} from '../canonical_tools.js';
 import {handleFunctionCallList} from '../functions.js';
 import {
   InvocationContext,
   QueuedInvocationEvent,
 } from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
-import {ReadonlyContext} from '../readonly_context.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
@@ -60,9 +60,7 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
     }
 
     // 2. Resolve the agent's node-tools.
-    const toolsList = await agent.canonicalTools(
-      new ReadonlyContext(invocationContext),
-    );
+    const toolsList = await canonicalToolsFor(agent, invocationContext);
     const toolsDict = Object.fromEntries(toolsList.map((t) => [t.name, t]));
     const nodeToolNames = new Set(
       toolsList.filter((t) => isNodeTool(t)).map((t) => t.name),

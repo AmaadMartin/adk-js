@@ -19,6 +19,7 @@ import {
 } from '../../tools/tool_confirmation.js';
 import {isSegmentPrefix} from '../../utils/branch_trie.js';
 import {logger} from '../../utils/logger.js';
+import {canonicalToolsFor} from '../canonical_tools.js';
 import {Context} from '../context.js';
 import {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -26,7 +27,6 @@ import {
 } from '../functions.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
-import {ReadonlyContext} from '../readonly_context.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /** A pinned tool call an approval unlocked, with the decision it carries. */
@@ -109,9 +109,7 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
     // Step 3: resolve the agent's tools. After the dedup above, deliberately:
     // resolving a toolset can mean a remote call, and a spent approval should
     // not pay for one.
-    const toolsList = await agent.canonicalTools(
-      new ReadonlyContext(invocationContext),
-    );
+    const toolsList = await canonicalToolsFor(agent, invocationContext);
     const toolsDict = Object.fromEntries(
       toolsList.map((tool) => [tool.name, tool]),
     );
