@@ -30,19 +30,28 @@ import {TOOL_FILTER_REQUEST_PROCESSOR} from './tool_filter_request_processor.js'
 
 /**
  * The standard processor pipeline for an agent that considers only itself and
- * its tools.
+ * its tools. A single flow permits no transfer to another agent.
  *
- * Sub-agent transfer is not part of it. `LlmAgent` appends the agent-transfer
- * processor separately when the agent can transfer. Both lists are fresh
- * arrays, so a caller that appends to them affects no other agent.
+ * Sub-agent transfer is not part of it. `AutoFlow` appends the agent-transfer
+ * processor for an agent that can transfer, and `LlmAgent` appends it to a
+ * caller-supplied pipeline. Both lists are fresh arrays, so a caller that
+ * appends to them affects no other agent.
+ *
+ * The order of {@link requestProcessors} is part of the contract. Code
+ * execution reads the contents that {@link CONTENT_REQUEST_PROCESSOR}
+ * assembles, and compaction rewrites the history those contents come from, so
+ * it runs immediately before them.
  */
 export class SingleFlow {
+  /** The request processors, in the order they run. */
   readonly requestProcessors: BaseLlmRequestProcessor[];
+
+  /** The response processors, in the order they run. */
   readonly responseProcessors: BaseLlmResponseProcessor[];
 
   /**
-   * @param contextCompactors - Compactors to evaluate before the conversation
-   *   history is assembled. When empty, no compaction processor is inserted.
+   * @param contextCompactors - Compactors to evaluate before the contents are
+   *   assembled. When empty, no compaction processor is inserted.
    */
   constructor(contextCompactors: BaseContextCompactor[] = []) {
     this.requestProcessors = [

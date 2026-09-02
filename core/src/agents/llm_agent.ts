@@ -78,6 +78,7 @@ import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
+import {AutoFlow} from './processors/auto_flow.js';
 import {applyRunConfigToLiveConfig} from './processors/basic_llm_request_processor.js';
 import {SingleFlow} from './processors/single_flow.js';
 import {ReadonlyContext} from './readonly_context.js';
@@ -567,18 +568,20 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.codeExecutor = config.codeExecutor;
     this.planner = config.planner;
 
-    const singleFlow = new SingleFlow(config.contextCompactors);
-    this.requestProcessors =
-      config.requestProcessors ?? singleFlow.requestProcessors;
-    this.responseProcessors =
-      config.responseProcessors ?? singleFlow.responseProcessors;
-
-    // Preserve the agent transfer behavior.
     const agentTransferDisabled =
       this.disallowTransferToParent &&
       this.disallowTransferToPeers &&
       !this.subAgents?.length;
-    if (!agentTransferDisabled) {
+
+    const Flow = agentTransferDisabled ? SingleFlow : AutoFlow;
+    const flow = new Flow(config.contextCompactors);
+
+    this.requestProcessors = config.requestProcessors ?? flow.requestProcessors;
+    this.responseProcessors =
+      config.responseProcessors ?? flow.responseProcessors;
+
+    // A caller-supplied pipeline still gets agent transfer appended.
+    if (config.requestProcessors && !agentTransferDisabled) {
       this.requestProcessors.push(AGENT_TRANSFER_LLM_REQUEST_PROCESSOR);
     }
 
