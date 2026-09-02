@@ -401,8 +401,6 @@ export class Runner {
   readonly resumabilityConfig?: ResumabilityConfig;
   /** Whether a run creates a session it asks for and does not find. */
   readonly autoCreateSession: boolean;
-  /** Where a loader found the root agent, when a loader supplied it. */
-  private readonly agentOrigin: AgentOrigin;
   /** Explains an origin that disagrees with `appName`, when one does. */
   private appNameAlignmentHint?: string;
 
@@ -425,8 +423,7 @@ export class Runner {
     this.resumabilityConfig =
       this.app.resumabilityConfig ?? input.resumabilityConfig;
     this.autoCreateSession = input.autoCreateSession ?? false;
-    this.agentOrigin = inferAgentOrigin(this.agent);
-    this.enforceAppNameAlignment();
+    this.enforceAppNameAlignment(inferAgentOrigin(this.agent));
     this.warnUncachedAgentTransfer();
   }
 
@@ -440,8 +437,8 @@ export class Runner {
    * Ported from `google/adk-python`
    * `runners.py::Runner._enforce_app_name_alignment`.
    */
-  private enforceAppNameAlignment(): void {
-    const originName = this.agentOrigin.appName;
+  private enforceAppNameAlignment(origin: AgentOrigin): void {
+    const originName = origin.appName;
     // A `__`-prefixed directory is a loader's own scratch space, not an app.
     if (
       !originName ||
@@ -450,7 +447,7 @@ export class Runner {
     ) {
       return;
     }
-    const originLocation = this.agentOrigin.path ?? originName;
+    const originLocation = origin.path ?? originName;
     const mismatch =
       `The runner is configured with app name "${this.appName}", but the ` +
       `root agent was loaded from "${originLocation}", which implies app ` +
