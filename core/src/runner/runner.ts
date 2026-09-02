@@ -32,7 +32,6 @@ import {
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
 import {defaultSummarizer} from '../context/summarizers/default_summarizer.js';
-import {isStaleSessionError} from '../errors/stale_session_error.js';
 import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -45,6 +44,7 @@ import {
   tracer,
 } from '../telemetry/tracing.js';
 import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
+import {AsyncQueue} from '../utils/async_queue.js';
 import {logger} from '../utils/logger.js';
 import {isGemini2OrAbove} from '../utils/model_name.js';
 import type {RunnableNode} from '../workflow/graph.js';
@@ -129,10 +129,11 @@ const MAX_BUFFERED_RUN_EVENTS = 1000;
  * Drains `source` as fast as it produces, and hands the events on in order.
  *
  * The pump runs independently of the caller, which is what makes
- * {@link Runner.run} eager where {@link Runner.runAsync} is demand-driven. A
- * failure is held until the events that preceded it have been handed on, then
- * thrown. A caller that stops iterating early closes `source` and sees no
- * error.
+ * {@link Runner.run} eager where {@link Runner.runAsync} is demand-driven.
+ * {@link AsyncQueue} supplies the rest: buffered events reach the caller
+ * before a failure does, and its high-water mark makes the pump wait rather
+ * than let the buffer grow without bound. A caller that stops iterating early
+ * closes `source` and sees no error.
  *
  * @param source The invocation to drain.
  * @yields The events `source` produced, in production order.
@@ -140,48 +141,28 @@ const MAX_BUFFERED_RUN_EVENTS = 1000;
 async function* pumpEagerly(
   source: AsyncGenerator<Event, void, undefined>,
 ): AsyncGenerator<Event, void, undefined> {
-  const buffer: Event[] = [];
-  let failure: {thrown: unknown} | undefined;
-  let producing = true;
-  let stopped = false;
-  let wakeConsumer: (() => void) | undefined;
-  let wakeProducer: (() => void) | undefined;
+  const queue = new AsyncQueue<Event>({
+    highWaterMark: MAX_BUFFERED_RUN_EVENTS,
+  });
 
   const pump = (async () => {
     try {
       for await (const event of source) {
-        buffer.push(event);
-        wakeConsumer?.();
-        wakeConsumer = undefined;
-        while (!stopped && buffer.length >= MAX_BUFFERED_RUN_EVENTS) {
-          await new Promise<void>((resolve) => (wakeProducer = resolve));
-        }
+        queue.push(event);
+        await queue.whenDrained();
       }
+      queue.close();
     } catch (thrown: unknown) {
-      failure = {thrown};
-    } finally {
-      producing = false;
-      wakeConsumer?.();
-      wakeConsumer = undefined;
+      queue.fail(asRunFailure(thrown));
     }
   })();
 
   try {
-    while (producing || buffer.length) {
-      if (!buffer.length) {
-        await new Promise<void>((resolve) => (wakeConsumer = resolve));
-        continue;
-      }
-      yield buffer.shift()!;
-      wakeProducer?.();
-      wakeProducer = undefined;
-    }
-    if (failure) {
-      throw asRunFailure(failure.thrown);
-    }
+    yield* queue;
   } finally {
-    stopped = true;
-    wakeProducer?.();
+    // Closing first releases a pump that is waiting on the high-water mark,
+    // so it can observe the closed source instead of waiting forever.
+    queue.close();
     await source.return(undefined);
     await pump;
   }
@@ -628,11 +609,6 @@ export class Runner {
    * summary and this method decides that it reaches storage. Ported from
    * `google/adk-python` `runners.py::Runner._run_post_invocation_compaction`.
    *
-   * A concurrent turn can advance the session while the summarizer is still
-   * running. The persistent session services report that as a
-   * {@link StaleSessionError}, and a summary that lost the race is discarded
-   * rather than overwriting the newer history. Every other failure propagates.
-   *
    * @param session The session the invocation ran against.
    */
   private async runPostInvocationCompaction(session: Session): Promise<void> {
@@ -646,22 +622,11 @@ export class Runner {
     if (!summarizer) {
       return;
     }
-    try {
-      for await (const event of runSlidingWindowCompaction(
-        {...config, summarizer},
-        session,
-      )) {
-        await this.sessionService.appendEvent({session, event});
-      }
-    } catch (e: unknown) {
-      if (!isStaleSessionError(e)) {
-        throw e;
-      }
-      logger.info(
-        `Discarding stale post-invocation compaction for session ` +
-          `${session.id}; a newer turn updated the session while ` +
-          'summarization was running.',
-      );
+    for await (const event of runSlidingWindowCompaction(
+      {...config, summarizer},
+      session,
+    )) {
+      await this.sessionService.appendEvent({session, event});
     }
   }
 

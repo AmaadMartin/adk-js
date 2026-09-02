@@ -51,7 +51,24 @@ export function createEventsCompactionConfig(
   params: Partial<EventsCompactionConfig> = {},
 ): EventsCompactionConfig {
   const config: EventsCompactionConfig = {...params};
+  validateEventsCompactionConfig(config);
+  return config;
+}
 
+/**
+ * Rejects a compaction policy that cannot trigger a compaction.
+ *
+ * Separate from {@link createEventsCompactionConfig} so a caller that already
+ * holds a config, such as the `App` constructor, can check it without
+ * discarding a returned copy.
+ *
+ * @param config The policy to check.
+ * @throws {Error} When only half of a trigger pair is set, when neither
+ *   trigger is configured, or when a numeric field is out of bounds.
+ */
+export function validateEventsCompactionConfig(
+  config: EventsCompactionConfig,
+): void {
   requireAtLeast('compactionInterval', config.compactionInterval, 1);
   requireAtLeast('overlapSize', config.overlapSize, 0);
   requireAtLeast('tokenThreshold', config.tokenThreshold, 1);
@@ -77,6 +94,4 @@ export function createEventsCompactionConfig(
         ' pair or the sliding-window pair.',
     );
   }
-
-  return config;
 }

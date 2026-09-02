@@ -153,10 +153,6 @@ served by the window.
   input keeps its unanswered call raw until the answer arrives.
 - **Nothing is deleted.** The summary event is appended, and the events it
   covers stay in the session. Later compactions fold the previous summary in.
-- **A summary that loses a write race is dropped, not forced.** A second turn
-  can advance the session while the summarizer is still running. The runner
-  discards the late summary rather than overwriting the newer history, and the
-  invocation still succeeds.
 
 ## Failure modes
 

@@ -10,8 +10,8 @@ import {
   RunnableRoot,
 } from '../workflow/run_node_as_invocation.js';
 import {
-  createEventsCompactionConfig,
   EventsCompactionConfig,
+  validateEventsCompactionConfig,
 } from './events_compaction_config.js';
 import {ResumabilityConfig} from './resumability_config.js';
 
@@ -105,9 +105,7 @@ export class App {
     this.plugins = options.plugins ?? [];
     this.resumabilityConfig = options.resumabilityConfig;
     if (options.eventsCompactionConfig) {
-      // Validated, not adopted: the app keeps the caller's own object so an
-      // identity comparison against it still holds.
-      createEventsCompactionConfig(options.eventsCompactionConfig);
+      validateEventsCompactionConfig(options.eventsCompactionConfig);
     }
     this.eventsCompactionConfig = options.eventsCompactionConfig;
   }

@@ -20,12 +20,9 @@ import {
   LlmAgent,
   Runner,
   Session,
-  StaleSessionError,
 } from '@google/adk';
 import {Content} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
-
-import {logger} from '../../src/utils/logger.js';
+import {beforeEach, describe, expect, it} from 'vitest';
 
 const USER_ID = 'u1';
 const SESSION_ID = 's1';
@@ -208,26 +205,7 @@ describe('post-invocation compaction', () => {
     expect(summarizer.calls).toBe(1);
   });
 
-  it('discards a summary that lost a write race', async () => {
-    const runner = buildRunner({appName: 'racing_app', compacting: true});
-    await seedSession('racing_app');
-    sessionService.compactionFailure = new StaleSessionError();
-    const info = vi.spyOn(logger, 'info').mockImplementation(() => {});
-
-    const events = await drain(runner);
-
-    const session = await readSession('racing_app');
-    expect(events).toHaveLength(1);
-    expect(session.events.filter(isCompactedEvent)).toEqual([]);
-    expect(session.events.map((e) => e.author)).toContain('echo');
-    expect(
-      info.mock.calls.filter((call) =>
-        String(call[0]).includes('stale post-invocation compaction'),
-      ),
-    ).toHaveLength(1);
-  });
-
-  it('propagates any other append failure', async () => {
+  it('propagates a failed append of the summary', async () => {
     const runner = buildRunner({appName: 'failing_app', compacting: true});
     await seedSession('failing_app');
     sessionService.compactionFailure = new Error('disk on fire');
