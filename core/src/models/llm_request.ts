@@ -314,21 +314,34 @@ export function finalizeDynamicInstructions(llmRequest: LlmRequest): void {
   instructions.length = 0;
 }
 
-function hasFunctionDeclarations(tool: ToolUnion): tool is Tool {
-  return 'functionDeclarations' in tool;
+/** A `Tool` that carries at least one function declaration. */
+export type ToolWithFunctionDeclarations = Tool & {
+  functionDeclarations: FunctionDeclaration[];
+};
+
+function hasFunctionDeclarations(
+  tool: ToolUnion,
+): tool is ToolWithFunctionDeclarations {
+  return (
+    'functionDeclarations' in tool &&
+    Array.isArray(tool.functionDeclarations) &&
+    tool.functionDeclarations.length > 0
+  );
 }
 
 /**
  * Finds the request's tool that carries function declarations.
  *
  * The Gemini API accepts at most one such tool, so a caller adding
- * declarations must merge them into this one when it exists.
+ * declarations merges them into this one when it exists. A tool whose
+ * declaration list is empty or absent is not a match: it is some other kind of
+ * tool entry, and appending to it would be a different request.
  *
  * @returns The tool carrying function declarations, if the request has one.
  */
 export function findToolWithFunctionDeclarations(
   llmRequest: LlmRequest,
-): Tool | undefined {
+): ToolWithFunctionDeclarations | undefined {
   return (llmRequest.config?.tools ?? []).find(hasFunctionDeclarations);
 }
 
@@ -369,14 +382,11 @@ export function appendTools(llmRequest: LlmRequest, tools: BaseTool[]): void {
   }
 
   const existingTool = findToolWithFunctionDeclarations(llmRequest);
-  if (!existingTool) {
-    config.tools.push({functionDeclarations});
+  if (existingTool) {
+    existingTool.functionDeclarations.push(...functionDeclarations);
     return;
   }
-  if (!existingTool.functionDeclarations) {
-    existingTool.functionDeclarations = [];
-  }
-  existingTool.functionDeclarations.push(...functionDeclarations);
+  config.tools.push({functionDeclarations});
 }
 
 /**

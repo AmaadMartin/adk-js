@@ -276,10 +276,6 @@ export abstract class BaseTool {
 
     const tool = findToolWithFunctionDeclarations(llmRequest);
     if (tool) {
-      if (!tool.functionDeclarations) {
-        tool.functionDeclarations = [];
-      }
-
       tool.functionDeclarations.push(functionDeclaration);
     } else {
       llmRequest.config = llmRequest.config || {};

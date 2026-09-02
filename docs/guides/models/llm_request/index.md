@@ -1,8 +1,9 @@
 # LlmRequest
 
-`LlmRequest` is the object ADK builds for one model call. A request processor
-or a tool receives it, adds an instruction or a tool declaration to it, and the
-model implementation turns it into the provider call.
+`LlmRequest` is the object ADK builds for one model call. A request processor,
+a plugin, a `beforeModelCallback` or a tool receives it, adds an instruction or
+a tool declaration to it, and the model implementation turns it into the
+provider call.
 
 ## Introduction
 
@@ -10,6 +11,9 @@ Several contributors write into the same request. Agent processors add the
 agent instruction, each tool adds its function declaration, and a retrieval
 tool adds recalled content. Each contributor sees only its own piece, so the
 request object owns the rules that keep the result valid for the provider.
+
+`LlmRequest` is a structural interface, not a class. You build one with an
+object literal and you read its fields directly.
 
 Three of those rules matter to anyone writing a tool or a processor.
 
@@ -21,7 +25,12 @@ contents as a user message.
 
 The Gemini API also accepts at most one tool that carries function
 declarations. A contributor that adds a declaration merges it into the existing
-tool rather than adding a second one.
+tool rather than adding a second one. `config.tools` also holds other kinds of
+entry: a built-in tool entry such as `{googleSearch: {}}` sits beside the
+declaration entry and is never merged into. An entry may carry an empty or
+absent `functionDeclarations`, so a reader skips that entry rather than assume
+the key implies a declaration. `findToolWithFunctionDeclarations` applies that
+rule for you.
 
 Ordinary conversation history should stay stable across turns, because a
 provider can cache a stable prefix. Request-scoped content, such as recalled
@@ -108,6 +117,39 @@ tool does not need to know where instructions end up, so the routing can change
 without touching the tool. And the resolution is idempotent, because the
 accumulator is empty afterwards, so a second resolution cannot duplicate the
 text.
+
+## Structured output
+
+`config.responseSchema` and `config.responseMimeType` control structured
+output. ADK treats the pair as one setting and always writes both. An agent
+that declares `outputSchema` gets both set for it, so you only set them by hand
+when you override the schema for one turn.
+
+The request processor that reads `LlmAgent.outputSchema` skips the pair for a
+task-mode agent. That agent finishes through the `finish_task` tool, and
+function calling is incompatible with a JSON response mime type.
+
+A `beforeModelCallback` receives the request and can mutate it. This one forces
+structured output for a single turn.
+
+```ts
+import {LlmAgent} from '@google/adk';
+import {Type} from '@google/genai';
+
+const agent = new LlmAgent({
+  name: 'reporter',
+  model: 'gemini-2.5-flash',
+  beforeModelCallback: ({request}) => {
+    request.config = request.config ?? {};
+    request.config.responseSchema = {
+      type: Type.OBJECT,
+      properties: {answer: {type: Type.STRING}},
+    };
+    request.config.responseMimeType = 'application/json';
+    return undefined;
+  },
+});
+```
 
 ## Context caching fields
 
