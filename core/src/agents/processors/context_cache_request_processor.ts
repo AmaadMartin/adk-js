@@ -10,18 +10,6 @@ import {LlmRequest} from '../../models/llm_request.js';
 import {InvocationContext, requireAgent} from '../invocation_context.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
-/** Thrown when a live cache carries no use count. */
-const MISSING_INVOCATIONS_USED_ERROR =
-  'Active cache metadata must include invocations_used.';
-
-/** What a walk back through the session found for the current agent. */
-interface SessionCacheInfo {
-  /** The most recent cache metadata, ready to carry into this request. */
-  cacheMetadata?: CacheMetadata;
-  /** The most recent prompt token count the model reported. */
-  previousTokenCount?: number;
-}
-
 /**
  * Returns the metadata to send with this request: always a copy, so the
  * session's own event keeps its recorded state.
@@ -44,29 +32,29 @@ function carryForwardCacheMetadata(
   // The union rules this out at compile time, but a session read back from
   // storage is not type-checked.
   if (typeof metadata.invocationsUsed !== 'number') {
-    throw new Error(MISSING_INVOCATIONS_USED_ERROR);
+    throw new Error('Active cache metadata must include invocations_used.');
   }
   return {...metadata, invocationsUsed: metadata.invocationsUsed + 1};
 }
 
 /**
- * Walks the session from the newest event back, collecting the agent's latest
- * cache metadata and its latest prompt token count. The two can sit on
- * different events, so the walk stops once it holds both.
+ * Walks the session from the newest event back, writing the agent's latest
+ * cache metadata and its latest prompt token count onto the request. The two
+ * can sit on different events, so the walk stops once it has written both.
  */
-function findCacheInfoFromEvents(
+function applyCacheInfoFromEvents(
+  llmRequest: LlmRequest,
   events: Event[],
   agentName: string,
   currentInvocationId: string,
-): SessionCacheInfo {
-  const info: SessionCacheInfo = {};
+): void {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event.author !== agentName) {
       continue;
     }
-    if (info.cacheMetadata === undefined && event.cacheMetadata) {
-      info.cacheMetadata = carryForwardCacheMetadata(
+    if (llmRequest.cacheMetadata === undefined && event.cacheMetadata) {
+      llmRequest.cacheMetadata = carryForwardCacheMetadata(
         event.cacheMetadata,
         event.invocationId,
         currentInvocationId,
@@ -74,19 +62,18 @@ function findCacheInfoFromEvents(
     }
     const promptTokenCount = event.usageMetadata?.promptTokenCount;
     if (
-      info.previousTokenCount === undefined &&
+      llmRequest.cacheableContentsTokenCount === undefined &&
       promptTokenCount !== undefined
     ) {
-      info.previousTokenCount = promptTokenCount;
+      llmRequest.cacheableContentsTokenCount = promptTokenCount;
     }
     if (
-      info.cacheMetadata !== undefined &&
-      info.previousTokenCount !== undefined
+      llmRequest.cacheMetadata !== undefined &&
+      llmRequest.cacheableContentsTokenCount !== undefined
     ) {
       break;
     }
   }
-  return info;
 }
 
 /**
@@ -112,25 +99,18 @@ export class ContextCacheRequestProcessor extends BaseLlmRequestProcessor {
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
   ): AsyncGenerator<Event, void, void> {
-    const agentName = requireAgent(invocationContext).name;
     const cacheConfig = invocationContext.contextCacheConfig;
     if (!cacheConfig) {
       return;
     }
 
     llmRequest.cacheConfig = cacheConfig;
-
-    const {cacheMetadata, previousTokenCount} = findCacheInfoFromEvents(
+    applyCacheInfoFromEvents(
+      llmRequest,
       invocationContext.session.events,
-      agentName,
+      requireAgent(invocationContext).name,
       invocationContext.invocationId,
     );
-    if (cacheMetadata !== undefined) {
-      llmRequest.cacheMetadata = cacheMetadata;
-    }
-    if (previousTokenCount !== undefined) {
-      llmRequest.cacheableContentsTokenCount = previousTokenCount;
-    }
   }
 }
 

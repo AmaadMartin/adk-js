@@ -30,43 +30,11 @@ request fields and a caller supplies the config on the invocation context.
 
 ## Get started
 
-Set a `ContextCacheConfig` on the invocation context. The agent's default
-pipeline runs the context cache processor immediately after it assembles the
-contents.
-
-```ts
-import {
-  ContextCacheConfig,
-  createSession,
-  InvocationContext,
-  LlmAgent,
-  PluginManager,
-} from '@google/adk';
-
-const cacheConfig: ContextCacheConfig = {
-  cacheIntervals: 10,
-  ttlSeconds: 1800,
-  minTokens: 1024,
-};
-
-const agent = new LlmAgent({
-  name: 'weather_agent',
-  model: 'gemini-2.5-flash',
-  instruction: 'Answer weather questions.',
-});
-
-const invocationContext = new InvocationContext({
-  invocationId: 'inv-1',
-  agent,
-  session: createSession({id: 'sess-1', appName: 'weather_app'}),
-  pluginManager: new PluginManager(),
-  contextCacheConfig: cacheConfig,
-});
-```
-
-Run the agent with that context — `agent.runAsync(invocationContext)` — and the
-request the model receives carries `cacheConfig`, plus `cacheMetadata` and
-`cacheableContentsTokenCount` when the session holds them.
+There is nothing to switch on yet. `ContextCacheConfig` is staged on
+`InvocationContext.contextCacheConfig`, and `App` and `Runner` will surface it
+once the model-side cache manager lands. Until then no model reads the fields
+the processor writes, so setting the config changes no request the model
+answers.
 
 ## Configuration
 
@@ -97,8 +65,9 @@ carries none of them. A half-populated record does not type-check.
 
 ## Failure modes
 
-- An invocation with no agent throws. Context caching is scoped to one agent's
-  events, so there is nothing to scope to.
+- An invocation that carries a config but no agent throws. Context caching is
+  scoped to one agent's events, so there is nothing to scope to. An invocation
+  with no config returns before that check and never throws.
 - A session restored from storage is not type-checked. If it holds metadata
   with a `cacheName` but no `invocationsUsed`, the processor throws
   `Active cache metadata must include invocations_used.` rather than sending a

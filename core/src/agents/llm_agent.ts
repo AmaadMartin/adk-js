@@ -1510,15 +1510,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           toolUnion,
           new ReadonlyContext(invocationContext),
         )
-      ).filter((tool) => {
-        // If allowedTools is not set, allow all tools. Otherwise, only allow
-        // tools that are in the allowedTools set.
-        // The allowedTools set is populated by request processors.
-        return (
+      ).filter(
+        (tool) =>
           !llmRequest.allowedTools ||
-          llmRequest.allowedTools.includes(tool.name)
-        );
-      });
+          llmRequest.allowedTools.includes(tool.name),
+      );
 
       for (const tool of tools) {
         await tool.processLlmRequest({toolContext, llmRequest});

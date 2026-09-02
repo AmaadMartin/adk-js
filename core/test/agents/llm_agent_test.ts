@@ -69,6 +69,25 @@ class MockLlmConnection implements BaseLlmConnection {
   }
 }
 
+/**
+ * Records the single request an agent builds, so one run of the default
+ * processor chain can be asserted against.
+ */
+class CapturingLlm extends BaseLlm {
+  capturedRequest?: LlmRequest;
+
+  async *generateContentAsync(
+    request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    this.capturedRequest = request;
+    yield {content: {role: 'model', parts: [{text: '{"answer": "42"}'}]}};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
 class MockLlm extends BaseLlm {
   response: LlmResponse | null;
   error: Error | null;
@@ -1064,6 +1083,40 @@ describe('LlmAgent default processor pipeline order', () => {
     );
   });
 
+  it('assembles the agent instruction before the identity preamble', async () => {
+    const llm = new CapturingLlm({model: 'gemini-2.5-flash'});
+    const agent = new LlmAgent({
+      name: 'ordered_agent',
+      model: llm,
+      instruction: 'Answer weather questions.',
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_order',
+      session: createSession({
+        id: 'sess_order',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    for await (const _ of agent.runAsync(invocationContext)) {
+      // Drain the run so that the request is fully built.
+    }
+
+    const systemInstruction = String(
+      llm.capturedRequest?.config?.systemInstruction ?? '',
+    );
+    const identityPreamble = 'You are an agent. Your internal name is';
+    expect(systemInstruction).toContain('Answer weather questions.');
+    expect(systemInstruction).toContain(identityPreamble);
+    expect(systemInstruction.indexOf('Answer weather questions.')).toBeLessThan(
+      systemInstruction.indexOf(identityPreamble),
+    );
+  });
+
   it('gives an agent exactly the processors it supplied', () => {
     const supplied = [CONTEXT_CACHE_REQUEST_PROCESSOR];
 
@@ -1089,25 +1142,6 @@ describe('LlmAgent outputSchema with tools', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
-
-  /**
-   * Records the single request the agent builds so that all three gated sites
-   * can be asserted against one run of the default processor chain.
-   */
-  class CapturingLlm extends BaseLlm {
-    capturedRequest?: LlmRequest;
-
-    async *generateContentAsync(
-      request: LlmRequest,
-    ): AsyncGenerator<LlmResponse, void, void> {
-      this.capturedRequest = request;
-      yield {content: {role: 'model', parts: [{text: '{"answer": "42"}'}]}};
-    }
-
-    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
-      return new MockLlmConnection();
-    }
-  }
 
   async function captureRequest(options: {
     model: string;
