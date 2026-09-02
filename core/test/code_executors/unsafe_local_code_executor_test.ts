@@ -609,13 +609,11 @@ describe('UnsafeLocalCodeExecutor', () => {
 
     it('applies the 30 second fallback when the field is cleared', async () => {
       const child = new HangingChildProcess();
-      let reachSpawn!: () => void;
       const spawned = new Promise<void>((resolve) => {
-        reachSpawn = resolve;
-      });
-      spawnMock.mockImplementation(() => {
-        reachSpawn();
-        return child;
+        spawnMock.mockImplementation(() => {
+          resolve();
+          return child;
+        });
       });
       vi.useFakeTimers();
 
