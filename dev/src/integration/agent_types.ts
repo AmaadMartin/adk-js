@@ -76,7 +76,9 @@ export interface YamlAgentConfig {
   model: string;
   description: string;
   instruction: string;
-  maxIterations?: string;
+  // YAML parses `max_iterations: 3` into a number, and a key with no value
+  // into null, so the field holds more than a string.
+  maxIterations?: number | string | null;
   disallowTransferToParent?: string;
   disallowTransferToPeers?: string;
   generateContentConfig?: GenerateContentConfig;

@@ -29,6 +29,30 @@ const BUILTIN_TOOLS = [
   'google_maps_grounding',
 ];
 
+/**
+ * Reads the `max_iterations` field of a YAML agent config.
+ *
+ * `0` and a negative value are iteration caps like any other, so a config that
+ * asks for no passes gets none. Only a missing value means "loop until a
+ * sub-agent escalates", which matches adk-python's `Optional[int]` field.
+ *
+ * @param value The raw `max_iterations` value from the config.
+ * @return The iteration cap, or undefined when the config sets none.
+ * @throws If the value is present but is not an integer.
+ */
+function parseMaxIterations(
+  value: number | string | null | undefined,
+): number | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`Invalid max_iterations "${value}": expected an integer.`);
+  }
+  return parsed;
+}
+
 export class AgentRegistry {
   private agents = new Map<string, BaseAgent>();
   private configs = new Map<string, YamlAgentConfig>();
@@ -196,9 +220,7 @@ export class AgentRegistry {
         case 'LoopAgent':
           agent = new LoopAgent({
             ...options,
-            maxIterations: config.maxIterations
-              ? parseInt(config.maxIterations, 10)
-              : undefined,
+            maxIterations: parseMaxIterations(config.maxIterations),
           });
           break;
         case 'ParallelAgent':
