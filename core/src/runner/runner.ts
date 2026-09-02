@@ -34,10 +34,7 @@ import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
-import {
-  DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS,
-  PluginManager,
-} from '../plugins/plugin_manager.js';
+import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {CompositeSessionKey, Session} from '../sessions/session.js';
 import {
@@ -214,8 +211,6 @@ export class Runner {
   readonly resumabilityConfig?: ResumabilityConfig;
   /** Whether a missing session is created instead of reported as an error. */
   readonly autoCreateSession: boolean;
-  /** How long each plugin gets to close, in seconds. */
-  readonly pluginCloseTimeoutSeconds: number;
 
   /**
    * The sentence describing an app name that disagrees with the root agent's
@@ -244,11 +239,9 @@ export class Runner {
     this.agent = asRunnableRoot(agent);
     const appPlugins = input.app?.plugins ?? [];
     const configPlugins = input.plugins ?? [];
-    this.pluginCloseTimeoutSeconds =
-      input.pluginCloseTimeoutSeconds ?? DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS;
     this.pluginManager = new PluginManager(
       [...appPlugins, ...configPlugins],
-      this.pluginCloseTimeoutSeconds,
+      input.pluginCloseTimeoutSeconds,
     );
     this.artifactService = input.artifactService;
     this.sessionService = input.sessionService;
@@ -259,26 +252,11 @@ export class Runner {
     this.autoCreateSession = input.autoCreateSession ?? false;
     this.appNameMismatch = formatAppNameMismatch(
       this.appName,
-      isBaseAgent(this.agent) ? this.inferAgentOrigin(this.agent) : {},
+      (isBaseAgent(this.agent) ? getAgentOrigin(this.agent) : undefined) ?? {},
     );
     if (this.appNameMismatch) {
       logger.warn(this.appNameMismatch);
     }
-  }
-
-  /**
-   * Returns where the root agent was loaded from.
-   *
-   * Override it to supply an origin the loaders did not record, which is also
-   * how a test drives the app-name alignment warning without a filesystem. The
-   * constructor calls it, so an override must not read a field the subclass
-   * assigns, because that assignment has not run yet.
-   *
-   * @param agent The root agent.
-   * @returns Its recorded origin, or an empty origin when none was recorded.
-   */
-  protected inferAgentOrigin(agent: BaseAgent): AgentOrigin {
-    return getAgentOrigin(agent) ?? {};
   }
 
   /**
@@ -421,6 +399,12 @@ export class Runner {
         ctx,
         this,
         async function* () {
+          // Checked before resolving the session, so a cancelled run neither
+          // creates one nor reports a missing one.
+          if (params.abortSignal?.aborted) {
+            return;
+          }
+
           const session = await this.getOrCreateSession(userId, sessionId);
 
           if (params.abortSignal?.aborted) {
@@ -846,6 +830,12 @@ export class Runner {
         ctx,
         this,
         async function* () {
+          // Checked before resolving the session, so a cancelled run neither
+          // creates one nor reports a missing one.
+          if (params.abortSignal?.aborted) {
+            return;
+          }
+
           const session = await this.getOrCreateSession(
             params.userId,
             params.sessionId,

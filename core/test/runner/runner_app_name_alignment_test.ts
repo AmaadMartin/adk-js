@@ -45,26 +45,16 @@ class EchoAgent extends BaseAgent {
 }
 
 /**
- * Builds a runner whose root agent origin is supplied rather than read from a
- * loader, mirroring how `adk-python`'s test drives the same warning.
- *
- * The override closes over `origin` rather than reading an instance field,
- * because the base constructor calls it before a subclass field is assigned.
+ * Builds a runner over an agent stamped with `origin`, standing in for one the
+ * dev `AgentLoader` read out of a directory.
  */
 function createRunnerWithOrigin(
   origin: AgentOrigin,
   sessionService: InMemorySessionService,
 ): Runner {
-  class OriginRunner extends Runner {
-    protected override inferAgentOrigin(): AgentOrigin {
-      return origin;
-    }
-  }
-  return new OriginRunner({
-    appName: APP_NAME,
-    agent: new EchoAgent(),
-    sessionService,
-  });
+  const agent = new EchoAgent();
+  setAgentOrigin(agent, origin);
+  return new Runner({appName: APP_NAME, agent, sessionService});
 }
 
 async function runToError(runner: Runner): Promise<unknown> {
@@ -189,16 +179,5 @@ describe('Runner app name alignment', () => {
 
   it('reports no origin for an unstamped agent', () => {
     expect(getAgentOrigin(new EchoAgent())).toBeUndefined();
-  });
-
-  it('picks up an origin a loader stamped on the root agent', async () => {
-    const agent = new EchoAgent();
-    setAgentOrigin(agent, {appName: 'loaded_app', dir: '/agents/loaded_app'});
-    const runner = new Runner({appName: APP_NAME, agent, sessionService});
-
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(((await runToError(runner)) as Error).message).toContain(
-      'which implies app name "loaded_app"',
-    );
   });
 });
