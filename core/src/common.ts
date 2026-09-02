@@ -156,10 +156,6 @@ export {
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
 export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
-export {
-  DEFAULT_LIVE_TIMEOUT_SECONDS,
-  MISSING_EVAL_DEPENDENCIES_MESSAGE,
-} from './evaluation/constants.js';
 export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
 export type {
   EvalCase,
@@ -177,7 +173,6 @@ export {
   generateInferencesFromRootAgent,
   generateResponses,
   generateResponsesFromSession,
-  normalizeLiveTranscriptions,
 } from './evaluation/evaluation_generator.js';
 export type {
   EvalCaseResponses,

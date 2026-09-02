@@ -128,18 +128,3 @@ The keys stay snake_case because they are the eval-data format adk-python
 writes and reads. A row whose `query` is not a string raises
 `InputValidationError`, and a query the session never saw yields an empty
 `actual_tool_use` and an undefined `response`.
-
-## Live mode
-
-Two pieces of the live (bidi) path are available. `sendAudioToLive` streams a
-turn's audio to a `LiveRequestQueue` as realtime input, in 16000-byte chunks
-bracketed by one activity start and one activity end.
-`generateInferencesForSingleUserInvocationLive` runs one turn against a live
-connection and yields the events of that invocation, failing after
-`DEFAULT_LIVE_TIMEOUT_SECONDS` if the model never reports its turn complete.
-
-`normalizeLiveTranscriptions` rewrites the transcription events a native-audio
-model produces into text content events, so an evaluator has text to grade.
-
-The driver that wires these to a live connection is not ported. Building it
-needs `Runner.runLive` support that adk-js does not have yet.

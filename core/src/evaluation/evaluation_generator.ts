@@ -15,7 +15,6 @@ import {
 import {readFile} from 'node:fs/promises';
 
 import {isBaseAgent} from '../agents/base_agent.js';
-import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {App, isApp} from '../apps/app.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {InMemoryArtifactService} from '../artifacts/in_memory_artifact_service.js';
@@ -34,7 +33,7 @@ import {Runner, RunnerConfig} from '../runner/runner.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
 import {Session} from '../sessions/session.js';
-import {base64Encode, randomUUID} from '../utils/env_aware_utils.js';
+import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {
   isRunnableRoot,
@@ -42,7 +41,6 @@ import {
 } from '../workflow/run_node_as_invocation.js';
 
 import {AgentDetails, AppDetails} from './app_details.js';
-import {DEFAULT_LIVE_TIMEOUT_SECONDS} from './constants.js';
 import {
   EvalCase,
   Invocation,
@@ -71,16 +69,8 @@ const DEFAULT_EVAL_USER_ID = 'test_user_id';
 /** Name of the intercepter plugin installed on every eval `Runner`. */
 const REQUEST_INTERCEPTER_PLUGIN_NAME = 'request_intercepter_plugin';
 
-/**
- * Bytes of audio sent per realtime message. Matches the chunk size the Live
- * API documents for streaming input.
- */
-const AUDIO_CHUNK_BYTES = 16000;
-
 /** How many times an eval case runs when the caller asks for no count. */
 const DEFAULT_REPEAT_NUM = 3;
-
-const MILLIS_PER_SECOND = 1000;
 
 /**
  * Row key holding the query an eval row grades. Supplied by the caller, in the
@@ -101,10 +91,6 @@ const RESET_DATA_NOT_CALLABLE_ERROR =
 /** Message of the error an eval row without a string query produces. */
 const NON_STRING_QUERY_ERROR =
   'Each evaluation entry must contain a string query.';
-
-/** Message of the error a live turn that never completes produces. */
-const LIVE_TURN_TIMEOUT_ERROR =
-  'Timed out waiting for model turn completion in live mode.';
 
 /**
  * One row of an eval dataset: the `query` the row grades, plus whatever fields
@@ -390,7 +376,7 @@ export function getAppDetailsByInvocationId(
  *     none.
  * @returns The session to run in.
  */
-export async function getOrCreateEvalSession(
+async function getOrCreateEvalSession(
   sessionService: BaseSessionService,
   initialSession?: SessionInput,
   fallbackSessionId?: string,
@@ -775,180 +761,4 @@ export async function generateResponsesFromSession(
   logger.debug(`Loaded session ${sessionPath}`);
 
   return evalDataset.map((rows) => processQueryWithSession(sessionData, rows));
-}
-
-/**
- * Rewrites the transcription events of a native-audio live turn into text
- * content events.
- *
- * A native-audio model answers in audio and reports the words separately, as a
- * transcription on an event that carries no content. An evaluator grades text,
- * so the transcription is folded into content here. Only consolidated
- * transcriptions are rewritten; a partial fragment would duplicate the turn.
- *
- * @param events The events of the live run.
- * @returns The events, with each consolidated transcription rewritten.
- */
-export function normalizeLiveTranscriptions(events: Event[]): Event[] {
-  return events.map(normalizeLiveTranscription);
-}
-
-function normalizeLiveTranscription(event: Event): Event {
-  if (event.content !== undefined || event.partial) {
-    return event;
-  }
-  const transcribed = transcribedContent(event);
-  if (transcribed === undefined) {
-    return event;
-  }
-  // Spread rather than `structuredClone`: the clone would drop the symbol
-  // brand `isEvent` checks.
-  return {
-    ...event,
-    inputTranscription: undefined,
-    outputTranscription: undefined,
-    content: transcribed,
-  };
-}
-
-function transcribedContent(event: Event): Content | undefined {
-  const inputText = event.inputTranscription?.text;
-  if (inputText) {
-    return {role: 'user', parts: [{text: inputText}]};
-  }
-  const outputText = event.outputTranscription?.text;
-  if (outputText) {
-    return {role: 'model', parts: [{text: outputText}]};
-  }
-  return undefined;
-}
-
-/**
- * Streams a user turn's audio to the Live API as realtime input.
- *
- * `Blob.data` is a base64 string in `@google/genai`, while the chunk size is a
- * byte count, so the audio is decoded before it is split and each chunk is
- * encoded again.
- *
- * @param liveRequestQueue The queue the live connection reads from.
- * @param content The user turn whose audio parts are streamed.
- */
-export function sendAudioToLive(
-  liveRequestQueue: LiveRequestQueue,
-  content: Content,
-): void {
-  liveRequestQueue.sendActivityStart();
-  for (const part of content.parts ?? []) {
-    const blob = part.inlineData;
-    if (!blob?.data) {
-      continue;
-    }
-    const audio = Buffer.from(blob.data, 'base64');
-    for (let start = 0; start < audio.length; start += AUDIO_CHUNK_BYTES) {
-      liveRequestQueue.sendRealtime({
-        data: base64Encode(audio.subarray(start, start + AUDIO_CHUNK_BYTES)),
-        mimeType: blob.mimeType,
-      });
-    }
-  }
-  liveRequestQueue.sendActivityEnd();
-}
-
-/**
- * Collects the events a live connection produces until the turn that asked for
- * them drains the queue.
- *
- * The live driver pushes events as they arrive, on its own schedule; the turn
- * generator takes whatever has arrived once the model reports the turn is
- * complete. This is the `asyncio.Queue` adk-python uses, in the form JS needs.
- */
-export class LiveEventQueue {
-  private events: Event[] = [];
-
-  push(event: Event): void {
-    this.events.push(event);
-  }
-
-  /** Returns every event queued so far and empties the queue. */
-  drain(): Event[] {
-    const drained = this.events;
-    this.events = [];
-    return drained;
-  }
-}
-
-/**
- * Waits for the model to finish its turn, or fails when the wait runs out.
- */
-async function waitForTurnComplete(
-  turnComplete: Promise<void>,
-  liveTimeoutSeconds: number,
-): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expiry = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      logger.warn(LIVE_TURN_TIMEOUT_ERROR);
-      reject(new Error(LIVE_TURN_TIMEOUT_ERROR));
-    }, liveTimeoutSeconds * MILLIS_PER_SECOND);
-  });
-
-  try {
-    await Promise.race([turnComplete, expiry]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * Runs one user turn against a live connection and yields the events it
- * produced.
- *
- * A native-audio model needs audio, but an evaluator grades the whole turn, so
- * a message carrying audio is streamed as realtime input while the yielded
- * user event keeps the full content, text included.
- *
- * @param params.liveRequestQueue The queue the live connection reads from.
- * @param params.eventQueue The queue the live driver pushes events onto.
- * @param params.userMessage The user turn to send.
- * @param params.currentInvocationId The invocation the turn belongs to.
- * @param params.turnComplete Resolves when the model reports its turn is done.
- * @param params.liveTimeoutSeconds How long to wait for that. Defaults to
- *     `DEFAULT_LIVE_TIMEOUT_SECONDS`.
- * @yields The synthetic user event, then each queued event of this invocation.
- * @throws {Error} If the model does not complete its turn in time.
- */
-export async function* generateInferencesForSingleUserInvocationLive(params: {
-  liveRequestQueue: LiveRequestQueue;
-  eventQueue: LiveEventQueue;
-  userMessage: Content;
-  currentInvocationId: string;
-  turnComplete: Promise<void>;
-  liveTimeoutSeconds?: number;
-}): AsyncGenerator<Event> {
-  const {liveRequestQueue, userMessage, currentInvocationId} = params;
-
-  yield createEvent({
-    content: userMessage,
-    author: USER_AUTHOR,
-    invocationId: currentInvocationId,
-  });
-
-  if ((userMessage.parts ?? []).some((part) => part.inlineData)) {
-    sendAudioToLive(liveRequestQueue, userMessage);
-  } else {
-    liveRequestQueue.sendContent(userMessage);
-  }
-
-  await waitForTurnComplete(
-    params.turnComplete,
-    params.liveTimeoutSeconds ?? DEFAULT_LIVE_TIMEOUT_SECONDS,
-  );
-
-  // Transcription-bearing events are yielded raw;
-  // `normalizeLiveTranscriptions` folds them into content later.
-  for (const event of params.eventQueue.drain()) {
-    if (event.invocationId === currentInvocationId) {
-      yield event;
-    }
-  }
 }
