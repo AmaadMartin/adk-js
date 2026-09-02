@@ -16,6 +16,7 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
+  LlmAgent,
   requiresUserInput,
   RunnableRoot,
   Runner,
@@ -33,6 +34,9 @@ import {
   loadFileData,
   saveToFile,
 } from '../utils/file_utils.js';
+import {AdkLogger} from '../utils/logger.js';
+
+const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
 
 const HOW_TO_ANSWER: Record<UserInputKind, string> = {
   input: 'Type your reply at the next prompt to continue.',
@@ -328,6 +332,8 @@ export interface RunAgentOptions {
   otelToCloud?: boolean;
   agentFileLoadOptions?: AgentFileOptions;
   reloadAgents?: boolean;
+  /** Model for agents in the tree that set none. Applied process-wide. */
+  defaultLlmModel?: string;
 }
 export async function runAgent(options: RunAgentOptions): Promise<void> {
   const userId = 'test_user';
@@ -342,6 +348,13 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   const loaded = await agentFile.load();
   const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
   const app = isApp(loaded) ? loaded : undefined;
+
+  // Model resolution is lazy, so the override still reaches an agent that was
+  // already constructed by the load above.
+  if (options.defaultLlmModel) {
+    logger.debug(`Overriding default model to ${options.defaultLlmModel}`);
+    LlmAgent.setDefaultModel(options.defaultLlmModel);
+  }
 
   let session = await sessionService.createSession({
     appName: app?.name ?? rootAgent.name,

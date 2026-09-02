@@ -456,6 +456,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   /** A unique symbol to identify ADK LLM agent class. */
   readonly [LLM_AGENT_SIGNATURE_SYMBOL] = true;
 
+  /** Model used when an agent, and its ancestors, set none. Unset by default. */
+  private static defaultModel?: string | BaseLlm;
+
   model?: string | BaseLlm;
   instruction: string | InstructionProvider;
   /** @deprecated Use GlobalInstructionPlugin instead. */
@@ -623,9 +626,33 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   /**
+   * Overrides the model used by any agent that sets none and has no ancestor
+   * that does. Process-wide: it affects every `LlmAgent` in the runtime, so it
+   * belongs to an entry point such as the CLI rather than to library code.
+   *
+   * @param model Model name or instance; `undefined` clears the override.
+   * @throws If given an empty model name.
+   */
+  static setDefaultModel(model: string | BaseLlm | undefined): void {
+    if (model === '') {
+      throw new Error('Default model must be a non-empty string.');
+    }
+    LlmAgent.defaultModel = model;
+  }
+
+  private static resolveDefaultModel(agentName: string): BaseLlm {
+    const model = LlmAgent.defaultModel;
+    if (model === undefined) {
+      throw new Error(`No model found for ${agentName}.`);
+    }
+    return isBaseLlm(model) ? model : LLMRegistry.newLlm(model);
+  }
+
+  /**
    * The resolved BaseLlm instance.
    *
-   * When not set, the agent will inherit the model from its ancestor.
+   * When not set, the agent will inherit the model from its ancestor, and then
+   * fall back to the model set by {@link LlmAgent.setDefaultModel}.
    */
   get canonicalModel(): BaseLlm {
     if (isBaseLlm(this.model)) {
@@ -643,7 +670,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
       ancestorAgent = ancestorAgent.parentAgent;
     }
-    throw new Error(`No model found for ${this.name}.`);
+    return LlmAgent.resolveDefaultModel(this.name);
   }
 
   /**
