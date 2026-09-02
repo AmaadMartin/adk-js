@@ -59,6 +59,7 @@ export class ReadonlyContext {
     return new State(
       this.invocationContext.session.state,
       {},
+      this.invocationContext.stateSchema,
     ) as Readonly<State>;
   }
 
