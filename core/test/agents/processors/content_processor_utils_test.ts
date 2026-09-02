@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {CompactedEvent, createEvent} from '@google/adk';
-import {Content} from '@google/genai';
+import {CompactedEvent, createEvent, Event} from '@google/adk';
+import {Content, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   getContents,
   getCurrentTurnContents,
+  isLiveModelMediaEventWithInlineData,
   mergeFunctionResponseEvents,
+  recoverCompactedFunctionCalls,
   removeClientFunctionCallId,
 } from '../../../src/agents/processors/content_processor_utils.js';
 
@@ -1203,5 +1205,303 @@ describe('removeClientFunctionCallId', () => {
     expect(() => removeClientFunctionCallId(emptyContent)).not.toThrow();
     const noParts: Content = {role: 'user', parts: []};
     expect(() => removeClientFunctionCallId(noParts)).not.toThrow();
+  });
+});
+
+/**
+ * Builds a model event that calls `roll_die` under the given `adk-` ids.
+ */
+function createCallEvent(ids: string[], timestamp = 1000): Event {
+  return createEvent({
+    author: 'agent',
+    timestamp,
+    content: {
+      role: 'model',
+      parts: ids.map((id) => ({
+        functionCall: {id, name: 'roll_die', args: {sides: 6}},
+      })),
+    },
+  });
+}
+
+/**
+ * Builds a user event that answers `roll_die` for the given `adk-` id.
+ */
+function createResponseEvent(
+  id: string,
+  result: string,
+  timestamp = 2000,
+): Event {
+  return createEvent({
+    author: 'user',
+    timestamp,
+    content: {
+      role: 'user',
+      parts: [{functionResponse: {id, name: 'roll_die', response: {result}}}],
+    },
+  });
+}
+
+describe('getContents with preserveFunctionCallIds', () => {
+  const events = [
+    createCallEvent(['adk-1']),
+    createResponseEvent('adk-1', 'four'),
+  ];
+
+  it('keeps the adk- ids when the option is set', () => {
+    const contents = getContents(events, 'agent', undefined, undefined, {
+      preserveFunctionCallIds: true,
+    });
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
+    expect(contents[1].parts?.[0].functionResponse?.id).toBe('adk-1');
+  });
+
+  it('strips the adk- ids by default', () => {
+    const contents = getContents(events, 'agent');
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
+    expect(contents[1].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+
+  it('strips the adk- ids when the option is explicitly false', () => {
+    const contents = getContents(events, 'agent', undefined, undefined, {
+      preserveFunctionCallIds: false,
+    });
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
+    expect(contents[1].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+
+  it('leaves the source events untouched either way', () => {
+    const sourceEvents = [
+      createCallEvent(['adk-1']),
+      createResponseEvent('adk-1', 'four'),
+    ];
+
+    getContents(sourceEvents, 'agent', undefined, undefined, {
+      preserveFunctionCallIds: true,
+    });
+    getContents(sourceEvents, 'agent');
+
+    expect(sourceEvents[0].content?.parts?.[0].functionCall?.id).toBe('adk-1');
+    expect(sourceEvents[1].content?.parts?.[0].functionResponse?.id).toBe(
+      'adk-1',
+    );
+  });
+
+  it('is forwarded by getCurrentTurnContents', () => {
+    const turnEvents = [
+      createEvent({
+        author: 'user',
+        timestamp: 500,
+        content: {role: 'user', parts: [{text: 'roll a die'}]},
+      }),
+      ...events,
+    ];
+
+    const preserved = getCurrentTurnContents(
+      turnEvents,
+      'agent',
+      undefined,
+      undefined,
+      {preserveFunctionCallIds: true},
+    );
+    const stripped = getCurrentTurnContents(turnEvents, 'agent');
+
+    expect(preserved[0].parts?.[0].functionCall?.id).toBe('adk-1');
+    expect(preserved[1].parts?.[0].functionResponse?.id).toBe('adk-1');
+    expect(stripped[0].parts?.[0].functionCall?.id).toBeUndefined();
+    expect(stripped[1].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+});
+
+describe('recoverCompactedFunctionCalls', () => {
+  it('re-injects a missing call right before the surviving response', () => {
+    const summary = createEvent({
+      author: 'user',
+      timestamp: 1500,
+      content: {role: 'user', parts: [{text: '[Previous Context Summary]'}]},
+    });
+    const callEvent = createCallEvent(['adk-1']);
+    const responseEvent = createResponseEvent('adk-1', 'four', 3000);
+
+    const recovered = recoverCompactedFunctionCalls(
+      [summary, responseEvent],
+      [callEvent, summary, responseEvent],
+    );
+
+    expect(recovered).toEqual([summary, callEvent, responseEvent]);
+  });
+
+  it('returns the same array when every response has its call', () => {
+    const callEvent = createCallEvent(['adk-1']);
+    const responseEvent = createResponseEvent('adk-1', 'four');
+    const events = [callEvent, responseEvent];
+
+    expect(recoverCompactedFunctionCalls(events, events)).toBe(events);
+  });
+
+  it('recovers the latest response of a compacted sibling', () => {
+    const parallelCall = createCallEvent(['adk-lr1', 'adk-lr2'], 1000);
+    const lr2Placeholder = createResponseEvent('adk-lr2', 'pending', 1100);
+    const lr2Result = createResponseEvent('adk-lr2', 'six', 1200);
+    const summary = createEvent({
+      author: 'user',
+      timestamp: 1500,
+      content: {role: 'user', parts: [{text: '[Previous Context Summary]'}]},
+    });
+    const lr1Result = createResponseEvent('adk-lr1', 'two', 3000);
+    const sourceEvents = [
+      parallelCall,
+      lr2Placeholder,
+      lr2Result,
+      summary,
+      lr1Result,
+    ];
+
+    const recovered = recoverCompactedFunctionCalls(
+      [summary, lr1Result],
+      sourceEvents,
+    );
+
+    expect(recovered).toEqual([summary, parallelCall, lr2Result, lr1Result]);
+  });
+
+  it('leaves an orphan alone when the source has no matching call', () => {
+    const responseEvent = createResponseEvent('adk-gone', 'four');
+    const events = [responseEvent];
+
+    expect(recoverCompactedFunctionCalls(events, events)).toBe(events);
+  });
+
+  it('ignores a call and a response that carry no id', () => {
+    const idlessCall = createEvent({
+      author: 'agent',
+      timestamp: 1000,
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'roll_die', args: {}}}],
+      },
+    });
+    const idlessResponse = createEvent({
+      author: 'user',
+      timestamp: 2000,
+      content: {
+        role: 'user',
+        parts: [{functionResponse: {name: 'roll_die', response: {}}}],
+      },
+    });
+    const events = [idlessCall, idlessResponse];
+
+    expect(recoverCompactedFunctionCalls(events, events)).toBe(events);
+  });
+
+  it('skips a source response with no id when picking the latest', () => {
+    const parallelCall = createCallEvent(['adk-lr1', 'adk-lr2'], 1000);
+    const idlessResponse = createEvent({
+      author: 'user',
+      timestamp: 1100,
+      content: {
+        role: 'user',
+        parts: [{functionResponse: {name: 'roll_die', response: {}}}],
+      },
+    });
+    const lr2Result = createResponseEvent('adk-lr2', 'six', 1200);
+    const lr1Result = createResponseEvent('adk-lr1', 'two', 3000);
+
+    const recovered = recoverCompactedFunctionCalls(
+      [lr1Result],
+      [parallelCall, idlessResponse, lr2Result, lr1Result],
+    );
+
+    expect(recovered).toEqual([parallelCall, lr2Result, lr1Result]);
+  });
+
+  it('leaves a sibling out when the source never answered it', () => {
+    const parallelCall = createCallEvent(['adk-lr1', 'adk-lr2'], 1000);
+    const lr1Result = createResponseEvent('adk-lr1', 'two', 3000);
+
+    const recovered = recoverCompactedFunctionCalls(
+      [lr1Result],
+      [parallelCall, lr1Result],
+    );
+
+    expect(recovered).toEqual([parallelCall, lr1Result]);
+  });
+
+  it('re-injects one call event once for two surviving responses', () => {
+    const parallelCall = createCallEvent(['adk-lr1', 'adk-lr2'], 1000);
+    const lr1Result = createResponseEvent('adk-lr1', 'two', 3000);
+    const lr2Result = createResponseEvent('adk-lr2', 'six', 3100);
+
+    const recovered = recoverCompactedFunctionCalls(
+      [lr1Result, lr2Result],
+      [parallelCall, lr1Result, lr2Result],
+    );
+
+    expect(recovered).toEqual([parallelCall, lr1Result, lr2Result]);
+  });
+
+  it('keeps the first source event that carries an orphaned call', () => {
+    const firstCall = createCallEvent(['adk-1'], 1000);
+    const laterCall = createCallEvent(['adk-1'], 1100);
+    const responseEvent = createResponseEvent('adk-1', 'four', 3000);
+
+    const recovered = recoverCompactedFunctionCalls(
+      [responseEvent],
+      [firstCall, laterCall, responseEvent],
+    );
+
+    expect(recovered[0]).toBe(firstCall);
+  });
+});
+
+describe('isLiveModelMediaEventWithInlineData', () => {
+  function eventWithParts(parts: Part[]): Event {
+    return createEvent({author: 'agent', content: {role: 'model', parts}});
+  }
+
+  it.each([
+    ['audio/pcm', 'audio/pcm;rate=24000'],
+    ['video', 'video/mp4'],
+    ['image', 'image/png'],
+    ['a mixed-case mime', 'AUDIO/PCM'],
+  ])('is true for %s inline data', (_name, mimeType) => {
+    const event = eventWithParts([{inlineData: {data: 'AAAA', mimeType}}]);
+
+    expect(isLiveModelMediaEventWithInlineData(event)).toBe(true);
+  });
+
+  it('is false for media referenced by fileData', () => {
+    const event = eventWithParts([
+      {fileData: {fileUri: 'artifact://audio.pcm', mimeType: 'audio/pcm'}},
+    ]);
+
+    expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+  });
+
+  it('is false for non-media inline data', () => {
+    const event = eventWithParts([
+      {inlineData: {data: 'AAAA', mimeType: 'text/plain'}},
+    ]);
+
+    expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+  });
+
+  it('is false for inline data with no mime type', () => {
+    const event = eventWithParts([{inlineData: {data: 'AAAA'}}]);
+
+    expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+  });
+
+  it('is false for an event with no content', () => {
+    expect(
+      isLiveModelMediaEventWithInlineData(createEvent({author: 'agent'})),
+    ).toBe(false);
+  });
+
+  it('is false for an event with an empty parts array', () => {
+    expect(isLiveModelMediaEventWithInlineData(eventWithParts([]))).toBe(false);
   });
 });
