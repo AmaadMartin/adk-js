@@ -723,7 +723,13 @@ export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {getBooleanEnvVar} from './utils/env_aware_utils.js';
 export {getHttpDebugInfo} from './utils/http_debug_utils.js';
 export type {HttpDebugRecord, HttpExchange} from './utils/http_debug_utils.js';
-export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
+export {
+  LogLevel,
+  getLogger,
+  isDebugEnabled,
+  setLogLevel,
+  setLogger,
+} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {
   isGemini2OrAbove,

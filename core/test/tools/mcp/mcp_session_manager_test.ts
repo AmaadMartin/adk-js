@@ -124,6 +124,54 @@ describe('MCPSessionManager', () => {
     expect(client.connect).toHaveBeenCalled();
   });
 
+  it('records the HTTP exchanges of a call made inside a debug sink', async () => {
+    const callerFetch = vi.fn().mockResolvedValue(new Response('ok'));
+    const transportOptions = {fetch: callerFetch};
+    const manager = new MCPSessionManager({
+      type: 'StreamableHTTPConnectionParams',
+      url: 'http://test-url',
+      transportOptions,
+    });
+    const sink: HttpDebugExchange[] = [];
+
+    await runWithHttpDebugSink(sink, () => manager.createSession());
+
+    const installed = vi.mocked(StreamableHTTPClientTransport).mock
+      .lastCall?.[1];
+    expect(installed?.fetch).not.toBe(callerFetch);
+    await installed?.fetch?.('http://test-url');
+    expect(callerFetch).toHaveBeenCalled();
+    expect(sink).toHaveLength(1);
+    // The caller's own options object is never modified.
+    expect(transportOptions.fetch).toBe(callerFetch);
+  });
+
+  it('installs no sink recorder when the session is created without one', async () => {
+    // The other debug recorder always installs a transparent wrapper, so the
+    // assertion is that a sink opened after the session records nothing, not
+    // that the caller's options object reaches the transport unwrapped.
+    const callerFetch = vi.fn().mockResolvedValue(new Response('ok'));
+    const transportOptions = {fetch: callerFetch};
+    const manager = new MCPSessionManager({
+      type: 'StreamableHTTPConnectionParams',
+      url: 'http://test-url',
+      transportOptions,
+    });
+    const sink: HttpDebugExchange[] = [];
+
+    await manager.createSession();
+
+    const installed = vi.mocked(StreamableHTTPClientTransport).mock
+      .lastCall?.[1];
+    await runWithHttpDebugSink(sink, () =>
+      installed?.fetch?.('http://test-url'),
+    );
+    expect(callerFetch).toHaveBeenCalled();
+    expect(sink).toEqual([]);
+    // The caller's own options object is never modified.
+    expect(transportOptions.fetch).toBe(callerFetch);
+  });
+
   it('creates an http client with deprecated header param', async () => {
     const manager = new MCPSessionManager({
       type: 'StreamableHTTPConnectionParams',

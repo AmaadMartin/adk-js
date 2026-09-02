@@ -10,6 +10,7 @@
  */
 
 export * from './conversion_utils.js';
+export type {HttpDebugExchange} from './http_debug_recorder.js';
 export * from './load_mcp_resource_tool.js';
 export * from './mcp_auth.js';
 export * from './mcp_session_manager.js';

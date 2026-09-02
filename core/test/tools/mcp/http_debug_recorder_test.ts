@@ -115,7 +115,7 @@ describe('createRecordingFetch', () => {
       baseFetch,
     )('https://user:hunter2@mcp.example/mcp');
 
-    expect(onlyExchange(sink).url).not.toContain('hunter2');
+    expect(onlyExchange(sink).url).toBe('https://user:***@mcp.example/mcp');
   });
 
   it.each([
