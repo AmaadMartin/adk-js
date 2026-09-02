@@ -20,6 +20,7 @@ import {AdkLogger} from '../utils/logger.js';
 import {toMessage} from '../utils/value_utils.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
+import {runEvalCli} from './cli_eval.js';
 import {
   convertGoogleApi,
   DEFAULT_OUTPUT_PATH,
@@ -36,6 +37,7 @@ import {
   DISABLE_FEATURES_OPTION,
   ENABLE_FEATURES_OPTION,
 } from './feature_options.js';
+import {applyHelpfulCommand} from './helpful_command.js';
 import {
   closeServices,
   MEMORY_SERVICE_URI_OPTION,
@@ -93,6 +95,15 @@ function getBoolean(option?: string | boolean): boolean {
   }
 
   return false;
+}
+
+/**
+ * Reports whether the user supplied the option, rather than commander filling
+ * in its default. An explicit empty value still counts as supplied.
+ */
+function wasSupplied(command: Command, name: string): boolean {
+  const source = command.getOptionValueSource(name);
+  return source !== undefined && source !== 'default';
 }
 
 /**
@@ -355,8 +366,7 @@ export function createProgram(): Command {
     startFailureMessage: 'Error starting API server:',
   });
 
-  program
-    .command('create')
+  applyHelpfulCommand(program.command('create'))
     .description('Creates a new agent')
     .argument('[agent]', 'Name to give the new agent', 'adk_agent')
     .option('-y, --yes', 'Optional. Skip confirmation prompts.')
@@ -393,8 +403,7 @@ export function createProgram(): Command {
       }
     });
 
-  program
-    .command('run')
+  applyHelpfulCommand(program.command('run'))
     .description('Runs agent')
     .argument('<agent>', 'Agent file path (.js or .ts)')
     .argument(
@@ -455,6 +464,14 @@ export function createProgram(): Command {
         options: Record<string, string>,
         command: Command,
       ) => {
+        // Before anything is resolved or loaded: the two options name two
+        // different sessions, so the run cannot honour both.
+        if (wasSupplied(command, 'replay') && wasSupplied(command, 'resume')) {
+          command.error(
+            `error: Options 'resume' and 'replay' cannot be set together.`,
+            {code: 'commander.conflictingOption'},
+          );
+        }
         applyFeatureOverrides(command);
         setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
@@ -510,6 +527,50 @@ export function createProgram(): Command {
 
         if (exitCode !== 0) {
           process.exit(exitCode);
+        }
+      },
+    );
+
+  applyHelpfulCommand(program.command('eval'))
+    .description('Evaluates an agent given the eval sets')
+    .argument('<agent>', 'Agent file path (.js or .ts)')
+    .argument(
+      '[eval_set_file_path_or_id...]',
+      'One or more eval set file paths or eval set ids. Add `:case1,case2` to run only those eval cases. Mixing file paths with ids is not supported.',
+    )
+    .option('--config_file_path <string>', 'Optional. The path to config file.')
+    .option(
+      '--print_detailed_results',
+      'Optional. Whether to print detailed results on console or not.',
+      false,
+    )
+    .option(
+      '--eval_storage_uri <string>',
+      'Optional. The evals storage URI to store agent evals, supported URIs: gs://<bucket name>.',
+    )
+    .addOption(LOG_LEVEL_OPTION)
+    .addOption(COMPILE_AGENT_FILE)
+    .addOption(BUNDLE_AGENT_FILE)
+    .addOption(AGENT_FILE_MODULE_TYPE)
+    .action(
+      async (
+        agentPath: string,
+        evalSetFileOrIds: string[],
+        options: Record<string, string>,
+      ) => {
+        setAdkCoreLogLevel(getLogLevelFromOptions(options));
+        try {
+          await runEvalCli({
+            agentPath,
+            evalSetFileOrIds,
+            configFilePath: options['config_file_path'],
+            printDetailedResults: getBoolean(options['print_detailed_results']),
+            evalStorageUri: options['eval_storage_uri'],
+            agentFileLoadOptions: getAgentFileOptions(options),
+          });
+        } catch (error) {
+          logger.error('Error evaluating agent:', toMessage(error));
+          process.exit(1);
         }
       },
     );
