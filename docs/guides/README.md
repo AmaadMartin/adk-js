@@ -9,6 +9,11 @@ replaces it.
 
 ## Index
 
+### Agents
+
+- [InvocationContext state](agents/invocation_context/index.md) - The state one
+  run carries: its credential service and its state schema.
+
 ### Apps
 
 - [Events compaction](apps/events_compaction/index.md) - Declaring one
