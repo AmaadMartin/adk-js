@@ -111,6 +111,23 @@ describe('ContextCacheRequestProcessor', () => {
     expect(llmRequest.cacheableContentsTokenCount).toBeUndefined();
   });
 
+  it('reads nothing from the session when the app configures no cache', async () => {
+    const llmRequest = emptyRequest();
+    const events = [
+      createEvent({
+        author: AGENT_NAME,
+        invocationId: EARLIER_INVOCATION,
+        cacheMetadata: activeCacheMetadata(5),
+        usageMetadata: {promptTokenCount: 250},
+      }),
+    ];
+
+    await run(createContext({events}), llmRequest);
+
+    expect(llmRequest.cacheMetadata).toBeUndefined();
+    expect(llmRequest.cacheableContentsTokenCount).toBeUndefined();
+  });
+
   it('throws when the invocation has no agent', async () => {
     const invocationContext = new InvocationContext({
       invocationId: CURRENT_INVOCATION,
