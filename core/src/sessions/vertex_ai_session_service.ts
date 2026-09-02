@@ -506,6 +506,25 @@ export class VertexAiSessionService extends BaseSessionService {
     });
   }
 
+  /**
+   * Not supported by the Vertex AI Agent Engine backend, which has no way to
+   * read user state without a session. To read user state, enumerate sessions
+   * with {@link listSessions} and call {@link getSession} on each result.
+   *
+   * @throws Always.
+   */
+  async getUserState(_request: {
+    appName: string;
+    userId: string;
+  }): Promise<Record<string, unknown>> {
+    throw new Error(
+      'VertexAiSessionService does not support getUserState. The Vertex AI ' +
+        'Agent Engine API does not expose user state independently of a ' +
+        'session. To read user state, enumerate sessions via listSessions ' +
+        'and call getSession on each result.',
+    );
+  }
+
   override async appendEvent({
     session,
     event,

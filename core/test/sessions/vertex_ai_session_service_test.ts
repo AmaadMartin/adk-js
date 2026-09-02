@@ -1912,4 +1912,11 @@ describe('VertexAiSessionService', () => {
       );
     });
   });
+  describe('getUserState', () => {
+    it('rejects because the backend cannot read user state', async () => {
+      await expect(
+        service.getUserState({appName: '12345', userId: 'testUser'}),
+      ).rejects.toThrow('does not support getUserState');
+    });
+  });
 });
