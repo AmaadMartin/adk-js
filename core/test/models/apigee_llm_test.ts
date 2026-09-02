@@ -137,6 +137,24 @@ describe('ApigeeLlm', () => {
       ] as HttpOptions;
       expect(httpOptions.baseUrl).toBe('https://proxy.example.com');
     });
+
+    it('should keep the proxyUrl when a Gemini baseUrl is also configured', () => {
+      const llm = new ApigeeLlm({
+        model: geminiModelString,
+        proxyUrl: defaultProxyUrl,
+        baseUrl: 'https://generativelanguage.googleapis.com/v1alpha',
+      });
+
+      const httpOptions = llm.apiClient['apiClient']['clientOptions'][
+        'httpOptions'
+      ] as HttpOptions;
+      const liveHttpOptions = llm.liveApiClient['apiClient']['clientOptions'][
+        'httpOptions'
+      ] as HttpOptions;
+
+      expect(httpOptions.baseUrl).toBe(defaultProxyUrl);
+      expect(liveHttpOptions.baseUrl).toBe(defaultProxyUrl);
+    });
   });
 
   describe('liveApiClient', () => {
