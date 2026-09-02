@@ -5,9 +5,9 @@
  */
 import {cloneDeep} from 'lodash-es';
 
-import {State} from '../sessions/state.js';
+import {isState, State} from '../sessions/state.js';
 
-import {File} from './code_execution_utils.js';
+import {File, FileContentEncoding} from './code_execution_utils.js';
 
 const CONTEXT_KEY = '_code_execution_context';
 const SESSION_ID_KEY = 'execution_session_id';
@@ -16,11 +16,43 @@ const INPUT_FILE_KEY = '_code_executor_input_files';
 const ERROR_COUNT_KEY = '_code_executor_error_counts';
 const CODE_EXECUTION_RESULTS_KEY = '_code_execution_results';
 
+/** The mime type a stored input file falls back to when it declares none. */
+const DEFAULT_MIME_TYPE = 'text/plain';
+
+const MILLIS_PER_SECOND = 1000;
+
+/** A session state, either the {@link State} wrapper or a plain state object. */
+export type SessionState = State | Record<string, unknown>;
+
+/** The shape stored under `_code_execution_context`. */
+interface CodeExecutionContextData {
+  [SESSION_ID_KEY]?: string;
+  [PROCESSED_FILE_NAMES_KEY]?: string[];
+}
+
+/** An input file as it is persisted in session state. */
+interface StoredInputFile {
+  name: string;
+  content: string;
+  mimeType?: string;
+  contentEncoding?: FileContentEncoding;
+}
+
 interface CodeExecutionResult {
   code: string;
   resultStdout: string;
   resultStderr: string;
   timestamp: number;
+}
+
+/** Rebuilds a {@link File} from the record persisted in session state. */
+function toFile(storedFile: StoredInputFile): File {
+  return {
+    name: storedFile.name,
+    content: storedFile.content,
+    contentEncoding: storedFile.contentEncoding,
+    mimeType: storedFile.mimeType ?? DEFAULT_MIME_TYPE,
+  };
 }
 
 /**
@@ -37,14 +69,45 @@ export interface UpdateCodeExecutionResultParams {
  * The persistent context used to configure the code executor.
  */
 export class CodeExecutorContext {
-  private readonly context: {
-    [SESSION_ID_KEY]?: string;
-    [PROCESSED_FILE_NAMES_KEY]?: string[];
-  };
+  private readonly context: CodeExecutionContextData;
 
-  constructor(private readonly sessionState: State) {
-    this.context = sessionState.get(CONTEXT_KEY) ?? {};
-    this.sessionState = sessionState;
+  constructor(private readonly sessionState: SessionState) {
+    const storedContext = this.readState<CodeExecutionContextData>(CONTEXT_KEY);
+
+    if (storedContext) {
+      this.context = storedContext;
+      return;
+    }
+
+    // Store the context up front so that later mutations of it are visible
+    // through the session state, and are recorded in a `State` delta.
+    this.context = {};
+    this.writeState(CONTEXT_KEY, this.context);
+  }
+
+  private readState<T>(key: string): T | undefined {
+    if (isState(this.sessionState)) {
+      return this.sessionState.get<T>(key);
+    }
+
+    return this.sessionState[key] as T | undefined;
+  }
+
+  private writeState(key: string, value: unknown): void {
+    if (isState(this.sessionState)) {
+      this.sessionState.set(key, value);
+      return;
+    }
+
+    this.sessionState[key] = value;
+  }
+
+  private hasState(key: string): boolean {
+    if (isState(this.sessionState)) {
+      return this.sessionState.has(key);
+    }
+
+    return key in this.sessionState;
   }
 
   /**
@@ -106,11 +169,13 @@ export class CodeExecutorContext {
    * @return A list of input files in the code executor context.
    */
   getInputFiles(): File[] {
-    if (!this.sessionState.has(INPUT_FILE_KEY)) {
+    const storedFiles = this.readState<StoredInputFile[]>(INPUT_FILE_KEY);
+
+    if (!storedFiles) {
       return [];
     }
 
-    return this.sessionState.get(INPUT_FILE_KEY) as File[];
+    return storedFiles.map(toFile);
   }
 
   /**
@@ -118,16 +183,17 @@ export class CodeExecutorContext {
    * @param inputFiles The input files to add to the session state.
    */
   addInputFiles(inputFiles: File[]) {
-    if (!this.sessionState.has(INPUT_FILE_KEY)) {
-      this.sessionState.set(INPUT_FILE_KEY, []);
-    }
+    const storedFiles = this.readState<StoredInputFile[]>(INPUT_FILE_KEY) ?? [];
 
-    (this.sessionState.get(INPUT_FILE_KEY) as File[]).push(...inputFiles);
+    this.writeState(INPUT_FILE_KEY, [
+      ...storedFiles,
+      ...inputFiles.map((inputFile) => ({...inputFile})),
+    ]);
   }
 
   clearInputFiles() {
-    if (this.sessionState.has(INPUT_FILE_KEY)) {
-      this.sessionState.set(INPUT_FILE_KEY, []);
+    if (this.hasState(INPUT_FILE_KEY)) {
+      this.writeState(INPUT_FILE_KEY, []);
     }
 
     if (PROCESSED_FILE_NAMES_KEY in this.context) {
@@ -141,15 +207,13 @@ export class CodeExecutorContext {
    * @return The error count for the given invocation ID.
    */
   getErrorCount(invocationId: string): number {
-    if (!this.sessionState.has(ERROR_COUNT_KEY)) {
-      return 0;
-    }
+    const errorCounts = this.readErrorCounts();
 
-    return (
-      ((this.sessionState.get(ERROR_COUNT_KEY) as Record<string, number>)[
-        invocationId
-      ] as number) || 0
-    );
+    return errorCounts?.[invocationId] ?? 0;
+  }
+
+  private readErrorCounts(): Record<string, number> | undefined {
+    return this.readState<Record<string, number>>(ERROR_COUNT_KEY);
   }
 
   /**
@@ -157,13 +221,12 @@ export class CodeExecutorContext {
    * @param invocationId The invocation ID to increment the error count for.
    */
   incrementErrorCount(invocationId: string) {
-    if (!this.sessionState.has(ERROR_COUNT_KEY)) {
-      this.sessionState.set(ERROR_COUNT_KEY, {});
-    }
+    const errorCounts = this.readErrorCounts() ?? {};
 
-    (this.sessionState.get(ERROR_COUNT_KEY) as Record<string, number>)[
-      invocationId
-    ] = this.getErrorCount(invocationId) + 1;
+    this.writeState(ERROR_COUNT_KEY, {
+      ...errorCounts,
+      [invocationId]: this.getErrorCount(invocationId) + 1,
+    });
   }
 
   /**
@@ -171,18 +234,15 @@ export class CodeExecutorContext {
    * @param invocationId The invocation ID to reset the error count for.
    */
   resetErrorCount(invocationId: string) {
-    if (!this.sessionState.has(ERROR_COUNT_KEY)) {
+    const errorCounts = this.readErrorCounts();
+
+    if (!errorCounts) {
       return;
     }
 
-    const errorCounts = this.sessionState.get(ERROR_COUNT_KEY) as Record<
-      string,
-      number
-    >;
-
-    if (invocationId in errorCounts) {
-      delete errorCounts[invocationId];
-    }
+    const remainingCounts = {...errorCounts};
+    delete remainingCounts[invocationId];
+    this.writeState(ERROR_COUNT_KEY, remainingCounts);
   }
 
   /**
@@ -199,23 +259,22 @@ export class CodeExecutorContext {
     resultStdout,
     resultStderr,
   }: UpdateCodeExecutionResultParams) {
-    if (!this.sessionState.has(CODE_EXECUTION_RESULTS_KEY)) {
-      this.sessionState.set(CODE_EXECUTION_RESULTS_KEY, {});
-    }
+    const storedResults =
+      this.readState<Record<string, CodeExecutionResult[]>>(
+        CODE_EXECUTION_RESULTS_KEY,
+      ) ?? {};
 
-    const codeExecutionResults = this.sessionState.get(
-      CODE_EXECUTION_RESULTS_KEY,
-    ) as Record<string, CodeExecutionResult[]>;
-
-    if (!(invocationId in codeExecutionResults)) {
-      codeExecutionResults[invocationId] = [];
-    }
-
-    codeExecutionResults[invocationId].push({
-      code,
-      resultStdout,
-      resultStderr,
-      timestamp: Date.now(),
+    this.writeState(CODE_EXECUTION_RESULTS_KEY, {
+      ...storedResults,
+      [invocationId]: [
+        ...(storedResults[invocationId] ?? []),
+        {
+          code,
+          resultStdout,
+          resultStderr,
+          timestamp: Math.floor(Date.now() / MILLIS_PER_SECOND),
+        },
+      ],
     });
   }
 
@@ -224,6 +283,6 @@ export class CodeExecutorContext {
    * @return The code execution context for the given invocation ID.
    */
   getCodeExecutionContext(): Record<string, unknown> {
-    return this.sessionState.get(CONTEXT_KEY) || {};
+    return this.readState<Record<string, unknown>>(CONTEXT_KEY) ?? {};
   }
 }
