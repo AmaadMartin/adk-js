@@ -25,17 +25,6 @@ const TEXT_LIKE_MIME_TYPES = new Set([
   'application/xml',
 ]);
 
-/** Error code for a tool result rejecting a malformed argument. */
-const INVALID_ARGUMENTS_ERROR_CODE = 'INVALID_ARGUMENTS';
-
-/** Message returned when `artifact_names` is not a list of strings. */
-const INVALID_ARTIFACT_NAMES_MESSAGE =
-  "'artifact_names' must be a list of strings.";
-
-/** Warning logged when a `load_artifacts` response carries a bad value. */
-const INVALID_ARTIFACT_NAMES_WARNING =
-  'Ignoring invalid artifact_names in load_artifacts response.';
-
 /**
  * Narrows a model-supplied `artifact_names` value to a list of strings.
  *
@@ -146,8 +135,8 @@ export class LoadArtifactsTool extends BaseTool {
     const artifactNames = parseArtifactNames(args['artifact_names']);
     if (!artifactNames) {
       return {
-        error: INVALID_ARTIFACT_NAMES_MESSAGE,
-        error_code: INVALID_ARGUMENTS_ERROR_CODE,
+        error: "'artifact_names' must be a list of strings.",
+        error_code: 'INVALID_ARGUMENTS',
       };
     }
     return {
@@ -226,7 +215,9 @@ export class LoadArtifactsTool extends BaseTool {
               response['artifact_names'],
             );
             if (!responseArtifactNames) {
-              logger.warn(INVALID_ARTIFACT_NAMES_WARNING);
+              logger.warn(
+                'Ignoring invalid artifact_names in load_artifacts response.',
+              );
               continue;
             }
             for (const name of responseArtifactNames) {

@@ -50,6 +50,11 @@ class StubToolContext {
   }
 }
 
+/** Builds a `Context` backed by {@link StubToolContext}. */
+function stubContext(artifactsByName: Record<string, Part> = {}): Context {
+  return new StubToolContext(artifactsByName) as unknown as Context;
+}
+
 describe('LoadArtifactsTool', () => {
   it('computes the correct declaration', () => {
     const tool = new LoadArtifactsTool();
@@ -670,7 +675,7 @@ describe('LoadArtifactsTool', () => {
   });
 
   describe('artifact_names validation', () => {
-    const emptyToolContext = {} as unknown as Context;
+    const emptyToolContext = stubContext();
 
     afterEach(() => {
       vi.restoreAllMocks();
@@ -725,9 +730,7 @@ describe('LoadArtifactsTool', () => {
 
     it('ignores a malformed artifact_names in a function response', async () => {
       const warnSpy = spyOnWarn();
-      const toolContext = new StubToolContext({
-        'ok.txt': {text: 'hello'},
-      }) as unknown as Context;
+      const toolContext = stubContext({'ok.txt': {text: 'hello'}});
 
       const llmRequest: LlmRequest = {
         contents: [
@@ -760,9 +763,7 @@ describe('LoadArtifactsTool', () => {
 
     it('ignores a non-array artifact_names in a function response', async () => {
       const warnSpy = spyOnWarn();
-      const toolContext = new StubToolContext({
-        'ok.txt': {text: 'hello'},
-      }) as unknown as Context;
+      const toolContext = stubContext({'ok.txt': {text: 'hello'}});
 
       const llmRequest: LlmRequest = {
         contents: [
@@ -792,9 +793,7 @@ describe('LoadArtifactsTool', () => {
 
     it('still loads a valid response when another in the same turn is malformed', async () => {
       const warnSpy = spyOnWarn();
-      const toolContext = new StubToolContext({
-        'ok.txt': {text: 'hello'},
-      }) as unknown as Context;
+      const toolContext = stubContext({'ok.txt': {text: 'hello'}});
 
       const llmRequest: LlmRequest = {
         contents: [
