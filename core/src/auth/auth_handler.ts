@@ -8,9 +8,15 @@ import {State} from '../sessions/state.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {AuthCredential} from './auth_credential.js';
-import {AuthSchemeType} from './auth_schemes.js';
+import {AuthSchemeType, isOAuth2Scheme} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
 import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js';
+
+/** The scheme types that require an OAuth2 consent flow. */
+const OAUTH_CONSENT_SCHEME_TYPES: readonly string[] = [
+  AuthSchemeType.OAUTH2,
+  AuthSchemeType.OPEN_ID_CONNECT,
+];
 
 /**
  * A handler that handles the auth flow in Agent Development Kit to help
@@ -30,10 +36,7 @@ export class AuthHandler {
     const credentialKey = 'temp:' + this.authConfig.credentialKey;
 
     const authSchemeType = this.authConfig.authScheme.type;
-    if (
-      authSchemeType !== AuthSchemeType.OAUTH2 &&
-      authSchemeType !== AuthSchemeType.OPEN_ID_CONNECT
-    ) {
+    if (!OAUTH_CONSENT_SCHEME_TYPES.includes(authSchemeType)) {
       state.set(credentialKey, this.authConfig.exchangedAuthCredential);
 
       return;
@@ -52,10 +55,7 @@ export class AuthHandler {
   generateAuthRequest(): AuthConfig {
     const authSchemeType = this.authConfig.authScheme.type;
 
-    if (
-      authSchemeType !== AuthSchemeType.OAUTH2 &&
-      authSchemeType !== AuthSchemeType.OPEN_ID_CONNECT
-    ) {
+    if (!OAUTH_CONSENT_SCHEME_TYPES.includes(authSchemeType)) {
       return this.authConfig;
     }
 
@@ -120,11 +120,7 @@ export class AuthHandler {
     if ('authorizationEndpoint' in authScheme) {
       authorizationEndpoint = authScheme.authorizationEndpoint;
       scopes = authScheme.scopes || [];
-    } else if (
-      authScheme.type === AuthSchemeType.OAUTH2 &&
-      'flows' in authScheme &&
-      authScheme.flows
-    ) {
+    } else if (isOAuth2Scheme(authScheme)) {
       const flows = authScheme.flows;
       const flow =
         flows.implicit ||

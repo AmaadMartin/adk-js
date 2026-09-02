@@ -31,6 +31,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Auth
 
+- [Auth schemes](auth/auth_schemes/index.md) - Declaring how an API expects to
+  be authenticated, including custom scheme types and OAuth2 endpoint
+  discovery.
 - [AuthCredential and its helpers](auth/auth_credential/index.md) - Building a
   credential with the right defaults, rejecting one that cannot work, and
   logging one without leaking the secret.

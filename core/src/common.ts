@@ -135,10 +135,17 @@ export type {
 export {AuthHandler} from './auth/auth_handler.js';
 export {AUTH_PREPROCESSOR, AuthPreprocessor} from './auth/auth_preprocessor.js';
 export {AuthProviderRegistry} from './auth/auth_provider_registry.js';
-export {AuthSchemeType, OAuthGrantType} from './auth/auth_schemes.js';
+export {
+  AuthSchemeType,
+  OAuthGrantType,
+  isCustomAuthScheme,
+  isExtendedOAuth2,
+  isOAuth2Scheme,
+} from './auth/auth_schemes.js';
 export type {
   AuthScheme,
   CustomAuthScheme,
+  ExtendedOAuth2,
   OpenIdConnectWithConfig,
 } from './auth/auth_schemes.js';
 export {isAuthConfig} from './auth/auth_tool.js';
@@ -158,6 +165,7 @@ export type {
 } from './auth/exchanger/base_credential_exchanger.js';
 export {OAuth2CredentialExchanger} from './auth/oauth2/oauth2_credential_exchanger.js';
 export {OAuth2DiscoveryManager} from './auth/oauth2/oauth2_discovery.js';
+export {populateAuthSchemeFromDiscovery} from './auth/oauth2/oauth2_utils.js';
 export type {BaseCredentialRefresher} from './auth/refresher/base_credential_refresher.js';
 export {CredentialRefresherRegistry} from './auth/refresher/credential_refresher_registry.js';
 export {BaseCodeExecutor} from './code_executors/base_code_executor.js';
