@@ -17,7 +17,7 @@ describe('appendInstructions', () => {
     it('joins the instructions with a blank line', () => {
       const llmRequest = createRequest();
 
-      const userContents = appendInstructions(llmRequest, [
+      appendInstructions(llmRequest, [
         'First instruction',
         'Second instruction',
       ]);
@@ -25,7 +25,6 @@ describe('appendInstructions', () => {
       expect(llmRequest.config?.systemInstruction).toBe(
         'First instruction\n\nSecond instruction',
       );
-      expect(userContents).toEqual([]);
       expect(llmRequest.contents).toEqual([]);
     });
 
@@ -41,10 +40,10 @@ describe('appendInstructions', () => {
     it('leaves the request untouched for an empty list', () => {
       const llmRequest = createRequest();
 
-      const userContents = appendInstructions(llmRequest, []);
+      appendInstructions(llmRequest, []);
 
       expect(llmRequest.config?.systemInstruction).toBeUndefined();
-      expect(userContents).toEqual([]);
+      expect(llmRequest.contents).toEqual([]);
     });
   });
 
@@ -56,22 +55,21 @@ describe('appendInstructions', () => {
         parts: [{text: 'First part'}, {text: 'Second part'}],
       };
 
-      const userContents = appendInstructions(llmRequest, content);
+      appendInstructions(llmRequest, content);
 
       expect(llmRequest.config?.systemInstruction).toBe(
         'First part\n\nSecond part',
       );
-      expect(userContents).toEqual([]);
       expect(llmRequest.contents).toEqual([]);
     });
 
     it('treats a content with no parts as a no-op', () => {
       const llmRequest = createRequest();
 
-      const userContents = appendInstructions(llmRequest, {role: 'user'});
+      appendInstructions(llmRequest, {role: 'user'});
 
       expect(llmRequest.config?.systemInstruction).toBeUndefined();
-      expect(userContents).toEqual([]);
+      expect(llmRequest.contents).toEqual([]);
     });
 
     it('ignores a part that is neither text nor data', () => {
@@ -97,12 +95,12 @@ describe('appendInstructions', () => {
         ],
       };
 
-      const userContents = appendInstructions(llmRequest, content);
+      appendInstructions(llmRequest, content);
 
       expect(llmRequest.config?.systemInstruction).toBe(
         'Look at this\n\n[Reference to inline binary data: inline_data_0 (type: image/png)]',
       );
-      expect(userContents).toEqual([
+      expect(llmRequest.contents).toEqual([
         {
           role: 'user',
           parts: [
@@ -164,12 +162,12 @@ describe('appendInstructions', () => {
         ],
       };
 
-      const userContents = appendInstructions(llmRequest, content);
+      appendInstructions(llmRequest, content);
 
       expect(llmRequest.config?.systemInstruction).toBe(
         "[Reference to file data: file_data_0 ('test_file.txt', URI: files/test123, type: text/plain)]",
       );
-      expect(userContents).toEqual([
+      expect(llmRequest.contents).toEqual([
         {
           role: 'user',
           parts: [
@@ -220,16 +218,24 @@ describe('appendInstructions', () => {
       }
     });
 
-    it('returns the same contents it appended to the request', () => {
+    it('appends the extracted content to the request', () => {
       const llmRequest = createRequest();
       const content: Content = {
         role: 'user',
         parts: [{fileData: {fileUri: 'files/test123'}}],
       };
 
-      const userContents = appendInstructions(llmRequest, content);
+      appendInstructions(llmRequest, content);
 
-      expect(llmRequest.contents).toEqual(userContents);
+      expect(llmRequest.contents).toEqual([
+        {
+          role: 'user',
+          parts: [
+            {text: 'Referenced file data: file_data_0'},
+            {fileData: {fileUri: 'files/test123'}},
+          ],
+        },
+      ]);
     });
 
     it('appends its text after an existing system instruction', () => {

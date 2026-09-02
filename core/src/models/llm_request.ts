@@ -5,10 +5,8 @@
  */
 
 import {
-  Blob,
   Content,
   createUserContent,
-  FileData,
   FunctionDeclaration,
   GenerateContentConfig,
   LiveConnectConfig,
@@ -56,40 +54,17 @@ export interface LlmRequest {
   previousInteractionId?: string;
 }
 
-/** Renders the ` (a, b)` suffix of a reference, or `''` when it has none. */
-function referenceSuffix(descriptors: string[]): string {
-  return descriptors.length ? ` (${descriptors.join(', ')})` : '';
-}
-
-/** Describes an inline binary part that the system instruction cannot carry. */
-function inlineDataReference(data: Blob, referenceId: string): string {
-  const descriptors: string[] = [];
-  if (data.displayName) {
-    descriptors.push(`'${data.displayName}'`);
-  }
-  if (data.mimeType) {
-    descriptors.push(`type: ${data.mimeType}`);
-  }
-  return `[Reference to inline binary data: ${referenceId}${referenceSuffix(
-    descriptors,
-  )}]`;
-}
-
-/** Describes a file part that the system instruction cannot carry. */
-function fileDataReference(data: FileData, referenceId: string): string {
-  const descriptors: string[] = [];
-  if (data.displayName) {
-    descriptors.push(`'${data.displayName}'`);
-  }
-  if (data.fileUri) {
-    descriptors.push(`URI: ${data.fileUri}`);
-  }
-  if (data.mimeType) {
-    descriptors.push(`type: ${data.mimeType}`);
-  }
-  return `[Reference to file data: ${referenceId}${referenceSuffix(
-    descriptors,
-  )}]`;
+/** Describes a part that the system instruction cannot carry. */
+function partReference(
+  kind: string,
+  referenceId: string,
+  descriptors: Array<string | undefined>,
+): string {
+  const shown = descriptors.filter((descriptor): descriptor is string =>
+    Boolean(descriptor),
+  );
+  const suffix = shown.length ? ` (${shown.join(', ')})` : '';
+  return `[Reference to ${kind}: ${referenceId}${suffix}]`;
 }
 
 /** Appends text to the system instruction, separated by a blank line. */
@@ -113,18 +88,16 @@ function appendSystemInstructionText(llmRequest: LlmRequest, text: string) {
  * user content.
  *
  * @param instructions The instructions to append.
- * @returns The user contents extracted from non-text parts, which are also
- *     appended to {@link LlmRequest.contents}. Empty for a list of strings.
  */
 export function appendInstructions(
   llmRequest: LlmRequest,
   instructions: string[] | Content,
-): Content[] {
+): void {
   if (Array.isArray(instructions)) {
     if (instructions.length) {
       appendSystemInstructionText(llmRequest, instructions.join('\n\n'));
     }
-    return [];
+    return;
   }
 
   const texts: string[] = [];
@@ -135,7 +108,12 @@ export function appendInstructions(
       texts.push(part.text);
     } else if (part.inlineData) {
       const referenceId = `inline_data_${nonTextCount++}`;
-      texts.push(inlineDataReference(part.inlineData, referenceId));
+      texts.push(
+        partReference('inline binary data', referenceId, [
+          part.inlineData.displayName && `'${part.inlineData.displayName}'`,
+          part.inlineData.mimeType && `type: ${part.inlineData.mimeType}`,
+        ]),
+      );
       userContents.push(
         createUserContent([
           `Referenced inline data: ${referenceId}`,
@@ -144,7 +122,13 @@ export function appendInstructions(
       );
     } else if (part.fileData) {
       const referenceId = `file_data_${nonTextCount++}`;
-      texts.push(fileDataReference(part.fileData, referenceId));
+      texts.push(
+        partReference('file data', referenceId, [
+          part.fileData.displayName && `'${part.fileData.displayName}'`,
+          part.fileData.fileUri && `URI: ${part.fileData.fileUri}`,
+          part.fileData.mimeType && `type: ${part.fileData.mimeType}`,
+        ]),
+      );
       userContents.push(
         createUserContent([
           `Referenced file data: ${referenceId}`,
@@ -158,7 +142,6 @@ export function appendInstructions(
     appendSystemInstructionText(llmRequest, texts.join('\n\n'));
   }
   llmRequest.contents.push(...userContents);
-  return userContents;
 }
 
 /**
