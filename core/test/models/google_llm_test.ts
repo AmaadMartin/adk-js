@@ -711,6 +711,19 @@ describe('GoogleLlm', () => {
       );
     });
 
+    it('should give the connection the same backend as the model', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      const connection = await llm.connect({
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        toolsDict: {},
+      });
+
+      expect(connection).toHaveProperty('apiBackend', llm.apiBackend);
+    });
+
     it('strips sessionResumption.transparent on the Gemini API backend', async () => {
       const llm = new TestGemini({
         apiKey: 'test-key',

@@ -12,12 +12,43 @@ import {
   Session,
 } from '@google/genai';
 
+import {filterAudioParts} from '../utils/content_utils.js';
 import {LiveResponseAggregator} from '../utils/live_connection_utils.js';
 import {logger} from '../utils/logger.js';
-import {isGemini3xFlashLive} from '../utils/model_name.js';
+import {isGemini35LiveTranslate, isGemini3xLive} from '../utils/model_name.js';
+import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
-import {BaseLlmConnection} from './base_llm_connection.js';
+import {
+  BaseLlmConnection,
+  RealtimeInput,
+  SendContentOptions,
+} from './base_llm_connection.js';
 import {LlmResponse} from './llm_response.js';
+
+/**
+ * Minimal placeholder text sent to Gemini 3.x Live to trigger a response to
+ * history that was just replayed. See {@link GeminiLlmConnection.sendHistory}.
+ */
+const RESPONSE_TRIGGER_TEXT = '.';
+
+/**
+ * Returns whether a realtime input is a media blob rather than a control
+ * signal.
+ *
+ * `Blob` and `LiveClientRealtimeInput` share no field names, so the presence of
+ * any `Blob` field identifies the input exactly.
+ */
+function isBlobInput(input: RealtimeInput): input is Blob {
+  return 'mimeType' in input || 'data' in input || 'displayName' in input;
+}
+
+/** Adds the live session id to a response once the id is known. */
+function withLiveSessionId(
+  response: LlmResponse,
+  liveSessionId: string | undefined,
+): LlmResponse {
+  return liveSessionId ? {...response, liveSessionId} : response;
+}
 
 /** The Gemini model connection. */
 export class GeminiLlmConnection implements BaseLlmConnection {
@@ -25,7 +56,13 @@ export class GeminiLlmConnection implements BaseLlmConnection {
     private readonly geminiSession: Session,
     private readonly modelVersion?: string,
     private readonly messageQueue?: AsyncIterable<LiveServerMessage>,
+    private readonly backend: GoogleLLMVariant = GoogleLLMVariant.VERTEX_AI,
   ) {}
+
+  /** The Google LLM backend this connection talks to. */
+  get apiBackend(): GoogleLLMVariant {
+    return this.backend;
+  }
 
   /**
    * Sends the conversation history to the gemini model.
@@ -34,114 +71,140 @@ export class GeminiLlmConnection implements BaseLlmConnection {
    * The model will respond if the last content is from user, otherwise it will
    * wait for new user input before responding.
    *
+   * Audio parts are dropped: the audio is already transcribed, and sending it
+   * as client content corrupts the live session.
+   *
    * @param history The conversation history to send to the model.
    */
   async sendHistory(history: Content[]): Promise<void> {
-    // We ignore any audio from user during the agent transfer phase.
-    const contents = history.filter(
-      (content) => content.parts && content.parts[0]?.text,
+    const contents = history.flatMap(
+      (content) => filterAudioParts(content) ?? [],
     );
 
-    if (contents.length > 0) {
-      const isGemini3x = isGemini3xFlashLive(this.modelVersion);
-      this.geminiSession.sendClientContent({
-        turns: contents,
-        turnComplete: isGemini3x
-          ? true
-          : contents[contents.length - 1].role === 'user',
-      });
-    } else {
+    if (contents.length === 0) {
       logger.info('no content is sent');
+      return;
+    }
+
+    const turnComplete = contents[contents.length - 1].role === 'user';
+    this.geminiSession.sendClientContent({turns: contents, turnComplete});
+
+    if (turnComplete && isGemini3xLive(this.modelVersion)) {
+      // Gemini 3.x Live only starts generating once it receives new user
+      // input, so the replayed history alone leaves the model waiting. The
+      // placeholder triggers the response the caller expects, e.g. right after
+      // an agent transfer.
+      logger.debug('Triggering the Gemini 3.x Live response to the history.');
+      this.geminiSession.sendRealtimeInput({text: RESPONSE_TRIGGER_TEXT});
     }
   }
 
   /**
    * Sends a user content to the gemini model.
    *
-   * The model will respond immediately upon receiving the content.
+   * The model will respond immediately upon receiving the content, unless the
+   * content is a partial turn update.
    * If you send function responses, all parts in the content should be function
    * responses.
    *
    * @param content The content to send to the model.
+   * @param options Options for the send, e.g. whether the content is a partial
+   *     turn update that leaves the turn open.
    */
-  async sendContent(content: Content): Promise<void> {
+  async sendContent(
+    content: Content,
+    options?: SendContentOptions,
+  ): Promise<void> {
     if (!content.parts) {
       throw new Error('Content must have parts.');
     }
-    if (content.parts[0].functionResponse) {
-      // All parts have to be function responses.
+
+    if (content.parts.every((part) => part.functionResponse)) {
       const functionResponses = content.parts
         .map((part) => part.functionResponse)
         .filter((fr): fr is FunctionResponse => !!fr);
       logger.debug('Sending LLM function response:', functionResponses);
-      this.geminiSession.sendToolResponse({
-        functionResponses,
-      });
-    } else {
-      logger.debug('Sending LLM new content', content);
-      const isGemini3x = isGemini3xFlashLive(this.modelVersion);
-      if (isGemini3x && content.parts.length === 1 && content.parts[0].text) {
-        logger.debug('Using sendRealtimeInput for Gemini 3.x text input');
-        this.geminiSession.sendRealtimeInput({text: content.parts[0].text});
-      } else {
-        this.geminiSession.sendClientContent({
-          turns: [content],
-          turnComplete: true,
-        });
-      }
+      this.geminiSession.sendToolResponse({functionResponses});
+      return;
     }
+
+    logger.debug('Sending LLM new content', content);
+    const partial = options?.partial ?? false;
+    // sendRealtimeInput always completes the turn, so a partial update has to
+    // go through sendClientContent.
+    if (
+      !partial &&
+      isGemini3xLive(this.modelVersion) &&
+      content.parts.length === 1 &&
+      content.parts[0].text
+    ) {
+      logger.debug('Using sendRealtimeInput for Gemini 3.x text input');
+      this.geminiSession.sendRealtimeInput({text: content.parts[0].text});
+      return;
+    }
+    this.geminiSession.sendClientContent({
+      turns: [content],
+      turnComplete: !partial,
+    });
   }
 
   /**
-   * Sends a chunk of audio or a frame of video to the model in realtime.
+   * Sends a chunk of audio, a frame of video, or a realtime control signal to
+   * the model.
    *
-   * @param blob The blob to send to the model.
+   * @param input The blob or control signal to send to the model.
    */
-  async sendRealtime(blob: Blob): Promise<void> {
-    logger.debug('Sending LLM Blob:', blob);
-    const isGemini3x = isGemini3xFlashLive(this.modelVersion);
-    const isNativeAudio = this.modelVersion?.includes('native-audio');
-
-    if (isGemini3x || isNativeAudio) {
-      if (blob.mimeType?.startsWith('audio/')) {
-        this.geminiSession.sendRealtimeInput({audio: blob});
-      } else if (blob.mimeType?.startsWith('image/')) {
-        this.geminiSession.sendRealtimeInput({video: blob});
-      } else {
-        logger.warn(
-          'Blob not sent. Unknown or empty mime type for sendRealtimeInput:',
-          blob.mimeType,
-        );
-      }
-    } else {
-      this.geminiSession.sendRealtimeInput({media: blob});
+  async sendRealtime(input: RealtimeInput): Promise<void> {
+    if (!input || typeof input !== 'object') {
+      throw new Error(`Unsupported input type: ${typeof input}`);
     }
+
+    if (isBlobInput(input)) {
+      logger.debug('Sending LLM Blob:', input);
+      this.sendBlob(input);
+      return;
+    }
+    if (input.activityStart) {
+      logger.debug('Sending LLM activity start signal.');
+      this.geminiSession.sendRealtimeInput({
+        activityStart: input.activityStart,
+      });
+      return;
+    }
+    if (input.activityEnd) {
+      logger.debug('Sending LLM activity end signal.');
+      this.geminiSession.sendRealtimeInput({activityEnd: input.activityEnd});
+      return;
+    }
+    if (input.audioStreamEnd) {
+      logger.debug('Sending LLM audio stream end signal.');
+      this.geminiSession.sendRealtimeInput({audioStreamEnd: true});
+      return;
+    }
+    logger.warn('Unary LiveClientRealtimeInput not fully supported yet.');
   }
 
   /**
    * Sends an activity start signal to the model.
    */
   async sendActivityStart(): Promise<void> {
-    this.geminiSession.sendRealtimeInput({activityStart: {}});
+    return this.sendRealtime({activityStart: {}});
   }
 
   /**
    * Sends an activity end signal to the model.
    */
   async sendActivityEnd(): Promise<void> {
-    this.geminiSession.sendRealtimeInput({activityEnd: {}});
+    return this.sendRealtime({activityEnd: {}});
   }
 
   /**
-   * Builds a full text response.
+   * Receives the model responses until the connection closes.
    *
-   * The text should not be partial and the returned LlmResponse is not be
-   * partial.
+   * Every response carries the live session id once the server reports it in
+   * its setup acknowledgement.
    *
-   * @param text The text to be included in the response.
-   * @param isThought Whether the text is a thought.
-   * @param groundingMetadata The grounding metadata to include.
-   * @returns An LlmResponse containing the full text.
+   * @returns A generator of LlmResponse.
    */
   async *receive(): AsyncGenerator<LlmResponse, void, void> {
     if (!this.messageQueue) {
@@ -149,17 +212,19 @@ export class GeminiLlmConnection implements BaseLlmConnection {
     }
 
     const aggregator = new LiveResponseAggregator(this.modelVersion);
+    let liveSessionId: string | undefined;
 
     for await (const message of this.messageQueue) {
       logger.debug('Got LLM Live message:', message);
+      liveSessionId ??= message.setupComplete?.sessionId;
 
       for (const response of aggregator.processMessage(message)) {
-        yield response;
+        yield withLiveSessionId(response, liveSessionId);
       }
     }
 
     for (const response of aggregator.close()) {
-      yield response;
+      yield withLiveSessionId(response, liveSessionId);
     }
   }
 
@@ -168,5 +233,25 @@ export class GeminiLlmConnection implements BaseLlmConnection {
    */
   async close(): Promise<void> {
     this.geminiSession.close();
+  }
+
+  private sendBlob(blob: Blob): void {
+    if (
+      !isGemini3xLive(this.modelVersion) &&
+      !isGemini35LiveTranslate(this.modelVersion)
+    ) {
+      this.geminiSession.sendRealtimeInput({media: blob});
+      return;
+    }
+    if (blob.mimeType?.startsWith('audio/')) {
+      this.geminiSession.sendRealtimeInput({audio: blob});
+    } else if (blob.mimeType?.startsWith('image/')) {
+      this.geminiSession.sendRealtimeInput({video: blob});
+    } else {
+      logger.warn(
+        'Blob not sent. Unknown or empty mime type for sendRealtimeInput:',
+        blob.mimeType,
+      );
+    }
   }
 }

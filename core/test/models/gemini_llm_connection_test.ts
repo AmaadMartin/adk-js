@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {GoogleLLMVariant, LlmResponse} from '@google/adk';
 import {
   Blob,
   Content,
@@ -11,10 +12,13 @@ import {
   LiveServerGoAway,
   LiveServerMessage,
   LiveServerSessionResumptionUpdate,
+  Part,
 } from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {RealtimeInput} from '../../src/models/base_llm_connection.js';
 import {GeminiLlmConnection} from '../../src/models/gemini_llm_connection.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
+import {logger} from '../../src/utils/logger.js';
 import {liveServerMessage} from '../utils/live_server_message_test_utils.js';
 
 describe('GeminiLlmConnection', () => {
@@ -51,7 +55,7 @@ describe('GeminiLlmConnection', () => {
       });
     });
 
-    it('should send history with turnComplete=true for Gemini 3.x', async () => {
+    it('should send history with turnComplete based on role for Gemini 3.x, and not trigger a response', async () => {
       const connection = new GeminiLlmConnection(
         mockSession,
         'gemini-3.1-flash-live',
@@ -65,8 +69,9 @@ describe('GeminiLlmConnection', () => {
 
       expect(mockSession.sendClientContent).toHaveBeenCalledWith({
         turns: history,
-        turnComplete: true,
+        turnComplete: false, // last is model
       });
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
     });
 
     it('should not send history if empty', async () => {
@@ -76,6 +81,248 @@ describe('GeminiLlmConnection', () => {
       );
       await connection.sendHistory([]);
       expect(mockSession.sendClientContent).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['inlineData', {inlineData: {mimeType: 'audio/pcm', data: 'AAD/AP8='}}],
+      [
+        'fileData',
+        {
+          fileData: {
+            mimeType: 'audio/pcm',
+            fileUri: 'artifact://app/user/session/_adk_live/audio.pcm#1',
+          },
+        },
+      ],
+    ])(
+      'should filter out an audio-only turn carried by %s',
+      async (_name, audioPart: Part) => {
+        const connection = new GeminiLlmConnection(mockSession);
+        const history: Content[] = [
+          {role: 'user', parts: [audioPart]},
+          {role: 'model', parts: [{text: 'I heard you'}]},
+        ];
+
+        await connection.sendHistory(history);
+
+        expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+          turns: [{role: 'model', parts: [{text: 'I heard you'}]}],
+          turnComplete: false,
+        });
+      },
+    );
+
+    it('should keep image data in history', async () => {
+      const connection = new GeminiLlmConnection(mockSession);
+      const imagePart: Part = {
+        inlineData: {mimeType: 'image/png', data: 'iVBORw0KGgo='},
+      };
+      const history: Content[] = [
+        {role: 'user', parts: [imagePart]},
+        {role: 'model', parts: [{text: 'Nice image!'}]},
+      ];
+
+      await connection.sendHistory(history);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: history,
+        turnComplete: false,
+      });
+    });
+
+    it('should keep the non-audio parts of a mixed turn', async () => {
+      const connection = new GeminiLlmConnection(mockSession);
+      const history: Content[] = [
+        {
+          role: 'user',
+          parts: [
+            {inlineData: {mimeType: 'audio/wav', data: 'AAD/AP8='}},
+            {text: 'transcribed text'},
+          ],
+        },
+      ];
+
+      await connection.sendHistory(history);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [{role: 'user', parts: [{text: 'transcribed text'}]}],
+        turnComplete: true,
+      });
+    });
+
+    it('should send nothing when every turn is audio only', async () => {
+      const connection = new GeminiLlmConnection(mockSession);
+      const history: Content[] = [
+        {
+          role: 'user',
+          parts: [
+            {inlineData: {mimeType: 'audio/pcm', data: 'AAD/AP8='}},
+            {
+              fileData: {
+                mimeType: 'audio/wav',
+                fileUri: 'artifact://audio.pcm#1',
+              },
+            },
+          ],
+        },
+      ];
+
+      await connection.sendHistory(history);
+
+      expect(mockSession.sendClientContent).not.toHaveBeenCalled();
+    });
+
+    it.each(['audio/pcm', 'audio/wav', 'audio/mp3', 'audio/ogg'])(
+      'should filter out %s parts',
+      async (mimeType) => {
+        const connection = new GeminiLlmConnection(mockSession);
+        const history: Content[] = [
+          {role: 'user', parts: [{inlineData: {mimeType, data: ''}}]},
+        ];
+
+        await connection.sendHistory(history);
+
+        expect(mockSession.sendClientContent).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should derive turnComplete from the filtered history', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.1-flash-live-preview',
+      );
+      const audioPart: Part = {
+        inlineData: {mimeType: 'audio/pcm', data: 'AAD/AP8='},
+      };
+
+      // The trailing user turn is audio only, so a model turn ends the
+      // filtered history.
+      await connection.sendHistory([
+        {role: 'user', parts: [{text: 'hi'}]},
+        {role: 'model', parts: [{text: 'hello'}]},
+        {role: 'user', parts: [audioPart]},
+      ]);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [
+          {role: 'user', parts: [{text: 'hi'}]},
+          {role: 'model', parts: [{text: 'hello'}]},
+        ],
+        turnComplete: false,
+      });
+
+      mockSession.sendClientContent.mockClear();
+
+      // The trailing model turn is audio only, so a user turn ends the
+      // filtered history.
+      await connection.sendHistory([
+        {role: 'user', parts: [{text: 'hi'}]},
+        {role: 'model', parts: [audioPart]},
+      ]);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [{role: 'user', parts: [{text: 'hi'}]}],
+        turnComplete: true,
+      });
+    });
+
+    it('should trigger the Gemini 3.x Live response after the history', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.1-flash-live-preview',
+      );
+      const history: Content[] = [
+        {role: 'user', parts: [{text: 'hi'}]},
+        {role: 'model', parts: [{text: 'hello'}]},
+        {role: 'user', parts: [{text: 'how are you?'}]},
+      ];
+
+      await connection.sendHistory(history);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: history,
+        turnComplete: true,
+      });
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({text: '.'});
+      // The trigger must come after the history, otherwise the model responds
+      // before it has seen the replayed turns.
+      expect(
+        mockSession.sendClientContent.mock.invocationCallOrder[0],
+      ).toBeLessThan(mockSession.sendRealtimeInput.mock.invocationCallOrder[0]);
+    });
+
+    it('should make the Gemini 3.x Live trigger follow the filtered history', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.1-flash-live-preview',
+      );
+      const audioPart: Part = {
+        inlineData: {mimeType: 'audio/pcm', data: 'AAD/AP8='},
+      };
+
+      // A model turn ends the filtered history, so nothing triggers.
+      await connection.sendHistory([
+        {role: 'user', parts: [{text: 'hi'}]},
+        {role: 'model', parts: [{text: 'hello'}]},
+        {role: 'user', parts: [audioPart]},
+      ]);
+
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
+
+      // A user turn ends the filtered history, so the trigger is sent.
+      await connection.sendHistory([
+        {role: 'user', parts: [{text: 'hi'}]},
+        {role: 'model', parts: [audioPart]},
+      ]);
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({text: '.'});
+    });
+
+    it('should not trigger a Gemini 3.x Live response for an empty history', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.1-flash-live-preview',
+      );
+
+      await connection.sendHistory([]);
+
+      expect(mockSession.sendClientContent).not.toHaveBeenCalled();
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'gemini-2.5-flash-native-audio-preview-12-2025',
+      'gemini-3.5-live-translate-preview',
+    ])('should not trigger a response for %s', async (modelVersion) => {
+      const connection = new GeminiLlmConnection(mockSession, modelVersion);
+      const history: Content[] = [{role: 'user', parts: [{text: 'hi'}]}];
+
+      await connection.sendHistory(history);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: history,
+        turnComplete: true,
+      });
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('apiBackend', () => {
+    it('should default to Vertex AI', () => {
+      const connection = new GeminiLlmConnection(mockSession);
+
+      expect(connection.apiBackend).toBe(GoogleLLMVariant.VERTEX_AI);
+    });
+
+    it('should expose the backend it was built with', () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+        undefined,
+        GoogleLLMVariant.GEMINI_API,
+      );
+
+      expect(connection.apiBackend).toBe(GoogleLLMVariant.GEMINI_API);
     });
   });
 
@@ -146,6 +393,82 @@ describe('GeminiLlmConnection', () => {
         'Content must have parts.',
       );
     });
+
+    it('should send every function response of a tool-only content', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const content: Content = {
+        role: 'user',
+        parts: [
+          {functionResponse: {name: 'tool_a', response: {r: 1}, id: '1'}},
+          {functionResponse: {name: 'tool_b', response: {r: 2}, id: '2'}},
+        ],
+      };
+
+      await connection.sendContent(content);
+
+      expect(mockSession.sendToolResponse).toHaveBeenCalledWith({
+        functionResponses: [
+          content.parts![0].functionResponse,
+          content.parts![1].functionResponse,
+        ],
+      });
+    });
+
+    it('should send a mixed function-response and text content as client content', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const content: Content = {
+        role: 'user',
+        parts: [
+          {functionResponse: {name: 'tool_a', response: {r: 1}, id: '1'}},
+          {text: 'and here is why'},
+        ],
+      };
+
+      await connection.sendContent(content);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [content],
+        turnComplete: true,
+      });
+      expect(mockSession.sendToolResponse).not.toHaveBeenCalled();
+    });
+
+    it('should keep the turn open for a partial content', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const content: Content = {role: 'user', parts: [{text: 'progress'}]};
+
+      await connection.sendContent(content, {partial: true});
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [content],
+        turnComplete: false,
+      });
+    });
+
+    it('should send partial Gemini 3.x text as client content, not realtime input', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.1-flash-live-preview',
+      );
+      const content: Content = {role: 'user', parts: [{text: 'progress'}]};
+
+      await connection.sendContent(content, {partial: true});
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [content],
+        turnComplete: false,
+      });
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
+    });
   });
 
   describe('sendRealtime', () => {
@@ -191,7 +514,7 @@ describe('GeminiLlmConnection', () => {
       });
     });
 
-    it('should use sendRealtimeInput with audio for Native Audio model audio', async () => {
+    it('should use sendRealtimeInput with media for Native Audio model audio', async () => {
       const connection = new GeminiLlmConnection(
         mockSession,
         'gemini-2.5-flash-preview-native-audio',
@@ -201,8 +524,104 @@ describe('GeminiLlmConnection', () => {
       await connection.sendRealtime(blob);
 
       expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        media: blob,
+      });
+    });
+
+    it('should use sendRealtimeInput with audio for Live Translate audio', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.5-live-translate-preview',
+      );
+      const blob: Blob = {mimeType: 'audio/pcm', data: 'base64data'};
+
+      await connection.sendRealtime(blob);
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
         audio: blob,
       });
+    });
+
+    it('should use sendRealtimeInput with video for Live Translate image', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.5-live-translate-preview',
+      );
+      const blob: Blob = {mimeType: 'image/jpeg', data: 'base64data'};
+
+      await connection.sendRealtime(blob);
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        video: blob,
+      });
+    });
+
+    it('should forward the end of the audio stream', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+
+      await connection.sendRealtime({audioStreamEnd: true});
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        audioStreamEnd: true,
+      });
+    });
+
+    it('should forward an activity start signal', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+
+      await connection.sendRealtime({activityStart: {}});
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        activityStart: {},
+      });
+    });
+
+    it('should forward an activity end signal', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+
+      await connection.sendRealtime({activityEnd: {}});
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        activityEnd: {},
+      });
+    });
+
+    it('should warn and send nothing for an unclassifiable realtime input', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+
+      await connection.sendRealtime({});
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Unary LiveClientRealtimeInput not fully supported yet.',
+      );
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('should reject an input that is not an object', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const notAnInput: unknown = 'audio';
+
+      await expect(
+        connection.sendRealtime(notAnInput as RealtimeInput),
+      ).rejects.toThrow(/Unsupported input type/);
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
     });
 
     it('should warn and not send if unknown mime type for Gemini 3.x', async () => {
@@ -265,6 +684,87 @@ describe('GeminiLlmConnection', () => {
       await expect(generator.next()).rejects.toThrow(
         'Message queue is not initialized.',
       );
+    });
+
+    it('should put the live session id on every response', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+        messageQueue,
+      );
+      const generator = connection.receive();
+
+      messageQueue.push(
+        liveServerMessage({setupComplete: {sessionId: 'test-session-id'}}),
+      );
+      messageQueue.push(
+        liveServerMessage({
+          serverContent: {modelTurn: {parts: [{text: 'hello'}]}},
+        }),
+      );
+      messageQueue.push(
+        liveServerMessage({usageMetadata: {totalTokenCount: 30}}),
+      );
+      messageQueue.close();
+
+      const responses: LlmResponse[] = [];
+      for await (const response of generator) {
+        responses.push(response);
+      }
+
+      expect(responses.length).toBeGreaterThan(0);
+      for (const response of responses) {
+        expect(response.liveSessionId).toBe('test-session-id');
+      }
+    });
+
+    it('should omit the live session id when the server never reports one', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+        messageQueue,
+      );
+      const generator = connection.receive();
+
+      messageQueue.push(liveServerMessage({setupComplete: {}}));
+      messageQueue.push(
+        liveServerMessage({usageMetadata: {totalTokenCount: 30}}),
+      );
+      messageQueue.close();
+
+      const res = await generator.next();
+      expect(res.value).not.toHaveProperty('liveSessionId');
+      expect((await generator.next()).done).toBe(true);
+    });
+
+    it('should put the live session id on a response flushed at close', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+        messageQueue,
+      );
+      const generator = connection.receive();
+
+      messageQueue.push(
+        liveServerMessage({setupComplete: {sessionId: 'test-session-id'}}),
+      );
+      messageQueue.push(
+        liveServerMessage({
+          toolCall: {functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}]},
+        }),
+      );
+      messageQueue.close();
+
+      const res = await generator.next();
+      expect(res.value).toEqual({
+        content: {
+          role: 'model',
+          parts: [{functionCall: {name: 'tool_a', args: {x: 1}, id: '1'}}],
+        },
+        modelVersion: 'gemini-2.5-flash',
+        liveSessionId: 'test-session-id',
+      });
+      expect((await generator.next()).done).toBe(true);
     });
 
     it('should yield usage metadata', async () => {
