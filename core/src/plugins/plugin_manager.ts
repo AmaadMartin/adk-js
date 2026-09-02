@@ -13,6 +13,7 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import type {BaseNode} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
@@ -436,5 +437,51 @@ export class PluginManager {
         plugin.onToolErrorCallback({tool, toolArgs, toolContext, error}),
       'onToolErrorCallback',
     )) as Record<string, unknown> | undefined;
+  }
+
+  /**
+   * Runs the `onAgentErrorCallback` for all plugins.
+   */
+  async runOnAgentErrorCallback({
+    agent,
+    callbackContext,
+    error,
+  }: {
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }): Promise<void> {
+    await this.runNotificationCallbacks(
+      (plugin: BasePlugin) =>
+        plugin.onAgentErrorCallback({agent, callbackContext, error}),
+      'onAgentErrorCallback',
+    );
+  }
+
+  /**
+   * Runs a notification-only callback for every registered plugin.
+   *
+   * Unlike {@link runCallbacks} this method never exits early and never
+   * re-throws: a plugin that fails is logged and the next one still runs. A
+   * notification reports an error that already happened, so a failure here must
+   * not replace the error the caller is about to propagate.
+   *
+   * @param callback A closure containing the callback method to run on each
+   *     plugin.
+   * @param callbackName The name of the callback, used for logging.
+   */
+  private async runNotificationCallbacks(
+    callback: (plugin: BasePlugin) => Promise<void>,
+    callbackName: string,
+  ): Promise<void> {
+    for (const plugin of this.plugins) {
+      try {
+        await callback(plugin);
+      } catch (e: unknown) {
+        logger.error(
+          `Error in plugin '${plugin.name}' during '${callbackName}' callback: ${formatError(e)}`,
+        );
+      }
+    }
   }
 }
