@@ -49,8 +49,10 @@ const evalCase: EvalCase = validateEvalCase({
   ],
 });
 
+const [invocation] = evalCase.conversation ?? [];
+
 // [[call, response]] — a call with no matching response pairs with undefined.
-getAllToolCallsWithResponses(evalCase.conversation![0].intermediateData);
+getAllToolCallsWithResponses(invocation?.intermediateData);
 ```
 
 A scenario-driven case carries no conversation at all:

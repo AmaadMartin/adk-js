@@ -17,8 +17,6 @@ import {AppDetails} from './app_details.js';
 import {ConversationScenario} from './conversation_scenarios.js';
 import {Rubric} from './eval_rubrics.js';
 
-export type {ConversationScenario};
-
 /**
  * Intermediate data an agent produces on its way to a final answer.
  */

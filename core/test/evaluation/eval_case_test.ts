@@ -78,7 +78,9 @@ function events(...invocationEvents: InvocationEvent[]): InvocationEvents {
  * Stands in for malformed data read from an eval set file: it is neither
  * supported shape, which the type system alone cannot express.
  */
-const MALFORMED = 'this is not a valid type' as unknown as IntermediateDataType;
+const MALFORMED: IntermediateDataType = JSON.parse(
+  '"this is not a valid type"',
+);
 
 describe('extra key passthrough', () => {
   it('carries unknown keys on a SessionInput', () => {
@@ -434,13 +436,10 @@ describe('reading a validated eval case', () => {
       owner: 'platform',
     });
 
-    const invocation = evalCase.conversation?.[0];
-    if (!invocation) {
-      expect.fail('the validated eval case lost its conversation');
-    }
+    const [invocation] = evalCase.conversation ?? [];
 
     expect(evalCase['owner']).toBe('platform');
-    expect(getAllToolCallsWithResponses(invocation.intermediateData)).toEqual([
+    expect(getAllToolCallsWithResponses(invocation?.intermediateData)).toEqual([
       [
         {id: 'call1', name: 'get_weather', args: {city: 'SFO'}},
         {id: 'call1', name: 'get_weather', response: {f: 61}},
