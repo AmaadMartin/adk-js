@@ -281,9 +281,6 @@ function validateInput(
   evalDataset: ReadonlyArray<ReadonlyArray<Record<string, unknown>>>,
   criteria: Record<string, Criterion>,
 ): void {
-  if (evalDataset.length === 0) {
-    throw new InputValidationError('The evaluation dataset is None or empty.');
-  }
   for (const key of Object.keys(criteria)) {
     if (!ALLOWED_CRITERIA.includes(key)) {
       throw new InputValidationError(
@@ -326,7 +323,11 @@ async function getEvalSetFromOldFormat(
   evalConfig: EvalConfig,
   initialSession: Record<string, unknown>,
 ): Promise<EvalSet> {
-  const data = (await loadDataset(evalSetFile))[0];
+  const datasets = await loadDataset(evalSetFile);
+  if (datasets.length === 0) {
+    throw new InputValidationError('The evaluation dataset is None or empty.');
+  }
+  const data = datasets[0];
   validateInput([data], evalConfig.criteria);
   return convertLegacyEvalSet(randomUUID(), [
     {name: evalSetFile, data, initialSession},
