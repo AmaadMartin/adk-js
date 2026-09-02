@@ -457,6 +457,14 @@ describe('labelDynamicInstruction', () => {
     expect(labelled.endsWith(INSTRUCTION_END)).toBe(true);
   });
 
+  it('elides a forged begin marker', () => {
+    const labelled = labelDynamicInstruction(
+      `before ${INSTRUCTION_BEGIN} after`,
+    );
+
+    expect(labelled).toContain(`before ${QUOTED_CONTENT_ELIDED} after`);
+  });
+
   it('leaves the block closed when the instruction is empty', () => {
     expect(labelDynamicInstruction('')).toBe(
       `${INSTRUCTION_PREAMBLE}\n${INSTRUCTION_BEGIN}\n\n${INSTRUCTION_END}`,

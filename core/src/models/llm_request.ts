@@ -73,6 +73,13 @@ export interface LlmRequest {
    * by size. Absent on the first request of a session.
    */
   cacheableContentsTokenCount?: number;
+
+  /**
+   * Whether the request carries non-text static-instruction content. Such
+   * content must stay a stable request prefix across turns, so that
+   * provider-side context caching can key off it. Internal request state.
+   */
+  hasStaticInstruction?: boolean;
 }
 
 /** Describes a part that the system instruction cannot carry. */
@@ -189,7 +196,53 @@ export function appendInstructions(
   if (texts.length) {
     appendSystemInstructionText(llmRequest, texts.join('\n\n'));
   }
-  llmRequest.contents.push(...userContents);
+  if (userContents.length) {
+    llmRequest.contents.push(...userContents);
+    llmRequest.hasStaticInstruction = true;
+  }
+}
+
+/**
+ * Inserts request-scoped user content at the current-turn boundary.
+ *
+ * Transient content, such as a dynamic instruction, belongs before the latest
+ * run of ordinary user contents, but after a function response while the model
+ * continues a tool-call turn. That boundary keeps the content out of the
+ * reusable system and history prefix, and it never separates a function call
+ * from its response.
+ *
+ * A request that carries non-text static-instruction content is a special
+ * case: the content goes to the very front, so the prefix stays stable for
+ * context caching.
+ *
+ * @param contents The request-scoped contents to insert.
+ */
+export function insertTransientUserContent(
+  llmRequest: LlmRequest,
+  contents: Content[],
+): void {
+  if (!contents.length) {
+    return;
+  }
+
+  if (llmRequest.hasStaticInstruction) {
+    llmRequest.contents.unshift(...contents);
+    return;
+  }
+
+  let insertIndex = llmRequest.contents.length;
+  while (insertIndex > 0) {
+    const content = llmRequest.contents[insertIndex - 1];
+    if (
+      content.role !== 'user' ||
+      content.parts?.some((part) => part.functionResponse)
+    ) {
+      break;
+    }
+    insertIndex--;
+  }
+
+  llmRequest.contents.splice(insertIndex, 0, ...contents);
 }
 
 /**

@@ -15,9 +15,10 @@ provider-side context caching, which keys on a stable request prefix.
 `staticInstruction` splits the prompt in two. Its content is sent literally —
 no placeholder substitution, no session state — so it is safe to cache. When
 you set it, `instruction` stops going to the system instruction and moves into
-`llmRequest.contents` instead, after the static content and before the
-conversation history. The static prefix therefore stays identical across turns
-while the dynamic part still reaches the model.
+`llmRequest.contents` instead. It lands before the last run of user content, so
+the model reads it just before the turn it applies to, and the conversation
+history ahead of it stays a reusable prefix. The static prefix therefore stays
+identical across turns while the dynamic part still reaches the model.
 
 Two consequences follow from that move, and both are handled for you.
 `Content` has no system role, so the relocated instruction would arrive looking
@@ -57,9 +58,10 @@ const agent = new LlmAgent({
 With `user_name` set to `Ada` in the session, the request carries:
 
 - `config.systemInstruction` — `You are a document analyst.`
-- `contents[0]` — a user content holding the preamble, the begin marker,
-  `The user is Ada. Answer from the manual only.`, and the end marker.
-- `contents[1..]` — the conversation history.
+- the conversation history, up to the latest model turn.
+- a user content holding the preamble, the begin marker, `The user is Ada.
+Answer from the manual only.`, and the end marker.
+- the latest user turn, last.
 
 Other processors, such as the agent identity one, contribute their own text to
 the system instruction as usual.
@@ -98,8 +100,10 @@ You are a document analyst.
 [Reference to file data: file_data_0 (URI: gs://bucket/manual.pdf, type: application/pdf)]
 ```
 
-The PDF becomes the first entry in `contents`, so it too stays a stable
-request prefix. Inline binary parts get the same treatment under
+The PDF becomes the first entry in `contents`, ahead of the history, so it too
+stays a stable request prefix. A request carrying such data is the one case
+where the labelled dynamic instruction also leads the contents rather than
+sitting at the turn boundary. Inline binary parts get the same treatment under
 `inline_data_<n>` ids. One counter numbers both kinds, in document order, so a
 run of inline, file, inline yields `inline_data_0`, `file_data_1`,
 `inline_data_2`. A `displayName` on the part is named first in the reference

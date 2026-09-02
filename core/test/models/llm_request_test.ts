@@ -7,7 +7,10 @@
 import type {Content, ContentUnion} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import type {LlmRequest} from '../../src/models/llm_request.js';
-import {appendInstructions} from '../../src/models/llm_request.js';
+import {
+  appendInstructions,
+  insertTransientUserContent,
+} from '../../src/models/llm_request.js';
 
 /** Builds a request whose `systemInstruction` starts on the given arm. */
 function requestWith(systemInstruction: ContentUnion): LlmRequest {
@@ -20,8 +23,13 @@ function requestWith(systemInstruction: ContentUnion): LlmRequest {
 }
 
 /** Builds a request that carries no config at all. */
-function createRequest(): LlmRequest {
-  return {contents: [], toolsDict: {}, liveConnectConfig: {}};
+function createRequest(contents: Content[] = []): LlmRequest {
+  return {contents, toolsDict: {}, liveConnectConfig: {}};
+}
+
+/** Builds a user content carrying a single text part. */
+function userText(text: string): Content {
+  return {role: 'user', parts: [{text}]};
 }
 
 /** Reads back the instruction, failing the test if it is not a string. */
@@ -429,5 +437,69 @@ describe('appendInstructions', () => {
     expect(() => appendInstructions(llmRequest, {})).toThrow(
       'instructions must be string[] or Content, got object.',
     );
+  });
+});
+
+describe('insertTransientUserContent', () => {
+  it('does nothing for an empty list', () => {
+    const llmRequest = createRequest([userText('Hi')]);
+
+    insertTransientUserContent(llmRequest, []);
+
+    expect(llmRequest.contents).toEqual([userText('Hi')]);
+  });
+
+  it('puts non-text static-instruction content at the front', () => {
+    const llmRequest = createRequest([userText('Hi')]);
+    llmRequest.hasStaticInstruction = true;
+
+    insertTransientUserContent(llmRequest, [userText('Referenced file data')]);
+
+    expect(llmRequest.contents).toEqual([
+      userText('Referenced file data'),
+      userText('Hi'),
+    ]);
+  });
+
+  it('inserts before the trailing run of user content', () => {
+    const llmRequest = createRequest([
+      userText('Older question'),
+      {role: 'model', parts: [{text: 'Older answer'}]},
+      userText('New question'),
+      userText('One more thing'),
+    ]);
+
+    insertTransientUserContent(llmRequest, [userText('Instruction')]);
+
+    expect(llmRequest.contents.map((c) => c.parts?.[0].text)).toEqual([
+      'Older question',
+      'Older answer',
+      'Instruction',
+      'New question',
+      'One more thing',
+    ]);
+  });
+
+  it('inserts after a trailing function response', () => {
+    const llmRequest = createRequest([
+      userText('Question'),
+      {role: 'model', parts: [{functionCall: {name: 'lookup'}}]},
+      {
+        role: 'user',
+        parts: [{functionResponse: {name: 'lookup', response: {out: 1}}}],
+      },
+    ]);
+
+    insertTransientUserContent(llmRequest, [userText('Instruction')]);
+
+    expect(llmRequest.contents[3]).toEqual(userText('Instruction'));
+  });
+
+  it('appends when every content is user content', () => {
+    const llmRequest = createRequest([]);
+
+    insertTransientUserContent(llmRequest, [userText('Instruction')]);
+
+    expect(llmRequest.contents).toEqual([userText('Instruction')]);
   });
 });

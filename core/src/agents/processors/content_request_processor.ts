@@ -8,6 +8,7 @@ import {getActiveEvents} from '../../context/compaction_utils.js';
 import type {Event} from '../../events/event.js';
 import {applyRewinds} from '../../events/rewind_events.js';
 import type {LlmRequest} from '../../models/llm_request.js';
+import {insertTransientUserContent} from '../../models/llm_request.js';
 import type {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import type {BaseLlmRequestProcessor} from './base_llm_processor.js';
@@ -50,10 +51,9 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
     const events = getActiveEvents(
       applyRewinds(invocationContext.session.events),
     );
-    // The instructions processor is the only producer of contents this early,
-    // and it only produces them for a static instruction, whose content must
-    // stay a stable request prefix for provider-side context caching. The
-    // reassignment below would otherwise discard them.
+    // The instructions processor is the only producer of contents this early.
+    // It puts static-instruction data and the labelled dynamic instruction
+    // here, and the reassignment below would otherwise discard them.
     const instructionContents = llmRequest.contents;
 
     if (agent.includeContents === 'default') {
@@ -76,7 +76,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       );
     }
 
-    llmRequest.contents.unshift(...instructionContents);
+    insertTransientUserContent(llmRequest, instructionContents);
 
     return;
   }
