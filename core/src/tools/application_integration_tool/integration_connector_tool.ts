@@ -71,10 +71,16 @@ export interface IntegrationConnectorToolOptions {
   action?: string;
   /** Tool performing the underlying `ExecuteConnection` call. */
   restApiTool: RestApiTool;
-  /** Scheme of the end-user credential, when the connection allows one. */
-  authScheme?: AuthScheme;
-  /** End-user credential, when the connection allows one. */
-  authCredential?: AuthCredential;
+  /**
+   * Scheme of the end-user credential, when the connection allows one. A
+   * string is its serialized form, which a call rejects.
+   */
+  authScheme?: AuthScheme | string;
+  /**
+   * End-user credential, when the connection allows one. A string is its
+   * serialized form, which a call rejects.
+   */
+  authCredential?: AuthCredential | string;
   /** Slot the prepared credential is cached under. */
   credentialKey?: string;
 }
@@ -141,10 +147,22 @@ export class IntegrationConnectorTool extends BaseTool {
     const {args, toolContext} = request;
     const {options} = this;
 
+    const {authScheme, authCredential} = options;
+    // Dropping a serialized option and calling the handler with `undefined`
+    // would read as "this connection needs no credential", and the call would
+    // reach the connector unauthenticated.
+    if (typeof authScheme === 'string' || typeof authCredential === 'string') {
+      throw new Error(
+        `IntegrationConnectorTool '${this.name}' holds authScheme or ` +
+          'authCredential in its serialized string form, which it cannot ' +
+          'authenticate with.',
+      );
+    }
+
     const authHandler = ToolAuthHandler.fromToolContext(
       toolContext,
-      options.authScheme,
-      options.authCredential,
+      authScheme,
+      authCredential,
       {credentialKey: options.credentialKey},
     );
     const authResult = await authHandler.prepareAuthCredentials();
