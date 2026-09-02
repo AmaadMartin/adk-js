@@ -10,6 +10,7 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   LlmAgent,
+  RunConfig,
   Runner,
 } from '@google/adk';
 import {FinishReason} from '@google/genai';
