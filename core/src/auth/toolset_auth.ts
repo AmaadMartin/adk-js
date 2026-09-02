@@ -9,7 +9,8 @@ import {cloneDeep} from 'lodash-es';
 import {Context} from '../agents/context.js';
 import {buildAuthRequestEvent} from '../agents/functions.js';
 import {InvocationContext} from '../agents/invocation_context.js';
-import type {LlmAgent} from '../agents/llm_agent.js';
+import {isLlmAgent, type LlmAgent} from '../agents/llm_agent.js';
+import {BaseLlmRequestProcessor} from '../agents/processors/base_llm_processor.js';
 import {Event} from '../events/event.js';
 import {isBaseToolset} from '../tools/base_toolset.js';
 import {logger} from '../utils/logger.js';
@@ -111,3 +112,26 @@ export async function* resolveToolsetAuth(
 
   invocationContext.endInvocation = true;
 }
+
+/**
+ * Runs {@link resolveToolsetAuth} as part of request preprocessing.
+ *
+ * It is a request processor rather than a step of the flow because adk-js
+ * lists an agent's tools from `ToolFilterRequestProcessor`. Ordering it
+ * against the other processors is what puts the credential in place before
+ * anything calls `getTools()`, and after `AuthPreprocessor` has stored the
+ * credential the client just sent.
+ */
+export class ToolsetAuthPreprocessor extends BaseLlmRequestProcessor {
+  override async *runAsync(
+    invocationContext: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const agent = invocationContext.agent;
+    if (!isLlmAgent(agent)) {
+      return;
+    }
+    yield* resolveToolsetAuth(invocationContext, agent);
+  }
+}
+
+export const TOOLSET_AUTH_PREPROCESSOR = new ToolsetAuthPreprocessor();

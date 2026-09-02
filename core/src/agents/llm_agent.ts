@@ -68,7 +68,7 @@ import {
 } from './functions.js';
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
-import {resolveToolsetAuth} from '../auth/toolset_auth.js';
+import {TOOLSET_AUTH_PREPROCESSOR} from '../auth/toolset_auth.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {AudioCacheManager} from './audio_cache_manager.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
@@ -641,6 +641,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.requestProcessors = config.requestProcessors ?? [
       BASIC_LLM_REQUEST_PROCESSOR,
       AUTH_PREPROCESSOR,
+      TOOLSET_AUTH_PREPROCESSOR,
       IDENTITY_LLM_REQUEST_PROCESSOR,
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
@@ -1279,11 +1280,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
         yield event;
       }
-    }
-
-    yield* resolveToolsetAuth(invocationContext, this);
-    if (invocationContext.endInvocation) {
-      return;
+      // A processor that interrupts the invocation, such as a toolset asking
+      // for a credential, stops the rest of preprocessing.
+      if (invocationContext.endInvocation) {
+        return;
+      }
     }
 
     for (const toolUnion of this.tools) {
@@ -1600,6 +1601,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           // concurrently (mirrors `send_task.cancel()` in the Python flow).
           sendAbort.abort();
           await connection.close();
+          // The sub-agent inherits the live request queue, and this run does
+          // not return until the sub-agent is done. This agent's tools have
+          // to stop here, or they keep answering the sub-agent's model.
+          await stopBackgroundToolTasks(invocationContext);
           const agent = requireAgent(invocationContext);
           const subAgent = agent.rootAgent.findAgent(transferTo);
           if (subAgent) {
@@ -1837,11 +1842,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
         yield event;
       }
-    }
-
-    yield* resolveToolsetAuth(invocationContext, this);
-    if (invocationContext.endInvocation) {
-      return;
+      // A processor that interrupts the invocation, such as a toolset asking
+      // for a credential, stops the rest of preprocessing.
+      if (invocationContext.endInvocation) {
+        return;
+      }
     }
 
     // TODO - b/425992518: check if tool preprocessors can be simplified.
