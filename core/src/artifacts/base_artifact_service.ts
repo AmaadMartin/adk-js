@@ -63,6 +63,8 @@ export interface ArtifactVersion {
   version: number;
   /** The canonical URI of the artifact. */
   canonicalUri?: string;
+  /** Unix timestamp (seconds) when the version was created. */
+  createTime?: number;
   /** Custom metadata associated with the artifact. */
   customMetadata?: Record<string, unknown>;
   /** The MIME type of the artifact. */
