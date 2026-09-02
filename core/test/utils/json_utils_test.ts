@@ -212,6 +212,10 @@ describe('stableJsonStringify', () => {
     expect(stableJsonStringify(7)).toBe('7');
     expect(stableJsonStringify('text')).toBe('"text"');
   });
+
+  it('omits an undefined property, the way JSON.stringify does', () => {
+    expect(stableJsonStringify({b: undefined, a: 1})).toBe('{"a":1}');
+  });
 });
 
 describe('safeJsonLoads', () => {

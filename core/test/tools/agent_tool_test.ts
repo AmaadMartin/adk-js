@@ -23,9 +23,11 @@ import {
   SequentialAgent,
   State,
   StreamingMode,
+  ToolExecutionError,
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {Content, GroundingMetadata, Part, Type} from '@google/genai';
+import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it, Mock, vi} from 'vitest';
 import {z} from 'zod';
 
@@ -1885,5 +1887,252 @@ describe('AgentTool input schema', () => {
     });
 
     expect(nested.newMessage?.parts?.[0]?.text).toBe('{"query":"hello"}');
+  });
+});
+
+/** What the nested `Runner.runAsync` call received, prompt text included. */
+interface NestedRunCall {
+  runConfig?: RunConfig;
+  text?: string;
+}
+
+/**
+ * Runs an `AgentTool` and reports what the nested `Runner.runAsync` call
+ * received.
+ *
+ * The stand-in Runner is cast the way every case above casts it: `Runner`
+ * declares far more members than a nested run touches, so a structural object
+ * is not assignable to it.
+ */
+async function runNested(
+  args: Record<string, unknown>,
+  parentRunConfig?: RunConfig,
+  agent: LlmAgent = new LlmAgent({
+    name: 'sub-agent',
+    description: 'a sub agent',
+  }),
+): Promise<NestedRunCall> {
+  const tool = new AgentTool({agent});
+  const session = createSession({
+    id: 'parent-session',
+    appName: 'sub-agent',
+    userId: 'parent-user',
+  });
+  const toolContext = new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      session,
+      pluginManager: new PluginManager([]),
+      runConfig: parentRunConfig,
+    }),
+  });
+
+  const nested: NestedRunCall = {};
+  const respond = async function* () {
+    yield createEvent({
+      author: 'sub-agent',
+      content: {role: 'model', parts: [{text: 'done'}]},
+    });
+  };
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: (params: {runConfig?: RunConfig; newMessage: Content}) => {
+          nested.runConfig = params.runConfig;
+          nested.text = params.newMessage.parts?.[0]?.text;
+          return respond();
+        },
+        // The tool releases the nested runner's toolsets on every exit.
+        closeToolsets: vi.fn(),
+      }) as unknown as Runner,
+  );
+
+  await tool.runAsync({args, toolContext});
+  return nested;
+}
+
+describe('AgentTool nested run config', () => {
+  // `nestedRunConfig` copies the caller's config on every call and states both
+  // overrides, so the nested config is never the caller's own object. These
+  // two cases therefore read the forwarded settings rather than the identity.
+  it('forwards the caller run config unchanged when no override applies', async () => {
+    const parentRunConfig: RunConfig = {
+      maxLlmCalls: 7,
+      a2aMetadata: {tier: 'x'},
+      streamingMode: StreamingMode.NONE,
+    };
+
+    const nested = await runNested({request: 'hi'}, parentRunConfig);
+
+    expect(nested.runConfig).toEqual({...parentRunConfig, supportCfc: false});
+    expect(nested.runConfig?.maxLlmCalls).toBe(7);
+    expect(nested.runConfig?.a2aMetadata).toEqual({tier: 'x'});
+  });
+
+  it('forwards a caller run config that sets no streaming mode', async () => {
+    const parentRunConfig: RunConfig = {maxLlmCalls: 7};
+
+    const nested = await runNested({request: 'hi'}, parentRunConfig);
+
+    expect(nested.runConfig).toEqual({
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.NONE,
+      supportCfc: false,
+    });
+  });
+
+  it('forwards undefined when the caller set no run config', async () => {
+    const nested = await runNested({request: 'hi'});
+
+    expect(nested.runConfig).toBeUndefined();
+  });
+
+  it('drops supportCfc without changing the caller run config', async () => {
+    const parentRunConfig: RunConfig = {supportCfc: true, maxLlmCalls: 7};
+
+    const nested = await runNested({request: 'hi'}, parentRunConfig);
+
+    expect(nested.runConfig?.supportCfc).toBe(false);
+    expect(nested.runConfig?.maxLlmCalls).toBe(7);
+    expect(parentRunConfig.supportCfc).toBe(true);
+  });
+
+  it('forces a unary nested run for a streaming caller', async () => {
+    const parentRunConfig: RunConfig = {
+      streamingMode: StreamingMode.SSE,
+      maxLlmCalls: 7,
+    };
+
+    const nested = await runNested({request: 'hi'}, parentRunConfig);
+
+    expect(nested.runConfig?.streamingMode).toBe(StreamingMode.NONE);
+    expect(nested.runConfig?.maxLlmCalls).toBe(7);
+    expect(parentRunConfig.streamingMode).toBe(StreamingMode.SSE);
+  });
+
+  it('applies both overrides at once', async () => {
+    const parentRunConfig: RunConfig = {
+      streamingMode: StreamingMode.SSE,
+      supportCfc: true,
+      maxLlmCalls: 7,
+    };
+
+    const nested = await runNested({request: 'hi'}, parentRunConfig);
+
+    expect(nested.runConfig?.supportCfc).toBe(false);
+    expect(nested.runConfig?.streamingMode).toBe(StreamingMode.NONE);
+    expect(nested.runConfig?.maxLlmCalls).toBe(7);
+  });
+});
+
+describe('AgentTool prompt text without an input schema', () => {
+  it('sorts the argument keys, whatever order the model emitted them in', async () => {
+    const inserted = await runNested({product: 'shoes', brand: 'Nike'});
+    const reversed = await runNested({brand: 'Nike', product: 'shoes'});
+
+    expect(inserted.text).toBe('{"brand":"Nike","product":"shoes"}');
+    expect(reversed.text).toBe(inserted.text);
+  });
+
+  it('passes a request argument through verbatim', async () => {
+    const nested = await runNested({request: 'find me Nike running shoes'});
+
+    expect(nested.text).toBe('find me Nike running shoes');
+  });
+
+  it('keeps an empty request argument rather than dumping the arguments', async () => {
+    const nested = await runNested({request: ''});
+
+    expect(nested.text).toBe('');
+  });
+});
+
+describe('AgentTool prompt text with an input schema', () => {
+  it('leaves the schema branch serializing the arguments as they arrive', async () => {
+    const agent = new LlmAgent({
+      name: 'sub-agent',
+      description: 'a sub agent',
+      inputSchema: {
+        type: Type.OBJECT,
+        properties: {product: {type: Type.STRING}, brand: {type: Type.STRING}},
+      },
+    });
+
+    const nested = await runNested(
+      {product: 'shoes', brand: 'Nike'},
+      undefined,
+      agent,
+    );
+
+    expect(nested.text).toBe('{"product":"shoes","brand":"Nike"}');
+  });
+});
+
+describe('AgentTool.fromConfig', () => {
+  const FIXTURE_PATH = fileURLToPath(
+    new URL('./fixtures/config_agents.ts', import.meta.url),
+  );
+  const CONFIG_PATH = fileURLToPath(
+    new URL('./fixtures/root_agent.yaml', import.meta.url),
+  );
+
+  it('wraps the agent the code reference resolves to', async () => {
+    const tool = await AgentTool.fromConfig(
+      {agent: {code: `${FIXTURE_PATH}#weatherAgent`}},
+      CONFIG_PATH,
+    );
+
+    expect(tool.name).toBe('weather_agent');
+    expect(tool.description).toBe('Answers questions about the weather.');
+  });
+
+  it('resolves a relative code reference against the config file', async () => {
+    const tool = await AgentTool.fromConfig(
+      {
+        agent: {code: './fixtures/config_agents.ts#weatherAgent'},
+        skipSummarization: true,
+      },
+      fileURLToPath(new URL('./root_agent.yaml', import.meta.url)),
+    );
+
+    expect(tool.name).toBe('weather_agent');
+  });
+
+  it('rejects a reference that sets both fields', async () => {
+    const building = AgentTool.fromConfig(
+      {agent: {code: `${FIXTURE_PATH}#weatherAgent`, configPath: 'a.yaml'}},
+      CONFIG_PATH,
+    );
+
+    await expect(building).rejects.toThrow(ToolExecutionError);
+    await expect(building).rejects.toThrow('exactly one of `code`');
+  });
+
+  it('rejects a reference that sets neither field', async () => {
+    const building = AgentTool.fromConfig({agent: {}}, CONFIG_PATH);
+
+    await expect(building).rejects.toThrow('exactly one of `code`');
+  });
+
+  it('refuses a configPath reference, which adk-js cannot load', async () => {
+    const building = AgentTool.fromConfig(
+      {agent: {configPath: './weather.yaml'}},
+      CONFIG_PATH,
+    );
+
+    await expect(building).rejects.toThrow(ToolExecutionError);
+    await expect(building).rejects.toThrow('no agent config loader');
+  });
+
+  it('rejects a code reference that resolves to something else', async () => {
+    const building = AgentTool.fromConfig(
+      {agent: {code: `${FIXTURE_PATH}#notAnAgent`}},
+      CONFIG_PATH,
+    );
+
+    await expect(building).rejects.toThrow('does not resolve to an agent');
   });
 });

@@ -158,6 +158,46 @@ function callFor(tool: BaseTool): FunctionCall {
 }
 
 /**
+ * A tool another orchestrator answers for, under a name of its own so that
+ * several can coexist. `defersResponse` is assigned in the constructor rather
+ * than passed in, because it is not a tool option: only a tool ADK ships sets
+ * it.
+ */
+class NamedDeferringTool extends BaseTool {
+  constructor(
+    name: string,
+    private readonly respond: (toolContext: Context) => unknown,
+  ) {
+    super({
+      name,
+      description: 'delegates the call and is answered later',
+    });
+    this.defersResponse = true;
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    return this.respond(toolContext);
+  }
+}
+
+const silentDeferringTool = new NamedDeferringTool(
+  'silentDeferringTool',
+  () => undefined,
+);
+
+const answeringDeferringTool = new NamedDeferringTool(
+  'answeringDeferringTool',
+  () => ({result: 'answered'}),
+);
+
+const falsyDeferringTool = new NamedDeferringTool(
+  'falsyDeferringTool',
+  () => '',
+);
+
+/**
  * Builds a long-running tool that mutates its tool context and then returns no
  * response.
  */
@@ -738,6 +778,77 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     ]);
+  });
+
+  it('should emit no event when a deferring tool returns nothing', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(silentDeferringTool)],
+      toolsDict: {silentDeferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should emit a response event when a deferring tool answers', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(answeringDeferringTool)],
+      toolsDict: {answeringDeferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      result: 'answered',
+    });
+  });
+
+  it('should emit a response event when a deferring tool answers with an empty string', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(falsyDeferringTool)],
+      toolsDict: {falsyDeferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      result: '',
+    });
+  });
+
+  it('should emit a content-less event for a deferring tool that recorded actions', async () => {
+    const recordingDeferringTool = new NamedDeferringTool(
+      'recordingDeferringTool',
+      (toolContext) => {
+        toolContext.state.set('jobStarted', true);
+        return undefined;
+      },
+    );
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(recordingDeferringTool)],
+      toolsDict: {recordingDeferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content).toBeUndefined();
+    expect(event!.actions.stateDelta).toEqual({jobStarted: true});
+  });
+
+  it('should not mark a deferring tool call as long running', async () => {
+    const functionCall = callFor(silentDeferringTool);
+
+    const longRunning = getLongRunningFunctionCalls([functionCall], {
+      silentDeferringTool,
+    });
+
+    expect(longRunning.size).toBe(0);
   });
 
   it.each([

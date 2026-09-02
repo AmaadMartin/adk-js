@@ -599,7 +599,11 @@ export {
   TaskAgentTool,
   isAgentTool,
 } from './tools/agent_tool.js';
-export type {AgentToolConfig} from './tools/agent_tool.js';
+export type {
+  AgentRefConfig,
+  AgentToolArgsConfig,
+  AgentToolConfig,
+} from './tools/agent_tool.js';
 export {
   BaseRetrievalTool,
   isBaseRetrievalTool,

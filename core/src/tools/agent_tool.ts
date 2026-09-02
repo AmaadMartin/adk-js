@@ -13,15 +13,20 @@ import {
   Type,
 } from '@google/genai';
 
-import {BaseAgent} from '../agents/base_agent.js';
+import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
 import {RunConfig, StreamingMode} from '../agents/run_config.js';
+import {
+  ToolErrorType,
+  ToolExecutionError,
+} from '../errors/tool_execution_error.js';
 import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
 import {formatError} from '../utils/error_utils.js';
 import {stableJsonStringify} from '../utils/json_utils.js';
+import {resolveFullyQualifiedName} from '../utils/module_utils.js';
 import {
   parseWithSchema,
   SchemaLike,
@@ -68,6 +73,63 @@ export interface AgentToolConfig {
    * state under `temp:_adk_grounding_metadata`. Defaults to false.
    */
   propagateGroundingMetadata?: boolean;
+}
+
+/**
+ * A reference to an agent named in a configuration file. Exactly one field is
+ * set.
+ */
+export interface AgentRefConfig {
+  /** Fully-qualified name of an agent instance defined in code. */
+  code?: string;
+
+  /** Path to the agent's own config file, relative to the referring file. */
+  configPath?: string;
+}
+
+/**
+ * The declarative configuration of an {@link AgentTool}, as a configuration
+ * file declares it.
+ *
+ * Named for its contents rather than for the tool because
+ * {@link AgentToolConfig} already names the constructor parameter object,
+ * which holds a live agent. Python spells the same pair `ToolArgsConfig` and
+ * `AgentToolConfig`.
+ */
+export interface AgentToolArgsConfig {
+  /** The agent to wrap. */
+  agent: AgentRefConfig;
+
+  /** Whether to skip summarization of the agent output. */
+  skipSummarization?: boolean;
+}
+
+/** Resolves the agent a configuration file references. */
+async function resolveAgentReference(
+  ref: AgentRefConfig,
+  configAbsPath: string,
+): Promise<BaseAgent> {
+  if ((ref.code === undefined) === (ref.configPath === undefined)) {
+    throw new ToolExecutionError(
+      'An agent reference must set exactly one of `code` and `configPath`.',
+      ToolErrorType.BAD_REQUEST,
+    );
+  }
+  if (ref.code === undefined) {
+    throw new ToolExecutionError(
+      'A `configPath` agent reference is not supported: adk-js has no agent ' +
+        'config loader. Reference the agent in code with `code` instead.',
+      ToolErrorType.BAD_REQUEST,
+    );
+  }
+  const resolved = await resolveFullyQualifiedName(ref.code, configAbsPath);
+  if (!isBaseAgent(resolved)) {
+    throw new ToolExecutionError(
+      `Agent reference \`${ref.code}\` does not resolve to an agent.`,
+      ToolErrorType.BAD_REQUEST,
+    );
+  }
+  return resolved;
 }
 
 /**
@@ -229,6 +291,34 @@ export class AgentTool extends BaseTool {
     this.includePlugins = config.includePlugins ?? true;
     this.propagateGroundingMetadata =
       config.propagateGroundingMetadata ?? false;
+  }
+
+  /**
+   * Builds a tool from the declarative configuration of a config file.
+   *
+   * The method is asynchronous because JavaScript loads a module
+   * asynchronously. The adk-python counterpart is synchronous only because
+   * `importlib` is.
+   *
+   * @param config The tool's declared configuration.
+   * @param configAbsPath Absolute path of the config file the declaration came
+   *   from. A relative module specifier resolves against its directory.
+   * @return The configured tool.
+   * @throws {ToolExecutionError} When the agent reference does not set exactly
+   *   one of `code` and `configPath`, names a `configPath`, or resolves to a
+   *   value that is not an agent.
+   * @throws {InputValidationError} When `code` names a module or an export
+   *   that does not resolve.
+   */
+  static async fromConfig(
+    config: AgentToolArgsConfig,
+    configAbsPath: string,
+  ): Promise<AgentTool> {
+    const agent = await resolveAgentReference(config.agent, configAbsPath);
+    return new AgentTool({
+      agent,
+      skipSummarization: config.skipSummarization,
+    });
   }
 
   override _getDeclaration(): FunctionDeclaration {
