@@ -7,11 +7,15 @@
 import {
   BaseRetrievalTool,
   Context,
+  createSession,
   FeatureName,
   FunctionTool,
+  InvocationContext,
   isBaseRetrievalTool,
   isBaseTool,
+  LlmAgent,
   LlmRequest,
+  PluginManager,
   RunAsyncToolRequest,
   withTemporaryFeatureOverride,
 } from '@google/adk';
@@ -68,10 +72,15 @@ function makeLlmRequest(): LlmRequest {
   };
 }
 
-// The inherited `processLlmRequest` only reads `llmRequest`; the context is
-// never touched, so an empty stand-in is enough.
 function makeToolContext(): Context {
-  return {} as Context;
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
 }
 
 describe('BaseRetrievalTool', () => {
