@@ -97,6 +97,7 @@ configuration loader yet, so nothing calls it; override it in a subclass that
 needs one.
 
 `getAuthConfig()` returns `undefined` on the base class. A toolset that needs
-credentials overrides it and returns an `AuthConfig`. ADK fills the config's
-`exchangedAuthCredential` field with a ready-to-use credential before it calls
-`getTools()` or runs any tool the toolset returned.
+credentials overrides it and returns an `AuthConfig`. Nothing in `adk-js` reads
+that value yet, so your toolset must still obtain its own credential. Override
+the method to declare what the toolset needs; do not rely on the framework to
+fill `exchangedAuthCredential` for you.

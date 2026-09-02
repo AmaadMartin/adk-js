@@ -344,9 +344,12 @@ describe('BaseToolset.getToolsWithPrefix', () => {
 
     expect(isBaseTool(copy)).toBe(true);
     expect(Object.getPrototypeOf(copy)).toBe(Object.getPrototypeOf(original));
-    await expect(
-      copy.runAsync({args: {}, toolContext: {} as Context}),
-    ).resolves.toBe('test result');
+    const toolContext = new Context({
+      invocationContext: invocationContextFor('inv-1'),
+    });
+    await expect(copy.runAsync({args: {}, toolContext})).resolves.toBe(
+      'test result',
+    );
   });
 
   it('returns undefined from a copy of a tool that has no declaration', async () => {
