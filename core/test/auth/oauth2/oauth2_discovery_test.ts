@@ -125,7 +125,7 @@ describe('OAuth2DiscoveryManager', () => {
     });
 
     it('discovers metadata from the issuerUrl of an ExtendedOAuth2 scheme', async () => {
-      const scheme: ExtendedOAuth2 = {
+      const scheme = {
         type: 'oauth2',
         issuerUrl: 'https://issuer.example.com',
         flows: {
@@ -135,7 +135,7 @@ describe('OAuth2DiscoveryManager', () => {
             scopes: {},
           },
         },
-      };
+      } satisfies ExtendedOAuth2;
       const mockMetadata = {
         issuer: 'https://issuer.example.com',
         authorization_endpoint: 'https://issuer.example.com/auth',
@@ -147,9 +147,6 @@ describe('OAuth2DiscoveryManager', () => {
         json: async () => mockMetadata,
       } as Response);
 
-      if (scheme.issuerUrl === undefined) {
-        expect.fail('issuerUrl must be set for this test');
-      }
       const result = await manager.discoverAuthServerMetadata(scheme.issuerUrl);
 
       expect(result).toEqual(mockMetadata);
