@@ -22,21 +22,6 @@ export function isStateSchemaError(e: unknown): e is StateSchemaError {
 }
 
 /**
- * Type guard for {@link State}. Duck-typed rather than an `instanceof` check so
- * it holds across two copies of the package in one runtime, and for test
- * doubles.
- */
-export function isState(value: unknown): value is State {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as State).get === 'function' &&
-    typeof (value as State).set === 'function' &&
-    typeof (value as State).has === 'function'
-  );
-}
-
-/**
  * A state mapping that maintains the current value and the pending-commit
  * delta.
  */

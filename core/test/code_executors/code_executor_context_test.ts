@@ -279,13 +279,6 @@ describe('CodeExecutorContext', () => {
       const result = ctx.getCodeExecutionContext() as Record<string, unknown>;
       expect(result['execution_session_id']).toBe('s-42');
     });
-
-    it('returns an empty object when the context key is removed from state', () => {
-      const raw: Record<string, unknown> = {};
-      const ctx = new CodeExecutorContext(raw);
-      delete raw[CONTEXT_KEY];
-      expect(ctx.getCodeExecutionContext()).toEqual({});
-    });
   });
 
   describe('constructor write-back', () => {
@@ -432,83 +425,6 @@ describe('CodeExecutorContext', () => {
       const timestamp = firstResult(state, 'inv-1')['timestamp'] as number;
       expect(Number.isInteger(timestamp)).toBe(true);
       expect(timestamp).toBeLessThan(Date.now() / 100);
-    });
-  });
-
-  describe('plain object session state', () => {
-    it('accepts every mutating call and writes through to the object', () => {
-      const raw: Record<string, unknown> = {};
-      const ctx = new CodeExecutorContext(raw);
-
-      ctx.setExecutionId('s-1');
-      ctx.addProcessedFileNames(['a.csv']);
-      ctx.addInputFiles([inputFile1]);
-      ctx.incrementErrorCount('inv');
-      ctx.updateCodeExecutionResult({
-        invocationId: 'inv',
-        code: 'x = 1',
-        resultStdout: 'out',
-        resultStderr: '',
-      });
-
-      expect(raw[CONTEXT_KEY]).toEqual({
-        execution_session_id: 's-1',
-        processed_input_files: ['a.csv'],
-      });
-      expect(raw[INPUT_FILE_KEY]).toEqual([inputFile1]);
-      expect(raw[ERROR_COUNT_KEY]).toEqual({inv: 1});
-      expect(
-        (raw[RESULTS_KEY] as Record<string, unknown[]>)['inv'],
-      ).toHaveLength(1);
-    });
-
-    it('accepts resetErrorCount and clearInputFiles without throwing', () => {
-      const raw: Record<string, unknown> = {};
-      const ctx = new CodeExecutorContext(raw);
-
-      ctx.addInputFiles([inputFile1]);
-      ctx.incrementErrorCount('inv');
-      ctx.resetErrorCount('inv');
-      ctx.clearInputFiles();
-
-      expect(raw[ERROR_COUNT_KEY]).toEqual({});
-      expect(raw[INPUT_FILE_KEY]).toEqual([]);
-    });
-
-    it('reads the values seeded on the object', () => {
-      const raw: Record<string, unknown> = {
-        [CONTEXT_KEY]: {
-          execution_session_id: 'session123',
-          processed_input_files: ['file1.csv'],
-        },
-        [INPUT_FILE_KEY]: [
-          {name: 'input1.txt', content: 'YQ==', mimeType: 'text/plain'},
-        ],
-        [ERROR_COUNT_KEY]: {invocationA: 2},
-      };
-      const ctx = new CodeExecutorContext(raw);
-
-      expect(ctx.getExecutionId()).toBe('session123');
-      expect(ctx.getProcessedFileNames()).toEqual(['file1.csv']);
-      expect(ctx.getInputFiles()).toEqual([
-        {name: 'input1.txt', content: 'YQ==', mimeType: 'text/plain'},
-      ]);
-      expect(ctx.getErrorCount('invocationA')).toBe(2);
-    });
-
-    it('treats a duck-typed state-like double as a State', () => {
-      const store = new Map<string, unknown>();
-      const stateLike = {
-        get: (key: string) => store.get(key),
-        set: (key: string, value: unknown) => store.set(key, value),
-        has: (key: string) => store.has(key),
-      };
-      const ctx = new CodeExecutorContext(stateLike);
-
-      ctx.incrementErrorCount('inv');
-
-      expect(store.get(CONTEXT_KEY)).toEqual({});
-      expect(store.get(ERROR_COUNT_KEY)).toEqual({inv: 1});
     });
   });
 
