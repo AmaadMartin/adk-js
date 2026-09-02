@@ -6,6 +6,9 @@
 
 import {
   App,
+  AsyncQueue,
+  BaseLlm,
+  BaseLlmConnection,
   BasePlugin,
   Context,
   convertEventsToEvalInvocations,
@@ -17,6 +20,7 @@ import {
   Event,
   generateInferencesFromAgentModule,
   generateInferencesFromRootAgent,
+  generateInferencesFromRootAgentLive,
   generateResponses,
   generateResponsesFromSession,
   getAllToolCalls,
@@ -42,6 +46,7 @@ import {
   setLogger,
   UserSimulator,
   UserSimulatorStatus,
+  Workflow,
 } from '@google/adk';
 import {Content, Part} from '@google/genai';
 import {mkdtemp, writeFile} from 'node:fs/promises';
@@ -1805,5 +1810,288 @@ describe('processQueryWithSession and generateResponsesFromSession', () => {
     expect(() =>
       processQueryWithSession(buildSession(recordedEvents()), [{query: 42}]),
     ).toThrow('Each evaluation entry must contain a string query.');
+  });
+});
+
+const LIVE_APP_NAME = 'live_eval_app';
+const LIVE_AGENT_NAME = 'live_agent';
+const LIVE_INSTRUCTION = 'Answer in one word.';
+
+/**
+ * A live model that answers each user turn with the next scripted batch, so a
+ * multi-turn conversation is deterministic: nothing arrives before the turn
+ * that asked for it.
+ */
+class TurnBasedLiveLlm extends BaseLlm {
+  readonly connections: TurnBasedLiveConnection[] = [];
+
+  constructor(private readonly batches: LlmResponse[][]) {
+    super({model: 'turn-based-live-llm'});
+  }
+
+  // eslint-disable-next-line require-yield -- the async path is never taken.
+  async *generateContentAsync(): AsyncGenerator<LlmResponse, void> {
+    throw new Error('TurnBasedLiveLlm only serves the live path.');
+  }
+
+  async connect(): Promise<BaseLlmConnection> {
+    const connection = new TurnBasedLiveConnection(this.batches);
+    this.connections.push(connection);
+    return connection;
+  }
+}
+
+class TurnBasedLiveConnection implements BaseLlmConnection {
+  closed = false;
+  private turn = 0;
+  private readonly responses = new AsyncQueue<LlmResponse>();
+
+  constructor(private readonly batches: LlmResponse[][]) {}
+
+  async sendHistory(): Promise<void> {}
+
+  async sendContent(): Promise<void> {
+    this.replyToTurn();
+  }
+
+  async sendRealtime(): Promise<void> {}
+
+  async sendActivityStart(): Promise<void> {}
+
+  async sendActivityEnd(): Promise<void> {
+    this.replyToTurn();
+  }
+
+  async *receive(): AsyncGenerator<LlmResponse, void, void> {
+    for await (const response of this.responses) {
+      yield response;
+    }
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    this.responses.close();
+  }
+
+  /** Replays the next batch, or ends the stream once the script runs out. */
+  private replyToTurn(): void {
+    const batch = this.batches[this.turn];
+    this.turn++;
+    if (batch === undefined) {
+      this.responses.close();
+      return;
+    }
+    for (const response of batch) {
+      this.responses.push(response);
+    }
+  }
+}
+
+/**
+ * Keeps a reference to every request the model was about to receive, so a
+ * later plugin's edits to it are visible after the run.
+ */
+class RequestCapturePlugin extends BasePlugin {
+  readonly requests: LlmRequest[] = [];
+
+  constructor() {
+    super('request_capture_plugin');
+  }
+
+  override async beforeModelCallback(params: {
+    callbackContext: Context;
+    llmRequest: LlmRequest;
+  }): Promise<LlmResponse | undefined> {
+    this.requests.push(params.llmRequest);
+    return;
+  }
+}
+
+function createLiveAgent(batches: LlmResponse[][]): LlmAgent {
+  return new LlmAgent({
+    name: LIVE_AGENT_NAME,
+    model: new TurnBasedLiveLlm(batches),
+    instruction: LIVE_INSTRUCTION,
+  });
+}
+
+const LIVE_TEXT_TURN: LlmResponse[] = [
+  {content: {role: 'model', parts: [{text: 'sunny'}]}},
+  {turnComplete: true},
+];
+
+describe('generateInferencesFromRootAgentLive', () => {
+  it('produces one invocation per turn of the conversation', async () => {
+    const userSimulator = new ScriptedUserSimulator(['turn one', 'turn two']);
+
+    const invocations = await generateInferencesFromRootAgentLive({
+      rootAgent: createLiveAgent([LIVE_TEXT_TURN, LIVE_TEXT_TURN]),
+      userSimulator,
+    });
+
+    expect(invocations).toHaveLength(2);
+    expect(
+      invocations.map((invocation) => invocation.userContent.parts?.[0]?.text),
+    ).toEqual(['turn one', 'turn two']);
+    expect(
+      invocations.map(
+        (invocation) => invocation.finalResponse?.parts?.[0]?.text,
+      ),
+    ).toEqual(['sunny', 'sunny']);
+    // Once per turn, then once more to learn the conversation is over.
+    expect(userSimulator.receivedEvents).toHaveLength(3);
+  });
+
+  it('records the instructions the agent was shown', async () => {
+    const invocations = await generateInferencesFromRootAgentLive({
+      rootAgent: createLiveAgent([LIVE_TEXT_TURN]),
+      userSimulator: new ScriptedUserSimulator(['hello']),
+    });
+
+    const invocation = invocations[0];
+    if (invocation === undefined) {
+      expect.fail('the live run produced no invocation');
+    }
+    expect(
+      invocation.appDetails?.agentDetails?.[LIVE_AGENT_NAME]?.instructions,
+    ).toContain(LIVE_INSTRUCTION);
+  });
+
+  it('hands the simulator a normalized copy of the conversation', async () => {
+    const userSimulator = new ScriptedUserSimulator(['hello', 'again']);
+
+    await generateInferencesFromRootAgentLive({
+      rootAgent: createLiveAgent([
+        [{outputTranscription: {text: 'spoken reply'}}, {turnComplete: true}],
+        LIVE_TEXT_TURN,
+      ]),
+      userSimulator,
+    });
+
+    const secondCall = userSimulator.receivedEvents[1];
+    const texts = secondCall.map((event) => event.content?.parts?.[0]?.text);
+    expect(texts).toContain('spoken reply');
+    // The copy is normalized, not the record: the transcription is folded into
+    // content rather than left on the event.
+    expect(
+      secondCall.every((event) => event.outputTranscription === undefined),
+    ).toBe(true);
+  });
+
+  it('grades the normalized events while keying app details off the raw ones', async () => {
+    const invocations = await generateInferencesFromRootAgentLive({
+      rootAgent: createLiveAgent([
+        [{outputTranscription: {text: 'spoken reply'}}, {turnComplete: true}],
+      ]),
+      userSimulator: new ScriptedUserSimulator(['hello']),
+    });
+
+    const invocation = invocations[0];
+    if (invocation === undefined) {
+      expect.fail('the live run produced no invocation');
+    }
+    expect(invocation.finalResponse?.parts?.[0]?.text).toBe('spoken reply');
+    expect(
+      invocation.appDetails?.agentDetails?.[LIVE_AGENT_NAME]?.instructions,
+    ).toContain(LIVE_INSTRUCTION);
+  });
+
+  it('stops as soon as the live driver finishes', async () => {
+    const userSimulator = new ScriptedUserSimulator(['one', 'two', 'three']);
+
+    const invocations = await generateInferencesFromRootAgentLive({
+      rootAgent: createLiveAgent([LIVE_TEXT_TURN]),
+      userSimulator,
+    });
+
+    // The second turn found the stream closed, so the third was never asked
+    // for.
+    expect(userSimulator.receivedEvents).toHaveLength(2);
+    expect(invocations).toHaveLength(2);
+  });
+
+  it('passes the turn timeout through to the wait', async () => {
+    const agent = createLiveAgent([[]]);
+
+    await expect(
+      generateInferencesFromRootAgentLive({
+        rootAgent: agent,
+        userSimulator: new ScriptedUserSimulator(['hello']),
+        liveTimeoutSeconds: 0.01,
+      }),
+    ).rejects.toThrow('Timed out waiting for model turn completion');
+  });
+
+  it('closes the live connection when a turn throws', async () => {
+    const llm = new TurnBasedLiveLlm([LIVE_TEXT_TURN]);
+    const agent = new LlmAgent({name: LIVE_AGENT_NAME, model: llm});
+    const failure = new Error('simulator failed');
+
+    await expect(
+      generateInferencesFromRootAgentLive({
+        rootAgent: agent,
+        userSimulator: {
+          getNextUserMessage: async () => {
+            throw failure;
+          },
+        },
+      }),
+    ).rejects.toThrow('simulator failed');
+
+    expect(llm.connections[0]?.closed).toBe(true);
+  });
+
+  it('refuses a workflow root', async () => {
+    await expect(
+      generateInferencesFromRootAgentLive({
+        rootAgent: new Workflow({
+          name: 'eval_workflow',
+          edges: [['START', new LlmAgent({name: 'node_agent'})]],
+        }),
+        userSimulator: new ScriptedUserSimulator(['hello']),
+      }),
+    ).rejects.toThrow('eval_workflow');
+  });
+});
+
+describe('EnsureRetryOptionsPlugin on the eval runner', () => {
+  it('gives the async path a retry policy', async () => {
+    const capture = new RequestCapturePlugin();
+    const agent = createScriptedAgent('retry_agent', ['done']);
+
+    await generateInferencesFromRootAgent({
+      rootAgent: agent,
+      userSimulator: new ScriptedUserSimulator(['hello']),
+      app: new App({
+        name: 'retry_app',
+        rootAgent: agent,
+        plugins: [capture],
+      }),
+    });
+
+    expect(capture.requests).toHaveLength(1);
+    expect(capture.requests[0].config?.httpOptions?.retryOptions).toEqual({
+      attempts: 7,
+    });
+  });
+
+  it('gives the live path a retry policy', async () => {
+    const capture = new RequestCapturePlugin();
+    const agent = createLiveAgent([LIVE_TEXT_TURN]);
+
+    await generateInferencesFromRootAgentLive({
+      rootAgent: agent,
+      userSimulator: new ScriptedUserSimulator(['hello']),
+      app: new App({
+        name: LIVE_APP_NAME,
+        rootAgent: agent,
+        plugins: [capture],
+      }),
+    });
+
+    expect(capture.requests).toHaveLength(1);
+    expect(capture.requests[0].config?.httpOptions?.retryOptions).toEqual({
+      attempts: 7,
+    });
   });
 });

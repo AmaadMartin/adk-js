@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, FunctionCall, Modality} from '@google/genai';
+import {Modality} from '@google/genai';
 
 import {Context} from '../agents/context.js';
-import {handleFunctionCallsAsync} from '../agents/functions.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
@@ -23,16 +22,12 @@ import {
 import {getFunctionCalls} from '../models/llm_response.js';
 import {Runner} from '../runner/runner.js';
 import {Session} from '../sessions/session.js';
-import {BaseTool} from '../tools/base_tool.js';
-import {asRecord, formatError} from '../utils/error_utils.js';
+import {asRecord} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 
 /** Author of the events the user contributed to a session. */
 const USER_AUTHOR = 'user';
-
-/** Role a tool response is sent back to the live model under. */
-const TOOL_ROLE = 'tool';
 
 /** WebSocket close code the Live API reports for a normal closure. */
 const WEBSOCKET_NORMAL_CLOSURE_CODE = 1000;
@@ -287,14 +282,12 @@ export class EvalLiveSession {
           });
         }
 
-        const functionCalls = getFunctionCalls(event);
-        if (functionCalls.length > 0) {
+        // The agent's live flow runs the tools itself and sends their results
+        // straight back over the connection, so the driver only has to notice
+        // that a tool round is open. adk-python's driver runs them a second
+        // time; adk-js does not, because that would call every tool twice.
+        if (getFunctionCalls(event).length > 0) {
           inFunctionCallLoop = true;
-          await this.answerFunctionCalls(
-            invocationContext,
-            event,
-            functionCalls,
-          );
         }
 
         if (event.turnComplete && event.author !== USER_AUTHOR) {
@@ -361,59 +354,6 @@ export class EvalLiveSession {
       llmRequest,
     });
     return callbackContext;
-  }
-
-  private async answerFunctionCalls(
-    invocationContext: InvocationContext,
-    functionCallEvent: Event,
-    functionCalls: FunctionCall[],
-  ): Promise<void> {
-    try {
-      const responseEvent = await handleFunctionCallsAsync({
-        invocationContext,
-        functionCallEvent,
-        toolsDict: await this.resolveToolsDict(invocationContext),
-        beforeToolCallbacks: this.agent.canonicalBeforeToolCallbacks,
-        afterToolCallbacks: this.agent.canonicalAfterToolCallbacks,
-      });
-      for (const part of responseEvent?.content?.parts ?? []) {
-        if (part.functionResponse) {
-          this.sendToolContent({role: TOOL_ROLE, parts: [part]});
-        }
-      }
-    } catch (error: unknown) {
-      const message = formatError(error);
-      logger.error(`Failed to handle function calls: ${message}`);
-      // Answer every outstanding call, or the model waits for a result that
-      // will never arrive and the conversation stalls.
-      for (const functionCall of functionCalls) {
-        this.sendToolContent({
-          role: TOOL_ROLE,
-          parts: [
-            {
-              functionResponse: {
-                name: functionCall.name,
-                id: functionCall.id,
-                response: {error: message},
-              },
-            },
-          ],
-        });
-      }
-    }
-  }
-
-  private async resolveToolsDict(
-    invocationContext: InvocationContext,
-  ): Promise<Record<string, BaseTool>> {
-    const tools = await this.agent.canonicalTools(
-      new ReadonlyContext(invocationContext),
-    );
-    return Object.fromEntries(tools.map((tool) => [tool.name, tool]));
-  }
-
-  private sendToolContent(content: Content): void {
-    this.liveRequestQueue.sendContent(content);
   }
 }
 
