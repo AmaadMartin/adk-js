@@ -12,6 +12,7 @@ import {loadOptionalPeer} from '../utils/optional_peer.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
+  createArtifactVersion,
   DeleteArtifactRequest,
   ListArtifactKeysRequest,
   ListVersionsRequest,
@@ -276,12 +277,13 @@ export class GcsArtifactService implements BaseArtifactService {
 
       const [metadata] = await file.getMetadata();
 
-      return {
+      return createArtifactVersion({
         version,
         mimeType: metadata.contentType,
         customMetadata: metadata.metadata as Record<string, unknown>,
         canonicalUri: file.publicUrl(),
-      };
+        createTime: toUnixSeconds(metadata.timeCreated),
+      });
     } catch (e) {
       logger.warn(
         `[GcsArtifactService] getArtifactVersion: Failed to get artifact version for userId: ${request.userId} sessionId: ${request.sessionId} filename: ${request.filename} version: ${request.version}`,
@@ -290,6 +292,18 @@ export class GcsArtifactService implements BaseArtifactService {
       return undefined;
     }
   }
+}
+
+/**
+ * Converts the RFC 3339 timestamp GCS reports into Unix seconds.
+ *
+ * @param timestamp The timestamp the client reported, if it reported one.
+ * @return The time in Unix seconds, or undefined when GCS reported no usable
+ *     timestamp.
+ */
+function toUnixSeconds(timestamp?: string): number | undefined {
+  const milliseconds = timestamp ? Date.parse(timestamp) : Number.NaN;
+  return Number.isNaN(milliseconds) ? undefined : milliseconds / 1000;
 }
 
 function getFileName({

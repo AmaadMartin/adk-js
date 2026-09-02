@@ -62,11 +62,53 @@ export interface ArtifactVersion {
   /** The version number. */
   version: number;
   /** The canonical URI of the artifact. */
-  canonicalUri?: string;
-  /** Custom metadata associated with the artifact. */
-  customMetadata?: Record<string, unknown>;
+  canonicalUri: string;
+  /** Custom metadata associated with the artifact, empty when none was given. */
+  customMetadata: Record<string, unknown>;
+  /**
+   * When the service recorded the version, as a Unix timestamp in seconds.
+   *
+   * The unit is seconds, not milliseconds, so that the value matches
+   * adk-python's `ArtifactVersion.create_time`.
+   */
+  createTime: number;
   /** The MIME type of the artifact. */
   mimeType?: string;
+}
+
+/** The fields a service supplies to build an {@link ArtifactVersion}. */
+export interface ArtifactVersionInit {
+  /** The version number. */
+  version: number;
+  /** The canonical URI of the artifact. */
+  canonicalUri: string;
+  /** Custom metadata associated with the artifact. Defaults to `{}`. */
+  customMetadata?: Record<string, unknown>;
+  /** Unix seconds. Defaults to the current time. */
+  createTime?: number;
+  /** The MIME type of the artifact. */
+  mimeType?: string;
+}
+
+/**
+ * Builds an artifact version record and fills in the fields a service omits.
+ *
+ * Every service records a version through this function, so the defaults live
+ * in one place.
+ *
+ * @param init The fields the service supplies.
+ * @return The complete version record.
+ */
+export function createArtifactVersion(
+  init: ArtifactVersionInit,
+): ArtifactVersion {
+  return {
+    version: init.version,
+    canonicalUri: init.canonicalUri,
+    customMetadata: init.customMetadata ?? {},
+    createTime: init.createTime ?? Date.now() / 1000,
+    mimeType: init.mimeType,
+  };
 }
 
 /**
