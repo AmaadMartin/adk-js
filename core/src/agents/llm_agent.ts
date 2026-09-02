@@ -255,31 +255,6 @@ function seedLiveSessionResumption(
   }
 }
 
-/**
- * Tells the Live server that the history about to be replayed already holds
- * the model's past answers, so the server does not answer those turns again.
- *
- * Only applies when history is replayed, i.e. on a fresh connection with
- * contents. A value the caller already chose is left alone.
- */
-function applyLiveHistoryConfig(
-  invocationContext: InvocationContext,
-  llmRequest: LlmRequest,
-): void {
-  if (
-    llmRequest.contents.length === 0 ||
-    invocationContext.liveSessionResumptionHandle
-  ) {
-    return;
-  }
-  const liveConfig = llmRequest.liveConnectConfig;
-  liveConfig.historyConfig = {
-    ...invocationContext.runConfig?.historyConfig,
-    ...liveConfig.historyConfig,
-  };
-  liveConfig.historyConfig.initialHistoryInClientContent ??= true;
-}
-
 /** What the live send loop needs to drain the queue into the connection. */
 interface LiveSendLoopParams {
   invocationContext: InvocationContext;
@@ -1211,7 +1186,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
 
       applyLiveSessionResumption(invocationContext, llmRequest, llm);
-      applyLiveHistoryConfig(invocationContext, llmRequest);
 
       let connection: BaseLlmConnection;
       try {

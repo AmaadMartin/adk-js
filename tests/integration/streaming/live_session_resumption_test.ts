@@ -159,7 +159,7 @@ describe('live session resumption end to end', () => {
     expect(sessionResumption).toEqual({handle: 'stored'});
   });
 
-  it('replays history and seeds the history config when no handle is stored', async () => {
+  it('replays the history when no handle is stored', async () => {
     const model = new ScriptedLiveModel([
       [
         {content: {role: 'model', parts: [{text: 'hi'}]}},
@@ -171,9 +171,7 @@ describe('live session resumption end to end', () => {
 
     expect(model.connections).toHaveLength(1);
     expect(model.connections[0].historyCalls).toHaveLength(1);
-    expect(
-      model.configsSeen[0]?.historyConfig?.initialHistoryInClientContent,
-    ).toBe(true);
+    expect(model.configsSeen[0]?.sessionResumption?.handle).toBeUndefined();
     expect(
       events.some((event) => event.content?.parts?.[0]?.text === 'hi'),
     ).toBe(true);

@@ -48,8 +48,9 @@ Three more things the flow does around the connection:
 
 ## Get started
 
-This agent refuses to discuss one topic and saves the session's audio. The
-guardrail runs on typed text and on finished speech transcriptions alike.
+This agent refuses to discuss one topic. The guardrail runs on typed text and
+on finished speech transcriptions alike. It leaves `saveLiveBlob` off, so every
+turn still ends with a `turnComplete` event.
 
 ```ts
 import {
@@ -141,7 +142,6 @@ for await (const event of runner.runLive({
 | Field                | Where       | Effect                                                           |
 | -------------------- | ----------- | ---------------------------------------------------------------- |
 | `saveLiveBlob`       | `RunConfig` | Saves each turn's audio to the artifact service. Off by default. |
-| `historyConfig`      | `RunConfig` | Copied onto the connect config when history is replayed.         |
 | `sessionResumption`  | `RunConfig` | Seeds the first connection's resumption handle.                  |
 | `responseScheduling` | `BaseTool`  | Declares the tool `NON_BLOCKING` on the live path.               |
 
@@ -151,10 +151,6 @@ produced audio emits no `turnComplete`. Do not build a turn boundary on that
 flag; close the queue on your own input instead, or on the `fileData` event
 the flush produces.
 
-The flow sets `historyConfig.initialHistoryInClientContent` to `true` when it
-replays history on a fresh connection, so the server does not answer those
-turns again. An explicit value in `RunConfig.historyConfig` is kept.
-
 `sessionResumption.transparent` is set only for a Vertex AI backed `Gemini`.
 The Gemini API backend rejects the field.
 
@@ -162,7 +158,9 @@ The Gemini API backend rejects the field.
 
 - A turn with no callback registered, or with callbacks that return nothing,
   passes through unchanged.
-- A blocked event carries `turnComplete: true`.
+- A blocked event carries `turnComplete: true`. A block raised after the
+  connection ended does not reach the caller, because the event stream is
+  already closed.
 - A resolved toolset credential is stored on the invocation, under
   `InvocationContext.credentialByKey`, never on the toolset's own config.
 - Audio is written only when the artifact service is present. A failed save
@@ -171,6 +169,13 @@ The Gemini API backend rejects the field.
 - No audio is cached while `saveLiveBlob` is off, so the caches cannot grow on
   the default path.
 - Cancelling a background tool is best effort. A task that ignores it is
-  logged and dropped from the registry.
+  logged and dropped from the registry. Nothing in adk-js writes
+  `InvocationContext.activeStreamingTools` yet, so the registry is empty unless
+  your own code seeds it.
+- The flow cannot tell the server that the replayed history already holds the
+  model's answers. adk-python sends `historyConfig.initialHistoryInClientContent`
+  for this. `@google/genai` builds the Live setup frame from a fixed field
+  list that has no such field, in the pinned 2.9.0 and in 2.20.0, so the server
+  may answer a replayed turn twice.
 - An agent transfer and a restart both open a session with no handle, so the
   child never resumes the session it was handed off from.
