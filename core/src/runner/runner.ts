@@ -59,7 +59,7 @@ import {
   RunnableRoot,
   runNodeAsInvocation,
 } from '../workflow/run_node_as_invocation.js';
-import {findActiveTaskScope} from './task_scope_utils.js';
+import {findActiveTaskScope, findTaskAgentNames} from './task_scope_utils.js';
 
 /**
  * The configuration parameters for the Runner.
@@ -326,7 +326,10 @@ function endedAgentsForInvocation(
     }
     if (event.actions.endOfAgent) {
       ended.add(key);
-    } else if (event.actions.agentState !== undefined) {
+    } else if (event.actions.agentState) {
+      // Truthiness, not a presence test. An event adk-python wrote and adk-js
+      // reads back carries an explicit `null` here, meaning "not recorded";
+      // the reference compares against `None` for the same reason.
       ended.delete(key);
     }
   }
@@ -403,6 +406,13 @@ export class Runner {
   readonly autoCreateSession: boolean;
   /** Explains an origin that disagrees with `appName`, when one does. */
   private appNameAlignmentHint?: string;
+  /**
+   * The task-mode agents under this runner's root.
+   *
+   * Only a scope one of these wrote into is a task delegation a user reply may
+   * join; see {@link findActiveTaskScope}.
+   */
+  private readonly taskAgentNames: ReadonlySet<string>;
 
   /**
    * Creates a new Runner instance.
@@ -423,6 +433,7 @@ export class Runner {
     this.resumabilityConfig =
       this.app.resumabilityConfig ?? input.resumabilityConfig;
     this.autoCreateSession = input.autoCreateSession ?? false;
+    this.taskAgentNames = findTaskAgentNames(this.agent);
     this.enforceAppNameAlignment(inferAgentOrigin(this.agent));
     this.warnUncachedAgentTransfer();
   }
@@ -586,9 +597,11 @@ export class Runner {
    *
    * {@link runAsync} produces an event only when the caller pulls one, so an
    * invocation runs at the speed of the `for await` that drains it. This
-   * method starts the invocation immediately and buffers into a queue, so the
-   * agent keeps working while the caller is busy with the event it already
-   * has. A failure is reported only after the events produced before it.
+   * method buffers into a queue instead, so once the caller has asked for the
+   * first event the agent keeps working while the caller is busy with it. A
+   * failure is reported only after the events produced before it.
+   *
+   * Like any async generator, this one does nothing until the first `next()`.
    *
    * That decoupling is what this ports. adk-python's `run` is a *synchronous*
    * generator driven from a background thread; JavaScript has no synchronous
@@ -717,7 +730,10 @@ export class Runner {
           if (runsAsNode) {
             validateNewMessage(newMessage, resumeInputs);
           }
-          const activeTaskScope = findActiveTaskScope(session);
+          const activeTaskScope = findActiveTaskScope(
+            session,
+            this.taskAgentNames,
+          );
 
           let invocationId = params.invocationId;
           // A message that joins a paused task borrows that task's invocation

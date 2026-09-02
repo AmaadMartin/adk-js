@@ -226,6 +226,35 @@ describe('Runner invocation resume', () => {
     expect(h.agent.runCount).toEqual([0]);
   });
 
+  it('leaves a finished agent finished when a later event records no state', async () => {
+    // adk-python writes an explicit `null` for "not recorded", so a session it
+    // wrote and adk-js reads back must not read that as a fresh checkpoint.
+    // Parsed from JSON because that is how such an event reaches adk-js.
+    const h = await harness({
+      events: (invocationId) => [
+        userEvent(invocationId, 'book a flight'),
+        createEvent({
+          invocationId,
+          author: 'root_agent',
+          actions: {endOfAgent: true},
+        }),
+        createEvent({
+          invocationId,
+          author: 'root_agent',
+          actions: JSON.parse('{"agentState": null}'),
+        }),
+      ],
+    });
+
+    const events = await drain(h.runner, {
+      sessionId: h.session.id,
+      invocationId: 'inv-1',
+    });
+
+    expect(events).toEqual([]);
+    expect(h.agent.runCount).toEqual([]);
+  });
+
   it('rejects a resume against a session with no events', async () => {
     const h = await harness();
 
