@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {AdkLogger} from './logger.js';
+import {isRecord, toMessage} from './value_utils.js';
 
 const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
 
@@ -21,14 +22,6 @@ const TELEMETRY_KEY = 'telemetry';
  */
 export function getUserConfigPath(): string {
   return path.join(os.homedir(), '.adk', 'config.json');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function toMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Reads the config file, returning `{}` for anything that is not an object. */

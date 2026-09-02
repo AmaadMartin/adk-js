@@ -25,6 +25,7 @@ import {Content} from '@google/genai';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
+import {text} from 'node:stream/consumers';
 
 import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
 import {
@@ -37,6 +38,7 @@ import {
   TimeoutError,
   withTimeout,
 } from '../utils/timeout_utils.js';
+import {isRecord, toMessage} from '../utils/value_utils.js';
 import {printEvent, renderUserInputRequest} from './event_printer.js';
 
 const REQUEST_CONFIRMATION = 'adk_request_confirmation';
@@ -46,14 +48,6 @@ const POSITIVE_RESPONSES = new Set(['y', 'yes', 'true', 'confirm']);
 /** Exit code adk-python uses for a run that finished waiting on a human. */
 const PAUSED_EXIT_CODE = 2;
 const FAILURE_EXIT_CODE = 1;
-
-function toMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /** Reads `--state`, reporting a parse failure the way adk-python does. */
 function parseSessionState(
@@ -77,14 +71,6 @@ function parseSessionState(
 /** Whether a plain-text answer means "yes" to a confirmation request. */
 export function isPositiveResponse(value: string): boolean {
   return POSITIVE_RESPONSES.has(value.trim().toLowerCase());
-}
-
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString('utf-8').trim();
 }
 
 interface InputFile {
@@ -259,11 +245,7 @@ async function runInteractively(
         ? withTimeout(turn(), parseTimeout(options.timeout))
         : turn());
     } catch (error) {
-      console.error(
-        `[ADK CLI] Turn failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+      console.error(`[ADK CLI] Turn failed: ${toMessage(error)}`);
     }
   }
 }
@@ -572,7 +554,7 @@ export async function runOnceCli(options: RunOnceOptions): Promise<number> {
       console.error('Error: Missing query argument or stdin input.');
       return FAILURE_EXIT_CODE;
     }
-    query = await readStdin();
+    query = (await text(process.stdin)).trim();
   }
 
   const {sessionService, artifactService, memoryService} = options;

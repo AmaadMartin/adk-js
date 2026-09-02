@@ -29,15 +29,14 @@ export const DISABLE_FEATURES_OPTION = new Option(
     `features. Example: --${DISABLE_FEATURES_KEY}=${FeatureName.PROGRESSIVE_SSE_STREAMING}`,
 ).argParser(appendValue);
 
-function toFeatureName(value: string): FeatureName | undefined {
-  return Object.values(FeatureName).find((name) => name === value);
+/** What `appendValue` collects into, keyed by the flag names above. */
+interface FeatureOptionValues {
+  [ENABLE_FEATURES_KEY]?: string[];
+  [DISABLE_FEATURES_KEY]?: string[];
 }
 
-function toStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((entry): entry is string => typeof entry === 'string');
+function toFeatureName(value: string): FeatureName | undefined {
+  return Object.values(FeatureName).find((name) => name === value);
 }
 
 /** Splits comma-separated values and records each name under `enabled`. */
@@ -66,14 +65,10 @@ function collectOverrides(
  * feature that a newer ADK release removed does not break an existing script.
  */
 export function applyFeatureOverrides(command: Command): void {
-  const options = command.opts();
+  const options = command.opts<FeatureOptionValues>();
   const overrides = new Map<string, boolean>();
-  collectOverrides(toStringList(options[ENABLE_FEATURES_KEY]), true, overrides);
-  collectOverrides(
-    toStringList(options[DISABLE_FEATURES_KEY]),
-    false,
-    overrides,
-  );
+  collectOverrides(options[ENABLE_FEATURES_KEY] ?? [], true, overrides);
+  collectOverrides(options[DISABLE_FEATURES_KEY] ?? [], false, overrides);
 
   for (const [name, enabled] of overrides) {
     const featureName = toFeatureName(name);

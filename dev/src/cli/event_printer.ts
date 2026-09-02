@@ -10,6 +10,7 @@ import {
   UserInputKind,
   UserInputRequest,
 } from '@google/adk';
+import {isRecord} from '../utils/value_utils.js';
 
 const HOW_TO_ANSWER: Record<UserInputKind, string> = {
   input: 'Type your reply at the next prompt to continue.',
@@ -96,10 +97,6 @@ function renderOutput(output: unknown): string {
   } catch {
     return String(output);
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isEmptyObject(value: unknown): boolean {

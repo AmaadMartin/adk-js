@@ -10,6 +10,7 @@ import {
   readTelemetryConsent,
   writeTelemetryConsent,
 } from '../utils/telemetry_config.js';
+import {toMessage} from '../utils/value_utils.js';
 
 const CONSENT_QUESTION =
   'Help improve the ADK (CLI and Web UI) by allowing Google to collect' +
@@ -29,10 +30,6 @@ const CONSENT_OPT_OUT =
 const CONSENT_PROMPT = 'Enable telemetry? [Y/n]: ';
 
 const AFFIRMATIVE_ANSWERS = new Set(['', 'y', 'yes']);
-
-function toMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** Records the consent and echoes it, or fails the command with exit code 1. */
 function recordConsent(command: Command, enabled: boolean): void {

@@ -64,16 +64,14 @@ export const NO_USE_LOCAL_STORAGE_OPTION = new Option(
  *
  * commander cannot express click's `--use_local_storage/--no_use_local_storage`
  * pair, because the negated form there spells its name with an underscore, so
- * the two flags are declared separately and reconciled here.
+ * the two flags are declared separately and reconciled here. Local storage is
+ * on unless the user turns it off, which is also what `--use_local_storage`
+ * asks for, so the two flags only disagree when both are given.
  *
  * @param command The command whose options were parsed.
- * @param defaultUseLocalStorage The value to use when neither flag is given.
  * @returns Whether the caller asked for local storage.
  */
-export function resolveUseLocalStorage(
-  command: Command,
-  defaultUseLocalStorage: boolean,
-): boolean {
+export function resolveUseLocalStorage(command: Command): boolean {
   const options = command.opts();
   const useLocalStorage = options[USE_LOCAL_STORAGE_KEY] === true;
   const noUseLocalStorage = options[NO_USE_LOCAL_STORAGE_KEY] === true;
@@ -90,10 +88,7 @@ export function resolveUseLocalStorage(
     );
   }
 
-  if (noUseLocalStorage) {
-    return false;
-  }
-  return useLocalStorage || defaultUseLocalStorage;
+  return !noUseLocalStorage;
 }
 
 /** An environment variable counts as on when it reads `true` or `1`. */

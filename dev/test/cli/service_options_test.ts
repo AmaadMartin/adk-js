@@ -72,11 +72,11 @@ describe('service_options', () => {
       return command;
     };
 
-    const expectUsageError = (args: string[], defaultValue: boolean) => {
+    const expectUsageError = (args: string[]) => {
       const command = parse(args);
       let exitCode: number | undefined;
       try {
-        resolveUseLocalStorage(command, defaultValue);
+        resolveUseLocalStorage(command);
       } catch (error: unknown) {
         if (!(error instanceof Error) || !('exitCode' in error)) {
           throw error;
@@ -90,10 +90,11 @@ describe('service_options', () => {
       ['--session_service_uri', ['--use_local_storage']],
       ['--artifact_service_uri', ['--no_use_local_storage']],
     ])('rejects a storage flag with %s', (uriFlag, storageFlag) => {
-      const {exitCode, message} = expectUsageError(
-        [...storageFlag, uriFlag, 'memory://'],
-        true,
-      );
+      const {exitCode, message} = expectUsageError([
+        ...storageFlag,
+        uriFlag,
+        'memory://',
+      ]);
 
       expect(exitCode).toBe(2);
       expect(message).toContain(
@@ -117,28 +118,26 @@ describe('service_options', () => {
         'memory://',
       ]);
 
-      expect(resolveUseLocalStorage(command, false)).toBe(true);
+      expect(resolveUseLocalStorage(command)).toBe(true);
     });
 
     it('allows a service URI when neither flag was given', () => {
       const command = parse(['--session_service_uri', 'sqlite://sessions.db']);
 
-      expect(resolveUseLocalStorage(command, true)).toBe(true);
+      expect(resolveUseLocalStorage(command)).toBe(true);
     });
 
     it.each([
-      ['no flag and a true default', [], true, true],
-      ['no flag and a false default', [], false, false],
-      ['--use_local_storage', ['--use_local_storage'], false, true],
-      ['--no_use_local_storage', ['--no_use_local_storage'], true, false],
+      ['no flag, which defaults to local storage', [], true],
+      ['--use_local_storage', ['--use_local_storage'], true],
+      ['--no_use_local_storage', ['--no_use_local_storage'], false],
       [
         'both flags, where the negative wins',
         ['--use_local_storage', '--no_use_local_storage'],
-        true,
         false,
       ],
-    ])('resolves %s', (_name, args, defaultValue, expected) => {
-      expect(resolveUseLocalStorage(parse(args), defaultValue)).toBe(expected);
+    ])('resolves %s', (_name, args, expected) => {
+      expect(resolveUseLocalStorage(parse(args))).toBe(expected);
     });
   });
 
