@@ -276,13 +276,8 @@ export class InvocationContext {
   /**
    * Credentials already resolved for this invocation, keyed by the auth
    * config's `credentialKey`. Read it through
-   * {@link ReadonlyContext.getCredential}, so a tool can reuse a credential the
-   * invocation resolved once. Mirrors adk-python
+   * {@link ReadonlyContext.getCredential}. Mirrors adk-python
    * `InvocationContext.credential_by_key`.
-   *
-   * Shared by reference with the contexts {@link clone} makes, so a credential
-   * cached by a sub-agent is visible to its parent — the same aliasing
-   * adk-python gets from its shallow `model_copy`.
    */
   readonly credentialByKey: Record<string, AuthCredential>;
 

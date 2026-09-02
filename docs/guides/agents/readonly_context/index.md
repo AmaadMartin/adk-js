@@ -42,60 +42,31 @@ Turns so far: ${turns}. Keep answers short: ${live}.`;
 
 ## What it exposes
 
-| Member               | Returns                                                        |
-| -------------------- | -------------------------------------------------------------- |
-| `userContent`        | The `Content` that started the invocation, or `undefined`.     |
-| `invocationId`       | The id of the invocation.                                      |
-| `userId`             | The user id of the session.                                    |
-| `sessionId`          | The id of the session.                                         |
-| `agentName`          | The name of the running agent, or `'unknown'`.                 |
-| `state`              | The session state, as a `State` view.                          |
-| `a2aMetadata`        | Request metadata from an incoming A2A request, or `undefined`. |
-| `session`            | The live `Session` object of the invocation.                   |
-| `runConfig`          | The `RunConfig` of the invocation, or `undefined`.             |
-| `getCredential(key)` | The credential resolved under `key`, or `undefined`.           |
+| Member               | Returns                                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `userContent`        | The `Content` that started the invocation, or `undefined`.                                                                                                                      |
+| `invocationId`       | The id of the invocation.                                                                                                                                                       |
+| `userId`             | The user id of the session.                                                                                                                                                     |
+| `sessionId`          | The id of the session.                                                                                                                                                          |
+| `agentName`          | The name of the running agent, or `'unknown'` when there is none — a bare node, or a synthetic context such as the one `agent_card.ts` builds to resolve a dynamic instruction. |
+| `state`              | The session state, as a `State` view.                                                                                                                                           |
+| `a2aMetadata`        | Request metadata from an incoming A2A request, or `undefined`.                                                                                                                  |
+| `session`            | The live `Session` object of the invocation.                                                                                                                                    |
+| `runConfig`          | The `RunConfig` of the invocation, or `undefined`.                                                                                                                              |
+| `getCredential(key)` | The credential resolved under `key`, or `undefined`.                                                                                                                            |
 
 ## Reading a resolved credential
 
-`getCredential` reads the invocation-scoped credential cache. A toolset asks for
-the credential the invocation already resolved for its `credentialKey`, instead
-of running an auth exchange of its own:
+`getCredential` returns `undefined` today. It reads the invocation-scoped
+credential cache, which starts empty and stays empty until something writes to
+it, and the writers live in the auth resolution path that adk-js does not port
+yet.
 
-```ts
-import {BaseTool, BaseToolset, ReadonlyContext} from '@google/adk';
-
-class BillingToolset extends BaseToolset {
-  constructor(
-    private readonly credentialKey: string,
-    private readonly tools: BaseTool[],
-  ) {
-    super([]);
-  }
-
-  async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    const credential = context?.getCredential(this.credentialKey);
-    if (!credential?.oauth2?.accessToken) {
-      return [];
-    }
-    return this.tools;
-  }
-
-  async close(): Promise<void> {}
-}
-```
-
-The cache starts empty and stays empty until something writes to it, so
-`getCredential` returns `undefined` on a fresh invocation. Writers live in the
-auth resolution path, which adk-js does not port yet.
+Once a writer exists, a toolset reads the credential the invocation already
+resolved for its `credentialKey` with
+`const credential = context?.getCredential(this.credentialKey);`, instead of
+running an auth exchange of its own.
 
 The cache is shared by reference with every context
 `InvocationContext.clone()` makes. A credential a sub-agent caches is therefore
 visible to the parent invocation, and to any `ReadonlyContext` built over it.
-
-## When there is no agent
-
-`agentName` returns `'unknown'` when the invocation drives a bare node rather
-than an agent. It never throws. Code inside an agent's own execution always has
-an agent, so the fallback only shows up on the node path and in synthetic
-contexts, such as the one `agent_card.ts` builds to resolve a dynamic
-instruction.
