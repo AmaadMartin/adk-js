@@ -22,6 +22,7 @@ import {
   UserInputKind,
   UserInputRequest,
 } from '@google/adk';
+import {Content, Part} from '@google/genai';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
@@ -32,6 +33,11 @@ import {
   loadFileData,
   saveToFile,
 } from '../utils/file_utils.js';
+import {
+  buildFunctionResponse,
+  collectPendingFunctionCalls,
+  renderFunctionCallPrompt,
+} from './hitl_prompt.js';
 
 const HOW_TO_ANSWER: Record<UserInputKind, string> = {
   input: 'Type your reply at the next prompt to continue.',
@@ -268,26 +274,37 @@ async function runInteractively(
     console.log(`Agent reloaded. New runner created with existing session.`);
   });
 
+  let nextMessage: Content | undefined;
+
   while (true) {
-    const query = await getUserInput('[user]: ');
+    if (!nextMessage) {
+      const query = await getUserInput('[user]: ');
 
-    if (!query || !query.trim()) {
-      continue;
+      if (!query || !query.trim()) {
+        continue;
+      }
+
+      if (query === 'exit') {
+        break;
+      }
+
+      nextMessage = {role: 'user', parts: [{text: query}]};
     }
 
-    if (query === 'exit') {
-      break;
-    }
+    const message = nextMessage;
+    nextMessage = undefined;
+    const turnEvents: Event[] = [];
 
     try {
       for await (const event of runner.runAsync({
         userId: options.session.userId,
         sessionId: options.session.id,
-        newMessage: {role: 'user', parts: [{text: query}]},
+        newMessage: message,
         // Interactive CLI: let a plain-text "yes"/"no" resolve a pending tool
         // confirmation (opt-in; off by default on non-interactive surfaces).
         runConfig: {plainTextToolConfirmation: true},
       })) {
+        turnEvents.push(event);
         printEvent(event);
       }
     } catch (error) {
@@ -296,8 +313,34 @@ async function runInteractively(
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      continue;
     }
+
+    nextMessage = await answerPendingCalls(turnEvents);
   }
+}
+
+/**
+ * Asks the user to answer every long-running call the finished turn raised.
+ *
+ * The answers travel in one message because the run resumes from a single
+ * message: sending them one at a time would resume with the first answer and
+ * lose the rest.
+ *
+ * @return The message that answers the turn, or undefined when the turn left
+ *     nothing open.
+ */
+async function answerPendingCalls(
+  events: Event[],
+): Promise<Content | undefined> {
+  const parts: Part[] = [];
+
+  for (const call of collectPendingFunctionCalls(events)) {
+    console.log(renderFunctionCallPrompt(call));
+    parts.push(buildFunctionResponse(call, await getUserInput('[user]: ')));
+  }
+
+  return parts.length > 0 ? {role: 'user', parts} : undefined;
 }
 
 /**

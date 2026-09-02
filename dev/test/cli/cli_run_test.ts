@@ -718,4 +718,190 @@ describe('cli_run', () => {
       expect(output).not.toContain('[streamer]');
     });
   });
+
+  describe('answering a paused interactive turn', () => {
+    /** A long-running call the turn is waiting on. */
+    const longRunningCall = (
+      id: string,
+      name: string,
+      args: Record<string, unknown>,
+    ) => ({
+      author: 'agent',
+      content: {role: 'model', parts: [{functionCall: {id, name, args}}]},
+      longRunningToolIds: [id],
+    });
+
+    /**
+     * Runs the interactive loop over scripted answers, and reports the messages
+     * the runner was given.
+     *
+     * The runner pauses on its first turn only, so the loop asks for the
+     * pending answers, sends them, and then reads `exit`.
+     */
+    async function runPausedTurn(
+      pausedEvents: unknown[],
+      answers: string[],
+    ): Promise<unknown[]> {
+      const messages: unknown[] = [];
+      let turn = 0;
+      (Runner as unknown as Mock).mockImplementation(() => ({
+        runAsync: async function* (options: {newMessage: unknown}) {
+          messages.push(options.newMessage);
+          turn++;
+          if (turn === 1) {
+            for (const event of pausedEvents) {
+              yield event;
+            }
+            return;
+          }
+          yield {author: 'model', content: {parts: [{text: 'resumed'}]}};
+        },
+      }));
+
+      for (const answer of ['start', ...answers, 'exit']) {
+        (mockRl.question as Mock).mockImplementationOnce(
+          (_prompt: string, callback: (value: string) => void) =>
+            callback(answer),
+        );
+      }
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      return messages;
+    }
+
+    it('sends the answer back as a function response', async () => {
+      const messages = await runPausedTurn(
+        [
+          longRunningCall('call-1', 'adk_request_input', {
+            message: 'Enter a number:',
+          }),
+        ],
+        ['21'],
+      );
+
+      expect(messages).toEqual([
+        {role: 'user', parts: [{text: 'start'}]},
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'call-1',
+                name: 'adk_request_input',
+                response: {result: 21},
+              },
+            },
+          ],
+        },
+      ]);
+    });
+
+    it('prints the prompt the paused call asks for', async () => {
+      await runPausedTurn(
+        [
+          longRunningCall('call-1', 'adk_request_confirmation', {
+            toolConfirmation: {hint: 'This deletes the order.'},
+          }),
+        ],
+        ['yes'],
+      );
+
+      const output = (console.log as Mock).mock.calls
+        .map((call) => call.join(' '))
+        .join('\n');
+      expect(output).toContain('[HITL confirm] This deletes the order.');
+      expect(output).toContain(
+        '  Type "yes" to confirm, anything else to reject.',
+      );
+    });
+
+    it('answers two pending calls in one message, in the order raised', async () => {
+      const messages = await runPausedTurn(
+        [
+          longRunningCall('call-1', 'adk_request_input', {message: 'City?'}),
+          longRunningCall('call-2', 'adk_request_confirmation', {
+            toolConfirmation: {hint: 'Send it?'},
+          }),
+        ],
+        ['Paris', 'no'],
+      );
+
+      expect(messages[1]).toEqual({
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'call-1',
+              name: 'adk_request_input',
+              response: {result: 'Paris'},
+            },
+          },
+          {
+            functionResponse: {
+              id: 'call-2',
+              name: 'adk_request_confirmation',
+              response: {confirmed: false},
+            },
+          },
+        ],
+      });
+    });
+
+    it('does not ask for a new user line before it sends the answer', async () => {
+      await runPausedTurn(
+        [longRunningCall('call-1', 'adk_request_input', {message: 'Name?'})],
+        ['Ada'],
+      );
+
+      // start, the answer, exit: the answer is consumed by the pause, not by a
+      // fresh `[user]:` turn.
+      expect((mockRl.question as Mock).mock.calls).toHaveLength(3);
+    });
+
+    it('asks nothing for a turn that raised no long-running call', async () => {
+      const messages = await runPausedTurn(
+        [
+          {
+            author: 'agent',
+            content: {
+              role: 'model',
+              parts: [{functionCall: {id: 'call-1', name: 'get_weather'}}],
+            },
+          },
+        ],
+        [],
+      );
+
+      expect(messages).toEqual([{role: 'user', parts: [{text: 'start'}]}]);
+    });
+
+    it('asks nothing when the turn threw', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const messages: unknown[] = [];
+      (Runner as unknown as Mock).mockImplementation(() => ({
+        runAsync: (options: {newMessage: unknown}) => {
+          messages.push(options.newMessage);
+          throw new Error('model unavailable');
+        },
+      }));
+      for (const answer of ['start', 'exit']) {
+        (mockRl.question as Mock).mockImplementationOnce(
+          (_prompt: string, callback: (value: string) => void) =>
+            callback(answer),
+        );
+      }
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(messages).toHaveLength(1);
+      expect((mockRl.question as Mock).mock.calls).toHaveLength(2);
+    });
+  });
 });

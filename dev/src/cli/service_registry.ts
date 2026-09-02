@@ -44,6 +44,7 @@ import * as path from 'node:path';
 import {isFileExists, isFolderExists} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {importUserModule} from '../utils/module_loader.js';
+import {asNonEmptyString, isRecord} from '../utils/value_utils.js';
 
 const logger = new AdkLogger({
   label: 'ServiceRegistry',
@@ -325,10 +326,6 @@ function requireArtifactService(
   return value;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 /**
  * Whether `value` implements the named methods.
  *
@@ -365,10 +362,6 @@ function isServiceRegistration(value: unknown): value is ServiceRegistration {
     isServiceKind(value['type']) &&
     typeof value['create'] === 'function'
   );
-}
-
-function asNonEmptyString(value: unknown): string | undefined {
-  return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
 function describeError(error: unknown): string {
