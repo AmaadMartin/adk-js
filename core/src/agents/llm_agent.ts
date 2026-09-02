@@ -8,7 +8,6 @@ import {ContentUnion, GenerateContentConfig, Part, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {SingleTurnAgentTool, TaskAgentTool} from '../tools/agent_tool.js';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
-import {FunctionTool} from '../tools/function_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {isBaseNode, type BaseNode} from '../workflow/base_node.js';
 import {NodeContext} from '../workflow/node_context.js';
@@ -1659,24 +1658,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       // Task mode: the agent completes by calling `finish_task` (whose params
       // mirror the output schema) rather than emitting structured output.
       allTools.push(this.finishTaskTool);
-    } else if (
-      this.outputSchema &&
-      allTools.length > 0 &&
-      !this.canonicalModel.capabilities.outputSchemaAndTools
-    ) {
-      const setModelResponseTool = new FunctionTool({
-        name: 'set_model_response',
-        description:
-          'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
-        parameters: this.outputSchema,
-        execute: async (args, toolContext) => {
-          if (toolContext) {
-            toolContext.actions.skipSummarization = true;
-          }
-          return JSON.stringify(args);
-        },
-      });
-      allTools.push(setModelResponseTool);
     }
     // Collect turn metadata and event actions
     // TODO - b/425992518: misleading, this is passing metadata.
@@ -1697,16 +1678,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           toolUnion,
           new ReadonlyContext(invocationContext),
         )
-      ).filter((tool) => {
-        // If allowedTools is not set, allow all tools. Otherwise, only allow
-        // tools that are in the allowedTools set.
-        // The allowedTools set is populated by request processors.
-        return (
+      ).filter(
+        (tool) =>
           !llmRequest.allowedTools ||
-          llmRequest.allowedTools.includes(tool.name) ||
-          tool.name === 'set_model_response'
-        );
-      });
+          llmRequest.allowedTools.includes(tool.name),
+      );
 
       for (const tool of tools) {
         await tool.processLlmRequest({toolContext, llmRequest});

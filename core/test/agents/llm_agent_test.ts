@@ -15,6 +15,7 @@ import {
   BaseToolset,
   CONTENT_REQUEST_PROCESSOR,
   Context,
+  CONTEXT_CACHE_REQUEST_PROCESSOR,
   ContextCompactorRequestProcessor,
   createEvent,
   createSession,
@@ -30,6 +31,7 @@ import {
   LongRunningFunctionTool,
   NL_PLANNING_REQUEST_PROCESSOR,
   NL_PLANNING_RESPONSE_PROCESSOR,
+  OUTPUT_SCHEMA_REQUEST_PROCESSOR,
   PlanReActPlanner,
   PluginManager,
   ReadonlyContext,
@@ -56,6 +58,9 @@ import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
   responseProcessor as CODE_EXECUTION_RESPONSE_PROCESSOR,
 } from '../../src/agents/processors/code_execution_request_processor.js';
+import {IDENTITY_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/identity_llm_request_processor.js';
+import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/instructions_llm_request_processor.js';
+import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/request_confirmation_llm_request_processor.js';
 import {appendDynamicInstructions} from '../../src/models/llm_request.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -74,6 +79,25 @@ class MockLlmConnection implements BaseLlmConnection {
   }
   async close(): Promise<void> {
     return Promise.resolve();
+  }
+}
+
+/**
+ * Records the single request an agent builds, so one run of the default
+ * processor chain can be asserted against.
+ */
+class CapturingLlm extends BaseLlm {
+  capturedRequest?: LlmRequest;
+
+  async *generateContentAsync(
+    request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    this.capturedRequest = request;
+    yield {content: {role: 'model', parts: [{text: '{"answer": "42"}'}]}};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
   }
 }
 
@@ -1214,6 +1238,83 @@ describe('LlmAgent planner', () => {
   });
 });
 
+describe('LlmAgent default processor pipeline order', () => {
+  /** Where a processor sits in a default agent's pipeline. */
+  function positionOf(processor: BaseLlmRequestProcessor): number {
+    return new LlmAgent({name: 'test_agent'}).requestProcessors.indexOf(
+      processor,
+    );
+  }
+
+  it('runs request confirmation, then the instruction, then the identity preamble', () => {
+    expect(positionOf(REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR)).toBeLessThan(
+      positionOf(INSTRUCTIONS_LLM_REQUEST_PROCESSOR),
+    );
+    expect(positionOf(INSTRUCTIONS_LLM_REQUEST_PROCESSOR)).toBeLessThan(
+      positionOf(IDENTITY_LLM_REQUEST_PROCESSOR),
+    );
+  });
+
+  it('runs the context cache processor immediately after the contents', () => {
+    expect(positionOf(CONTEXT_CACHE_REQUEST_PROCESSOR)).toBe(
+      positionOf(CONTENT_REQUEST_PROCESSOR) + 1,
+    );
+  });
+
+  it('runs the output schema processor immediately after code execution', () => {
+    expect(positionOf(OUTPUT_SCHEMA_REQUEST_PROCESSOR)).toBe(
+      positionOf(CODE_EXECUTION_REQUEST_PROCESSOR) + 1,
+    );
+  });
+
+  it('assembles the agent instruction before the identity preamble', async () => {
+    const llm = new CapturingLlm({model: 'gemini-2.5-flash'});
+    const agent = new LlmAgent({
+      name: 'ordered_agent',
+      model: llm,
+      instruction: 'Answer weather questions.',
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_order',
+      session: createSession({
+        id: 'sess_order',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    for await (const _ of agent.runAsync(invocationContext)) {
+      // Drain the run so that the request is fully built.
+    }
+
+    const systemInstruction = String(
+      llm.capturedRequest?.config?.systemInstruction ?? '',
+    );
+    const identityPreamble = 'You are an agent. Your internal name is';
+    expect(systemInstruction).toContain('Answer weather questions.');
+    expect(systemInstruction).toContain(identityPreamble);
+    expect(systemInstruction.indexOf('Answer weather questions.')).toBeLessThan(
+      systemInstruction.indexOf(identityPreamble),
+    );
+  });
+
+  it('gives an agent exactly the processors it supplied', () => {
+    const supplied = [CONTEXT_CACHE_REQUEST_PROCESSOR];
+
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      requestProcessors: supplied,
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    expect(agent.requestProcessors).toEqual(supplied);
+  });
+});
+
 describe('LlmAgent outputSchema with tools', () => {
   const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 
@@ -1226,28 +1327,10 @@ describe('LlmAgent outputSchema with tools', () => {
     vi.unstubAllEnvs();
   });
 
-  /**
-   * Records the single request the agent builds so that all three gated sites
-   * can be asserted against one run of the default processor chain.
-   */
-  class CapturingLlm extends BaseLlm {
-    capturedRequest?: LlmRequest;
-
-    async *generateContentAsync(
-      request: LlmRequest,
-    ): AsyncGenerator<LlmResponse, void, void> {
-      this.capturedRequest = request;
-      yield {content: {role: 'model', parts: [{text: '{"answer": "42"}'}]}};
-    }
-
-    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
-      return new MockLlmConnection();
-    }
-  }
-
   async function captureRequest(options: {
     model: string;
     withTools: boolean;
+    mode?: 'single_turn' | 'task';
   }): Promise<LlmRequest> {
     const llm = new CapturingLlm({model: options.model});
     const agent = new LlmAgent({
@@ -1255,6 +1338,7 @@ describe('LlmAgent outputSchema with tools', () => {
       model: llm,
       instruction: 'Base instruction',
       outputSchema: OUTPUT_SCHEMA,
+      mode: options.mode,
       tools: options.withTools
         ? [
             new FunctionTool({
@@ -1330,6 +1414,22 @@ describe('LlmAgent outputSchema with tools', () => {
     expect(request.config?.responseSchema).toBeUndefined();
     expect(request.toolsDict).toHaveProperty('set_model_response');
     expect(request.config?.systemInstruction).toContain('set_model_response');
+  });
+
+  it('gives a task-mode agent finish_task and no set_model_response', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const request = await captureRequest({
+      model: 'gemini-2.5-flash',
+      withTools: true,
+      mode: 'task',
+    });
+
+    expect(request.toolsDict).toHaveProperty('finish_task');
+    expect(request.toolsDict).not.toHaveProperty('set_model_response');
+    expect(request.config?.systemInstruction).not.toContain(
+      'set_model_response',
+    );
   });
 
   it.each(['true', undefined])(

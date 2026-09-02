@@ -29,6 +29,7 @@ import {branchPathFromString} from '../workflow/branch_path.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent, BaseAgentState} from './base_agent.js';
+import {ContextCacheConfig} from './context_cache_config.js';
 import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
@@ -101,6 +102,8 @@ export interface InvocationContextParams {
   resumabilityConfig?: ResumabilityConfig;
   agentStates?: Record<string, AgentState>;
   endOfAgents?: Record<string, boolean>;
+  /** Context cache configuration for this invocation. */
+  contextCacheConfig?: ContextCacheConfig;
 }
 
 /**
@@ -380,6 +383,12 @@ export class InvocationContext {
   readonly credentialByKey: Record<string, AuthCredential>;
 
   /**
+   * Context cache configuration for this invocation. Context caching is
+   * enabled for the invocation only while this is set.
+   */
+  readonly contextCacheConfig?: ContextCacheConfig;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -403,6 +412,7 @@ export class InvocationContext {
     this.a2aMetadata = params.a2aMetadata;
     this.customMetadata = params.customMetadata ?? {};
     this.credentialByKey = params.credentialByKey ?? Object.create(null);
+    this.contextCacheConfig = params.contextCacheConfig;
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop

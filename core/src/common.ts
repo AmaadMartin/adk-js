@@ -63,6 +63,10 @@ export {
   CONTENT_REQUEST_PROCESSOR,
   ContentRequestProcessor,
 } from './agents/processors/content_request_processor.js';
+export {
+  CONTEXT_CACHE_REQUEST_PROCESSOR,
+  ContextCacheRequestProcessor,
+} from './agents/processors/context_cache_request_processor.js';
 export {ContextCompactorRequestProcessor} from './agents/processors/context_compactor_request_processor.js';
 export {
   INTERACTIONS_REQUEST_PROCESSOR,
@@ -74,6 +78,10 @@ export {
   NlPlanningRequestProcessor,
   NlPlanningResponseProcessor,
 } from './agents/processors/nl_planning_processor.js';
+export {
+  OUTPUT_SCHEMA_REQUEST_PROCESSOR,
+  OutputSchemaRequestProcessor,
+} from './agents/processors/output_schema_request_processor.js';
 export {SingleFlow} from './agents/processors/single_flow.js';
 export {ReadonlyContext} from './agents/readonly_context.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';

@@ -84,16 +84,6 @@ export class InstructionsLlmRequestProcessor extends BaseLlmRequestProcessor {
         appendInstructions(llmRequest, [instructionWithState]);
       }
     }
-
-    if (
-      agent.outputSchema &&
-      agent.tools?.length &&
-      !agent.canonicalModel.capabilities.outputSchemaAndTools
-    ) {
-      appendInstructions(llmRequest, [
-        'To output the final result, you must call the "set_model_response" function with the appropriate values. Do not output anything else.',
-      ]);
-    }
   }
 }
 

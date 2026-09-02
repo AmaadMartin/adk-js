@@ -350,7 +350,7 @@ describe('IdentityLlmRequestProcessor', () => {
 });
 
 describe('identity instruction in the LlmAgent request chain', () => {
-  it('puts the preamble ahead of the agent instruction', async () => {
+  it('puts the preamble behind the agent instruction', async () => {
     const model = new RecordingLlm();
     const agent = new LlmAgent({
       name: 'weather_agent',
@@ -362,9 +362,9 @@ describe('identity instruction in the LlmAgent request chain', () => {
     await runAgentOnce(agent);
 
     expect(model.lastRequest?.config?.systemInstruction).toBe(
-      'You are an agent. Your internal name is "weather_agent". ' +
-        'The description about you is "Answers questions about the weather.".' +
-        '\n\nBe concise.',
+      'Be concise.\n\n' +
+        'You are an agent. Your internal name is "weather_agent". ' +
+        'The description about you is "Answers questions about the weather.".',
     );
   });
 

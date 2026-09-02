@@ -173,8 +173,11 @@ export interface LlmResponse {
   /**
    * Context cache metadata when caching served this response.
    *
-   * It carries the cache identity, its use count and its lifecycle. The
-   * context caching request processor populates it.
+   * It carries the cache identity, its use count and its lifecycle. The model
+   * layer records it here, and because `Event` extends `LlmResponse` it
+   * reaches the session. `ContextCacheRequestProcessor` reads it back off the
+   * session's events to build the next request. No `adk-js` model layer writes
+   * it yet.
    */
   cacheMetadata?: CacheMetadata;
 
