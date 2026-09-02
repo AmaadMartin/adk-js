@@ -187,6 +187,8 @@ export {
   LIVE_RUN_CONFIG,
   LiveEventQueue,
   WEBSOCKET_NORMAL_CLOSURE_CODE,
+  WORKFLOW_LIVE_UNSUPPORTED_ERROR,
+  assertLiveRootSupported,
   isNormalLiveClosure,
   recordLlmRequestForAgent,
 } from './evaluation/live_session.js';

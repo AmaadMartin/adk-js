@@ -50,7 +50,11 @@ import {
   SessionInput,
 } from './eval_case.js';
 import {EvalSet} from './eval_set.js';
-import {EvalLiveSession, LiveEventQueue} from './live_session.js';
+import {
+  assertLiveRootSupported,
+  EvalLiveSession,
+  LiveEventQueue,
+} from './live_session.js';
 import {RequestIntercepterPlugin} from './request_intercepter_plugin.js';
 import {EnsureRetryOptionsPlugin} from './retry_options_utils.js';
 import {
@@ -1011,6 +1015,8 @@ export async function* generateInferencesForSingleUserInvocationLive(params: {
  *     `DEFAULT_LIVE_TIMEOUT_SECONDS`.
  * @param params.app The app the agent belongs to, when there is one.
  * @returns One invocation per turn of the conversation.
+ * @throws {InputValidationError} If `rootAgent` is not an agent. A workflow
+ *     root has no live path yet, so it is refused before the run starts.
  * @throws {Error} If the model does not complete a turn in time, or the live
  *     connection fails with anything but a normal closure.
  */
@@ -1026,6 +1032,8 @@ export async function generateInferencesFromRootAgentLive(params: {
   liveTimeoutSeconds?: number;
   app?: App;
 }): Promise<Invocation[]> {
+  assertLiveRootSupported(params.rootAgent);
+
   const {runner, session, requestIntercepter} = await prepareEvalRun(params);
 
   const liveSession = new EvalLiveSession(

@@ -260,18 +260,23 @@ defaults to `DEFAULT_LIVE_TIMEOUT_SECONDS`. The live session is closed either
 way.
 
 Closing the session closes the request queue and waits up to 30 seconds for the
-background consumer. After that it warns, aborts the run, and returns. A
-WebSocket close code of 1000 is a normal end of stream: the transcript
-collected so far is kept and the eval case is not failed. Any other close code
-propagates.
+background consumer. After that it warns, aborts the run, and returns. An
+aborted consumer stops at its next event, so it does not keep writing to the
+session after the call returned. A WebSocket close code of 1000 is a normal end
+of stream: the transcript collected so far is kept and the eval case is not
+failed. Any other close code propagates.
 
-### Workflow roots
+### Workflow roots are not supported yet
 
-A `Workflow` root is driven through `Runner.runLive` rather than through the
-agent's own live flow, and each agent of the graph has its request recorded up
-front so `afterModelCallback` can be replayed per author. `Runner.runLive`
-currently rejects a non-agent root, so this path starts working when the runner
-grows workflow live support.
+`generateInferencesFromRootAgentLive` needs an agent root. It rejects a
+`Workflow` with an `InputValidationError` before it opens a live session,
+because `Runner.runLive` does not accept a non-agent root. Evaluate a workflow
+with `generateInferencesFromRootAgent`, which does support one.
+
+`EvalLiveSession` already routes a workflow root through `Runner.runLive` and
+records each graph agent's request up front, so the path starts working when
+the runner grows workflow live support. The guard is what has to go on that
+day.
 
 ## Failure modes
 
@@ -284,3 +289,5 @@ grows workflow live support.
   and is exported, so a simulator can apply it to itself.
 - A dataset row whose `query` is not a string raises an
   `InputValidationError`.
+- A `Workflow` root passed to `generateInferencesFromRootAgentLive` raises an
+  `InputValidationError`. The live path needs an agent root.

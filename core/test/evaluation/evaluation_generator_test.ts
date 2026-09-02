@@ -45,6 +45,7 @@ import {
   setLogger,
   UserSimulator,
   UserSimulatorStatus,
+  Workflow,
 } from '@google/adk';
 import {Content, Part} from '@google/genai';
 import {mkdtemp, writeFile} from 'node:fs/promises';
@@ -2033,6 +2034,27 @@ describe('generateInferencesFromRootAgentLive', () => {
       'reply to hello',
     );
     expect(invocations[1].finalResponse).toBeUndefined();
+  });
+
+  it('refuses a workflow root before it opens a live session', async () => {
+    const simulator = new ScriptedUserSimulator(['hello']);
+
+    await expect(
+      generateInferencesFromRootAgentLive({
+        rootAgent: new Workflow({
+          name: 'fixture_workflow',
+          edges: [
+            [
+              'START',
+              new LlmAgent({name: 'wf_agent', model: new ScriptedLlm(['hi'])}),
+            ],
+          ],
+        }),
+        userSimulator: simulator,
+      }),
+    ).rejects.toThrow('Live evaluation needs an agent root.');
+    // The refusal happens before the turn loop, so the simulator is untouched.
+    expect(simulator.receivedEvents).toHaveLength(0);
   });
 
   it('closes the live session when a turn runs out of time', async () => {

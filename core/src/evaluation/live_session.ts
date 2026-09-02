@@ -16,8 +16,9 @@ import {
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
-import {RunConfig} from '../agents/run_config.js';
+import {createRunConfig, RunConfig} from '../agents/run_config.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {Event, getFunctionCalls} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {determineAgentForResumption, Runner} from '../runner/runner.js';
@@ -73,6 +74,33 @@ const CONSUME_TIMEOUT_WARNING = 'Timed out waiting for runLive to finish.';
 /** Message of the error {@link EvalLiveSession.close} throws before `start`. */
 const CLOSED_BEFORE_STARTED_ERROR =
   'The live session was closed before it was started.';
+
+/**
+ * Message of the error a live eval of a non-agent root produces.
+ *
+ * The node driver routes such a root to `Runner.runLive`, which rejects it, so
+ * the eval fails here with a message that explains why rather than deep inside
+ * the runner after the turn loop has already run.
+ */
+export const WORKFLOW_LIVE_UNSUPPORTED_ERROR =
+  'Live evaluation needs an agent root. `Runner.runLive` does not support a ' +
+  'workflow root yet, so a workflow can only be evaluated with ' +
+  '`generateInferencesFromRootAgent`.';
+
+/**
+ * Rejects a root the live path cannot drive.
+ *
+ * Remove this guard once `Runner.runLive` accepts a non-agent root;
+ * {@link EvalLiveSession.consumeNodeEvents} is already written for that day.
+ *
+ * @param root The root the caller asked to evaluate.
+ * @throws {InputValidationError} If the root is not an agent.
+ */
+export function assertLiveRootSupported(root: unknown): void {
+  if (!isBaseAgent(root)) {
+    throw new InputValidationError(WORKFLOW_LIVE_UNSUPPORTED_ERROR);
+  }
+}
 
 /**
  * Collects the events a live connection produces until the turn that asked for
@@ -292,6 +320,12 @@ export class EvalLiveSession {
   /**
    * Drives a workflow root through `Runner.runLive`.
    *
+   * `Runner.runLive` rejects a non-agent root today, so this throws
+   * {@link WORKFLOW_LIVE_UNSUPPORTED_ERROR} in the runner rather than driving
+   * anything. The routing is the behaviour being ported, and it starts working
+   * when the runner grows workflow live support; until then
+   * {@link assertLiveRootSupported} refuses such a root up front.
+   *
    * Public so a test can drive it directly, as adk-python's tests drive
    * `_consume_node_events`.
    */
@@ -307,6 +341,9 @@ export class EvalLiveSession {
         runConfig: LIVE_RUN_CONFIG,
         abortSignal: this.abortController.signal,
       })) {
+        if (this.abortController.signal.aborted) {
+          return;
+        }
         event.invocationId = this.currentInvocationId;
         const callbackContext = callbackContextByAuthor.get(event.author ?? '');
         if (callbackContext !== undefined) {
@@ -462,6 +499,12 @@ export class EvalLiveSession {
 
     let inFunctionCallLoop = false;
     for await (const event of agentToRun.runLive(invocationContext)) {
+      // `close()` aborts a consumer that outlived its wait. Stop here so an
+      // abandoned consumer stops writing to the session the caller has
+      // already returned.
+      if (this.abortController.signal.aborted) {
+        return;
+      }
       event.invocationId = this.currentInvocationId;
       await invocationContext.pluginManager.runAfterModelCallback({
         callbackContext,
@@ -477,7 +520,7 @@ export class EvalLiveSession {
       const functionCalls = getFunctionCalls(event);
       if (functionCalls.length > 0) {
         inFunctionCallLoop = true;
-        await this.runFunctionCalls(root, agentToRun, event, functionCalls);
+        await this.runFunctionCalls(root, event, functionCalls);
       }
       inFunctionCallLoop = this.settleTurn(event, inFunctionCallLoop);
     }
@@ -486,13 +529,17 @@ export class EvalLiveSession {
   /**
    * Runs the tools a live event asked for and feeds the results back.
    *
+   * The tools and both tool callbacks come from the root agent, not from the
+   * agent the live flow resolved, matching adk-python: its
+   * `handle_function_calls_live` reads them off `invocation_context.agent`,
+   * which the caller sets to the root.
+   *
    * A tool that throws still gets an answer: the model is sent one error-
    * carrying `functionResponse` per call, so the turn continues instead of
    * stalling on a response that never arrives.
    */
   private async runFunctionCalls(
     root: BaseAgent,
-    agent: LlmAgent,
     event: Event,
     functionCalls: FunctionCall[],
   ): Promise<void> {
@@ -500,13 +547,10 @@ export class EvalLiveSession {
       root,
       event.invocationId,
     );
-    const rootAgent = this.runner.agent;
-    const toolsDict: Record<string, BaseTool> = isLlmAgent(rootAgent)
+    const toolsDict: Record<string, BaseTool> = isLlmAgent(root)
       ? Object.fromEntries(
           (
-            await rootAgent.canonicalTools(
-              new ReadonlyContext(invocationContext),
-            )
+            await root.canonicalTools(new ReadonlyContext(invocationContext))
           ).map((tool) => [tool.name, tool]),
         )
       : {};
@@ -516,8 +560,12 @@ export class EvalLiveSession {
         invocationContext,
         functionCallEvent: event,
         toolsDict,
-        beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
-        afterToolCallbacks: agent.canonicalAfterToolCallbacks,
+        beforeToolCallbacks: isLlmAgent(root)
+          ? root.canonicalBeforeToolCallbacks
+          : [],
+        afterToolCallbacks: isLlmAgent(root)
+          ? root.canonicalAfterToolCallbacks
+          : [],
       });
       for (const part of responseEvent?.content?.parts ?? []) {
         if (part.functionResponse) {
@@ -565,7 +613,9 @@ export class EvalLiveSession {
           )
         : undefined,
       pluginManager: this.runner.pluginManager,
-      runConfig: LIVE_RUN_CONFIG,
+      // Resolved rather than passed raw, so the run-wide `maxLlmCalls` cap is
+      // populated. `Runner.runLive` does the same for the node path.
+      runConfig: createRunConfig(LIVE_RUN_CONFIG),
       liveRequestQueue: this.liveRequestQueue,
       abortSignal: this.abortController.signal,
     });

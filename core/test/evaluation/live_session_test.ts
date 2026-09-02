@@ -13,6 +13,7 @@ import {
   Event,
   FunctionTool,
   InMemorySessionService,
+  InputValidationError,
   InvocationContext,
   LiveRequest,
   LiveRequestQueue,
@@ -33,11 +34,13 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {BaseLlmRequestProcessor} from '../../src/agents/processors/base_llm_processor.js';
 import {createRunConfig} from '../../src/agents/run_config.js';
 import {
+  assertLiveRootSupported,
   CONSUME_TIMEOUT_MS,
   EvalLiveSession,
   isNormalLiveClosure,
   LIVE_RUN_CONFIG,
   LiveEventQueue,
+  WORKFLOW_LIVE_UNSUPPORTED_ERROR,
 } from '../../src/evaluation/live_session.js';
 
 import {LongRunningFunctionTool} from '../../src/tools/long_running_tool.js';
@@ -611,6 +614,20 @@ describe('EvalLiveSession agent routing', () => {
     ).toEqual(['get_weather']);
   });
 
+  it('resolves the run config, so the run-wide call cap is enforced', async () => {
+    const agent = new ScriptedLiveAgent(
+      {name: 'test_agent', model: stubModel()},
+      scriptOf(agentEvent({text: 'Hello', turnComplete: true})),
+    );
+    const {session} = await newAgentSession({agent});
+
+    await session.consumeEvents();
+
+    const runConfig = agent.liveContexts[0].runConfig;
+    expect(runConfig?.maxLlmCalls).toBe(createRunConfig().maxLlmCalls);
+    expect(runConfig?.responseModalities).toEqual([Modality.AUDIO]);
+  });
+
   it('stamps the turn invocation id onto every event', async () => {
     const agent = new ScriptedLiveAgent(
       {name: 'test_agent', model: stubModel()},
@@ -809,6 +826,78 @@ describe('EvalLiveSession agent routing', () => {
     expect(await drainLiveRequests(session.liveRequestQueue)).toEqual([]);
   });
 
+  it('takes the tools and the tool callbacks from the root agent', async () => {
+    const fired: string[] = [];
+    const child = new ScriptedLiveAgent(
+      {
+        name: 'child',
+        model: stubModel(),
+        beforeToolCallback: () => {
+          fired.push('child');
+          return undefined;
+        },
+      },
+      scriptOf(
+        agentEvent({
+          author: 'child',
+          functionCall: {name: 'get_weather', id: 'call-1'},
+        }),
+        agentEvent({author: 'child', turnComplete: true}),
+      ),
+    );
+    const root = new LlmAgent({
+      name: 'parent',
+      model: stubModel(),
+      subAgents: [child],
+      tools: [
+        new FunctionTool({
+          name: 'get_weather',
+          description: 'Get weather details',
+          execute: () => ({temperature: 20}),
+        }),
+      ],
+      beforeToolCallback: () => {
+        fired.push('parent');
+        return undefined;
+      },
+    });
+
+    const sessionService = new InMemorySessionService();
+    const stored = await newSession(sessionService);
+    // Resumption resolves the child, so the agent driven and the root the
+    // tools come from are different objects.
+    for (const event of [
+      createEvent({
+        author: 'child',
+        invocationId: 'previous',
+        content: {parts: [{functionCall: {name: 'get_weather', id: 'c1'}}]},
+      }),
+      createEvent({
+        author: 'child',
+        invocationId: 'previous',
+        content: {parts: [{functionResponse: {name: 'get_weather', id: 'c1'}}]},
+      }),
+    ]) {
+      await sessionService.appendEvent({session: stored, event});
+    }
+    const runner = new Runner({
+      appName: APP_NAME,
+      agent: root,
+      sessionService,
+      resumabilityConfig: {isResumable: true},
+    });
+    const session = new EvalLiveSession(runner, stored, USER_ID, stored.id);
+
+    await session.consumeEvents();
+
+    expect(child.liveContexts).toHaveLength(1);
+    expect(fired).toEqual(['parent']);
+    const requests = await drainLiveRequests(session.liveRequestQueue);
+    expect(requests[0].content?.parts?.[0].functionResponse?.name).toBe(
+      'get_weather',
+    );
+  });
+
   it('answers an unresolvable call when the root holds no tools', async () => {
     const sessionService = new InMemorySessionService();
     const child = new ScriptedLiveAgent(
@@ -867,6 +956,50 @@ describe('EvalLiveSession agent routing', () => {
 
     await expect(session.consumeEvents()).rejects.toThrow(
       "Cannot drive agent 'pipeline' via the LlmAgent live flow",
+    );
+  });
+});
+
+describe('live evaluation of a workflow root', () => {
+  function newWorkflowRoot(): Workflow {
+    return new Workflow({
+      name: 'stub_workflow',
+      edges: [['START', new LlmAgent({name: 'greeter', model: stubModel()})]],
+    });
+  }
+
+  it('is refused up front, naming the runner limitation', () => {
+    expect(() => assertLiveRootSupported(newWorkflowRoot())).toThrowError(
+      InputValidationError,
+    );
+    expect(() => assertLiveRootSupported(newWorkflowRoot())).toThrow(
+      WORKFLOW_LIVE_UNSUPPORTED_ERROR,
+    );
+  });
+
+  it('accepts an agent root', () => {
+    expect(() =>
+      assertLiveRootSupported(new LlmAgent({name: 'solo', model: stubModel()})),
+    ).not.toThrow();
+  });
+
+  // The node driver in this file is exercised against `ScriptedLiveRunner`,
+  // which overrides `runLive`. This test pins what the REAL runner does today,
+  // so the stubbed suite is never mistaken for proof that a workflow can be
+  // evaluated live. It fails the day `Runner.runLive` accepts a workflow, which
+  // is the day `assertLiveRootSupported` should be deleted.
+  it('is what the real runner still rejects', async () => {
+    const sessionService = new InMemorySessionService();
+    const stored = await newSession(sessionService);
+    const runner = new Runner({
+      appName: APP_NAME,
+      agent: newWorkflowRoot(),
+      sessionService,
+    });
+    const session = new EvalLiveSession(runner, stored, USER_ID, stored.id);
+
+    await expect(session.consumeEvents()).rejects.toThrow(
+      'runLive is only supported for agents.',
     );
   });
 });
@@ -948,7 +1081,11 @@ describe('EvalLiveSession lifecycle', () => {
     await expect(closing).resolves.toBeUndefined();
     expect(session.isFinished).toBe(false);
     expect(runner.runLiveCalls[0].abortSignal?.aborted).toBe(true);
+
+    // The abandoned consumer must not keep writing once `close` has returned.
     releaseConsumer?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(session.eventQueue.drain()).toEqual([]);
   });
 
   it('swallows a normal closure the agent driver raised', async () => {
@@ -961,6 +1098,32 @@ describe('EvalLiveSession lifecycle', () => {
     session.start();
 
     await expect(session.close()).resolves.toBeUndefined();
+  });
+
+  it('stops an aborted agent consumer before it writes to the session', async () => {
+    vi.useFakeTimers();
+    let releaseConsumer: (() => void) | undefined;
+    const stalled = new Promise<void>((resolve) => {
+      releaseConsumer = resolve;
+    });
+    const agent = new ScriptedLiveAgent(
+      {name: 'test_agent', model: stubModel()},
+      async function* () {
+        await stalled;
+        yield agentEvent({text: 'late', turnComplete: true});
+      },
+    );
+    const {session, sessionService} = await newAgentSession({agent});
+
+    session.start();
+    const closing = session.close();
+    await vi.advanceTimersByTimeAsync(CONSUME_TIMEOUT_MS);
+    await expect(closing).resolves.toBeUndefined();
+
+    releaseConsumer?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(session.eventQueue.drain()).toEqual([]);
+    expect(sessionService.appended).toEqual([]);
   });
 
   it('re-arms the turn latch on every turn', async () => {
