@@ -53,11 +53,8 @@ export function normalizeBaseUrlAndApiVersion(
     return {baseUrl};
   }
 
-  const userInfo = url.username
-    ? `${url.username}${url.password ? `:${url.password}` : ''}@`
-    : '';
-  return {
-    baseUrl: `${url.protocol}//${userInfo}${url.host}/`,
-    apiVersion: versionMatch[1],
-  };
+  // The query and fragment are already known empty, so dropping the path is
+  // all the normalized URL needs.
+  url.pathname = '/';
+  return {baseUrl: url.toString(), apiVersion: versionMatch[1]};
 }
