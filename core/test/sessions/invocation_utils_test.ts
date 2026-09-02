@@ -10,7 +10,6 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   extractResumeInputs,
   findUserMessageForInvocation,
-  getFunctionResponsesFromContent,
   resolveInvocationId,
   resolveInvocationIdFromFunctionResponses,
   validateNewMessage,
@@ -42,22 +41,6 @@ function responseMessage(ids: Array<string | undefined>): Content {
 function sessionOf(events: Event[]): Session {
   return createSession({id: 's1', appName: 'app', userId: 'u', events});
 }
-
-describe('getFunctionResponsesFromContent', () => {
-  it('returns an empty list for a message with no parts', () => {
-    expect(getFunctionResponsesFromContent(undefined)).toEqual([]);
-    expect(getFunctionResponsesFromContent({role: 'user'})).toEqual([]);
-  });
-
-  it('returns only the function response parts', () => {
-    const responses = getFunctionResponsesFromContent({
-      role: 'user',
-      parts: [{text: 'hi'}, {functionResponse: {id: 'fc-1', name: 'book'}}],
-    });
-
-    expect(responses).toEqual([{id: 'fc-1', name: 'book'}]);
-  });
-});
 
 describe('extractResumeInputs', () => {
   it('keys each tool result by the call it answers', () => {

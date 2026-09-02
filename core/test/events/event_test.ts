@@ -21,6 +21,7 @@ import {describe, expect, it} from 'vitest';
 import {
   createNewEventId,
   generateClientFunctionCallId,
+  getFunctionResponsesFromContent,
   populateClientFunctionCallId,
   transformToCamelCaseEvent,
   transformToSnakeCaseEvent,
@@ -166,6 +167,22 @@ describe('Event Utils', () => {
       expect(getFunctionResponses(event)).toHaveLength(2);
       expect(getFunctionResponses(event)[0].name).toBe('func1');
       expect(getFunctionResponses(event)[1].name).toBe('func2');
+    });
+  });
+
+  describe('getFunctionResponsesFromContent', () => {
+    it('returns an empty list for a message with no parts', () => {
+      expect(getFunctionResponsesFromContent(undefined)).toEqual([]);
+      expect(getFunctionResponsesFromContent({role: 'user'})).toEqual([]);
+    });
+
+    it('returns only the function response parts', () => {
+      const responses = getFunctionResponsesFromContent({
+        role: 'user',
+        parts: [{text: 'hi'}, {functionResponse: {id: 'fc-1', name: 'book'}}],
+      });
+
+      expect(responses).toEqual([{id: 'fc-1', name: 'book'}]);
     });
   });
 

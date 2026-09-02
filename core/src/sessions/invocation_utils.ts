@@ -4,29 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, FunctionResponse} from '@google/genai';
+import {Content} from '@google/genai';
 
-import {Event, getFunctionCalls} from '../events/event.js';
+import {
+  Event,
+  getFunctionCalls,
+  getFunctionResponsesFromContent,
+} from '../events/event.js';
 import {logger} from '../utils/logger.js';
 import {Session} from './session.js';
-
-/**
- * Returns the function responses carried by a message.
- *
- * Ported from `google/adk-python`
- * `runners.py::_get_function_responses_from_content`.
- */
-export function getFunctionResponsesFromContent(
-  content: Content | undefined,
-): FunctionResponse[] {
-  const responses: FunctionResponse[] = [];
-  for (const part of content?.parts ?? []) {
-    if (part.functionResponse) {
-      responses.push(part.functionResponse);
-    }
-  }
-  return responses;
-}
 
 /**
  * Maps the function responses in a message to the tool results they carry,
