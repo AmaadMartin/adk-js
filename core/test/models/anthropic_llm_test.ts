@@ -14,6 +14,7 @@ import {
   AnthropicRateLimitError,
   AnthropicRequestOptions,
   Claude,
+  ContextCacheConfig,
   FunctionTool,
   LLMRegistry,
   LlmRequest,
@@ -1486,5 +1487,305 @@ describe('Claude Vertex client construction', () => {
       'x-goog-api-client': getClientLabels().join(' '),
       'user-agent': getClientLabels().join(' '),
     });
+  });
+});
+
+const EPHEMERAL: Anthropic.CacheControlEphemeral = {type: 'ephemeral'};
+
+function cacheConfig(
+  overrides: Partial<ContextCacheConfig> = {},
+): ContextCacheConfig {
+  return {cacheIntervals: 10, ttlSeconds: 1800, minTokens: 0, ...overrides};
+}
+
+/** A three-turn conversation with a system instruction and two tools. */
+function cacheRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
+  return request({
+    contents: [
+      {role: 'user', parts: [{text: 'Cache this'}]},
+      {role: 'model', parts: [{text: 'Sure'}]},
+      {role: 'user', parts: [{text: 'And this'}]},
+    ],
+    config: {
+      systemInstruction: 'You are a helpful assistant',
+      tools: [
+        {
+          functionDeclarations: [
+            {name: 'first', description: 'a'},
+            {name: 'second', description: 'b'},
+          ],
+        },
+      ],
+    },
+    cacheConfig: cacheConfig(),
+    ...overrides,
+  });
+}
+
+/** Collects every cache breakpoint in a payload, keyed by where it sits. */
+function breakpoints(
+  params: Anthropic.MessageCreateParams,
+): Record<string, Anthropic.CacheControlEphemeral | null> {
+  const found: Record<string, Anthropic.CacheControlEphemeral | null> = {};
+  if (Array.isArray(params.system)) {
+    params.system.forEach((block, index) => {
+      if (block.cache_control !== undefined) {
+        found[`system[${index}]`] = block.cache_control;
+      }
+    });
+  }
+  (params.tools ?? []).forEach((tool, index) => {
+    if ('cache_control' in tool && tool.cache_control !== undefined) {
+      found[`tools[${index}]`] = tool.cache_control;
+    }
+  });
+  params.messages.forEach((message, messageIndex) => {
+    if (!Array.isArray(message.content)) {
+      return;
+    }
+    message.content.forEach((block, blockIndex) => {
+      if ('cache_control' in block && block.cache_control !== undefined) {
+        found[`messages[${messageIndex}][${blockIndex}]`] = block.cache_control;
+      }
+    });
+  });
+  return found;
+}
+
+/** Runs one turn and returns the payload that reached `messages.create`. */
+async function sentParams(
+  llmRequest: LlmRequest,
+  stream = false,
+): Promise<Anthropic.MessageCreateParams> {
+  const client = new FakeAnthropicClient(
+    stream ? [messageStart(), messageDelta('end_turn')] : message(),
+  );
+
+  await collect(new AnthropicLlm({client}), llmRequest, stream);
+
+  return client.lastParams;
+}
+
+describe('AnthropicLlm prompt caching', () => {
+  it('sends no breakpoints when the app configured no caching', async () => {
+    const params = await sentParams(cacheRequest({cacheConfig: undefined}));
+
+    expect(params.system).toBe('You are a helpful assistant');
+    expect(breakpoints(params)).toEqual({});
+  });
+
+  it('marks the tools, the system instruction and the conversation', async () => {
+    const params = await sentParams(cacheRequest());
+
+    expect(params.system).toEqual([
+      {
+        type: 'text',
+        text: 'You are a helpful assistant',
+        cache_control: EPHEMERAL,
+      },
+    ]);
+    expect(breakpoints(params)).toEqual({
+      'system[0]': EPHEMERAL,
+      'tools[1]': EPHEMERAL,
+      'messages[2][0]': EPHEMERAL,
+    });
+  });
+
+  it('marks the same three breakpoints when streaming', async () => {
+    const params = await sentParams(cacheRequest(), true);
+
+    expect(params.stream).toBe(true);
+    expect(breakpoints(params)).toEqual({
+      'system[0]': EPHEMERAL,
+      'tools[1]': EPHEMERAL,
+      'messages[2][0]': EPHEMERAL,
+    });
+  });
+
+  it('still marks the rest without a system instruction', async () => {
+    const llmRequest = cacheRequest();
+    delete llmRequest.config?.systemInstruction;
+
+    const params = await sentParams(llmRequest);
+
+    expect(params.system).toBeUndefined();
+    expect(breakpoints(params)).toEqual({
+      'tools[1]': EPHEMERAL,
+      'messages[2][0]': EPHEMERAL,
+    });
+  });
+
+  it.each([
+    {ttlSeconds: 300, cacheControl: EPHEMERAL},
+    {ttlSeconds: 1800, cacheControl: EPHEMERAL},
+    {ttlSeconds: 3599, cacheControl: EPHEMERAL},
+    {ttlSeconds: 3600, cacheControl: {type: 'ephemeral', ttl: '1h'}},
+    {ttlSeconds: 86_400, cacheControl: {type: 'ephemeral', ttl: '1h'}},
+  ])(
+    'maps a lifetime of $ttlSeconds seconds onto one Claude offers',
+    async ({ttlSeconds, cacheControl}) => {
+      const params = await sentParams(
+        cacheRequest({cacheConfig: cacheConfig({ttlSeconds})}),
+      );
+
+      expect(breakpoints(params)['system[0]']).toEqual(cacheControl);
+    },
+  );
+
+  it.each([
+    {
+      name: 'thinking',
+      trailingPart: {text: 'reasoning', thought: true},
+    },
+    {
+      name: 'redacted_thinking',
+      trailingPart: {
+        thought: true,
+        thoughtSignature: Buffer.from('opaque').toString('base64'),
+      },
+    },
+  ])('never marks a trailing $name block', async ({name, trailingPart}) => {
+    const params = await sentParams(
+      cacheRequest({
+        contents: [
+          {role: 'user', parts: [{text: 'Question'}]},
+          {role: 'model', parts: [{text: 'Answer'}, trailingPart]},
+        ],
+      }),
+    );
+
+    const blocks = params.messages[1].content;
+    if (!Array.isArray(blocks)) {
+      return expect.fail('the model turn must carry a list of blocks');
+    }
+    expect(blocks[1].type).toBe(name);
+    expect(blocks[1]).not.toHaveProperty('cache_control');
+    expect(breakpoints(params)['messages[1][1]']).toBeUndefined();
+    expect(breakpoints(params)['messages[1][0]']).toEqual(EPHEMERAL);
+  });
+
+  it('walks back past a turn left with no blocks', async () => {
+    const params = await sentParams(
+      cacheRequest({
+        contents: [
+          {role: 'user', parts: [{text: 'Question'}]},
+          {
+            role: 'model',
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/png',
+                  data: 'bm90LWEtcmVhbC1wbmc=',
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(params.messages[1].content).toEqual([]);
+    expect(breakpoints(params)).toEqual({
+      'system[0]': EPHEMERAL,
+      'tools[1]': EPHEMERAL,
+      'messages[0][0]': EPHEMERAL,
+    });
+  });
+
+  it('sends no breakpoints below the configured minimum', async () => {
+    const params = await sentParams(
+      cacheRequest({
+        cacheConfig: cacheConfig({minTokens: 5000}),
+        cacheableContentsTokenCount: 4999,
+      }),
+    );
+
+    expect(params.system).toBe('You are a helpful assistant');
+    expect(breakpoints(params)).toEqual({});
+  });
+
+  it('sends breakpoints at the configured minimum', async () => {
+    const params = await sentParams(
+      cacheRequest({
+        cacheConfig: cacheConfig({minTokens: 5000}),
+        cacheableContentsTokenCount: 5000,
+      }),
+    );
+
+    expect(breakpoints(params)).toEqual({
+      'system[0]': EPHEMERAL,
+      'tools[1]': EPHEMERAL,
+      'messages[2][0]': EPHEMERAL,
+    });
+  });
+
+  it('marks the first turn of a session, whose size is unknown', async () => {
+    const llmRequest = cacheRequest();
+    expect(llmRequest.cacheableContentsTokenCount).toBeUndefined();
+
+    const params = await sentParams(llmRequest);
+
+    expect(breakpoints(params)).toEqual({
+      'system[0]': EPHEMERAL,
+      'tools[1]': EPHEMERAL,
+      'messages[2][0]': EPHEMERAL,
+    });
+  });
+
+  it('leaves a request without tools unmarked at the tool level', async () => {
+    const params = await sentParams(
+      cacheRequest({config: {systemInstruction: 'Only a system prompt'}}),
+    );
+
+    expect(params.tools).toBeUndefined();
+    expect(breakpoints(params)).toEqual({
+      'system[0]': EPHEMERAL,
+      'messages[2][0]': EPHEMERAL,
+    });
+  });
+});
+
+describe('AnthropicLlm streamed tool arguments', () => {
+  function toolCallStream(partialJson: string): StreamEvent[] {
+    return [
+      messageStart(),
+      {
+        type: 'content_block_start',
+        index: 0,
+        content_block: {
+          type: 'tool_use',
+          id: 'toolu_1',
+          name: 'weather',
+          input: {},
+          caller: {type: 'direct'},
+        },
+      },
+      {
+        type: 'content_block_delta',
+        index: 0,
+        delta: {type: 'input_json_delta', partial_json: partialJson},
+      },
+      messageDelta('tool_use'),
+    ];
+  }
+
+  it('names the tool when the streamed arguments are truncated', async () => {
+    const client = new FakeAnthropicClient(toolCallStream('{"city": "Par'));
+
+    await expect(
+      collect(new AnthropicLlm({client}), request(), true),
+    ).rejects.toThrowError(
+      /^Invalid JSON in streamed arguments for tool weather: /,
+    );
+  });
+
+  it('rejects streamed arguments that are not a JSON object', async () => {
+    const client = new FakeAnthropicClient(toolCallStream('"Paris"'));
+
+    await expect(
+      collect(new AnthropicLlm({client}), request(), true),
+    ).rejects.toThrowError(
+      'Expected a JSON object for streamed arguments for tool weather.',
+    );
   });
 });
