@@ -26,48 +26,6 @@ import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './request_input_llm_request_p
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './tool_filter_request_processor.js';
 
 /**
- * Builds the request pipeline for a single flow.
- *
- * @param contextCompactors - Compactors to evaluate before the contents are
- *   assembled. When empty, no compaction processor is inserted.
- * @return A fresh list, in the order the processors run.
- */
-function createRequestProcessors(
-  contextCompactors: BaseContextCompactor[],
-): BaseLlmRequestProcessor[] {
-  return [
-    BASIC_LLM_REQUEST_PROCESSOR,
-    AUTH_PREPROCESSOR,
-    REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
-    REQUEST_INPUT_LLM_REQUEST_PROCESSOR,
-    INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
-    IDENTITY_LLM_REQUEST_PROCESSOR,
-    // Read the Interactions chain id before contents. A chained request needs
-    // only the current turn, because the service keeps the earlier turns.
-    INTERACTIONS_REQUEST_PROCESSOR,
-    // Compaction runs before contents so the compacted events reach the model.
-    ...(contextCompactors.length > 0
-      ? [new ContextCompactorRequestProcessor(contextCompactors)]
-      : []),
-    CONTENT_REQUEST_PROCESSOR,
-    // Code execution runs after contents because it rewrites them to optimize
-    // data files.
-    CODE_EXECUTION_REQUEST_PROCESSOR,
-    TOOL_FILTER_REQUEST_PROCESSOR,
-    OUTPUT_SCHEMA_REQUEST_PROCESSOR,
-  ];
-}
-
-/**
- * Builds the response pipeline for a single flow.
- *
- * @return A fresh list, in the order the processors run.
- */
-function createResponseProcessors(): BaseLlmResponseProcessor[] {
-  return [CODE_EXECUTION_RESPONSE_PROCESSOR];
-}
-
-/**
  * The standard processor pipeline for an agent that considers only itself and
  * its tools.
  *
@@ -79,17 +37,40 @@ function createResponseProcessors(): BaseLlmResponseProcessor[] {
  */
 export class SingleFlow {
   /** The request processors, in the order they run. */
-  readonly requestProcessors: BaseLlmRequestProcessor[] = [];
+  readonly requestProcessors: BaseLlmRequestProcessor[];
 
   /** The response processors, in the order they run. */
-  readonly responseProcessors: BaseLlmResponseProcessor[] = [];
+  readonly responseProcessors: BaseLlmResponseProcessor[] = [
+    CODE_EXECUTION_RESPONSE_PROCESSOR,
+  ];
 
   /**
    * @param contextCompactors - Compactors to evaluate before the contents are
    *   assembled. When empty, no compaction processor is inserted.
    */
   constructor(contextCompactors: BaseContextCompactor[] = []) {
-    this.requestProcessors.push(...createRequestProcessors(contextCompactors));
-    this.responseProcessors.push(...createResponseProcessors());
+    this.requestProcessors = [
+      BASIC_LLM_REQUEST_PROCESSOR,
+      AUTH_PREPROCESSOR,
+      REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
+      REQUEST_INPUT_LLM_REQUEST_PROCESSOR,
+      INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
+      IDENTITY_LLM_REQUEST_PROCESSOR,
+      // Read the Interactions chain id before contents. A chained request
+      // needs only the current turn, because the service keeps the earlier
+      // turns.
+      INTERACTIONS_REQUEST_PROCESSOR,
+      // Compaction runs before contents so the compacted events reach the
+      // model.
+      ...(contextCompactors.length > 0
+        ? [new ContextCompactorRequestProcessor(contextCompactors)]
+        : []),
+      CONTENT_REQUEST_PROCESSOR,
+      // Code execution runs after contents because it rewrites them to
+      // optimize data files.
+      CODE_EXECUTION_REQUEST_PROCESSOR,
+      TOOL_FILTER_REQUEST_PROCESSOR,
+      OUTPUT_SCHEMA_REQUEST_PROCESSOR,
+    ];
   }
 }

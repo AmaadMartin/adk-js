@@ -60,25 +60,9 @@ const agent = new LlmAgent({
 
 ## The pipeline
 
-`requestProcessors`, in the order they run:
-
-1. `BASIC_LLM_REQUEST_PROCESSOR` — the model, the generation config, the output
-   schema when the model accepts one.
-2. `AUTH_PREPROCESSOR` — resolves credentials that a tool asked for on an
-   earlier turn.
-3. `REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR` — replays a tool confirmation.
-4. `REQUEST_INPUT_LLM_REQUEST_PROCESSOR` — replays an answer to a request for
-   input.
-5. `INSTRUCTIONS_LLM_REQUEST_PROCESSOR` — the global and agent instructions.
-6. `IDENTITY_LLM_REQUEST_PROCESSOR` — the agent name and description preamble.
-7. `INTERACTIONS_REQUEST_PROCESSOR` — the Interactions chain id, read before the
-   contents.
-8. `ContextCompactorRequestProcessor` — present only when you pass compactors.
-9. `CONTENT_REQUEST_PROCESSOR` — the conversation contents.
-10. `CODE_EXECUTION_REQUEST_PROCESSOR` — rewrites the contents to optimize data
-    files.
-11. `TOOL_FILTER_REQUEST_PROCESSOR` — narrows the tool list.
-12. `OUTPUT_SCHEMA_REQUEST_PROCESSOR` — the `set_model_response` workaround.
+The constructor in `core/src/agents/processors/single_flow.ts` is the list, with
+a comment on each processor whose position is load-bearing. Read it there rather
+than from a copy here.
 
 `responseProcessors` holds the code execution response processor, which runs the
 code the model emitted.

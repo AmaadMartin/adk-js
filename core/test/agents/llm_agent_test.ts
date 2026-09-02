@@ -1215,6 +1215,60 @@ describe('LlmAgent outputSchema with tools', () => {
     },
   );
 
+  it('offers set_model_response even when allowedTools excludes it', async () => {
+    // The tool reaches the model through toolsDict, which the allowedTools
+    // filter never touches, so no exemption for its name is needed.
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+    const narrowAllowedTools = new (class extends BaseLlmRequestProcessor {
+      // eslint-disable-next-line require-yield -- BaseLlmRequestProcessor mandates an AsyncGenerator; this processor only mutates the request.
+      async *runAsync(
+        _invocationContext: InvocationContext,
+        request: LlmRequest,
+      ): AsyncGenerator<Event, void, void> {
+        request.allowedTools = ['nothing_matches_this'];
+      }
+    })();
+    const llm = new CapturingLlm({model: 'gemini-2.5-flash'});
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: llm,
+      outputSchema: OUTPUT_SCHEMA,
+      tools: [
+        new FunctionTool({
+          name: 'some_tool',
+          description: 'A test tool',
+          execute: () => 'result',
+        }),
+      ],
+      requestProcessors: [
+        ...new SingleFlow().requestProcessors,
+        narrowAllowedTools,
+      ],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_allowed_tools',
+      session: createSession({
+        id: 'sess_allowed_tools',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    for await (const _ of agent.runAsync(invocationContext)) {
+      // Drain the run so that the request is fully built.
+    }
+
+    const request = llm.capturedRequest;
+    if (!request) {
+      expect.fail('the agent never called the model');
+    }
+    expect(request.toolsDict).toHaveProperty('set_model_response');
+    expect(request.toolsDict).not.toHaveProperty('some_tool');
+  });
+
   it('persists state writes made in processLlmRequest across turns', async () => {
     class StateProbeTool extends BaseTool {
       constructor() {
