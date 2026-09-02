@@ -25,7 +25,6 @@ import {runAgent} from './cli_run.js';
 import {AGENT_TYPE_OPTION, toAgentType} from './create_options.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
-import {applyExclusiveOptions} from './exclusive_options.js';
 import {
   applyVerboseLogLevel,
   getLogLevelFromOptions,
@@ -34,6 +33,9 @@ import {
 } from './log_options.js';
 
 dotenv.config({quiet: true});
+
+/** The exit code click uses for a usage error, and adk-python inherits. */
+const USAGE_ERROR_EXIT_CODE = 2;
 
 function getSessionServiceFromOptions(options: {
   session_service_uri?: string;
@@ -342,7 +344,22 @@ export function createProgram(): Command {
       }
     });
 
-  applyExclusiveOptions(program.command('run'), ['replay', 'resume'])
+  program
+    .command('run')
+    // adk-python refuses these two together in its `validate_exclusive`
+    // callback. The check runs before the action, so a refused invocation
+    // never starts an agent.
+    .hook('preAction', (_program, command) => {
+      if (
+        command.getOptionValue('replay') !== undefined &&
+        command.getOptionValue('resume') !== undefined
+      ) {
+        command.error(
+          "error: Options 'resume' and 'replay' cannot be set together.",
+          {exitCode: USAGE_ERROR_EXIT_CODE, code: 'adk.exclusiveOptions'},
+        );
+      }
+    })
     .description('Runs agent')
     .argument('<agent>', 'Agent file path (.js or .ts)')
     .option(

@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Command, CommanderError, InvalidArgumentError} from 'commander';
-import {describe, expect, it, vi} from 'vitest';
+import {Command, InvalidArgumentError} from 'commander';
+import {describe, expect, it} from 'vitest';
 import {
   createChoiceOption,
   normalizeChoice,
 } from '../../src/cli/choice_options.js';
+import {runExpectingError} from './command_utils.js';
 
 const FRUITS = ['APPLE', 'PEAR'] as const;
 
@@ -52,15 +53,14 @@ describe('createChoiceOption', () => {
   });
 
   it('fails the command when the value is not a choice', async () => {
-    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const received: {value?: string} = {};
 
-    const error = await buildCommand(received)
-      .parseAsync(['--fruit', 'plum'], {from: 'user'})
-      .catch((thrown: unknown) => thrown);
+    const error = await runExpectingError(buildCommand(received), [
+      '--fruit',
+      'plum',
+    ]);
 
-    expect(error).toBeInstanceOf(CommanderError);
-    expect((error as CommanderError).code).toBe('commander.invalidArgument');
+    expect(error?.code).toBe('commander.invalidArgument');
     expect(received.value).toBeUndefined();
   });
 

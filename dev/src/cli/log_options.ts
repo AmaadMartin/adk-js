@@ -53,9 +53,13 @@ export const LOG_LEVEL_OPTION = createChoiceOption(
   LOG_LEVEL_CHOICES,
 ).default(DEFAULT_LOG_LEVEL_NAME);
 
-/** The logging flags every ADK command advertises. */
+/**
+ * The resolved logging flags of a command.
+ *
+ * `--verbose` is not here: `applyVerboseLogLevel` folds it into `log_level`
+ * before the action runs, so an action reads one field.
+ */
 export interface LogLevelOptions {
-  verbose?: boolean;
   log_level?: string;
 }
 
@@ -83,12 +87,8 @@ export function applyVerboseLogLevel(program: Command): Command {
 
 /** Resolves the log level a command was asked for. */
 export function getLogLevelFromOptions(options: LogLevelOptions): LogLevel {
-  const name =
-    typeof options.log_level === 'string'
-      ? options.log_level.toUpperCase()
-      : DEFAULT_LOG_LEVEL_NAME;
-
   // `??`, not `||`: LogLevel.DEBUG is 0, so `||` fell through to INFO and made
-  // `--log_level debug` a silent no-op.
-  return LOG_LEVEL_MAP[name] ?? LogLevel.INFO;
+  // `--log_level debug` a silent no-op. An absent flag misses the map and takes
+  // the same fallback.
+  return LOG_LEVEL_MAP[options.log_level?.toUpperCase() ?? ''] ?? LogLevel.INFO;
 }

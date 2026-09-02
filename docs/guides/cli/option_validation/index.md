@@ -94,21 +94,3 @@ adk create my-agent --type config
 Two options set together exits 2, the code click uses for a usage error and
 adk-python inherits. A rejected choice value exits 1, which is commander's own
 code for a bad argument.
-
-## Adding an option
-
-Three modules under `dev/src/cli/` hold this behaviour, and a new option should
-reuse them rather than repeat the checks:
-
-- `choice_options.ts` — `createChoiceOption(flags, description, choices)`
-  builds an option whose value must be one of `choices`. The match ignores
-  case, and the parsed value is normalized to the declared spelling, so an
-  action handler compares against one spelling only. The values also appear in
-  `--help`.
-- `exclusive_options.ts` — `applyExclusiveOptions(command, names)` refuses an
-  invocation that sets more than one of `names`, before the action runs.
-- `log_options.ts` — `--log_level`, `--verbose`, and the mapping from a level
-  name to a `LogLevel`.
-
-These are internal to the `@google/adk-devtools` CLI and are not exported from
-the package.

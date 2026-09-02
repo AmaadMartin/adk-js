@@ -5,8 +5,8 @@
  */
 
 import {LogLevel} from '@google/adk';
-import {Command, CommanderError} from 'commander';
-import {describe, expect, it, vi} from 'vitest';
+import {Command} from 'commander';
+import {describe, expect, it} from 'vitest';
 import {
   applyVerboseLogLevel,
   getLogLevelFromOptions,
@@ -14,6 +14,7 @@ import {
   LOG_LEVEL_OPTION,
   VERBOSE_OPTION,
 } from '../../src/cli/log_options.js';
+import {applyExitOverride, runExpectingError} from './command_utils.js';
 
 describe('getLogLevelFromOptions', () => {
   it.each([
@@ -51,17 +52,10 @@ describe('applyVerboseLogLevel', () => {
       .action((options: {verbose?: boolean; log_level?: string}) => {
         resolved.level = getLogLevelFromOptions(options);
       });
-    program
-      .command('bare')
-      .action(() => {
-        resolved.level = LogLevel.ERROR;
-      })
-      .exitOverride();
-    program.exitOverride();
-    for (const command of program.commands) {
-      command.exitOverride();
-    }
-    return program;
+    program.command('bare').action(() => {
+      resolved.level = LogLevel.ERROR;
+    });
+    return applyExitOverride(program);
   };
 
   it('raises a defaulted --log_level to DEBUG for --verbose', async () => {
@@ -104,15 +98,15 @@ describe('applyVerboseLogLevel', () => {
   });
 
   it('refuses a --log_level outside the choice list', async () => {
-    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const resolved: {level?: LogLevel} = {};
 
-    const error = await buildProgram(resolved)
-      .parseAsync(['serve', '--log_level', 'verbose'], {from: 'user'})
-      .catch((thrown: unknown) => thrown);
+    const error = await runExpectingError(buildProgram(resolved), [
+      'serve',
+      '--log_level',
+      'verbose',
+    ]);
 
-    expect(error).toBeInstanceOf(CommanderError);
-    expect((error as CommanderError).code).toBe('commander.invalidArgument');
+    expect(error?.code).toBe('commander.invalidArgument');
     expect(resolved.level).toBeUndefined();
   });
 });
