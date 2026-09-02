@@ -103,6 +103,32 @@ Once a credential is available the tool sends its token to the connector as
 A credential that carries no token sends an empty object in place of the token
 string. The connector reads that as "no end-user token supplied".
 
+Both options also take a string, which is the serialized form of the scheme or
+of the credential. adk-python accepts it so that a stored configuration
+round-trips through the constructor, and this port accepts it on the same
+terms. Nothing parses the string back, so `runAsync` throws and calls nothing:
+
+```ts
+const tool = new IntegrationConnectorTool({
+  name: 'list_issues',
+  description: 'Lists Jira issues.',
+  connectionName: 'projects/p/locations/l/connections/jira',
+  connectionHost: 'jira.example.com',
+  connectionServiceName: 'services/jira',
+  operation: 'LIST_ENTITIES',
+  restApiTool,
+  authScheme: '{"type":"http","scheme":"bearer"}',
+});
+
+// Throws: IntegrationConnectorTool 'list_issues' was configured with
+// authScheme as a string; it accepts the serialized form for configuration
+// round-trips but cannot authenticate with it.
+await tool.runAsync({args: {}, toolContext});
+```
+
+Building the declaration still works, because it reads no credential. Pass a
+parsed `AuthScheme` and `AuthCredential` to make a call.
+
 `withAuthCredential` returns a copy of the tool that calls with a different
 credential, and returns the tool unchanged when it has no `authScheme`. A host
 that has exchanged the end-user credential uses it to rebind the token without
