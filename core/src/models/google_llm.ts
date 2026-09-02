@@ -293,26 +293,19 @@ export class Gemini extends BaseLlm {
         yield createLlmResponse(response);
       }
     } catch (e: unknown) {
-      const resourceExhausted = asResourceExhaustedError(e);
-      if (resourceExhausted) {
-        throw resourceExhausted;
-      }
-      throw e;
+      throw asResourceExhaustedError(e) ?? e;
     }
   }
 
   protected getHttpOptions(): HttpOptions {
-    const options: HttpOptions = {
+    // The SDK skips an undefined scalar when it merges these over its own
+    // defaults, so an unresolved value leaves the default in place.
+    return {
       headers: {...this.trackingHeaders, ...this.headers},
       baseUrl: this.normalizedBaseUrl.baseUrl,
       retryOptions: this.retryOptions,
+      apiVersion: this.configuredApiVersion(),
     };
-    // Left unset when nothing resolved, so the SDK's own default applies.
-    const apiVersion = this.configuredApiVersion();
-    if (apiVersion) {
-      options.apiVersion = apiVersion;
-    }
-    return options;
   }
 
   /**
@@ -528,9 +521,7 @@ export class Gemini extends BaseLlm {
       for (const content of llmRequest.contents) {
         if (!content.parts) continue;
         content.parts = content.parts.map((part) =>
-          part.inlineData
-            ? asSafePartForLlm(part, INLINE_FILE_ARTIFACT_NAME)
-            : part,
+          asSafePartForLlm(part, INLINE_FILE_ARTIFACT_NAME),
         );
       }
     }

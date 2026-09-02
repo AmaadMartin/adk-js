@@ -49,10 +49,10 @@ describe('isResourceExhaustedError', () => {
   it('accepts an error built by a second copy of the package', () => {
     // Two copies of adk-js in one runtime would fail an `instanceof` check
     // between them, so the guard must match on `name` instead.
-    const foreign = Object.create(Error.prototype) as Error;
+    const foreign = new Error('from another copy');
     foreign.name = 'ResourceExhaustedError';
-    foreign.message = 'from another copy';
 
+    expect(foreign).not.toBeInstanceOf(ResourceExhaustedError);
     expect(isResourceExhaustedError(foreign)).toBe(true);
   });
 
