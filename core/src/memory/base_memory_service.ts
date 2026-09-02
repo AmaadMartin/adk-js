@@ -100,9 +100,8 @@ export interface BaseMemoryService {
   /**
    * Adds an explicit list of events to the memory.
    *
-   * Optional: a service that only supports full-session ingestion omits it.
-   * Call it through the {@link addEventsToMemory} helper, which reports the
-   * unsupported path as an error.
+   * Optional: a service that only supports full-session ingestion omits the
+   * member, so a caller narrows it before calling.
    *
    * @param request The request describing the events to add.
    * @return A promise that resolves when the events are added to the memory.
@@ -112,9 +111,8 @@ export interface BaseMemoryService {
   /**
    * Adds explicit memory items to the memory.
    *
-   * Optional: a service that only generates memory from events omits it. Call
-   * it through the {@link addMemory} helper, which reports the unsupported
-   * path as an error.
+   * Optional: a service that only generates memory from events omits the
+   * member, so a caller narrows it before calling.
    *
    * @param request The request describing the memory items to write.
    * @return A promise that resolves when the memory items are written.
@@ -129,58 +127,4 @@ export interface BaseMemoryService {
    *     matching memories.
    */
   searchMemory(request: SearchMemoryRequest): Promise<SearchMemoryResponse>;
-}
-
-/** The error message for a service that cannot ingest event deltas. */
-export const EVENT_DELTAS_UNSUPPORTED_MESSAGE =
-  'This memory service does not support adding event deltas. ' +
-  'Call addSessionToMemory(session) to ingest the full session.';
-
-/** The error message for a service that cannot write memory items directly. */
-export const DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE =
-  'This memory service does not support direct memory writes. ' +
-  'Call addEventsToMemory(...) or addSessionToMemory(session) instead.';
-
-/**
- * Adds an explicit list of events to the memory of the given service.
- *
- * A service that omits the optional member drops the write silently when the
- * caller invokes it as `service.addEventsToMemory?.(request)`. This helper
- * throws instead, so an unsupported path is reported rather than lost.
- *
- * @param service The memory service to write to.
- * @param request The request describing the events to add.
- * @return A promise that resolves when the events are added to the memory.
- * @throws An error when the service does not implement the member.
- */
-export async function addEventsToMemory(
-  service: BaseMemoryService,
-  request: AddEventsToMemoryRequest,
-): Promise<void> {
-  if (!service.addEventsToMemory) {
-    throw new Error(EVENT_DELTAS_UNSUPPORTED_MESSAGE);
-  }
-  await service.addEventsToMemory(request);
-}
-
-/**
- * Adds explicit memory items to the memory of the given service.
- *
- * A service that omits the optional member drops the write silently when the
- * caller invokes it as `service.addMemory?.(request)`. This helper throws
- * instead, so an unsupported path is reported rather than lost.
- *
- * @param service The memory service to write to.
- * @param request The request describing the memory items to write.
- * @return A promise that resolves when the memory items are written.
- * @throws An error when the service does not implement the member.
- */
-export async function addMemory(
-  service: BaseMemoryService,
-  request: AddMemoryRequest,
-): Promise<void> {
-  if (!service.addMemory) {
-    throw new Error(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE);
-  }
-  await service.addMemory(request);
 }

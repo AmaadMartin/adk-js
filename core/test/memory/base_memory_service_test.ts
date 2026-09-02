@@ -5,10 +5,6 @@
  */
 
 import {
-  DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE,
-  EVENT_DELTAS_UNSUPPORTED_MESSAGE,
-  addEventsToMemory,
-  addMemory,
   createEvent,
   type AddEventsToMemoryRequest,
   type AddMemoryRequest,
@@ -16,35 +12,57 @@ import {
   type MemoryEntry,
   type SearchMemoryResponse,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 const EMPTY_RESPONSE: SearchMemoryResponse = {memories: []};
 
+const MEMORIES: MemoryEntry[] = [
+  {content: {role: 'user', parts: [{text: 'prefers metric units'}]}},
+];
+
+const SESSION = {
+  id: 'session-1',
+  appName: 'myApp',
+  userId: 'alice',
+  state: {},
+  events: [],
+  lastUpdateTime: 0,
+};
+
 /** A service that implements only the two required members. */
-function createRequiredOnlyService() {
+function createRequiredOnlyService(): BaseMemoryService {
   return {
-    addSessionToMemory: vi.fn(async () => {}),
-    searchMemory: vi.fn(async () => EMPTY_RESPONSE),
-  } satisfies BaseMemoryService;
+    async addSessionToMemory() {},
+    async searchMemory() {
+      return EMPTY_RESPONSE;
+    },
+  };
 }
 
-function createEventWritingService() {
-  return {
-    ...createRequiredOnlyService(),
-    addEventsToMemory: vi.fn(async (_request: AddEventsToMemoryRequest) => {}),
-  } satisfies BaseMemoryService;
-}
+describe('BaseMemoryService contract', () => {
+  it('accepts a service that implements only the two required members', async () => {
+    const service = createRequiredOnlyService();
 
-function createMemoryWritingService() {
-  return {
-    ...createRequiredOnlyService(),
-    addMemory: vi.fn(async (_request: AddMemoryRequest) => {}),
-  } satisfies BaseMemoryService;
-}
+    await service.addSessionToMemory(SESSION);
+    const response = await service.searchMemory({
+      appName: 'myApp',
+      userId: 'alice',
+      query: 'hello',
+    });
 
-describe('addEventsToMemory', () => {
-  it('forwards the full request to a service that implements the member', async () => {
-    const service = createEventWritingService();
+    expect(response).toEqual(EMPTY_RESPONSE);
+    expect(service.addEventsToMemory).toBeUndefined();
+    expect(service.addMemory).toBeUndefined();
+  });
+
+  it('passes an event delta to a service that implements addEventsToMemory', async () => {
+    const received: AddEventsToMemoryRequest[] = [];
+    const service: BaseMemoryService = {
+      ...createRequiredOnlyService(),
+      async addEventsToMemory(request) {
+        received.push(request);
+      },
+    };
     const request: AddEventsToMemoryRequest = {
       appName: 'myApp',
       userId: 'alice',
@@ -58,160 +76,64 @@ describe('addEventsToMemory', () => {
       customMetadata: {ttl: '3600s'},
     };
 
-    await addEventsToMemory(service, request);
+    await service.addEventsToMemory?.(request);
 
-    expect(service.addEventsToMemory).toHaveBeenCalledTimes(1);
-    expect(service.addEventsToMemory).toHaveBeenCalledWith(request);
-    expect(service.addEventsToMemory.mock.calls[0][0]).toBe(request);
+    expect(received).toEqual([request]);
   });
 
-  it('forwards a request whose sessionId and customMetadata are absent', async () => {
-    const service = createEventWritingService();
-    const request: AddEventsToMemoryRequest = {
-      appName: 'myApp',
-      userId: 'alice',
-      events: [createEvent({author: 'user'})],
+  it('leaves sessionId and customMetadata absent when the caller omits them', async () => {
+    let received: AddEventsToMemoryRequest | undefined;
+    const service: BaseMemoryService = {
+      ...createRequiredOnlyService(),
+      async addEventsToMemory(request) {
+        received = request;
+      },
     };
 
-    await addEventsToMemory(service, request);
-
-    const received = service.addEventsToMemory.mock.calls[0][0];
-    expect('sessionId' in received).toBe(false);
-    expect('customMetadata' in received).toBe(false);
-  });
-
-  it('forwards an empty events array without special-casing it', async () => {
-    const service = createEventWritingService();
-
-    await addEventsToMemory(service, {
+    await service.addEventsToMemory?.({
       appName: 'myApp',
       userId: 'alice',
       events: [],
     });
 
-    expect(service.addEventsToMemory).toHaveBeenCalledTimes(1);
-    expect(service.addEventsToMemory.mock.calls[0][0].events).toEqual([]);
+    if (!received) {
+      expect.fail('addEventsToMemory was not called');
+    }
+    expect('sessionId' in received).toBe(false);
+    expect('customMetadata' in received).toBe(false);
+    expect(received.events).toEqual([]);
   });
 
-  it('rejects when the service omits the member and calls nothing else', async () => {
-    const service = createRequiredOnlyService();
-
-    await expect(
-      addEventsToMemory(service, {
-        appName: 'myApp',
-        userId: 'alice',
-        events: [],
-      }),
-    ).rejects.toThrow(EVENT_DELTAS_UNSUPPORTED_MESSAGE);
-    expect(service.addSessionToMemory).not.toHaveBeenCalled();
-    expect(service.searchMemory).not.toHaveBeenCalled();
-  });
-
-  it('propagates an error thrown by the implementing member', async () => {
+  it('passes memory items to a service that implements addMemory', async () => {
+    const received: AddMemoryRequest[] = [];
     const service: BaseMemoryService = {
       ...createRequiredOnlyService(),
-      addEventsToMemory: async () => {
-        throw new Error('quota exhausted');
+      async addMemory(request) {
+        received.push(request);
       },
     };
-
-    await expect(
-      addEventsToMemory(service, {
-        appName: 'myApp',
-        userId: 'alice',
-        events: [],
-      }),
-    ).rejects.toThrow('quota exhausted');
-  });
-});
-
-describe('addMemory', () => {
-  const memories: MemoryEntry[] = [
-    {content: {role: 'user', parts: [{text: 'prefers metric units'}]}},
-  ];
-
-  it('forwards the full request to a service that implements the member', async () => {
-    const service = createMemoryWritingService();
     const request: AddMemoryRequest = {
       appName: 'myApp',
       userId: 'alice',
-      memories,
+      memories: MEMORIES,
       customMetadata: {ttl: '3600s'},
     };
 
-    await addMemory(service, request);
+    await service.addMemory?.(request);
 
-    expect(service.addMemory).toHaveBeenCalledTimes(1);
-    expect(service.addMemory).toHaveBeenCalledWith(request);
-    expect(service.addMemory.mock.calls[0][0]).toBe(request);
+    expect(received).toEqual([request]);
   });
 
-  it('forwards a request whose customMetadata is absent', async () => {
-    const service = createMemoryWritingService();
-
-    await addMemory(service, {appName: 'myApp', userId: 'alice', memories});
-
-    const received = service.addMemory.mock.calls[0][0];
-    expect('customMetadata' in received).toBe(false);
-    expect(received.memories).toEqual(memories);
-  });
-
-  it('rejects when the service omits the member', async () => {
-    const service = createRequiredOnlyService();
-
-    await expect(
-      addMemory(service, {appName: 'myApp', userId: 'alice', memories}),
-    ).rejects.toThrow(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE);
-    expect(service.addSessionToMemory).not.toHaveBeenCalled();
-    expect(service.searchMemory).not.toHaveBeenCalled();
-  });
-
-  it('propagates an error thrown by the implementing member', async () => {
+  it('propagates an error thrown by an optional member', async () => {
     const service: BaseMemoryService = {
       ...createRequiredOnlyService(),
-      addMemory: async () => {
+      async addMemory() {
         throw new Error('memories must not be empty');
       },
     };
 
     await expect(
-      addMemory(service, {appName: 'myApp', userId: 'alice', memories: []}),
+      service.addMemory?.({appName: 'myApp', userId: 'alice', memories: []}),
     ).rejects.toThrow('memories must not be empty');
-  });
-});
-
-describe('BaseMemoryService contract', () => {
-  it('keeps the unsupported-path messages that adk-python raises', () => {
-    expect(EVENT_DELTAS_UNSUPPORTED_MESSAGE).toBe(
-      'This memory service does not support adding event deltas. ' +
-        'Call addSessionToMemory(session) to ingest the full session.',
-    );
-    expect(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE).toBe(
-      'This memory service does not support direct memory writes. ' +
-        'Call addEventsToMemory(...) or addSessionToMemory(session) instead.',
-    );
-  });
-
-  it('accepts a service that implements only the two required members', async () => {
-    const service: BaseMemoryService = createRequiredOnlyService();
-    const session = {
-      id: 'session-1',
-      appName: 'myApp',
-      userId: 'alice',
-      state: {},
-      events: [],
-      lastUpdateTime: 0,
-    };
-
-    await service.addSessionToMemory(session);
-    const response = await service.searchMemory({
-      appName: 'myApp',
-      userId: 'alice',
-      query: 'hello',
-    });
-
-    expect(response).toEqual(EMPTY_RESPONSE);
-    expect(service.addEventsToMemory).toBeUndefined();
-    expect(service.addMemory).toBeUndefined();
   });
 });

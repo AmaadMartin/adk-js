@@ -18,33 +18,27 @@ The interface therefore carries two optional members:
   list as an incremental delta and must not assume it is the full session.
 - `addMemory` writes `MemoryEntry` items directly.
 
-They are optional because most services support neither. That creates a second
-problem: `service.addMemory?.(request)` resolves with `undefined` against such a
-service, so the write disappears and the caller sees success. The package
-exports one dispatch helper per path to close that gap. Each helper calls the
-member when the service implements it, and throws when it does not.
+They are optional because most services support neither, and the absent member
+is how a service declines the path. TypeScript reports a call on an optional
+member as possibly undefined, so the compiler makes you check for support before
+you write.
 
 This mirrors `BaseMemoryService` in
 [adk-python](https://github.com/google/adk-python/blob/main/src/google/adk/memory/base_memory_service.py),
-where the two optional paths are concrete methods that raise
-`NotImplementedError`. TypeScript cannot give an interface member a default
-body, so the default moves into the helper and the error messages stay the same.
+where the same two paths are concrete methods that raise `NotImplementedError`.
+Python needs that body because the method always exists on the instance, so
+support is otherwise undetectable. Here the missing member carries the same
+information at compile time.
 
 ## Get started
 
-Call the helper, not the member. Pass the service first.
-
 ```ts
-import {
-  VertexAiMemoryBankService,
-  addEventsToMemory,
-  addMemory,
-} from '@google/adk';
+import {VertexAiMemoryBankService} from '@google/adk';
 
 const memoryService = new VertexAiMemoryBankService({agentEngineId: '456'});
 
 // Persist the latest turn instead of re-ingesting the whole session.
-await addEventsToMemory(memoryService, {
+await memoryService.addEventsToMemory({
   appName: session.appName,
   userId: session.userId,
   sessionId: session.id,
@@ -52,7 +46,7 @@ await addEventsToMemory(memoryService, {
 });
 
 // Write a fact you distilled yourself.
-await addMemory(memoryService, {
+await memoryService.addMemory({
   appName: session.appName,
   userId: session.userId,
   memories: [
@@ -64,8 +58,26 @@ await addMemory(memoryService, {
 `sessionId` is optional, and a service that does not partition memory that way
 ignores it. Both requests also accept `customMetadata`, a portable record whose
 supported keys each service defines. `VertexAiMemoryBankService` reads
-`enable_consolidation` from it, for example. The helpers forward the request
-object unchanged, so an absent field stays absent.
+`enable_consolidation` from it, for example.
+
+Behind a `BaseMemoryService`, narrow the member before calling it:
+
+```ts
+import type {BaseMemoryService, Event} from '@google/adk';
+
+async function persistTurn(
+  service: BaseMemoryService,
+  appName: string,
+  userId: string,
+  events: Event[],
+): Promise<boolean> {
+  if (!service.addEventsToMemory) {
+    return false;
+  }
+  await service.addEventsToMemory({appName, userId, events});
+  return true;
+}
+```
 
 ## What each service supports
 
@@ -74,31 +86,10 @@ object unchanged, so an absent field stays absent.
 | `InMemoryMemoryService`     | yes                  | no                  | no          |
 | `VertexAiMemoryBankService` | yes                  | yes                 | yes         |
 
-Against `InMemoryMemoryService` both helpers throw, because the service
-implements neither optional member:
-
-```ts
-import {InMemoryMemoryService, addMemory} from '@google/adk';
-
-await addMemory(new InMemoryMemoryService(), {
-  appName: 'demo',
-  userId: 'alice',
-  memories: [],
-});
-// Error: This memory service does not support direct memory writes.
-// Call addEventsToMemory(...) or addSessionToMemory(session) instead.
-```
-
-The two messages are exported as `EVENT_DELTAS_UNSUPPORTED_MESSAGE` and
-`DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE`, so a caller can match on them
-without repeating the text.
-
 ## Implementing a service
 
 Implement `addSessionToMemory` and `searchMemory`. Add either optional member
-only when the service can honour it, and omit it otherwise — an omitted member
-is how a service declines the path, and the helper turns that into the error
-above.
+only when the service can honour it, and omit it otherwise.
 
 ```ts
 import type {AddEventsToMemoryRequest, BaseMemoryService} from '@google/adk';
@@ -119,9 +110,9 @@ const service: BaseMemoryService = {
 };
 ```
 
-The helpers validate nothing. They do not reject an empty `events` array or an
-empty `memories` array, and they do not wrap an error the service throws. Put
-argument validation in the service, which is where adk-python puts it too.
+The interface itself validates nothing, so an empty `events` array and an empty
+`memories` array both reach the service. Put argument validation in the service,
+which is where adk-python puts it too.
 
 ## Limitations
 
