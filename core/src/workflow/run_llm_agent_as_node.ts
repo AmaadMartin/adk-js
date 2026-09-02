@@ -49,7 +49,6 @@ export async function* runLlmAgentAsNode(
   nodeInput: unknown,
 ): AsyncGenerator<Event, void, void> {
   const isTaskMode = agent.mode === 'task';
-  const isSingleTurnMode = agent.mode === 'single_turn';
 
   if (!isTaskMode && !agent.includeContentsExplicit) {
     agent.includeContents = 'none';
@@ -64,7 +63,8 @@ export async function* runLlmAgentAsNode(
   // the agent answers over the connection instead of one turn at a time. A
   // `single_turn` agent stays non-live: it consumes only its node input.
   const isLive =
-    invocationContext.liveRequestQueue !== undefined && !isSingleTurnMode;
+    invocationContext.liveRequestQueue !== undefined &&
+    agent.mode !== 'single_turn';
 
   let agentIc = withWorkflowInstructionScope(invocationContext, {
     input: nodeInput,

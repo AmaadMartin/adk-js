@@ -327,39 +327,15 @@ export class EvalLiveSession {
       invocationContext,
     );
 
-    let inFunctionCallLoop = false;
-    for await (const event of agent.runLive(invocationContext)) {
-      event.invocationId = this.invocationId;
-      await this.runner.pluginManager.runAfterModelCallback({
-        callbackContext,
-        llmResponse: event,
-      });
-      this.eventQueue.push(event);
-      if (!event.partial) {
-        await this.runner.sessionService.appendEvent({
-          session: this.session,
-          event,
-        });
-      }
-
+    return this.consumeLiveEvents(
+      agent.runLive(invocationContext),
+      () => callbackContext,
       // The agent's live flow runs the tools itself and sends their results
       // straight back over the connection, so the driver only has to notice
       // that a tool round is open. adk-python's driver runs them a second
       // time; adk-js does not, because that would call every tool twice.
-      if (getFunctionCalls(event).length > 0) {
-        inFunctionCallLoop = true;
-      }
-
-      if (event.turnComplete && event.author !== USER_AUTHOR) {
-        // A `turnComplete` that closes a tool-call round is not the end of
-        // the turn: the model still has to answer with the tool's result.
-        if (inFunctionCallLoop) {
-          inFunctionCallLoop = false;
-        } else {
-          this.turnSignal.resolve();
-        }
-      }
-    }
+      (event) => getFunctionCalls(event).length > 0,
+    );
   }
 
   /**
@@ -379,16 +355,38 @@ export class EvalLiveSession {
    * repeated here.
    */
   private async consumeNodeEvents(workflow: Workflow): Promise<void> {
-    const callbackContextByAuthor = await this.recordNodeAppDetails(workflow);
     const invocationContext = this.newLiveInvocationContext(undefined);
-
-    let inFunctionCallLoop = false;
-    for await (const event of runNodeAsInvocation(
+    const contextByAuthor = await this.recordNodeAppDetails(
       workflow,
       invocationContext,
-    )) {
+    );
+
+    return this.consumeLiveEvents(
+      runNodeAsInvocation(workflow, invocationContext),
+      (event) => contextByAuthor.get(event.author),
+      opensToolRound,
+    );
+  }
+
+  /**
+   * Reads one driver's events until its stream ends.
+   *
+   * @param events The driver's event stream.
+   * @param contextFor The callback context recorded for an event's author, or
+   *     `undefined` when nothing was recorded for it.
+   * @param opensRound Whether an event opens a tool round the agent still owes
+   *     an answer to. The two drivers disagree: the agent flow keeps the turn
+   *     open for any call, while a workflow's handoff calls end the agent.
+   */
+  private async consumeLiveEvents(
+    events: AsyncIterable<Event>,
+    contextFor: (event: Event) => Context | undefined,
+    opensRound: (event: Event) => boolean,
+  ): Promise<void> {
+    let inFunctionCallLoop = false;
+    for await (const event of events) {
       event.invocationId = this.invocationId;
-      const callbackContext = callbackContextByAuthor.get(event.author);
+      const callbackContext = contextFor(event);
       if (callbackContext !== undefined) {
         await this.runner.pluginManager.runAfterModelCallback({
           callbackContext,
@@ -403,11 +401,13 @@ export class EvalLiveSession {
         });
       }
 
-      if (opensToolRound(event)) {
+      if (opensRound(event)) {
         inFunctionCallLoop = true;
       }
 
       if (event.turnComplete && event.author !== USER_AUTHOR) {
+        // A `turnComplete` that closes a tool-call round is not the end of
+        // the turn: the model still has to answer with the tool's result.
         if (inFunctionCallLoop) {
           inFunctionCallLoop = false;
         } else {
@@ -495,12 +495,16 @@ export class EvalLiveSession {
    * failure on one agent is logged and skipped, so it never aborts the run.
    *
    * @param workflow The workflow root under evaluation.
+   * @param baseContext The context the graph runs under. Each agent's request
+   *     is recorded under a copy of it, so a recorded request belongs to the
+   *     same invocation as the events it explains.
    * @returns The callback context for each recorded agent, keyed by the
    *     agent's name. The key type admits `undefined` because that is what an
    *     event's author is typed as, and an authorless event matches nothing.
    */
   private async recordNodeAppDetails(
     workflow: Workflow,
+    baseContext: InvocationContext,
   ): Promise<Map<string | undefined, Context>> {
     const contextByAuthor = new Map<string | undefined, Context>();
     const graph = workflow.graph;
@@ -508,7 +512,6 @@ export class EvalLiveSession {
       return contextByAuthor;
     }
 
-    const baseContext = this.newLiveInvocationContext(undefined);
     for (const node of graph.nodes) {
       if (!isLlmAgent(node)) {
         continue;
