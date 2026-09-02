@@ -65,6 +65,7 @@ import {
 } from '../utils/schema.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 import {BaseAgent, BaseAgentConfig} from './base_agent.js';
+import {TASK_COMPLETED_FUNCTION_CALL_NAME} from './framework_function_calls.js';
 import {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
@@ -1496,7 +1497,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
 
         const taskCompleted = getFunctionResponses(event).some(
-          (r) => r.name === 'task_completed',
+          (r) => r.name === TASK_COMPLETED_FUNCTION_CALL_NAME,
         );
         if (taskCompleted) {
           await sleep(TRANSFER_AGENT_DELAY_MS);
