@@ -222,4 +222,81 @@ describe('IdentityLlmRequestProcessor', () => {
       'Your internal name is "my_agent"',
     );
   });
+
+  it('matches the Python preamble for an agent with no description', async () => {
+    const agent = new LlmAgent({name: 'agent', model: 'gemini-2.5-flash'});
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest = makeLlmRequest();
+    llmRequest.config = {systemInstruction: ''};
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config.systemInstruction).toBe(
+      'You are an agent. Your internal name is "agent".',
+    );
+  });
+
+  it('joins the description into one instruction, with the trailing period', async () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'gemini-2.5-flash',
+      description: 'test description',
+    });
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest = makeLlmRequest();
+    llmRequest.config = {systemInstruction: ''};
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config.systemInstruction).toBe(
+      'You are an agent. Your internal name is "agent". ' +
+        'The description about you is "test description".',
+    );
+  });
+
+  it('skips the preamble for a single_turn agent', async () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'gemini-2.5-flash',
+      mode: 'single_turn',
+    });
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest = makeLlmRequest();
+    llmRequest.config = {systemInstruction: ''};
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config.systemInstruction).toBe('');
+  });
+
+  it('creates no config for a single_turn agent that had none', async () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'gemini-2.5-flash',
+      mode: 'single_turn',
+    });
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config).toBeUndefined();
+  });
+
+  it('names an agent that cannot transfer anywhere', async () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'gemini-2.5-flash',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config?.systemInstruction).toBe(
+      'You are an agent. Your internal name is "agent".',
+    );
+  });
 });
