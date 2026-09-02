@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GcsArtifactService} from '@google/adk';
+import {GcsArtifactService, InputValidationError} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
 
@@ -114,6 +114,7 @@ describe('GcsArtifactService', () => {
     async () => {
       storageMock.buckets.clear();
     },
+    'Artifact must have either inlineData or text content.',
   );
 
   describe('customMetadata GCS shape', () => {
@@ -410,6 +411,6 @@ describe('GcsArtifactService', () => {
         filename: 'empty.txt',
         artifact: {},
       }),
-    ).rejects.toThrow('Artifact must have either inlineData or text content.');
+    ).rejects.toThrow(InputValidationError);
   });
 });

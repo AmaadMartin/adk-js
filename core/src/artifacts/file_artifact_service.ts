@@ -9,6 +9,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
 
 import {
@@ -78,7 +79,9 @@ export class FileArtifactService implements BaseArtifactService {
     customMetadata,
   }: SaveArtifactRequest): Promise<number> {
     if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
-      throw new Error('Artifact must have either inlineData or text content.');
+      throw new InputValidationError(
+        'Artifact must have either inlineData or text content.',
+      );
     }
 
     const artifactDir = getArtifactDir(

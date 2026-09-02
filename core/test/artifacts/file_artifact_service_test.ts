@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FileArtifactService} from '@google/adk';
+import {FileArtifactService, InputValidationError} from '@google/adk';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
@@ -30,6 +30,7 @@ describe('FileArtifactService', () => {
         await fs.rm(rootDir, {recursive: true, force: true});
       }
     },
+    'Artifact must have either inlineData or text content.',
   );
 
   describe('fileData storage', () => {
@@ -232,9 +233,7 @@ describe('FileArtifactService', () => {
           filename: 'empty.txt',
           artifact: {},
         }),
-      ).rejects.toThrow(
-        'Artifact must have either inlineData or text content.',
-      );
+      ).rejects.toThrow(InputValidationError);
     } finally {
       await fs.rm(rootDir, {recursive: true, force: true});
     }

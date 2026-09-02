@@ -6,6 +6,7 @@
 
 import type {Bucket, File, StorageOptions} from '@google-cloud/storage';
 import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
@@ -54,7 +55,9 @@ export class GcsArtifactService implements BaseArtifactService {
       !request.artifact.text &&
       !request.artifact.fileData
     ) {
-      throw new Error('Artifact must have either inlineData or text content.');
+      throw new InputValidationError(
+        'Artifact must have either inlineData or text content.',
+      );
     }
 
     const versions = await this.listVersions(request);
@@ -187,24 +190,19 @@ export class GcsArtifactService implements BaseArtifactService {
     sessionId,
   }: ListArtifactKeysRequest): Promise<string[]> {
     const bucket = await this.getBucket();
-    const listings = [
-      listArtifactKeysUnderPrefix(
-        bucket,
-        `${appName}/${userId}/user/`,
-        'user:',
-      ),
+    const prefixes: Array<[string, string?]> = [
+      [`${appName}/${userId}/user/`, 'user:'],
     ];
-
     if (sessionId !== undefined) {
-      listings.push(
-        listArtifactKeysUnderPrefix(
-          bucket,
-          `${appName}/${userId}/${sessionId}/`,
-        ),
-      );
+      prefixes.push([`${appName}/${userId}/${sessionId}/`]);
     }
 
-    const keys = await Promise.all(listings);
+    const keys = await Promise.all(
+      prefixes.map(async ([prefix, keyPrefix]) => {
+        const [files] = await bucket.getFiles({prefix});
+        return extractArtifactKeys(files, prefix, keyPrefix);
+      }),
+    );
 
     return keys.flat().sort((a, b) => a.localeCompare(b));
   }
@@ -320,24 +318,6 @@ function getFileName({
     : `${appName}/${userId}/${sessionId}/${cleanFilename}`;
 
   return version !== undefined ? `${prefix}/${version}` : prefix;
-}
-
-/**
- * Lists the artifact keys stored under one object-name prefix.
- *
- * @param bucket The bucket to list.
- * @param fileNamePrefix The object-name prefix to list under.
- * @param keyPrefix The namespace prefix to restore on each returned key.
- * @return The artifact keys found under the prefix.
- */
-async function listArtifactKeysUnderPrefix(
-  bucket: Bucket,
-  fileNamePrefix: string,
-  keyPrefix?: string,
-): Promise<string[]> {
-  const [files] = await bucket.getFiles({prefix: fileNamePrefix});
-
-  return extractArtifactKeys(files, fileNamePrefix, keyPrefix);
 }
 
 function extractArtifactKeys(

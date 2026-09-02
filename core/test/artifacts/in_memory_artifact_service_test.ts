@@ -12,6 +12,7 @@ describe('InMemoryArtifactService', () => {
   runArtifactServiceTests(
     async () => new InMemoryArtifactService(),
     async () => {},
+    'Artifact must have inlineData, text, or fileData content.',
   );
 
   it('keeps artifacts with ambiguous path components isolated', async () => {
@@ -289,7 +290,7 @@ describe('InMemoryArtifactService', () => {
       const version = await service.getArtifactVersion(key);
 
       expect(version).toBeDefined();
-      expect('customMetadata' in version!).toBe(false);
+      expect(version).not.toHaveProperty('customMetadata');
     });
 
     it('is absent when the caller supplies an empty object', async () => {
@@ -305,7 +306,7 @@ describe('InMemoryArtifactService', () => {
       const version = await service.getArtifactVersion(key);
 
       expect(version).toBeDefined();
-      expect('customMetadata' in version!).toBe(false);
+      expect(version).not.toHaveProperty('customMetadata');
     });
 
     it('is preserved unchanged when the caller supplies one', async () => {
