@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App, isApp, isRunnableRoot, RunnableRoot} from '@google/adk';
+import {
+  App,
+  isApp,
+  isRunnableRoot,
+  RunnableRoot,
+  stampAgentOrigin,
+} from '@google/adk';
 import esbuild from 'esbuild';
 import {shimPlugin} from 'esbuild-shim-plugin';
 import * as fs from 'node:fs';
@@ -610,7 +616,8 @@ export class AgentLoader {
   private async loadAgentFromFile(file: FileMetadata): Promise<void> {
     try {
       const agentFile = new AgentFile(file.path, this.options);
-      await agentFile.load();
+      const loaded = await agentFile.load();
+      stampRootAgentOrigin(loaded, file.name, path.dirname(file.path));
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(file.name, file.path, e);
@@ -629,7 +636,8 @@ export class AgentLoader {
 
     try {
       const agentFile = new AgentFile(possibleEntryFile.path, this.options);
-      await agentFile.load();
+      const loaded = await agentFile.load();
+      stampRootAgentOrigin(loaded, dir.name, dir.path);
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(dir.name, possibleEntryFile.path, e);
@@ -652,6 +660,21 @@ export class AgentLoader {
         `Skipping it; the other agents are unaffected.`,
     );
   }
+}
+
+/**
+ * Records the directory an agent was loaded from, and the app name it implies.
+ *
+ * A runner built under a different app name reads sessions from somewhere
+ * else, so it explains that mismatch when a lookup fails.
+ */
+function stampRootAgentOrigin(
+  loaded: RunnableRoot | App,
+  appName: string,
+  dirPath: string,
+): void {
+  const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
+  stampAgentOrigin(rootAgent, {appName, path: dirPath});
 }
 
 function isJsFile(fileExt?: string): boolean {

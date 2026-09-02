@@ -28,6 +28,13 @@ export const FINISH_TASK_SUCCESS_RESULT = 'Task completed.';
  *
  * A task that reports this has finished: it will not read another user reply,
  * so its isolation scope closes just as it does on success.
+ *
+ * No adk-js code path writes it, and neither does adk-python's tool. Both SDKs
+ * recognise it on read, because a session is shared storage: adk-python's
+ * `_finish_task_tool.py::is_finish_task_terminal_fr` accepts it, and a session
+ * adk-python wrote can be read back here through the same session service. A
+ * reader that did not recognise it would treat the finished task's isolation
+ * scope as open and capture every later user turn into it.
  */
 export const FINISH_TASK_ERROR_RESULT = 'Task failed.';
 

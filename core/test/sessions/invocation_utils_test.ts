@@ -8,9 +8,8 @@ import {createEvent, createSession, Event, Session} from '@google/adk';
 import {Content} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
-  extractResumeInputs,
   findUserMessageForInvocation,
-  getFunctionResponsesFromContent,
+  hasResumeResponses,
   resolveInvocationId,
   resolveInvocationIdFromFunctionResponses,
   validateNewMessage,
@@ -43,42 +42,23 @@ function sessionOf(events: Event[]): Session {
   return createSession({id: 's1', appName: 'app', userId: 'u', events});
 }
 
-describe('getFunctionResponsesFromContent', () => {
-  it('returns an empty list for a message with no parts', () => {
-    expect(getFunctionResponsesFromContent(undefined)).toEqual([]);
-    expect(getFunctionResponsesFromContent({role: 'user'})).toEqual([]);
+describe('hasResumeResponses', () => {
+  it('is true for a message answering identified calls', () => {
+    expect(hasResumeResponses(responseMessage(['fc-1', 'fc-2']))).toBe(true);
   });
 
-  it('returns only the function response parts', () => {
-    const responses = getFunctionResponsesFromContent({
-      role: 'user',
-      parts: [{text: 'hi'}, {functionResponse: {id: 'fc-1', name: 'book'}}],
-    });
-
-    expect(responses).toEqual([{id: 'fc-1', name: 'book'}]);
-  });
-});
-
-describe('extractResumeInputs', () => {
-  it('keys each tool result by the call it answers', () => {
-    expect(extractResumeInputs(responseMessage(['fc-1', 'fc-2']))).toEqual({
-      'fc-1': {ok: true},
-      'fc-2': {ok: true},
-    });
+  it('is false for a plain text message', () => {
+    expect(hasResumeResponses({role: 'user', parts: [{text: 'hello'}]})).toBe(
+      false,
+    );
   });
 
-  it('returns undefined for a plain text message', () => {
-    expect(
-      extractResumeInputs({role: 'user', parts: [{text: 'hello'}]}),
-    ).toBeUndefined();
+  it('is false when a response carries no id', () => {
+    expect(hasResumeResponses(responseMessage([undefined]))).toBe(false);
   });
 
-  it('returns undefined when a response carries no id', () => {
-    expect(extractResumeInputs(responseMessage([undefined]))).toBeUndefined();
-  });
-
-  it('returns undefined for an absent message', () => {
-    expect(extractResumeInputs(undefined)).toBeUndefined();
+  it('is false for an absent message', () => {
+    expect(hasResumeResponses(undefined)).toBe(false);
   });
 });
 
@@ -92,30 +72,26 @@ describe('validateNewMessage', () => {
       ],
     };
 
-    expect(() =>
-      validateNewMessage(message, extractResumeInputs(message)),
-    ).toThrow(/cannot contain both function responses and text/);
+    expect(() => validateNewMessage(message)).toThrow(
+      /cannot contain both function responses and text/,
+    );
   });
 
   it('accepts a message of function responses only', () => {
     const message = responseMessage(['fc-1']);
 
-    expect(() =>
-      validateNewMessage(message, extractResumeInputs(message)),
-    ).not.toThrow();
+    expect(() => validateNewMessage(message)).not.toThrow();
   });
 
   it('accepts a plain text message', () => {
     const message: Content = {role: 'user', parts: [{text: 'hello'}]};
 
-    expect(() => validateNewMessage(message, undefined)).not.toThrow();
+    expect(() => validateNewMessage(message)).not.toThrow();
   });
 
-  it('accepts resume inputs with no message to check against', () => {
-    expect(() => validateNewMessage(undefined, {'fc-1': {}})).not.toThrow();
-    expect(() =>
-      validateNewMessage({role: 'user'}, {'fc-1': {}}),
-    ).not.toThrow();
+  it('accepts a message with no parts to inspect', () => {
+    expect(() => validateNewMessage(undefined)).not.toThrow();
+    expect(() => validateNewMessage({role: 'user'})).not.toThrow();
   });
 });
 
@@ -192,12 +168,6 @@ describe('resolveInvocationId', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns the caller id for an absent message', () => {
-    expect(resolveInvocationId(sessionOf([]), undefined, 'inv-7')).toBe(
-      'inv-7',
-    );
-  });
-
   it('returns the caller id for a plain text message', () => {
     expect(
       resolveInvocationId(
@@ -210,11 +180,7 @@ describe('resolveInvocationId', () => {
 
   it('rejects a function response with no id', () => {
     expect(() =>
-      resolveInvocationId(
-        sessionOf([]),
-        responseMessage([undefined]),
-        undefined,
-      ),
+      resolveInvocationId(sessionOf([]), responseMessage([undefined]), 'inv-7'),
     ).toThrow('Function response id is required to resume an invocation.');
   });
 

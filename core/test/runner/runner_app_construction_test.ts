@@ -18,8 +18,8 @@ import {logger} from '../../src/utils/logger.js';
 
 class MarkerPlugin extends BasePlugin {}
 
-function newAgent(name = 'root_agent'): LlmAgent {
-  return new LlmAgent({name, model: 'gemini-2.0-flash'});
+function newAgent(name = 'root_agent', subAgents: LlmAgent[] = []): LlmAgent {
+  return new LlmAgent({name, model: 'gemini-2.0-flash', subAgents});
 }
 
 function newWorkflow(name = 'wf'): Workflow {

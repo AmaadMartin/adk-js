@@ -17,54 +17,12 @@ import {BaseAgent} from '../base_agent.js';
 import {Context} from '../context.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent, LlmAgent} from '../llm_agent.js';
+import {
+  getTransferTargets,
+  isTransferTarget,
+  NON_TRANSFERABLE_MODES,
+} from '../transfer_utils.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
-
-/** Agent modes that cannot service a conversation handed to them. */
-const NON_TRANSFERABLE_MODES: ReadonlyArray<LlmAgent['mode']> = [
-  'single_turn',
-  'task',
-];
-
-/**
- * Whether `agent` may be offered to the model as a transfer target.
- *
- * A `single_turn` or `task` agent is driven by the workflow graph rather than
- * by a transfer, so it is excluded. Only {@link LlmAgent} carries `mode`; every
- * other agent type is a valid target.
- */
-function isTransferTarget(agent: BaseAgent): boolean {
-  return !isLlmAgent(agent) || !NON_TRANSFERABLE_MODES.includes(agent.mode);
-}
-
-/**
- * Collects the agents that `agent` can transfer to: its sub-agents, its parent
- * agent, and its peer agents, subject to the `disallowTransferTo*` flags.
- *
- * Sub-agents and peers are filtered by {@link isTransferTarget}. The parent is
- * not: returning control upwards is always allowed.
- */
-function getTransferTargets(agent: LlmAgent): BaseAgent[] {
-  const targets: BaseAgent[] = agent.subAgents.filter(isTransferTarget);
-
-  if (!agent.parentAgent || !isLlmAgent(agent.parentAgent)) {
-    return targets;
-  }
-
-  if (!agent.disallowTransferToParent) {
-    targets.push(agent.parentAgent);
-  }
-
-  if (!agent.disallowTransferToPeers) {
-    targets.push(
-      ...agent.parentAgent.subAgents.filter(
-        (peerAgent) =>
-          peerAgent.name !== agent.name && isTransferTarget(peerAgent),
-      ),
-    );
-  }
-
-  return targets;
-}
 
 function buildTargetAgentInfo(targetAgent: BaseAgent): string {
   return `

@@ -220,22 +220,29 @@ export function getFunctionCalls(response: LlmResponse): FunctionCall[] {
 }
 
 /**
+ * Returns the function responses carried by a message.
+ *
+ * The runner reads a caller's reply before it becomes an event, so the rule
+ * lives at the content level and {@link getFunctionResponses} reuses it.
+ */
+export function getFunctionResponsesFromContent(
+  content: Content | undefined,
+): FunctionResponse[] {
+  return (
+    content?.parts?.flatMap((part) =>
+      part.functionResponse ? [part.functionResponse] : [],
+    ) ?? []
+  );
+}
+
+/**
  * Returns the function responses in the response, in the order the model
  * emitted them.
  */
 export function getFunctionResponses(
   response: LlmResponse,
 ): FunctionResponse[] {
-  const funcResponses = [];
-  if (response.content && response.content.parts) {
-    for (const part of response.content.parts) {
-      if (part.functionResponse) {
-        funcResponses.push(part.functionResponse);
-      }
-    }
-  }
-
-  return funcResponses;
+  return getFunctionResponsesFromContent(response.content);
 }
 
 /**
