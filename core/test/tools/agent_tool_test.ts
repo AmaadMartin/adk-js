@@ -6,6 +6,7 @@
 
 import {
   AgentTool,
+  AgentToolArgsConfig,
   BaseAgent,
   BasePlugin,
   Context,
@@ -15,19 +16,27 @@ import {
   Event,
   FeatureName,
   InMemorySessionService,
+  InputValidationError,
   InvocationContext,
   LlmAgent,
   PluginManager,
   RunConfig,
   Runner,
   SequentialAgent,
+  SingleTurnAgentTool,
   State,
   StreamingMode,
+  TaskAgentTool,
+  ToolErrorType,
+  ToolExecutionError,
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {Content, GroundingMetadata, Part, Type} from '@google/genai';
+import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it, Mock, vi} from 'vitest';
 import {z} from 'zod';
+
+import {searchAgent} from './fixtures/config_agents.js';
 
 /** Selects the Vertex AI variant, which is not GEMINI_API. */
 const ENTERPRISE_MODE_ENV_VAR = 'GOOGLE_GENAI_USE_ENTERPRISE';
@@ -40,6 +49,7 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     Runner: vi.fn().mockImplementation((config) => ({
       appName: config?.appName,
       sessionService: config?.sessionService,
+      pluginManager: new PluginManager(config?.plugins),
       close: vi.fn(),
       runAsync: vi.fn(),
       closeToolsets: vi.fn(),
@@ -62,9 +72,11 @@ function mockRunnerCapturingConfig(
     return {
       appName: config?.appName,
       sessionService: config?.sessionService,
+      pluginManager: new PluginManager(config?.plugins),
       runAsync: async function* () {
         yield* events;
       },
+      close: vi.fn(),
       closeToolsets: vi.fn(),
     } as unknown as Runner;
   });
@@ -84,23 +96,25 @@ type StubRun = (params: {
 
 /**
  * Installs a `Runner` stub that runs `run`, and returns the mock recording
- * whether the tool released the nested runner's toolsets.
+ * whether the tool closed the nested runner.
  *
  * The one cast is the mock pattern this file already uses: a partial stub
  * cannot satisfy the whole `Runner` shape.
  */
 function stubRunner(run: StubRun): Mock {
-  const closeToolsets = vi.fn();
+  const close = vi.fn();
   vi.mocked(Runner).mockImplementation(
     (config) =>
       ({
         appName: config?.appName,
         sessionService: config?.sessionService,
-        closeToolsets,
+        pluginManager: new PluginManager(config?.plugins),
+        close,
+        closeToolsets: vi.fn(),
         runAsync: run,
       }) as unknown as Runner,
   );
-  return closeToolsets;
+  return close;
 }
 
 /**
@@ -225,10 +239,12 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        pluginManager: new PluginManager(config?.plugins),
         runAsync: vi.fn((request: {sessionId: string}) => {
           childSessionIds.push(request.sessionId);
           return mockRunAsync();
         }),
+        close: vi.fn(),
         closeToolsets: vi.fn(),
       } as unknown as Runner;
     });
@@ -543,6 +559,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        pluginManager: new PluginManager(config?.plugins),
         close: vi.fn(),
         runAsync: mockRunAsync,
         closeToolsets: vi.fn(),
@@ -839,6 +856,7 @@ function mockRunner(stream: () => AsyncGenerator<Event, void, void>) {
     return {
       appName: config?.appName,
       sessionService: config?.sessionService,
+      pluginManager: new PluginManager(config?.plugins),
       runAsync: async function* (params: {newMessage: Content}) {
         seen.runCalls += 1;
         seen.messageText = params.newMessage.parts?.[0].text;
@@ -849,6 +867,7 @@ function mockRunner(stream: () => AsyncGenerator<Event, void, void>) {
           seen.streamClosed = true;
         }
       },
+      close: vi.fn(),
       closeToolsets: vi.fn(),
     } as unknown as Runner;
   });
@@ -1885,5 +1904,455 @@ describe('AgentTool input schema', () => {
     });
 
     expect(nested.newMessage?.parts?.[0]?.text).toBe('{"query":"hello"}');
+  });
+});
+
+describe('AgentTool declaration build', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** An input schema carrying keywords the Gemini surface rejects. */
+  const richSchema = z.object({
+    query: z.string().describe('the query'),
+    limit: z.number().default(10),
+    tag: z.string().nullable(),
+  });
+
+  function richAgent(description = 'searches the catalogue'): LlmAgent {
+    return new LlmAgent({
+      name: 'search_agent',
+      model: 'gemini-2.5-flash',
+      description,
+      inputSchema: richSchema,
+    });
+  }
+
+  it('normalises the input schema for the Gemini API surface', () => {
+    vi.stubEnv(ENTERPRISE_MODE_ENV_VAR, 'false');
+    const agent = richAgent();
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration.name).toBe('search_agent');
+    expect(declaration.parameters).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        query: {type: Type.STRING, description: 'the query'},
+        limit: {type: Type.NUMBER},
+        tag: {type: Type.STRING},
+      },
+      required: ['query'],
+    });
+  });
+
+  it('keeps the keywords the Vertex AI surface accepts', () => {
+    vi.stubEnv(ENTERPRISE_MODE_ENV_VAR, 'true');
+    const agent = richAgent();
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration.parameters?.properties?.['limit']).toEqual({
+      type: Type.NUMBER,
+      default: 10,
+    });
+    expect(declaration.parameters?.properties?.['tag']).toEqual({
+      type: Type.STRING,
+      nullable: true,
+    });
+    expect(declaration.parameters?.required).toEqual(['query']);
+  });
+
+  it('drops the schema dialect key with the feature on', async () => {
+    const agent = richAgent();
+
+    const declaration = await withJsonSchemaDeclaration(() =>
+      new AgentTool({agent})._getDeclaration(),
+    );
+
+    expect(declaration.parametersJsonSchema).not.toHaveProperty('$schema');
+    expect(declaration.parametersJsonSchema).toMatchObject({
+      type: 'object',
+      properties: {query: {type: 'string'}},
+    });
+    expect(declaration.parameters).toBeUndefined();
+  });
+
+  it('describes the tool with the agent description, not the schema', () => {
+    const declaration = new AgentTool({
+      agent: richAgent('answers catalogue questions'),
+    })._getDeclaration();
+
+    expect(declaration.description).toBe('answers catalogue questions');
+  });
+
+  it('normalises a genai schema set after the agent was built', () => {
+    vi.stubEnv(ENTERPRISE_MODE_ENV_VAR, 'false');
+    const agent = new LlmAgent({
+      name: 'search_agent',
+      model: 'gemini-2.5-flash',
+      description: 'searches the catalogue',
+    });
+    agent.inputSchema = {
+      type: Type.OBJECT,
+      properties: {
+        query: {type: Type.STRING},
+        tag: {type: Type.STRING, nullable: true},
+      },
+      required: ['query', 'tag'],
+    };
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration.parameters).toEqual({
+      type: Type.OBJECT,
+      properties: {query: {type: Type.STRING}, tag: {type: Type.STRING}},
+      required: ['query'],
+    });
+  });
+
+  it('declares a string response off GEMINI_API without an output schema', () => {
+    vi.stubEnv(ENTERPRISE_MODE_ENV_VAR, 'true');
+
+    const declaration = new AgentTool({
+      agent: richAgent(),
+    })._getDeclaration();
+
+    expect(declaration.response).toEqual({type: Type.STRING});
+    expect(declaration.responseJsonSchema).toBeUndefined();
+  });
+
+  it('declares an object response off GEMINI_API with an output schema', () => {
+    vi.stubEnv(ENTERPRISE_MODE_ENV_VAR, 'true');
+    const agent = new LlmAgent({
+      name: 'search_agent',
+      model: 'gemini-2.5-flash',
+      description: 'searches the catalogue',
+      inputSchema: richSchema,
+      outputSchema: z.object({answer: z.string()}),
+    });
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration.response).toEqual({type: Type.OBJECT});
+  });
+
+  it('declares the response json schemas off GEMINI_API with the feature on', async () => {
+    vi.stubEnv(ENTERPRISE_MODE_ENV_VAR, 'true');
+    const withOutput = new LlmAgent({
+      name: 'search_agent',
+      model: 'gemini-2.5-flash',
+      description: 'searches the catalogue',
+      inputSchema: richSchema,
+      outputSchema: z.object({answer: z.string()}),
+    });
+
+    const declarations = await withJsonSchemaDeclaration(() => [
+      new AgentTool({agent: richAgent()})._getDeclaration(),
+      new AgentTool({agent: withOutput})._getDeclaration(),
+    ]);
+
+    expect(declarations[0].responseJsonSchema).toEqual({type: 'string'});
+    expect(declarations[1].responseJsonSchema).toEqual({type: 'object'});
+  });
+
+  it('declares no response schema on GEMINI_API', () => {
+    vi.stubEnv(ENTERPRISE_MODE_ENV_VAR, 'false');
+
+    const declaration = new AgentTool({
+      agent: richAgent(),
+    })._getDeclaration();
+
+    expect(declaration.response).toBeUndefined();
+    expect(declaration.responseJsonSchema).toBeUndefined();
+  });
+});
+
+describe('AgentTool response deferral', () => {
+  it('defers the response of a delegated task', () => {
+    expect(new TaskAgentTool({agent: SUB_AGENT}).defersResponse).toBe(true);
+  });
+
+  it('answers a plain agent call itself', () => {
+    expect(new AgentTool({agent: SUB_AGENT}).defersResponse).toBe(false);
+    expect(new SingleTurnAgentTool({agent: SUB_AGENT}).defersResponse).toBe(
+      false,
+    );
+  });
+});
+
+/** Absolute path of the fixture module a config file names. */
+const AGENT_FIXTURE_PATH = fileURLToPath(
+  new URL('./fixtures/config_agents.ts', import.meta.url),
+);
+
+/** Absolute path of a config file sitting next to the fixture. */
+const AGENT_CONFIG_PATH = fileURLToPath(
+  new URL('./fixtures/root_agent.yaml', import.meta.url),
+);
+
+/**
+ * Builds declared args carrying a value the declared type forbids. A config
+ * file is parsed at run time, so its contents are not what the type promises.
+ */
+function malformedArgs(args: unknown): AgentToolArgsConfig {
+  return args as AgentToolArgsConfig;
+}
+
+describe('AgentTool.fromConfig', () => {
+  /** A plugin with no callbacks, used only to watch where it is registered. */
+  class InertPlugin extends BasePlugin {}
+
+  it('resolves an agent named in code', async () => {
+    const tool = await AgentTool.fromConfig(
+      {agent: {code: `${AGENT_FIXTURE_PATH}#searchAgent`}},
+      AGENT_CONFIG_PATH,
+    );
+
+    expect(tool.name).toBe('search_agent');
+    expect(tool.description).toBe('searches the catalogue');
+  });
+
+  it('resolves an agent named relative to the config file', async () => {
+    const tool = await AgentTool.fromConfig(
+      {agent: {code: './config_agents.ts#searchAgent'}},
+      AGENT_CONFIG_PATH,
+    );
+
+    expect(tool.name).toBe('search_agent');
+  });
+
+  it('applies skipSummarization from the config', async () => {
+    mockRunner(replay(reply([{text: 'done'}])));
+    const tool = await AgentTool.fromConfig(
+      {
+        agent: {code: `${AGENT_FIXTURE_PATH}#searchAgent`},
+        skipSummarization: true,
+      },
+      AGENT_CONFIG_PATH,
+    );
+    const toolContext = createToolContext({agent: searchAgent});
+
+    await tool.runAsync({args: {request: 'go'}, toolContext});
+
+    expect(toolContext.actions.skipSummarization).toBe(true);
+  });
+
+  it('leaves summarization on when the config omits it', async () => {
+    mockRunner(replay(reply([{text: 'done'}])));
+    const tool = await AgentTool.fromConfig(
+      {agent: {code: `${AGENT_FIXTURE_PATH}#searchAgent`}},
+      AGENT_CONFIG_PATH,
+    );
+    const toolContext = createToolContext({agent: searchAgent});
+
+    await tool.runAsync({args: {request: 'go'}, toolContext});
+
+    expect(toolContext.actions.skipSummarization).toBeUndefined();
+  });
+
+  it('lends the parent plugins to the sub-runner by default', async () => {
+    const plugin = new InertPlugin('recorder');
+    const seen = mockRunner(replay(reply([{text: 'done'}])));
+    const tool = await AgentTool.fromConfig(
+      {agent: {code: `${AGENT_FIXTURE_PATH}#searchAgent`}},
+      AGENT_CONFIG_PATH,
+    );
+
+    await tool.runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({agent: searchAgent, plugins: [plugin]}),
+    });
+
+    expect(seen.plugins).toEqual([plugin]);
+  });
+
+  it('withholds the parent plugins when the config turns them off', async () => {
+    const plugin = new InertPlugin('recorder');
+    const seen = mockRunner(replay(reply([{text: 'done'}])));
+    const tool = await AgentTool.fromConfig(
+      {
+        agent: {code: `${AGENT_FIXTURE_PATH}#searchAgent`},
+        includePlugins: false,
+      },
+      AGENT_CONFIG_PATH,
+    );
+
+    await tool.runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({agent: searchAgent, plugins: [plugin]}),
+    });
+
+    expect(seen.plugins).toBeUndefined();
+  });
+
+  it.each([
+    [
+      'a reference naming both forms',
+      {agent: {code: 'a#b', configPath: 'sub_agent.yaml'}},
+      'Invalid tool config: only one of `agent.code` or `agent.configPath` ' +
+        'should be provided.',
+    ],
+    [
+      'a reference naming neither form',
+      {agent: {}},
+      'Invalid tool config: exactly one of `agent.code` or ' +
+        '`agent.configPath` must be provided.',
+    ],
+    [
+      'a config file reference',
+      {agent: {configPath: 'sub_agent.yaml'}},
+      'Invalid tool config: `agent.configPath` is not supported yet; name ' +
+        'the agent instance with `agent.code`.',
+    ],
+    [
+      'a non-string code reference',
+      {agent: {code: 42}},
+      'Invalid tool config: `agent.code` must be a string.',
+    ],
+    [
+      'a config that is not an object',
+      'not a config',
+      'Invalid tool config: the config must be a non-null object.',
+    ],
+    [
+      'a missing agent entry',
+      {},
+      'Invalid tool config: `agent` must be a non-null object.',
+    ],
+    [
+      'a null agent entry',
+      {agent: null},
+      'Invalid tool config: `agent` must be a non-null object.',
+    ],
+    [
+      'a non-boolean skipSummarization',
+      {agent: {code: 'a#b'}, skipSummarization: 'yes'},
+      'Invalid tool config: `skipSummarization` must be a boolean.',
+    ],
+    [
+      'a non-boolean includePlugins',
+      {agent: {code: 'a#b'}, includePlugins: 1},
+      'Invalid tool config: `includePlugins` must be a boolean.',
+    ],
+  ])('rejects %s', async (_label, args, message) => {
+    const building = AgentTool.fromConfig(
+      malformedArgs(args),
+      AGENT_CONFIG_PATH,
+    );
+
+    await expect(building).rejects.toThrow(ToolExecutionError);
+    await expect(building).rejects.toMatchObject({
+      message,
+      errorType: ToolErrorType.BAD_REQUEST,
+    });
+  });
+
+  it.each([
+    ['a plain object', 'notAnAgent'],
+    ['a class', 'AgentClass'],
+    ['a factory function', 'makeAgent'],
+  ])('rejects a code reference naming %s', async (_label, exportName) => {
+    const building = AgentTool.fromConfig(
+      {agent: {code: `${AGENT_FIXTURE_PATH}#${exportName}`}},
+      AGENT_CONFIG_PATH,
+    );
+
+    await expect(building).rejects.toMatchObject({
+      message: 'Invalid tool config: `agent.code` must name an agent instance.',
+      errorType: ToolErrorType.BAD_REQUEST,
+    });
+  });
+
+  it('keeps the declared values out of the error message', async () => {
+    const building = AgentTool.fromConfig(
+      malformedArgs({
+        agent: {code: 'secret-token#agent', configPath: 'x.yaml'},
+      }),
+      AGENT_CONFIG_PATH,
+    );
+
+    await expect(building).rejects.toThrow(
+      expect.objectContaining({
+        message: expect.not.stringContaining('secret-token'),
+      }),
+    );
+  });
+
+  it('propagates the resolver error for a name that does not resolve', async () => {
+    const building = AgentTool.fromConfig(
+      {agent: {code: '/no/such/module.ts#agent'}},
+      AGENT_CONFIG_PATH,
+    );
+
+    await expect(building).rejects.toThrow(InputValidationError);
+    await expect(building).rejects.toMatchObject({
+      message: 'Invalid fully qualified name: /no/such/module.ts#agent',
+    });
+  });
+});
+
+describe('AgentTool borrowed plugin teardown', () => {
+  /** A plugin recording whether the sub-runner closed it. */
+  class ClosingPlugin extends BasePlugin {
+    closed = false;
+
+    override async close(): Promise<void> {
+      this.closed = true;
+    }
+  }
+
+  /**
+   * Installs a `Runner` stub whose plugin manager is real, so a test can close
+   * it the way `Runner.close` does and see what the tool configured.
+   */
+  function stubRunnerExposingPluginManager(): {manager?: PluginManager} {
+    const captured: {manager?: PluginManager} = {};
+    vi.mocked(Runner).mockImplementation((config) => {
+      captured.manager = new PluginManager(config?.plugins);
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        pluginManager: captured.manager,
+        close: vi.fn(),
+        closeToolsets: vi.fn(),
+        runAsync: async function* () {
+          yield createEvent({
+            author: 'sub-agent',
+            content: {role: 'model', parts: [{text: 'done'}]},
+          });
+        },
+      } as unknown as Runner;
+    });
+    return captured;
+  }
+
+  it('leaves the borrowed plugins open when the sub-runner closes', async () => {
+    const agent = createSubAgent();
+    const plugin = new ClosingPlugin('recorder');
+    const captured = stubRunnerExposingPluginManager();
+
+    await new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({agent, plugins: [plugin]}),
+    });
+    await captured.manager?.close();
+
+    expect(plugin.closed).toBe(false);
+  });
+
+  it('closes the plugins the sub-runner owns', async () => {
+    const agent = createSubAgent();
+    const plugin = new ClosingPlugin('recorder');
+    const captured = stubRunnerExposingPluginManager();
+
+    await new AgentTool({agent, includePlugins: false}).runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({agent, plugins: [plugin]}),
+    });
+    captured.manager?.registerPlugin(plugin);
+    await captured.manager?.close();
+
+    expect(plugin.closed).toBe(true);
   });
 });

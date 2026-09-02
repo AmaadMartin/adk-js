@@ -13,7 +13,8 @@ import {
   Type,
 } from '@google/genai';
 
-import {BaseAgent} from '../agents/base_agent.js';
+import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
+import {AgentRefConfig} from '../agents/common_configs.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
 import {RunConfig, StreamingMode} from '../agents/run_config.js';
 import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
@@ -22,22 +23,25 @@ import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
 import {formatError} from '../utils/error_utils.js';
 import {stableJsonStringify} from '../utils/json_utils.js';
+import {resolveFullyQualifiedName} from '../utils/module_utils.js';
 import {
   parseWithSchema,
   SchemaLike,
   stripJsonCodeFence,
   toJsonSchema,
 } from '../utils/schema.js';
+import {isZodObject} from '../utils/simple_zod_to_json.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 import {runNodeFromToolContext} from '../workflow/run_node_from_tool.js';
 
 import {State} from '../sessions/state.js';
 
+import {buildFunctionDeclaration} from './_automatic_function_calling_util.js';
 import {
   AGENT_TOOL_SIGNATURE_SYMBOL,
   isAgentTool,
 } from './agent_tool_signature.js';
-import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import {BaseTool, invalidToolConfig, RunAsyncToolRequest} from './base_tool.js';
 import {ForwardingArtifactService} from './forwarding_artifact_service.js';
 
 export {isAgentTool};
@@ -71,6 +75,26 @@ export interface AgentToolConfig {
 }
 
 /**
+ * The declared args of an {@link AgentTool} in a config file.
+ *
+ * The file form of {@link AgentToolConfig}: it names the agent instead of
+ * holding one. Mirrors adk-python's `AgentToolConfig`.
+ */
+export interface AgentToolArgsConfig {
+  /** The reference to the agent instance. */
+  agent: AgentRefConfig;
+
+  /** Whether to skip summarization of the agent output. Defaults to false. */
+  skipSummarization?: boolean;
+
+  /**
+   * Whether to propagate the parent runner's plugins into the wrapped agent's
+   * runner. Defaults to true.
+   */
+  includePlugins?: boolean;
+}
+
+/**
  * Prefix marking a state key as ADK bookkeeping. Such a key stays in the
  * caller's session and never reaches a sub-agent.
  */
@@ -85,6 +109,19 @@ const REQUEST_PARAMETERS: Schema = {
 
 /** {@link REQUEST_PARAMETERS} as plain JSON Schema. */
 const REQUEST_PARAMETERS_JSON_SCHEMA = toJsonSchema(REQUEST_PARAMETERS);
+
+/**
+ * The declaration of an agent that declares no input schema: it takes one
+ * free-text `request`.
+ */
+function declareRequestParameter(
+  name: string,
+  description: string,
+): FunctionDeclaration {
+  return isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)
+    ? {name, description, parametersJsonSchema: REQUEST_PARAMETERS_JSON_SCHEMA}
+    : {name, description, parameters: REQUEST_PARAMETERS};
+}
 
 /**
  * The state key the wrapped agent's grounding metadata is published under.
@@ -199,6 +236,77 @@ function nestedRunConfig(callerConfig?: RunConfig): RunConfig | undefined {
 }
 
 /**
+ * Checks the declared args of an {@link AgentTool} config file.
+ *
+ * The runtime checks are not redundant with the declared type: a loader parses
+ * a config file, so what arrives is whatever the file held.
+ *
+ * @throws {ToolExecutionError} When an entry has the wrong shape.
+ */
+function validateAgentToolArgs(config: AgentToolArgsConfig): void {
+  if (typeof config !== 'object' || config === null) {
+    throw invalidToolConfig('the config must be a non-null object');
+  }
+  const {agent, skipSummarization, includePlugins} = config;
+  if (typeof agent !== 'object' || agent === null) {
+    throw invalidToolConfig('`agent` must be a non-null object');
+  }
+  if (
+    skipSummarization !== undefined &&
+    typeof skipSummarization !== 'boolean'
+  ) {
+    throw invalidToolConfig('`skipSummarization` must be a boolean');
+  }
+  if (includePlugins !== undefined && typeof includePlugins !== 'boolean') {
+    throw invalidToolConfig('`includePlugins` must be a boolean');
+  }
+}
+
+/**
+ * The agent an {@link AgentRefConfig} names.
+ *
+ * Mirrors adk-python's `resolve_agent_reference`, less its `configPath` arm:
+ * adk-js core has no agent-config file loader to resolve one with.
+ *
+ * @param ref The reference read from a config file.
+ * @param configAbsPath Absolute path of that config file. A relative module
+ *   specifier in `ref.code` resolves against its directory.
+ * @throws {ToolExecutionError} When the reference names no agent, names both
+ *   forms, names a config file, or resolves to a value that is not an agent.
+ * @throws {InputValidationError} When `ref.code` does not resolve.
+ */
+async function resolveAgentReference(
+  ref: AgentRefConfig,
+  configAbsPath?: string,
+): Promise<BaseAgent> {
+  const {code, configPath} = ref;
+  if (code !== undefined && configPath !== undefined) {
+    throw invalidToolConfig(
+      'only one of `agent.code` or `agent.configPath` should be provided',
+    );
+  }
+  if (code === undefined && configPath === undefined) {
+    throw invalidToolConfig(
+      'exactly one of `agent.code` or `agent.configPath` must be provided',
+    );
+  }
+  if (configPath !== undefined) {
+    throw invalidToolConfig(
+      '`agent.configPath` is not supported yet; name the agent instance with' +
+        ' `agent.code`',
+    );
+  }
+  if (typeof code !== 'string') {
+    throw invalidToolConfig('`agent.code` must be a string');
+  }
+  const agent = await resolveFullyQualifiedName(code, configAbsPath);
+  if (!isBaseAgent(agent)) {
+    throw invalidToolConfig('`agent.code` must name an agent instance');
+  }
+  return agent;
+}
+
+/**
  * A tool that wraps an agent.
  *
  * This tool allows an agent to be called as a tool within a larger
@@ -231,30 +339,53 @@ export class AgentTool extends BaseTool {
       config.propagateGroundingMetadata ?? false;
   }
 
-  override _getDeclaration(): FunctionDeclaration {
-    const jsonSchemaDeclaration = isFeatureEnabled(
-      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
-    );
-    const declaration: FunctionDeclaration = {
-      name: this.name,
-      description: this.description,
-    };
+  /**
+   * Builds a tool from its declared args in an agent config file.
+   *
+   * The method is asynchronous because JavaScript loads a module
+   * asynchronously. The adk-python counterpart is synchronous only because
+   * `importlib` is.
+   *
+   * @param config The tool's declared args.
+   * @param configAbsPath Absolute path of that config file. A relative module
+   *   specifier in `config.agent.code` resolves against its directory.
+   * @return The configured tool.
+   * @throws {ToolExecutionError} When an entry has the wrong shape, or the
+   *   agent reference names no agent instance.
+   * @throws {InputValidationError} When `config.agent.code` does not resolve.
+   */
+  static override async fromConfig(
+    config: AgentToolArgsConfig,
+    configAbsPath?: string,
+  ): Promise<AgentTool> {
+    validateAgentToolArgs(config);
+    return new AgentTool({
+      agent: await resolveAgentReference(config.agent, configAbsPath),
+      skipSummarization: config.skipSummarization,
+      includePlugins: config.includePlugins,
+    });
+  }
 
-    if (jsonSchemaDeclaration) {
-      const inputSchema = agentInputSchemaSource(this.agent);
-      declaration.parametersJsonSchema = inputSchema
-        ? toJsonSchema(inputSchema)
-        : REQUEST_PARAMETERS_JSON_SCHEMA;
-    } else {
-      // The declaration carries the agent's input schema as it stands. The
-      // arguments a call brings back are validated in `runAsync`.
-      declaration.parameters =
-        agentInputSchema(this.agent) ?? REQUEST_PARAMETERS;
-    }
+  override _getDeclaration(): FunctionDeclaration {
+    const inputSchema = agentInputSchemaSource(this.agent);
+    const declaration = inputSchema
+      ? buildFunctionDeclaration({
+          name: this.name,
+          // A Zod object renders through the strict converter, which keeps
+          // what the genai translation drops. Any other schema is already
+          // normalised on the agent.
+          parameters: isZodObject(inputSchema)
+            ? inputSchema
+            : agentInputSchema(this.agent),
+          variant: this.apiVariant,
+        })
+      : declareRequestParameter(this.name, this.description);
+    // The agent's description wins over anything the input schema carries.
+    declaration.description = this.description;
 
     if (this.apiVariant !== GoogleLLMVariant.GEMINI_API) {
       const hasOutputSchema = agentHasOutputSchema(this.agent);
-      if (jsonSchemaDeclaration) {
+      if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
         declaration.responseJsonSchema = {
           type: hasOutputSchema ? 'object' : 'string',
         };
@@ -313,12 +444,14 @@ export class AgentTool extends BaseTool {
         toolContext.invocationContext.memoryService ??
         new InMemoryMemoryService(),
       credentialService: toolContext.invocationContext.credentialService,
-      // The caller keeps ownership of these plugins: the sub-runner releases
-      // its own toolsets and nothing else.
       plugins: this.includePlugins
         ? toolContext.invocationContext.pluginManager?.listPlugins()
         : undefined,
     });
+
+    if (this.includePlugins) {
+      runner.pluginManager.setSkipClosingPlugins(true);
+    }
 
     try {
       const state = Object.fromEntries(
@@ -399,10 +532,10 @@ export class AgentTool extends BaseTool {
 
       return result;
     } finally {
-      // Release the toolsets the wrapped agent holds, on every exit: a normal
-      // run, an abort, and a throw. The session service and the plugins belong
-      // to the caller, which is still using them.
-      await runner.closeToolsets();
+      // Release the wrapped agent's toolsets and the sub-runner's own plugins,
+      // on every exit: a normal run, an abort, and a throw. Plugins borrowed
+      // from the caller are exempted above, because the caller still owns them.
+      await runner.close();
     }
   }
 }
@@ -476,6 +609,14 @@ export class SingleTurnAgentTool extends AgentTool {
  * the tool in parallel. Mirrors adk-python's `_TaskAgentTool`.
  */
 export class TaskAgentTool extends AgentTool {
+  /**
+   * A delegated task that pauses — an interrupt awaiting a resume — produces
+   * no output. Without this marker the framework answers the call with an
+   * empty function response, and the model replies as though the task had
+   * finished with nothing. Mirrors adk-python's `_TaskAgentTool`.
+   */
+  override defersResponse = true;
+
   override _getDeclaration(): FunctionDeclaration {
     const inputSchema =
       agentInputSchemaSource(this.agent) ?? DEFAULT_TASK_INPUT_SCHEMA;

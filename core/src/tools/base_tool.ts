@@ -302,7 +302,7 @@ export abstract class BaseTool {
  * The config is rejected without echoing it back: a tool's declared args can
  * carry credentials.
  */
-function invalidToolConfig(requirement: string): ToolExecutionError {
+export function invalidToolConfig(requirement: string): ToolExecutionError {
   return new ToolExecutionError(
     `Invalid tool config: ${requirement}.`,
     ToolErrorType.BAD_REQUEST,
