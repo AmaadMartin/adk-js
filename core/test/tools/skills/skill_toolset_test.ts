@@ -316,6 +316,50 @@ describe('skill_toolset', () => {
       expect(tools2.map((t) => t.name)).toContain('cached_tool');
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
     });
+
+    it('applies a nested toolset prefix to the tools it contributes', async () => {
+      class NestedTool extends BaseTool {
+        constructor() {
+          super({name: 'nested_tool', description: 'Nested tool'});
+        }
+        async runAsync() {
+          return 'nested';
+        }
+      }
+
+      class NestedToolset extends BaseToolset {
+        constructor() {
+          super([], 'inner');
+        }
+        override async getTools(): Promise<BaseTool[]> {
+          return [new NestedTool()];
+        }
+      }
+
+      const skillWithTools: Skill = {
+        frontmatter: {
+          name: 'skill-with-nested',
+          description: 'desc',
+          metadata: {
+            adk_additional_tools: ['inner_nested_tool'],
+          },
+        },
+        instructions: 'instructions',
+      };
+
+      const toolset = new SkillToolset([skillWithTools], {
+        additionalTools: [new NestedToolset()],
+      });
+
+      const context = {
+        agentName: 'test-agent',
+        state: {get: vi.fn().mockReturnValue(['skill-with-nested'])},
+      } as unknown as ReadonlyContext;
+
+      const tools = await toolset.getTools(context);
+
+      expect(tools.map((t) => t.name)).toContain('inner_nested_tool');
+    });
   });
 
   describe('script output directory', () => {
