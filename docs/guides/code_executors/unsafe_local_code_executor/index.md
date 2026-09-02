@@ -79,6 +79,29 @@ const result = await executor.executeCode({
 // result.stderr === ''
 ```
 
+## The exit status
+
+The result also carries the raw status in `exitCode`, so a caller can classify a
+run itself instead of parsing `stderr`. A program that died by signal reports
+the negative signal number, the way a shell and adk-python report it:
+
+```typescript
+const result = await executor.executeCode({
+  invocationContext,
+  codeExecutionInput: {
+    code: 'import sys\nsys.exit(3)',
+    language: CodeExecutionLanguage.PYTHON,
+    inputFiles: [],
+  },
+});
+
+// result.exitCode === 3
+// A program killed on the timeout reports -15, and one killed by SIGKILL -9.
+```
+
+`exitCode` is `undefined` only when no process ran, which is the unsupported
+language case.
+
 ## Timeouts
 
 `timeoutSeconds` bounds the run and defaults to 30. On the deadline the

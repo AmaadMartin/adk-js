@@ -109,11 +109,6 @@ export interface UnsafeLocalCodeExecutorOptions {
   shellCommandPath?: string;
 }
 
-function createTempDir(): Promise<string> {
-  // mkdtemp names the directory itself and creates it exclusively at 0o700.
-  return fs.mkdtemp(path.join(os.tmpdir(), 'adk_js_unsafe_code_executor_'));
-}
-
 async function writeScriptFile(
   tempDir: string,
   code: string,
@@ -226,16 +221,23 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
     const isPython = language === CodeExecutionLanguage.PYTHON;
     let tempDir: string | undefined;
     try {
-      tempDir = await createTempDir();
+      // mkdtemp names the directory itself and creates it exclusively at 0o700.
+      tempDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'adk_js_unsafe_code_executor_'),
+      );
 
-      let command = this.pythonCommandPath;
-      let args = ['-c', PYTHON_RUNNER_SOURCE, pythonRunName(code)];
+      let command: string;
+      let args: string[];
       // Only Python gets an explicit environment; every other language keeps
       // inheriting the parent's.
-      let env: typeof process.env | undefined = pythonChildEnv();
+      let env: typeof process.env | undefined;
       let scriptFileName: string | undefined;
 
-      if (!isPython) {
+      if (isPython) {
+        command = this.pythonCommandPath;
+        args = ['-c', PYTHON_RUNNER_SOURCE, pythonRunName(code)];
+        env = pythonChildEnv();
+      } else {
         const filePath = await writeScriptFile(
           tempDir,
           code,
@@ -245,7 +247,6 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         scriptFileName = path.basename(filePath);
         command = this.nodeCommandPath;
         args = [filePath];
-        env = undefined;
 
         if (language === CodeExecutionLanguage.SHELL) {
           command = this.shellCommandPath;
@@ -280,6 +281,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       const executionResult = await new Promise<{
         stdout: string;
         stderr: string;
+        exitCode: number | null;
       }>((resolve) => {
         const child = spawn(command, args, {
           cwd: tempDir,
@@ -371,7 +373,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             // `os._exit`. Reporting nothing would show the model a clean run.
             stderr = `Code execution exited with status ${exitStatus}.`;
           }
-          resolve({stdout, stderr});
+          resolve({stdout, stderr, exitCode: exitStatus});
         });
       });
 
@@ -418,6 +420,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         stdout: executionResult.stdout,
         stderr: executionResult.stderr,
         outputFiles,
+        exitCode: executionResult.exitCode,
       };
     } finally {
       if (tempDir) {

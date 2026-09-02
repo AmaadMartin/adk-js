@@ -101,6 +101,12 @@ export interface CodeExecutionResult {
    * The output files from the code execution.
    * */
   outputFiles: File[];
+
+  /**
+   * The status the executed process exited with, or undefined when the
+   * executor cannot report one.
+   */
+  exitCode?: number | null;
 }
 
 /**

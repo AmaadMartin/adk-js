@@ -827,6 +827,74 @@ describe('UnsafeLocalCodeExecutor', () => {
     });
   });
 
+  describe('reported exit status', () => {
+    it('reports a clean run as 0', async () => {
+      const result = await executor.executeCode(pythonParams("print('ok')"));
+
+      expect(result.exitCode).toBe(0);
+    });
+
+    it('reports the status the program chose', async () => {
+      const result = await executor.executeCode(
+        pythonParams('import sys\nsys.exit(3)'),
+      );
+
+      expect(result.exitCode).toBe(3);
+    });
+
+    it.skipIf(IS_WINDOWS)(
+      'reports a signal death as a negative status',
+      async () => {
+        const result = await executor.executeCode(
+          pythonParams(
+            'import os, signal\nos.kill(os.getpid(), signal.SIGKILL)',
+          ),
+        );
+
+        expect(result.exitCode).toBe(-os.constants.signals.SIGKILL);
+      },
+    );
+
+    it.skipIf(IS_WINDOWS)(
+      'reports the signal a timed-out program died from',
+      async () => {
+        const result = await new UnsafeLocalCodeExecutor({
+          timeoutSeconds: 0.5,
+        }).executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: 'setTimeout(() => {}, 60000);',
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            inputFiles: [],
+          },
+        });
+
+        expect(result.exitCode).toBe(-os.constants.signals.SIGTERM);
+      },
+    );
+
+    it('reports a failed spawn as the negative errno, not as a clean run', async () => {
+      const result = await new UnsafeLocalCodeExecutor({
+        pythonCommandPath: 'non-existent-python-executable-789',
+      }).executeCode(pythonParams("print('test')"));
+
+      expect(result.exitCode).toBe(-os.constants.errno.ENOENT);
+    });
+
+    it('leaves the status unset when no process ran', async () => {
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'whatever',
+          language: CodeExecutionLanguage.UNSPECIFIED,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.exitCode).toBeUndefined();
+    });
+  });
+
   describe('python runner semantics', () => {
     it('runs code guarded on __main__', async () => {
       const result = await executor.executeCode(
