@@ -144,18 +144,19 @@ describe('App eventsCompactionConfig', () => {
     expect(app.eventsCompactionConfig).toBe(eventsCompactionConfig);
   });
 
-  it('rejects a sliding-window policy this SDK cannot act on', () => {
-    expect(
-      () =>
-        new App({
-          name: 'window_app',
-          rootAgent: new DummyAgent('root'),
-          eventsCompactionConfig: createEventsCompactionConfig({
-            compactionInterval: 2,
-            overlapSize: 1,
-          }),
-        }),
-    ).toThrowError(/carries no token trigger/);
+  it('accepts a sliding-window policy', () => {
+    const eventsCompactionConfig = createEventsCompactionConfig({
+      compactionInterval: 2,
+      overlapSize: 1,
+    });
+
+    const app = new App({
+      name: 'window_app',
+      rootAgent: new DummyAgent('root'),
+      eventsCompactionConfig,
+    });
+
+    expect(app.eventsCompactionConfig).toBe(eventsCompactionConfig);
   });
 
   it('leaves the policy unset when none is given', () => {
@@ -175,6 +176,17 @@ describe('App eventsCompactionConfig', () => {
           rootAgent: new DummyAgent('root'),
           eventsCompactionConfig: {tokenThreshold: 5},
         }),
-    ).toThrowError(/carries no token trigger/);
+    ).toThrowError(/must be set together/);
+  });
+
+  it('rejects a policy that configures no trigger at all', () => {
+    expect(
+      () =>
+        new App({
+          name: 'triggerless_app',
+          rootAgent: new DummyAgent('root'),
+          eventsCompactionConfig: {},
+        }),
+    ).toThrowError(/At least one compaction trigger/);
   });
 });
