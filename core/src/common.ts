@@ -6,6 +6,12 @@
 
 export {ActiveStreamingTool} from './agents/active_streaming_tool.js';
 export type {ActiveStreamingToolParams} from './agents/active_streaming_tool.js';
+export {AudioCacheManager} from './agents/audio_cache_manager.js';
+export type {
+  AudioCacheStats,
+  AudioCacheType,
+  FlushCachesOptions,
+} from './agents/audio_cache_manager.js';
 export {BaseAgent, isBaseAgent} from './agents/base_agent.js';
 export type {
   AfterAgentCallback,
@@ -26,6 +32,7 @@ export {
 export {InvocationContext, requireAgent} from './agents/invocation_context.js';
 export type {
   InvocationContextParams,
+  RealtimeCacheEntry,
   WorkflowInstructionScope,
 } from './agents/invocation_context.js';
 export {LiveRequestQueue} from './agents/live_request_queue.js';
@@ -66,7 +73,11 @@ export {ReadonlyContext} from './agents/readonly_context.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
 export {StreamingMode} from './agents/run_config.js';
-export type {RunConfig} from './agents/run_config.js';
+export type {
+  HistoryConfig,
+  LiveConnectConfigWithHistory,
+  RunConfig,
+} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
 export {
