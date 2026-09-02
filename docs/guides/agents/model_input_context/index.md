@@ -22,8 +22,7 @@ compaction removes it.
 `modelInputContext` is the escape hatch. The runner never persists it. The
 content request processor inserts a deep copy of it into `llmRequest.contents`
 immediately before the invocation's user content, so the model reads the
-context and then the question it answers. The block is deep-copied, so the
-request never aliases your array.
+context and then the question it answers.
 
 Two neighbouring pieces do related things. Session state (`ctx.state`) carries
 values between turns, and a `temp:` key is dropped before storage — but state
@@ -82,8 +81,9 @@ tool call: the request then ends with the function call and its response, and
 the block still precedes the user message that started the turn.
 
 When the user content is not in the contents at all, the block goes to the
-front. That happens for an agent whose `includeContents` is not `'default'`,
-and for a request built from a slice that excludes the original question.
+front. That happens when the invocation carries no user content, and for a
+sub-agent whose turn starts from another agent's message: the processor
+relabels that message as context, so it no longer equals the user content.
 
 ## What it does not do
 

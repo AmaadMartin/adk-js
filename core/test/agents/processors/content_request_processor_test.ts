@@ -390,6 +390,42 @@ describe('ContentRequestProcessor — model input context', () => {
     expect(block[0].parts?.[0].text).toBe('a retrieved document');
   });
 
+  it('goes to the front for a turn that starts from another agent', async () => {
+    const agent = new LlmAgent({
+      name: 'sub_agent',
+      model: 'gemini-2.5-flash',
+      includeContents: 'none',
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv1',
+      agent: agent as BaseAgent,
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [
+          userTurn(),
+          createEvent({
+            invocationId: 'inv1',
+            author: 'coordinator',
+            content: {role: 'model', parts: [{text: 'over to you'}]},
+          }),
+        ],
+      }),
+      pluginManager: new PluginManager([]),
+      runConfig: {modelInputContext: [document('a retrieved document')]},
+      userContent,
+    });
+    const llmRequest = emptyRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(requestTexts(llmRequest)).toEqual([
+      'a retrieved document',
+      'For context:',
+    ]);
+  });
+
   it('is a no-op for an empty model input context', async () => {
     const invocationContext = createMockInvocationContext([userTurn()], {
       runConfig: {modelInputContext: []},

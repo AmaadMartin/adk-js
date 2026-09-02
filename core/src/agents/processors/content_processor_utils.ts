@@ -102,9 +102,10 @@ export function getContents(
  *
  * The block is deep-copied, so the caller's `RunConfig` array is never aliased
  * into the request: a later edit of the request cannot reach back into the run
- * configuration. When the user content is absent from `contents` — a tool-call
- * turn that carries only function responses, for instance — the block goes to
- * the front, which is where adk-python puts it.
+ * configuration. When the user content is absent from `contents` — no
+ * `userContent` on the invocation, or a sub-agent whose turn starts from
+ * another agent's message rather than the user's — the block goes to the front,
+ * which is where adk-python puts it.
  *
  * @param contents The request contents, modified in place.
  * @param modelInputContext The transient contents to insert.

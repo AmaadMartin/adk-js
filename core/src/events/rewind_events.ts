@@ -28,28 +28,16 @@ export function applyRewinds(events: Event[]): Event[] {
   while (i >= 0) {
     const rewindTarget = events[i].actions?.rewindBeforeInvocationId;
     if (rewindTarget) {
-      i = firstEventOfInvocation(events, rewindTarget, i);
+      for (let j = 0; j < i; j++) {
+        if (events[j].invocationId === rewindTarget) {
+          i = j;
+          break;
+        }
+      }
     } else {
       kept.push(events[i]);
     }
     i--;
   }
   return kept.reverse();
-}
-
-/**
- * Returns the index of the first event of `invocationId` below `limit`, or
- * `limit` itself when the invocation is absent from that range.
- */
-function firstEventOfInvocation(
-  events: Event[],
-  invocationId: string,
-  limit: number,
-): number {
-  for (let j = 0; j < limit; j++) {
-    if (events[j].invocationId === invocationId) {
-      return j;
-    }
-  }
-  return limit;
 }

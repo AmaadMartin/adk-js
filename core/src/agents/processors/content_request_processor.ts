@@ -68,14 +68,11 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       );
     }
 
-    const modelInputContext = invocationContext.runConfig?.modelInputContext;
-    if (modelInputContext) {
-      insertModelInputContext(
-        llmRequest.contents,
-        modelInputContext,
-        invocationContext.userContent,
-      );
-    }
+    insertModelInputContext(
+      llmRequest.contents,
+      invocationContext.runConfig?.modelInputContext ?? [],
+      invocationContext.userContent,
+    );
 
     return;
   }
