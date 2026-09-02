@@ -435,6 +435,21 @@ async function convertToolUnionToTools(
  */
 const LLM_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.llmAgent');
 
+const DEFAULT_MODEL_SYMBOL = Symbol.for('google.adk.llmAgent.defaultModel');
+
+/**
+ * The default model override, held on `globalThis` rather than on the class.
+ *
+ * A bundler inlines `@google/adk` into an agent's bundle, so one process can
+ * hold two copies of `LlmAgent`. A class-level field would be private to the
+ * copy that wrote it, and the CLI's override would never reach the agent. The
+ * shared key mirrors the `Symbol.for('google.adk.*')` brands used for the same
+ * reason elsewhere.
+ */
+const defaultModelHolder: typeof globalThis & {
+  [DEFAULT_MODEL_SYMBOL]?: string | BaseLlm;
+} = globalThis;
+
 /**
  * Type guard to check if an object is an instance of LlmAgent.
  * @param obj The object to check.
@@ -455,9 +470,6 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   /** A unique symbol to identify ADK LLM agent class. */
   readonly [LLM_AGENT_SIGNATURE_SYMBOL] = true;
-
-  /** Model used when an agent, and its ancestors, set none. Unset by default. */
-  private static defaultModel?: string | BaseLlm;
 
   model?: string | BaseLlm;
   instruction: string | InstructionProvider;
@@ -637,11 +649,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     if (model === '') {
       throw new Error('Default model must be a non-empty string.');
     }
-    LlmAgent.defaultModel = model;
+    defaultModelHolder[DEFAULT_MODEL_SYMBOL] = model;
   }
 
   private static resolveDefaultModel(agentName: string): BaseLlm {
-    const model = LlmAgent.defaultModel;
+    const model = defaultModelHolder[DEFAULT_MODEL_SYMBOL];
     if (model === undefined) {
       throw new Error(`No model found for ${agentName}.`);
     }

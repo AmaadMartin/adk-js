@@ -1508,6 +1508,21 @@ describe('LlmAgent default model', () => {
     expect(leaf.canonicalModel).toBeInstanceOf(DefaultTestLlm);
   });
 
+  // An agent file is bundled with its own copy of `@google/adk`, so the class
+  // the CLI configures is not the class the agent uses. `resetModules` gives a
+  // second copy of the module graph to stand in for that one.
+  it('shares the override with a second copy of the module graph', async () => {
+    const llm = new DefaultTestLlm({model: 'default-test-llm'});
+    LlmAgent.setDefaultModel(llm);
+
+    vi.resetModules();
+    const {LlmAgent: ReloadedLlmAgent} = await import('@google/adk');
+    expect(ReloadedLlmAgent).not.toBe(LlmAgent);
+
+    const agent = new ReloadedLlmAgent({name: 'bundled_agent'});
+    expect(agent.canonicalModel).toBe(llm);
+  });
+
   it('rejects an empty model name', () => {
     expect(() => LlmAgent.setDefaultModel('')).toThrow(
       'Default model must be a non-empty string.',
