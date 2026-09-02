@@ -321,6 +321,56 @@ describe('CLI Entrypoint', () => {
       );
     });
 
+    it('forwards the service options to runAgent', async () => {
+      await parse([
+        'run',
+        'agent.ts',
+        '--in_memory',
+        '--memory_service_uri',
+        'agentengine://123',
+        '--session_service_uri',
+        'sqlite:///tmp/s.db',
+        '--artifact_service_uri',
+        'gs://bucket',
+        '--default_llm_model',
+        'gemini-2.5-flash',
+      ]);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          inMemory: true,
+          memoryServiceUri: 'agentengine://123',
+          sessionServiceUri: 'sqlite:///tmp/s.db',
+          artifactServiceUri: 'gs://bucket',
+          defaultLlmModel: 'gemini-2.5-flash',
+        }),
+      );
+    });
+
+    it('asks for local storage by default', async () => {
+      await parse(['run', 'agent.ts']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({useLocalStorage: true, inMemory: false}),
+      );
+    });
+
+    it('declines local storage for --no_use_local_storage', async () => {
+      await parse(['run', 'agent.ts', '--no_use_local_storage']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({useLocalStorage: false}),
+      );
+    });
+
+    it('declines local storage for --use_local_storage false', async () => {
+      await parse(['run', 'agent.ts', '--use_local_storage', 'false']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({useLocalStorage: false}),
+      );
+    });
+
     it('leaves --state, --timeout and --jsonl unset by default', async () => {
       await parse(['run', 'agent.ts']);
 
