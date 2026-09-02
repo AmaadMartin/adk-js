@@ -115,6 +115,7 @@ export {createEventsCompactionConfig} from './apps/events_compaction_config.js';
 export type {EventsCompactionConfig} from './apps/events_compaction_config.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';
+export type {ArtifactScope} from './artifacts/artifact_util.js';
 export type {
   BaseArtifactService,
   DeleteArtifactRequest,
@@ -123,6 +124,10 @@ export type {
   LoadArtifactRequest,
   SaveArtifactRequest,
 } from './artifacts/base_artifact_service.js';
+export type {
+  GetAuthenticatedUrlRequest,
+  GetSignedUrlRequest,
+} from './artifacts/gcs_artifact_service.js';
 export {InMemoryArtifactService} from './artifacts/in_memory_artifact_service.js';
 export type {
   SessionArtifactService,

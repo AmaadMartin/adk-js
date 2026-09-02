@@ -12,6 +12,7 @@ import {
   ParsedArtifactUri,
   ensurePart,
   isArtifactRef,
+  isArtifactUri,
   parseArtifactUri,
   validateArtifactReferenceScope,
   validatePathSegment,
@@ -70,6 +71,15 @@ describe('parseArtifactUri', () => {
     expect(parsed?.sessionId).toBeUndefined();
   });
 
+  it('keeps a sessions segment inside a user-scoped filename', () => {
+    const parsed = parseArtifactUri(
+      'artifact://apps/app2/users/user2/artifacts/sessions/session1/versions/456',
+    );
+
+    expect(parsed?.filename).toBe('sessions/session1');
+    expect(parsed?.sessionId).toBeUndefined();
+  });
+
   it.each([
     'http://example.com',
     'artifact://invalid',
@@ -79,6 +89,25 @@ describe('parseArtifactUri', () => {
     'artifact://apps/app1/users/user1/artifacts/file1/versions/1/extra',
   ])('returns undefined for %s', (uri) => {
     expect(parseArtifactUri(uri)).toBeUndefined();
+  });
+});
+
+describe('isArtifactUri', () => {
+  it('accepts an artifact URI', () => {
+    expect(
+      isArtifactUri(
+        'artifact://apps/a/users/u/sessions/s/artifacts/f/versions/1',
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ['an http URI', 'http://example.com'],
+    ['a Cloud Storage URI', 'gs://bucket/object'],
+    ['an empty URI', ''],
+    ['a scheme that merely starts the same way', 'artifacts://apps/a'],
+  ])('rejects %s', (_name, uri) => {
+    expect(isArtifactUri(uri)).toBe(false);
   });
 });
 

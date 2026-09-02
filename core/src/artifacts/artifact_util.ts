@@ -50,7 +50,7 @@ const USER_SCOPED_ARTIFACT_URI_RE =
  * @return The parsed URI, or undefined when the URI does not match the grammar.
  */
 export function parseArtifactUri(uri: string): ParsedArtifactUri | undefined {
-  if (!uri.startsWith(ARTIFACT_URI_SCHEME)) {
+  if (!isArtifactUri(uri)) {
     return undefined;
   }
 
@@ -79,6 +79,16 @@ export function parseArtifactUri(uri: string): ParsedArtifactUri | undefined {
 }
 
 /**
+ * Reports whether a URI addresses another artifact.
+ *
+ * @param uri The file URI an artifact carries.
+ * @return True when the URI uses the `artifact://` scheme.
+ */
+export function isArtifactUri(uri: string): boolean {
+  return uri.startsWith(ARTIFACT_URI_SCHEME);
+}
+
+/**
  * Reports whether an artifact references another artifact.
  *
  * @param artifact The artifact part to check.
@@ -86,7 +96,7 @@ export function parseArtifactUri(uri: string): ParsedArtifactUri | undefined {
  */
 export function isArtifactRef(artifact: Part): artifact is ArtifactRefPart {
   const fileUri = artifact.fileData?.fileUri;
-  return fileUri !== undefined && fileUri.startsWith(ARTIFACT_URI_SCHEME);
+  return fileUri !== undefined && isArtifactUri(fileUri);
 }
 
 /**
