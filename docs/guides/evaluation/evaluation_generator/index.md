@@ -199,18 +199,79 @@ writes and reads. A query the session never saw yields an empty
 
 ## Live mode
 
-Two pieces of the live (bidi) path are available. `sendAudioToLive` streams a
-turn's audio to a `LiveRequestQueue` as realtime input, in 16000-byte chunks
-bracketed by one activity start and one activity end.
-`generateInferencesForSingleUserInvocationLive` runs one turn against a live
-connection and yields the events of that invocation, failing after
-`DEFAULT_LIVE_TIMEOUT_SECONDS` if the model never reports its turn complete.
+`generateInferencesFromRootAgentLive` is the live counterpart of
+`generateInferencesFromRootAgent`. It returns the same `Invocation[]`, so the
+same evaluators grade it.
 
-`normalizeLiveTranscriptions` rewrites the transcription events a native-audio
-model produces into text content events, so an evaluator has text to grade.
+```typescript
+import {generateInferencesFromRootAgentLive} from '@google/adk';
 
-The driver that wires these to a live connection is not ported. Building it
-needs `Runner.runLive` support that adk-js does not have yet.
+const invocations = await generateInferencesFromRootAgentLive({
+  rootAgent: liveAgent,
+  userSimulator: new ScriptedUserSimulator(['what colour is the sky?']),
+  liveTimeoutSeconds: 600,
+});
+```
+
+A live run is push-shaped: the model streams events whenever it likes. The eval
+loop is pull-shaped and asks for one turn at a time. `EvalLiveSession` bridges
+the two. It owns the live request queue, consumes the event stream on a
+background task, and releases a per-turn latch when the model reports the turn
+is complete. The function above drives it for you; construct one directly only
+if you are writing your own loop.
+
+### The run config
+
+Every live driver runs under `LIVE_RUN_CONFIG`: audio response modality, input
+and output transcription, and server-side voice-activity detection turned off.
+Turn boundaries therefore come from the activity markers the harness sends
+around each audio turn, not from the model's own silence detection.
+
+### Audio and transcription
+
+A user turn carrying `inlineData` is streamed as realtime audio by
+`sendAudioToLive`, in 16000-byte chunks bracketed by one activity start and one
+activity end. The turn's full content, text included, is still recorded as the
+user event, so an autorater sees what the user said even though the model only
+heard it.
+
+A native-audio model answers in audio and reports its words separately, as a
+transcription on an event that carries no content. `normalizeLiveTranscriptions`
+folds those into text content, both before the history reaches the user
+simulator and before the invocations are built.
+
+### Tool calls
+
+When the model calls a tool mid-turn, the driver runs it and sends each
+`functionResponse` back into the live request queue with `role: 'tool'`. If the
+tool loop throws, every call still gets an answer — one `functionResponse`
+carrying `{error: <message>}` — so the model is not left waiting on a response
+that never arrives.
+
+The `turnComplete` that accompanies a tool call is not the end of the turn, so
+the driver swallows it and honours the next one. Calls that hand off instead of
+continuing — `finish_task`, `transfer_to_agent`, `task_completed` — are the
+exception: they end the agent, so the `turnComplete` after them is real.
+
+### Timeouts and closure
+
+A turn the model never completes fails after `liveTimeoutSeconds`, which
+defaults to `DEFAULT_LIVE_TIMEOUT_SECONDS`. The live session is closed either
+way.
+
+Closing the session closes the request queue and waits up to 30 seconds for the
+background consumer. After that it warns, aborts the run, and returns. A
+WebSocket close code of 1000 is a normal end of stream: the transcript
+collected so far is kept and the eval case is not failed. Any other close code
+propagates.
+
+### Workflow roots
+
+A `Workflow` root is driven through `Runner.runLive` rather than through the
+agent's own live flow, and each agent of the graph has its request recorded up
+front so `afterModelCallback` can be replayed per author. `Runner.runLive`
+currently rejects a non-agent root, so this path starts working when the runner
+grows workflow live support.
 
 ## Failure modes
 

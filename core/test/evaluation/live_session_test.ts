@@ -138,6 +138,19 @@ class ScriptedLiveRunner extends Runner {
   }
 }
 
+/** Counts the events the live driver hands to the session service. */
+class RecordingSessionService extends InMemorySessionService {
+  readonly appended: Event[] = [];
+
+  override async appendEvent(request: {
+    session: Session;
+    event: Event;
+  }): Promise<Event> {
+    this.appended.push(request.event);
+    return super.appendEvent(request);
+  }
+}
+
 /** Records the model callbacks the live driver fires by hand. */
 class CallbackRecorderPlugin extends BasePlugin {
   readonly beforeModelCalls: Array<{
@@ -272,8 +285,12 @@ async function newNodeSession(params: {
 async function newAgentSession(params: {
   agent: BaseAgent;
   plugins?: BasePlugin[];
-}): Promise<{session: EvalLiveSession; stored: Session}> {
-  const sessionService = new InMemorySessionService();
+}): Promise<{
+  session: EvalLiveSession;
+  stored: Session;
+  sessionService: RecordingSessionService;
+}> {
+  const sessionService = new RecordingSessionService();
   const stored = await newSession(sessionService);
   const runner = new Runner({
     appName: APP_NAME,
@@ -284,6 +301,7 @@ async function newAgentSession(params: {
   return {
     session: new EvalLiveSession(runner, stored, USER_ID, stored.id),
     stored,
+    sessionService,
   };
 }
 
@@ -621,10 +639,15 @@ describe('EvalLiveSession agent routing', () => {
         agentEvent({text: 'final', turnComplete: true}),
       ),
     );
-    const {session, stored} = await newAgentSession({agent});
+    const {session, stored, sessionService} = await newAgentSession({agent});
 
     await session.consumeEvents();
 
+    // The driver never hands a partial event over, so the session service is
+    // not asked to discard one.
+    expect(
+      sessionService.appended.map((event) => event.content?.parts?.[0].text),
+    ).toEqual(['final']);
     expect(
       stored.events.map((event) => event.content?.parts?.[0].text),
     ).toEqual(['final']);
