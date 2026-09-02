@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Session} from '@google/adk';
+import {type Session, StreamingMode} from '@google/adk';
 import camelcaseKeys from 'camelcase-keys';
 import fg from 'fast-glob';
 import yaml from 'js-yaml';
@@ -12,9 +12,11 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type {
   Recordings,
+  TestCaseSpec,
   TestInfo,
   TestSpec,
 } from '../integration/test_types.js';
+import {generatedFilePaths} from './generated_file_utils.js';
 
 /**
  * Paths in `spec.yaml` that hold user data ADK passes through verbatim. Their
@@ -78,15 +80,7 @@ const RECORDINGS_OPAQUE_PATHS = [
  * test case nobody has recorded yet.
  */
 export async function loadTestSpec(specFile: string): Promise<TestSpec> {
-  const content = await fs.readFile(specFile, 'utf-8');
-  const parsedSpec = yaml.load(content);
-  if (typeof parsedSpec !== 'object' || parsedSpec === null) {
-    throw new Error('Spec file must be a YAML mapping');
-  }
-  return camelcaseKeys(parsedSpec, {
-    deep: true,
-    stopPaths: SPEC_OPAQUE_PATHS,
-  }) as TestSpec;
+  return loadYamlMapping<TestSpec>(specFile, 'Spec', SPEC_OPAQUE_PATHS);
 }
 
 /**
@@ -110,6 +104,67 @@ export async function* streamSpecFiles(
 }
 
 /**
+ * batchLoadTestSpecs will recursively search the directory given and load the
+ * spec.yaml of every test case it finds.
+ *
+ * The generated files are not read, so a case that was never recorded is still
+ * returned. `adk conformance record` needs exactly that.
+ */
+export async function batchLoadTestSpecs(
+  directory: string,
+): Promise<TestCaseSpec[]> {
+  const testCases: TestCaseSpec[] = [];
+
+  for await (const normalizedFile of streamSpecFiles(directory)) {
+    const baseDir = path.posix.dirname(normalizedFile);
+    const spec = await loadTestSpec(normalizedFile);
+
+    // Make test names unique by including relative file path from given root dir
+    const normalizedDir = directory.replaceAll('\\', '/');
+    const relativePath = path.posix.relative(normalizedDir, baseDir);
+    const parsedPath = path.posix.parse(relativePath);
+    const name = path.posix.join(parsedPath.dir, parsedPath.name);
+
+    testCases.push({
+      name,
+      dir: baseDir,
+      category: name.includes('/') ? name.split('/')[0] : '',
+      spec,
+    });
+  }
+
+  return testCases;
+}
+
+/**
+ * Reads the recorded session and recordings of a test case.
+ *
+ * @throws if either generated file is missing or is not a YAML mapping.
+ */
+export async function loadTestInfo(
+  testCase: TestCaseSpec,
+  streamingMode: StreamingMode,
+): Promise<TestInfo> {
+  const {sessionFile, recordingsFile} = generatedFilePaths(
+    testCase.dir,
+    streamingMode,
+  );
+  return {
+    ...testCase,
+    session: await loadYamlMapping<Session>(
+      sessionFile,
+      'Session',
+      SESSION_OPAQUE_PATHS,
+    ),
+    recordings: await loadYamlMapping<Recordings>(
+      recordingsFile,
+      'Recording',
+      RECORDINGS_OPAQUE_PATHS,
+    ),
+  };
+}
+
+/**
  * batchLoadYamlTestDefs will recursively search the directory given
  * and load all of the YAML files into in-memory config.
  */
@@ -125,55 +180,29 @@ export async function batchLoadYamlTestDefs(
   // Assume any directory with a spec.yaml is a test with all 3 files
   const tests = new Map<string, TestInfo>();
 
-  for await (const normalizedFile of streamSpecFiles(directory)) {
-    // Test directory
-    const baseDir = path.posix.dirname(normalizedFile);
-
-    // Spec file
-    const testSpec = await loadTestSpec(path.posix.join(baseDir, 'spec.yaml'));
-
-    // Session file
-    const sessionFile = path.posix.join(baseDir, 'generated-session.yaml');
-    const sessionContent = await fs.readFile(sessionFile, 'utf-8');
-    const parsedSession = yaml.load(sessionContent);
-    if (typeof parsedSession !== 'object' || parsedSession === null) {
-      throw new Error('Session file must be a YAML mapping');
-    }
-    const session = camelcaseKeys(parsedSession, {
-      deep: true,
-      stopPaths: SESSION_OPAQUE_PATHS,
-    }) as Session;
-
-    // Recordings file
-    const recordingsFile = path.posix.join(
-      baseDir,
-      'generated-recordings.yaml',
-    );
-    const recordingsContent = await fs.readFile(recordingsFile, 'utf-8');
-    const parsedRecordings = yaml.load(recordingsContent);
-    if (typeof parsedRecordings !== 'object' || parsedRecordings === null) {
-      throw new Error('Recording file must be a YAML mapping');
-    }
-    const recordings = camelcaseKeys(parsedRecordings, {
-      deep: true,
-      stopPaths: RECORDINGS_OPAQUE_PATHS,
-    }) as Recordings;
-
-    // Make test names unique by including relative file path from given root dir
-    const normalizedDir = directory.replaceAll('\\', '/');
-    const relativePath = path.posix.relative(normalizedDir, baseDir);
-    const parsedPath = path.posix.parse(relativePath);
-    const name = path.posix.join(parsedPath.dir, parsedPath.name);
-
-    tests.set(name, {
-      name: name,
-      spec: testSpec,
-      session: session,
-      recordings: recordings,
-    });
-
-    console.log('loaded test', name, 'from', baseDir);
+  for (const testCase of await batchLoadTestSpecs(directory)) {
+    tests.set(testCase.name, await loadTestInfo(testCase, StreamingMode.NONE));
+    console.log('loaded test', testCase.name, 'from', testCase.dir);
   }
 
   return tests;
+}
+
+/**
+ * Reads one YAML mapping and camelCases its keys.
+ *
+ * `stopPaths` names the subtrees that hold user data, which keep the keys the
+ * test author wrote.
+ */
+async function loadYamlMapping<T>(
+  file: string,
+  label: string,
+  stopPaths: readonly string[],
+): Promise<T> {
+  const content = await fs.readFile(file, 'utf-8');
+  const parsed = yaml.load(content);
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error(`${label} file must be a YAML mapping`);
+  }
+  return camelcaseKeys(parsed, {deep: true, stopPaths}) as T;
 }
