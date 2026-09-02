@@ -33,8 +33,23 @@ const tool = new RestApiTool(
 );
 ```
 
-This tool aborts a call that has not finished after 30 seconds. Read the default
-from `DEFAULT_REQUEST_TIMEOUT_MS`:
+This tool aborts a call that has not finished after 30 seconds.
+
+`OpenAPIToolset` takes the same option and gives it to every tool it builds,
+which is how you raise the deadline for an API that legitimately takes longer
+than the default:
+
+```ts
+import {OpenAPIToolset} from '@google/adk';
+import {readFile} from 'node:fs/promises';
+
+const toolset = new OpenAPIToolset({
+  specStr: await readFile('petstore.json', 'utf-8'),
+  timeoutMs: 900_000,
+});
+```
+
+Read the default from `DEFAULT_REQUEST_TIMEOUT_MS`:
 
 ```ts
 import {DEFAULT_REQUEST_TIMEOUT_MS} from '@google/adk';

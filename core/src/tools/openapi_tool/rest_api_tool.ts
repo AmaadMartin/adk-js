@@ -22,6 +22,12 @@ import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
 import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
 
+// adk-python defines `snake_to_lower_camel` in `rest_api_tool.py` and
+// re-exports it from the `openapi_spec_parser` package, so a caller of either
+// SDK reaches the helper from the same place. The implementation lives in
+// `case_utils.ts`, beside the other case helpers.
+export {snakeToLowerCamel} from '../../utils/case_utils.js';
+
 const logger = getLogger();
 
 /**

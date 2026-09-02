@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys} from '../../src/utils/case_utils.js';
+import {camelCaseKeys, snakeToLowerCamel} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
   describe('camelCaseKeys', () => {
@@ -89,6 +89,36 @@ describe('case_utils', () => {
       expect(camelCaseKeys(123)).toBe(123);
       expect(camelCaseKeys('hello')).toBe('hello');
       expect(camelCaseKeys(true)).toBe(true);
+    });
+  });
+
+  describe('snakeToLowerCamel', () => {
+    it('should return a single word unchanged', () => {
+      expect(snakeToLowerCamel('single')).toBe('single');
+    });
+
+    it('should convert two words', () => {
+      expect(snakeToLowerCamel('two_words')).toBe('twoWords');
+    });
+
+    it('should convert three words', () => {
+      expect(snakeToLowerCamel('three_word_example')).toBe('threeWordExample');
+    });
+
+    it('should return an empty string unchanged', () => {
+      expect(snakeToLowerCamel('')).toBe('');
+    });
+
+    it('should return an already camelCase name unchanged', () => {
+      expect(snakeToLowerCamel('alreadyCamelCase')).toBe('alreadyCamelCase');
+    });
+
+    it('should lowercase the remainder of an upper-case segment', () => {
+      expect(snakeToLowerCamel('TWO_WORDS')).toBe('twoWords');
+    });
+
+    it('should drop a trailing underscore', () => {
+      expect(snakeToLowerCamel('trailing_')).toBe('trailing');
     });
   });
 });
