@@ -37,17 +37,6 @@ export const LIVE_SHUTDOWN_TIMEOUT_SECONDS = 30;
 
 const MILLIS_PER_SECOND = 1000;
 
-/** Message of the error a second {@link EvalLiveSession.start} produces. */
-const LIVE_SESSION_ALREADY_STARTED_ERROR = 'Live session was already started.';
-
-/** Message of the error closing an unstarted {@link EvalLiveSession} produces. */
-const LIVE_SESSION_NOT_STARTED_ERROR =
-  'Live session was exited before it was started.';
-
-/** Logged when the background driver outlives the shutdown timeout. */
-const LIVE_SHUTDOWN_TIMEOUT_WARNING =
-  'Timed out waiting for the live run to finish.';
-
 /**
  * Run config shared by every live eval driver.
  *
@@ -206,7 +195,7 @@ export class EvalLiveSession {
    */
   start(): void {
     if (this.consumePromise !== undefined) {
-      throw new Error(LIVE_SESSION_ALREADY_STARTED_ERROR);
+      throw new Error('Live session was already started.');
     }
     const consumePromise = this.consumeEvents();
     // Nothing awaits the driver until `close`, and a turn can take as long as
@@ -241,7 +230,7 @@ export class EvalLiveSession {
     this.liveRequestQueue.close();
     const consumePromise = this.consumePromise;
     if (consumePromise === undefined) {
-      throw new Error(LIVE_SESSION_NOT_STARTED_ERROR);
+      throw new Error('Live session was exited before it was started.');
     }
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -258,7 +247,7 @@ export class EvalLiveSession {
         expiry,
       ]);
       if (outcome === 'timed-out') {
-        logger.warn(LIVE_SHUTDOWN_TIMEOUT_WARNING);
+        logger.warn('Timed out waiting for the live run to finish.');
         this.abortController.abort();
       }
     } catch (error: unknown) {
