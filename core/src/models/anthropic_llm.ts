@@ -7,9 +7,11 @@
 import type {Anthropic} from '@anthropic-ai/sdk';
 import {FunctionDeclaration, Part, Tool} from '@google/genai';
 
+import {isRecord, safeJsonLoads} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../utils/optional_peer.js';
 
+import {applyCacheBreakpoints} from './anthropic_cache.js';
 import {
   AnthropicEffort,
   AnthropicGenerateContentConfig,
@@ -33,6 +35,7 @@ import {BaseLlmConnection} from './base_llm_connection.js';
 import {extractSystemInstruction} from './interactions_utils.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
+import {resolveCacheConfig} from './prompt_cache.js';
 
 /** The optional peer backing {@link AnthropicLlm}. */
 const ANTHROPIC_SDK: OptionalPeer = {
@@ -216,10 +219,34 @@ function streamedBlockToPart(block: StreamedBlock): Part {
         functionCall: {
           id: block.id,
           name: block.name,
-          args: block.argsJson ? JSON.parse(block.argsJson) : {},
+          args: streamedToolArgs(block.argsJson, block.name),
         },
       };
   }
+}
+
+/**
+ * Decodes the arguments Claude streamed for one tool call.
+ *
+ * A truncated or non-object argument payload is rejected rather than degraded
+ * to `{}`, because an empty argument object is a valid call the tool would
+ * then run with the wrong input.
+ *
+ * @throws If the accumulated text is not a JSON object.
+ */
+function streamedToolArgs(
+  argsJson: string,
+  toolName: string,
+): Record<string, unknown> {
+  if (!argsJson) {
+    return {};
+  }
+  const context = `streamed arguments for tool ${toolName}`;
+  const parsed = safeJsonLoads(argsJson, context);
+  if (!isRecord(parsed)) {
+    throw new Error(`Expected a JSON object for ${context}.`);
+  }
+  return parsed;
 }
 
 /**
@@ -565,19 +592,31 @@ export class AnthropicLlm extends BaseLlm {
     const effort = buildEffortParam(config);
     const declarations = collectFunctionDeclarations(config?.tools);
 
+    const messages = llmRequest.contents.map((content) =>
+      contentToMessageParam(content, sanitizer),
+    );
+    const tools = declarations.map(functionDeclarationToToolParam);
+    const systemInstruction = extractSystemInstruction(config ?? {});
+    const cacheConfig = resolveCacheConfig(llmRequest);
+    const system = cacheConfig
+      ? applyCacheBreakpoints({
+          cacheConfig,
+          system: systemInstruction,
+          messages,
+          tools,
+        })
+      : systemInstruction;
+
     const params: Anthropic.MessageCreateParamsNonStreaming = {
       model: this.resolveModelName(llmRequest.model),
-      messages: llmRequest.contents.map((content) =>
-        contentToMessageParam(content, sanitizer),
-      ),
+      messages,
       max_tokens: config?.maxOutputTokens ?? this.maxTokens,
     };
-    const system = extractSystemInstruction(config ?? {});
     if (system) {
       params.system = system;
     }
-    if (declarations.length) {
-      params.tools = declarations.map(functionDeclarationToToolParam);
+    if (tools.length) {
+      params.tools = tools;
     }
     if (Object.keys(llmRequest.toolsDict).length) {
       params.tool_choice = {type: 'auto'};
