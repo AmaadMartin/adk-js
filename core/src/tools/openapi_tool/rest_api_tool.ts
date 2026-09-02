@@ -12,6 +12,7 @@ import {
   AuthCredential,
   parseAuthCredential,
 } from '../../auth/auth_credential.js';
+import {AuthScheme} from '../../auth/auth_schemes.js';
 import {
   FeatureName,
   isFeatureEnabled,
@@ -96,10 +97,7 @@ export class RestApiTool extends BaseTool {
     description: string,
     endpoint: OperationEndpoint | string,
     operation: OpenAPIV3.OperationObject | string,
-    authScheme?:
-      | OpenAPIV3.SecuritySchemeObject
-      | Record<string, unknown>
-      | string,
+    authScheme?: AuthScheme | Record<string, unknown> | string,
     authCredential?: AuthCredential | string,
     options: RestApiToolOptions = {},
   ) {
@@ -127,10 +125,7 @@ export class RestApiTool extends BaseTool {
    */
   @experimental
   public configureAuthScheme(
-    authScheme:
-      | OpenAPIV3.SecuritySchemeObject
-      | Record<string, unknown>
-      | string,
+    authScheme: AuthScheme | Record<string, unknown> | string,
   ) {
     const data =
       typeof authScheme === 'string'

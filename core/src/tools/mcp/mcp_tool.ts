@@ -256,10 +256,19 @@ function apiKeyHeaders(
     logger.error(message);
     throw new Error(message);
   }
-  if (authScheme.type === 'apiKey' && authScheme.in === 'header') {
+  // A CustomAuthScheme declares only `type`, so it can also spell it 'apiKey'.
+  // The `in` check keeps the scheme that carries a header name and location.
+  if (
+    authScheme.type === 'apiKey' &&
+    'in' in authScheme &&
+    authScheme.in === 'header'
+  ) {
     return {[authScheme.name]: apiKey};
   }
-  const location = authScheme.type === 'apiKey' ? authScheme.in : undefined;
+  const location =
+    authScheme.type === 'apiKey' && 'in' in authScheme
+      ? authScheme.in
+      : undefined;
   const message =
     'McpTool only supports header-based API key authentication. ' +
     `Configured location: ${location}`;

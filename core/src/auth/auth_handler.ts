@@ -8,6 +8,7 @@ import {State} from '../sessions/state.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {AuthCredential} from './auth_credential.js';
+import {AuthSchemeType} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
 import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js';
 
@@ -29,7 +30,10 @@ export class AuthHandler {
     const credentialKey = 'temp:' + this.authConfig.credentialKey;
 
     const authSchemeType = this.authConfig.authScheme.type;
-    if (!['oauth2', 'openIdConnect'].includes(authSchemeType)) {
+    if (
+      authSchemeType !== AuthSchemeType.OAUTH2 &&
+      authSchemeType !== AuthSchemeType.OPEN_ID_CONNECT
+    ) {
       state.set(credentialKey, this.authConfig.exchangedAuthCredential);
 
       return;
@@ -48,7 +52,10 @@ export class AuthHandler {
   generateAuthRequest(): AuthConfig {
     const authSchemeType = this.authConfig.authScheme.type;
 
-    if (!['oauth2', 'openIdConnect'].includes(authSchemeType)) {
+    if (
+      authSchemeType !== AuthSchemeType.OAUTH2 &&
+      authSchemeType !== AuthSchemeType.OPEN_ID_CONNECT
+    ) {
       return this.authConfig;
     }
 
@@ -113,7 +120,11 @@ export class AuthHandler {
     if ('authorizationEndpoint' in authScheme) {
       authorizationEndpoint = authScheme.authorizationEndpoint;
       scopes = authScheme.scopes || [];
-    } else if (authScheme.type === 'oauth2' && authScheme.flows) {
+    } else if (
+      authScheme.type === AuthSchemeType.OAUTH2 &&
+      'flows' in authScheme &&
+      authScheme.flows
+    ) {
       const flows = authScheme.flows;
       const flow =
         flows.implicit ||

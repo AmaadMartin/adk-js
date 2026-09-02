@@ -8,6 +8,7 @@ import yaml from 'js-yaml';
 import {OpenAPIV3} from 'openapi-types';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
+import {AuthScheme} from '../../auth/auth_schemes.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
 import {experimental} from '../../utils/experimental.js';
 import {SslVerify} from '../../utils/ssl_utils.js';
@@ -29,7 +30,7 @@ export class OpenAPIToolset extends BaseToolset {
       toolFilter?: ToolPredicate | string[];
       prefix?: string;
       preservePropertyNames?: boolean;
-      authScheme?: OpenAPIV3.SecuritySchemeObject;
+      authScheme?: AuthScheme;
       authCredential?: AuthCredential;
       credentialKey?: string;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;

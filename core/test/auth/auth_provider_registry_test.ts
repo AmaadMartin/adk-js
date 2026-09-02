@@ -4,13 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthProviderRegistry, AuthScheme, BaseAuthProvider} from '@google/adk';
+import {
+  AuthProviderRegistry,
+  AuthScheme,
+  BaseAuthProvider,
+  CustomAuthScheme,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 class MockAuthProvider implements BaseAuthProvider {
   async getAuthCredential() {
     return undefined;
   }
+}
+
+interface AcmeVaultScheme extends CustomAuthScheme {
+  type: 'acmeVault';
+  vaultPath: string;
 }
 
 describe('AuthProviderRegistry', () => {
@@ -76,6 +86,18 @@ describe('AuthProviderRegistry', () => {
     };
 
     expect(registry.getProvider(authScheme)).toBe(mockProvider2);
+  });
+
+  it('should resolve a provider registered for a custom scheme type', () => {
+    const registry = new AuthProviderRegistry();
+    const mockProvider = new MockAuthProvider();
+
+    registry.register('acmeVault', mockProvider);
+
+    const acme: AcmeVaultScheme = {type: 'acmeVault', vaultPath: 'secret/db'};
+    const authScheme: AuthScheme = acme;
+
+    expect(registry.getProvider(authScheme)).toBe(mockProvider);
   });
 
   it('should isolate registry instances', () => {

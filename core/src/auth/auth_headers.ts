@@ -37,7 +37,9 @@ function apiKeyHeaders(
   apiKey: string,
   authScheme?: AuthScheme,
 ): Record<string, string> | undefined {
-  if (!authScheme || authScheme.type !== 'apiKey') {
+  // A CustomAuthScheme declares only `type`, so it can also spell it 'apiKey'.
+  // The `in` check keeps the scheme that carries a header name and location.
+  if (!authScheme || authScheme.type !== 'apiKey' || !('in' in authScheme)) {
     return undefined;
   }
   if (authScheme.in !== 'header') {

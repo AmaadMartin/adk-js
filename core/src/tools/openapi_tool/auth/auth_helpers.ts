@@ -536,6 +536,11 @@ async function fetchOpenIdConfiguration(
   return body;
 }
 
+/** Reads a scheme's description, which a CustomAuthScheme does not declare. */
+function schemeDescription(authScheme: AuthScheme): string | undefined {
+  return 'description' in authScheme ? authScheme.description : undefined;
+}
+
 /** Builds the `Authorization` header parameter that carries a bearer token. */
 function authorizationParam(
   description: string | undefined,
@@ -578,7 +583,13 @@ export function credentialToParam(
     return undefined;
   }
 
-  if (authScheme.type === 'apiKey' && authCredential.apiKey) {
+  // A CustomAuthScheme declares only `type`, so it can also spell it 'apiKey'.
+  // The `in` check keeps the scheme that carries a header name and location.
+  if (
+    authScheme.type === 'apiKey' &&
+    'in' in authScheme &&
+    authCredential.apiKey
+  ) {
     if (!isApiKeyLocation(authScheme.in)) {
       throw new Error(`Invalid API Key location: ${authScheme.in}`);
     }
@@ -599,7 +610,10 @@ export function credentialToParam(
   if (authCredential.authType === AuthCredentialTypes.HTTP) {
     const credentials = authCredential.http?.credentials;
     if (credentials?.token) {
-      return authorizationParam(authScheme.description, credentials.token);
+      return authorizationParam(
+        schemeDescription(authScheme),
+        credentials.token,
+      );
     }
     if (credentials?.username || credentials?.password) {
       throw new Error('Basic Authentication is not supported.');
@@ -610,7 +624,7 @@ export function credentialToParam(
   if (authScheme.type === 'oauth2' || authScheme.type === 'openIdConnect') {
     const token = authCredential.http?.credentials?.token;
     return token
-      ? authorizationParam(authScheme.description, token)
+      ? authorizationParam(schemeDescription(authScheme), token)
       : undefined;
   }
 
