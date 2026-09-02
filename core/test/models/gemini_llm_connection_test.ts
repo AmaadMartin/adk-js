@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {GoogleLLMVariant, RealtimeInput} from '@google/adk';
 import {
   Blob,
   Content,
@@ -15,6 +16,7 @@ import {
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {GeminiLlmConnection} from '../../src/models/gemini_llm_connection.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
+import {logger} from '../../src/utils/logger.js';
 import {liveServerMessage} from '../utils/live_server_message_test_utils.js';
 
 describe('GeminiLlmConnection', () => {
@@ -215,6 +217,124 @@ describe('GeminiLlmConnection', () => {
       await connection.sendRealtime(blob);
 
       expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
+    });
+
+    it('should use sendRealtimeInput with audio for Live Translate audio', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.5-live-translate-preview',
+      );
+      const blob: Blob = {mimeType: 'audio/pcm', data: 'base64data'};
+
+      await connection.sendRealtime(blob);
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({audio: blob});
+    });
+
+    it('should use sendRealtimeInput with video for Live Translate image', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.5-live-translate-preview',
+      );
+      const blob: Blob = {mimeType: 'image/jpeg', data: 'base64data'};
+
+      await connection.sendRealtime(blob);
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({video: blob});
+    });
+
+    it('should forward an activityStart signal', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+
+      await connection.sendRealtime({activityStart: {}});
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        activityStart: {},
+      });
+    });
+
+    it('should forward an activityEnd signal', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+
+      await connection.sendRealtime({activityEnd: {}});
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        activityEnd: {},
+      });
+    });
+
+    it('should forward an audioStreamEnd signal', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+
+      await connection.sendRealtime({audioStreamEnd: true});
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        audioStreamEnd: true,
+      });
+    });
+
+    it('should warn and send nothing for an empty realtime input', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+
+      await connection.sendRealtime({});
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Unary LiveClientRealtimeInput not fully supported yet.',
+      );
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it.each([
+      ['null', null],
+      ['a string', 'audio'],
+      ['a number', 42],
+      ['an object with unknown fields', {frames: ['a']}],
+    ])('should throw for %s', async (_name, notAnInput: unknown) => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+
+      await expect(
+        connection.sendRealtime(notAnInput as RealtimeInput),
+      ).rejects.toThrow(/Unsupported input type/);
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('apiBackend', () => {
+    it('should default to Vertex AI', () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+
+      expect(connection.apiBackend).toBe(GoogleLLMVariant.VERTEX_AI);
+    });
+
+    it('should report the backend it was constructed with', () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+        messageQueue,
+        GoogleLLMVariant.GEMINI_API,
+      );
+
+      expect(connection.apiBackend).toBe(GoogleLLMVariant.GEMINI_API);
     });
   });
 

@@ -88,13 +88,10 @@ function shiftGroundingSupports(
  */
 function mergeGroundingMetadata(
   existing: GroundingMetadata | undefined,
-  incoming: GroundingMetadata | undefined,
-): GroundingMetadata | undefined {
+  incoming: GroundingMetadata,
+): GroundingMetadata {
   if (!existing) {
     return incoming;
-  }
-  if (!incoming) {
-    return existing;
   }
 
   const chunkOffset = existing.groundingChunks?.length ?? 0;
@@ -174,7 +171,7 @@ export class LiveResponseAggregator {
     if (message.usageMetadata) {
       yield {
         usageMetadata: toGenerateContentUsageMetadata(message.usageMetadata),
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
     }
 
@@ -192,21 +189,21 @@ export class LiveResponseAggregator {
     if (message.sessionResumptionUpdate) {
       yield {
         liveSessionResumptionUpdate: message.sessionResumptionUpdate,
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
     }
 
     if (message.voiceActivity) {
       yield {
         voiceActivity: message.voiceActivity,
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
     }
 
     if (message.goAway) {
       yield {
         goAway: message.goAway,
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
     }
   }
@@ -218,7 +215,7 @@ export class LiveResponseAggregator {
     if (this.toolCallParts.length > 0) {
       yield {
         content: {role: 'model', parts: this.toolCallParts},
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
       this.toolCallParts = [];
     }
@@ -251,12 +248,17 @@ export class LiveResponseAggregator {
         ...(serverContent.turnCompleteReason !== undefined
           ? {turnCompleteReason: serverContent.turnCompleteReason}
           : {}),
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
     }
 
     if (content && content.parts) {
-      yield* this.processModelTurn(content, serverContent, hasToolCall);
+      yield* this.processModelTurn(
+        content,
+        content.parts,
+        serverContent,
+        hasToolCall,
+      );
     }
 
     yield* this.processTranscriptions(serverContent);
@@ -272,10 +274,10 @@ export class LiveResponseAggregator {
 
   private *processModelTurn(
     content: Content,
+    parts: Part[],
     serverContent: LiveServerContent,
     hasToolCall: boolean,
   ): Generator<LlmResponse, void, void> {
-    const parts = content.parts ?? [];
     const llmResponse: LlmResponse = {
       content,
       ...(serverContent.interrupted !== undefined
@@ -284,7 +286,7 @@ export class LiveResponseAggregator {
       ...(serverContent.turnCompleteReason !== undefined
         ? {turnCompleteReason: serverContent.turnCompleteReason}
         : {}),
-      ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+      ...this.modelVersionField(),
     };
 
     if (!serverContent.turnComplete && serverContent.groundingMetadata) {
@@ -360,7 +362,7 @@ export class LiveResponseAggregator {
             finished: false,
           },
           partial: true,
-          ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+          ...this.modelVersionField(),
         };
       }
       if (serverContent.outputTranscription.finished) {
@@ -370,7 +372,7 @@ export class LiveResponseAggregator {
             finished: true,
           },
           partial: false,
-          ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+          ...this.modelVersionField(),
         };
         this.outputTranscriptionText = '';
       }
@@ -390,7 +392,7 @@ export class LiveResponseAggregator {
             finished: true,
           },
           partial: false,
-          ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+          ...this.modelVersionField(),
         };
         this.inputTranscriptionText = '';
       }
@@ -401,7 +403,7 @@ export class LiveResponseAggregator {
             finished: true,
           },
           partial: false,
-          ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+          ...this.modelVersionField(),
         };
         this.outputTranscriptionText = '';
       }
@@ -418,7 +420,7 @@ export class LiveResponseAggregator {
         yield {
           inputTranscription: {text: inputTranscription.text, finished: true},
           partial: false,
-          ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+          ...this.modelVersionField(),
         };
       }
       return;
@@ -429,14 +431,14 @@ export class LiveResponseAggregator {
       yield {
         inputTranscription: {text: inputTranscription.text, finished: false},
         partial: true,
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
     }
     if (inputTranscription.finished) {
       yield {
         inputTranscription: {text: this.inputTranscriptionText, finished: true},
         partial: false,
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
       this.inputTranscriptionText = '';
     }
@@ -465,7 +467,7 @@ export class LiveResponseAggregator {
         ...(this.toolCallGroundingMetadata
           ? {groundingMetadata: this.toolCallGroundingMetadata}
           : {}),
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
       this.toolCallParts = [];
       if (this.toolCallGroundingMetadata) {
@@ -476,7 +478,7 @@ export class LiveResponseAggregator {
 
     const finalResponse: LlmResponse = {
       turnComplete: true,
-      ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+      ...this.modelVersionField(),
     };
     if (serverContent.interrupted !== undefined) {
       finalResponse.interrupted = serverContent.interrupted;
@@ -515,7 +517,7 @@ export class LiveResponseAggregator {
         ...(this.pendingGroundingMetadata
           ? {groundingMetadata: this.pendingGroundingMetadata}
           : {}),
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
     }
     this.pendingGroundingMetadata = undefined;
@@ -557,7 +559,7 @@ export class LiveResponseAggregator {
         ...(this.pendingGroundingMetadata
           ? {groundingMetadata: this.pendingGroundingMetadata}
           : {}),
-        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+        ...this.modelVersionField(),
       };
       this.toolCallParts = [];
       this.pendingGroundingMetadata = undefined;
@@ -576,6 +578,11 @@ export class LiveResponseAggregator {
       this.pendingGroundingMetadata ??
       (this.isGemini3xLiveModel ? {} : undefined)
     );
+  }
+
+  /** The model version field, present only once the version is known. */
+  private modelVersionField(): {modelVersion?: string} {
+    return this.modelVersion ? {modelVersion: this.modelVersion} : {};
   }
 
   private buildFullTextResponse(
