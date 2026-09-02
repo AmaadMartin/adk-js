@@ -7,7 +7,6 @@
 import {z} from 'zod';
 import {Event} from '../../events/event.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
-import {isBaseTool} from '../../tools/base_tool.js';
 import {isEnterpriseWebSearchTool} from '../../tools/enterprise_web_search_tool.js';
 import {FunctionTool} from '../../tools/function_tool.js';
 import {isGoogleSearchTool} from '../../tools/google_search_tool.js';
@@ -138,9 +137,6 @@ function buildSearchToolError(agentName: string, toolClass: string): string {
  */
 function getIncompatibleBuiltInToolError(agent: LlmAgent): string | undefined {
   for (const tool of agent.tools) {
-    if (!isBaseTool(tool)) {
-      continue;
-    }
     if (isGoogleSearchTool(tool) && !tool.bypassMultiToolsLimit) {
       return buildSearchToolError(agent.name, 'GoogleSearchTool');
     }
@@ -210,10 +206,7 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
 
     const errorMessage = getIncompatibleBuiltInToolError(agent);
     if (errorMessage) {
-      const hasSubAgentTarget = transferTargets.some((target) =>
-        agent.subAgents.includes(target),
-      );
-      if (hasSubAgentTarget) {
+      if (agent.subAgents.some(isTransferTarget)) {
         throw new Error(errorMessage);
       }
       return;
