@@ -147,7 +147,44 @@ addition to it. Anthropic also counts extended-thinking tokens inside
 `output_tokens`; ADK subtracts them, so `thoughtsTokenCount` and
 `candidatesTokenCount` stay disjoint.
 
-## Limits
+## Prompt caching
 
-Prompt caching is not implemented. ADK reports the cache token counts Claude
-returns, but it never sets a cache breakpoint on a request.
+Claude charges the full input rate for the whole prompt on every turn unless a
+block carries a cache breakpoint. A breakpoint tells Claude to store the prefix
+ending at that block and to serve that prefix at the much lower cache-read rate
+on later turns.
+
+Caching stays off unless the request carries a `cacheConfig`:
+
+```ts
+import {ContextCacheConfig, LlmRequest} from '@google/adk';
+
+const cacheConfig: ContextCacheConfig = {
+  cacheIntervals: 10,
+  ttlSeconds: 3600,
+  minTokens: 5000,
+};
+const llmRequest: LlmRequest = {...baseRequest, cacheConfig};
+```
+
+ADK then sets three breakpoints, one per prefix level: on the last tool
+definition, on the system instruction, and on the last block of the
+conversation. Claude reads the prompt as tools, then system, then messages, so
+a breakpoint on each level keeps the levels above a change cached. Editing the
+conversation leaves the tools and the system instruction cached.
+
+A `ttlSeconds` of 3600 or more asks for the hour-long cache. Anything less gets
+Claude's 5-minute default. Those two lifetimes are the only ones Claude offers.
+
+`minTokens` gates on the previous turn's measured prompt size, which the
+request carries as `cacheableContentsTokenCount`. A prompt below the minimum is
+sent unmarked. The first turn of a session has no measured size yet, so ADK
+marks it.
+
+A `thinking` or `redacted_thinking` block never carries a breakpoint, because
+Claude rejects one there. The conversation search runs backwards from the end,
+skips those blocks, and skips a turn left with no blocks at all.
+
+Claude owns the cache itself, so the Claude path only marks the prefix. It
+never creates or refreshes a cache resource, and it does not read
+`cacheIntervals`.
