@@ -22,37 +22,17 @@ import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
 import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
 
-export {snakeToLowerCamel} from '../../utils/case_utils.js';
-
 const logger = getLogger();
 
 /**
- * Per-phase budgets, in milliseconds, for one REST API call. Mirrors the
- * `httpx.Timeout` adk-python configures on its default client, so an API is
- * given the same amount of time by either SDK.
+ * Deadline for one REST API call, in milliseconds.
+ *
+ * `fetch` aborts a whole request rather than one phase of it, so this is the
+ * sum of the sequential budgets adk-python gives its client in
+ * `_DEFAULT_TIMEOUT`: waiting for a pooled connection (10s), opening the
+ * connection (10s), then the longer of reading and writing (600s).
  */
-export interface RequestTimeout {
-  /** Opening the connection. */
-  connectMs: number;
-  /** Waiting for a connection from the pool. */
-  poolMs: number;
-  /** Waiting for response bytes. */
-  readMs: number;
-  /** Sending the request body. */
-  writeMs: number;
-}
-
-/**
- * Connection setup stays short so an unreachable peer fails fast instead of
- * occupying the invocation; the transfer budgets stay generous, because a
- * legitimate API can be slow. The values match adk-python's `_DEFAULT_TIMEOUT`.
- */
-export const DEFAULT_REQUEST_TIMEOUT: RequestTimeout = {
-  connectMs: 10_000,
-  poolMs: 10_000,
-  readMs: 600_000,
-  writeMs: 600_000,
-};
+export const DEFAULT_REQUEST_TIMEOUT_MS = 620_000;
 
 /** Options accepted by {@link RestApiTool} and {@link createRestApiTool}. */
 export interface RestApiToolOptions {
@@ -62,52 +42,8 @@ export interface RestApiToolOptions {
   headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   /** Names the slot the tool's credential is stored under. */
   credentialKey?: string;
-  /** Overrides part of {@link DEFAULT_REQUEST_TIMEOUT}. */
-  timeout?: Partial<RequestTimeout>;
-}
-
-/**
- * Merges timeout overrides over {@link DEFAULT_REQUEST_TIMEOUT}. A phase whose
- * override is `undefined` keeps its default, so an absent configuration value
- * does not have to be stripped by the caller.
- *
- * @throws {Error} If a supplied budget is not a finite number above zero.
- */
-export function resolveRequestTimeout(
-  overrides: Partial<RequestTimeout> = {},
-): RequestTimeout {
-  const supplied = Object.entries(overrides).filter(
-    ([, budget]) => budget !== undefined,
-  );
-  const timeout = {
-    ...DEFAULT_REQUEST_TIMEOUT,
-    ...Object.fromEntries(supplied),
-  };
-  for (const [phase, budget] of Object.entries(timeout)) {
-    if (!Number.isFinite(budget) || budget <= 0) {
-      throw new Error(
-        `Invalid request timeout '${phase}': ${budget}. Expected a finite ` +
-          `number of milliseconds greater than zero.`,
-      );
-    }
-  }
-  return timeout;
-}
-
-/**
- * Collapses the four phase budgets into the single deadline `fetch` accepts.
- *
- * `fetch` aborts a whole request rather than one phase of it, so the phases
- * that run in sequence are summed: a call waits for a pooled connection, then
- * opens it, then transfers. Reading and writing overlap, so the larger of the
- * two is taken.
- */
-export function requestDeadlineMs(timeout: RequestTimeout): number {
-  return (
-    timeout.poolMs +
-    timeout.connectMs +
-    Math.max(timeout.readMs, timeout.writeMs)
-  );
+  /** Deadline for one call. Defaults to {@link DEFAULT_REQUEST_TIMEOUT_MS}. */
+  timeoutMs?: number;
 }
 
 @experimental
@@ -116,7 +52,7 @@ export class RestApiTool extends BaseTool {
 
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
-  private timeout: RequestTimeout;
+  private readonly timeoutMs: number;
 
   constructor(
     name: string,
@@ -132,7 +68,7 @@ export class RestApiTool extends BaseTool {
     this.authCredential = authCredential;
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
-    this.timeout = resolveRequestTimeout(options.timeout);
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.operationParser = new OperationParser(operation, options);
   }
 
@@ -149,16 +85,6 @@ export class RestApiTool extends BaseTool {
   @experimental
   public configureCredentialKey(credentialKey: string) {
     this.credentialKey = credentialKey;
-  }
-
-  /**
-   * Replaces the request budgets. A phase left out returns to its default.
-   *
-   * @throws {Error} If a supplied budget is not a finite number above zero.
-   */
-  @experimental
-  public configureTimeouts(timeout?: Partial<RequestTimeout>) {
-    this.timeout = resolveRequestTimeout(timeout);
   }
 
   @experimental
@@ -234,7 +160,7 @@ export class RestApiTool extends BaseTool {
         headers,
         // eslint-disable-next-line no-undef
         body: body as BodyInit,
-        signal: AbortSignal.timeout(requestDeadlineMs(this.timeout)),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
 
       const contentType = response.headers.get('content-type');
@@ -297,22 +223,9 @@ function encodePathParamValue(name: string, value: string): string {
 }
 
 /**
- * Encodes one query value the way adk-python's transport does: a null becomes
- * the empty string and everything else its own string form. Nothing is
- * JSON-encoded, so an object a model passed against the schema is stringified
- * rather than serialized.
- */
-function queryValueToString(value: unknown): string {
-  return value === null || value === undefined ? '' : String(value);
-}
-
-/**
- * Adds one query parameter, matching what adk-python sends.
- *
- * A null or undefined parameter is omitted, because a model routinely sends
- * one for an optional parameter it has no value for and `?cursor=null` is a
- * value the server reads. `false`, `0` and `''` are values the model chose, so
- * they survive. An array repeats the key once per element.
+ * Adds one query parameter, matching what adk-python sends: a null or
+ * undefined parameter is dropped, an array repeats the key once per element,
+ * and nothing is JSON-encoded.
  */
 function appendQueryParam(
   queryParams: URLSearchParams,
@@ -322,13 +235,12 @@ function appendQueryParam(
   if (value === null || value === undefined) {
     return;
   }
-  if (Array.isArray(value)) {
-    for (const element of value) {
-      queryParams.append(name, queryValueToString(element));
-    }
-    return;
+  for (const item of Array.isArray(value) ? value : [value]) {
+    queryParams.append(
+      name,
+      item === null || item === undefined ? '' : String(item),
+    );
   }
-  queryParams.append(name, queryValueToString(value));
 }
 
 export function prepareRequestParams(

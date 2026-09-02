@@ -11,13 +11,10 @@ import {
   Context,
   createRestApiTool,
   createSession,
-  DEFAULT_REQUEST_TIMEOUT,
   getLogger,
   InvocationContext,
   OpenApiSpecParser,
   PluginManager,
-  requestDeadlineMs,
-  resolveRequestTimeout,
   RestApiTool,
   RestApiToolOptions,
   ToolAuthHandler,
@@ -1214,51 +1211,6 @@ describe('RestApiTool request timeouts', () => {
     vi.restoreAllMocks();
   });
 
-  describe('DEFAULT_REQUEST_TIMEOUT', () => {
-    it('bounds every phase within the adk-python limits', () => {
-      expect(DEFAULT_REQUEST_TIMEOUT.connectMs).toBeLessThanOrEqual(30_000);
-      expect(DEFAULT_REQUEST_TIMEOUT.poolMs).toBeLessThanOrEqual(30_000);
-      expect(DEFAULT_REQUEST_TIMEOUT.readMs).toBeGreaterThanOrEqual(600_000);
-      expect(DEFAULT_REQUEST_TIMEOUT.writeMs).toBeGreaterThanOrEqual(600_000);
-    });
-
-    it('sums the sequential phases into one deadline', () => {
-      expect(requestDeadlineMs(DEFAULT_REQUEST_TIMEOUT)).toBe(
-        10_000 + 10_000 + 600_000,
-      );
-    });
-  });
-
-  describe('resolveRequestTimeout', () => {
-    it('returns the defaults when nothing is overridden', () => {
-      expect(resolveRequestTimeout()).toEqual(DEFAULT_REQUEST_TIMEOUT);
-    });
-
-    it('overrides only the phase it is given', () => {
-      expect(resolveRequestTimeout({connectMs: 500})).toEqual({
-        ...DEFAULT_REQUEST_TIMEOUT,
-        connectMs: 500,
-      });
-    });
-
-    it('keeps the default of a phase whose override is undefined', () => {
-      expect(resolveRequestTimeout({readMs: undefined})).toEqual(
-        DEFAULT_REQUEST_TIMEOUT,
-      );
-    });
-
-    it.each([
-      ['connectMs', 0],
-      ['poolMs', -1],
-      ['readMs', Number.NaN],
-      ['writeMs', Number.POSITIVE_INFINITY],
-    ])('rejects %s of %s', (phase, budget) => {
-      expect(() => resolveRequestTimeout({[phase]: budget})).toThrowError(
-        new RegExp(`Invalid request timeout '${phase}'`),
-      );
-    });
-  });
-
   describe('runAsync', () => {
     it('sends a deadline that has not expired', async () => {
       const fetchSpy = stubFetch();
@@ -1275,7 +1227,7 @@ describe('RestApiTool request timeouts', () => {
       expect(init.signal.aborted).toBe(false);
     });
 
-    it('deadlines a default request after the summed phases', async () => {
+    it('deadlines a default request after the adk-python budget', async () => {
       const deadlineSpy = vi.spyOn(AbortSignal, 'timeout');
       stubFetch();
 
@@ -1284,52 +1236,19 @@ describe('RestApiTool request timeouts', () => {
         toolContext: callContext(),
       });
 
-      expect(deadlineSpy).toHaveBeenCalledWith(620_000);
+      expect(deadlineSpy).toHaveBeenCalledWith(10_000 + 10_000 + 600_000);
     });
 
-    it('deadlines an overridden request after the shorter phases', async () => {
+    it('deadlines an overridden request after the shorter budget', async () => {
       const deadlineSpy = vi.spyOn(AbortSignal, 'timeout');
       stubFetch();
 
-      await buildTool({timeout: {connectMs: 500}}).runAsync({
+      await buildTool({timeoutMs: 500}).runAsync({
         args: {},
         toolContext: callContext(),
       });
 
-      expect(deadlineSpy).toHaveBeenCalledWith(610_500);
-    });
-
-    it('deadlines a reconfigured request after the new phases', async () => {
-      const deadlineSpy = vi.spyOn(AbortSignal, 'timeout');
-      stubFetch();
-      const tool = buildTool();
-
-      tool.configureTimeouts({
-        connectMs: 1_000,
-        poolMs: 1_000,
-        readMs: 5_000,
-        writeMs: 5_000,
-      });
-      await tool.runAsync({args: {}, toolContext: callContext()});
-
-      expect(deadlineSpy).toHaveBeenCalledWith(7_000);
-    });
-
-    it('returns every phase to its default when reconfigured with nothing', async () => {
-      const deadlineSpy = vi.spyOn(AbortSignal, 'timeout');
-      stubFetch();
-      const tool = buildTool({timeout: {connectMs: 500}});
-
-      tool.configureTimeouts();
-      await tool.runAsync({args: {}, toolContext: callContext()});
-
-      expect(deadlineSpy).toHaveBeenCalledWith(620_000);
-    });
-
-    it('rejects an invalid budget passed to the setter', () => {
-      expect(() => buildTool().configureTimeouts({readMs: -1})).toThrowError(
-        /Invalid request timeout 'readMs'/,
-      );
+      expect(deadlineSpy).toHaveBeenCalledWith(500);
     });
 
     it('reports an aborted request as a timeout', async () => {

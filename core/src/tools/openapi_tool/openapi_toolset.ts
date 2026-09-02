@@ -12,11 +12,7 @@ import {experimental} from '../../utils/experimental.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {OpenApiSpecParser} from './openapi_spec_parser/openapi_spec_parser.js';
-import {
-  createRestApiTool,
-  RequestTimeout,
-  RestApiTool,
-} from './rest_api_tool.js';
+import {createRestApiTool, RestApiTool} from './rest_api_tool.js';
 
 @experimental
 export class OpenAPIToolset extends BaseToolset {
@@ -34,7 +30,6 @@ export class OpenAPIToolset extends BaseToolset {
       authCredential?: AuthCredential;
       credentialKey?: string;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-      timeout?: Partial<RequestTimeout>;
     } = {},
   ) {
     super(options.toolFilter || [], options.prefix);
@@ -78,7 +73,6 @@ export class OpenAPIToolset extends BaseToolset {
           preservePropertyNames: options.preservePropertyNames,
           headerProvider: options.headerProvider,
           credentialKey: options.credentialKey,
-          timeout: options.timeout,
         },
       );
 

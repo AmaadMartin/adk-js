@@ -65,7 +65,7 @@ describe('RestApiTool against a server that never answers', () => {
         {responses: {}},
         undefined,
         undefined,
-        {timeout: {connectMs: 100, poolMs: 100, readMs: 50, writeMs: 50}},
+        {timeoutMs: 300},
       );
 
       const result = await tool.runAsync({
