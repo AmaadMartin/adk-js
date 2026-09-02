@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {NotImplementedError} from '../errors/not_implemented_error.js';
 import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 
@@ -127,4 +128,57 @@ export interface BaseMemoryService {
    *     matching memories.
    */
   searchMemory(request: SearchMemoryRequest): Promise<SearchMemoryResponse>;
+}
+
+/**
+ * Adds an explicit list of events to the memory of any memory service.
+ *
+ * A caller can always call it, whichever service it holds. The call rejects
+ * when the service omits the optional member, so an unsupported write reports
+ * itself instead of disappearing.
+ *
+ * @param service The memory service to write to.
+ * @param request The request describing the events to add.
+ * @return A promise that resolves when the events are added to the memory.
+ * @throws {NotImplementedError} When the service ingests whole sessions only.
+ *     Call `addSessionToMemory(session)` on it instead.
+ */
+export async function addEventsToMemory(
+  service: BaseMemoryService,
+  request: AddEventsToMemoryRequest,
+): Promise<void> {
+  if (!service.addEventsToMemory) {
+    throw new NotImplementedError(
+      'This memory service does not support adding event deltas. ' +
+        'Call addSessionToMemory(session) to ingest the full session.',
+    );
+  }
+  return service.addEventsToMemory(request);
+}
+
+/**
+ * Adds explicit memory items to any memory service.
+ *
+ * A caller can always call it, whichever service it holds. The call rejects
+ * when the service omits the optional member, so an unsupported write reports
+ * itself instead of disappearing.
+ *
+ * @param service The memory service to write to.
+ * @param request The request describing the memory items to write.
+ * @return A promise that resolves when the memory items are written.
+ * @throws {NotImplementedError} When the service generates memory from events
+ *     only. Call `addEventsToMemory(...)` or `addSessionToMemory(session)` on
+ *     it instead.
+ */
+export async function addMemory(
+  service: BaseMemoryService,
+  request: AddMemoryRequest,
+): Promise<void> {
+  if (!service.addMemory) {
+    throw new NotImplementedError(
+      'This memory service does not support direct memory writes. ' +
+        'Call addEventsToMemory(...) or addSessionToMemory(session) instead.',
+    );
+  }
+  return service.addMemory(request);
 }

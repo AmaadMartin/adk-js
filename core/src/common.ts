@@ -385,8 +385,10 @@ export type {
   CrewaiToolLike,
   CrewaiToolOptions,
 } from './integrations/crewai/crewai_tool.js';
+export {addEventsToMemory, addMemory} from './memory/base_memory_service.js';
 export type {
   AddEventsToMemoryRequest,
+  AddMemoryRequest,
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,

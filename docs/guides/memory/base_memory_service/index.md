@@ -1,8 +1,8 @@
 # BaseMemoryService write paths
 
 `BaseMemoryService` is the interface ADK uses to store conversation history and
-search it later. Two of its four write paths are optional. Reach for them when
-you want to persist one turn, or one distilled fact, instead of a whole session.
+search it later. Two of its write paths are optional. Reach for them when you
+want to persist one turn, or one distilled fact, instead of a whole session.
 
 ## Introduction
 
@@ -18,27 +18,33 @@ The interface therefore carries two optional members:
   list as an incremental delta and must not assume it is the full session.
 - `addMemory` writes `MemoryEntry` items directly.
 
-They are optional because most services support neither, and the absent member
-is how a service declines the path. TypeScript reports a call on an optional
-member as possibly undefined, so the compiler makes you check for support before
-you write.
+They are optional because most services support neither. The package also
+exports two functions of the same names that take the service as their first
+argument. Call one of those and the write always has an outcome: it reaches the
+service, or it rejects with `NotImplementedError` naming the path to use
+instead. It never resolves without storing anything.
 
 This mirrors `BaseMemoryService` in
 [adk-python](https://github.com/google/adk-python/blob/main/src/google/adk/memory/base_memory_service.py),
-where the same two paths are concrete methods that raise `NotImplementedError`.
-Python needs that body because the method always exists on the instance, so
-support is otherwise undetectable. Here the missing member carries the same
-information at compile time.
+where the two paths are concrete methods that raise `NotImplementedError`. A
+Python subclass inherits that default for free. A TypeScript interface cannot
+carry a method body, and adding required members to a published interface
+breaks every external implementer, so the default lives in the exported
+functions instead.
 
 ## Get started
 
 ```ts
-import {VertexAiMemoryBankService} from '@google/adk';
+import {
+  addEventsToMemory,
+  addMemory,
+  VertexAiMemoryBankService,
+} from '@google/adk';
 
 const memoryService = new VertexAiMemoryBankService({agentEngineId: '456'});
 
 // Persist the latest turn instead of re-ingesting the whole session.
-await memoryService.addEventsToMemory({
+await addEventsToMemory(memoryService, {
   appName: session.appName,
   userId: session.userId,
   sessionId: session.id,
@@ -46,7 +52,7 @@ await memoryService.addEventsToMemory({
 });
 
 // Write a fact you distilled yourself.
-await memoryService.addMemory({
+await addMemory(memoryService, {
   appName: session.appName,
   userId: session.userId,
   memories: [
@@ -60,22 +66,43 @@ ignores it. Both requests also accept `customMetadata`, a portable record whose
 supported keys each service defines. `VertexAiMemoryBankService` reads
 `enable_consolidation` from it, for example.
 
-Behind a `BaseMemoryService`, narrow the member before calling it:
+## Handling an unsupported path
+
+`InMemoryMemoryService` stores the events you give it, but it distils no memory
+of its own, so a direct write reports itself:
 
 ```ts
-import type {BaseMemoryService, Event} from '@google/adk';
+import {
+  addMemory,
+  InMemoryMemoryService,
+  NotImplementedError,
+} from '@google/adk';
 
-async function persistTurn(
-  service: BaseMemoryService,
-  appName: string,
-  userId: string,
-  events: Event[],
-): Promise<boolean> {
-  if (!service.addEventsToMemory) {
-    return false;
+try {
+  await addMemory(new InMemoryMemoryService(), {
+    appName: 'myApp',
+    userId: 'alice',
+    memories: [
+      {content: {role: 'user', parts: [{text: 'prefers metric units'}]}},
+    ],
+  });
+} catch (error: unknown) {
+  if (!(error instanceof NotImplementedError)) {
+    throw error;
   }
-  await service.addEventsToMemory({appName, userId, events});
-  return true;
+  // "This memory service does not support direct memory writes. Call
+  //  addEventsToMemory(...) or addSessionToMemory(session) instead."
+}
+```
+
+The functions add nothing else. They validate no argument, and an error the
+service itself throws reaches you unchanged.
+
+To branch on support instead of catching, read the member:
+
+```ts
+if (service.addEventsToMemory) {
+  await service.addEventsToMemory(request);
 }
 ```
 
@@ -83,7 +110,7 @@ async function persistTurn(
 
 | Service                     | `addSessionToMemory` | `addEventsToMemory` | `addMemory` |
 | --------------------------- | -------------------- | ------------------- | ----------- |
-| `InMemoryMemoryService`     | yes                  | no                  | no          |
+| `InMemoryMemoryService`     | yes                  | yes                 | no          |
 | `VertexAiMemoryBankService` | yes                  | yes                 | yes         |
 
 ## Implementing a service
@@ -110,9 +137,8 @@ const service: BaseMemoryService = {
 };
 ```
 
-The interface itself validates nothing, so an empty `events` array and an empty
-`memories` array both reach the service. Put argument validation in the service,
-which is where adk-python puts it too.
+An empty `events` array and an empty `memories` array both reach the service,
+so put argument validation in the service. That is where adk-python puts it too.
 
 ## Limitations
 

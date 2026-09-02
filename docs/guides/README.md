@@ -77,7 +77,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 - [BaseMemoryService write paths](memory/base_memory_service/index.md) - The
   optional event-delta and direct-write paths on the memory service contract,
-  and the error a service raises when it does not support one.
+  and the error a caller gets when a service does not support one.
 - [VertexAiRagMemoryService](memory/vertex_ai_rag_memory_service/index.md) - Storing whole sessions in a Vertex AI RAG corpus, and searching them per app and user.
 
 ### Models
