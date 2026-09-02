@@ -44,8 +44,37 @@ The supported connection-string schemes are `sqlite://`, `postgres://`,
 rejects anything else at once, with the password removed from the message. Use
 `sqlite://:memory:` for a throwaway database.
 
+A SQLAlchemy-style URL names its driver in the scheme, as
+`postgresql+asyncpg://` does. This SDK picks its own driver, so it rejects such
+a URL and names the backend scheme to use instead.
+
 Every method connects on first use. Call `init()` during startup to pay that
 cost upfront instead. It is safe to call twice and safe to call concurrently.
+
+On sqlite, every pooled connection is opened with `PRAGMA foreign_keys = ON`.
+sqlite reads that pragma per connection and defaults it to off.
+
+## Reading part of a conversation
+
+`getSession` takes a config that narrows the events it returns:
+
+```ts
+const recent = await service.getSession({
+  appName: 'my-app',
+  userId: 'u1',
+  sessionId: 's1',
+  config: {numRecentEvents: 20, afterTimestamp: since},
+});
+```
+
+`afterTimestamp` is inclusive, so the event whose timestamp you pass comes
+back. `numRecentEvents: 0` returns the session with no events at all, and
+issues no events query: use it to read state or to test for existence.
+
+`listSessions` returns sessions oldest first by update time, with the user id
+and then the session id breaking a tie. `order: 'desc'` flips the update-time
+key only. The order is total, which is what makes `limit`, `offset` and `page`
+partition the sessions without a repeat or a gap.
 
 ## Rejecting a stale write
 
@@ -130,18 +159,35 @@ const service = new DatabaseSessionService('postgres://localhost/adk', {
 
 ## Failure modes
 
-| Condition                                        | Result                           |
-| ------------------------------------------------ | -------------------------------- |
-| `createSession` with an id that exists           | `AlreadyExistsError`             |
-| `appendEvent` on a session storage does not hold | `SessionNotFoundError`           |
-| `appendEvent` from a superseded session          | `StaleSessionError`              |
-| An app or user state row is missing              | `Error` naming the missing scope |
-| The database holds the legacy v0 schema          | `Error` from `init()`            |
+| Condition                                        | Result                               |
+| ------------------------------------------------ | ------------------------------------ |
+| `createSession` with an id that exists           | `AlreadyExistsError`                 |
+| `appendEvent` on a session storage does not hold | `SessionNotFoundError`               |
+| `appendEvent` from a superseded session          | `StaleSessionError`                  |
+| An app or user state row is missing              | `Error` naming the missing scope     |
+| A write to a legacy v0 database                  | `Error` naming `adk migrate session` |
 
-The v0 schema is the one adk-python wrote before event data moved to JSON. It
-stores event actions as a Python pickle, which this SDK cannot read, so
-`init()` refuses the database rather than upgrading it in place. Migrate it
-with the adk-python `adk migrate session` command first.
+## Opening a legacy database
+
+The v0 schema is the one adk-python wrote before event data moved to JSON.
+This service detects it before it creates any table, and then opens it for
+reading only: `getSession`, `listSessions` and `deleteSession` work, while
+`createSession` and `appendEvent` throw.
+
+Writes are refused because v0 stores event actions as a Python pickle.
+TypeScript cannot produce a pickle that adk-python's restricted unpickler
+reads back, so an event written from here would break the Python reader. For
+the same reason a legacy event comes back with empty actions, and the service
+warns once per instance when it reads one. Everything else on the event, its
+content and metadata included, is recovered.
+
+Nothing in the database is altered: no column is added and no schema version
+is recorded. Migrate it with the adk-python `adk migrate session` command to
+write to it from here.
+
+A caller-supplied MikroORM instance cannot read a legacy database, because its
+entity set is fixed at construction. Pass a connection string or an options
+object instead.
 
 ## Timestamp precision
 
