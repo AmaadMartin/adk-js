@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, FunctionResponse} from '@google/genai';
+import {Content, FunctionCall, FunctionResponse} from '@google/genai';
 
 import {LlmResponse} from '../models/llm_response.js';
 
@@ -240,19 +240,26 @@ export function populateClientFunctionCallId(modelResponseEvent: Event): void {
 }
 
 /**
+ * Returns the function responses carried by a message.
+ *
+ * The runner reads a caller's reply before it becomes an event, so the rule
+ * lives at the content level and {@link getFunctionResponses} reuses it.
+ */
+export function getFunctionResponsesFromContent(
+  content: Content | undefined,
+): FunctionResponse[] {
+  return (
+    content?.parts?.flatMap((part) =>
+      part.functionResponse ? [part.functionResponse] : [],
+    ) ?? []
+  );
+}
+
+/**
  * Returns the function responses in the event.
  */
 export function getFunctionResponses(event: Event): FunctionResponse[] {
-  const funcResponses = [];
-  if (event.content && event.content.parts) {
-    for (const part of event.content.parts) {
-      if (part.functionResponse) {
-        funcResponses.push(part.functionResponse);
-      }
-    }
-  }
-
-  return funcResponses;
+  return getFunctionResponsesFromContent(event.content);
 }
 
 /**

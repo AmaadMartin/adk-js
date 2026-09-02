@@ -20,7 +20,7 @@ import {
   vi,
 } from 'vitest';
 
-import {App, isApp} from '@google/adk';
+import {App, inferAgentOrigin, isApp} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
@@ -768,6 +768,36 @@ describe('AgentLoader', () => {
       const agentFile = await agentLoader.getAgentFile('agent1');
       const agent = await agentFile.load();
       expect(agent.name).toEqual('agent1');
+      await agentLoader.disposeAll();
+    });
+
+    it('records the directory a single-file agent came from', async () => {
+      const agentLoader = new AgentLoader(tempAgentsDir);
+      await agentLoader.listAgents();
+      const agentFile = await agentLoader.getAgentFile('agent1');
+
+      expect(inferAgentOrigin(await agentFile.load())).toEqual({
+        appName: 'agent1',
+        path: tempAgentsDir,
+      });
+      await agentLoader.disposeAll();
+    });
+
+    it('records the directory an agent directory came from', async () => {
+      const dir = path.join(tempAgentsDir, 'agent4');
+      await fs.mkdir(dir, {recursive: true});
+      await fs.writeFile(
+        path.join(dir, 'agent.js'),
+        agent1JsContent.replace("'agent1'", "'agent4'"),
+      );
+      const agentLoader = new AgentLoader(tempAgentsDir);
+      await agentLoader.listAgents();
+      const agentFile = await agentLoader.getAgentFile('agent4');
+
+      expect(inferAgentOrigin(await agentFile.load())).toEqual({
+        appName: 'agent4',
+        path: dir,
+      });
       await agentLoader.disposeAll();
     });
 

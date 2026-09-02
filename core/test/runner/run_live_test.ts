@@ -206,6 +206,7 @@ describe('Runner.runLive', () => {
       agent,
       sessionService,
       artifactService,
+      autoCreateSession: true,
     });
     const queue = new LiveRequestQueue();
     queue.close();

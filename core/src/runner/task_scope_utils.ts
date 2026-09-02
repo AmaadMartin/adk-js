@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {isBaseAgent} from '../agents/base_agent.js';
+import {isLlmAgent} from '../agents/llm_agent.js';
 import {Event, getFunctionResponses} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {
@@ -11,6 +13,9 @@ import {
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,
 } from '../tools/finish_task_tool.js';
+import type {BaseNode} from '../workflow/base_node.js';
+import type {RunnableRoot} from '../workflow/run_node_as_invocation.js';
+import {isWorkflow} from '../workflow/workflow.js';
 
 /**
  * The isolation scope of a task agent that is paused waiting for the user, and
@@ -44,13 +49,27 @@ export interface TaskScope {
  * scope, so the reply reaches the task agent instead of being filtered out of
  * its view. Ported from `google/adk-python`
  * `runners.py::_find_active_task_scope`.
+ *
+ * One deliberate divergence from the reference. adk-python reads every
+ * isolation scope as a task delegation, because delegation is the only thing
+ * that opens one there. In adk-js any node may declare `isolationScope`
+ * (`workflow/base_node.ts`), and such a node never emits `finish_task`, so its
+ * scope would read as open forever and capture every later user turn into the
+ * invocation that opened it. Only scopes a task-mode agent wrote into count,
+ * which is what `taskAgentNames` is for.
+ *
+ * @param taskAgentNames The task-mode agents under the runner's root, from
+ *   {@link findTaskAgentNames}. An empty set means no scope can be a task.
  */
-export function findActiveTaskScope(session: Session): TaskScope | undefined {
-  const closed = closedScopes(session.events);
+export function findActiveTaskScope(
+  session: Session,
+  taskAgentNames: ReadonlySet<string>,
+): TaskScope | undefined {
+  const {closed, taskScopes} = scanScopes(session.events, taskAgentNames);
   for (let i = session.events.length - 1; i >= 0; i--) {
     const event = session.events[i];
     const scope = event.isolationScope;
-    if (scope && !closed.has(scope)) {
+    if (scope && taskScopes.has(scope) && !closed.has(scope)) {
       return {isolationScope: scope, invocationId: event.invocationId};
     }
   }
@@ -58,21 +77,63 @@ export function findActiveTaskScope(session: Session): TaskScope | undefined {
 }
 
 /**
- * Collects every scope a terminal `finish_task` response has closed.
+ * The names of the task-mode agents reachable from `root`.
+ *
+ * Walks the agent tree through `subAgents` and a workflow through the nodes of
+ * its static graph. A node a `dynamicEntry` builds at run time is not visible
+ * here, so a task agent reachable only that way is not recognised as one.
+ */
+export function findTaskAgentNames(root: RunnableRoot): ReadonlySet<string> {
+  const names = new Set<string>();
+  const seen = new Set<BaseNode>();
+  const pending: BaseNode[] = [root];
+  for (let i = 0; i < pending.length; i++) {
+    const current = pending[i];
+    if (seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+    if (isLlmAgent(current) && current.mode === 'task') {
+      names.add(current.name);
+    }
+    if (isBaseAgent(current)) {
+      pending.push(...current.subAgents);
+    }
+    if (isWorkflow(current)) {
+      pending.push(...(current.graph?.nodes ?? []));
+    }
+  }
+  return names;
+}
+
+/**
+ * Collects the scopes a task agent wrote into, and the ones a terminal
+ * `finish_task` response has closed.
  *
  * This forward pass is what makes the backward search above correct. Events
  * commonly follow the closing response inside the same scope, and a backward
  * search would reach one of those first and read the finished task as still
  * active.
  */
-function closedScopes(events: Event[]): Set<string> {
+function scanScopes(
+  events: Event[],
+  taskAgentNames: ReadonlySet<string>,
+): {closed: Set<string>; taskScopes: Set<string>} {
   const closed = new Set<string>();
+  const taskScopes = new Set<string>();
   for (const event of events) {
-    if (event.isolationScope && closesTaskScope(event)) {
-      closed.add(event.isolationScope);
+    const scope = event.isolationScope;
+    if (!scope) {
+      continue;
+    }
+    if (event.author && taskAgentNames.has(event.author)) {
+      taskScopes.add(scope);
+    }
+    if (closesTaskScope(event)) {
+      closed.add(scope);
     }
   }
-  return closed;
+  return {closed, taskScopes};
 }
 
 /** Whether an event carries a terminal `finish_task` function response. */

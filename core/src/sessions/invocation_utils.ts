@@ -4,48 +4,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, FunctionResponse} from '@google/genai';
+import {Content} from '@google/genai';
 
-import {Event, getFunctionCalls} from '../events/event.js';
+import {
+  Event,
+  getFunctionCalls,
+  getFunctionResponsesFromContent,
+} from '../events/event.js';
 import {logger} from '../utils/logger.js';
 import {Session} from './session.js';
 
 /**
- * Returns the function responses carried by a message.
+ * Whether a message answers a call that an invocation is waiting on.
  *
- * Ported from `google/adk-python`
- * `runners.py::_get_function_responses_from_content`.
+ * A response without an id answers nothing identifiable, so it does not count.
+ * This is what tells the runner the message resumes a turn rather than starting
+ * one. Narrowed from `google/adk-python` `runners.py::_extract_resume_inputs`,
+ * which also carries the tool results; nothing here reads them yet.
  */
-export function getFunctionResponsesFromContent(
-  content: Content | undefined,
-): FunctionResponse[] {
-  const responses: FunctionResponse[] = [];
-  for (const part of content?.parts ?? []) {
-    if (part.functionResponse) {
-      responses.push(part.functionResponse);
-    }
-  }
-  return responses;
-}
-
-/**
- * Maps the function responses in a message to the tool results they carry,
- * keyed by the id of the call each one answers.
- *
- * Returns `undefined` when the message carries none, which is what tells the
- * runner the message starts a turn rather than resuming one. Ported from
- * `google/adk-python` `runners.py::_extract_resume_inputs`.
- */
-export function extractResumeInputs(
-  message: Content | undefined,
-): Record<string, unknown> | undefined {
-  const inputs: Record<string, unknown> = {};
-  for (const response of getFunctionResponsesFromContent(message)) {
-    if (response.id) {
-      inputs[response.id] = response.response;
-    }
-  }
-  return Object.keys(inputs).length > 0 ? inputs : undefined;
+export function hasResumeResponses(message: Content | undefined): boolean {
+  return getFunctionResponsesFromContent(message).some(
+    (response) => !!response.id,
+  );
 }
 
 /**
@@ -58,11 +38,8 @@ export function extractResumeInputs(
  *
  * @throws {Error} If the message carries both kinds of part.
  */
-export function validateNewMessage(
-  message: Content | undefined,
-  resumeInputs: Record<string, unknown> | undefined,
-): void {
-  if (!resumeInputs) {
+export function validateNewMessage(message: Content | undefined): void {
+  if (!hasResumeResponses(message)) {
     return;
   }
   if ((message?.parts ?? []).some((part) => part.text)) {
@@ -137,12 +114,9 @@ export function resolveInvocationIdFromFunctionResponses(
  */
 export function resolveInvocationId(
   session: Session,
-  newMessage: Content | undefined,
-  invocationId: string | undefined,
+  newMessage: Content,
+  invocationId: string,
 ): string | undefined {
-  if (!newMessage) {
-    return invocationId;
-  }
   const responses = getFunctionResponsesFromContent(newMessage);
   if (responses.length === 0) {
     return invocationId;
@@ -157,7 +131,7 @@ export function resolveInvocationId(
     session,
     newMessage,
   );
-  if (invocationId && invocationId !== resolved) {
+  if (invocationId !== resolved) {
     logger.warn(
       `Provided invocationId ${invocationId} is ignored because newMessage ` +
         `has a function response with invocationId ${resolved}.`,

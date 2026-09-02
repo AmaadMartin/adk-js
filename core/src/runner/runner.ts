@@ -7,6 +7,7 @@
 import {Content, createPartFromText, Modality, Part} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
+import {AgentOrigin, inferAgentOrigin} from '../agents/agent_origin.js';
 import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
 import {reservedFunctionCallName} from '../agents/framework_function_calls.js';
 import {findMatchingFunctionCall} from '../agents/functions.js';
@@ -18,7 +19,7 @@ import {
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
-import {App, createUnvalidatedApp} from '../apps/app.js';
+import {App} from '../apps/app.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
@@ -28,6 +29,7 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
+import {SessionNotFoundError} from '../errors/session_not_found_error.js';
 import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -35,8 +37,8 @@ import {BasePlugin} from '../plugins/base_plugin.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {
-  extractResumeInputs,
   findUserMessageForInvocation,
+  hasResumeResponses,
   resolveInvocationId,
   resolveInvocationIdFromFunctionResponses,
   validateNewMessage,
@@ -55,7 +57,7 @@ import {
   RunnableRoot,
   runNodeAsInvocation,
 } from '../workflow/run_node_as_invocation.js';
-import {findActiveTaskScope} from './task_scope_utils.js';
+import {findActiveTaskScope, findTaskAgentNames} from './task_scope_utils.js';
 
 /**
  * The configuration parameters for the Runner.
@@ -86,6 +88,14 @@ export interface RunnerConfig {
    * An optional list of plugins to apply globally across all agents.
    */
   plugins?: BasePlugin[];
+
+  /**
+   * Whether to create a session that a run asks for and does not find.
+   *
+   * Defaults to false, so a run against a session id that does not exist
+   * reports it rather than silently starting an empty conversation.
+   */
+  autoCreateSession?: boolean;
 
   /**
    * An optional service for storing and retrieving artifacts.
@@ -137,12 +147,6 @@ function resolveApp(input: RunnerConfig): App {
         'Pass exactly one to Runner().',
     );
   }
-  if (!app && !agent) {
-    throw new Error(
-      'One of app or agent must be provided. Got none. ' +
-        'Pass exactly one to Runner().',
-    );
-  }
 
   if (plugins?.length) {
     if (app) {
@@ -161,16 +165,22 @@ function resolveApp(input: RunnerConfig): App {
     return app;
   }
 
-  const root = asRunnableRoot(agent!);
+  if (!agent) {
+    throw new Error(
+      'One of app or agent must be provided. Got none. ' +
+        'Pass exactly one to Runner().',
+    );
+  }
+
+  const root = asRunnableRoot(agent);
   // A node root names the app when the caller did not, mirroring adk-python.
   // An agent root does not: adk-js reports a missing app name at session
   // lookup, and naming the app after the agent would hide that.
   const fallbackName = isBaseAgent(root) ? '' : root.name;
-  return createUnvalidatedApp({
-    name: input.appName ?? fallbackName,
-    rootAgent: root,
-    plugins,
-  });
+  return new App(
+    {name: input.appName ?? fallbackName, rootAgent: root, plugins},
+    true,
+  );
 }
 
 /** Names a value's class, for a diagnostic that reports what was passed. */
@@ -238,32 +248,34 @@ function coordinatesTaskSubAgent(root: BaseAgent): boolean {
 }
 
 /**
- * Collects the agents that reported the end of their run within an invocation.
+ * Whether `agentName` reported the end of its run within an invocation.
  *
- * An agent is keyed by its node path when it ran as a workflow node, and by its
- * author name otherwise. A later `agentState` reopens the agent: it
- * checkpointed again, so the earlier end no longer stands. Derived from the
- * session rather than tracked on the invocation, because the runner only needs
- * the membership test. Mirrors `google/adk-python`
+ * Read backwards for the agent's own latest word: `endOfAgent` means it
+ * finished, and an `agentState` after that means it checkpointed again, so the
+ * earlier end no longer stands. Truthiness, not a presence test, because an
+ * event adk-python wrote carries an explicit `null` there meaning "not
+ * recorded". Derived from the session rather than tracked on the invocation,
+ * because the runner only asks this one question. Mirrors `google/adk-python`
  * `invocation_context.py::populate_invocation_agent_states`.
  */
-function endedAgentsForInvocation(
+function hasAgentEnded(
   session: Session,
   invocationId: string,
-): Set<string> {
-  const ended = new Set<string>();
-  for (const event of session.events) {
-    const key = event.nodeInfo?.path || event.author;
-    if (event.invocationId !== invocationId || !key) {
+  agentName: string,
+): boolean {
+  for (let i = session.events.length - 1; i >= 0; i--) {
+    const event = session.events[i];
+    if (event.invocationId !== invocationId || event.author !== agentName) {
       continue;
     }
     if (event.actions.endOfAgent) {
-      ended.add(key);
-    } else if (event.actions.agentState !== undefined) {
-      ended.delete(key);
+      return true;
+    }
+    if (event.actions.agentState) {
+      return false;
     }
   }
-  return ended;
+  return false;
 }
 
 /**
@@ -332,6 +344,17 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
   readonly resumabilityConfig?: ResumabilityConfig;
+  /** Whether a run creates a session it asks for and does not find. */
+  readonly autoCreateSession: boolean;
+  /** Explains an origin that disagrees with `appName`, when one does. */
+  private appNameAlignmentHint?: string;
+  /**
+   * The task-mode agents under this runner's root.
+   *
+   * Only a scope one of these wrote into is a task delegation a user reply may
+   * join; see {@link findActiveTaskScope}.
+   */
+  private readonly taskAgentNames: ReadonlySet<string>;
 
   /**
    * Creates a new Runner instance.
@@ -351,6 +374,98 @@ export class Runner {
     this.credentialService = input.credentialService;
     this.resumabilityConfig =
       this.app.resumabilityConfig ?? input.resumabilityConfig;
+    this.autoCreateSession = input.autoCreateSession ?? false;
+    this.taskAgentNames = findTaskAgentNames(this.agent);
+    this.enforceAppNameAlignment(inferAgentOrigin(this.agent));
+  }
+
+  /**
+   * Warns when the root agent was loaded from a directory that implies a
+   * different app name, and keeps the explanation for the session lookup.
+   *
+   * The two disagreeing is the usual reason a session that exists cannot be
+   * found: the dev server writes sessions under the directory name, and a
+   * runner built by hand under another name reads an empty conversation.
+   * Ported from `google/adk-python`
+   * `runners.py::Runner._enforce_app_name_alignment`.
+   */
+  private enforceAppNameAlignment(origin: AgentOrigin): void {
+    const originName = origin.appName;
+    // A `__`-prefixed directory is a loader's own scratch space, not an app.
+    if (
+      !originName ||
+      originName.startsWith('__') ||
+      originName === this.appName
+    ) {
+      return;
+    }
+    const originLocation = origin.path ?? originName;
+    const mismatch =
+      `The runner is configured with app name "${this.appName}", but the ` +
+      `root agent was loaded from "${originLocation}", which implies app ` +
+      `name "${originName}".`;
+    this.appNameAlignmentHint =
+      `${mismatch} Ensure the runner appName matches that directory or pass ` +
+      'appName explicitly when constructing the runner.';
+    logger.warn(`App name mismatch detected. ${mismatch}`);
+  }
+
+  /**
+   * Looks the session up, and creates it when the runner was asked to.
+   *
+   * Ported from `google/adk-python`
+   * `runners.py::Runner._get_or_create_session`.
+   *
+   * @throws {SessionNotFoundError} If the session does not exist and
+   *   `autoCreateSession` is not set.
+   */
+  private async getOrCreateSession(params: {
+    userId: string;
+    sessionId: string;
+  }): Promise<Session> {
+    const session = await this.sessionService.getSession({
+      appName: this.appName,
+      userId: params.userId,
+      sessionId: params.sessionId,
+    });
+    if (session) {
+      return session;
+    }
+    if (!this.appName) {
+      throw new Error(
+        `Session lookup failed: appName must be provided in runner constructor (or via app.name)`,
+      );
+    }
+    if (this.autoCreateSession) {
+      return this.sessionService.createSession({
+        appName: this.appName,
+        userId: params.userId,
+        sessionId: params.sessionId,
+      });
+    }
+    throw new SessionNotFoundError(
+      this.formatSessionNotFoundMessage(params.sessionId),
+    );
+  }
+
+  /**
+   * Explains a session that could not be found, naming an app-name mismatch
+   * when one was detected at construction.
+   *
+   * Ported from `google/adk-python`
+   * `runners.py::Runner._format_session_not_found_message`.
+   */
+  private formatSessionNotFoundMessage(sessionId: string): string {
+    const message = `Session not found: ${sessionId}`;
+    if (!this.appNameAlignmentHint) {
+      return message;
+    }
+    return (
+      `${message}. ${this.appNameAlignmentHint} ` +
+      'The mismatch prevents the runner from locating the session. ' +
+      'To automatically create a session when missing, set ' +
+      '`autoCreateSession: true` when constructing the runner.'
+    );
   }
 
   /**
@@ -455,23 +570,10 @@ export class Runner {
         ctx,
         this,
         async function* () {
-          const session = await this.sessionService.getSession({
-            appName: this.appName,
-            userId,
-            sessionId,
-          });
+          const session = await this.getOrCreateSession({userId, sessionId});
 
           if (params.abortSignal?.aborted) {
             return;
-          }
-
-          if (!session) {
-            if (!this.appName) {
-              throw new Error(
-                `Session lookup failed: appName must be provided in runner constructor (or via app.name)`,
-              );
-            }
-            throw new Error(`Session not found: ${sessionId}`);
           }
 
           if (runConfig.supportCfc && isLlmAgent(this.agent)) {
@@ -492,12 +594,14 @@ export class Runner {
           // =====================================================================
           // Decide which invocation this run belongs to
           // =====================================================================
-          const resumeInputs = extractResumeInputs(newMessage);
           const runsAsNode = rootRunsAsNode(this.agent);
           if (runsAsNode) {
-            validateNewMessage(newMessage, resumeInputs);
+            validateNewMessage(newMessage);
           }
-          const activeTaskScope = findActiveTaskScope(session);
+          const activeTaskScope = findActiveTaskScope(
+            session,
+            this.taskAgentNames,
+          );
 
           let invocationId = params.invocationId;
           // A message that joins a paused task borrows that task's invocation
@@ -570,7 +674,9 @@ export class Runner {
           // a reply to a paused task are both genuinely new content.
           const isNewTurn = Boolean(
             newMessage &&
-            (resumeInputs || continuesPausedTask || !existingUserContent),
+            (hasResumeResponses(newMessage) ||
+              continuesPausedTask ||
+              !existingUserContent),
           );
 
           if (isNewTurn && newMessage) {
@@ -650,10 +756,11 @@ export class Runner {
           if (
             isResumedInvocation &&
             invocationContext.agent &&
-            endedAgentsForInvocation(
+            hasAgentEnded(
               session,
               invocationContext.invocationId,
-            ).has(invocationContext.agent.name)
+              invocationContext.agent.name,
+            )
           ) {
             return;
           }
@@ -944,8 +1051,7 @@ export class Runner {
         ctx,
         this,
         async function* () {
-          const session = await this.sessionService.getOrCreateSession({
-            appName: this.appName,
+          const session = await this.getOrCreateSession({
             userId: params.userId,
             sessionId: params.sessionId,
           });
