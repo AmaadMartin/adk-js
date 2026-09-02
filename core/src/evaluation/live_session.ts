@@ -55,8 +55,9 @@ const LIVE_SHUTDOWN_TIMEOUT_WARNING =
  * the activity markers the driver puts around the audio it sends rather than
  * from the model's own guess at when the user stopped talking.
  *
- * Frozen because one object is shared by every eval run; each session runs
- * against a copy of it.
+ * One object is shared by every eval run, so it is frozen against a direct
+ * write and each session runs against a deep copy. A shallow copy would still
+ * alias `realtimeInputConfig`, which `Object.freeze` does not reach.
  */
 export const LIVE_RUN_CONFIG: RunConfig = Object.freeze({
   streamingMode: StreamingMode.BIDI,
@@ -207,13 +208,24 @@ export class EvalLiveSession {
     if (this.consumePromise !== undefined) {
       throw new Error(LIVE_SESSION_ALREADY_STARTED_ERROR);
     }
-    this.consumePromise = this.consumeEvents();
+    const consumePromise = this.consumeEvents();
+    // Nothing awaits the driver until `close`, and a turn can take as long as
+    // the user simulator does. A driver that fails in that window would be an
+    // unhandled rejection, which terminates the process; marking it handled
+    // here parks the failure until `close` reports it.
+    consumePromise.catch(() => {});
+    this.consumePromise = consumePromise;
   }
 
   /** Opens a new turn: a fresh invocation id and a fresh turn promise. */
   startTurn(): void {
     this.invocationId = createNewEventId();
     this.turnSignal = newTurnSignal();
+    // A driver that has already stopped will never resolve the new signal, so
+    // the turn would wait out its whole timeout instead of ending at once.
+    if (this.finished) {
+      this.turnSignal.resolve();
+    }
   }
 
   /**
@@ -248,9 +260,6 @@ export class EvalLiveSession {
       if (outcome === 'timed-out') {
         logger.warn(LIVE_SHUTDOWN_TIMEOUT_WARNING);
         this.abortController.abort();
-        // The driver outlived the wait, so nobody is left to report its
-        // failure. Absorb it rather than leave an unhandled rejection behind.
-        consumePromise.catch(() => {});
       }
     } catch (error: unknown) {
       if (!isNormalClosure(error)) {
@@ -328,9 +337,10 @@ export class EvalLiveSession {
       invocationId: createNewEventId(),
       agent: this.agent,
       session,
-      // A copy, so a processor that edits the run config cannot edit the
-      // config the next eval run starts from.
-      runConfig: {...LIVE_RUN_CONFIG},
+      // A deep copy, so a processor that edits the run config — including a
+      // nested field a shallow copy would still share — cannot edit the config
+      // the next eval run starts from.
+      runConfig: structuredClone(LIVE_RUN_CONFIG),
       pluginManager: runner.pluginManager,
       liveRequestQueue: this.liveRequestQueue,
       abortSignal: this.abortController.signal,

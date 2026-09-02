@@ -33,9 +33,12 @@ rebuilds the request the agent would have sent, from the agent's public request
 processors and tools, and fires `beforeModelCallback` once with it, then
 `afterModelCallback` once per event.
 
-Both entry points install `EnsureRetryOptionsPlugin` on the eval runner, so a
-transient outage at the model provider retries instead of failing the eval
-case.
+Both entry points install `EnsureRetryOptionsPlugin` on the eval runner, which
+records a retry policy on every eval model request that carries none. Note that
+`@google/genai` 2.9.0 applies the retry options its client was built with, not
+the ones on the request, so against that version the policy is recorded but not
+applied. Pass `httpOptions.retryOptions` when you construct the client to make
+a transient outage retry today.
 
 ## Get started
 

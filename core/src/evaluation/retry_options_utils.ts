@@ -21,9 +21,8 @@ export const DEFAULT_RETRY_ATTEMPTS = 7;
  * Retry policy stamped onto an eval request that carries none.
  *
  * `@google/genai` 2.9.0 models the attempt count and nothing else on
- * `HttpRetryOptions`, and its client reads only that field, so the attempt
- * count is the whole policy. adk-python additionally sets an initial delay, a
- * maximum delay, an exponential base and a status-code list, none of which the
+ * `HttpRetryOptions`. adk-python additionally sets an initial delay, a maximum
+ * delay, an exponential base and a status-code list, none of which the
  * TypeScript SDK declares.
  */
 const DEFAULT_HTTP_RETRY_OPTIONS: HttpRetryOptions = {
@@ -53,10 +52,15 @@ export function addDefaultRetryOptionsIfNotPresent(
 }
 
 /**
- * Gives every eval model request a retry policy.
+ * Records a retry policy on every eval model request that carries none, so a
+ * transient outage at the model provider is answered by a retry rather than by
+ * a failed eval case.
  *
- * A transient outage at the model provider would otherwise fail the eval case
- * rather than the agent, so the inference step retries by default.
+ * `ApiClient.apiCall` in `@google/genai` 2.9.0 reads the retry options its
+ * client was built with, not the ones on the request it is sending, so against
+ * that version this records the policy without changing what the client does.
+ * Set `httpOptions.retryOptions` when constructing the client to change the
+ * client's behaviour today.
  *
  * Intended for eval-system internal use. Do not depend on it directly.
  */

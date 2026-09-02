@@ -199,6 +199,28 @@ function declaredToolNames(harness: Harness): Array<string | undefined> {
   );
 }
 
+/**
+ * A processor that turns server-side activity detection back on through the
+ * run config it was handed, as a caller's own processor could.
+ */
+class DisableActivityDetectionProcessor extends BaseLlmRequestProcessor {
+  async *runAsync(
+    invocationContext: InvocationContext,
+    _llmRequest: LlmRequest,
+  ): AsyncGenerator<Event, void, void> {
+    const detection =
+      invocationContext.runConfig?.realtimeInputConfig
+        ?.automaticActivityDetection;
+    if (detection) {
+      detection.disabled = false;
+    }
+    yield createEvent({
+      invocationId: invocationContext.invocationId,
+      author: AGENT_NAME,
+    });
+  }
+}
+
 /** Reports whether the turn in flight has completed, without awaiting it. */
 function watchTurn(liveSession: EvalLiveSession): () => boolean {
   let settled = false;
@@ -232,8 +254,25 @@ describe('LIVE_RUN_CONFIG', () => {
     ).toBe(true);
   });
 
-  it('is frozen, so one run cannot reconfigure the next', () => {
+  it('is frozen against a direct write', () => {
     expect(Object.isFrozen(LIVE_RUN_CONFIG)).toBe(true);
+  });
+
+  it('survives a run that edits a nested field of its own config', async () => {
+    const harness = await createHarness([TEXT_REPLY, TURN_COMPLETE], {
+      requestProcessors: [new DisableActivityDetectionProcessor()],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    liveSession.start();
+    await liveSession.turnComplete;
+    await liveSession.close();
+
+    // `Object.freeze` does not reach `realtimeInputConfig`, so a shallow copy
+    // would have let the run turn detection back on for every later run.
+    expect(
+      LIVE_RUN_CONFIG.realtimeInputConfig?.automaticActivityDetection?.disabled,
+    ).toBe(true);
   });
 
   it('survives a run unchanged', async () => {
@@ -509,6 +548,46 @@ describe('EvalLiveSession', () => {
     await liveSession.close();
 
     await expect(liveSession.turnComplete).resolves.toBeUndefined();
+  });
+
+  it('opens an already-finished session on a turn that is over at once', async () => {
+    const harness = await createHarness([]);
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+    liveSession.start();
+    harness.llm.connection.endStream();
+    await drainPendingWork();
+
+    liveSession.startTurn();
+
+    // A fresh unresolved signal here would make the turn wait out its whole
+    // timeout for a driver that has already stopped.
+    await expect(liveSession.turnComplete).resolves.toBeUndefined();
+    await liveSession.close();
+  });
+
+  it('keeps a driver failure handled while a turn is in flight', async () => {
+    const harness = await createHarness([]);
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.prependListener('unhandledRejection', onUnhandled);
+
+    try {
+      liveSession.start();
+      harness.llm.connection.emit(
+        Object.assign(new Error('socket dropped'), {code: 1006}),
+      );
+      // Nobody awaits the driver here: the eval loop is waiting on the user
+      // simulator. An unguarded rejection would terminate the process.
+      await drainPendingWork();
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandled);
+    }
+
+    // The failure is still reported, rather than swallowed.
+    await expect(liveSession.close()).rejects.toThrow('socket dropped');
   });
 
   it('refuses a second start', async () => {
