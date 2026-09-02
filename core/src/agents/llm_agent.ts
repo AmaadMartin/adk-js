@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, GenerateContentConfig, Schema} from '@google/genai';
+import {
+  Content,
+  GenerateContentConfig,
+  GroundingMetadata,
+  Schema,
+} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
@@ -42,6 +47,7 @@ import {
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
+import {State} from '../sessions/state.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
@@ -119,6 +125,30 @@ const MAX_LIVE_RESTARTS = 5;
  * ADK live flow; the value is an empirical heuristic, not a guarantee.
  */
 const TRANSFER_AGENT_DELAY_MS = 1000;
+
+/**
+ * The tool name that makes the flow attach grounding metadata to a response.
+ *
+ * adk-python matches on this exact name rather than on a tool class, so a
+ * caller can supply its own search tool under the same name.
+ */
+const GROUNDING_SEARCH_AGENT_NAME = 'google_search_agent';
+
+/** Session state key under which a search tool leaves grounding metadata. */
+const GROUNDING_METADATA_STATE_KEY = `${State.TEMP_PREFIX}_adk_grounding_metadata`;
+
+/**
+ * Narrows a session state value to grounding metadata the flow can attach.
+ *
+ * Every `GroundingMetadata` field is optional, so any object satisfies the
+ * type structurally. An empty object carries nothing to attach, and adk-python
+ * skips it too, so this rejects it.
+ */
+function isGroundingMetadata(value: unknown): value is GroundingMetadata {
+  return (
+    typeof value === 'object' && value !== null && Object.keys(value).length > 0
+  );
+}
 
 /**
  * How `runLiveFlow` reopens a live session.
@@ -1981,6 +2011,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       author: this.name,
       branch: invocationContext.branch,
     });
+    const resolvedTools: BaseTool[] = [];
     for (const toolUnion of allTools) {
       const toolContext = new Context({
         invocationContext,
@@ -1988,12 +2019,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       });
 
       // process all tools from this tool union
-      const tools = (
-        await convertToolUnionToTools(
-          toolUnion,
-          new ReadonlyContext(invocationContext),
-        )
-      ).filter((tool) => {
+      const unionTools = await convertToolUnionToTools(
+        toolUnion,
+        new ReadonlyContext(invocationContext),
+      );
+      resolvedTools.push(...unionTools);
+      const tools = unionTools.filter((tool) => {
         // If allowedTools is not set, allow all tools. Otherwise, only allow
         // tools that are in the allowedTools set.
         // The allowedTools set is populated by request processors.
@@ -2012,6 +2043,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
+    invocationContext.canonicalToolsCache = resolvedTools;
     // =========================================================================
     // Global runtime interruption
     // =========================================================================
@@ -2335,7 +2367,13 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           return;
         }
 
-        yield alteredLlmResponse ?? llmResponse;
+        const groundedLlmResponse = await this.withGroundingMetadata(
+          invocationContext,
+          llmResponse,
+          alteredLlmResponse,
+        );
+
+        yield groundedLlmResponse ?? llmResponse;
       }
     }
   }
@@ -2420,6 +2458,51 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Attaches the grounding metadata a `google_search_agent` tool left in temp
+   * state to the response the flow is about to yield.
+   *
+   * The search runs as a tool, so its grounding metadata reaches the flow
+   * through session state rather than through the model response. Mirrors
+   * `_maybe_add_grounding_metadata` in adk-python's
+   * `flows/llm_flows/base_llm_flow.py`, including the match on the tool's name
+   * rather than on its class.
+   *
+   * The live path does not call this. There the flow reads a response returned
+   * by the after-model callbacks as "the callbacks blocked this turn", so
+   * returning one for a turn nobody blocked would end the turn.
+   *
+   * @param invocationContext The current invocation.
+   * @param llmResponse The response the model returned.
+   * @param response The response an after-model callback returned, if any.
+   * @returns `response` unchanged when there is no grounding metadata to
+   *   attach, otherwise the response carrying it.
+   */
+  private async withGroundingMetadata(
+    invocationContext: InvocationContext,
+    llmResponse: LlmResponse,
+    response?: LlmResponse,
+  ): Promise<LlmResponse | undefined> {
+    let tools = invocationContext.canonicalToolsCache;
+    if (!tools) {
+      tools = await this.canonicalTools(new ReadonlyContext(invocationContext));
+      invocationContext.canonicalToolsCache = tools;
+    }
+    if (!tools.some((tool) => tool.name === GROUNDING_SEARCH_AGENT_NAME)) {
+      return response;
+    }
+
+    const groundingMetadata =
+      invocationContext.session.state[GROUNDING_METADATA_STATE_KEY];
+    if (!isGroundingMetadata(groundingMetadata)) {
+      return response;
+    }
+
+    const grounded = response ?? llmResponse;
+    grounded.groundingMetadata = groundingMetadata;
+    return grounded;
   }
 
   /**

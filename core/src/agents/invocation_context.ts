@@ -14,6 +14,7 @@ import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 
@@ -71,6 +72,7 @@ export interface InvocationContextParams {
   inputRealtimeCache?: RealtimeCacheEntry[];
   outputRealtimeCache?: RealtimeCacheEntry[];
   credentialByKey?: Record<string, AuthCredential>;
+  canonicalToolsCache?: BaseTool[];
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
   workflowInstructionScope?: WorkflowInstructionScope;
@@ -255,6 +257,13 @@ export class InvocationContext {
   readonly credentialByKey: Record<string, AuthCredential>;
 
   /**
+   * The tools the current model step resolved, reused by after-model
+   * processing. A toolset can list different tools on each step, so the flow
+   * refreshes this cache every step rather than resolving the tools once.
+   */
+  canonicalToolsCache?: BaseTool[];
+
+  /**
    * The manager for keeping track of plugins in this invocation.
    */
   pluginManager: PluginManager;
@@ -326,6 +335,7 @@ export class InvocationContext {
     this.inputRealtimeCache = params.inputRealtimeCache;
     this.outputRealtimeCache = params.outputRealtimeCache;
     this.credentialByKey = params.credentialByKey ?? {};
+    this.canonicalToolsCache = params.canonicalToolsCache;
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;
     this.workflowInstructionScope = params.workflowInstructionScope;
