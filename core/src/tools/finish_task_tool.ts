@@ -23,6 +23,13 @@ export const FINISH_TASK_TOOL_NAME = 'finish_task';
  */
 export const FINISH_TASK_SUCCESS_RESULT = 'Task completed.';
 
+/**
+ * The result of a task that ended in failure. Like
+ * {@link FINISH_TASK_SUCCESS_RESULT} it is terminal: it closes the task's
+ * isolation scope, where a validation error leaves the scope open for a retry.
+ */
+export const FINISH_TASK_ERROR_RESULT = 'Task failed.';
+
 /** The default output schema when the task agent declares none. */
 const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
   type: Type.OBJECT,
