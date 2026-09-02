@@ -51,13 +51,6 @@ const CREATE_MEMORY_KNOWN_FIELDS = [
   'memoryId',
 ];
 
-const VERTEX_METADATA_KEYS = [
-  'boolValue',
-  'doubleValue',
-  'stringValue',
-  'timestampValue',
-] as const;
-
 const ENABLE_CONSOLIDATION_KEY = 'enable_consolidation';
 const MAX_DIRECT_MEMORIES_PER_GENERATE_CALL = 5;
 
@@ -105,13 +98,8 @@ function toVertexMetadataValue(
 }
 
 function fromVertexMetadataValue(value: MemoryMetadataValue): unknown {
-  for (const key of VERTEX_METADATA_KEYS) {
-    const unwrapped = value[key];
-    if (unwrapped != null) {
-      return unwrapped;
-    }
-  }
-  return value;
+  const {boolValue, doubleValue, stringValue, timestampValue} = value;
+  return boolValue ?? doubleValue ?? stringValue ?? timestampValue ?? value;
 }
 
 function fromVertexMetadata(

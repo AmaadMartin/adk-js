@@ -435,6 +435,36 @@ describe('VertexAiMemoryBankService', () => {
       });
     });
 
+    it('keeps falsy metadata values instead of falling through', async () => {
+      mockMemories.retrieveInternal.mockResolvedValue({
+        retrievedMemories: [
+          {
+            memory: {
+              fact: 'user likes blue',
+              updateTime: '2026-04-21T12:00:00Z',
+              metadata: {
+                aBool: {boolValue: false},
+                aDouble: {doubleValue: 0},
+                aString: {stringValue: ''},
+              },
+            },
+          },
+        ],
+      });
+
+      const response = await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(response.memories[0].customMetadata).toEqual({
+        aBool: false,
+        aDouble: 0,
+        aString: '',
+      });
+    });
+
     it('returns an unrecognised metadata value unchanged', async () => {
       mockMemories.retrieveInternal.mockResolvedValue({
         retrievedMemories: [
