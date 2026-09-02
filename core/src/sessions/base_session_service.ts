@@ -124,10 +124,14 @@ export abstract class BaseSessionService {
   /**
    * Gets a session or creates one if it doesn't exist.
    *
-   * @param request The request to get or create a session.
+   * @param request The request to get or create a session. `config` limits
+   *     which events the lookup returns; it is ignored when the service has to
+   *     create the session.
    * @return A promise that resolves to the session instance.
    */
-  async getOrCreateSession(request: CreateSessionRequest): Promise<Session> {
+  async getOrCreateSession(
+    request: CreateSessionRequest & {config?: GetSessionConfig},
+  ): Promise<Session> {
     if (!request.sessionId) {
       return this.createSession(request);
     }
@@ -135,6 +139,7 @@ export abstract class BaseSessionService {
       appName: request.appName,
       userId: request.userId,
       sessionId: request.sessionId,
+      config: request.config,
     });
     if (session) {
       return session;
