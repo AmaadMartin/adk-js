@@ -6,9 +6,12 @@
 
 import {Content} from '@google/genai';
 
+import type {AuthCredential} from '../auth/auth_credential.js';
+import type {Session} from '../sessions/session.js';
 import {State} from '../sessions/state.js';
 
-import {InvocationContext, requireAgent} from './invocation_context.js';
+import {InvocationContext} from './invocation_context.js';
+import type {RunConfig} from './run_config.js';
 
 /**
  * A readonly context represents the data of a single invocation of an agent.
@@ -45,10 +48,11 @@ export class ReadonlyContext {
   }
 
   /**
-   * The current agent name.
+   * The name of the agent that is currently running, or `'unknown'` when the
+   * invocation drives a bare node and has no agent at this level.
    */
   get agentName(): string {
-    return requireAgent(this.invocationContext).name;
+    return this.invocationContext.agent?.name ?? 'unknown';
   }
 
   /**
@@ -66,5 +70,29 @@ export class ReadonlyContext {
    */
   get a2aMetadata(): Record<string, unknown> | undefined {
     return this.invocationContext.a2aMetadata;
+  }
+
+  /**
+   * The current session of this invocation.
+   */
+  get session(): Session {
+    return this.invocationContext.session;
+  }
+
+  /**
+   * The run config of this invocation, or `undefined` when it has none.
+   */
+  get runConfig(): RunConfig | undefined {
+    return this.invocationContext.runConfig;
+  }
+
+  /**
+   * The credential this invocation already resolved for `key`, or `undefined`
+   * when nothing is cached under it.
+   *
+   * @param key The auth config's `credentialKey`.
+   */
+  getCredential(key: string): AuthCredential | undefined {
+    return this.invocationContext.credentialByKey[key];
   }
 }
