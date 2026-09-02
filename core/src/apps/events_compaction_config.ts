@@ -5,7 +5,7 @@
  */
 
 import type {BaseSummarizer} from '../context/summarizers/base_summarizer.js';
-import {NumberRange, requireInRange} from '../utils/number_utils.js';
+import {requireAtLeast} from '../utils/number_utils.js';
 
 /**
  * How an app compacts the events of a session.
@@ -39,11 +39,11 @@ export interface EventsCompactionConfig {
 
 type NumericField = Exclude<keyof EventsCompactionConfig, 'summarizer'>;
 
-const NUMERIC_BOUNDS: ReadonlyArray<readonly [NumericField, NumberRange]> = [
-  ['compactionInterval', {min: 1}],
-  ['overlapSize', {min: 0}],
-  ['tokenThreshold', {min: 1}],
-  ['eventRetentionSize', {min: 0}],
+const NUMERIC_MINIMUMS: ReadonlyArray<readonly [NumericField, number]> = [
+  ['compactionInterval', 1],
+  ['overlapSize', 0],
+  ['tokenThreshold', 1],
+  ['eventRetentionSize', 0],
 ];
 
 /**
@@ -61,10 +61,10 @@ export function createEventsCompactionConfig(
 ): EventsCompactionConfig {
   const config: EventsCompactionConfig = {...params};
 
-  for (const [name, range] of NUMERIC_BOUNDS) {
+  for (const [name, min] of NUMERIC_MINIMUMS) {
     const value = config[name];
     if (value !== undefined) {
-      requireInRange(name, value, range);
+      requireAtLeast(name, value, min);
     }
   }
 
