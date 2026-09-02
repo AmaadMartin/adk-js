@@ -57,6 +57,19 @@ export abstract class BaseLlm {
   static readonly supportedModels: Array<string | RegExp> = [];
 
   /**
+   * Whether the provider pairs a tool call with its result by id.
+   *
+   * Anthropic's `tool_use`/`tool_result` blocks and the OpenAI-compatible
+   * `tool_call_id` field both match a result to its call by id, so the `adk-`
+   * fallback ids have to survive replay. Gemini's `generateContent` is the one
+   * supported protocol that rejects a client-supplied id, and narrows this
+   * itself.
+   */
+  get pairsToolCallsById(): boolean {
+    return true;
+  }
+
+  /**
    * Generates one content from the given contents and tools.
    *
    * @param llmRequest  LlmRequest, the request to send to the LLM.
