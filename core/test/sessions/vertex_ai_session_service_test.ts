@@ -11,8 +11,9 @@ import {
   State,
   VertexAiSessionService,
 } from '@google/adk';
-import {Session} from '@google/adk/sessions/session.js';
-import {ApiError} from '@google/genai';
+import {createSession, Session} from '@google/adk/sessions/session.js';
+import {ApiError, HttpOptions} from '@google/genai';
+import {ApiClient} from '@google/genai/vertex_internal';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   isFastForwardable,
@@ -31,6 +32,18 @@ vi.mock('nodejs-vertexai', () => ({
 }));
 
 const clientConstructor = vi.hoisted(() => vi.fn());
+const sessionsConstructor = vi.hoisted(() => vi.fn());
+
+// The service builds the Agent Engine `Sessions` client itself whenever it
+// cannot use the ADC `Client`: in express mode, and when a subclass overrides
+// the HTTP options. Capture the ApiClient it is handed.
+vi.mock('@google-cloud/vertexai/build/src/genai/sessions.js', () => ({
+  Sessions: class {
+    constructor(apiClient: unknown) {
+      sessionsConstructor(apiClient);
+    }
+  },
+}));
 
 // The service imports Client from the package root, so the mock must target
 // the root. Keep the other root exports for the rest of the module graph.
@@ -48,11 +61,14 @@ vi.mock('@google-cloud/vertexai', async (importOriginal) => ({
 afterEach(() => {
   vi.unstubAllEnvs();
   clientConstructor.mockClear();
+  sessionsConstructor.mockClear();
 });
 
 import {
+  extractShortSessionId,
   isVertexAiConnectionString,
   quoteFilterLiteral,
+  validateSessionId,
 } from '@google/adk/sessions/vertex_ai_session_service.js';
 import {logger} from '@google/adk/utils/logger.js';
 
@@ -66,6 +82,64 @@ describe('isVertexAiConnectionString', () => {
     expect(isVertexAiConnectionString('memory:/')).toBe(false);
     expect(isVertexAiConnectionString('')).toBe(false);
     expect(isVertexAiConnectionString(undefined)).toBe(false);
+  });
+});
+
+describe('extractShortSessionId', () => {
+  it.each(['123', 'session-123_abc'])(
+    'returns the short id %s unchanged',
+    (sessionId) => {
+      expect(extractShortSessionId(sessionId)).toBe(sessionId);
+    },
+  );
+
+  it('extracts the short id from a full resource name', () => {
+    expect(
+      extractShortSessionId(
+        'projects/p/locations/l/reasoningEngines/123/sessions/session-123',
+      ),
+    ).toBe('session-123');
+  });
+
+  it('extracts the short id when the engine matches the expected one', () => {
+    expect(
+      extractShortSessionId(
+        'projects/p/locations/l/reasoningEngines/123/sessions/session-123',
+        '123',
+      ),
+    ).toBe('session-123');
+  });
+
+  it('throws when the resource name carries another reasoning engine', () => {
+    expect(() =>
+      extractShortSessionId(
+        'projects/p/locations/l/reasoningEngines/999/sessions/session-123',
+        '123',
+      ),
+    ).toThrow(/Session resource name mismatch/);
+  });
+
+  it('returns a slashed string whose penultimate segment is not sessions', () => {
+    expect(extractShortSessionId('a/b', '123')).toBe('a/b');
+  });
+
+  it('extracts the short id from a name that names no reasoning engine', () => {
+    expect(extractShortSessionId('sessions/session-123', '123')).toBe(
+      'session-123',
+    );
+  });
+});
+
+describe('validateSessionId', () => {
+  it.each(['invalid@id', 'invalid/id', '', '..', '../foo', '..?force=true'])(
+    'rejects %s',
+    (sessionId) => {
+      expect(() => validateSessionId(sessionId)).toThrow(/Invalid session_id/);
+    },
+  );
+
+  it('accepts letters, digits, underscores and dashes', () => {
+    expect(() => validateSessionId('Session_9-x')).not.toThrow();
   });
 });
 
@@ -181,6 +255,15 @@ describe('VertexAiSessionService', () => {
       expect(clientConstructor).not.toHaveBeenCalled();
     });
 
+    it('authenticates the sessions client with the API key', () => {
+      new VertexAiSessionService({expressModeApiKey: 'test-api-key'});
+
+      expect(sessionsConstructor).toHaveBeenCalledTimes(1);
+      const apiClient = sessionsConstructor.mock.calls[0][0] as ApiClient;
+      expect(apiClient.getApiKey()).toBe('test-api-key');
+      expect(apiClient.isVertexAI()).toBe(true);
+    });
+
     it('keeps using project and location when an API key is also in the environment', () => {
       new VertexAiSessionService({
         projectId: 'test-project',
@@ -199,6 +282,202 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(clientConstructor).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('apiClientHttpOptionsOverride', () => {
+    class CustomEndpointSessionService extends VertexAiSessionService {
+      protected override apiClientHttpOptionsOverride(): HttpOptions {
+        // 'v1beta1' is the Vertex default, so it would not prove anything.
+        return {apiVersion: 'v1', baseUrl: 'https://endpoint.invalid'};
+      }
+    }
+
+    it('reaches the api client a subclass override configures', () => {
+      new CustomEndpointSessionService({
+        projectId: 'test-project',
+        location: 'us-central1',
+      });
+
+      expect(clientConstructor).not.toHaveBeenCalled();
+      expect(sessionsConstructor).toHaveBeenCalledTimes(1);
+      const apiClient = sessionsConstructor.mock.calls[0][0] as ApiClient;
+      expect(apiClient.getApiVersion()).toBe('v1');
+      expect(apiClient.getBaseUrl()).toBe('https://endpoint.invalid');
+      expect(apiClient.getProject()).toBe('test-project');
+    });
+
+    it('reaches the api client of an express mode service', () => {
+      vi.stubEnv('GOOGLE_GENAI_USE_VERTEXAI', 'true');
+
+      new CustomEndpointSessionService({expressModeApiKey: 'test-api-key'});
+
+      const apiClient = sessionsConstructor.mock.calls[0][0] as ApiClient;
+      expect(apiClient.getApiVersion()).toBe('v1');
+      expect(apiClient.getBaseUrl()).toBe('https://endpoint.invalid');
+      expect(apiClient.getApiKey()).toBe('test-api-key');
+    });
+
+    it('leaves the default construction path alone when not overridden', () => {
+      new VertexAiSessionService({
+        projectId: 'test-project',
+        location: 'us-central1',
+      });
+
+      expect(clientConstructor).toHaveBeenCalledWith({
+        project: 'test-project',
+        location: 'us-central1',
+      });
+      expect(sessionsConstructor).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('session id validation', () => {
+    const invalidSessionIds = ['..', '../foo', '..?force=true', 'a/b'];
+
+    it.each(invalidSessionIds)(
+      'getSession rejects %s without an RPC',
+      async (sessionId) => {
+        await expect(
+          service.getSession({appName: '12345', userId: 'testUser', sessionId}),
+        ).rejects.toThrow(/Invalid session_id/);
+        expect(mockClient.get).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([...invalidSessionIds, ''])(
+      'deleteSession rejects %s without an RPC',
+      async (sessionId) => {
+        await expect(
+          service.deleteSession({
+            appName: '12345',
+            userId: 'testUser',
+            sessionId,
+          }),
+        ).rejects.toThrow(/Invalid session_id/);
+        expect(mockClient.get).not.toHaveBeenCalled();
+        expect(mockClient.delete).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(invalidSessionIds)(
+      'createSession rejects %s without an RPC',
+      async (sessionId) => {
+        await expect(
+          service.createSession({
+            appName: '12345',
+            userId: 'testUser',
+            sessionId,
+          }),
+        ).rejects.toThrow(/Invalid session_id/);
+        expect(mockClient.createInternal).not.toHaveBeenCalled();
+      },
+    );
+
+    it('getSession rejects an empty session id without an RPC', async () => {
+      await expect(
+        service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: '',
+        }),
+      ).rejects.toThrow(/Invalid session_id/);
+      expect(mockClient.get).not.toHaveBeenCalled();
+    });
+
+    it('createSession treats an empty session id as no session id', async () => {
+      // Matches adk-python, which only validates a session id it was given.
+      await service.createSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: '',
+      });
+
+      expect(mockClient.createInternal).toHaveBeenCalledWith(
+        expect.objectContaining({config: {}}),
+      );
+    });
+
+    it('getSession reads the short id out of a full resource name', async () => {
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId:
+          'projects/p/locations/l/reasoningEngines/12345/sessions/session-123',
+      });
+
+      expect(mockClient.get).toHaveBeenCalledTimes(1);
+      expect(mockClient.get).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/session-123',
+      });
+      expect(session?.id).toBe('session-123');
+    });
+
+    it('deleteSession reads the short id out of a full resource name', async () => {
+      await service.deleteSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId:
+          'projects/p/locations/l/reasoningEngines/12345/sessions/session-123',
+      });
+
+      expect(mockClient.delete).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/session-123',
+      });
+    });
+
+    it('createSession reads the short id out of a full resource name', async () => {
+      await service.createSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId:
+          'projects/p/locations/l/reasoningEngines/12345/sessions/session-123',
+      });
+
+      expect(mockClient.createInternal).toHaveBeenCalledWith(
+        expect.objectContaining({config: {sessionId: 'session-123'}}),
+      );
+    });
+
+    it('getSession rejects a resource name from another reasoning engine', async () => {
+      await expect(
+        service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId:
+            'projects/p/locations/l/reasoningEngines/999/sessions/session-123',
+        }),
+      ).rejects.toThrow(/Session resource name mismatch/);
+      expect(mockClient.get).not.toHaveBeenCalled();
+    });
+
+    it('appendEvent rejects an invalid session id before appending', async () => {
+      const session = createSession({
+        id: 'bad/id',
+        appName: '12345',
+        userId: 'testUser',
+      });
+
+      await expect(
+        service.appendEvent({
+          session,
+          event: createEvent({author: 'user', invocationId: 'inv-1'}),
+        }),
+      ).rejects.toThrow(/Invalid session_id/);
+      expect(mockClient.events.append).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getUserState', () => {
+    it('rejects, naming the listSessions workaround', async () => {
+      await expect(
+        service.getUserState({appName: '12345', userId: 'testUser'}),
+      ).rejects.toThrow(/does not support getUserState/);
+      await expect(
+        service.getUserState({appName: '12345', userId: 'testUser'}),
+      ).rejects.toThrow(
+        /enumerate sessions via listSessions and call getSession/,
+      );
     });
   });
 
@@ -388,6 +667,36 @@ describe('VertexAiSessionService', () => {
         "Cannot specify both 'ttl' and 'expireTime' simultaneously.",
       );
       expect(mockClient.createInternal).not.toHaveBeenCalled();
+    });
+
+    it('forwards extra session config the SDK typing does not model', async () => {
+      await service.createSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionConfig: {displayName: 'x', labels: {team: 'search'}},
+      });
+
+      expect(mockClient.createInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345',
+        userId: 'testUser',
+        config: {displayName: 'x', labels: {team: 'search'}},
+      });
+    });
+
+    it('lets the typed fields win over extra session config', async () => {
+      await service.createSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'typed-id',
+        ttl: '7200s',
+        sessionConfig: {ttl: '1s', sessionId: 'smuggled/id'},
+      });
+
+      expect(mockClient.createInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345',
+        userId: 'testUser',
+        config: {ttl: '7200s', sessionId: 'typed-id'},
+      });
     });
   });
 
@@ -876,6 +1185,120 @@ describe('VertexAiSessionService', () => {
       expect(result.limit).toBe(3);
       expect(result.totalItems).toBe(3);
       expect(result.totalPages).toBe(1);
+    });
+
+    it('sorts by lastUpdateTime when no order is requested', async () => {
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'projects/p/locations/l/sessions/s3',
+            userId: 'testUser',
+            updateTime: '2026-01-03T00:00:00Z',
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s1',
+            userId: 'testUser',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s2',
+            userId: 'testUser',
+            updateTime: '2026-01-02T00:00:00Z',
+          },
+        ],
+      });
+
+      const result = await service.listSessions({appName: '12345'});
+
+      expect(result.sessions.map((s) => s.id)).toEqual(['s1', 's2', 's3']);
+    });
+
+    it('breaks a tie on userId, then on id', async () => {
+      const updateTime = '2026-01-01T00:00:00Z';
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'projects/p/locations/l/sessions/s2',
+            userId: 'bob',
+            updateTime,
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s3',
+            userId: 'alice',
+            updateTime,
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s1',
+            userId: 'alice',
+            updateTime,
+          },
+        ],
+      });
+
+      const result = await service.listSessions({appName: '12345'});
+
+      expect(result.sessions.map((s) => `${s.userId}/${s.id}`)).toEqual([
+        'alice/s1',
+        'alice/s3',
+        'bob/s2',
+      ]);
+    });
+
+    it('keeps the ascending tie-break when order is desc', async () => {
+      const updateTime = '2026-01-01T00:00:00Z';
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'projects/p/locations/l/sessions/s2',
+            userId: 'bob',
+            updateTime,
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s1',
+            userId: 'alice',
+            updateTime,
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s0',
+            userId: 'carol',
+            updateTime: '2026-01-02T00:00:00Z',
+          },
+        ],
+      });
+
+      const result = await service.listSessions({
+        appName: '12345',
+        order: 'desc',
+      });
+
+      expect(result.sessions.map((s) => s.id)).toEqual(['s0', 's1', 's2']);
+    });
+
+    it('sorts across pages, not within each page', async () => {
+      mockClient.listInternal
+        .mockResolvedValueOnce({
+          sessions: [
+            {
+              name: 'projects/p/locations/l/sessions/late',
+              userId: 'testUser',
+              updateTime: '2026-01-09T00:00:00Z',
+            },
+          ],
+          nextPageToken: 'token-page-2',
+        })
+        .mockResolvedValueOnce({
+          sessions: [
+            {
+              name: 'projects/p/locations/l/sessions/early',
+              userId: 'testUser',
+              updateTime: '2026-01-01T00:00:00Z',
+            },
+          ],
+        });
+
+      const result = await service.listSessions({appName: '12345'});
+
+      expect(result.sessions.map((s) => s.id)).toEqual(['early', 'late']);
     });
 
     it('order asc sorts sessions by lastUpdateTime ascending', async () => {
@@ -1701,6 +2124,91 @@ describe('VertexAiSessionService', () => {
       expect(isFastForwardable(states.get('fetch')!)).toBe(true);
       expect([...states.get('gate')!.interruptIds]).toEqual(['gate-1']);
       expect(states.get('gate')?.input).toBe('A(x)');
+    });
+  });
+
+  describe('rawEvent normalization', () => {
+    /** The fields a reader falls back to when there is no usable rawEvent. */
+    const legacyApiEvent = {
+      name: 'reasoningEngines/12345/sessions/s/events/e1',
+      invocationId: 'inv-1',
+      author: 'model',
+      content: {role: 'model', parts: [{text: 'legacy'}]},
+      actions: {transferAgent: 'specialist'},
+    };
+
+    async function readOneEvent() {
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+      expect(session?.events).toHaveLength(1);
+      return session!.events[0];
+    }
+
+    it('reads a rawEvent delivered under the snake_case key', async () => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            ...legacyApiEvent,
+            timestamp: '2026-04-09T13:00:00Z',
+            raw_event: {
+              author: 'model',
+              branch: 'main',
+              content: {role: 'model', parts: [{text: 'from raw'}]},
+            },
+          },
+        ],
+      });
+
+      const event = await readOneEvent();
+
+      expect(event.branch).toBe('main');
+      expect(event.content?.parts?.[0].text).toBe('from raw');
+      expect(event.timestamp).toBe(new Date('2026-04-09T13:00:00Z').getTime());
+    });
+
+    it.each<[string, unknown]>([
+      ['a string', 'not-an-object'],
+      ['a number', 42],
+      ['an array', []],
+      ['an empty object', {}],
+    ])('falls back to the legacy fields for %s', async (_, rawEvent) => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [{...legacyApiEvent, rawEvent}],
+      });
+
+      const event = await readOneEvent();
+
+      expect(event.author).toBe('model');
+      expect(event.content?.parts?.[0].text).toBe('legacy');
+      expect(event.actions.transferToAgent).toBe('specialist');
+    });
+
+    it.each<[string, unknown]>([
+      ['the string a session store persisted for SQL NULL', 'null'],
+      ['an array', []],
+    ])('drops groundingMetadata delivered as %s', async (_, metadata) => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {...legacyApiEvent, eventMetadata: {groundingMetadata: metadata}},
+        ],
+      });
+
+      const event = await readOneEvent();
+
+      expect(event.groundingMetadata).toBeUndefined();
+    });
+
+    it('drops content delivered as a primitive', async () => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [{...legacyApiEvent, content: 'null'}],
+      });
+
+      const event = await readOneEvent();
+
+      expect(event.content).toBeUndefined();
     });
   });
 
