@@ -5,6 +5,7 @@
  */
 
 import {
+  AgentConfigSchema,
   AgentTransferLlmRequestProcessor,
   BaseAgent,
   BaseAgentConfig,
@@ -23,6 +24,7 @@ import {
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
+import {z} from 'zod';
 import {logger} from '../../src/utils/logger.js';
 
 class MockAgent extends BaseAgent {
@@ -72,6 +74,91 @@ class LazyConfigAgent extends BaseAgent<LazyConfigAgentConfig> {
     _context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {}
 }
+
+/** Records the config `fromConfig` derived, so a test can inspect it. */
+class RecordingAgent extends MockAgent {
+  readonly receivedConfig: BaseAgentConfig;
+
+  constructor(config: BaseAgentConfig) {
+    super(config);
+    this.receivedConfig = config;
+  }
+}
+
+interface ToneAgentConfig extends BaseAgentConfig {
+  tone: string;
+}
+
+/** Declares its own config schema, with a field the base schema lacks. */
+class ToneAgent extends BaseAgent<ToneAgentConfig> {
+  static override configType: AgentConfigSchema = z.looseObject({
+    agentClass: z.string().default('ToneAgent'),
+    name: z.string(),
+    description: z.string().default(''),
+    tone: z.string(),
+  });
+
+  readonly tone: string;
+
+  constructor(config: ToneAgentConfig) {
+    super(config);
+    this.tone = config.tone;
+  }
+
+  protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {}
+
+  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {}
+}
+
+/** Checks across fields, so a failure carries no field path. */
+class EitherAgent extends MockAgent {
+  static override configType: AgentConfigSchema = z
+    .looseObject({
+      agentClass: z.string().default('EitherAgent'),
+      name: z.string(),
+      description: z.string().default(''),
+      tone: z.string().optional(),
+      style: z.string().optional(),
+    })
+    .refine(
+      (config) => config.tone !== undefined || config.style !== undefined,
+      {
+        message: 'either tone or style is required',
+      },
+    );
+}
+
+/** Overrides the `parseConfig` hook to derive a field of its own. */
+class DescribedAgent extends MockAgent {
+  static override parseConfig(
+    _config: unknown,
+    configAbsPath: string | undefined,
+    kwargs: BaseAgentConfig,
+  ): BaseAgentConfig {
+    return {...kwargs, description: `described by ${configAbsPath}`};
+  }
+}
+
+const said = (value: string): Content => ({
+  role: 'model',
+  parts: [{text: value}],
+});
+
+const run = async (agent: BaseAgent): Promise<Event[]> => {
+  const events: Event[] = [];
+  const context = new InvocationContext({
+    invocationId: 'test',
+    agent,
+    session: createSession({id: 'test-session', appName: 'test-app'}),
+    pluginManager: new PluginManager(),
+  });
+
+  for await (const event of agent.runAsync(context)) {
+    events.push(event);
+  }
+
+  return events;
+};
 
 describe('BaseAgent', () => {
   describe('rootAgent', () => {
@@ -698,6 +785,232 @@ describe('BaseAgent', () => {
 
       expect(root.findSubAgent('search')).toBe(first);
       warn.mockRestore();
+    });
+  });
+
+  describe('clone callback rebinding', () => {
+    class AnnouncingAgent extends MockAgent {
+      constructor(config: BaseAgentConfig) {
+        super({
+          beforeAgentCallback: AnnouncingAgent.prototype.announce,
+          ...config,
+        });
+      }
+
+      announce(): Content {
+        return said(`announced by ${this.name}`);
+      }
+    }
+
+    it("rebinds a callback that is one of the agent's own methods", async () => {
+      const original = new AnnouncingAgent({name: 'original'});
+
+      const clone = original.clone({name: 'copy'});
+      const events = await run(clone);
+
+      expect(events[0].content).toEqual(said('announced by copy'));
+    });
+
+    it('rebinds a callback given in a list', async () => {
+      const original = new AnnouncingAgent({
+        name: 'original',
+        beforeAgentCallback: [AnnouncingAgent.prototype.announce],
+      });
+
+      const clone = original.clone({name: 'copy'});
+      const events = await run(clone);
+
+      expect(events[0].content).toEqual(said('announced by copy'));
+    });
+
+    it('rebinds to the newest copy when a clone is cloned', async () => {
+      const original = new AnnouncingAgent({name: 'original'});
+
+      const events = await run(
+        original.clone({name: 'first'}).clone({
+          name: 'second',
+        }),
+      );
+
+      expect(events[0].content).toEqual(said('announced by second'));
+    });
+
+    it('leaves the original agent untouched', () => {
+      const original = new AnnouncingAgent({name: 'original'});
+
+      original.clone({name: 'copy'});
+
+      expect(original.beforeAgentCallback[0]).toBe(
+        AnnouncingAgent.prototype.announce,
+      );
+    });
+
+    it('leaves a callback bound to another object alone', async () => {
+      const recorder = {
+        label: 'recorder',
+        mark(): Content {
+          return said(this.label);
+        },
+      };
+      const original = new MockAgent({
+        name: 'original',
+        beforeAgentCallback: recorder.mark.bind(recorder),
+      });
+
+      const events = await run(original.clone({name: 'copy'}));
+
+      expect(events[0].content).toEqual(said('recorder'));
+    });
+
+    it('leaves a closure over the original agent alone', async () => {
+      const original = new MockAgent({
+        name: 'original',
+        beforeAgentCallback: () => said(`closed over ${original.name}`),
+      });
+
+      const events = await run(original.clone({name: 'copy'}));
+
+      expect(events[0].content).toEqual(said('closed over original'));
+    });
+
+    it('does not rebind a callback the caller overrode', async () => {
+      const original = new AnnouncingAgent({name: 'original'});
+
+      const events = await run(
+        original.clone({
+          name: 'copy',
+          beforeAgentCallback: () => said('from the override'),
+        }),
+      );
+
+      expect(events[0].content).toEqual(said('from the override'));
+    });
+  });
+
+  describe('fromConfig', () => {
+    it('builds an instance of the concrete subclass', () => {
+      const agent = MockAgent.fromConfig({
+        name: 'built',
+        description: 'from a config',
+      });
+
+      expect(agent).toBeInstanceOf(MockAgent);
+      expect(agent.name).toBe('built');
+      expect(agent.description).toBe('from a config');
+    });
+
+    it('defaults a missing description to the empty string', () => {
+      expect(MockAgent.fromConfig({name: 'built'}).description).toBe('');
+    });
+
+    it('does not pass agentClass to the constructor', () => {
+      const agent = RecordingAgent.fromConfig({
+        name: 'built',
+        agentClass: 'RecordingAgent',
+      });
+
+      expect(agent.receivedConfig).not.toHaveProperty('agentClass');
+    });
+
+    it('rejects a config that is not an object', () => {
+      expect(() => MockAgent.fromConfig(null)).toThrow(
+        'Invalid config type: expected object, got null',
+      );
+      expect(() => MockAgent.fromConfig('x')).toThrow(
+        'Invalid config type: expected object, got string',
+      );
+      expect(() => MockAgent.fromConfig([])).toThrow(
+        'Invalid config type: expected object, got array',
+      );
+    });
+
+    it('names the class and the field when the config is invalid', () => {
+      expect(() => MockAgent.fromConfig({description: 'no name'})).toThrow(
+        /Invalid MockAgent config: name:/,
+      );
+    });
+
+    it('passes an extra key through to the constructor', () => {
+      const agent = RecordingAgent.fromConfig({name: 'built', locale: 'en-GB'});
+
+      expect(agent.receivedConfig).toHaveProperty('locale', 'en-GB');
+    });
+
+    it('builds a subclass whose schema declares its own field', () => {
+      const agent = ToneAgent.fromConfig({name: 'built', tone: 'dry'});
+
+      expect(agent.tone).toBe('dry');
+    });
+
+    it('enforces a schema the subclass declares', () => {
+      expect(() => ToneAgent.fromConfig({name: 'built'})).toThrow(
+        /Invalid ToneAgent config: tone:/,
+      );
+    });
+
+    it('labels a schema failure that names no field', () => {
+      expect(() => EitherAgent.fromConfig({name: 'built'})).toThrow(
+        'Invalid EitherAgent config: (root): either tone or style is required',
+      );
+    });
+
+    it('uses the kwargs a subclass parseConfig returns', () => {
+      const agent = DescribedAgent.fromConfig(
+        {name: 'built'},
+        '/tmp/agent.yml',
+      );
+
+      expect(agent.description).toBe('described by /tmp/agent.yml');
+    });
+
+    it('accepts constructed sub-agents and callbacks', () => {
+      const subAgent = new MockAgent({name: 'child'});
+      const callback = () => said('from the config callback');
+
+      const agent = MockAgent.fromConfig({
+        name: 'built',
+        subAgents: [subAgent],
+        beforeAgentCallbacks: [callback],
+        afterAgentCallbacks: callback,
+      });
+
+      expect(agent.subAgents).toEqual([subAgent]);
+      expect(agent.beforeAgentCallback).toEqual([callback]);
+      expect(agent.afterAgentCallback).toEqual([callback]);
+    });
+
+    it('rejects an unresolved sub-agent reference', () => {
+      expect(() =>
+        MockAgent.fromConfig({
+          name: 'built',
+          subAgents: [{configPath: './child.yml'}],
+        }),
+      ).toThrow(
+        /Cannot build MockAgent from config: `subAgents` holds an unresolved reference/,
+      );
+    });
+
+    it('rejects an unresolved callback reference', () => {
+      expect(() =>
+        MockAgent.fromConfig({
+          name: 'built',
+          beforeAgentCallbacks: [{name: 'my_library.before_agent'}],
+        }),
+      ).toThrow(
+        /Cannot build MockAgent from config: `beforeAgentCallbacks` holds an unresolved reference/,
+      );
+    });
+
+    it('rejects a sub-agents value that is not a list', () => {
+      expect(() =>
+        MockAgent.fromConfig({name: 'built', subAgents: 'child.yml'}),
+      ).toThrow(/`subAgents` holds an unresolved reference/);
+    });
+
+    it('returns the kwargs unchanged by default', () => {
+      const kwargs = {name: 'built'};
+
+      expect(BaseAgent.parseConfig({}, undefined, kwargs)).toBe(kwargs);
     });
   });
 });

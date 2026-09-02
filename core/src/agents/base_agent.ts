@@ -322,9 +322,9 @@ export abstract class BaseAgent<
     // The clone does not exist while the config is being rebuilt, so a rebound
     // callback reads it when it runs. A callback only runs after construction,
     // so it is always set by then.
-    let cloned: this | undefined;
+    let cloned: this | undefined = undefined;
     const rebind = (value: unknown): unknown => {
-      if (typeof value !== 'function') {
+      if (!isFunction(value)) {
         return value;
       }
 
@@ -1018,6 +1018,16 @@ function unresolvedReferenceError(className: string, field: string): Error {
 }
 
 /**
+ * Narrows a value of unknown type to a callable.
+ *
+ * @param value The value to test.
+ * @return True when the value is a function.
+ */
+function isFunction(value: unknown): value is UnknownFunction {
+  return typeof value === 'function';
+}
+
+/**
  * Reports whether `fn` is a method of `owner`, declared either on `owner`
  * itself or anywhere on its prototype chain below `Object.prototype`.
  *
@@ -1028,11 +1038,7 @@ function unresolvedReferenceError(className: string, field: string): Error {
  * @param fn The candidate method.
  * @return True when `owner` exposes `fn` as a method.
  */
-function isMethodOf(owner: object, fn: unknown): fn is UnknownFunction {
-  if (typeof fn !== 'function') {
-    return false;
-  }
-
+function isMethodOf(owner: object, fn: UnknownFunction): boolean {
   for (
     let scope: object | null = owner;
     scope !== null && scope !== Object.prototype;
