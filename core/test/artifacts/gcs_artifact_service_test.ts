@@ -54,7 +54,9 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
       return [
         {
           contentType: file.contentType,
-          metadata: file.metadata,
+          // GCS omits the key when the blob carries no metadata.
+          metadata:
+            Object.keys(file.metadata).length > 0 ? file.metadata : undefined,
           timeCreated: file.timeCreated,
         },
       ];
@@ -168,10 +170,10 @@ describe('GcsArtifactService', () => {
       if (!entry?.timeCreated) {
         expect.fail('Expected the stored blob to carry a creation time.');
       }
+      // A time far from now, so the current time cannot pass for it.
+      entry.timeCreated = '2020-01-02T03:04:05.000Z';
 
-      expect(await readCreateTime(service)).toBe(
-        Date.parse(entry.timeCreated) / 1000,
-      );
+      expect(await readCreateTime(service)).toBe(1577934245);
     });
 
     it('falls back to the current time when the blob reports none', async () => {
@@ -223,6 +225,36 @@ describe('GcsArtifactService', () => {
 
       expect(entry).toBeDefined();
       expect(entry?.metadata).toMatchObject({foo: 'bar'});
+    });
+
+    it('reports an empty customMetadata when the blob carries none', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'bare.txt',
+        artifact: {text: 'hello'},
+      });
+      const entry = storageMock
+        .bucket(bucketName)
+        .files.get('test-app/test-user/test-session/bare.txt/0');
+      if (!entry) {
+        expect.fail('Expected the blob to be stored.');
+      }
+      entry.metadata = {};
+
+      const metadata = await service.getArtifactVersion({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'bare.txt',
+        version: 0,
+      });
+
+      expect(metadata?.customMetadata).toEqual({});
     });
 
     it('reports only the caller keys as customMetadata', async () => {
