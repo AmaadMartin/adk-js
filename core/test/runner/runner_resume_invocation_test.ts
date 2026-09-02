@@ -13,6 +13,7 @@ import {
   InvocationContext,
   LlmAgent,
   Runner,
+  SequentialAgent,
   Session,
 } from '@google/adk';
 import {Content} from '@google/genai';
@@ -304,5 +305,60 @@ describe('Runner invocation resume', () => {
     expect(h.agent.seenUserContent).toEqual([
       {role: 'user', parts: [{text: 'book a flight'}]},
     ]);
+  });
+});
+
+/**
+ * A root that is not an `LlmAgent` takes adk-python's plain runner path, which
+ * neither resolves the invocation for every message nor refuses a mixed one.
+ * A remote A2A caller relies on that: it answers a tool call and adds text in
+ * the same message.
+ */
+describe('Runner with a root that is not an LlmAgent', () => {
+  async function plainRunner(isResumable: boolean) {
+    const sessionService = new InMemorySessionService();
+    const app = new App({
+      name: APP_NAME,
+      rootAgent: new SequentialAgent({
+        name: 'plain_agent',
+        subAgents: [new RecordingAgent('step')],
+      }),
+      resumabilityConfig: {isResumable},
+    });
+    const runner = new Runner({app, sessionService});
+    const session = await sessionService.createSession({
+      appName: APP_NAME,
+      userId: USER_ID,
+    });
+    return {runner, session};
+  }
+
+  const mixedMessage: Content = {
+    role: 'user',
+    parts: [
+      {text: 'Approved'},
+      {functionResponse: {id: 'fc-1', name: 'approve', response: {ok: true}}},
+    ],
+  };
+
+  it('accepts a message mixing a tool result with text', async () => {
+    const {runner, session} = await plainRunner(false);
+
+    const events = await drain(runner, {
+      sessionId: session.id,
+      newMessage: mixedMessage,
+    });
+
+    expect(events.map((e) => e.author)).toContain('step');
+  });
+
+  it('resolves the invocation once the app is resumable', async () => {
+    const {runner, session} = await plainRunner(true);
+
+    await expect(
+      drain(runner, {sessionId: session.id, newMessage: mixedMessage}),
+    ).rejects.toThrow(
+      'Function call not found for function response ids: fc-1',
+    );
   });
 });

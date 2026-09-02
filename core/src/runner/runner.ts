@@ -202,6 +202,26 @@ function normalizeRootMode(root: RunnableRoot): void {
   }
 }
 
+/** Whether an agent is an `LlmAgent` running in task mode. */
+function isTaskModeAgent(agent: BaseAgent): boolean {
+  return isLlmAgent(agent) && agent.mode === 'task';
+}
+
+/**
+ * Whether the runner drives this root through the node runtime.
+ *
+ * adk-python splits its runner in two. An `LlmAgent` root and a bare node go
+ * through `workflow/_node_runner_utils.run_node_async`, which resolves the
+ * invocation for every message and refuses one that mixes function responses
+ * with text. Any other agent root takes the plain path, which resolves the
+ * invocation only for a resumable app and applies neither rule. Keeping that
+ * split is what lets a caller of, say, a remote A2A agent go on sending a
+ * message that carries a tool result alongside text.
+ */
+function rootRunsAsNode(root: RunnableRoot): boolean {
+  return !isBaseAgent(root) || isLlmAgent(root);
+}
+
 /**
  * Whether the root is a chat coordinator that delegates to a task-mode
  * sub-agent.
@@ -473,7 +493,10 @@ export class Runner {
           // Decide which invocation this run belongs to
           // =====================================================================
           const resumeInputs = extractResumeInputs(newMessage);
-          validateNewMessage(newMessage, resumeInputs);
+          const runsAsNode = rootRunsAsNode(this.agent);
+          if (runsAsNode) {
+            validateNewMessage(newMessage, resumeInputs);
+          }
           const activeTaskScope = findActiveTaskScope(session);
 
           let invocationId = params.invocationId;
@@ -481,7 +504,7 @@ export class Runner {
           // id so the task agent sees it, but it is still the user's next turn
           // rather than a replay of the turn that opened the task.
           let continuesPausedTask = false;
-          if (newMessage) {
+          if (newMessage && (runsAsNode || isResumable)) {
             if (invocationId) {
               invocationId = resolveInvocationId(
                 session,
@@ -493,7 +516,7 @@ export class Runner {
                 session,
                 newMessage,
               );
-              if (!invocationId && activeTaskScope) {
+              if (!invocationId && runsAsNode && activeTaskScope) {
                 invocationId = activeTaskScope.invocationId;
                 continuesPausedTask = true;
               }
@@ -735,10 +758,7 @@ export class Runner {
   private async *runRoot(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    const runsAsNode =
-      !isBaseAgent(this.agent) ||
-      (isLlmAgent(this.agent) && this.agent.mode === 'task');
-    if (runsAsNode) {
+    if (!isBaseAgent(this.agent) || isTaskModeAgent(this.agent)) {
       yield* runNodeAsInvocation(this.agent, invocationContext);
       return;
     }
