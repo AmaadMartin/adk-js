@@ -14,10 +14,10 @@ export interface AgentDetails {
   /** The name that uniquely identifies the agent in the app. */
   name: string;
 
-  /** The instructions set on the agent. Defaults to an empty string. */
+  /** The instructions set on the agent. */
   instructions?: string;
 
-  /** The tools available to the agent. Defaults to an empty list. */
+  /** The tools available to the agent. */
   toolDeclarations?: Tool[];
 }
 

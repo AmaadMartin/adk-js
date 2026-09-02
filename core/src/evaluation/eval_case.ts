@@ -70,7 +70,7 @@ export type IntermediateDataType = IntermediateData | InvocationEvents;
 
 /** One turn of a conversation, from the user's message to the agent's reply. */
 export interface Invocation {
-  /** Unique identifier for the invocation. Defaults to an empty string. */
+  /** Unique identifier for the invocation. */
   invocationId?: string;
 
   userContent: Content;
@@ -80,9 +80,7 @@ export interface Invocation {
   /** The route the agent took to reach {@link finalResponse}. */
   intermediateData?: IntermediateDataType;
 
-  /**
-   * Creation time in seconds since the epoch, for debugging. Defaults to 0.
-   */
+  /** Creation time in seconds since the epoch, for debugging. */
   creationTimestamp?: number;
 
   /** Rubrics that apply to this invocation only. */
@@ -212,9 +210,7 @@ function unsupportedIntermediateData(value: unknown): InputValidationError {
  * @throws {InputValidationError} If the value is neither
  *   {@link IntermediateData} nor {@link InvocationEvents}.
  */
-export function getAllToolCalls(
-  intermediateData?: IntermediateDataType,
-): FunctionCall[] {
+export function getAllToolCalls(intermediateData?: unknown): FunctionCall[] {
   if (!intermediateData) {
     return [];
   }
@@ -235,7 +231,7 @@ export function getAllToolCalls(
  *   {@link IntermediateData} nor {@link InvocationEvents}.
  */
 export function getAllToolResponses(
-  intermediateData?: IntermediateDataType,
+  intermediateData?: unknown,
 ): FunctionResponse[] {
   if (!intermediateData) {
     return [];
@@ -259,7 +255,7 @@ export function getAllToolResponses(
  *   {@link IntermediateData} nor {@link InvocationEvents}.
  */
 export function getAllToolCallsWithResponses(
-  intermediateData?: IntermediateDataType,
+  intermediateData?: unknown,
 ): ToolCallAndResponse[] {
   const responsesByCallId = new Map<string | undefined, FunctionResponse>();
   for (const response of getAllToolResponses(intermediateData)) {

@@ -10,7 +10,6 @@ import {
   getAllToolCallsWithResponses,
   getAllToolResponses,
   IntermediateData,
-  IntermediateDataType,
   Invocation,
   InvocationEvent,
   InvocationEvents,
@@ -43,13 +42,6 @@ const TOOL_RESPONSE_LOOKUP: FunctionResponse = {
 
 /** A malformed value, as an eval-set file on disk can hold one. */
 const MALFORMED_INTERMEDIATE_DATA = 'this is not a valid type';
-
-/**
- * The accessors reject a value that is neither shape, so a test needs one.
- * The parameter type excludes it by construction, hence the double cast.
- */
-const malformedIntermediateData =
-  MALFORMED_INTERMEDIATE_DATA as unknown as IntermediateDataType;
 
 function eventWith(author: string, parts: Part[]): InvocationEvent {
   return {author, content: {parts, role: 'model'}};
@@ -239,7 +231,7 @@ describe('getAllToolCalls', () => {
   });
 
   it('rejects a value that is neither shape', () => {
-    expect(() => getAllToolCalls(malformedIntermediateData)).toThrow(
+    expect(() => getAllToolCalls(MALFORMED_INTERMEDIATE_DATA)).toThrow(
       /Unsupported type for intermediate_data/,
     );
   });
@@ -313,7 +305,7 @@ describe('getAllToolResponses', () => {
   });
 
   it('rejects a value that is neither shape', () => {
-    expect(() => getAllToolResponses(malformedIntermediateData)).toThrow(
+    expect(() => getAllToolResponses(MALFORMED_INTERMEDIATE_DATA)).toThrow(
       /Unsupported type for intermediate_data/,
     );
   });
