@@ -80,12 +80,18 @@ is a narrowed surface, not a security boundary. To write state, use a `Context`:
 ## Resolved credentials
 
 `getCredential(key)` returns a credential that this invocation already resolved,
-keyed by the credential key of the auth config that produced it. It returns
+keyed by the credential key of the auth config that asked for it. It returns
 `undefined` for a key that no credential was resolved for:
 
 ```ts
 const credential = readonlyContext.getCredential(authConfig.credentialKey);
 ```
+
+A credential appears there when the client answers a credential request: the
+auth preprocessor binds the response to the request the agent raised, stores the
+credential, and records it on the invocation. A toolset or an instruction
+provider holds only a `ReadonlyContext`, so this accessor is how it reads a
+credential that a tool obtained earlier in the same run.
 
 The store lives on the `InvocationContext`, not in session state, so a
 credential resolved for one invocation cannot leak into another. It is shared by

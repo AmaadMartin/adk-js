@@ -131,21 +131,6 @@ describe('ReadonlyContext', () => {
     expect(context.runConfig).toBeUndefined();
   });
 
-  it('starts the custom metadata of a new invocation empty', () => {
-    const context = new ReadonlyContext(makeContext());
-
-    expect(context.customMetadata).toEqual({});
-  });
-
-  it('exposes metadata written into the invocation', () => {
-    const invocationContext = makeContext();
-    const context = new ReadonlyContext(invocationContext);
-
-    invocationContext.customMetadata['source'] = 'test-tool';
-
-    expect(context.customMetadata).toEqual({source: 'test-tool'});
-  });
-
   it('exposes a credential resolved for this invocation', () => {
     const credential: AuthCredential = {
       authType: AuthCredentialTypes.API_KEY,

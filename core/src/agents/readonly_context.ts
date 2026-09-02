@@ -74,14 +74,6 @@ export class ReadonlyContext {
   }
 
   /**
-   * A read-only view of the metadata that tools and services accumulated
-   * during this invocation.
-   */
-  get customMetadata(): Readonly<Record<string, unknown>> {
-    return this.invocationContext.customMetadata;
-  }
-
-  /**
    * The current session of this invocation.
    */
   get session(): Session {
