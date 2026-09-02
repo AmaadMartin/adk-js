@@ -66,6 +66,11 @@ function createFakeChild(pid: number, signalled: string[]) {
   });
 }
 
+/** Python translates `\n` to the host's line ending; compare the text. */
+function normalize(text: string): string {
+  return text.replace(/\r\n/g, '\n');
+}
+
 /** Whether `pid` still names a process this test can signal. */
 function isAlive(pid: number): boolean {
   try {
@@ -669,7 +674,7 @@ describe('UnsafeLocalCodeExecutor', () => {
       const result = await runPython("print('partial')\n1 / 0");
 
       // Output written before the failure is no reason to call the run clean.
-      expect(result.stdout).toBe('partial\n');
+      expect(normalize(result.stdout)).toBe('partial\n');
       expect(result.exitCode).toBe(1);
     });
 
@@ -701,14 +706,14 @@ describe('UnsafeLocalCodeExecutor', () => {
         "if __name__ == '__main__':\n  print('guarded')",
       );
 
-      expect(result.stdout).toBe('guarded\n');
+      expect(normalize(result.stdout)).toBe('guarded\n');
       expect(result.stderr).toBe('');
     });
 
     it('does not name unguarded code __main__', async () => {
       const result = await runPython("print(globals().get('__name__'))");
 
-      expect(result.stdout).toBe('None\n');
+      expect(normalize(result.stdout)).toBe('None\n');
     });
 
     it('separates stdout from stderr, and clears a warning of a clean run', async () => {
@@ -739,7 +744,7 @@ describe('UnsafeLocalCodeExecutor', () => {
         "import os\nprint('before', flush=True)\nos._exit(3)",
       );
 
-      expect(result.stdout).toBe('before\n');
+      expect(normalize(result.stdout)).toBe('before\n');
       expect(result.stderr).toBe('Code execution exited with status 3.');
     });
 
@@ -769,7 +774,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     it('preserves unicode', async () => {
       const result = await runPython("print('你好, café')");
 
-      expect(result.stdout).toBe('你好, café\n');
+      expect(normalize(result.stdout)).toBe('你好, café\n');
       expect(result.stderr).toBe('');
     });
 
@@ -785,7 +790,7 @@ describe('UnsafeLocalCodeExecutor', () => {
         "import sys\nprint(sys.stdout.encoding)\nprint('café')",
       );
 
-      const [encoding, text] = result.stdout.trimEnd().split('\n');
+      const [encoding, text] = normalize(result.stdout).trimEnd().split('\n');
       expect(encoding.toLowerCase()).toBe('utf-8');
       expect(text).toBe('café');
       expect(result.stderr).toBe('');
@@ -794,7 +799,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     it('reads out output far larger than a pipe buffer', async () => {
       const result = await runPython("print('x' * 1000000)");
 
-      expect(result.stdout).toBe(`${'x'.repeat(1000000)}\n`);
+      expect(normalize(result.stdout)).toBe(`${'x'.repeat(1000000)}\n`);
       expect(result.stderr).toBe('');
     }, 30_000);
 
@@ -803,14 +808,23 @@ describe('UnsafeLocalCodeExecutor', () => {
 
       const result = await runPython(`data = '${payload}'\nprint(len(data))`);
 
-      expect(result.stdout).toBe(`${payload.length}\n`);
+      expect(normalize(result.stdout)).toBe(`${payload.length}\n`);
       expect(result.stderr).toBe('');
     }, 30_000);
 
     it('resolves imports from the agent path', async () => {
-      const result = await runPython('import sys\nprint(sys.path)');
+      // The directory arrives in argv rather than in the source, so the test
+      // does not have to escape a windows path into a python literal.
+      const result = await runPython(
+        [
+          'import os, sys',
+          'wanted = os.path.normcase(sys.argv[1])',
+          'print(any(os.path.normcase(p) == wanted for p in sys.path))',
+        ].join('\n'),
+        [process.cwd()],
+      );
 
-      expect(result.stdout).toContain(process.cwd());
+      expect(normalize(result.stdout)).toBe('True\n');
     });
 
     it('leaves the caller arguments in argv', async () => {
@@ -819,7 +833,7 @@ describe('UnsafeLocalCodeExecutor', () => {
         'two',
       ]);
 
-      expect(result.stdout).toBe("['one', 'two']\n");
+      expect(normalize(result.stdout)).toBe("['one', 'two']\n");
     });
 
     it('returns a file the program wrote', async () => {
@@ -903,43 +917,51 @@ describe('UnsafeLocalCodeExecutor', () => {
       return {result, hasSpawned};
     }
 
+    /** Windows has no process group to signal, so only the child is reached. */
+    function signalsFor(signal: string): string[] {
+      return IS_WINDOWS
+        ? [`child:${signal}`]
+        : [`group:-4321:${signal}`, `child:${signal}`];
+    }
+
     it('signals the group before the child, and kills only after the grace period', async () => {
       const {result, hasSpawned} = startExecution();
       await hasSpawned;
 
       await vi.advanceTimersByTimeAsync(timeoutSeconds * 1000);
-      expect(signalled).toEqual(['group:-4321:SIGTERM', 'child:SIGTERM']);
+      expect(signalled).toEqual(signalsFor('SIGTERM'));
 
       await vi.advanceTimersByTimeAsync(TERMINATE_GRACE_MS - 1);
-      expect(signalled).toEqual(['group:-4321:SIGTERM', 'child:SIGTERM']);
+      expect(signalled).toEqual(signalsFor('SIGTERM'));
 
       await vi.advanceTimersByTimeAsync(1);
       expect(signalled).toEqual([
-        'group:-4321:SIGTERM',
-        'child:SIGTERM',
-        'group:-4321:SIGKILL',
-        'child:SIGKILL',
+        ...signalsFor('SIGTERM'),
+        ...signalsFor('SIGKILL'),
       ]);
 
       child.emit('close', null, 'SIGKILL');
       await result;
     });
 
-    it('kills the child even when the group is already gone', async () => {
-      vi.spyOn(process, 'kill').mockImplementation(() => {
-        const error = new Error('kill ESRCH');
-        signalled.push('group:ESRCH');
-        throw error;
-      });
-      const {result, hasSpawned} = startExecution();
-      await hasSpawned;
+    it.skipIf(IS_WINDOWS)(
+      'kills the child even when the group is already gone',
+      async () => {
+        vi.spyOn(process, 'kill').mockImplementation(() => {
+          const error = new Error('kill ESRCH');
+          signalled.push('group:ESRCH');
+          throw error;
+        });
+        const {result, hasSpawned} = startExecution();
+        await hasSpawned;
 
-      await vi.advanceTimersByTimeAsync(timeoutSeconds * 1000);
+        await vi.advanceTimersByTimeAsync(timeoutSeconds * 1000);
 
-      expect(signalled).toEqual(['group:ESRCH', 'child:SIGTERM']);
-      child.emit('close', null, 'SIGTERM');
-      await result;
-    });
+        expect(signalled).toEqual(['group:ESRCH', 'child:SIGTERM']);
+        child.emit('close', null, 'SIGTERM');
+        await result;
+      },
+    );
 
     it('keeps what the code wrote before the timeout', async () => {
       const {result, hasSpawned} = startExecution();
