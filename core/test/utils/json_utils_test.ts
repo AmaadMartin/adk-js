@@ -6,7 +6,7 @@
 
 import {describe, expect, it} from 'vitest';
 
-import {safeJsonLoads} from '../../src/utils/json_utils.js';
+import {isRecord, safeJsonLoads} from '../../src/utils/json_utils.js';
 
 describe('safeJsonLoads', () => {
   it('parses an object', () => {
@@ -44,5 +44,19 @@ describe('safeJsonLoads', () => {
       return expect.fail('safeJsonLoads must throw an Error');
     }
     expect(caught.cause).toBeInstanceOf(SyntaxError);
+  });
+});
+
+describe('isRecord', () => {
+  it.each([
+    {label: 'an object', value: {a: 1}, expected: true},
+    {label: 'an empty object', value: {}, expected: true},
+    {label: 'an array', value: [1, 2], expected: false},
+    {label: 'null', value: null, expected: false},
+    {label: 'a string', value: 'text', expected: false},
+    {label: 'a number', value: 7, expected: false},
+    {label: 'undefined', value: undefined, expected: false},
+  ])('reports $label as $expected', ({value, expected}) => {
+    expect(isRecord(value)).toBe(expected);
   });
 });

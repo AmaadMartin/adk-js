@@ -27,7 +27,9 @@ import {
   Schema,
 } from '@google/genai';
 
+import {isRecord} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
+import {lowercaseSchemaTypes} from '../utils/schema_utils.js';
 
 import {LlmResponse} from './llm_response.js';
 
@@ -72,40 +74,6 @@ const STOP_REASON_MAPPING: ReadonlyMap<Anthropic.StopReason, FinishReason> =
     ['refusal', FinishReason.SAFETY],
   ]);
 
-/** JSON-schema keys whose value is a map of sub-schemas. */
-const SCHEMA_MAP_KEYS = [
-  '$defs',
-  'defs',
-  'dependentSchemas',
-  'patternProperties',
-  'properties',
-] as const;
-
-/** JSON-schema keys whose value is a single sub-schema. */
-const SCHEMA_SINGLE_KEYS = [
-  'additionalProperties',
-  'additional_properties',
-  'contains',
-  'else',
-  'if',
-  'items',
-  'not',
-  'propertyNames',
-  'then',
-  'unevaluatedProperties',
-] as const;
-
-/** JSON-schema keys whose value is a list of sub-schemas. */
-const SCHEMA_LIST_KEYS = [
-  'allOf',
-  'all_of',
-  'anyOf',
-  'any_of',
-  'oneOf',
-  'one_of',
-  'prefixItems',
-] as const;
-
 /**
  * `GenerateContentResponseUsageMetadata` plus Anthropic's cache-write count.
  *
@@ -126,11 +94,6 @@ export interface AnthropicTokenCounts {
   thinkingTokens?: number;
   cachedInputTokens?: number;
   cacheCreationTokens?: number;
-}
-
-/** Narrows a decoded JSON value to a plain object. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Strips `;` parameters and case from a MIME type. */
@@ -562,47 +525,6 @@ export function messageToLlmResponse(message: Anthropic.Message): LlmResponse {
 }
 
 /**
- * Lowercases every nested JSON-schema `type` string, in place.
- *
- * genai spells its types `STRING` and `OBJECT`; Anthropic rejects anything but
- * the lowercase JSON-schema spelling.
- *
- * @param value The schema, or a fragment of one, to rewrite.
- */
-export function updateTypeString(value: unknown): void {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      updateTypeString(item);
-    }
-    return;
-  }
-  if (!isRecord(value)) {
-    return;
-  }
-  const schemaType = value['type'];
-  if (typeof schemaType === 'string') {
-    value['type'] = schemaType.toLowerCase();
-  }
-  for (const key of SCHEMA_MAP_KEYS) {
-    const child = value[key];
-    if (isRecord(child)) {
-      for (const childValue of Object.values(child)) {
-        updateTypeString(childValue);
-      }
-    }
-  }
-  for (const key of SCHEMA_SINGLE_KEYS) {
-    updateTypeString(value[key]);
-  }
-  for (const key of SCHEMA_LIST_KEYS) {
-    const child = value[key];
-    if (Array.isArray(child)) {
-      updateTypeString(child);
-    }
-  }
-}
-
-/**
  * Deep-copies a JSON-serializable value into a plain record.
  *
  * The copy exists so that lowercasing types never mutates the caller's
@@ -643,7 +565,7 @@ export function functionDeclarationToToolParam(
   const inputSchema = parametersJsonSchema
     ? cloneJsonObject(parametersJsonSchema)
     : parametersToInputSchema(parameters);
-  updateTypeString(inputSchema);
+  lowercaseSchemaTypes(inputSchema);
   return {
     name,
     description: description ?? '',

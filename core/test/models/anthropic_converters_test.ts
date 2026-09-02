@@ -21,7 +21,6 @@ import {
   toClaudeRole,
   toGoogleGenAiFinishReason,
   ToolUseIdSanitizer,
-  updateTypeString,
 } from '../../src/models/anthropic_converters.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -344,32 +343,6 @@ describe('functionDeclarationToToolParam', () => {
       type: 'OBJECT',
       properties: {query: {type: 'STRING'}},
     });
-  });
-});
-
-describe('updateTypeString', () => {
-  it('ignores a value that is not a schema', () => {
-    expect(() => {
-      updateTypeString('not-a-schema');
-    }).not.toThrow();
-  });
-
-  it('leaves a non-string type alone', () => {
-    const schema = {type: 7};
-    updateTypeString(schema);
-    expect(schema).toEqual({type: 7});
-  });
-
-  it('walks a list of schemas', () => {
-    const schemas = [{type: 'STRING'}, {type: 'INTEGER'}];
-    updateTypeString(schemas);
-    expect(schemas).toEqual([{type: 'string'}, {type: 'integer'}]);
-  });
-
-  it('leaves a list-valued key holding a single schema alone', () => {
-    const schema = {anyOf: {type: 'STRING'}};
-    updateTypeString(schema);
-    expect(schema).toEqual({anyOf: {type: 'STRING'}});
   });
 });
 

@@ -10,15 +10,6 @@ import {ContextCacheConfig} from '../agents/context_cache_config.js';
 
 import {useOneHourTtl} from './prompt_cache.js';
 
-/** Claude rejects a cache breakpoint on a reasoning block. */
-const UNCACHEABLE_BLOCK_TYPES = new Set(['thinking', 'redacted_thinking']);
-
-/** The content blocks Claude accepts a cache breakpoint on. */
-type CacheableBlockParam = Exclude<
-  Anthropic.ContentBlockParam,
-  Anthropic.ThinkingBlockParam | Anthropic.RedactedThinkingBlockParam
->;
-
 /** Options for {@link applyCacheBreakpoints}. */
 export interface CacheBreakpointOptions {
   /** Cache configuration for the request. */
@@ -32,12 +23,6 @@ export interface CacheBreakpointOptions {
 
   /** Tool definitions to mark, modified in place. */
   tools: Anthropic.Tool[];
-}
-
-function isCacheableBlock(
-  block: Anthropic.ContentBlockParam,
-): block is CacheableBlockParam {
-  return !UNCACHEABLE_BLOCK_TYPES.has(block.type);
 }
 
 /** Maps the configured cache lifetime onto one Claude actually offers. */
@@ -70,7 +55,8 @@ function markLastCacheableMessageBlock(
     }
     for (let blockIndex = content.length - 1; blockIndex >= 0; blockIndex--) {
       const block = content[blockIndex];
-      if (!isCacheableBlock(block)) {
+      // Claude rejects a cache breakpoint on a reasoning block.
+      if (block.type === 'thinking' || block.type === 'redacted_thinking') {
         continue;
       }
       block.cache_control = cacheControl;

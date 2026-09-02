@@ -7,7 +7,7 @@
 import type {Anthropic} from '@anthropic-ai/sdk';
 import {FunctionDeclaration, Part, Tool} from '@google/genai';
 
-import {safeJsonLoads} from '../utils/json_utils.js';
+import {isRecord, safeJsonLoads} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../utils/optional_peer.js';
 
@@ -26,7 +26,6 @@ import {
   extractThinkingTokenCount,
   extractTokenCounts,
   functionDeclarationToToolParam,
-  isRecord,
   messageToLlmResponse,
   toGoogleGenAiFinishReason,
   ToolUseIdSanitizer,
