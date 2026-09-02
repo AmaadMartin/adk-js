@@ -25,7 +25,6 @@ import {
   Server,
   ServerResponse,
 } from 'node:http';
-import {AddressInfo} from 'node:net';
 import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 
 /** A tool as the server advertises it in a `tools/list` result. */
@@ -159,8 +158,11 @@ beforeAll(async () => {
     void handle(req, res);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const {port} = server.address() as AddressInfo;
-  serverUrl = `http://127.0.0.1:${port}`;
+  const address = server.address();
+  if (address === null || typeof address === 'string') {
+    expect.fail('the stub server did not bind a TCP port');
+  }
+  serverUrl = `http://127.0.0.1:${address.port}`;
 });
 
 afterAll(async () => {
