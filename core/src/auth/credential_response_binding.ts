@@ -56,7 +56,10 @@ function readString(source: unknown, name: string): string | undefined {
  * registered with the authorization server. Without that identity the exchanger
  * refuses the exchange, and a refresh of an accepted token later fails too, so
  * the request contributes every field of {@link BACKFILLED_OAUTH2_FIELDS} the
- * client left out. A value the client did send always wins, in either casing.
+ * client left out, and only those fields: a response with no `oauth2` at all
+ * gets the same list, not a copy of the request's whole block, so a token the
+ * agent is holding can never stand in for the user's answer.
+ * A value the client did send always wins, in either casing.
  *
  * Returns `undefined` when the client sent an `oauth2` that is not an object,
  * which is not a credential this can merge with or store.
@@ -69,10 +72,7 @@ function bindUnpinnedCredential(
     return supplied;
   }
 
-  const suppliedOAuth2: unknown = readField(supplied, 'oauth2');
-  if (suppliedOAuth2 === undefined || suppliedOAuth2 === null) {
-    return {...supplied, oauth2: {...requestedOAuth2}};
-  }
+  const suppliedOAuth2 = readField(supplied, 'oauth2') ?? {};
   if (!isRecord(suppliedOAuth2)) {
     return undefined;
   }
@@ -172,7 +172,7 @@ export function bindCredentialResponse(
   }
 
   const supplied = readField(response, 'exchangedAuthCredential');
-  if (typeof supplied !== 'object' || supplied === null) {
+  if (!isRecord(supplied)) {
     return undefined;
   }
 

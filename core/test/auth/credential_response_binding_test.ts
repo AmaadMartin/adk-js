@@ -121,6 +121,21 @@ function unpinnedOAuthRequest(): AuthConfig {
   };
 }
 
+/** The same request, plus a token the agent is already holding. */
+function unpinnedOAuthRequestWithToken(): AuthConfig {
+  const request = unpinnedOAuthRequest();
+  return {
+    ...request,
+    exchangedAuthCredential: {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {
+        ...request.exchangedAuthCredential?.oauth2,
+        accessToken: 'agent-token',
+      },
+    },
+  };
+}
+
 /**
  * A session in which `request` was raised by the agent and `response` came back
  * from the client, plus the state object the credential will land in.
@@ -444,6 +459,14 @@ describe('bindCredentialResponse', () => {
     ).toBeUndefined();
   });
 
+  it('returns nothing when the credential is not an object', () => {
+    expect(
+      bindCredentialResponse(unpinnedOAuthRequest(), {
+        exchangedAuthCredential: 'nope',
+      }),
+    ).toBeUndefined();
+  });
+
   // The shape the nit on #775 named: a credential is present, but nothing in it
   // answers the pending authorization-code flow.
   it('refuses a credential that answers nothing', () => {
@@ -571,30 +594,25 @@ describe('bindCredentialResponse', () => {
     // A token from the request is the agent's, not the user's, and the
     // exchanger returns early on any token it finds.
     it('does not backfill a token from the request', () => {
-      const request = unpinnedOAuthRequest();
-
-      const bound = bindCredentialResponse(
-        {
-          ...request,
-          exchangedAuthCredential: {
-            authType: AuthCredentialTypes.OAUTH2,
-            oauth2: {
-              ...request.exchangedAuthCredential?.oauth2,
-              accessToken: 'agent-token',
-            },
-          },
-        },
-        {
-          exchangedAuthCredential: {
-            authType: 'oauth2',
-            oauth2: {authCode: 'x'},
-          },
-        },
-      );
+      const bound = bindCredentialResponse(unpinnedOAuthRequestWithToken(), {
+        exchangedAuthCredential: {authType: 'oauth2', oauth2: {authCode: 'x'}},
+      });
 
       expect(
         bound?.exchangedAuthCredential?.oauth2?.accessToken,
       ).toBeUndefined();
+    });
+
+    // The same rule with nothing to merge into: a response carrying no oauth2
+    // gets the listed fields, not the request's whole block.
+    it('copies no token when the response carries no oauth2', () => {
+      const bound = bindCredentialResponse(unpinnedOAuthRequestWithToken(), {
+        exchangedAuthCredential: {authType: 'oauth2'},
+      });
+
+      expect(bound?.exchangedAuthCredential?.oauth2).toStrictEqual(
+        unpinnedOAuthRequest().exchangedAuthCredential?.oauth2,
+      );
     });
 
     // The request is read back out of an event in session history.
