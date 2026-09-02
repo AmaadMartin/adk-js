@@ -100,8 +100,11 @@ function isStringArray(value: unknown): value is string[] {
 /**
  * `Content` is a structural interface, so there is no constructor to test
  * against. A non-array object carrying either of its two fields is one.
+ *
+ * Named for what it tests, because `workflow/base_node.ts` exports a stricter
+ * `isContent` that rejects a `Content` carrying only a role.
  */
-function isContent(value: unknown): value is Content {
+export function isContentLike(value: unknown): value is Content {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -236,7 +239,8 @@ function appendContentInstructions(
  *
  * The model API accepts only a string system instruction. A `Content` may also
  * carry inline or file data, so each such part becomes a textual reference in
- * the system instruction plus a user content holding the data itself.
+ * the system instruction plus a user content appended to
+ * {@link LlmRequest.contents}.
  *
  * @param instructions The instructions to append.
  * @returns The user contents synthesized from non-text parts, empty on every
@@ -255,7 +259,7 @@ export function appendInstructions(
     }
     return [];
   }
-  if (isContent(instructions)) {
+  if (isContentLike(instructions)) {
     return appendContentInstructions(config, llmRequest, instructions);
   }
   throw new TypeError(
