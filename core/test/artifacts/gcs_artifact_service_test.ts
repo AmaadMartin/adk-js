@@ -720,7 +720,7 @@ describe('GcsArtifactService.getSignedUrl', () => {
       ...SESSION_KEY,
       filename: 'notes.txt',
       version: 0,
-      signingVersion: 'v4',
+      signingOptions: {version: 'v4'},
     });
 
     const [call] = storageMock.bucket(BUCKET).signedUrlCalls;
@@ -728,7 +728,7 @@ describe('GcsArtifactService.getSignedUrl', () => {
     expect(call.config.version).toBe('v4');
   });
 
-  it('forwards the expiry, the action and the extra signing options', async () => {
+  it('forwards every signing option', async () => {
     const service = newService();
     await service.saveArtifact({
       ...SESSION_KEY,
@@ -740,9 +740,9 @@ describe('GcsArtifactService.getSignedUrl', () => {
     await service.getSignedUrl({
       ...SESSION_KEY,
       filename: 'notes.txt',
-      expires,
-      action: 'write',
-      extraSigningOptions: {
+      signingOptions: {
+        expires,
+        action: 'write',
         responseType: 'application/pdf',
         promptSaveAs: 'notes.txt',
       },
@@ -757,7 +757,7 @@ describe('GcsArtifactService.getSignedUrl', () => {
     });
   });
 
-  it('lets an explicit action override the extra signing options', async () => {
+  it('lets a signing option override the default action', async () => {
     const service = newService();
     await service.saveArtifact({
       ...SESSION_KEY,
@@ -768,33 +768,31 @@ describe('GcsArtifactService.getSignedUrl', () => {
     await service.getSignedUrl({
       ...SESSION_KEY,
       filename: 'notes.txt',
-      extraSigningOptions: {action: 'delete', version: 'v2'},
+      signingOptions: {action: 'delete', version: 'v2'},
     });
 
     const [call] = storageMock.bucket(BUCKET).signedUrlCalls;
-    expect(call.config.action).toBe('read');
+    expect(call.config.action).toBe('delete');
     expect(call.config.version).toBe('v2');
   });
 
-  it('lets the default expiry override the extra signing options', async () => {
+  it('lets a signing option override the default expiry', async () => {
     const service = newService();
     await service.saveArtifact({
       ...SESSION_KEY,
       filename: 'notes.txt',
       artifact: {text: 'v0'},
     });
+    const expires = new Date('2020-01-01T00:00:00.000Z');
 
-    const before = Date.now();
     await service.getSignedUrl({
       ...SESSION_KEY,
       filename: 'notes.txt',
-      extraSigningOptions: {expires: new Date('2020-01-01T00:00:00.000Z')},
+      signingOptions: {expires},
     });
-    const after = Date.now();
 
     const [call] = storageMock.bucket(BUCKET).signedUrlCalls;
-    expect(call.config.expires).toBeGreaterThanOrEqual(before + ONE_HOUR_MS);
-    expect(call.config.expires).toBeLessThanOrEqual(after + ONE_HOUR_MS);
+    expect(call.config.expires).toBe(expires);
   });
 
   it('returns undefined for a missing artifact', async () => {

@@ -68,7 +68,8 @@ const url = await artifactService.getAuthenticatedUrl({
 `getSignedUrl` returns a link that carries its own authorization, so an
 unauthenticated client can open it. Treat the link as a bearer token for the
 object until it expires. It expires one hour from now and permits a read,
-unless you say otherwise.
+unless `signingOptions` says otherwise. Those options reach the storage client
+unchanged, so anything its `GetSignedUrlConfig` accepts works here.
 
 ```ts
 const signedUrl = await artifactService.getSignedUrl({
@@ -76,8 +77,7 @@ const signedUrl = await artifactService.getSignedUrl({
   userId: 'user1',
   sessionId: 'session1',
   filename: 'report.md',
-  expires: Date.now() + 15 * 60 * 1000,
-  signingVersion: 'v4',
+  signingOptions: {expires: Date.now() + 15 * 60 * 1000, version: 'v4'},
 });
 ```
 

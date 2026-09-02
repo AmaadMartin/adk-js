@@ -76,16 +76,10 @@ type ResolvedArtifact =
 /** The parameters for {@link GcsArtifactService.getSignedUrl}. */
 export interface GetSignedUrlRequest extends LoadArtifactRequest {
   /**
-   * When the URL expires, as a Date or as epoch milliseconds. Defaults to one
-   * hour from now.
+   * Options for the storage client, merged over the defaults: a `'read'`
+   * action, and an expiry one hour from now.
    */
-  expires?: Date | number;
-  /** The operation the URL permits. Defaults to `'read'`. */
-  action?: GetSignedUrlConfig['action'];
-  /** The signing version forwarded to the storage client. */
-  signingVersion?: GetSignedUrlConfig['version'];
-  /** Additional options merged into the underlying signed-URL config. */
-  extraSigningOptions?: Partial<GetSignedUrlConfig>;
+  signingOptions?: Partial<GetSignedUrlConfig>;
 }
 
 export class GcsArtifactService implements BaseArtifactService {
@@ -376,16 +370,11 @@ export class GcsArtifactService implements BaseArtifactService {
       return undefined;
     }
 
-    const config: GetSignedUrlConfig = {
-      ...request.extraSigningOptions,
-      action: request.action ?? 'read',
-      expires: request.expires ?? Date.now() + DEFAULT_SIGNED_URL_TTL_MS,
-    };
-    if (request.signingVersion !== undefined) {
-      config.version = request.signingVersion;
-    }
-
-    const [url] = await resolved.file.getSignedUrl(config);
+    const [url] = await resolved.file.getSignedUrl({
+      action: 'read',
+      expires: Date.now() + DEFAULT_SIGNED_URL_TTL_MS,
+      ...request.signingOptions,
+    });
     return url;
   }
 

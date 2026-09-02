@@ -10,11 +10,13 @@ import {
   InputValidationError,
   isArtifactRef,
   parseArtifactUri,
-  validateArtifactReferenceScope,
-  validatePathSegment,
 } from '@google/adk';
 import type {Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {
+  validateArtifactReferenceScope,
+  validatePathSegment,
+} from '../../src/artifacts/artifact_util.js';
 
 const SESSION_SCOPED_URI =
   'artifact://apps/app1/users/user1/sessions/session1/artifacts/file1/versions/123';

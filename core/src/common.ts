@@ -85,13 +85,10 @@ export {
   getArtifactUri,
   isArtifactRef,
   parseArtifactUri,
-  validateArtifactReferenceScope,
-  validatePathSegment,
 } from './artifacts/artifact_util.js';
 export type {
   GetArtifactUriRequest,
   ParsedArtifactUri,
-  ValidateArtifactReferenceScopeRequest,
 } from './artifacts/artifact_util.js';
 export type {
   BaseArtifactService,
