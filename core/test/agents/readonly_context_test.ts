@@ -5,8 +5,6 @@
  */
 
 import {
-  AuthCredential,
-  AuthCredentialTypes,
   BaseAgent,
   Event,
   InvocationContext,
@@ -45,11 +43,6 @@ function makeContext(
     ...overrides,
   });
 }
-
-const apiKeyCredential: AuthCredential = {
-  authType: AuthCredentialTypes.API_KEY,
-  apiKey: 'test-api-key',
-};
 
 describe('ReadonlyContext', () => {
   it('exposes the invocation id', () => {
@@ -131,36 +124,5 @@ describe('ReadonlyContext', () => {
     const context = new ReadonlyContext(makeContext());
 
     expect(context.runConfig).toBeUndefined();
-  });
-
-  it('returns a credential resolved earlier in the invocation', () => {
-    const context = new ReadonlyContext(
-      makeContext({credentialByKey: {'test-key': apiKeyCredential}}),
-    );
-
-    expect(context.getCredential('test-key')).toBe(apiKeyCredential);
-  });
-
-  it('returns undefined for a credential key the invocation never resolved', () => {
-    const context = new ReadonlyContext(
-      makeContext({credentialByKey: {'test-key': apiKeyCredential}}),
-    );
-
-    expect(context.getCredential('other-key')).toBeUndefined();
-  });
-
-  it('returns undefined for any key when no credential was ever resolved', () => {
-    const context = new ReadonlyContext(makeContext());
-
-    expect(context.getCredential('test-key')).toBeUndefined();
-  });
-
-  it('shares the resolved credentials with a cloned invocation context', () => {
-    const invocationContext = makeContext();
-
-    invocationContext.credentialByKey['test-key'] = apiKeyCredential;
-    const clonedContext = new ReadonlyContext(invocationContext.clone());
-
-    expect(clonedContext.getCredential('test-key')).toBe(apiKeyCredential);
   });
 });

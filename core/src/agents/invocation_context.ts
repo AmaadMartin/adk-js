@@ -7,7 +7,6 @@
 import {Content} from '@google/genai';
 
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
-import type {AuthCredential} from '../auth/auth_credential.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {Event} from '../events/event.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -65,11 +64,6 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
-  /**
-   * Credentials already resolved for this invocation, keyed by the auth
-   * config's `credentialKey`.
-   */
-  credentialByKey?: Record<string, AuthCredential>;
 }
 
 /**
@@ -274,14 +268,6 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
-   * Credentials already resolved for this invocation, keyed by the auth
-   * config's `credentialKey`. Read it through
-   * {@link ReadonlyContext.getCredential}. Mirrors adk-python
-   * `InvocationContext.credential_by_key`.
-   */
-  readonly credentialByKey: Record<string, AuthCredential>;
-
-  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -303,7 +289,6 @@ export class InvocationContext {
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
-    this.credentialByKey = params.credentialByKey ?? {};
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop

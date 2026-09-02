@@ -6,7 +6,6 @@
 
 import {Content} from '@google/genai';
 
-import type {AuthCredential} from '../auth/auth_credential.js';
 import type {Session} from '../sessions/session.js';
 import {State} from '../sessions/state.js';
 
@@ -84,15 +83,5 @@ export class ReadonlyContext {
    */
   get runConfig(): RunConfig | undefined {
     return this.invocationContext.runConfig;
-  }
-
-  /**
-   * The credential this invocation already resolved for `key`, or `undefined`
-   * when nothing is cached under it.
-   *
-   * @param key The auth config's `credentialKey`.
-   */
-  getCredential(key: string): AuthCredential | undefined {
-    return this.invocationContext.credentialByKey[key];
   }
 }
