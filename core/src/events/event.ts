@@ -366,6 +366,11 @@ const PRESERVE_KEYS_CAMEL_CASE = [
   'actions.renderUiWidgets.payload',
   // Arbitrary structured model output: its keys are the model's, not ours.
   'actions.setModelResponse',
+  // A compaction summary is `Content`, so its tool-call payloads carry
+  // user-defined keys just like the top-level `content` above. Only these two
+  // leaves are preserved: `Content`'s own keys still convert.
+  'actions.compaction.compactedContent.parts.functionCall.args',
+  'actions.compaction.compactedContent.parts.functionResponse.response',
 ];
 
 /**
@@ -393,6 +398,8 @@ const PRESERVE_KEYS_SNAKE_CASE = [
   'actions.render_ui_widgets.payload',
   // See the camelCase list above.
   'actions.set_model_response',
+  'actions.compaction.compacted_content.parts.function_call.args',
+  'actions.compaction.compacted_content.parts.function_response.response',
 ];
 
 /**

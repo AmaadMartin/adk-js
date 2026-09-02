@@ -12,6 +12,7 @@ import {transformToCamelCaseEvent} from '../../src/events/event.js';
 import {
   createEventActions,
   EventActions,
+  EventCompaction,
   isDefaultEventActions,
   mergeEventActions,
   serializeEventActions,
@@ -26,6 +27,48 @@ function createTestAuthConfig(credentialKey: string): AuthConfig {
     credentialKey,
   };
 }
+
+function createTestCompaction(): EventCompaction {
+  return {
+    startTimestamp: 1000,
+    endTimestamp: 2000,
+    compactedContent: {role: 'model', parts: [{text: 'the story so far'}]},
+  };
+}
+
+/**
+ * Builds an actions payload from untyped input, the way plain JavaScript or a
+ * widened object reaches `createEventActions`. TypeScript's excess-property
+ * check rejects a stray key in a literal, so a test for the runtime check has
+ * to enter through the same door those callers use.
+ */
+function untypedActions(
+  fields: Record<string, unknown>,
+): Partial<EventActions> {
+  const declared: Partial<EventActions> = {};
+  return Object.assign(declared, fields);
+}
+
+/** One valid value per declared field, keyed so the compiler pins the set. */
+const ONE_VALUE_PER_FIELD: Record<keyof EventActions, unknown> = {
+  skipSummarization: true,
+  stateDelta: {cartSize: 2},
+  artifactDelta: {'report.pdf': 1},
+  transferToAgent: 'billing_agent',
+  escalate: true,
+  requestedAuthConfigs: {'call-1': createTestAuthConfig('key-1')},
+  requestedToolConfirmations: {
+    'call-1': new ToolConfirmation({hint: 'ok?', confirmed: false}),
+  },
+  compaction: createTestCompaction(),
+  agentState: {step: 3},
+  endOfAgent: true,
+  renderUiWidgets: [{id: 'call-1', provider: 'mcp', payload: {}}],
+  transferReason: 'the user asked about an invoice',
+  route: 'approved',
+  setModelResponse: {answer: 42},
+  rewindBeforeInvocationId: 'inv-1',
+};
 
 describe('createEventActions', () => {
   it('creates an EventActions with empty dicts and no scalar fields', () => {
@@ -116,6 +159,11 @@ describe('isDefaultEventActions', () => {
 
   it.each(nonDefaults)('returns false when %s', (_label, overrides) => {
     expect(isDefaultEventActions(createEventActions(overrides))).toBe(false);
+  });
+
+  it('returns false when compaction is set', () => {
+    const actions = createEventActions({compaction: createTestCompaction()});
+    expect(isDefaultEventActions(actions)).toBe(false);
   });
 });
 
@@ -319,6 +367,25 @@ describe('mergeEventActions', () => {
   it('leaves rewindBeforeInvocationId unset when no source carries it', () => {
     const result = mergeEventActions([createEventActions({escalate: true})]);
     expect(result.rewindBeforeInvocationId).toBeUndefined();
+  });
+
+  it('uses last-writer-wins for compaction', () => {
+    const first = createTestCompaction();
+    const last = {...createTestCompaction(), endTimestamp: 3000};
+    const result = mergeEventActions([
+      createEventActions({compaction: first}),
+      createEventActions({compaction: last}),
+    ]);
+    expect(result.compaction).toEqual(last);
+  });
+
+  it('keeps an earlier compaction when a later source leaves it unset', () => {
+    const compaction = createTestCompaction();
+    const result = mergeEventActions([
+      createEventActions({compaction}),
+      createEventActions({escalate: true}),
+    ]);
+    expect(result.compaction).toEqual(compaction);
   });
 });
 
@@ -609,5 +676,57 @@ describe('serializeEventActions', () => {
       self: '[Circular]',
     });
     expect(() => JSON.stringify(serialized)).not.toThrow();
+  });
+});
+
+describe('createEventActions compaction', () => {
+  it('leaves compaction unset by default', () => {
+    expect(createEventActions().compaction).toBeUndefined();
+  });
+
+  it('keeps a supplied compaction verbatim', () => {
+    const compaction = createTestCompaction();
+    const actions = createEventActions({compaction});
+    expect(actions.compaction).toEqual(compaction);
+  });
+});
+
+describe('createEventActions unknown keys', () => {
+  it('rejects a misspelled field and names it', () => {
+    expect(() =>
+      createEventActions(untypedActions({transferAgent: 'other_agent'})),
+    ).toThrow(InputValidationError);
+    expect(() =>
+      createEventActions(untypedActions({transferAgent: 'other_agent'})),
+    ).toThrow('EventActions received unknown key(s): transferAgent.');
+  });
+
+  it('reports every unknown key in one message', () => {
+    expect(() =>
+      createEventActions(untypedActions({transferAgent: 'a', endOfTurn: true})),
+    ).toThrow(
+      'EventActions received unknown key(s): transferAgent, endOfTurn.',
+    );
+  });
+
+  it('rejects a snake_case field with the camelCase hint', () => {
+    expect(() =>
+      createEventActions(untypedActions({state_delta: {a: 1}})),
+    ).toThrow(
+      'EventActions received unknown key(s): state_delta. Fields are camelCase; see EventActions.',
+    );
+  });
+
+  it('rejects an Object.prototype name carried as an own key', () => {
+    expect(() => createEventActions(untypedActions({toString: 'x'}))).toThrow(
+      'EventActions received unknown key(s): toString.',
+    );
+  });
+
+  it.each(Object.keys(ONE_VALUE_PER_FIELD))('accepts the field %s', (field) => {
+    const value = ONE_VALUE_PER_FIELD[field as keyof EventActions];
+    expect(() =>
+      createEventActions(untypedActions({[field]: value})),
+    ).not.toThrow();
   });
 });

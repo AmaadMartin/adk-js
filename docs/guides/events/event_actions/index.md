@@ -2,9 +2,10 @@
 
 `EventActions` carries the side-effects of an event: the state and artifact
 updates it applies, the transfer or escalation it requests, the credentials a
-tool needs, and the route a workflow node emitted. Reach for it when you build
-an event by hand, or when you read one back out of a session and need to know
-what it asked the runner to do.
+tool needs, the route a workflow node emitted, and the summary of a compacted
+range of events. Reach for it when you build an event by hand, or when you
+read one back out of a session and need to know what it asked the runner to
+do.
 
 ## Introduction
 
@@ -19,10 +20,11 @@ field names on the wire. This module mirrors `google/adk-python`
 A field it does not have is a field that is dropped when the event crosses the
 boundary.
 
-Two behaviours guard the type rather than extend it. `createEventActions`
-rejects a malformed `requestedAuthConfigs` entry, and `serializeEventActions`
-makes session state safe to persist when a tool put a value in it that JSON
-cannot represent.
+Three behaviours guard the type rather than extend it. `createEventActions`
+rejects a key that `EventActions` does not declare. It also rejects a
+malformed `requestedAuthConfigs` entry. `serializeEventActions` makes session
+state safe to persist when a tool put a value in it that JSON cannot
+represent.
 
 ## Get started
 
@@ -40,6 +42,7 @@ const actions = createEventActions({
 
 // actions.artifactDelta is {}
 // actions.transferReason is 'the user asked about an invoice'
+// actions.escalate is undefined
 ```
 
 `createEvent` builds the actions for you, so pass a partial and read the result
@@ -153,3 +156,56 @@ const restored: unknown = JSON.parse('{"credentialKey": "billing-key"}');
 The check is structural. It confirms both required properties are present. It
 does not confirm the scheme is one ADK supports, or that the credential key
 names a stored credential.
+
+## Unknown keys are rejected
+
+TypeScript already rejects a stray key in an object literal. The runtime check
+covers the callers the compiler never sees: plain JavaScript, and an object
+widened to `Record<string, unknown>` before it arrives.
+
+```js
+createEventActions({transferAgent: 'other_agent'});
+// InputValidationError: EventActions received unknown key(s): transferAgent.
+// Fields are camelCase; see EventActions.
+```
+
+Fields are camelCase here. `google/adk-python` accepts `state_delta` as well as
+`stateDelta`, because pydantic's `populate_by_name` allows both. This SDK
+converts snake_case to camelCase at the wire boundary, in
+`transformToCamelCaseEvent`, so a snake_case key that reaches
+`createEventActions` is a bug and the check reports it.
+
+The check guards what you construct in the process, and only that. An event
+rehydrated from storage is cast by `transformToCamelCaseEvent`, never built by
+`createEventActions`, so a stored event carrying an unknown key still passes.
+
+## Compaction
+
+`compaction` holds the range of events one event summarizes, and the summary
+that stands in for them. All three fields are required:
+
+```ts
+import {createEventActions, EventCompaction} from '@google/adk';
+
+const compaction: EventCompaction = {
+  startTimestamp: 1000,
+  endTimestamp: 2000,
+  compactedContent: {role: 'model', parts: [{text: 'the story so far'}]},
+};
+
+const actions = createEventActions({compaction});
+```
+
+The timestamps carry whatever unit the writer used. Nothing in adk-js reads
+them and neither SDK converts them, so read them in the writer's unit:
+`google/adk-python` documents seconds, while `Event.timestamp` here is in
+milliseconds.
+
+The field survives `transformToSnakeCaseEvent` and `transformToCamelCaseEvent`
+in both directions, including the argument keys of a tool call inside the
+summary: `args` and `response` payloads keep their spelling, while `Content`'s
+own keys convert.
+
+This SDK's own compaction pipeline uses `CompactedEvent` instead, and reads
+nothing from this field. `compaction` is an opaque passthrough, so an event
+that carries one survives a round trip through adk-js unchanged.

@@ -372,7 +372,7 @@ export {
   createEventActions,
   serializeEventActions,
 } from './events/event_actions.js';
-export type {EventActions} from './events/event_actions.js';
+export type {EventActions, EventCompaction} from './events/event_actions.js';
 export {filterSessionEvents} from './events/event_filters.js';
 export type {
   SessionEventFilterOptions,
