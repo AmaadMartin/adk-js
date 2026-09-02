@@ -128,7 +128,8 @@ export interface AnthropicTokenCounts {
   cacheCreationTokens?: number;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+/** Narrows a decoded JSON value to a plain object. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
