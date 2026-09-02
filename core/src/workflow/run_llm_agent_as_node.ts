@@ -58,12 +58,18 @@ export async function* runLlmAgentAsNode(
     await appendNodeInputAsUserTurn(ctx, nodeInput);
   }
 
-  const agentIc = withWorkflowInstructionScope(ctx.getInvocationContext(), {
+  let agentIc = withWorkflowInstructionScope(ctx.getInvocationContext(), {
     input: nodeInput,
     outputsByNode: collectPredecessorOutputs(ctx),
   });
 
   if (isTaskMode) {
+    // A task node has no delegating function call to state its task, so the
+    // node input takes that place. `single_turn` is excluded: it already
+    // appends the input as a scoped user turn above.
+    if (nodeInput != null) {
+      agentIc = agentIc.clone({userContent: toUserContent(nodeInput)});
+    }
     yield* runTaskMode(ctx, agentIc, agent);
     return;
   }

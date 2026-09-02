@@ -5,17 +5,21 @@
  */
 
 import {
-  BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
+  createEvent,
+  createSession,
   Event,
   EventActions,
+  Gemini,
   InvocationContext,
   LlmAgent,
   LlmRequest,
   PluginManager,
+  RunConfig,
   Session,
 } from '@google/adk';
+import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 function createMockEvent(id: string, timestamp: number, text: string): Event {
@@ -62,12 +66,12 @@ function createMockInvocationContext(events: Event[]): InvocationContext {
 
   const agent = new LlmAgent({
     name: 'test_agent',
-    model: 'gemini-2.5-flash',
+    model: new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
   });
 
   return new InvocationContext({
     invocationId: 'test-invocation',
-    agent: agent as BaseAgent,
+    agent,
     session,
     pluginManager: new PluginManager([]),
   });
@@ -182,5 +186,147 @@ describe('ContentRequestProcessor', () => {
     expect(llmRequest.contents[0].parts?.[0]?.text).toContain('Summary 1-3');
     // Followed by message 4
     expect(llmRequest.contents[1].parts?.[0]?.text).toContain('New message 4');
+  });
+});
+
+describe('ContentRequestProcessor — function call ids', () => {
+  function callAndResponseEvents(): Event[] {
+    return [
+      createEvent({
+        author: 'test_agent',
+        content: {
+          role: 'model',
+          parts: [{functionCall: {name: 'tool', id: 'adk-1', args: {}}}],
+        },
+      }),
+      createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {functionResponse: {name: 'tool', id: 'adk-1', response: {}}},
+          ],
+        },
+      }),
+    ];
+  }
+
+  async function contentsFor(model: Gemini): Promise<Content[]> {
+    const session = createSession({
+      id: 'test-session',
+      events: callAndResponseEvents(),
+      appName: 'test-app',
+      userId: 'test-user',
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent', model}),
+      session,
+      pluginManager: new PluginManager([]),
+    });
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+    return llmRequest.contents;
+  }
+
+  it('strips the adk- ids for a plain Gemini model', async () => {
+    const contents = await contentsFor(
+      new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
+    );
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
+  });
+
+  it('preserves the adk- ids for a Gemini model on the Interactions API', async () => {
+    const contents = await contentsFor(
+      new Gemini({
+        model: 'gemini-2.5-flash',
+        apiKey: 'test-api-key',
+        useInteractionsApi: true,
+      }),
+    );
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
+  });
+});
+
+describe('ContentRequestProcessor — thoughts from other agents', () => {
+  const thinkingEvent = createEvent({
+    author: 'other_agent',
+    invocationId: 'test-invocation',
+    content: {
+      role: 'model',
+      parts: [{text: 'weighing options', thought: true}, {text: 'done'}],
+    },
+  });
+
+  async function contentsFor(
+    includeContents: 'default' | 'none',
+    runConfig?: RunConfig,
+  ): Promise<string[]> {
+    const session = createSession({
+      id: 'test-session',
+      events: [thinkingEvent],
+      appName: 'test-app',
+      userId: 'test-user',
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({
+        name: 'test_agent',
+        model: new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
+        includeContents,
+      }),
+      session,
+      pluginManager: new PluginManager([]),
+      runConfig,
+    });
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+    return llmRequest.contents.flatMap((content) =>
+      (content.parts ?? []).map((part) => part.text ?? ''),
+    );
+  }
+
+  it('relays the thoughts into the full history when the run config asks', async () => {
+    const texts = await contentsFor('default', {
+      includeThoughtsFromOtherAgents: true,
+    });
+
+    expect(texts).toContain('[other_agent] thought: weighing options');
+  });
+
+  it('omits the thoughts from the full history by default', async () => {
+    const texts = await contentsFor('default');
+
+    expect(texts).not.toContain('[other_agent] thought: weighing options');
+    expect(texts).toContain('[other_agent] said: done');
+  });
+
+  it('omits the thoughts from a current-turn build even when the run config asks', async () => {
+    const texts = await contentsFor('none', {
+      includeThoughtsFromOtherAgents: true,
+    });
+
+    expect(texts).not.toContain('[other_agent] thought: weighing options');
+    expect(texts).toContain('[other_agent] said: done');
   });
 });
