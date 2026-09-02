@@ -5,13 +5,12 @@
  */
 
 import {BaseContextCompactor} from '../../context/base_context_compactor.js';
-import {LlmSummarizer} from '../../context/summarizers/llm_summarizer.js';
+import {defaultSummarizer} from '../../context/summarizers/default_summarizer.js';
 import {TokenBasedContextCompactor} from '../../context/token_based_context_compactor.js';
 import {Event} from '../../events/event.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {ContextCompactionTrigger} from '../../plugins/base_plugin.js';
 import {InvocationContext} from '../invocation_context.js';
-import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
@@ -105,14 +104,7 @@ function compactorsFor(
   }
 
   const {tokenThreshold, eventRetentionSize} = config;
-  const agent = ctx.agent;
-  // Summarize with the running agent's own model, as `adk-python` does when a
-  // policy names no summarizer.
-  const summarizer =
-    config.summarizer ??
-    (isLlmAgent(agent)
-      ? new LlmSummarizer({llm: agent.canonicalModel})
-      : undefined);
+  const summarizer = config.summarizer ?? defaultSummarizer(ctx.agent);
 
   if (
     tokenThreshold === undefined ||

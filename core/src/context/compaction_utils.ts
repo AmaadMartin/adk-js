@@ -31,6 +31,52 @@ export function getActiveEvents(events: Event[]): Event[] {
 }
 
 /**
+ * The longest prefix of `events` that leaves no obligation open.
+ *
+ * A function call, a tool-confirmation request and an auth request each open
+ * an obligation keyed by its call id, and a function response with the same id
+ * closes it. Summarizing past an open obligation drops the call while the
+ * matching response survives as a raw event, and the model then receives a
+ * response it has no call for.
+ *
+ * Responses are applied before calls within one event, so a response only ever
+ * closes an obligation an earlier event opened. Ported from `google/adk-python`
+ * `apps/compaction.py::_longest_self_contained_prefix`.
+ *
+ * @param events The candidate window, in session order.
+ * @returns The prefix ending at the last balanced point, empty when the window
+ *   never reaches one.
+ */
+export function longestSelfContainedPrefix(events: Event[]): Event[] {
+  const openIds = new Set<string>();
+  let safeLength = 0;
+
+  events.forEach((event, index) => {
+    for (const response of getFunctionResponses(event)) {
+      if (response.id) {
+        openIds.delete(response.id);
+      }
+    }
+    for (const call of getFunctionCalls(event)) {
+      if (call.id) {
+        openIds.add(call.id);
+      }
+    }
+    for (const id of Object.keys(event.actions.requestedToolConfirmations)) {
+      openIds.add(id);
+    }
+    for (const id of Object.keys(event.actions.requestedAuthConfigs)) {
+      openIds.add(id);
+    }
+    if (openIds.size === 0) {
+      safeLength = index + 1;
+    }
+  });
+
+  return events.slice(0, safeLength);
+}
+
+/**
  * Determines the baseline index to retain from active raw events,
  * ensuring we don't split between a function call and its response.
  *
