@@ -321,6 +321,55 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
     expect(endpoint.headers[0]['user-agent']).toContain('gl-typescript/');
   });
 
+  it('reads token counts from a usage block sent as a JSON string', async () => {
+    endpoint = await startEndpoint([
+      {
+        kind: 'json',
+        body: {
+          model: 'gpt-4o',
+          choices: [
+            {
+              index: 0,
+              message: {role: 'assistant', content: 'hi'},
+              finish_reason: 'stop',
+            },
+          ],
+          usage: JSON.stringify({
+            prompt_tokens: 10,
+            completion_tokens: 4,
+            total_tokens: 14,
+            cached_tokens: 3,
+            cache_creation_input_tokens: 2,
+            completion_tokens_details: {reasoning_tokens: 5},
+          }),
+        },
+      },
+    ]);
+
+    const model = new LiteLlm({
+      model: 'openai/gpt-4o',
+      apiBase: endpoint.apiBase,
+    });
+    const llmRequest: LlmRequest = {
+      contents: [{role: 'user', parts: [{text: 'hi'}]}],
+      liveConnectConfig: {},
+      toolsDict: {},
+    };
+
+    const responses: LlmResponse[] = [];
+    for await (const response of model.generateContentAsync(llmRequest)) {
+      responses.push(response);
+    }
+
+    expect(responses[0].usageMetadata).toMatchObject({
+      promptTokenCount: 10,
+      candidatesTokenCount: 4,
+      totalTokenCount: 14,
+      cachedContentTokenCount: 3,
+      thoughtsTokenCount: 5,
+    });
+  });
+
   it('reports an endpoint error', async () => {
     endpoint = await startEndpoint([]);
 

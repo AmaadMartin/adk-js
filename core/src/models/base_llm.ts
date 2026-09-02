@@ -5,8 +5,10 @@
  */
 
 import {getClientLabels} from '../utils/client_labels.js';
+import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {LlmCapabilities} from './capabilities.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
 
@@ -55,6 +57,20 @@ export abstract class BaseLlm {
    * List of supported models in regex for LlmRegistry.
    */
   static readonly supportedModels: Array<string | RegExp> = [];
+
+  /**
+   * The capabilities of this model instance, recomputed on every access.
+   *
+   * A subclass overrides this to declare what it supports, so that a caller
+   * asks the model instead of deriving support from its name. The default
+   * keeps a model that declares nothing resolving the way callers resolve it
+   * today.
+   *
+   * @return A fresh snapshot of the resolved capabilities.
+   */
+  get capabilities(): LlmCapabilities {
+    return {outputSchemaAndTools: canUseOutputSchemaWithTools(this.model)};
+  }
 
   /**
    * Generates one content from the given contents and tools.

@@ -178,11 +178,17 @@ export interface StreamChoice {
   finish_reason?: string | null;
 }
 
+/**
+ * The `usage` block as it arrives. Some providers serialize it to a JSON
+ * string instead of sending an object, so both shapes are declared.
+ */
+export type RawUsage = Usage | string;
+
 /** A non-streaming chat-completions response. */
 export interface ModelResponse {
   model?: string;
   choices?: Choice[];
-  usage?: Usage;
+  usage?: RawUsage;
   vertex_ai_grounding_metadata?: unknown;
 }
 
@@ -190,7 +196,7 @@ export interface ModelResponse {
 export interface ModelResponseStream {
   model?: string;
   choices?: StreamChoice[];
-  usage?: Usage;
+  usage?: RawUsage;
   vertex_ai_grounding_metadata?: unknown;
 }
 

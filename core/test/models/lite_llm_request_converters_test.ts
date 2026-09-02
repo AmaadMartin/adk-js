@@ -32,6 +32,7 @@ import {
   toLiteLlmResponseFormat,
   toLiteLlmRole,
 } from '../../src/models/lite_llm_request_converters.js';
+import {messageToGenerateContentResponse} from '../../src/models/lite_llm_response_converters.js';
 import {ChatMessage, JsonObject} from '../../src/models/lite_llm_types.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
 
@@ -466,6 +467,57 @@ describe('contentToMessageParam', () => {
         function: {name: 'add', arguments: '{"a":1}'},
       },
     ]);
+  });
+
+  it('sends a thought signature on both provider channels', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {id: 'c1', name: 'add', args: {a: 1}},
+              thoughtSignature: 'Y2Fs',
+            },
+          ],
+        },
+        GROQ,
+      ),
+    );
+    expect(message.tool_calls).toEqual([
+      {
+        type: 'function',
+        id: 'c1',
+        function: {name: 'add', arguments: '{"a":1}'},
+        provider_specific_fields: {thought_signature: 'Y2Fs'},
+        extra_content: {google: {thought_signature: 'Y2Fs'}},
+      },
+    ]);
+  });
+
+  it('carries a signature from a provider message back out', () => {
+    const response = messageToGenerateContentResponse({
+      role: 'assistant',
+      tool_calls: [
+        {
+          type: 'function',
+          id: 'c1',
+          function: {name: 'add', arguments: '{"a":1}'},
+          extra_content: {google: {thought_signature: 'Y2Fs'}},
+        },
+      ],
+    });
+    const modelTurn = response.content;
+    if (!modelTurn) {
+      expect.fail('the provider message produced no content');
+    }
+
+    const message = singleMessage(contentToMessageParam(modelTurn, GROQ));
+
+    expect(message.tool_calls?.[0]).toMatchObject({
+      provider_specific_fields: {thought_signature: 'Y2Fs'},
+      extra_content: {google: {thought_signature: 'Y2Fs'}},
+    });
   });
 
   it('rejects a function call with no name', () => {

@@ -185,6 +185,14 @@ describe('LiteLlm', () => {
       expect(() => LLMRegistry.resolve('openai/gpt-4o')).toThrow();
     });
 
+    it('declares that it pairs an output schema with tools', () => {
+      const client = new RecordingClient(textResponse());
+
+      expect(
+        new LiteLlm({model: 'openai/gpt-4o', client}).capabilities,
+      ).toEqual({outputSchemaAndTools: true});
+    });
+
     it('drops the request fields it owns and keeps the rest', async () => {
       const client = new RecordingClient(textResponse());
       const model = new LiteLlm({
@@ -606,6 +614,34 @@ describe('LiteLlm', () => {
 
       expect(responses[responses.length - 1].usageMetadata).toMatchObject({
         totalTokenCount: 3,
+      });
+    });
+
+    it('reports the cache and reasoning counts a stream sends', async () => {
+      const client = new RecordingClient({}, [
+        textChunk('hi'),
+        textChunk('', 'stop'),
+        {
+          model: 'claude-3',
+          choices: [],
+          usage: {
+            prompt_tokens: 10,
+            cache_read_input_tokens: 6,
+            cache_creation_input_tokens: 4,
+            completion_tokens_details: {reasoning_tokens: 9},
+          },
+        },
+      ]);
+      const model = new LiteLlm({model: 'bedrock/claude-3', client});
+
+      const responses = await collect(
+        model.generateContentAsync(request(), true),
+      );
+
+      expect(responses[responses.length - 1].usageMetadata).toMatchObject({
+        cachedContentTokenCount: 6,
+        cacheCreationInputTokens: 4,
+        thoughtsTokenCount: 9,
       });
     });
 

@@ -106,6 +106,19 @@ through LiteLLM get `{type: 'json_object', response_schema: ...}`; every other
 model gets an OpenAI strict `json_schema`, with `additionalProperties: false`
 and every property required, because strict mode demands both.
 
+An output schema and tools work together on every route, so
+`capabilities.outputSchemaAndTools` is always `true`:
+
+```ts
+new LiteLlm({model: 'openai/gpt-4o', apiBase}).capabilities;
+// {outputSchemaAndTools: true}
+```
+
+LiteLLM reconciles the two per provider. A provider with native support gets
+both passed through, and the rest get a JSON tool call with `tool_choice`
+enforcement. Other models resolve the same capability from the model name, so
+they answer `true` only for Gemini on Vertex AI.
+
 Streaming yields a `partial: true` response per text or reasoning delta,
 followed by the aggregated response carrying the usage metadata, the finish
 reason and any grounding metadata. Tool-call fragments are accumulated across
@@ -245,6 +258,14 @@ client, and nothing else reads it.
 | A file URI the provider cannot resolve, or one with no MIME type | The call throws. The URI is redacted first, so a signed URL is never put in the message. |
 | A tool call in the history was never answered                    | A placeholder tool result is inserted and a warning is logged. The call proceeds.        |
 | The model stops for a reason other than a clean stop             | The response carries `finishReason`, `errorCode` and `errorMessage`. Nothing is thrown.  |
+
+A provider that reports its token counts in an unusual way is read anyway.
+`usage` is accepted as an object or as a JSON string, and a count that is not a
+number is ignored rather than coerced, so `usageMetadata` reports `0` instead
+of failing the call. A streamed response is the one exception: a chunk whose
+`usage` is neither absent nor an object throws
+`Unexpected LiteLLM usage type`, because a stream that reports usage in an
+unreadable shape has nothing else left to give.
 
 `LiteLlm` has no live connection: `connect()` throws. Use `Gemini` for live
 sessions.

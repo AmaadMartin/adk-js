@@ -12,8 +12,12 @@ import {
   BraceDepthTracker,
   buildToolCallFromJsonDict,
   convertReasoningValueToParts,
+  extractCacheCreationTokens,
+  extractCachedPromptTokens,
   extractGroundingMetadata,
+  extractReasoningTokens,
   extractReasoningValue,
+  extractThoughtSignatureFromToolCall,
   extractUsageMetadata,
   iterReasoningTexts,
   messageToGenerateContentResponse,
@@ -332,11 +336,33 @@ describe('convertReasoningValueToParts', () => {
   it('reads anthropic thinking blocks', () => {
     expect(
       convertReasoningValueToParts([
-        {type: 'thinking', thinking: 'step one', signature: 'sig'},
+        {type: 'thinking', thinking: 'step one', signature: 'Y2Fs'},
         {type: 'redacted', data: 'hidden'},
         {type: 'thinking', thinking: ''},
       ]),
-    ).toEqual([{text: 'step one', thought: true}]);
+    ).toEqual([{text: 'step one', thought: true, thoughtSignature: 'Y2Fs'}]);
+  });
+
+  it('keeps a signature-only block so the signature survives', () => {
+    expect(
+      convertReasoningValueToParts([
+        {type: 'thinking', thinking: '', signature: 'Y2Fs'},
+      ]),
+    ).toEqual([{text: '', thought: true, thoughtSignature: 'Y2Fs'}]);
+  });
+
+  it('encodes a signature that did not arrive base64', () => {
+    expect(
+      convertReasoningValueToParts([
+        {type: 'thinking', thinking: 'step one', signature: 'sig'},
+      ]),
+    ).toEqual([{text: 'step one', thought: true, thoughtSignature: 'c2ln'}]);
+  });
+
+  it('leaves a block with neither text nor a signature out', () => {
+    expect(
+      convertReasoningValueToParts([{type: 'thinking', thinking: ''}]),
+    ).toEqual([]);
   });
 
   it('falls back to text extraction for other list items', () => {
@@ -753,5 +779,152 @@ describe('modelResponseToChunks', () => {
         },
       },
     ]);
+  });
+});
+
+describe('extractCachedPromptTokens', () => {
+  it.each([
+    [{prompt_tokens_details: {cached_tokens: 42}}, 42],
+    [{prompt_tokens_details: [{cached_tokens: 10}, {cached_tokens: 5}]}, 15],
+    [{cached_prompt_tokens: 33}, 33],
+    [{cached_tokens: 21}, 21],
+    [{cache_read_input_tokens: 17}, 17],
+    [{prompt_tokens: 100}, 0],
+    [{}, 0],
+    ['not a dict', 0],
+    [null, 0],
+    [undefined, 0],
+    [42, 0],
+    [[{cached_tokens: 5}], 0],
+    [{cached_tokens: 'not a number'}, 0],
+    [{prompt_tokens_details: 'not a dict', cached_tokens: 7}, 7],
+    [JSON.stringify({cached_tokens: 89}), 89],
+    [JSON.stringify({some_key: 'x'}), 0],
+    [JSON.stringify([1, 2]), 0],
+  ])('reads %j as %i', (usage, expected) => {
+    expect(extractCachedPromptTokens(usage)).toBe(expected);
+  });
+});
+
+describe('extractCacheCreationTokens', () => {
+  it.each([
+    [{cache_creation_input_tokens: 12}, 12],
+    [{cache_write_input_tokens: 8}, 8],
+    [{cache_creation_input_tokens: 'no', cache_write_input_tokens: 8}, 8],
+    [JSON.stringify({cache_creation_input_tokens: 4}), 4],
+  ])('reads %j as %i', (usage, expected) => {
+    expect(extractCacheCreationTokens(usage)).toBe(expected);
+  });
+
+  it.each([[{}], ['not a dict'], [null], [undefined], [42], [[]]])(
+    'reports nothing for %j',
+    (usage) => {
+      expect(extractCacheCreationTokens(usage)).toBeUndefined();
+    },
+  );
+});
+
+describe('extractReasoningTokens', () => {
+  it.each([
+    [{completion_tokens_details: {reasoning_tokens: 64}}, 64],
+    [JSON.stringify({completion_tokens_details: {reasoning_tokens: 7}}), 7],
+    [{completion_tokens_details: {reasoning_tokens: 'lots'}}, 0],
+    [{completion_tokens_details: 'not a dict'}, 0],
+    [{}, 0],
+    ['not a dict', 0],
+    [null, 0],
+    [undefined, 0],
+    [42, 0],
+  ])('reads %j as %i', (usage, expected) => {
+    expect(extractReasoningTokens(usage)).toBe(expected);
+  });
+});
+
+describe('extractUsageMetadata from a JSON string', () => {
+  it('reads the counts a provider serialized', () => {
+    expect(
+      extractUsageMetadata(
+        JSON.stringify({
+          prompt_tokens: 11,
+          completion_tokens: 22,
+          total_tokens: 33,
+          cached_tokens: 4,
+          cache_creation_input_tokens: 5,
+          completion_tokens_details: {reasoning_tokens: 6},
+        }),
+      ),
+    ).toEqual({
+      promptTokenCount: 11,
+      candidatesTokenCount: 22,
+      totalTokenCount: 33,
+      cachedContentTokenCount: 4,
+      thoughtsTokenCount: 6,
+      cacheCreationInputTokens: 5,
+    });
+  });
+
+  it('defaults every count to zero for a payload it cannot read', () => {
+    expect(extractUsageMetadata('not a dict')).toEqual({
+      promptTokenCount: 0,
+      candidatesTokenCount: 0,
+      totalTokenCount: 0,
+      cachedContentTokenCount: 0,
+      thoughtsTokenCount: undefined,
+    });
+  });
+
+  it('ignores a count that is not a number', () => {
+    expect(extractUsageMetadata({prompt_tokens: '11'})).toMatchObject({
+      promptTokenCount: 0,
+    });
+  });
+});
+
+describe('modelResponseToChunks usage typing', () => {
+  it.each(['not a dict', JSON.stringify({prompt_tokens: 1})])(
+    'refuses the usage %j a stream cannot report',
+    (usage) => {
+      expect(() => chunksOf({choices: [], usage})).toThrow(
+        'Unexpected LiteLLM usage type: string',
+      );
+    },
+  );
+});
+
+describe('extractThoughtSignatureFromToolCall', () => {
+  it('splits a tool call id on the first separator only', () => {
+    // Splitting on the last separator would find the valid base64 tail.
+    expect(
+      extractThoughtSignatureFromToolCall({id: 'a__thought__b__thought__Y2Fs'}),
+    ).toBeUndefined();
+    expect(extractThoughtSignatureFromToolCall({id: 'a__thought__Y2Fs'})).toBe(
+      'Y2Fs',
+    );
+  });
+
+  it('reports nothing for an id that ends at the separator', () => {
+    expect(
+      extractThoughtSignatureFromToolCall({id: 'call_1__thought__'}),
+    ).toBeUndefined();
+  });
+});
+
+describe('messageToGenerateContentResponse thought signatures', () => {
+  it('keeps the separator in the function call id it reports', () => {
+    const response = messageToGenerateContentResponse({
+      role: 'assistant',
+      tool_calls: [
+        {
+          type: 'function',
+          id: 'call_1__thought__Y2Fs',
+          function: {name: 'lookup', arguments: '{}'},
+        },
+      ],
+    });
+
+    expect(response.content?.parts?.[0]).toEqual({
+      functionCall: {id: 'call_1__thought__Y2Fs', name: 'lookup', args: {}},
+      thoughtSignature: 'Y2Fs',
+    });
   });
 });
