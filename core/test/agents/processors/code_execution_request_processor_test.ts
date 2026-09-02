@@ -16,6 +16,7 @@ import {describe, expect, it} from 'vitest';
 import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
   CodeExecutionResponseProcessor,
+  executionFailed,
 } from '../../../src/agents/processors/code_execution_request_processor.js';
 import {
   BaseCodeExecutor,
@@ -125,6 +126,53 @@ describe('CodeExecutionRequestProcessor', () => {
       expect(llmRequest.contents).toHaveLength(1);
     });
   });
+});
+
+describe('executionFailed', () => {
+  it('spends no retry on a program that warned and succeeded', () => {
+    expect(
+      executionFailed({
+        stdout: 'ok',
+        stderr: 'a warning',
+        outputFiles: [],
+        exitCode: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it('reports a failure the program described on stderr', () => {
+    expect(
+      executionFailed({
+        stdout: '',
+        stderr: 'boom',
+        outputFiles: [],
+        exitCode: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it('reports a failure the program said nothing about', () => {
+    expect(
+      executionFailed({stdout: '', stderr: '', outputFiles: [], exitCode: 3}),
+    ).toBe(true);
+  });
+
+  it.each([undefined, null])(
+    'falls back to stderr when the status is %s',
+    (exitCode) => {
+      expect(
+        executionFailed({
+          stdout: '',
+          stderr: 'boom',
+          outputFiles: [],
+          exitCode,
+        }),
+      ).toBe(true);
+      expect(
+        executionFailed({stdout: 'ok', stderr: '', outputFiles: [], exitCode}),
+      ).toBe(false);
+    },
+  );
 });
 
 describe('CodeExecutionResponseProcessor', () => {
