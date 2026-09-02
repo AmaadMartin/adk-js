@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {SqliteDriver} from '@mikro-orm/sqlite';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {
   CreateSessionRequest,
   DeleteSessionRequest,
@@ -11,16 +13,16 @@ import type {
   ListSessionsRequest,
   ListSessionsResponse,
   Session,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   BaseSessionService,
   DatabaseSessionService,
   InMemorySessionService,
   createEvent,
   createSession,
-} from '@google/adk';
-import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+  mergeStates,
+  splitStateDelta,
+} from '../../src/index.js';
 
 const APP_NAME = 'test-app';
 const USER_ID = 'test-user';
@@ -205,5 +207,45 @@ describe('BaseSessionService.flush', () => {
     });
     expect(stored?.events).toHaveLength(1);
     expect(stored?.events[0].content?.parts).toEqual([{text: 'Hello'}]);
+  });
+});
+
+describe('splitStateDelta', () => {
+  it('routes each key by prefix and drops temporary keys', () => {
+    expect(
+      splitStateDelta({
+        'app:theme': 'dark',
+        'user:locale': 'en',
+        'temp:scratch': 1,
+        turn: 2,
+      }),
+    ).toEqual({
+      app: {theme: 'dark'},
+      user: {locale: 'en'},
+      session: {turn: 2},
+    });
+  });
+
+  it('returns empty buckets for undefined state', () => {
+    expect(splitStateDelta(undefined)).toEqual({
+      app: {},
+      user: {},
+      session: {},
+    });
+  });
+
+  it('strips only the leading prefix', () => {
+    expect(splitStateDelta({'app:app:nested': 1})).toEqual({
+      app: {'app:nested': 1},
+      user: {},
+      session: {},
+    });
+  });
+
+  it('round-trips through mergeStates for non-temporary keys', () => {
+    const state = {'app:theme': 'dark', 'user:locale': 'en', turn: 2};
+    const {app, user, session} = splitStateDelta(state);
+
+    expect(mergeStates(app, user, session)).toEqual(state);
   });
 });
