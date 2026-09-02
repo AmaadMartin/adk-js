@@ -14,6 +14,9 @@ const PROXY_PROVIDER = 'litellm_proxy';
 /** Providers that accept an uploaded file id instead of inline file data. */
 const FILE_ID_REQUIRED_PROVIDERS = new Set(['openai', 'azure']);
 
+/** Matches both spellings of a Gemma 4 model name. */
+const GEMMA4_MODEL_PATTERN = /gemma-?4/;
+
 /**
  * Maps a chat-completions `finish_reason` onto a genai `FinishReason`.
  *
@@ -76,9 +79,27 @@ export function getProviderFromModel(model: string): string {
 
 /** Returns true when the model reaches Gemini through LiteLLM. */
 export function isLiteLlmGeminiModel(model: string): boolean {
+  const stripped = stripProxyPrefix(model);
   return (
-    model.startsWith('gemini/gemini-') || model.startsWith('vertex_ai/gemini-')
+    stripped.startsWith('gemini/gemini-') ||
+    stripped.startsWith('vertex_ai/gemini-')
   );
+}
+
+/** Returns true when the model reaches Vertex AI through LiteLLM. */
+export function isLiteLlmVertexModel(model: string): boolean {
+  return stripProxyPrefix(model).startsWith('vertex_ai/');
+}
+
+/**
+ * Returns true when the model is a Gemma 4, under either spelling.
+ *
+ * Ollama uses `gemma4`, while Hugging Face, vLLM and llama.cpp use the
+ * hyphenated `gemma-4`. Gemma 3 and earlier do not support tool use at all, so
+ * the match is scoped to 4.
+ */
+export function isGemma4Model(model: string): boolean {
+  return GEMMA4_MODEL_PATTERN.test(model.toLowerCase());
 }
 
 /** Maps a chat-completions `finish_reason` onto a genai `FinishReason`. */
