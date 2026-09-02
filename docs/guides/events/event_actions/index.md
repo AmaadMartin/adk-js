@@ -82,6 +82,22 @@ unchanged.
 A route key is a string, a number or a boolean, and an array of keys fires
 every matching branch.
 
+## Fields this SDK carries but does not act on
+
+Two fields exist so an event written by a Python runner keeps them. Nothing in
+this SDK reads either one yet.
+
+`compaction` holds the range of events a summary replaces, as
+`{startTimestamp, endTimestamp, compactedContent}`. This SDK's own compaction
+pipeline uses `CompactedEvent` instead, which keeps the same range on the event
+itself. `rewindBeforeInvocationId` names the invocation a rewind event returns
+to, and this SDK has no rewind support.
+
+Both round-trip through storage under their Python names,
+`compaction.start_timestamp` and `rewind_before_invocation_id`. The timestamps
+use the unit of `Event.timestamp`, milliseconds. The Python model records
+seconds, and neither side converts.
+
 ## Session state that JSON cannot represent
 
 A tool writes to session state through the tool context, and nothing stops it

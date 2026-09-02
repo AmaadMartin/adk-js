@@ -12,6 +12,7 @@ import {transformToCamelCaseEvent} from '../../src/events/event.js';
 import {
   createEventActions,
   EventActions,
+  EventCompaction,
   isDefaultEventActions,
   mergeEventActions,
   serializeEventActions,
@@ -23,6 +24,16 @@ function createTestAuthConfig(credentialKey: string): AuthConfig {
   return {
     authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},
     credentialKey,
+  };
+}
+
+function createTestCompaction(
+  summary = 'the user booked a flight',
+): EventCompaction {
+  return {
+    startTimestamp: 1000,
+    endTimestamp: 2000,
+    compactedContent: {role: 'model', parts: [{text: summary}]},
   };
 }
 
@@ -111,6 +122,8 @@ describe('isDefaultEventActions', () => {
     ['route is an empty array', {route: []}],
     ['setModelResponse is set', {setModelResponse: {ok: true}}],
     ['setModelResponse is explicitly null', {setModelResponse: null}],
+    ['compaction is set', {compaction: createTestCompaction()}],
+    ['rewindBeforeInvocationId is set', {rewindBeforeInvocationId: 'inv-1'}],
   ];
 
   it.each(nonDefaults)('returns false when %s', (_label, overrides) => {
@@ -382,6 +395,50 @@ describe('mergeEventActions parity fields', () => {
       }),
     ]);
     expect(result.setModelResponse).toBe(response);
+  });
+});
+
+describe('compaction and rewindBeforeInvocationId', () => {
+  it('leaves both fields undefined by default', () => {
+    const actions = createEventActions();
+    expect(actions.compaction).toBeUndefined();
+    expect(actions.rewindBeforeInvocationId).toBeUndefined();
+  });
+
+  it('applies both fields from the override', () => {
+    const compaction = createTestCompaction();
+    const actions = createEventActions({
+      compaction,
+      rewindBeforeInvocationId: 'inv-1',
+    });
+    expect(actions.compaction).toEqual(compaction);
+    expect(actions.rewindBeforeInvocationId).toBe('inv-1');
+  });
+
+  it('keeps the last writer for both fields', () => {
+    const second = createTestCompaction('the user cancelled the flight');
+    const result = mergeEventActions([
+      createEventActions({
+        compaction: createTestCompaction(),
+        rewindBeforeInvocationId: 'inv-1',
+      }),
+      createEventActions({
+        compaction: second,
+        rewindBeforeInvocationId: 'inv-2',
+      }),
+    ]);
+    expect(result.compaction).toBe(second);
+    expect(result.rewindBeforeInvocationId).toBe('inv-2');
+  });
+
+  it('does not clear either field with a later unset source', () => {
+    const compaction = createTestCompaction();
+    const result = mergeEventActions([
+      createEventActions({compaction, rewindBeforeInvocationId: 'inv-1'}),
+      createEventActions({escalate: true}),
+    ]);
+    expect(result.compaction).toBe(compaction);
+    expect(result.rewindBeforeInvocationId).toBe('inv-1');
   });
 });
 

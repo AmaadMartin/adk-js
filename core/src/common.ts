@@ -181,7 +181,7 @@ export {
   createEventActions,
   serializeEventActions,
 } from './events/event_actions.js';
-export type {EventActions} from './events/event_actions.js';
+export type {EventActions, EventCompaction} from './events/event_actions.js';
 export {EventType, toStructuredEvents} from './events/structured_events.js';
 export type {
   ActivityEvent,

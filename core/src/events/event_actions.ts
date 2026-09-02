@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {AuthConfig, isAuthConfig} from '../auth/auth_tool.js';
@@ -15,6 +16,25 @@ import {logger} from '../utils/logger.js';
 // `event.ts` imports this module at runtime, so `Route` is imported as a type
 // to keep the dependency one-way.
 import type {Route} from './event.js';
+
+/**
+ * The compaction of a contiguous range of events. Mirrors Python
+ * `EventCompaction`.
+ */
+export interface EventCompaction {
+  /**
+   * The start timestamp of the compacted events, in the same unit as
+   * {@link Event.timestamp} (milliseconds since the epoch). Python records
+   * seconds here; neither side converts.
+   */
+  startTimestamp: number;
+
+  /** The end timestamp of the compacted events, in the same unit. */
+  endTimestamp: number;
+
+  /** The summary that stands in for the compacted range. */
+  compactedContent: Content;
+}
 
 /**
  * Represents the actions attached to an event.
@@ -99,6 +119,26 @@ export interface EventActions {
    * `EventActions.set_model_response`, which is untyped there too.
    */
   setModelResponse?: unknown;
+
+  /**
+   * The range of events this event compacts, and the summary that stands in
+   * for them. Mirrors Python `EventActions.compaction`.
+   *
+   * This SDK's own compaction pipeline uses `CompactedEvent` instead. The
+   * field is here so a compaction written by a Python runner survives the
+   * wire.
+   */
+  compaction?: EventCompaction;
+
+  /**
+   * The invocation id to rewind to. Only set on a rewind event. Mirrors Python
+   * `EventActions.rewind_before_invocation_id`.
+   *
+   * This SDK has no rewind machinery yet, so nothing here reads the field. It
+   * is carried so a rewind marker written by a Python runner survives the
+   * wire.
+   */
+  rewindBeforeInvocationId?: string;
 }
 
 /**
@@ -171,7 +211,9 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     actions.escalate === undefined &&
     actions.transferReason === undefined &&
     actions.route === undefined &&
-    actions.setModelResponse === undefined
+    actions.setModelResponse === undefined &&
+    actions.compaction === undefined &&
+    actions.rewindBeforeInvocationId === undefined
   );
 }
 
@@ -244,6 +286,12 @@ export function mergeEventActions(
     if (source.setModelResponse !== undefined) {
       result.setModelResponse = source.setModelResponse;
     }
+    if (source.compaction !== undefined) {
+      result.compaction = source.compaction;
+    }
+    if (source.rewindBeforeInvocationId !== undefined) {
+      result.rewindBeforeInvocationId = source.rewindBeforeInvocationId;
+    }
   }
   return result;
 }
@@ -259,7 +307,8 @@ export function mergeEventActions(
  * warning per field is logged, and the event still persists.
  *
  * @param actions The actions about to be persisted.
- * @returns A shallow copy holding the sanitized fields. Never throws.
+ * @returns A shallow copy holding the sanitized fields. No value held in
+ *   `stateDelta` or `agentState` can make it throw.
  */
 export function serializeEventActions(actions: EventActions): EventActions {
   return {

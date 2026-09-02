@@ -519,6 +519,33 @@ describe('Event Utils', () => {
       expect(restored.route).toBeUndefined();
     });
 
+    it('round-trips compaction and rewindBeforeInvocationId under their Python names', () => {
+      const original = createEvent({
+        id: '123',
+        actions: createEventActions({
+          rewindBeforeInvocationId: 'inv1',
+          compaction: {
+            startTimestamp: 1000,
+            endTimestamp: 2000,
+            compactedContent: {role: 'model', parts: [{text: 'a summary'}]},
+          },
+        }),
+      });
+
+      const snake = transformToSnakeCaseEvent(original);
+      const actions = snake['actions'] as Record<string, unknown>;
+      expect(actions['rewind_before_invocation_id']).toBe('inv1');
+      expect(actions['compaction']).toEqual({
+        start_timestamp: 1000,
+        end_timestamp: 2000,
+        compacted_content: {role: 'model', parts: [{text: 'a summary'}]},
+      });
+
+      const restored = transformToCamelCaseEvent(snake);
+      expect(restored.actions.rewindBeforeInvocationId).toBe('inv1');
+      expect(restored.actions.compaction).toEqual(original.actions.compaction);
+    });
+
     it('leaves the top-level route unset for a payload with no actions', () => {
       const restored = transformToCamelCaseEvent({id: '123'});
       expect(restored.route).toBeUndefined();
