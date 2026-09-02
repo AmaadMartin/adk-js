@@ -6,6 +6,7 @@
 
 import {
   InMemorySessionService,
+  InputValidationError,
   Session,
   State,
   createEvent,
@@ -881,5 +882,154 @@ describe('InMemorySessionService', () => {
       });
       expect(session?.id).toBe('poc_sid');
     });
+  });
+});
+
+describe('InMemorySessionService getUserState', () => {
+  let service: InMemorySessionService;
+
+  beforeEach(() => {
+    service = new InMemorySessionService();
+  });
+
+  async function writeState(
+    appName: string,
+    userId: string,
+    stateDelta: Record<string, unknown>,
+  ): Promise<Session> {
+    const session = await service.createSession({appName, userId});
+    await service.appendEvent({
+      session,
+      event: createEvent({author: 'agent', actions: {stateDelta}}),
+    });
+    return session;
+  }
+
+  it('returns an empty object for an unknown app and user', async () => {
+    const state = await service.getUserState({
+      appName: 'unknown-app',
+      userId: 'unknown-user',
+    });
+
+    expect(state).toEqual({});
+  });
+
+  it('returns un-prefixed user keys and no session keys', async () => {
+    await writeState('app', 'alice', {
+      'user:profile': {name: 'Alice'},
+      session_key: 1,
+    });
+
+    const state = await service.getUserState({
+      appName: 'app',
+      userId: 'alice',
+    });
+
+    expect(state).toEqual({profile: {name: 'Alice'}});
+  });
+
+  it('does not leak user state to another user', async () => {
+    await writeState('app', 'alice', {'user:profile': 'a'});
+
+    const state = await service.getUserState({appName: 'app', userId: 'bob'});
+
+    expect(state).toEqual({});
+  });
+
+  it('does not leak user state to another app', async () => {
+    await writeState('app', 'alice', {'user:profile': 'a'});
+
+    const state = await service.getUserState({
+      appName: 'other-app',
+      userId: 'alice',
+    });
+
+    expect(state).toEqual({});
+  });
+
+  it('is readable without a session id and reflects the latest write', async () => {
+    await writeState('app', 'alice', {'user:profile': 'first'});
+    await writeState('app', 'alice', {'user:profile': 'second'});
+
+    const state = await service.getUserState({
+      appName: 'app',
+      userId: 'alice',
+    });
+
+    expect(state).toEqual({profile: 'second'});
+  });
+
+  it('returns a copy that the caller cannot write back into the store', async () => {
+    await writeState('app', 'alice', {'user:profile': 'a'});
+
+    const first = await service.getUserState({appName: 'app', userId: 'alice'});
+    first['profile'] = 'tampered';
+    first['injected'] = true;
+
+    const second = await service.getUserState({
+      appName: 'app',
+      userId: 'alice',
+    });
+    expect(second).toEqual({profile: 'a'});
+  });
+});
+
+describe('InMemorySessionService temp state', () => {
+  let service: InMemorySessionService;
+
+  beforeEach(() => {
+    service = new InMemorySessionService();
+  });
+
+  it('keeps temp state in memory and out of storage', async () => {
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'alice',
+      sessionId: 'sid',
+    });
+
+    await service.appendEvent({
+      session,
+      event: createEvent({
+        author: 'agent',
+        actions: {stateDelta: {'temp:k': 'v', sk: 'kept'}},
+      }),
+    });
+
+    expect(session.state['temp:k']).toBe('v');
+
+    const reloaded = await service.getSession({
+      appName: 'app',
+      userId: 'alice',
+      sessionId: 'sid',
+    });
+    expect(reloaded?.state).not.toHaveProperty('temp:k');
+    expect(reloaded?.state['sk']).toBe('kept');
+
+    const listed = await service.listSessions({
+      appName: 'app',
+      userId: 'alice',
+    });
+    expect(listed.sessions[0].state).not.toHaveProperty('temp:k');
+  });
+});
+
+describe('InMemorySessionService getSession config validation', () => {
+  it('rejects a negative numRecentEvents', async () => {
+    const service = new InMemorySessionService();
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'alice',
+      sessionId: 'sid',
+    });
+
+    await expect(
+      service.getSession({
+        appName: session.appName,
+        userId: session.userId,
+        sessionId: session.id,
+        config: {numRecentEvents: -1},
+      }),
+    ).rejects.toThrow(InputValidationError);
   });
 });

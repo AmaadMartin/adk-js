@@ -269,6 +269,7 @@ export type {
   DeleteSessionRequest,
   GetSessionConfig,
   GetSessionRequest,
+  GetUserStateRequest,
   ListSessionsRequest,
   ListSessionsResponse,
 } from './sessions/base_session_service.js';

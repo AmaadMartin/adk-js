@@ -42,6 +42,7 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   trimTempState,
+  validateGetSessionConfig,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
 
@@ -238,6 +239,8 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
+    validateGetSessionConfig(config);
+
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`;
 

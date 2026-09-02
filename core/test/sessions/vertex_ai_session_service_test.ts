@@ -7,7 +7,9 @@
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
   createEvent,
+  InputValidationError,
   isCompactedEvent,
+  NotImplementedError,
   State,
   VertexAiSessionService,
 } from '@google/adk';
@@ -1724,5 +1726,41 @@ describe('VertexAiSessionService', () => {
         'legacy-specialist',
       );
     });
+  });
+});
+
+describe('VertexAiSessionService unsupported and invalid requests', () => {
+  let service: VertexAiSessionService;
+
+  beforeEach(() => {
+    service = new VertexAiSessionService({
+      projectId: 'test-project',
+      location: 'us-central1',
+    });
+  });
+
+  it('rejects getUserState with NotImplementedError', async () => {
+    await expect(
+      service.getUserState({appName: '12345', userId: 'testUser'}),
+    ).rejects.toBeInstanceOf(NotImplementedError);
+  });
+
+  it('names the service and the workaround in the getUserState error', async () => {
+    await expect(
+      service.getUserState({appName: '12345', userId: 'testUser'}),
+    ).rejects.toThrow(
+      /VertexAiSessionService does not support getUserState.*listSessions/s,
+    );
+  });
+
+  it('rejects getSession with a negative numRecentEvents', async () => {
+    await expect(
+      service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+        config: {numRecentEvents: -1},
+      }),
+    ).rejects.toThrow(InputValidationError);
   });
 });

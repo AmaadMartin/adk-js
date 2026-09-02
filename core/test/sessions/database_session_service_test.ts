@@ -9,6 +9,7 @@ import {
   createEventActions,
   DatabaseSessionService,
   Event,
+  InputValidationError,
   State,
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
@@ -700,6 +701,54 @@ describe('DatabaseSessionService', () => {
       })) as {id: string; updateTime: Date};
 
       expect(storedSession.updateTime.getTime()).toBe(timestamp);
+    });
+  });
+
+  describe('getUserState', () => {
+    it('returns an empty object before any user state is written', async () => {
+      const state = await service.getUserState({
+        appName: 'app',
+        userId: 'alice',
+      });
+
+      expect(state).toEqual({});
+    });
+
+    it('returns un-prefixed user keys written through appendEvent', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'alice',
+        sessionId: 'sid',
+      });
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          author: 'agent',
+          actions: {
+            stateDelta: {'user:profile': {name: 'Alice'}, session_key: 1},
+          },
+        }),
+      });
+
+      const state = await service.getUserState({
+        appName: 'app',
+        userId: 'alice',
+      });
+
+      expect(state).toEqual({profile: {name: 'Alice'}});
+    });
+  });
+
+  describe('getSession config validation', () => {
+    it('rejects a negative numRecentEvents', async () => {
+      await expect(
+        service.getSession({
+          appName: 'app',
+          userId: 'alice',
+          sessionId: 'sid',
+          config: {numRecentEvents: -1},
+        }),
+      ).rejects.toThrow(InputValidationError);
     });
   });
 });
