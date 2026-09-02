@@ -167,13 +167,17 @@ describe('GoogleApiToolset', () => {
   });
 
   it('applies a filter set after the first getTools call', async () => {
+    // The first filter selects a different tool from the second, so a filter
+    // delegated to the inner toolset at build time would narrow the second
+    // call to nothing.
     const toolset = new GoogleApiToolset({
       apiName: 'calendar',
       apiVersion: 'v3',
+      toolFilter: ['calendar.calendars.get'],
     });
-    expect((await toolset.getTools()).map((tool) => tool.name)).toEqual(
-      CALENDAR_TOOL_NAMES,
-    );
+    expect((await toolset.getTools()).map((tool) => tool.name)).toEqual([
+      'calendar.calendars.get',
+    ]);
 
     toolset.setToolFilter(['calendar.calendars.insert']);
 
