@@ -11,8 +11,12 @@
  * have sent. Only the current turn's reply is read.
  */
 
-import type {Event} from '@google/adk';
+import {describe, expect, it, vi} from 'vitest';
+import {z} from 'zod';
+import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_input_llm_request_processor.js';
+import type {Context, Event} from '../../../src/index.js';
 import {
+  BasePlugin,
   createEvent,
   createSession,
   getFunctionResponses,
@@ -20,11 +24,10 @@ import {
   LlmAgent,
   node,
   PluginManager,
+  PolicyOutcome,
   RequestInput,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
-import {z} from 'zod';
-import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_input_llm_request_processor.js';
+  SecurityPlugin,
+} from '../../../src/index.js';
 import type {SchemaLike} from '../../../src/utils/schema.js';
 import {
   createRequestInputEvent,
@@ -160,6 +163,7 @@ function userStructured(
 async function runProcessor(
   events: Event[],
   agent: LlmAgent = agentWithNodeTool(),
+  options: {plugins?: BasePlugin[]; state?: Record<string, unknown>} = {},
 ) {
   const {handleFunctionCallList} =
     await import('../../../src/agents/functions.js');
@@ -175,8 +179,9 @@ async function runProcessor(
       appName: 'test-app',
       userId: 'test-user',
       events,
+      state: options.state,
     }),
-    pluginManager: new PluginManager([]),
+    pluginManager: new PluginManager(options.plugins ?? []),
   });
 
   const yielded: Event[] = [];
@@ -188,16 +193,16 @@ async function runProcessor(
   return {spy, yielded};
 }
 
-/** The resume inputs the processor threaded into `callId`'s confirmation. */
-function payloadFor(
+/** The resume inputs the processor threaded into `callId`. */
+function threadedResumeInputs(
   spy: Awaited<ReturnType<typeof runProcessor>>['spy'],
   callId: string,
 ): unknown {
   const call = spy.mock.calls[0]?.[0];
-  if (!call?.toolConfirmationDict) {
+  if (!call?.resumeInputsDict) {
     expect.fail('the processor did not re-run the pending node-tool');
   }
-  return call.toolConfirmationDict[callId].payload;
+  return call.resumeInputsDict[callId];
 }
 
 describe('RequestInputLlmRequestProcessor — plain-text resume', () => {
@@ -208,7 +213,7 @@ describe('RequestInputLlmRequestProcessor — plain-text resume', () => {
       userText(CURRENT_INVOCATION, 'yes'),
     ]);
 
-    expect(payloadFor(spy, 'call-1')).toEqual({gate_a: 'yes'});
+    expect(threadedResumeInputs(spy, 'call-1')).toEqual({gate_a: 'yes'});
   });
 
   it('resolves nothing when two interrupts are pending', async () => {
@@ -285,7 +290,7 @@ describe('RequestInputLlmRequestProcessor — plain-text resume', () => {
       userText(CURRENT_INVOCATION, 'sure'),
     ]);
 
-    expect(payloadFor(spy, 'call-2')).toEqual({gate_b: 'sure'});
+    expect(threadedResumeInputs(spy, 'call-2')).toEqual({gate_b: 'sure'});
   });
 });
 
@@ -303,7 +308,7 @@ describe('RequestInputLlmRequestProcessor — plain-text resume held to the decl
       interrupt('gate_a', responseSchema),
       ...replies,
     ]);
-    return payloadFor(spy, 'call-1');
+    return threadedResumeInputs(spy, 'call-1');
   }
 
   it('delivers a number to an interrupt that asked for one', async () => {
@@ -375,7 +380,7 @@ describe('RequestInputLlmRequestProcessor — plain-text resume record', () => {
         response: {result: 'approve'},
       },
     ]);
-    expect(payloadFor(spy, TOOL_CALL_ID)).toEqual({A: 'approve'});
+    expect(threadedResumeInputs(spy, TOOL_CALL_ID)).toEqual({A: 'approve'});
   });
 
   it('carries the current invocation and branch on the record', async () => {
@@ -399,7 +404,7 @@ describe('RequestInputLlmRequestProcessor — plain-text resume record', () => {
 
     // `42` is the number the equivalent client reply `{result: "42"}` unwraps
     // to, so the live turn and a later replay agree.
-    expect(payloadFor(spy, TOOL_CALL_ID)).toEqual({A: 42});
+    expect(threadedResumeInputs(spy, TOOL_CALL_ID)).toEqual({A: 42});
   });
 
   it('records nothing for a structured reply, which is already recorded', async () => {
@@ -410,7 +415,7 @@ describe('RequestInputLlmRequestProcessor — plain-text resume record', () => {
     ]);
 
     expect(yielded).toEqual([]);
-    expect(payloadFor(spy, TOOL_CALL_ID)).toEqual({A: 'approve'});
+    expect(threadedResumeInputs(spy, TOOL_CALL_ID)).toEqual({A: 'approve'});
   });
 
   it('answers the second pause from the second typed reply', async () => {
@@ -424,7 +429,9 @@ describe('RequestInputLlmRequestProcessor — plain-text resume record', () => {
       userText(CURRENT_INVOCATION, 'second answer'),
     ]);
 
-    expect(payloadFor(spy, TOOL_CALL_ID)).toEqual({B: 'second answer'});
+    expect(threadedResumeInputs(spy, TOOL_CALL_ID)).toEqual({
+      B: 'second answer',
+    });
     expect(yielded).toHaveLength(1);
     expect(getFunctionResponses(yielded[0])).toEqual([
       {
@@ -533,5 +540,121 @@ describe('RequestInputLlmRequestProcessor — plain-text resume record', () => {
         userStructured(CURRENT_INVOCATION, 'A', '{"approved":"yes"}'),
       ]),
     ).rejects.toThrow(/reply to interrupt 'A' does not match/i);
+  });
+});
+
+describe('RequestInputLlmRequestProcessor resume inputs', () => {
+  /**
+   * An agent whose node-tool records the input of each run it performs. `runs`
+   * stays empty when something stops the tool from executing.
+   */
+  function agentWithRecordingNodeTool(): {agent: LlmAgent; runs: unknown[]} {
+    const runs: unknown[] = [];
+    const agent = new LlmAgent({
+      name: 'gate_agent',
+      model: 'gemini-2.5-flash',
+      tools: [
+        node(
+          (_ctx: unknown, input: unknown) => {
+            runs.push(input);
+            return 'done';
+          },
+          {name: TOOL_NAME, inputSchema: z.object({}), rerunOnResume: true},
+        ),
+      ],
+    });
+    return {agent, runs};
+  }
+
+  /**
+   * Resumes a session paused on `interrupt-1` with the real
+   * `handleFunctionCallList`. The suites above mock that function to read its
+   * arguments; these two tests are about the context the resumed call runs
+   * with, so the call itself has to happen.
+   */
+  async function runResumed(
+    agent: LlmAgent,
+    options: {plugins?: BasePlugin[]; state?: Record<string, unknown>},
+  ): Promise<void> {
+    const actual = await vi.importActual<
+      typeof import('../../../src/agents/functions.js')
+    >('../../../src/agents/functions.js');
+    const {handleFunctionCallList} =
+      await import('../../../src/agents/functions.js');
+    const spy = vi.mocked(handleFunctionCallList);
+    spy.mockImplementation(actual.handleFunctionCallList);
+    try {
+      await runProcessor(
+        [
+          nodeToolCall(CURRENT_INVOCATION),
+          interrupt('interrupt-1'),
+          userStructured(CURRENT_INVOCATION, 'interrupt-1', {
+            region: 'Pacific',
+          }),
+        ],
+        agent,
+        options,
+      );
+    } finally {
+      spy.mockImplementation(async () => null);
+    }
+  }
+
+  it('does not present resume inputs as a human approval', async () => {
+    const {agent} = agentWithRecordingNodeTool();
+    // Observes the context the resumed tool call actually runs with.
+    const seen: Array<{confirmation: unknown; inputs: unknown}> = [];
+    class ObserverPlugin extends BasePlugin {
+      constructor() {
+        super('observer');
+      }
+      override async beforeToolCallback({toolContext}: {toolContext: Context}) {
+        seen.push({
+          confirmation: toolContext.toolConfirmation,
+          inputs: toolContext.resumeInputs,
+        });
+        return undefined;
+      }
+    }
+
+    await runResumed(agent, {plugins: [new ObserverPlugin()]});
+
+    // The answer arrives as resume inputs and nothing else: no confirmation is
+    // fabricated to carry it, so nothing downstream can read the user's answer
+    // as approval of the action.
+    expect(seen).toEqual([
+      {
+        confirmation: undefined,
+        inputs: {'interrupt-1': {region: 'Pacific'}},
+      },
+    ]);
+  });
+
+  it('leaves a confirmation gate closed on the resumed call', async () => {
+    const {agent, runs} = agentWithRecordingNodeTool();
+    const policyEngine = {
+      evaluate: async () => ({outcome: PolicyOutcome.CONFIRM}),
+    };
+
+    await runResumed(agent, {
+      plugins: [new SecurityPlugin({policyEngine})],
+      // An armed gate: the policy engine ruled CONFIRM on this call and no
+      // approval has answered it yet.
+      //
+      // Seeded rather than played out, because SecurityPlugin's own state
+      // machine cannot currently reach this combination — a node tool it
+      // blocks never runs, so it never pauses for input, and once a real
+      // approval releases it the recorded state is the ToolConfirmation
+      // rather than 'CONFIRM'. That is the coincidence #773 is about: the
+      // fabrication is harmless only for as long as no gate is armed on a
+      // resumable call. This pins the behavior for when one is.
+      state: {
+        'orcas_tool_call_security_check_states': {[TOOL_CALL_ID]: 'CONFIRM'},
+      },
+    });
+
+    // Answering the node's question is not approving the action: the gate holds
+    // and the node does not run.
+    expect(runs).toEqual([]);
   });
 });

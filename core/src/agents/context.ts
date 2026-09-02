@@ -13,6 +13,7 @@ import type {EventActions} from '../events/event_actions.js';
 import {createEventActions} from '../events/event_actions.js';
 import type {SearchMemoryResponse} from '../memory/base_memory_service.js';
 import {State} from '../sessions/state.js';
+import type {ResumeInputs} from '../tools/resume_inputs.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
 import type {InvocationContext} from './invocation_context.js';
@@ -33,6 +34,7 @@ export class Context extends ReadonlyContext {
   readonly eventActions: EventActions;
   readonly functionCallId?: string;
   toolConfirmation?: ToolConfirmation;
+  readonly resumeInputs: ResumeInputs;
   readonly abortSignal?: AbortSignal;
 
   /**
@@ -46,12 +48,18 @@ export class Context extends ReadonlyContext {
    *     call.
    * @param options.toolConfirmation The tool confirmation of the current tool
    *     call.
+   * @param options.resumeInputs The inputs the current tool call is being
+   *     resumed with, if it paused to ask for them, keyed by interrupt id.
+   *     Defaults to empty rather than absent, matching adk-python's
+   *     `Context.resume_inputs`. Carries no approval; see
+   *     {@link ResumeInputs}.
    */
   constructor(options: {
     invocationContext: InvocationContext;
     eventActions?: EventActions;
     functionCallId?: string;
     toolConfirmation?: ToolConfirmation;
+    resumeInputs?: ResumeInputs;
   }) {
     super(options.invocationContext);
     this.eventActions = options.eventActions || createEventActions();
@@ -61,6 +69,7 @@ export class Context extends ReadonlyContext {
     );
     this.functionCallId = options.functionCallId;
     this.toolConfirmation = options.toolConfirmation;
+    this.resumeInputs = options.resumeInputs ?? {};
     this.abortSignal = options.invocationContext.abortSignal;
   }
 

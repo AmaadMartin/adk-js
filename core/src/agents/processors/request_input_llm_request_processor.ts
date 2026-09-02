@@ -8,7 +8,7 @@ import type {FunctionCall} from '@google/genai';
 
 import type {Event} from '../../events/event.js';
 import {getFunctionCalls, getFunctionResponses} from '../../events/event.js';
-import {ToolConfirmation} from '../../tools/tool_confirmation.js';
+import type {ResumeInputs} from '../../tools/resume_inputs.js';
 import {AsyncQueue} from '../../utils/async_queue.js';
 import {isNodeTool} from '../../workflow/nodes/node_tool.js';
 import {
@@ -115,14 +115,16 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
       });
     }
 
-    // 5. Re-run each pending node-tool, threading the resume inputs through the
-    //    tool confirmation payload (read by NodeTool as the node's resumeInputs).
-    const toolConfirmationDict: Record<string, ToolConfirmation> = {};
+    // 5. Re-run each pending node-tool, threading the resume inputs through
+    //    their own mapping (read by NodeTool as the node's resumeInputs).
+    //
+    //    Deliberately NOT a ToolConfirmation: answering a node's question is
+    //    not approving an action, and the two must not be interchangeable. A
+    //    node tool that gates on confirmation therefore still gates here, and
+    //    the only thing that can open that gate is an approval a human gave.
+    const resumeInputsDict: Record<string, ResumeInputs> = {};
     for (const id of Object.keys(pending)) {
-      toolConfirmationDict[id] = new ToolConfirmation({
-        confirmed: true,
-        payload: resume.inputs,
-      });
+      resumeInputsDict[id] = resume.inputs;
     }
 
     const eventQueue = new AsyncQueue<Event>();
@@ -136,7 +138,7 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
           beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
           afterToolCallbacks: agent.canonicalAfterToolCallbacks,
           filters: new Set(Object.keys(pending)),
-          toolConfirmationDict,
+          resumeInputsDict,
         });
       } finally {
         eventQueue.close();
@@ -153,8 +155,12 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
   }
 }
 
-/** The resume inputs a turn supplies, and the typed reply behind them. */
-interface ResumeInputs {
+/**
+ * The resume inputs a turn supplies, and the typed reply behind them. Named
+ * apart from the exported {@link ResumeInputs} it carries in `inputs`, which is
+ * the bare interruptId -> value mapping the tool call is resumed with.
+ */
+interface CollectedResume {
   /** interruptId -> the value handed to the waiting node. */
   inputs: Record<string, unknown>;
   /**
@@ -180,7 +186,7 @@ interface ResumeInputs {
  * it is the turn being processed, and skipped on later turns — it never
  * resolved its interrupt, so the pause is still open for the next answer.
  */
-function collectResumeInputs(events: Event[]): ResumeInputs {
+function collectResumeInputs(events: Event[]): CollectedResume {
   const responseSchemas = responseSchemasByInterruptId(events);
   const lastUser = [...events].reverse().find((e) => e.author === 'user');
   const structured = structuredResumeInputs(lastUser, responseSchemas);

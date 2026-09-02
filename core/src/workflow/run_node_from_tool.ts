@@ -83,7 +83,7 @@ export function runNodeFromToolContext({
     // not the node name doubled.
     nodePath: '',
     runId,
-    resumeInputs: collectResumeInputs(toolContext),
+    resumeInputs: toolContext.resumeInputs,
   });
 
   return executeChildNode({
@@ -95,18 +95,4 @@ export function runNodeFromToolContext({
       overrideBranch: createSubBranch(childIc.branch, {name: toolName, runId}),
     },
   });
-}
-
-/**
- * Collects resume inputs for the node from the tool context. When the tool call
- * is being resumed after a `RequestInput`, the user's response is threaded
- * through `toolConfirmation.payload` keyed by interrupt id (see the request-input
- * resume processor).
- */
-function collectResumeInputs(toolContext: Context): Record<string, unknown> {
-  const payload = toolContext.toolConfirmation?.payload;
-  if (payload && typeof payload === 'object') {
-    return payload as Record<string, unknown>;
-  }
-  return {};
 }
