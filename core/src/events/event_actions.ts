@@ -109,6 +109,14 @@ export interface EventActions {
    * `EventActions.set_model_response`, which is untyped there too.
    */
   setModelResponse?: unknown;
+
+  /**
+   * The invocation id to rewind to. This is only set for a rewind event.
+   *
+   * `applyRewinds` reads it to drop the rewound invocations, so the annulled
+   * turns never reach the model.
+   */
+  rewindBeforeInvocationId?: string;
 }
 
 /**
@@ -118,8 +126,8 @@ export interface EventActions {
  * @param state - Optional partial {@link EventActions} whose properties
  *   override the defaults. Dictionary fields (`stateDelta`, `artifactDelta`,
  *   `requestedAuthConfigs`, `requestedToolConfirmations`) default to `{}`;
- *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`) default
- *   to `undefined`.
+ *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`,
+ *   `rewindBeforeInvocationId`) default to `undefined`.
  * @returns A fully populated {@link EventActions} object.
  */
 export function createEventActions(
@@ -199,9 +207,9 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  *    `requestedAuthConfigs`, `requestedToolConfirmations`) — all entries from
  *    every source are combined via `Object.assign`. Later sources win on
  *    duplicate keys.
- * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
- *    last-writer-wins: the value from the last source that sets the field is
- *    kept.
+ * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`,
+ *    `rewindBeforeInvocationId`) — last-writer-wins: the value from the last
+ *    source that sets the field is kept.
  * 3. **List fields** (`renderUiWidgets`) — the widgets of every source are
  *    concatenated in source order. A source that sets nothing contributes
  *    nothing, so the result stays `undefined` when no source sets it.
@@ -268,6 +276,9 @@ export function mergeEventActions(
     }
     if (source.setModelResponse !== undefined) {
       result.setModelResponse = source.setModelResponse;
+    }
+    if (source.rewindBeforeInvocationId !== undefined) {
+      result.rewindBeforeInvocationId = source.rewindBeforeInvocationId;
     }
   }
   return result;

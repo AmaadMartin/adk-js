@@ -1044,6 +1044,20 @@ describe('LlmAgent Default Request Processors', () => {
     );
     expect(authIndex).toBeLessThan(contentIndex);
   });
+
+  it('resolves the interaction chain id before building the contents', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+    });
+    const interactionsIndex = agent.requestProcessors.indexOf(
+      INTERACTIONS_REQUEST_PROCESSOR,
+    );
+    const contentIndex = agent.requestProcessors.indexOf(
+      CONTENT_REQUEST_PROCESSOR,
+    );
+    expect(interactionsIndex).toBeGreaterThanOrEqual(0);
+    expect(interactionsIndex).toBeLessThan(contentIndex);
+  });
 });
 
 describe('LlmAgent Single Flow Defaults', () => {

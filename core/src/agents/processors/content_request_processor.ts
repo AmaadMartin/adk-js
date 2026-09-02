@@ -15,6 +15,7 @@ import {
   getContents,
   GetContentsOptions,
   getCurrentTurnContents,
+  insertModelInputContext,
 } from './content_processor_utils.js';
 
 /**
@@ -52,7 +53,10 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       userContent: invocationContext.userContent,
     };
 
-    if (agent.includeContents === 'default') {
+    if (
+      agent.includeContents === 'default' &&
+      !llmRequest.previousInteractionId
+    ) {
       // Include full conversation history
       llmRequest.contents = getContents(
         events,
@@ -69,12 +73,24 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
     } else {
       // Include current turn context only (no conversation history). Another
       // agent's thoughts are history, so they stay out of a current-turn build.
+      // A request that carries a previous interaction id is a chained
+      // Interactions request, and the service already retains the earlier
+      // turns.
       llmRequest.contents = getCurrentTurnContents(
         events,
         agent.name,
         invocationContext.branch,
         invocationContext.isolationScope,
         {...options, includeThoughtsFromOtherAgents: false},
+      );
+    }
+
+    const modelInputContext = invocationContext.runConfig?.modelInputContext;
+    if (modelInputContext) {
+      insertModelInputContext(
+        llmRequest.contents,
+        modelInputContext,
+        invocationContext.userContent,
       );
     }
 

@@ -6,6 +6,7 @@
 
 import {
   AvatarConfig,
+  createUserContent,
   HttpOptions,
   SessionResumptionConfig,
   TranslationConfig,
@@ -214,5 +215,15 @@ describe('createRunConfig saveLiveBlob', () => {
 
     expect(config.saveLiveBlob).toBe(true);
     warnSpy.mockRestore();
+  });
+
+  it('carries modelInputContext through unchanged', () => {
+    const modelInputContext = [createUserContent('a retrieved document')];
+    const config = createRunConfig({modelInputContext});
+    expect(config.modelInputContext).toEqual(modelInputContext);
+  });
+
+  it('leaves modelInputContext unset by default', () => {
+    expect(createRunConfig().modelInputContext).toBeUndefined();
   });
 });

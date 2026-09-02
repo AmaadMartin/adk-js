@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {Content, createUserContent, Part} from '@google/genai';
-import {cloneDeep} from 'lodash-es';
+import {cloneDeep, isEqual} from 'lodash-es';
 
 import {
   CompactedEvent,
   isCompactedEvent,
 } from '../../events/compacted_event.js';
 import {createEvent, Event} from '../../events/event.js';
+import {applyRewinds} from '../../events/rewind_events.js';
 import {
   getFunctionCalls,
   getFunctionResponses,
@@ -77,6 +78,9 @@ export interface GetContentsOptions {
 /**
  * Get the contents for the LLM request.
  *
+ * Events annulled by a rewind marker are dropped first, so a rewound turn
+ * never reaches the model.
+ *
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
@@ -94,7 +98,7 @@ export function getContents(
 ): Content[] {
   const includedEvents: Event[] = [];
 
-  for (const event of events) {
+  for (const event of applyRewinds(events)) {
     if (isCompactedEvent(event)) {
       includedEvents.push(convertCompactedEvent(event));
       continue;
@@ -169,6 +173,40 @@ function includeThoughtsOf(
     !!options.includeThoughtsFromOtherAgents &&
     isEventFromAnotherAgent(agentName, event)
   );
+}
+
+/**
+ * Inserts transient model input context immediately before the invocation's
+ * user content.
+ *
+ * The block is deep-copied, so the caller's `RunConfig` array is never aliased
+ * into the request: a later edit of the request cannot reach back into the run
+ * configuration. When the user content is absent from `contents` — a tool-call
+ * turn that carries only function responses, for instance — the block goes to
+ * the front, which is where adk-python puts it.
+ *
+ * @param contents The request contents, modified in place.
+ * @param modelInputContext The transient contents to insert.
+ * @param userContent The invocation's user content, if any.
+ */
+export function insertModelInputContext(
+  contents: Content[],
+  modelInputContext: Content[],
+  userContent?: Content,
+): void {
+  if (modelInputContext.length === 0) {
+    return;
+  }
+  let insertIndex = 0;
+  if (userContent) {
+    for (let i = contents.length - 1; i >= 0; i--) {
+      if (isEqual(contents[i], userContent)) {
+        insertIndex = i;
+        break;
+      }
+    }
+  }
+  contents.splice(insertIndex, 0, ...cloneDeep(modelInputContext));
 }
 
 /**

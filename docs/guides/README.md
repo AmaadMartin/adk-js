@@ -15,6 +15,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [LangGraphAgent](agents/langgraph_agent/index.md) - Running a compiled
   LangGraph state graph as an ADK agent.
 - [LlmAgent single-turn and task modes](agents/llm_agent/single_turn.md) - Exposing a sub-agent to its parent as a callable tool that runs inline.
+- [Model input context](agents/model_input_context/index.md) - Adding per-turn contents to one LLM request without writing them to the session.
 - [ParallelAgent](agents/parallel_agent/index.md) - Running sub-agents
   concurrently on isolated branches, and how the fan-out ends.
 - [Per-run request configuration](agents/request_config/index.md) - How `RunConfig` and the agent's own `generateContentConfig` combine into one model request.
