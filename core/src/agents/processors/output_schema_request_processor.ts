@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Schema} from '@google/genai';
 import {Event} from '../../events/event.js';
 import {
   appendInstructions,
@@ -13,10 +12,12 @@ import {
 } from '../../models/llm_request.js';
 import {FunctionTool} from '../../tools/function_tool.js';
 import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
-import {Context} from '../context.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
+
+/** The name of the tool the model calls to return its structured answer. */
+export const SET_MODEL_RESPONSE_TOOL_NAME = 'set_model_response';
 
 /**
  * The instruction that tells the model to return its final answer through the
@@ -25,42 +26,15 @@ import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 export const SET_MODEL_RESPONSE_INSTRUCTION =
   'To output the final result, you must call the "set_model_response" function with the appropriate values. Do not output anything else.';
 
-const SET_MODEL_RESPONSE_TOOL_NAME = 'set_model_response';
-
-/**
- * Returns the structured answer the model passed as the call arguments. The
- * answer is already final, so the agent must not summarize it again.
- */
-export async function submitModelResponse(
-  args: unknown,
-  toolContext?: Context,
-): Promise<string> {
-  if (toolContext) {
-    toolContext.actions.skipSummarization = true;
-  }
-  return JSON.stringify(args);
-}
-
-/** Builds the tool through which the model returns its structured answer. */
-export function createSetModelResponseTool(
-  outputSchema: Schema,
-): FunctionTool<Schema> {
-  return new FunctionTool({
-    name: SET_MODEL_RESPONSE_TOOL_NAME,
-    description:
-      'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
-    parameters: outputSchema,
-    execute: submitModelResponse,
-  });
-}
-
 /**
  * Declares the `set_model_response` tool and instructs the model to call it,
  * for an agent that wants structured output but whose model cannot accept an
  * output schema and tools in the same request.
  *
- * The model returns the structured answer as the arguments of that call, which
- * `LlmAgent` reads back off the merged event.
+ * `LlmAgent.postprocess` reads the call back off the merged event and rewrites
+ * it into the final content. The live path has no such read-back, so the
+ * workaround is skipped there rather than asking the model for an answer that
+ * nothing would collect.
  */
 export class OutputSchemaRequestProcessor extends BaseLlmRequestProcessor {
   /**
@@ -77,6 +51,7 @@ export class OutputSchemaRequestProcessor extends BaseLlmRequestProcessor {
   ): AsyncGenerator<Event, void, void> {
     const agent = invocationContext.agent;
     if (
+      invocationContext.liveRequestQueue ||
       !isLlmAgent(agent) ||
       !agent.outputSchema ||
       !agent.tools?.length ||
@@ -86,7 +61,20 @@ export class OutputSchemaRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    appendTools(llmRequest, [createSetModelResponseTool(agent.outputSchema)]);
+    const setModelResponseTool = new FunctionTool({
+      name: SET_MODEL_RESPONSE_TOOL_NAME,
+      description:
+        'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
+      parameters: agent.outputSchema,
+      execute: async (args, toolContext) => {
+        if (toolContext) {
+          toolContext.actions.skipSummarization = true;
+        }
+        return JSON.stringify(args);
+      },
+    });
+
+    appendTools(llmRequest, [setModelResponseTool]);
     appendInstructions(llmRequest, [SET_MODEL_RESPONSE_INSTRUCTION]);
   }
 }

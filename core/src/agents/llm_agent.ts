@@ -67,6 +67,7 @@ import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
+import {SET_MODEL_RESPONSE_TOOL_NAME} from './processors/output_schema_request_processor.js';
 import {SingleFlow} from './processors/single_flow.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
@@ -525,7 +526,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
 
-    const flow = new SingleFlow(config.contextCompactors ?? []);
+    const flow = new SingleFlow(config.contextCompactors);
     this.requestProcessors = config.requestProcessors ?? flow.requestProcessors;
     this.responseProcessors =
       config.responseProcessors ?? flow.responseProcessors;
@@ -1595,7 +1596,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     if (mergedEvent.content) {
       const functionCalls = getFunctionCalls(mergedEvent);
       const setModelResponseCall = functionCalls.find(
-        (call) => call.name === 'set_model_response',
+        (call) => call.name === SET_MODEL_RESPONSE_TOOL_NAME,
       );
       if (setModelResponseCall) {
         const args = setModelResponseCall.args;

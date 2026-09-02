@@ -13,6 +13,7 @@ import {
   Event,
   FunctionTool,
   InvocationContext,
+  LiveRequestQueue,
   LlmAgent,
   LlmRequest,
   LlmResponse,
@@ -23,7 +24,6 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   OUTPUT_SCHEMA_REQUEST_PROCESSOR,
   SET_MODEL_RESPONSE_INSTRUCTION,
-  submitModelResponse,
 } from '../../../src/agents/processors/output_schema_request_processor.js';
 
 const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
@@ -52,10 +52,14 @@ class NonLlmAgent extends BaseAgent {
   protected async *runLiveImpl(_context: InvocationContext) {}
 }
 
-function createMockInvocationContext(agent: BaseAgent): InvocationContext {
+function createMockInvocationContext(
+  agent: BaseAgent,
+  liveRequestQueue?: LiveRequestQueue,
+): InvocationContext {
   return new InvocationContext({
     invocationId: 'test-invocation',
     agent,
+    liveRequestQueue,
     session: createSession({
       id: 'test-session',
       events: [],
@@ -92,6 +96,7 @@ function createAgent(options: {
 /** Runs the processor and returns the mutated request and the yielded events. */
 async function runProcessor(
   agent: BaseAgent,
+  liveRequestQueue?: LiveRequestQueue,
 ): Promise<{llmRequest: LlmRequest; events: Event[]}> {
   const llmRequest: LlmRequest = {
     contents: [],
@@ -101,7 +106,7 @@ async function runProcessor(
   const events: Event[] = [];
 
   for await (const event of OUTPUT_SCHEMA_REQUEST_PROCESSOR.runAsync(
-    createMockInvocationContext(agent),
+    createMockInvocationContext(agent, liveRequestQueue),
     llmRequest,
   )) {
     events.push(event);
@@ -240,6 +245,24 @@ describe('OutputSchemaRequestProcessor', () => {
     expect(events).toEqual([]);
   });
 
+  it('leaves the request untouched on the live path', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+    const liveRequestQueue = new LiveRequestQueue();
+
+    const {llmRequest, events} = await runProcessor(
+      createAgent({
+        model: 'gemini-2.5-flash',
+        withSchema: true,
+        withTools: true,
+      }),
+      liveRequestQueue,
+    );
+
+    expectRequestUntouched(llmRequest);
+    expect(events).toEqual([]);
+    liveRequestQueue.close();
+  });
+
   it('leaves the request untouched when the agent is not an LlmAgent', async () => {
     vi.stubEnv(VERTEX_ENV_VAR, undefined);
 
@@ -252,7 +275,7 @@ describe('OutputSchemaRequestProcessor', () => {
   });
 });
 
-describe('submitModelResponse', () => {
+describe('the set_model_response tool', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -277,11 +300,5 @@ describe('submitModelResponse', () => {
 
     expect(result).toBe(JSON.stringify({answer: 'yes'}));
     expect(toolContext.actions.skipSummarization).toBe(true);
-  });
-
-  it('returns the arguments as JSON when there is no tool context', async () => {
-    expect(await submitModelResponse({answer: 'yes'})).toBe(
-      JSON.stringify({answer: 'yes'}),
-    );
   });
 });
