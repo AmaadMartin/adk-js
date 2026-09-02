@@ -32,6 +32,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [AuthCredential and its helpers](auth/auth_credential/index.md) - Building a
   credential with the right defaults, rejecting one that cannot work, and
   logging one without leaking the secret.
+- [Authenticated tools and the credential key](auth/tool_auth/index.md) - How a
+  tool asks for a user credential, and which calls resume once it arrives.
 - [BaseAuthCredentialExchanger](auth/credential_exchanger/index.md) - The
   OpenAPI tool auth layer's exchange contract, and the error that reports a
   missing credential.

@@ -154,10 +154,10 @@ export function createEventActions(
  *
  * @throws {InputValidationError} When an entry is not an {@link AuthConfig}.
  */
-function validateRequestedAuthConfigs(configs: {
-  [key: string]: AuthConfig;
-}): void {
-  for (const [key, config] of Object.entries(configs)) {
+function validateRequestedAuthConfigs(
+  configs: {[key: string]: AuthConfig} | undefined,
+): void {
+  for (const [key, config] of Object.entries(configs ?? {})) {
     if (!isAuthConfig(config)) {
       throw new InputValidationError(
         `requestedAuthConfigs['${key}'] is not a valid AuthConfig: expected an object with 'authScheme' and 'credentialKey'.`,
