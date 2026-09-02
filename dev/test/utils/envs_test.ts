@@ -14,7 +14,6 @@ import {
   describe,
   expect,
   it,
-  Mock,
   vi,
 } from 'vitest';
 
@@ -32,21 +31,11 @@ const ABSENT_FILENAME = '.env.adk-test-absent';
  */
 const WARMUP_HOOK_TIMEOUT_MS = 60000;
 
-interface LoadedEnvs {
-  loadDotenvForAgent: (
-    agentName: string,
-    agentParentDir: string,
-    filename?: string,
-  ) => void;
-  warn: Mock;
-  debug: Mock;
-}
-
 /**
  * Imports a fresh copy of the module under test, so its snapshot of the
  * explicit environment reflects whatever the test exported first.
  */
-async function loadEnvs(): Promise<LoadedEnvs> {
+async function loadEnvs() {
   vi.resetModules();
   const {AdkLogger} = await import('../../src/utils/logger.js');
   const warn = vi.spyOn(AdkLogger.prototype, 'warn').mockImplementation(() => {
@@ -57,11 +46,7 @@ async function loadEnvs(): Promise<LoadedEnvs> {
     .mockImplementation(() => {});
   const {loadDotenvForAgent} = await import('../../src/utils/envs.js');
 
-  return {
-    loadDotenvForAgent,
-    warn: warn as unknown as Mock,
-    debug: debug as unknown as Mock,
-  };
+  return {loadDotenvForAgent, warn, debug};
 }
 
 describe('loadDotenvForAgent', () => {

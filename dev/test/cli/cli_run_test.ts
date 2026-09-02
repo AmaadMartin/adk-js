@@ -11,7 +11,6 @@ import {
   isApp,
   Runner,
 } from '@google/adk';
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
@@ -29,11 +28,23 @@ vi.mock('../../src/utils/agent_loader.js', async (importOriginal) => {
   };
 });
 
+/** The reload listener `runAgent` registered, captured by the `watch` fake. */
+const watchState = vi.hoisted(() => ({
+  listener: undefined as (() => Promise<void>) | undefined,
+}));
+
 // Only `watch` is faked, so the reload subscriber can be driven without
 // waiting on a real filesystem event.
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
-  return {...actual, default: actual, watch: vi.fn()};
+  return {
+    ...actual,
+    default: actual,
+    watch: (_path: string, listener: () => Promise<void>) => {
+      watchState.listener = listener;
+      return {close: () => {}};
+    },
+  };
 });
 
 // Only the I/O is faked; getAbsolutePath is the real resolver under test.
@@ -739,7 +750,7 @@ describe('cli_run', () => {
   describe('run context', () => {
     /** The options every `Runner` this run built was constructed with. */
     const runnerOptions = () =>
-      (Runner as unknown as Mock).mock.calls.map((call) => call[0]);
+      vi.mocked(Runner).mock.calls.map((call) => call[0]);
 
     const AGENT_PATH = path.resolve(
       path.sep,
@@ -788,16 +799,9 @@ describe('cli_run', () => {
 
     it('keeps the credential service and the app name across a reload', async () => {
       const credentialService = new InMemoryCredentialService();
-      let reload: (() => Promise<void>) | undefined;
-      (fs.watch as unknown as Mock).mockImplementation(
-        (_path: string, listener: () => Promise<void>) => {
-          reload = listener;
-          return {close: vi.fn()};
-        },
-      );
       (mockRl.question as Mock).mockImplementationOnce(
         async (_prompt: string, cb: (answer: string) => void) => {
-          await reload?.();
+          await watchState.listener?.();
           cb('exit');
         },
       );
@@ -834,7 +838,7 @@ describe('cli_run', () => {
         name: 'custom_cli_app',
         rootAgent: {name: 'assistant'},
       });
-      (isApp as unknown as Mock).mockReturnValue(true);
+      vi.mocked(isApp).mockReturnValue(true);
 
       await runAgent({agentPath: AGENT_PATH, sessionService});
 
@@ -850,7 +854,7 @@ describe('cli_run', () => {
         name: 'custom_cli_app',
         rootAgent: {name: 'assistant'},
       });
-      (isApp as unknown as Mock).mockReturnValue(true);
+      vi.mocked(isApp).mockReturnValue(true);
 
       await runAgent({
         agentPath: AGENT_PATH,
