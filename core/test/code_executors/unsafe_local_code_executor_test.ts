@@ -166,7 +166,9 @@ describe('UnsafeLocalCodeExecutor', () => {
     const params: ExecuteCodeParams = {
       invocationContext,
       codeExecutionInput: {
-        code: 'console.error("An error occurred");',
+        // The exit status is what marks a run failed, so a program whose
+        // stderr must survive has to exit non-zero.
+        code: 'console.error("An error occurred");\nprocess.exit(1);',
         language: CodeExecutionLanguage.JAVASCRIPT,
         inputFiles: [],
       },
