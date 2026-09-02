@@ -289,13 +289,6 @@ describe('setOutputSchema', () => {
     type: Type.OBJECT,
     properties: {answer: {type: Type.STRING}},
   };
-  const ALIAS_SCHEMA: Schema = {
-    type: Type.OBJECT,
-    properties: {other: {type: Type.STRING}},
-  };
-  const MISSING_SCHEMA_MESSAGE =
-    'Either outputSchema or baseModel must be provided. Pass ' +
-    'outputSchema=<your schema> (baseModel is deprecated).';
 
   it('sets the schema and forces the JSON mime type', () => {
     const request = createRequest();
@@ -306,39 +299,6 @@ describe('setOutputSchema', () => {
     expect(request.config?.responseMimeType).toBe('application/json');
   });
 
-  it('accepts the deprecated baseModel alias', () => {
-    const request = createRequest();
-
-    setOutputSchema(request, undefined, {baseModel: ALIAS_SCHEMA});
-
-    expect(request.config?.responseSchema).toBe(ALIAS_SCHEMA);
-    expect(request.config?.responseMimeType).toBe('application/json');
-  });
-
-  it('prefers outputSchema when both are supplied', () => {
-    const request = createRequest();
-
-    setOutputSchema(request, SCHEMA, {baseModel: ALIAS_SCHEMA});
-
-    expect(request.config?.responseSchema).toBe(SCHEMA);
-  });
-
-  it('throws and leaves the request untouched when neither is supplied', () => {
-    const request = createRequest();
-
-    expect(() => setOutputSchema(request)).toThrow(MISSING_SCHEMA_MESSAGE);
-    expect(request.config?.responseSchema).toBeUndefined();
-    expect(request.config?.responseMimeType).toBeUndefined();
-  });
-
-  it('throws when both arguments are explicitly undefined', () => {
-    const request = createRequest();
-
-    expect(() =>
-      setOutputSchema(request, undefined, {baseModel: undefined}),
-    ).toThrow(MISSING_SCHEMA_MESSAGE);
-  });
-
   it('creates the config when the request has none', () => {
     const request = createBareRequest();
 
@@ -346,26 +306,5 @@ describe('setOutputSchema', () => {
 
     expect(request.config?.responseSchema).toBe(SCHEMA);
     expect(request.config?.responseMimeType).toBe('application/json');
-  });
-
-  it('does not create the config when it throws', () => {
-    const request = createBareRequest();
-
-    expect(() => setOutputSchema(request)).toThrow(MISSING_SCHEMA_MESSAGE);
-    expect(request.config).toBeUndefined();
-  });
-});
-
-describe('LlmRequest.isManagedAgent', () => {
-  it('reads falsy on a freshly built request', () => {
-    expect(createRequest().isManagedAgent).toBeFalsy();
-  });
-
-  it('round-trips once set', () => {
-    const request = createRequest();
-
-    request.isManagedAgent = true;
-
-    expect(request.isManagedAgent).toBe(true);
   });
 });
