@@ -371,12 +371,16 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             // diagnostic, but on its own it would hide the cut-short run.
             const note = `Code execution timed out after ${this.timeoutSeconds} seconds.`;
             stderr = stderr ? `${stderr}\n${note}` : note;
-          } else if (exitStatus === 0) {
+          } else if (isPython && exitStatus === 0) {
             // A non-empty stderr is what marks the result failed and drives the
             // retry counter, so it has to mean the program failed rather than
-            // that the program wrote a warning. The exit status says which.
+            // that the program wrote a warning. The runner exits non-zero for
+            // every python failure, so the status says which. Python only: a
+            // script in another language can call a script that fails without
+            // changing this status, and clearing what that script wrote would
+            // report its failure as a success.
             stderr = '';
-          } else if (!stderr && exitStatus !== null) {
+          } else if (!stderr && exitStatus !== null && exitStatus !== 0) {
             // The code died without saying why: a signal, or `os._exit`.
             stderr = `Code execution exited with status ${exitStatus}.`;
           }

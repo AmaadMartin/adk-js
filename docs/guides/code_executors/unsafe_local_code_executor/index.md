@@ -43,11 +43,12 @@ runs through: `commandPath` for JavaScript, `pythonCommandPath` for Python, and
 
 A run reports `stdout`, `stderr`, `outputFiles` and `exitCode`.
 
-`stderr` means the run failed. ADK reports a result with a non-empty `stderr`
-to the model as a failure, and counts it against the error-retry budget, so the
-executor clears `stderr` when the program exits 0. A program that prints a
-warning and succeeds is therefore reported as a success, and its warning is
-dropped. Read `stdout` for what the program produced.
+For Python, `stderr` means the run failed. ADK reports a result with a
+non-empty `stderr` to the model as a failure, and counts it against the
+error-retry budget, so the executor clears `stderr` when a Python program exits 0. A program that prints a warning and succeeds is therefore reported as a
+success, and its warning is dropped; read `stdout` for what it produced. The
+other languages keep their `stderr`, because a script in them can call a script
+that fails without changing the exit status the executor sees.
 
 When a program fails without saying why -- it called `os._exit`, or a signal
 killed it -- the executor writes the sentence `Code execution exited with

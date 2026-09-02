@@ -220,9 +220,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     const params: ExecuteCodeParams = {
       invocationContext,
       codeExecutionInput: {
-        // The failing exit is what keeps stderr: it is now reported only for a
-        // run that failed, so that a warning is not read as a failure.
-        code: 'console.error("An error occurred");\nprocess.exit(1);',
+        code: 'console.error("An error occurred");',
         language: CodeExecutionLanguage.JAVASCRIPT,
         inputFiles: [],
       },
@@ -858,11 +856,13 @@ describe('UnsafeLocalCodeExecutor', () => {
       });
     }
 
-    it('reports a clean run as status 0', async () => {
+    it('reports a clean run as status 0, and keeps what it wrote', async () => {
       const result = await runJavaScript('console.error("just a warning");');
 
       expect(result.exitCode).toBe(0);
-      expect(result.stderr).toBe('');
+      // Only python's stderr is cleared on a clean exit: a script in another
+      // language can call a script that fails without changing this status.
+      expect(result.stderr).toContain('just a warning');
     });
 
     it('reports a silent non-zero exit as a failure', async () => {
