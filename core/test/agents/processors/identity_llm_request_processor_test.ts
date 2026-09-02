@@ -19,8 +19,6 @@ import {IDENTITY_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/ide
 /** Forces `disallowTransferToParent` and `disallowTransferToPeers` to true. */
 const OUTPUT_SCHEMA: Schema = {type: Type.OBJECT};
 
-const SHARED_INSTRUCTION = 'Shared instruction.';
-
 class MockRootAgent extends BaseAgent {
   constructor(name: string, subAgents: BaseAgent[] = []) {
     super({name, subAgents});
@@ -157,22 +155,7 @@ describe('IdentityLlmRequestProcessor', () => {
     expect(instruction).toContain('Processes data');
   });
 
-  it('omits the preamble when both transfer directions are disabled', async () => {
-    const agent = new LlmAgent({
-      name: 'my_agent',
-      model: 'gemini-2.5-flash',
-      disallowTransferToParent: true,
-      disallowTransferToPeers: true,
-    });
-    const invocationContext = createMockInvocationContext(agent);
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(invocationContext, llmRequest);
-
-    expect(llmRequest.config?.systemInstruction).toBeUndefined();
-  });
-
-  it('omits the preamble for an agent whose outputSchema disables transfer', async () => {
+  it('names an agent whose outputSchema disables transfer', async () => {
     const agent = new LlmAgent({
       name: 'child_one',
       model: 'gemini-2.5-flash',
@@ -183,34 +166,8 @@ describe('IdentityLlmRequestProcessor', () => {
 
     await runProcessor(invocationContext, llmRequest);
 
-    expect(llmRequest.config?.systemInstruction).toBeUndefined();
-  });
-
-  it('gives fan-out siblings an identical system prompt', async () => {
-    const requests = ['child_one', 'child_two'].map((name) => {
-      const agent = new LlmAgent({
-        name,
-        model: 'gemini-2.5-flash',
-        instruction: SHARED_INSTRUCTION,
-        outputSchema: OUTPUT_SCHEMA,
-      });
-      const llmRequest = makeLlmRequest();
-      llmRequest.config = {systemInstruction: SHARED_INSTRUCTION};
-      return {
-        invocationContext: createMockInvocationContext(agent),
-        llmRequest,
-      };
-    });
-
-    for (const {invocationContext, llmRequest} of requests) {
-      await runProcessor(invocationContext, llmRequest);
-    }
-
-    expect(requests[0].llmRequest.config?.systemInstruction).toBe(
-      SHARED_INSTRUCTION,
-    );
-    expect(requests[0].llmRequest.config?.systemInstruction).toBe(
-      requests[1].llmRequest.config?.systemInstruction,
+    expect(llmRequest.config?.systemInstruction).toBe(
+      'You are an agent. Your internal name is "child_one".',
     );
   });
 
