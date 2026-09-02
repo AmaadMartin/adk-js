@@ -54,7 +54,6 @@ export interface BaseAgentConfig extends BaseNodeConfig {
   subAgents?: BaseAgent[];
   beforeAgentCallback?: BeforeAgentCallback;
   afterAgentCallback?: AfterAgentCallback;
-  adkOrigin?: AgentOrigin;
 }
 
 /**
@@ -197,7 +196,6 @@ export abstract class BaseAgent<
       config.beforeAgentCallback,
     );
     this.afterAgentCallback = getCannonicalCallback(config.afterAgentCallback);
-    this.adkOrigin = config.adkOrigin;
 
     this.setParentAgentForSubAgents();
   }

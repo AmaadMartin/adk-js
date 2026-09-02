@@ -1,9 +1,8 @@
-# Runner entry points and session lifecycle
+# Runner session lifecycle and run-level options
 
-`Runner` has two entry points. `runAsync` advances the invocation each time you
-ask for the next event; `run` keeps the invocation going while you are busy with
-the last one. Around both sits one session-resolution step, which either finds
-the session, creates it, or explains why it could not.
+Before an agent can run, `Runner` resolves the session. That one step either
+finds the session, creates it, or explains why it could not. A few options then
+apply to the whole invocation rather than to one agent.
 
 ## Introduction
 
@@ -20,12 +19,10 @@ and repeats the explanation inside the session-not-found message. The dev
 `AgentLoader` records this for every agent it loads, so an agent in
 `agents/weather_agent/` run under `appName: 'weather_bot'` says so.
 
-Choose between the entry points by who is slower. `runAsync` is the default and
-the right one when the caller keeps up. Reach for `run` when the caller is the
-bottleneck — writing to a slow socket, rendering, awaiting a downstream service
-— and you want the agent to finish rather than wait. `run` buffers up to 1000
-events and then applies back pressure; it never drops one, and the events and
-their order are exactly what `runAsync` produced.
+Use `runAsync`. `Runner.run` exists because `google/adk-python` has one, where
+it is a synchronous generator that lets a synchronous caller drive the async
+runtime. TypeScript has no such divide, so `run` yields exactly what `runAsync`
+yields and takes exactly the same options.
 
 ## Get started
 
@@ -38,12 +35,12 @@ const runner = new InMemoryRunner({
   autoCreateSession: true,
 });
 
-for await (const event of runner.run({
+for await (const event of runner.runAsync({
   userId: 'user-1',
   sessionId: 'session-1',
   newMessage: {role: 'user', parts: [{text: 'What is the weather?'}]},
 })) {
-  await renderSlowly(event); // The agent is not throttled by this.
+  render(event);
 }
 ```
 
@@ -103,14 +100,6 @@ can override a run-level default for that key while the rest still land.
 `sessionService.getSession` as `config`, on both the `runAsync` and the
 `runLive` path. Use `numRecentEvents` to stop loading the full history of a long
 conversation on every turn.
-
-## Failures on the eager path
-
-`run` reports a failure only after it has yielded the events the agent produced
-before it. An `Error` the agent threw is re-thrown unchanged. Any other thrown
-value becomes an `Error` whose `cause` is the original value, because
-re-throwing it would describe the caller's control flow rather than the agent's
-failure. A caller that stops iterating early gets no error at all.
 
 ## Recording where an agent came from
 

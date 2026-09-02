@@ -20,10 +20,8 @@ const USER_ID = 'run_user';
 const SESSION_ID = 'run_session';
 const MESSAGE = {role: 'user', parts: [{text: 'hello'}]};
 
-/** Emits `count` events and records how many it has emitted so far. */
+/** Emits `count` events. */
 class CountingAgent extends LlmAgent {
-  emitted = 0;
-
   constructor(private readonly count: number) {
     super({name: 'counting_agent', model: 'gemini-2.5-flash'});
   }
@@ -32,7 +30,6 @@ class CountingAgent extends LlmAgent {
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
     for (let i = 0; i < this.count; i++) {
-      this.emitted++;
       yield createEvent({
         invocationId: context.invocationId,
         author: this.name,
@@ -98,62 +95,42 @@ describe('Runner.run', () => {
   });
 
   it('yields the same events in the same order as runAsync', async () => {
-    const eager: string[] = [];
+    const viaRun: string[] = [];
     for await (const event of newRunner(new CountingAgent(3)).run({
       userId: USER_ID,
       sessionId: SESSION_ID,
       newMessage: MESSAGE,
     })) {
-      eager.push(`${event.author}:${event.content?.parts?.[0]?.text}`);
+      viaRun.push(`${event.author}:${event.content?.parts?.[0]?.text}`);
     }
 
-    const lazy: string[] = [];
+    const viaRunAsync: string[] = [];
     for await (const event of newRunner(new CountingAgent(3)).runAsync({
       userId: USER_ID,
       sessionId: SESSION_ID,
       newMessage: MESSAGE,
     })) {
-      lazy.push(`${event.author}:${event.content?.parts?.[0]?.text}`);
+      viaRunAsync.push(`${event.author}:${event.content?.parts?.[0]?.text}`);
     }
 
-    expect(eager).toEqual(lazy);
-    expect(eager).toHaveLength(3);
+    expect(viaRun).toEqual(viaRunAsync);
+    expect(viaRun).toHaveLength(3);
   });
 
-  it('runs the agent ahead of a slow consumer', async () => {
-    const agent = new CountingAgent(4);
-    const emittedAtFirstEvent: number[] = [];
-
-    for await (const _ of newRunner(agent).run({
+  it('accepts the same options runAsync accepts', async () => {
+    const events: Event[] = [];
+    for await (const event of newRunner(new CountingAgent(1)).run({
       userId: USER_ID,
       sessionId: SESSION_ID,
       newMessage: MESSAGE,
+      yieldUserMessage: true,
+      runConfig: {customMetadata: {requestId: 'req-1'}},
     })) {
-      emittedAtFirstEvent.push(agent.emitted);
-      // Let the pump run while the consumer is busy.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      events.push(event);
     }
 
-    expect(emittedAtFirstEvent).toHaveLength(4);
-    // By the time the second event reaches the consumer the agent has already
-    // produced everything; runAsync would still be at event two.
-    expect(emittedAtFirstEvent[1]).toBe(4);
-  });
-
-  it('does not run ahead under runAsync', async () => {
-    const agent = new CountingAgent(4);
-    const emittedAtEachEvent: number[] = [];
-
-    for await (const _ of newRunner(agent).runAsync({
-      userId: USER_ID,
-      sessionId: SESSION_ID,
-      newMessage: MESSAGE,
-    })) {
-      emittedAtEachEvent.push(agent.emitted);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-
-    expect(emittedAtEachEvent).toEqual([1, 2, 3, 4]);
+    expect(events.map((e) => e.author)).toEqual(['user', 'counting_agent']);
+    expect(events[0].customMetadata).toEqual({requestId: 'req-1'});
   });
 
   it('yields the events produced before an error, then re-throws it', async () => {
@@ -174,9 +151,8 @@ describe('Runner.run', () => {
     expect(received[0].content?.parts?.[0]?.text).toBe('before the failure');
   });
 
-  it('wraps a non-Error throw and keeps it as the cause', async () => {
-    let caught: unknown;
-    try {
+  it('re-throws a non-Error value unchanged, as runAsync does', async () => {
+    await expect(async () => {
       for await (const _ of newRunner(new ThrowingAgent('cancelled')).run({
         userId: USER_ID,
         sessionId: SESSION_ID,
@@ -184,33 +160,7 @@ describe('Runner.run', () => {
       })) {
         // Drain until the failure surfaces.
       }
-    } catch (thrown) {
-      caught = thrown;
-    }
-
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toBe(
-      'Agent run terminated by cancelled.',
-    );
-    expect((caught as Error).cause).toBe('cancelled');
-  });
-
-  it('describes a non-string, non-Error throw by its type', async () => {
-    let caught: unknown;
-    try {
-      for await (const _ of newRunner(new ThrowingAgent({code: 7})).run({
-        userId: USER_ID,
-        sessionId: SESSION_ID,
-        newMessage: MESSAGE,
-      })) {
-        // Drain until the failure surfaces.
-      }
-    } catch (thrown) {
-      caught = thrown;
-    }
-
-    expect((caught as Error).message).toBe('Agent run terminated by object.');
-    expect((caught as Error).cause).toEqual({code: 7});
+    }).rejects.toBe('cancelled');
   });
 
   it('raises nothing when the caller stops iterating before the failure', async () => {
@@ -235,21 +185,5 @@ describe('Runner.run', () => {
     }
 
     expect(rejections).toEqual([]);
-  });
-
-  it('never drops an event when the buffer fills', async () => {
-    // MAX_BUFFERED_RUN_EVENTS is 1000, so this run exceeds the bound and the
-    // pump has to wait for the consumer at least once.
-    const received: Event[] = [];
-    for await (const event of newRunner(new CountingAgent(1200)).run({
-      userId: USER_ID,
-      sessionId: SESSION_ID,
-      newMessage: MESSAGE,
-    })) {
-      received.push(event);
-    }
-
-    expect(received).toHaveLength(1200);
-    expect(received[1199].content?.parts?.[0]?.text).toBe('event 1199');
   });
 });

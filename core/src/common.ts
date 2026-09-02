@@ -261,7 +261,7 @@ export {
   isRoutableLlmAgent,
   isRunner,
 } from './runner/runner.js';
-export type {RunnerConfig} from './runner/runner.js';
+export type {RunAsyncParams, RunnerConfig} from './runner/runner.js';
 export {BaseSessionService} from './sessions/base_session_service.js';
 export type {
   AppendEventRequest,

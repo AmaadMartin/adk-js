@@ -8,6 +8,6 @@ implementation. For the official ADK documentation, visit
 
 ### Runner
 
-- [Runner entry points and session lifecycle](runner/session_lifecycle/index.md) -
-  Choosing between `run` and `runAsync`, creating a missing session, and the
+- [Runner session lifecycle and run-level options](runner/session_lifecycle/index.md) -
+  Creating a missing session, diagnosing a mismatched app name, and the
   run-level options that apply to a whole invocation.
