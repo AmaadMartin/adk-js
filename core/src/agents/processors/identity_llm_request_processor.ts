@@ -14,13 +14,12 @@ import {BaseLlmRequestProcessor} from './base_llm_processor.js';
  * Appends identity instructions to the {@link LlmRequest} system prompt,
  * informing the model of the agent's name and description.
  *
- * The instructions are omitted for an agent that cannot transfer control
- * anywhere, since nothing in the prompt consumes the identity in that case.
+ * An agent in `single_turn` mode gets no identity instruction.
  */
 export class IdentityLlmRequestProcessor extends BaseLlmRequestProcessor {
   /**
-   * Appends agent name and description as identity instructions to the system
-   * prompt of the request, unless the agent has no reachable transfer target.
+   * Appends the agent name and description as one identity instruction to the
+   * system prompt of the request, unless the agent runs in `single_turn` mode.
    *
    * @param invocationContext - The current invocation context.
    * @param llmRequest - The request object to append instructions to.
@@ -31,24 +30,14 @@ export class IdentityLlmRequestProcessor extends BaseLlmRequestProcessor {
     llmRequest: LlmRequest,
   ): AsyncGenerator<Event, void, undefined> {
     const agent = requireAgent(invocationContext);
-    // The preamble only exists so the model can name itself when handing off
-    // control, and embedding the agent name gives every sibling of a fan-out a
-    // distinct system prompt, which defeats prompt-prefix caching on local
-    // models (google/adk-js#613). Mirrors the condition in the LlmAgent
-    // constructor that decides whether the transfer processor runs at all.
-    if (
-      isLlmAgent(agent) &&
-      agent.disallowTransferToParent &&
-      agent.disallowTransferToPeers &&
-      agent.subAgents.length === 0
-    ) {
+    if (isLlmAgent(agent) && agent.mode === 'single_turn') {
       return;
     }
-    const si = [`You are an agent. Your internal name is "${agent.name}".`];
+    let si = `You are an agent. Your internal name is "${agent.name}".`;
     if (agent.description) {
-      si.push(`The description about you is "${agent.description}"`);
+      si += ` The description about you is "${agent.description}".`;
     }
-    appendInstructions(llmRequest, si);
+    appendInstructions(llmRequest, [si]);
   }
 }
 

@@ -10,6 +10,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Agents
 
+- [Agent Identity](agents/identity/index.md) - What the framework tells the model about the agent, and how a single-turn agent opts out.
 - [InvocationContext](agents/invocation_context/index.md) - The per-run context: event selection by branch, resumability, the event queue, and the LLM-call limit.
 - [LangGraphAgent](agents/langgraph_agent/index.md) - Running a compiled
   LangGraph state graph as an ADK agent.

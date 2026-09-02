@@ -6,9 +6,13 @@
 
 import {
   BaseAgent,
+  BaseLlm,
+  BaseLlmConnection,
+  InMemoryRunner,
   InvocationContext,
   LlmAgent,
   LlmRequest,
+  LlmResponse,
   PluginManager,
   createSession,
 } from '@google/adk';
@@ -19,7 +23,39 @@ import {IDENTITY_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/ide
 /** Forces `disallowTransferToParent` and `disallowTransferToPeers` to true. */
 const OUTPUT_SCHEMA: Schema = {type: Type.OBJECT};
 
-const SHARED_INSTRUCTION = 'Shared instruction.';
+class RecordingLlm extends BaseLlm {
+  lastRequest?: LlmRequest;
+
+  constructor() {
+    super({model: 'recording-llm'});
+  }
+
+  async *generateContentAsync(
+    request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    this.lastRequest = request;
+    yield {content: {parts: [{text: 'done'}]}};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('Method not implemented.');
+  }
+}
+
+async function runAgentOnce(agent: LlmAgent): Promise<void> {
+  const runner = new InMemoryRunner({agent});
+  const session = await runner.sessionService.createSession({
+    appName: runner.appName,
+    userId: 'test_user',
+  });
+  for await (const _ of runner.runAsync({
+    userId: 'test_user',
+    sessionId: session.id,
+    newMessage: {role: 'user', parts: [{text: 'Hi'}]},
+  })) {
+    // intentionally empty
+  }
+}
 
 class MockRootAgent extends BaseAgent {
   constructor(name: string, subAgents: BaseAgent[] = []) {
@@ -157,22 +193,7 @@ describe('IdentityLlmRequestProcessor', () => {
     expect(instruction).toContain('Processes data');
   });
 
-  it('omits the preamble when both transfer directions are disabled', async () => {
-    const agent = new LlmAgent({
-      name: 'my_agent',
-      model: 'gemini-2.5-flash',
-      disallowTransferToParent: true,
-      disallowTransferToPeers: true,
-    });
-    const invocationContext = createMockInvocationContext(agent);
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(invocationContext, llmRequest);
-
-    expect(llmRequest.config?.systemInstruction).toBeUndefined();
-  });
-
-  it('omits the preamble for an agent whose outputSchema disables transfer', async () => {
+  it('names an agent whose outputSchema disables transfer', async () => {
     const agent = new LlmAgent({
       name: 'child_one',
       model: 'gemini-2.5-flash',
@@ -183,34 +204,8 @@ describe('IdentityLlmRequestProcessor', () => {
 
     await runProcessor(invocationContext, llmRequest);
 
-    expect(llmRequest.config?.systemInstruction).toBeUndefined();
-  });
-
-  it('gives fan-out siblings an identical system prompt', async () => {
-    const requests = ['child_one', 'child_two'].map((name) => {
-      const agent = new LlmAgent({
-        name,
-        model: 'gemini-2.5-flash',
-        instruction: SHARED_INSTRUCTION,
-        outputSchema: OUTPUT_SCHEMA,
-      });
-      const llmRequest = makeLlmRequest();
-      llmRequest.config = {systemInstruction: SHARED_INSTRUCTION};
-      return {
-        invocationContext: createMockInvocationContext(agent),
-        llmRequest,
-      };
-    });
-
-    for (const {invocationContext, llmRequest} of requests) {
-      await runProcessor(invocationContext, llmRequest);
-    }
-
-    expect(requests[0].llmRequest.config?.systemInstruction).toBe(
-      SHARED_INSTRUCTION,
-    );
-    expect(requests[0].llmRequest.config?.systemInstruction).toBe(
-      requests[1].llmRequest.config?.systemInstruction,
+    expect(llmRequest.config?.systemInstruction).toBe(
+      'You are an agent. Your internal name is "child_one".',
     );
   });
 
@@ -263,6 +258,119 @@ describe('IdentityLlmRequestProcessor', () => {
 
     expect(llmRequest.config?.systemInstruction).toContain(
       'Your internal name is "my_agent"',
+    );
+  });
+
+  it('matches the Python preamble for an agent with no description', async () => {
+    const agent = new LlmAgent({name: 'agent', model: 'gemini-2.5-flash'});
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest = makeLlmRequest();
+    llmRequest.config = {systemInstruction: ''};
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config.systemInstruction).toBe(
+      'You are an agent. Your internal name is "agent".',
+    );
+  });
+
+  it('joins the description into one instruction, with the trailing period', async () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'gemini-2.5-flash',
+      description: 'test description',
+    });
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest = makeLlmRequest();
+    llmRequest.config = {systemInstruction: ''};
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config.systemInstruction).toBe(
+      'You are an agent. Your internal name is "agent". ' +
+        'The description about you is "test description".',
+    );
+  });
+
+  it('skips the preamble for a single_turn agent', async () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'gemini-2.5-flash',
+      mode: 'single_turn',
+    });
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest = makeLlmRequest();
+    llmRequest.config = {systemInstruction: ''};
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config.systemInstruction).toBe('');
+  });
+
+  it('creates no config for a single_turn agent that had none', async () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'gemini-2.5-flash',
+      mode: 'single_turn',
+    });
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config).toBeUndefined();
+  });
+
+  it('names an agent that cannot transfer anywhere', async () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'gemini-2.5-flash',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config?.systemInstruction).toBe(
+      'You are an agent. Your internal name is "agent".',
+    );
+  });
+});
+
+describe('identity instruction in the LlmAgent request chain', () => {
+  it('puts the preamble ahead of the agent instruction', async () => {
+    const model = new RecordingLlm();
+    const agent = new LlmAgent({
+      name: 'weather_agent',
+      model,
+      description: 'Answers questions about the weather.',
+      instruction: 'Be concise.',
+    });
+
+    await runAgentOnce(agent);
+
+    expect(model.lastRequest?.config?.systemInstruction).toBe(
+      'You are an agent. Your internal name is "weather_agent". ' +
+        'The description about you is "Answers questions about the weather.".' +
+        '\n\nBe concise.',
+    );
+  });
+
+  it('sends only the agent instruction for a single_turn agent', async () => {
+    const model = new RecordingLlm();
+    const agent = new LlmAgent({
+      name: 'classifier',
+      model,
+      mode: 'single_turn',
+      instruction: 'Reply with one of: bug, feature, question.',
+    });
+
+    await runAgentOnce(agent);
+
+    expect(model.lastRequest?.config?.systemInstruction).toBe(
+      'Reply with one of: bug, feature, question.',
     );
   });
 });
