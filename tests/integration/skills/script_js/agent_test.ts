@@ -16,7 +16,6 @@ const PROJECT_PATH = `${dirname}/tests/integration/skills/script_js`;
 // The agent writes script output into a dedicated subdirectory of the project
 // (see agent.ts), never into the project/working directory itself.
 const OUTPUT_PATH = `${PROJECT_PATH}/output`;
-const TEST_EXECUTION_TIMEOUT = 60000;
 
 /** Directory backing the CLI's file artifact service for this run. */
 let artifactRoot: string;
@@ -110,102 +109,98 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
     // An older run wrote into the fixture dir; clear it so the assertions
     // below see only what this run produced. See GENERATED_FILE_NAMES.
     await removeGeneratedOutputs(PROJECT_PATH);
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 
-  it(
-    'should run agent with skills successfully',
-    async () => {
-      // getArtifactServiceFromUri strips the scheme with a plain string split,
-      // so the path has to follow `file://` directly: a Windows drive letter
-      // does not survive the leading slash of a canonical `file:///` URL.
-      const artifactServiceUri = `file://${artifactRoot.split(path.sep).join('/')}`;
-      const childProcess = spawn(
-        'npm',
-        ['run', 'start', '--', '--artifact_service_uri', artifactServiceUri],
-        {
-          cwd: PROJECT_PATH,
-          shell: true,
-          env: {...process.env, ADK_SKILL_OUTPUT_DIR: outputDir},
-        },
-      );
+  it('should run agent with skills successfully', async () => {
+    // getArtifactServiceFromUri strips the scheme with a plain string split,
+    // so the path has to follow `file://` directly: a Windows drive letter
+    // does not survive the leading slash of a canonical `file:///` URL.
+    const artifactServiceUri = `file://${artifactRoot.split(path.sep).join('/')}`;
+    const childProcess = spawn(
+      'npm',
+      ['run', 'start', '--', '--artifact_service_uri', artifactServiceUri],
+      {
+        cwd: PROJECT_PATH,
+        shell: true,
+        env: {...process.env, ADK_SKILL_OUTPUT_DIR: outputDir},
+      },
+    );
 
-      const response = await sendInput(
-        childProcess,
-        'Let`s create algorithmic art.\n',
-      );
-      expect(response.toString()).toContain(
-        'I have created an original algorithmic art piece titled **"Ephemeral Entanglement"**.\n\nFollowing the generative art movement philosophy, I\'ve generated three files for you:\n\n1.  **`ephemeral_entanglement.md`**: The algorithmic philosophy detailing the conceptual foundation of this piece. It explores the delicate dance between deterministic forces and stochastic drift, visualizing unseen connections in a dynamic system.\n2.  **`index.html`**: The interactive viewer for the generative art. It includes a user interface to adjust parameters like particle count, connection radius, and noise scale, allowing you to explore the algorithm\'s emergent behavior.\n3.  **`sketch.js`**: The meticulously crafted p5.js algorithm that brings the philosophy to life. It uses layered Perlin noise to drive a flow field, guiding particles that form ephemeral, glowing bonds when they come into proximity. \n\nYou can view the art by opening the `index.html` file in your web browser. Let the algorithmic dance begin!',
-      );
+    const response = await sendInput(
+      childProcess,
+      'Let`s create algorithmic art.\n',
+    );
+    expect(response.toString()).toContain(
+      'I have created an original algorithmic art piece titled **"Ephemeral Entanglement"**.\n\nFollowing the generative art movement philosophy, I\'ve generated three files for you:\n\n1.  **`ephemeral_entanglement.md`**: The algorithmic philosophy detailing the conceptual foundation of this piece. It explores the delicate dance between deterministic forces and stochastic drift, visualizing unseen connections in a dynamic system.\n2.  **`index.html`**: The interactive viewer for the generative art. It includes a user interface to adjust parameters like particle count, connection radius, and noise scale, allowing you to explore the algorithm\'s emergent behavior.\n3.  **`sketch.js`**: The meticulously crafted p5.js algorithm that brings the philosophy to life. It uses layered Perlin noise to drive a flow field, guiding particles that form ephemeral, glowing bonds when they come into proximity. \n\nYou can view the art by opening the `index.html` file in your web browser. Let the algorithmic dance begin!',
+    );
 
-      // Shut the CLI down so the session's artifacts are fully flushed.
-      await sendInput(childProcess, 'exit\n');
+    // Shut the CLI down so the session's artifacts are fully flushed.
+    await sendInput(childProcess, 'exit\n');
 
-      // verify that files were created in the declared output directory, and
-      // not in the agent's working directory, with the expected content
-      const resultMdFile = await fs.readFile(
-        path.join(outputDir, 'ephemeral_entanglement.md'),
-        'utf-8',
-      );
-      const resultScriptFile = await fs.readFile(
-        path.join(outputDir, 'sketch.js'),
-        'utf-8',
-      );
-      const resultHtmlFile = await fs.readFile(
-        path.join(outputDir, 'index.html'),
-        'utf-8',
-      );
+    // verify that files were created in the declared output directory, and
+    // not in the agent's working directory, with the expected content
+    const resultMdFile = await fs.readFile(
+      path.join(outputDir, 'ephemeral_entanglement.md'),
+      'utf-8',
+    );
+    const resultScriptFile = await fs.readFile(
+      path.join(outputDir, 'sketch.js'),
+      'utf-8',
+    );
+    const resultHtmlFile = await fs.readFile(
+      path.join(outputDir, 'index.html'),
+      'utf-8',
+    );
 
-      // The script's output also belongs to the session, not to the directory
-      // the agent process happens to be running in.
-      const artifactMdFile = await readArtifact('ephemeral_entanglement.md');
-      const artifactScriptFile = await readArtifact('sketch.js');
-      const artifactHtmlFile = await readArtifact('index.html');
+    // The script's output also belongs to the session, not to the directory
+    // the agent process happens to be running in.
+    const artifactMdFile = await readArtifact('ephemeral_entanglement.md');
+    const artifactScriptFile = await readArtifact('sketch.js');
+    const artifactHtmlFile = await readArtifact('index.html');
 
-      for (const name of GENERATED_FILE_NAMES) {
-        await expect(fs.access(path.join(PROJECT_PATH, name))).rejects.toThrow(
-          /ENOENT/,
-        );
-      }
+    for (const name of GENERATED_FILE_NAMES) {
+      await expect(fs.access(path.join(PROJECT_PATH, name))).rejects.toThrow(
+        /ENOENT/,
+      );
+    }
 
-      const expectedMdFile = await fs.readFile(
-        `${PROJECT_PATH}/expected/ephemeral_entanglement.md`,
-        'utf-8',
-      );
-      const expectedScriptFile = await fs.readFile(
-        `${PROJECT_PATH}/expected/sketch.js`,
-        'utf-8',
-      );
-      const expectedHtmlFile = await fs.readFile(
-        `${PROJECT_PATH}/expected/index.html`,
-        'utf-8',
-      );
+    const expectedMdFile = await fs.readFile(
+      `${PROJECT_PATH}/expected/ephemeral_entanglement.md`,
+      'utf-8',
+    );
+    const expectedScriptFile = await fs.readFile(
+      `${PROJECT_PATH}/expected/sketch.js`,
+      'utf-8',
+    );
+    const expectedHtmlFile = await fs.readFile(
+      `${PROJECT_PATH}/expected/index.html`,
+      'utf-8',
+    );
 
-      expect((normalizeLineEndings(resultMdFile) as string).trim()).toEqual(
-        (normalizeLineEndings(expectedMdFile) as string).trim(),
-      );
-      expect((normalizeLineEndings(resultScriptFile) as string).trim()).toEqual(
-        (normalizeLineEndings(expectedScriptFile) as string).trim(),
-      );
-      expect((normalizeLineEndings(resultHtmlFile) as string).trim()).toEqual(
-        (normalizeLineEndings(expectedHtmlFile) as string).trim(),
-      );
+    expect((normalizeLineEndings(resultMdFile) as string).trim()).toEqual(
+      (normalizeLineEndings(expectedMdFile) as string).trim(),
+    );
+    expect((normalizeLineEndings(resultScriptFile) as string).trim()).toEqual(
+      (normalizeLineEndings(expectedScriptFile) as string).trim(),
+    );
+    expect((normalizeLineEndings(resultHtmlFile) as string).trim()).toEqual(
+      (normalizeLineEndings(expectedHtmlFile) as string).trim(),
+    );
 
-      expect((normalizeLineEndings(artifactMdFile) as string).trim()).toEqual(
-        (normalizeLineEndings(expectedMdFile) as string).trim(),
-      );
-      expect(
-        (normalizeLineEndings(artifactScriptFile) as string).trim(),
-      ).toEqual((normalizeLineEndings(expectedScriptFile) as string).trim());
-      expect((normalizeLineEndings(artifactHtmlFile) as string).trim()).toEqual(
-        (normalizeLineEndings(expectedHtmlFile) as string).trim(),
-      );
+    expect((normalizeLineEndings(artifactMdFile) as string).trim()).toEqual(
+      (normalizeLineEndings(expectedMdFile) as string).trim(),
+    );
+    expect((normalizeLineEndings(artifactScriptFile) as string).trim()).toEqual(
+      (normalizeLineEndings(expectedScriptFile) as string).trim(),
+    );
+    expect((normalizeLineEndings(artifactHtmlFile) as string).trim()).toEqual(
+      (normalizeLineEndings(expectedHtmlFile) as string).trim(),
+    );
 
-      // Fail loudly if the run produced a `_<n>` variant.
-      const generated = (await fs.readdir(outputDir)).filter(isGeneratedOutput);
-      expect(generated.sort()).toEqual([...GENERATED_FILE_NAMES].sort());
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    // Fail loudly if the run produced a `_<n>` variant.
+    const generated = (await fs.readdir(outputDir)).filter(isGeneratedOutput);
+    expect(generated.sort()).toEqual([...GENERATED_FILE_NAMES].sort());
+  });
 
   afterAll(async () => {
     await fs.rm(outputDir, {recursive: true, force: true}).catch(() => {});

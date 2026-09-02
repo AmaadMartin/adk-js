@@ -17,13 +17,21 @@ import {defineConfig} from 'vitest/config';
  * This is a hang guard, not an expected runtime: the slowest hook is a fixture
  * `npm run build`, measured at 3.6s on ubuntu. Nothing measures the server
  * starts on the slowest CI runner, so the budget stays where it was until
- * somebody does. Trade-off: a stuck hook takes this long to surface.
+ * somebody does. Keep it above the 60s server start watchdog in
+ * `tests/integration/test_api_server.ts`, so a server that boots but never
+ * announces itself fails with that watchdog's message rather than a bare
+ * `Hook timed out`. A per-file `it()`/hook argument replaces this value rather
+ * than raising it, so a file that states one must record the measurement
+ * behind it. Trade-off: a stuck hook takes this long to surface.
  */
 const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
 
 /**
- * Test budget (ms) for the `integration` project: matches the largest per-file
- * timeout in the repo. Per-file `it()`/hook timeouts still override both.
+ * Test budget (ms) for the `integration` project: a test body spawns
+ * `npm run start` and reads the child's stdout to EOF with no internal
+ * timeout, so this budget is its only bound. A per-file `it()`/hook argument
+ * replaces this value rather than raising it, so a file that states one must
+ * record the measurement behind it.
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 

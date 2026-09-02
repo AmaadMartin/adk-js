@@ -25,8 +25,6 @@ import {
 import {assertWorkspaceAdkCliAvailable} from '../workspace_cli.js';
 
 const dirname = process.cwd();
-const TEST_EXECUTION_TIMEOUT = 60000;
-const HOOK_TIMEOUT = 120000;
 
 async function runToCompletion(agent: RunnableRoot): Promise<Event[]> {
   const sessionService = new InMemorySessionService();
@@ -125,32 +123,28 @@ class NodeModulesAgent extends BaseAgent {
 exports.rootAgent = new NodeModulesAgent();`,
     );
     await loader.preloadAgents();
-  }, HOOK_TIMEOUT);
+  });
 
-  it(
-    'should discover apps vs agents across directories and standalone files',
-    async () => {
-      const apps = await loader.listApps();
-      expect(apps).toHaveLength(2);
-      expect(apps).toContain('service_alpha');
-      expect(apps).toContain('standalone_app');
+  it('should discover apps vs agents across directories and standalone files', async () => {
+    const apps = await loader.listApps();
+    expect(apps).toHaveLength(2);
+    expect(apps).toContain('service_alpha');
+    expect(apps).toContain('standalone_app');
 
-      const agentsAndApps = await loader.listAgents();
-      expect(agentsAndApps).toHaveLength(5);
-      expect(agentsAndApps).toContain('service_alpha');
-      expect(agentsAndApps).toContain('service_beta');
-      // Before a Workflow could be a root this was not an error, it was a
-      // silence: the file exported nothing matching `isBaseAgent`, so the
-      // directory simply did not show up.
-      expect(agentsAndApps).toContain('service_graph');
-      expect(agentsAndApps).toContain('standalone_agent');
-      expect(agentsAndApps).toContain('standalone_app');
-      expect(agentsAndApps).not.toContain('.hidden');
-      expect(agentsAndApps).not.toContain('node_modules');
-      expect(await loader.listLoadFailures()).toEqual([]);
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    const agentsAndApps = await loader.listAgents();
+    expect(agentsAndApps).toHaveLength(5);
+    expect(agentsAndApps).toContain('service_alpha');
+    expect(agentsAndApps).toContain('service_beta');
+    // Before a Workflow could be a root this was not an error, it was a
+    // silence: the file exported nothing matching `isBaseAgent`, so the
+    // directory simply did not show up.
+    expect(agentsAndApps).toContain('service_graph');
+    expect(agentsAndApps).toContain('standalone_agent');
+    expect(agentsAndApps).toContain('standalone_app');
+    expect(agentsAndApps).not.toContain('.hidden');
+    expect(agentsAndApps).not.toContain('node_modules');
+    expect(await loader.listLoadFailures()).toEqual([]);
+  });
 
   it('should load App from directory entrypoint and expose App and rootAgent', async () => {
     const appFile = await loader.getAppFile('service_alpha');
@@ -185,23 +179,19 @@ exports.rootAgent = new NodeModulesAgent();`,
    * `Symbol.for('google.adk.workflow.workflow')` brand exists for, and the case
    * an `instanceof` check would silently fail.
    */
-  it(
-    'should load a compiled Workflow export as the root, unwrapped',
-    async () => {
-      const agentFile = await loader.getAgentFile('service_graph');
-      const rootAgent = await agentFile.loadAgent();
+  it('should load a compiled Workflow export as the root, unwrapped', async () => {
+    const agentFile = await loader.getAgentFile('service_graph');
+    const rootAgent = await agentFile.loadAgent();
 
-      // Held as the workflow it is, not dressed as an agent: `isWorkflow` is
-      // what the dev server's graph renderer and the a2a card match on.
-      expect(isBaseAgent(rootAgent)).toBe(false);
-      expect(isWorkflow(rootAgent)).toBe(true);
-      expect(rootAgent.name).toBe('graph_workflow');
-      expect(rootAgent.description).toBe(
-        'Normalizes the question, then answers it.',
-      );
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    // Held as the workflow it is, not dressed as an agent: `isWorkflow` is
+    // what the dev server's graph renderer and the a2a card match on.
+    expect(isBaseAgent(rootAgent)).toBe(false);
+    expect(isWorkflow(rootAgent)).toBe(true);
+    expect(rootAgent.name).toBe('graph_workflow');
+    expect(rootAgent.description).toBe(
+      'Normalizes the question, then answers it.',
+    );
+  });
 
   it('should run a loaded Workflow root through a real Runner', async () => {
     const agentFile = await loader.getAgentFile('service_graph');
@@ -250,5 +240,5 @@ exports.rootAgent = new NodeModulesAgent();`,
     } finally {
       await cleanUpFixture(projectPath);
     }
-  }, HOOK_TIMEOUT);
+  });
 });

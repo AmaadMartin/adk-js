@@ -14,8 +14,9 @@ const dirname = process.cwd();
 
 // `tests/integration/global_setup.ts` installs the fixture; the hook below only
 // builds it. Each test then runs a short command inside the built fixture.
-// Per-test budget, not a build budget. Windows CI is slow enough to need the
-// wide margin.
+// Per-test budget, not a build budget: don't raise it for hook flakes, because
+// the hooks are on the project's hookTimeout. It replaces the project's 60s
+// testTimeout, because Windows CI is slow enough to need the wide margin.
 const TEST_EXECUTION_TIMEOUT = 120000;
 
 describe('Build setup', () => {
@@ -45,6 +46,8 @@ describe('Build setup', () => {
         expect(buildResult.stderr).toBe('');
         expect(buildResult.stdout).toContain('\nBuild complete');
       }
+      // Replaces the project's 120s hookTimeout rather than raising it: the
+      // fixture build is slow on Windows CI.
     }, 300000);
 
     it(
@@ -131,6 +134,7 @@ describe('Build setup', () => {
             );
           });
       }
-    }, 120000);
+      // No hook budget: the 120s project hookTimeout already applies.
+    });
   });
 });
