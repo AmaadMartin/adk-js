@@ -379,6 +379,18 @@ describe('PluginManager', () => {
       ]);
     });
 
+    it('is a no-op for a plugin that does not implement the hook', async () => {
+      service.registerPlugin(plugin1);
+
+      await expect(
+        service.runOnAgentErrorCallback({
+          agent,
+          callbackContext: mockCallbackContext,
+          error: mockError,
+        }),
+      ).resolves.toBeUndefined();
+    });
+
     it('keeps notifying after a plugin throws, and never re-throws', async () => {
       const failing = new RecordingPlugin('failing', new Error('plugin boom'));
       const later = new RecordingPlugin('later');

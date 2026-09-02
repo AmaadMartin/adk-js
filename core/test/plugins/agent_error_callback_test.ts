@@ -95,6 +95,13 @@ class FailingPlugin extends BasePlugin {
   }
 }
 
+/** A plugin manager that fails the whole fan-out, not just one plugin. */
+class ThrowingPluginManager extends PluginManager {
+  override async runOnAgentErrorCallback(): Promise<void> {
+    throw new Error('plugin manager exploded');
+  }
+}
+
 function createContext(
   agent: BaseAgent,
   plugins: BasePlugin[],
@@ -269,5 +276,22 @@ describe('onAgentErrorCallback', () => {
     expect(failing.notified).toBe(true);
     expect(tracker.agentErrors).toHaveLength(1);
     expect(tracker.agentErrors[0].error.message).toBe('agent crashed');
+  });
+
+  it('propagates the agent error when the whole fan-out fails', async () => {
+    const original = new Error('agent crashed');
+    const agent = new CrashingAgent({name: 'crash_agent'}, original);
+    const context = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new ThrowingPluginManager(),
+    });
+
+    const thrown = await drain(agent.runAsync(context)).catch(
+      (e: unknown) => e,
+    );
+
+    expect(thrown).toBe(original);
   });
 });

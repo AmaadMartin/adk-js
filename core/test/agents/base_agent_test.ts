@@ -427,6 +427,20 @@ describe('BaseAgent', () => {
       expect(events).toHaveLength(1);
       expect(events[0].content).toEqual(text('from plugin'));
     });
+
+    it('yields plugin after-content from runLive', async () => {
+      const plugin = new AgentHookPlugin(
+        'hooks',
+        undefined,
+        text('after live'),
+      );
+      const agent = new MockAgent({name: 'test_agent'});
+
+      const events = await drain(agent.runLive(contextFor(agent, plugin)));
+
+      expect(events).toHaveLength(1);
+      expect(events[0].content).toEqual(text('after live'));
+    });
   });
 
   describe('clone validation', () => {
