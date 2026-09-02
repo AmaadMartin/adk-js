@@ -1063,12 +1063,14 @@ describe('LlmAgent outputSchema with tools', () => {
   async function captureRequest(options: {
     model: string;
     withTools: boolean;
+    mode?: 'single_turn' | 'task';
   }): Promise<LlmRequest> {
     const llm = new CapturingLlm({model: options.model});
     const agent = new LlmAgent({
       name: 'test_agent',
       model: llm,
       instruction: 'Base instruction',
+      mode: options.mode,
       outputSchema: OUTPUT_SCHEMA,
       tools: options.withTools
         ? [
@@ -1164,6 +1166,22 @@ describe('LlmAgent outputSchema with tools', () => {
       );
     },
   );
+
+  it('omits the set_model_response instruction and tool in task mode', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const request = await captureRequest({
+      model: 'gemini-2.5-flash',
+      withTools: true,
+      mode: 'task',
+    });
+
+    expect(request.toolsDict).not.toHaveProperty('set_model_response');
+    expect(request.config?.systemInstruction).not.toContain(
+      'set_model_response',
+    );
+    expect(request.toolsDict).toHaveProperty('finish_task');
+  });
 
   it('persists state writes made in processLlmRequest across turns', async () => {
     class StateProbeTool extends BaseTool {
