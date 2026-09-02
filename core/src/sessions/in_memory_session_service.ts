@@ -34,24 +34,20 @@ export function isInMemoryConnectionString(uri?: string): boolean {
 }
 
 /**
- * Orders sessions oldest-first, breaking ties on user ID and then session ID
- * so that a list is stable across calls.
+ * Builds the comparator that orders a listed page of sessions.
+ *
+ * Sessions run oldest-first unless `order` is `'desc'`. Ties break on user ID
+ * and then session ID, ascending in both directions, so that a list is stable
+ * across calls.
  */
-function compareByLastUpdateTime(a: Session, b: Session): number {
-  return (
-    a.lastUpdateTime - b.lastUpdateTime ||
+function compareSessions(
+  order: ListSessionsRequest['order'],
+): (a: Session, b: Session) => number {
+  const direction = order === 'desc' ? -1 : 1;
+  return (a, b) =>
+    direction * (a.lastUpdateTime - b.lastUpdateTime) ||
     a.userId.localeCompare(b.userId) ||
-    a.id.localeCompare(b.id)
-  );
-}
-
-/** {@link compareByLastUpdateTime} with the time term reversed. */
-function compareByLastUpdateTimeDesc(a: Session, b: Session): number {
-  return (
-    b.lastUpdateTime - a.lastUpdateTime ||
-    a.userId.localeCompare(b.userId) ||
-    a.id.localeCompare(b.id)
-  );
+    a.id.localeCompare(b.id);
 }
 
 /**
@@ -216,9 +212,7 @@ export class InMemorySessionService extends BaseSessionService {
       ),
     );
 
-    all.sort(
-      order === 'desc' ? compareByLastUpdateTimeDesc : compareByLastUpdateTime,
-    );
+    all.sort(compareSessions(order));
 
     if (limit === undefined) {
       const totalItems = all.length;
