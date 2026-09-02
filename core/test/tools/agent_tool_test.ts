@@ -755,6 +755,25 @@ describe('AgentTool input schema', () => {
     ).rejects.toThrow();
   });
 
+  it('validates against a schema set directly on the agent', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    agent.inputSchema = {
+      type: Type.OBJECT,
+      properties: {city: {type: Type.STRING}},
+      required: ['city'],
+    };
+    const nested = stubNestedRunner();
+
+    await new AgentTool({agent}).runAsync({
+      args: {city: 'Paris'},
+      toolContext: createToolContext({agent}),
+    });
+
+    const text = nested.newMessage?.parts?.[0].text;
+    expect(text).toBeDefined();
+    expect(JSON.parse(text!)).toEqual({city: 'Paris'});
+  });
+
   it('passes the validated arguments as bare JSON', async () => {
     const agent = new LlmAgent({name: 'sub-agent', inputSchema});
     const nested = stubNestedRunner();
