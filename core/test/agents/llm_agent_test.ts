@@ -89,6 +89,24 @@ class MockLlm extends BaseLlm {
   }
 }
 
+/** A model that throws something that is not an `Error`. */
+class ThrowingLlm extends BaseLlm {
+  constructor(private readonly thrown: unknown) {
+    super({model: 'throwing-llm'});
+  }
+
+  // eslint-disable-next-line require-yield -- the generator only ever throws.
+  async *generateContentAsync(
+    _request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    throw this.thrown;
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
 class StreamingMockLlm extends BaseLlm {
   responseChunks: LlmResponse[];
 
@@ -280,6 +298,9 @@ describe('LlmAgent.callLlm', () => {
   const onModelErrorPluginResponse: LlmResponse = {
     content: {parts: [{text: 'on model error plugin'}]},
   };
+  const onModelErrorAgentResponse: LlmResponse = {
+    content: {parts: [{text: 'on model error agent'}]},
+  };
   const modelError = new Error(
     JSON.stringify({
       error: {
@@ -362,6 +383,71 @@ describe('LlmAgent.callLlm', () => {
     agent.model = new MockLlm(null, modelError);
     const result = await callLlmUnderTest();
     expect(result).toEqual([{errorCode: '500', errorMessage: 'LLM error'}]);
+  });
+
+  it('uses the agent on model error callback when no plugin recovers', async () => {
+    agent.model = new MockLlm(null, modelError);
+    agent.onModelErrorCallback = ({request, error}) => {
+      expect(request).toBe(llmRequest);
+      expect(error).toBe(modelError);
+      return onModelErrorAgentResponse;
+    };
+    const result = await callLlmUnderTest();
+    expect(result).toEqual([onModelErrorAgentResponse]);
+  });
+
+  it('keeps the parsed error response when the agent callback returns nothing', async () => {
+    agent.model = new MockLlm(null, modelError);
+    agent.onModelErrorCallback = () => undefined;
+    const result = await callLlmUnderTest();
+    expect(result).toEqual([{errorCode: '500', errorMessage: 'LLM error'}]);
+  });
+
+  it('stops at the first agent callback that returns a response', async () => {
+    agent.model = new MockLlm(null, modelError);
+    const calls: string[] = [];
+    agent.onModelErrorCallback = [
+      () => {
+        calls.push('first');
+        return undefined;
+      },
+      () => {
+        calls.push('second');
+        return onModelErrorAgentResponse;
+      },
+      () => {
+        calls.push('third');
+        return afterCallbackResponse;
+      },
+    ];
+    const result = await callLlmUnderTest();
+    expect(result).toEqual([onModelErrorAgentResponse]);
+    expect(calls).toEqual(['first', 'second']);
+  });
+
+  it('skips the agent callbacks when a plugin recovers from the error', async () => {
+    pluginManager.registerPlugin(mockPlugin);
+    mockPlugin.onModelErrorResponse = onModelErrorPluginResponse;
+    agent.model = new MockLlm(null, modelError);
+    let agentCallbackCalls = 0;
+    agent.onModelErrorCallback = () => {
+      agentCallbackCalls += 1;
+      return onModelErrorAgentResponse;
+    };
+    const result = await callLlmUnderTest();
+    expect(result).toEqual([onModelErrorPluginResponse]);
+    expect(agentCallbackCalls).toBe(0);
+  });
+
+  it('rethrows a non-Error throw without consulting the callbacks', async () => {
+    agent.model = new ThrowingLlm('model exploded');
+    let agentCallbackCalls = 0;
+    agent.onModelErrorCallback = () => {
+      agentCallbackCalls += 1;
+      return onModelErrorAgentResponse;
+    };
+    await expect(callLlmUnderTest()).rejects.toBe('model exploded');
+    expect(agentCallbackCalls).toBe(0);
   });
 });
 
