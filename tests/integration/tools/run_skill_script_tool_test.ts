@@ -13,6 +13,7 @@ import {
   SkillToolset,
   UnsafeLocalCodeExecutor,
 } from '@google/adk';
+import {executionFailed} from '@google/adk/code_executors/code_execution_utils.js';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -275,6 +276,31 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       expect(result).toBeDefined();
       expect(result.stderr).toContain('skill');
       expect(result.stderr).toContain('powershell error');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
+
+  it.skipIf(!IS_WINDOWS)(
+    'reports a failing PowerShell skill script as a failure',
+    async () => {
+      const toolset = new SkillToolset([testSkill], {
+        codeExecutor: new UnsafeLocalCodeExecutor(),
+        scriptOutputDir: outputDir,
+      });
+      const tool = new RunSkillScriptTool(toolset);
+
+      const result = (await tool.runAsync({
+        args: {
+          skill_name: 'test-skill',
+          script_path: 'scripts/fail.ps1',
+        },
+        toolContext: createMockContext(),
+      })) as CodeExecutionResult;
+
+      // The wrapper calls the script, so it has to hand on the status the
+      // script chose. Without that, the model is told the run succeeded.
+      expect(result.exitCode).not.toBe(0);
+      expect(executionFailed(result)).toBe(true);
     },
     TEST_EXECUTION_TIMEOUT,
   );

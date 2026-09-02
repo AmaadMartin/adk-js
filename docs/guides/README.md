@@ -52,6 +52,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 ### Code Executors
 
 - [ContainerCodeExecutor](code_executors/container_code_executor/index.md) - Running model-generated code in a hardened Docker container under a wall-clock bound.
+- [UnsafeLocalCodeExecutor](code_executors/unsafe_local_code_executor/index.md) - Running model-written code on the local host, and what its result reports.
 
 ### Evaluation
 
