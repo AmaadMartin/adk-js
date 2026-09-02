@@ -132,6 +132,8 @@ const runConfig: Partial<RunConfig> = {
 };
 ```
 
+ADK-owned spans read this config, so the run above records no request, response
+or tool content on its spans while the rest of the process keeps its default.
 Each knob resolves in this order: the `ADK_TELEMETRY_IGNORE_RUN_CONFIG` admin
 lock, then the per-request field, then the environment variable, then the
 default. Set the lock to `1` or `true` and the per-request fields are ignored,
@@ -150,8 +152,7 @@ so a live request always carries both. Pass `StreamingMode.BIDI` to record that
 a run is bidirectional; `runLive()` does not branch on the value, and
 `runAsync()` ignores it.
 
-`toolThreadPoolConfig` is accepted and validated so that one configuration can
-drive several ADK SDKs. It does not change tool execution here: a tool callback
-is not structured-cloneable, so Node cannot move it onto a worker thread. Tools
-always run on the main event loop. `maxWorkers` defaults to 4 and must be at
-least 1.
+`toolThreadPoolConfig` is accepted so that one configuration can drive several
+ADK SDKs, but nothing here reads it. A tool callback is not
+structured-cloneable, so Node cannot move it onto a worker thread; tools always
+run on the main event loop.

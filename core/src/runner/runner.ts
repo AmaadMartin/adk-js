@@ -443,7 +443,7 @@ export class Runner {
 
                 // Stamped before the callback so a plugin reads the merged
                 // metadata, and again below because a plugin that replaces the
-                // event returns one that was never stamped.
+                // event returns an unstamped one.
                 applyRunConfigCustomMetadata(event, runConfig);
                 // Step 3: Run the on_event callbacks before persisting so callback
                 // changes are stored in the session and match the streamed event.
