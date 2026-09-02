@@ -242,6 +242,9 @@ exports.rootAgent = new NodeModulesAgent();`,
 
   afterAll(async () => {
     // `finally` so a disposeAll() failure cannot skip the fixture cleanup.
+    // This one stays per-suite: the fixture has no `package.json`, so
+    // `tests/integration/global_setup.ts` neither installs nor cleans it, and
+    // the `node_modules` written above is this suite's own.
     try {
       await loader.disposeAll();
     } finally {

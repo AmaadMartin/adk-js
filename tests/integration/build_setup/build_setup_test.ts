@@ -12,9 +12,10 @@ import {getResponse, sendInput} from '../test_case_utils.js';
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 
-// Hooks do the install/build; each test only runs a short command inside the
-// installed fixture. Per-test budget, not an install budget. Windows CI is slow
-// enough to need the wide margin.
+// `tests/integration/global_setup.ts` installs the fixture; the hook below only
+// builds it. Each test then runs a short command inside the built fixture.
+// Per-test budget, not a build budget. Windows CI is slow enough to need the
+// wide margin.
 const TEST_EXECUTION_TIMEOUT = 120000;
 
 describe('Build setup', () => {
@@ -29,8 +30,6 @@ describe('Build setup', () => {
     const projectPath = `${dirname}/tests/integration/build_setup/${buildSetup}`;
 
     beforeAll(async () => {
-      await execAsync('npm install', {cwd: projectPath});
-
       if (buildSetup.startsWith('ts_')) {
         let buildResult;
         try {
@@ -112,13 +111,15 @@ describe('Build setup', () => {
     );
 
     afterAll(async () => {
-      const targets = ['node_modules', 'package-lock.json'];
+      // Only what the hook built. `global_setup.ts` removes `node_modules` and
+      // `package-lock.json` for every fixture once the pool has stopped.
+      const targets: string[] = [];
       if (buildSetup.startsWith('ts_')) {
         targets.push('dist');
       }
 
       // One target that cannot be removed must not stop the others, and must
-      // not turn a passing suite red. It does change the next run's install
+      // not turn a passing suite red. It does change the next run's build
       // though, so report it.
       for (const target of targets) {
         await fs

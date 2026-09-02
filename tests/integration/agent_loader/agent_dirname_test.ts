@@ -22,6 +22,9 @@ describe.each(['__dirname', '__filename', 'import_meta_url', 'dependency_url'])(
       testCaseName,
     );
 
+    // The fixture no longer installs: `tests/integration/global_setup.ts`
+    // does that, and the `start` script runs the CLI built at the workspace
+    // root, so the only precondition left is that build.
     beforeAll(async () => {
       await assertWorkspaceAdkCliAvailable();
     });
