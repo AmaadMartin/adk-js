@@ -336,19 +336,6 @@ export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.
 export {convertLegacyEvalSet} from './evaluation/legacy_eval_set_converter.js';
 export type {LegacyEvalCase} from './evaluation/legacy_eval_set_converter.js';
 export {
-  EvalLiveSession,
-  LIVE_RUN_CONFIG,
-  LIVE_SHUTDOWN_TIMEOUT_SECONDS,
-  LiveEventQueue,
-  isNormalClosure,
-  requireLiveEvalAgent,
-} from './evaluation/live_session.js';
-export {
-  DEFAULT_RETRY_ATTEMPTS,
-  EnsureRetryOptionsPlugin,
-  addDefaultRetryOptionsIfNotPresent,
-} from './evaluation/retry_options_utils.js';
-export {
   UserSimulatorStatus,
   validateNextUserMessage,
 } from './evaluation/simulation/user_simulator.js';

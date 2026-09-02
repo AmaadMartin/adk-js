@@ -5,16 +5,20 @@
  */
 
 import {
-  addDefaultRetryOptionsIfNotPresent,
   Context,
-  DEFAULT_RETRY_ATTEMPTS,
-  EnsureRetryOptionsPlugin,
   InMemorySessionService,
   InvocationContext,
   LlmRequest,
   PluginManager,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+
+// Eval-system internal, so deliberately absent from the public barrel.
+import {
+  addDefaultRetryOptionsIfNotPresent,
+  DEFAULT_RETRY_ATTEMPTS,
+  EnsureRetryOptionsPlugin,
+} from '../../src/evaluation/retry_options_utils.js';
 
 function createLlmRequest(): LlmRequest {
   return {contents: [], toolsDict: {}, liveConnectConfig: {}};

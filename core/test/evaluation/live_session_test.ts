@@ -10,22 +10,16 @@ import {
   BaseTool,
   Context,
   createEvent,
-  EvalLiveSession,
   Event,
   getLogger,
   InMemoryArtifactService,
   InMemorySessionService,
   InputValidationError,
   InvocationContext,
-  isNormalClosure,
-  LIVE_RUN_CONFIG,
-  LIVE_SHUTDOWN_TIMEOUT_SECONDS,
-  LiveEventQueue,
   LlmAgent,
   LlmRequest,
   LlmResponse,
   Logger,
-  requireLiveEvalAgent,
   RunAsyncToolRequest,
   Runner,
   Session,
@@ -35,6 +29,16 @@ import {
 } from '@google/adk';
 import {FunctionDeclaration, Modality} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+
+// The live driver is eval-system internal and deliberately absent from the
+// public barrel, as `RequestIntercepterPlugin` is.
+import {
+  EvalLiveSession,
+  isNormalClosure,
+  LIVE_RUN_CONFIG,
+  LIVE_SHUTDOWN_TIMEOUT_SECONDS,
+  requireLiveEvalAgent,
+} from '../../src/evaluation/live_session.js';
 
 import {FakeLiveLlm} from './test_helpers.js';
 
@@ -325,18 +329,6 @@ describe('requireLiveEvalAgent', () => {
 
     expect(() => requireLiveEvalAgent(workflow)).toThrow(InputValidationError);
     expect(() => requireLiveEvalAgent(workflow)).toThrow('eval_workflow');
-  });
-});
-
-describe('LiveEventQueue', () => {
-  it('hands over everything queued and empties itself', () => {
-    const queue = new LiveEventQueue();
-    const event = {invocationId: 'inv-1'} as Event;
-
-    queue.push(event);
-
-    expect(queue.drain()).toEqual([event]);
-    expect(queue.drain()).toEqual([]);
   });
 });
 
