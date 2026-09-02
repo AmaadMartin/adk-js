@@ -71,6 +71,13 @@ describe('service registry', () => {
 
   beforeEach(async () => {
     agentRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-agent-root-'));
+    // The fixture declares its module type, so a `.js` services file is ESM on
+    // every supported Node version, not only where module detection is on.
+    await fs.writeFile(
+      path.join(agentRoot, 'package.json'),
+      '{"type": "module"}',
+      'utf-8',
+    );
     registry = new ServiceRegistry();
     warn = vi
       .spyOn(AdkLogger.prototype, 'warn')
