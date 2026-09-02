@@ -171,6 +171,11 @@ const TASK_DELEGATION_WARNING =
  * The run config the wrapped agent runs under: the caller's, with the two
  * settings that cannot cross the boundary overridden.
  *
+ * Without this the nested run falls back to the `RunConfig` defaults: a
+ * `maxLlmCalls` ceiling of 500 whatever the caller asked for, and none of the
+ * caller's own settings. The count stays per-invocation, so the ceiling bounds
+ * the nested run rather than being shared with the caller's.
+ *
  * CFC (Compositional Function Calling) describes how the caller's own model
  * executes. Handing it to another agent switches that agent onto the live API
  * path, which only works if its model happens to support CFC. And only the
@@ -278,9 +283,11 @@ export class AgentTool extends BaseTool {
       parts: [
         {
           // With a schema the text must stay a bare JSON document: the wrapped
-          // agent re-validates it against that same schema. Without one, and
-          // without a string `request`, the keys are sorted so that the same
-          // arguments always produce the same message.
+          // agent re-validates it against that same schema, so any prose here
+          // fails that parse. Validating here catches arguments the model got
+          // wrong at the tool boundary instead of inside the sub-agent.
+          // Without a schema, and without a string `request`, the keys are
+          // sorted so that the same arguments always produce the same message.
           text: inputSchema
             ? JSON.stringify(parseWithSchema(inputSchema, args))
             : typeof request === 'string'

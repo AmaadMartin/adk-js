@@ -40,6 +40,7 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     Runner: vi.fn().mockImplementation((config) => ({
       appName: config?.appName,
       sessionService: config?.sessionService,
+      close: vi.fn(),
       runAsync: vi.fn(),
       closeToolsets: vi.fn(),
     })),
@@ -542,6 +543,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
         closeToolsets: vi.fn(),
       } as unknown as Runner;
@@ -1850,5 +1852,38 @@ describe('AgentTool input schema', () => {
     const declaration = new AgentTool({agent})._getDeclaration();
 
     expect(declaration.description).toBe('answers catalogue questions');
+  });
+
+  it('drops an argument the input schema does not declare', async () => {
+    const {nested} = captureNestedRun();
+    const agent = schemaAgent();
+
+    await new AgentTool({agent}).runAsync({
+      args: {query: 'hello', limit: 5, unexpected: 'dropped'},
+      toolContext: createToolContext({agent}),
+    });
+
+    const text = nested.newMessage?.parts?.[0]?.text;
+    if (text === undefined) {
+      expect.fail('the nested run received no text part');
+    }
+    expect(JSON.parse(text)).toEqual({query: 'hello', limit: 5});
+  });
+
+  it('sends the arguments a genai schema accepts', async () => {
+    const {nested} = captureNestedRun();
+    const agent = new LlmAgent({name: 'sub-agent', model: 'gemini-2.5-flash'});
+    agent.inputSchema = {
+      type: Type.OBJECT,
+      properties: {query: {type: Type.STRING}},
+      required: ['query'],
+    };
+
+    await new AgentTool({agent}).runAsync({
+      args: {query: 'hello'},
+      toolContext: createToolContext({agent}),
+    });
+
+    expect(nested.newMessage?.parts?.[0]?.text).toBe('{"query":"hello"}');
   });
 });
