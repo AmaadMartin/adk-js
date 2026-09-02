@@ -6,19 +6,25 @@
 
 import {
   BaseAgent,
+  BaseLlm,
+  BaseLlmConnection,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
   createEvent,
   Event,
   EventActions,
+  InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  LLMRegistry,
   LlmRequest,
+  LlmResponse,
   PluginManager,
   RunConfig,
+  Runner,
   Session,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import {Content, createUserContent} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 function createMockEvent(id: string, timestamp: number, text: string): Event {
@@ -389,5 +395,64 @@ describe('ContentRequestProcessor — rewind filtering', () => {
       'question one',
       'question three',
     ]);
+  });
+});
+
+/** Records each request the agent sends and answers with a fixed reply. */
+class CaptureLlm extends BaseLlm {
+  static override readonly supportedModels = [/capture-model/];
+  static readonly requests: LlmRequest[] = [];
+
+  override async *generateContentAsync(
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {
+    CaptureLlm.requests.push(structuredClone(llmRequest));
+    yield {content: {role: 'model', parts: [{text: 'the answer'}]}};
+  }
+
+  override connect(): Promise<BaseLlmConnection> {
+    throw new Error('not supported');
+  }
+}
+LLMRegistry.register(CaptureLlm);
+
+describe('model input context through the runner', () => {
+  it('reaches the model without entering the session', async () => {
+    CaptureLlm.requests.length = 0;
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: 'test-app',
+      agent: new LlmAgent({name: 'capture_agent', model: 'capture-model'}),
+      sessionService,
+    });
+    const session = await sessionService.createSession({
+      appName: 'test-app',
+      userId: 'ada',
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: 'ada',
+      sessionId: session.id,
+      newMessage: createUserContent('the question'),
+      runConfig: {
+        modelInputContext: [createUserContent('a retrieved document')],
+      },
+    })) {
+      // Drain the event stream so the invocation completes.
+    }
+
+    expect(CaptureLlm.requests).toHaveLength(1);
+    expect(requestTexts(CaptureLlm.requests[0])).toEqual([
+      'a retrieved document',
+      'the question',
+    ]);
+
+    const stored = await sessionService.getSession({
+      appName: 'test-app',
+      userId: 'ada',
+      sessionId: session.id,
+    });
+    const storedTexts = stored?.events.map((e) => e.content?.parts?.[0]?.text);
+    expect(storedTexts).toEqual(['the question', 'the answer']);
   });
 });
