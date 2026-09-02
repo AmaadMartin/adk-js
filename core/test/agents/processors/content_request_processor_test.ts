@@ -8,6 +8,7 @@ import {
   BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
+  createSession,
   Event,
   EventActions,
   InvocationContext,
@@ -191,20 +192,18 @@ function createContextWithModelInputContext(params: {
   userContent?: Content;
   modelInputContext?: Content[];
 }): InvocationContext {
-  const session = {
-    id: 'test-session',
-    events: params.events,
-    appName: 'test-app',
-    userId: 'test-user',
-  } as unknown as Session;
-
   return new InvocationContext({
     invocationId: 'test-invocation',
     agent: new LlmAgent({
       name: 'test_agent',
       model: 'gemini-2.5-flash',
     }) as BaseAgent,
-    session,
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+      events: params.events,
+    }),
     pluginManager: new PluginManager([]),
     userContent: params.userContent,
     runConfig: {modelInputContext: params.modelInputContext},
