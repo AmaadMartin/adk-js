@@ -1,4 +1,4 @@
-# NL planning
+# BasePlanner
 
 Applies an agent's planner to the outgoing model request, and hands the
 model's reply back to the planner. Reach for a planner when you want the model

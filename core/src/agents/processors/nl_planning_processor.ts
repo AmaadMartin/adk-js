@@ -8,42 +8,28 @@ import {createEvent, Event} from '../../events/event.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {LlmResponse} from '../../models/llm_response.js';
 import {BasePlanner, isBasePlanner} from '../../planners/base_planner.js';
-import {
-  BuiltInPlanner,
-  isBuiltInPlanner,
-} from '../../planners/built_in_planner.js';
+import {isBuiltInPlanner} from '../../planners/built_in_planner.js';
 import {PlanReActPlanner} from '../../planners/plan_re_act_planner.js';
 import {Context} from '../context.js';
 import {InvocationContext, requireAgent} from '../invocation_context.js';
+import {isLlmAgent} from '../llm_agent.js';
 import {ReadonlyContext} from '../readonly_context.js';
 import {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
 } from './base_llm_processor.js';
 
-/** The agent surface the planner resolver reads. */
-interface AgentWithPlanner {
-  planner?: unknown;
-}
-
-function hasPlanner(agent: object): agent is AgentWithPlanner {
-  return 'planner' in agent;
-}
-
 /**
  * Resolves the planner that governs this invocation.
  *
- * The `planner` property is read structurally rather than through
- * {@link isLlmAgent}, because a flow can drive an agent that supplies the
- * `LlmAgent` surface without carrying its brand. A value that is not a
- * {@link BasePlanner} falls back to {@link PlanReActPlanner}, matching
- * adk-python.
+ * A value that is not a {@link BasePlanner} falls back to
+ * {@link PlanReActPlanner}, matching adk-python.
  */
 function getPlanner(
   invocationContext: InvocationContext,
 ): BasePlanner | undefined {
   const agent = requireAgent(invocationContext);
-  if (!hasPlanner(agent) || !agent.planner) {
+  if (!isLlmAgent(agent) || !agent.planner) {
     return undefined;
   }
   return isBasePlanner(agent.planner) ? agent.planner : new PlanReActPlanner();
@@ -118,13 +104,7 @@ export class NlPlanningResponseProcessor extends BaseLlmResponseProcessor {
     }
 
     const planner = getPlanner(invocationContext);
-    // A planner that inherits the built-in no-op has nothing to do. The
-    // identity comparison is what still lets an overriding subclass run.
-    if (
-      !planner ||
-      planner.processPlanningResponse ===
-        BuiltInPlanner.prototype.processPlanningResponse
-    ) {
+    if (!planner) {
       return;
     }
 

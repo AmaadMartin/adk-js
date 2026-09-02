@@ -313,7 +313,7 @@ describe('NlPlanningRequestProcessor', () => {
   });
 
   it('falls back to PlanReActPlanner for a non-BasePlanner value', async () => {
-    const agent = new BareAgent({name: 'test_agent'});
+    const agent = new LlmAgent({name: 'test_agent'});
     Object.assign(agent, {planner: {}});
     const llmRequest = makeLlmRequest();
 
@@ -322,14 +322,14 @@ describe('NlPlanningRequestProcessor', () => {
     expect(llmRequest.config?.systemInstruction).toContain(PLANNING_TAG);
   });
 
-  it('applies the planner of an agent that is not an LlmAgent', async () => {
+  it('ignores a planner on an agent that is not an LlmAgent', async () => {
     const agent = new BareAgent({name: 'test_agent'});
     Object.assign(agent, {planner: new CustomPlanner()});
     const llmRequest = makeLlmRequest();
 
     await runRequestProcessor(createInvocationContext(agent), llmRequest);
 
-    expect(llmRequest.config?.systemInstruction).toBe('Custom instruction');
+    expect(llmRequest.config?.systemInstruction).toBeUndefined();
   });
 
   it('leaves the request untouched when the agent has no planner', async () => {
@@ -405,36 +405,44 @@ describe('NlPlanningResponseProcessor', () => {
     expect(planner.receivedParts).toEqual(responseParts);
   });
 
-  it('does not call processPlanningResponse for a plain BuiltInPlanner', async () => {
-    const spy = vi.spyOn(BuiltInPlanner.prototype, 'processPlanningResponse');
+  it('leaves the parts alone for a plain BuiltInPlanner', async () => {
     const agent = new LlmAgent({
       name: 'test_agent',
       planner: new BuiltInPlanner({thinkingConfig: {}}),
     });
+    const parts: Part[] = [
+      {text: 'thinking...', thought: true},
+      {text: 'Here is my response'},
+    ];
+    const llmResponse = makeLlmResponse(parts);
 
-    await runResponseProcessor(
+    const events = await runResponseProcessor(
       createInvocationContext(agent),
-      makeLlmResponse([{text: 'Here is my response'}]),
+      llmResponse,
     );
 
-    expect(spy).not.toHaveBeenCalled();
-    spy.mockRestore();
+    expect(llmResponse.content?.parts).toEqual(parts);
+    expect(events).toHaveLength(0);
   });
 
-  it('does not call processPlanningResponse for a non-overriding subclass', async () => {
-    const spy = vi.spyOn(BuiltInPlanner.prototype, 'processPlanningResponse');
+  it('leaves the parts alone for a non-overriding BuiltInPlanner subclass', async () => {
     const agent = new LlmAgent({
       name: 'test_agent',
       planner: new NonOverriddenBuiltInPlanner({thinkingConfig: {}}),
     });
+    const parts: Part[] = [
+      {text: 'thinking...', thought: true},
+      {text: 'Here is my response'},
+    ];
+    const llmResponse = makeLlmResponse(parts);
 
-    await runResponseProcessor(
+    const events = await runResponseProcessor(
       createInvocationContext(agent),
-      makeLlmResponse([{text: 'Here is my response'}]),
+      llmResponse,
     );
 
-    expect(spy).not.toHaveBeenCalled();
-    spy.mockRestore();
+    expect(llmResponse.content?.parts).toEqual(parts);
+    expect(events).toHaveLength(0);
   });
 
   it('replaces the parts with what the planner returned', async () => {
@@ -579,7 +587,7 @@ describe('NlPlanningResponseProcessor', () => {
   });
 
   it('falls back to PlanReActPlanner for a non-BasePlanner value', async () => {
-    const agent = new BareAgent({name: 'test_agent'});
+    const agent = new LlmAgent({name: 'test_agent'});
     Object.assign(agent, {planner: {}});
     const llmResponse = makeLlmResponse([
       {text: `${PLANNING_TAG}Step one.\n/*FINAL_ANSWER*/The answer.`},
@@ -591,5 +599,19 @@ describe('NlPlanningResponseProcessor', () => {
       {text: 'Step one.\n', thought: true},
       {text: 'The answer.'},
     ]);
+  });
+
+  it('ignores a planner on an agent that is not an LlmAgent', async () => {
+    const agent = new BareAgent({name: 'test_agent'});
+    Object.assign(agent, {planner: new StateWritingPlanner()});
+    const llmResponse = makeLlmResponse([{text: 'original'}]);
+
+    const events = await runResponseProcessor(
+      createInvocationContext(agent),
+      llmResponse,
+    );
+
+    expect(events).toHaveLength(0);
+    expect(llmResponse.content?.parts).toEqual([{text: 'original'}]);
   });
 });

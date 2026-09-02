@@ -10,4 +10,4 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Planners
 
-- [NL planning](planners/nl_planning/index.md) - Applying an agent's planner to the model request, and splitting the reply into a plan and an answer.
+- [BasePlanner](planners/planner/index.md) - Applying an agent's planner to the model request, and splitting the reply into a plan and an answer.

@@ -415,7 +415,7 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   contextCompactors?: BaseContextCompactor[];
 
   /**
-   * Instructs the agent to make a plan and execute it step by step.
+   * Runs the code blocks the model writes, and feeds their output back to it.
    */
   codeExecutor?: BaseCodeExecutor;
 
