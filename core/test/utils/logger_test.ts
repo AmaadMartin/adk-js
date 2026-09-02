@@ -7,6 +7,7 @@
 import {
   getLogger,
   isDebugEnabled,
+  isLogLevelEnabled,
   Logger,
   LogLevel,
   setLogger,
@@ -334,5 +335,54 @@ describe('isDebugEnabled', () => {
     setLogger(bare);
 
     expect(isDebugEnabled()).toBe(false);
+  });
+});
+
+describe('isLogLevelEnabled', () => {
+  beforeEach(() => {
+    resetLogger();
+  });
+
+  afterEach(() => {
+    resetLogger();
+  });
+
+  it('is false for DEBUG at the default level', () => {
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
+  });
+
+  it('is true for DEBUG once the level is lowered to DEBUG', () => {
+    setLogLevel(LogLevel.DEBUG);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(true);
+  });
+
+  it('is true for a level at or above the configured level', () => {
+    setLogLevel(LogLevel.WARN);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
+    expect(isLogLevelEnabled(LogLevel.WARN)).toBe(true);
+    expect(isLogLevelEnabled(LogLevel.ERROR)).toBe(true);
+  });
+
+  it('is false for a custom logger that cannot report its level', () => {
+    const customLogger: Logger = {
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    };
+
+    setLogger(customLogger);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
+  });
+
+  it('is false for the disabled logger', () => {
+    setLogger(null);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
   });
 });

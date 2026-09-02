@@ -727,6 +727,7 @@ export {
   LogLevel,
   getLogger,
   isDebugEnabled,
+  isLogLevelEnabled,
   setLogLevel,
   setLogger,
 } from './utils/logger.js';

@@ -33,7 +33,12 @@ import {
 } from '../../features/feature_registry.js';
 import {formatError} from '../../utils/error_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
-import {isDebugEnabled, logger} from '../../utils/logger.js';
+import {
+  isDebugEnabled,
+  isLogLevelEnabled,
+  logger,
+  LogLevel,
+} from '../../utils/logger.js';
 import {retryOnce} from '../../utils/retry_utils.js';
 import {isRecord, isStringArray} from '../../utils/type_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
@@ -42,6 +47,8 @@ import {applyConfirmationGate} from '../tool_confirmation.js';
 
 import {
   HttpDebugExchange,
+  mcpHttpDebugStorage,
+  McpHttpExchange,
   runWithHttpDebugSink,
 } from './http_debug_recorder.js';
 import {createMcpAuthConfig, McpAuthOptions} from './mcp_auth.js';
@@ -73,6 +80,25 @@ function asUiResourceUri(value: unknown): string | undefined {
 function appendHttpDebugInfo(
   toolContext: Context,
   exchanges: HttpDebugExchange[],
+): void {
+  if (exchanges.length === 0) {
+    return;
+  }
+  const metadata = toolContext.customMetadata;
+  const recorded = metadata[HTTP_DEBUG_METADATA_KEY];
+  metadata[HTTP_DEBUG_METADATA_KEY] = Array.isArray(recorded)
+    ? [...recorded, ...exchanges]
+    : exchanges;
+}
+
+/**
+ * Appends `exchanges` to the invocation's `http_debug_info` too. This is the
+ * second exchange shape the branch records; a sink that stayed empty adds
+ * nothing, so only the recorders that actually ran are represented.
+ */
+function appendMcpHttpDebugInfo(
+  toolContext: Context,
+  exchanges: McpHttpExchange[],
 ): void {
   if (exchanges.length === 0) {
     return;
@@ -552,19 +578,23 @@ export class MCPTool extends BaseTool {
   private async callWithHttpDebug(
     request: RunAsyncToolRequest,
   ): Promise<unknown> {
-    if (!isDebugEnabled()) {
+    // Two probes, because a custom logger may implement only one of them: a
+    // logger that answers either one is asking for a recording.
+    if (!isDebugEnabled() && !isLogLevelEnabled(LogLevel.DEBUG)) {
       return this.callMcpTool(request);
     }
 
     const exchanges: HttpDebugExchange[] = [];
+    const mcpExchanges: McpHttpExchange[] = [];
     try {
       return await runWithHttpDebugSink(exchanges, () =>
-        this.callMcpTool(request),
+        mcpHttpDebugStorage.run(mcpExchanges, () => this.callMcpTool(request)),
       );
     } finally {
       // In a `finally` so a failed call still reports what it sent, which is
       // the exchange an operator is usually after.
       appendHttpDebugInfo(request.toolContext, exchanges);
+      appendMcpHttpDebugInfo(request.toolContext, mcpExchanges);
     }
   }
 

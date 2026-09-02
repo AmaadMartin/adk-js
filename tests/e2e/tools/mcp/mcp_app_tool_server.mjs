@@ -5,14 +5,18 @@
  */
 
 /**
- * A minimal, real MCP server exposing one MCP App tool over stdio.
+ * A minimal, real MCP server exposing three tools over stdio.
  *
- * The tool declares its user interface in `_meta.ui`, and its input schema uses
+ * `weather` declares its user interface in `_meta.ui`, and its input schema uses
  * `oneOf`, which the genai `Schema` conversion cannot express. Asking for the
  * location `nowhere` returns a failed result (`isError`) instead of raising, so
  * a test can exercise the error path a server reports in band.
  *
- * The e2e test spawns this file as a child process.
+ * `render_chart` is backed by an MCP App and `sum` is a plain tool with no user
+ * interface, so a test can compare the widget path against a tool that declares
+ * none.
+ *
+ * The e2e tests spawn this file as a child process.
  */
 
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
@@ -40,17 +44,52 @@ const WEATHER_TOOL = {
   },
 };
 
+const RENDER_CHART_TOOL = {
+  name: 'render_chart',
+  description: 'Renders a chart in an MCP App.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      series: {type: 'array', items: {type: 'number'}},
+    },
+    required: ['series'],
+  },
+  _meta: {ui: {resourceUri: 'ui://charts/bar'}},
+};
+
+const SUM_TOOL = {
+  name: 'sum',
+  description: 'Adds two numbers, with no UI.',
+  inputSchema: {
+    type: 'object',
+    properties: {a: {type: 'number'}, b: {type: 'number'}},
+    required: ['a', 'b'],
+  },
+};
+
 const server = new Server(
   {name: 'e2e-mcp-app-server', version: '1.0.0'},
   {capabilities: {tools: {}}},
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [WEATHER_TOOL],
+  tools: [WEATHER_TOOL, RENDER_CHART_TOOL, SUM_TOOL],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.arguments?.location === 'nowhere') {
+  const args = request.params.arguments ?? {};
+
+  if (request.params.name === 'render_chart') {
+    return {
+      content: [{type: 'text', text: `charted ${args.series.length} points`}],
+    };
+  }
+
+  if (request.params.name === 'sum') {
+    return {content: [{type: 'text', text: String(args.a + args.b)}]};
+  }
+
+  if (args.location === 'nowhere') {
     return {
       content: [{type: 'text', text: 'unknown location'}],
       isError: true,

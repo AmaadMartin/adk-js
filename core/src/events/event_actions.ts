@@ -303,6 +303,8 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  * 3. **List fields** (`renderUiWidgets`) — the widgets of every source are
  *    concatenated in source order. A source that sets nothing contributes
  *    nothing, so the result stays `undefined` when no source sets it.
+ *    Parallel function responses each render their own widget, and
+ *    last-writer-wins would drop every widget but the last.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.

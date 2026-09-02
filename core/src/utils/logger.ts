@@ -181,6 +181,18 @@ export function setLogLevel(level: LogLevel) {
 }
 
 /**
+ * Whether the current logger would emit a message at `level`.
+ *
+ * Callers use this to skip work that only exists to produce a log record, such
+ * as capturing HTTP exchanges for a debug dump. A logger that cannot report its
+ * level answers `false`: turning capture on for a logger that will discard the
+ * result costs work and risks retaining data nobody reads.
+ */
+export function isLogLevelEnabled(level: LogLevel): boolean {
+  return currentLogger.isEnabledFor?.(level) ?? false;
+}
+
+/**
  * Whether the current logger emits debug messages.
  *
  * A logger that does not implement {@link Logger.isDebugEnabled} reports

@@ -27,7 +27,12 @@ import {
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
-import {createRecordingFetch, getHttpDebugSink} from './http_debug_recorder.js';
+import {
+  createMcpRecordingFetch,
+  createRecordingFetch,
+  getHttpDebugSink,
+  mcpHttpDebugStorage,
+} from './http_debug_recorder.js';
 
 /**
  * The optional peer backing every MCP connection.
@@ -179,10 +184,32 @@ function withHttpDebugRecording(
 }
 
 /**
- * Returns `options` with an instrumented `fetch` installed. This is the second
- * of the three debug recorders. Unlike the other two it is always installed,
- * because its capture can start after the session is open; it records only
- * while a capture is active, and delegates untouched otherwise.
+ * Returns `options` with a recording `fetch` installed, but only while an
+ * {@link mcpHttpDebugStorage} sink is active. With no sink the caller's
+ * options are handed back untouched.
+ *
+ * A copy is returned rather than the caller's object: `createSession` runs
+ * once per tool call and would otherwise wrap the recorder around itself
+ * again on every call, recording one exchange N times.
+ */
+function withMcpHttpDebugRecording(
+  options: StreamableHTTPClientTransportOptions,
+): StreamableHTTPClientTransportOptions {
+  const sink = mcpHttpDebugStorage.getStore();
+  if (!sink) {
+    return options;
+  }
+  return {
+    ...options,
+    fetch: createMcpRecordingFetch(options.fetch ?? globalThis.fetch, sink),
+  };
+}
+
+/**
+ * Returns `options` with an instrumented `fetch` installed. Unlike the other
+ * debug recorders it is always installed, because its capture can start after
+ * the session is open; it records only while a capture is active, and
+ * delegates untouched otherwise.
  */
 function withInstrumentedFetch(
   options: StreamableHTTPClientTransportOptions,
@@ -381,14 +408,18 @@ export class MCPSessionManager {
             MCP_SDK,
             () => import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
           );
-          // Three recorders can sit in front of the transport's fetch, one
+          // Four recorders can sit in front of the transport's fetch, one
           // per debug sink. Each installs itself only while its own sink is
           // active, so an ordinary session sends exactly the bytes it sends
           // today, and a session under several captures reports to each.
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
             withExchangeRecording(
-              withInstrumentedFetch(withHttpDebugRecording(transportOptions)),
+              withInstrumentedFetch(
+                withHttpDebugRecording(
+                  withMcpHttpDebugRecording(transportOptions),
+                ),
+              ),
             ),
           );
           transport.onerror = (err) => logTransportError(err, errlog);

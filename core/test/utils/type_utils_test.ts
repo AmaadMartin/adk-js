@@ -44,4 +44,9 @@ describe('isRecord', () => {
     }
     expect(value['resourceUri']).toBe('ui://demo/card');
   });
+
+  it('rejects a primitive', () => {
+    expect(isRecord('ui://a')).toBe(false);
+    expect(isRecord(7)).toBe(false);
+  });
 });
