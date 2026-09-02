@@ -37,8 +37,6 @@ import {BasePlugin, ContextCompactionTrigger} from './base_plugin.js';
 export class PluginManager {
   private readonly plugins: Set<BasePlugin> = new Set();
 
-  private skipClosingPlugins = false;
-
   /** Whether any plugin is registered. */
   get hasPlugins(): boolean {
     return this.plugins.size > 0;
@@ -91,30 +89,13 @@ export class PluginManager {
   }
 
   /**
-   * Keeps {@link close} from closing the registered plugins.
-   *
-   * A component that borrows another component's plugins registers the very
-   * same instances, so closing them would tear down plugins the owner is still
-   * using. Mirrors adk-python's `set_skip_closing_plugins`.
-   *
-   * @param value Whether {@link close} leaves the plugins open.
-   */
-  setSkipClosingPlugins(value: boolean): void {
-    this.skipClosingPlugins = value;
-  }
-
-  /**
-   * Closes every registered plugin, in registration order, unless
-   * {@link setSkipClosingPlugins} turned that off.
+   * Closes every registered plugin, in registration order.
    *
    * A plugin that throws does not stop the remaining plugins from closing.
    *
    * @throws If one or more plugins failed to close, naming each of them.
    */
   async close(): Promise<void> {
-    if (this.skipClosingPlugins) {
-      return;
-    }
     const failures: string[] = [];
     // Sequential rather than concurrent: a plugin built on task-local context,
     // an MCP session for example, breaks when torn down from another task.

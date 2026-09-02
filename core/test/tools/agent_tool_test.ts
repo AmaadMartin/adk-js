@@ -49,7 +49,6 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     Runner: vi.fn().mockImplementation((config) => ({
       appName: config?.appName,
       sessionService: config?.sessionService,
-      pluginManager: new PluginManager(config?.plugins),
       close: vi.fn(),
       runAsync: vi.fn(),
       closeToolsets: vi.fn(),
@@ -72,11 +71,9 @@ function mockRunnerCapturingConfig(
     return {
       appName: config?.appName,
       sessionService: config?.sessionService,
-      pluginManager: new PluginManager(config?.plugins),
       runAsync: async function* () {
         yield* events;
       },
-      close: vi.fn(),
       closeToolsets: vi.fn(),
     } as unknown as Runner;
   });
@@ -96,25 +93,23 @@ type StubRun = (params: {
 
 /**
  * Installs a `Runner` stub that runs `run`, and returns the mock recording
- * whether the tool closed the nested runner.
+ * whether the tool released the nested runner's toolsets.
  *
  * The one cast is the mock pattern this file already uses: a partial stub
  * cannot satisfy the whole `Runner` shape.
  */
 function stubRunner(run: StubRun): Mock {
-  const close = vi.fn();
+  const closeToolsets = vi.fn();
   vi.mocked(Runner).mockImplementation(
     (config) =>
       ({
         appName: config?.appName,
         sessionService: config?.sessionService,
-        pluginManager: new PluginManager(config?.plugins),
-        close,
-        closeToolsets: vi.fn(),
+        closeToolsets,
         runAsync: run,
       }) as unknown as Runner,
   );
-  return close;
+  return closeToolsets;
 }
 
 /**
@@ -239,12 +234,10 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
-        pluginManager: new PluginManager(config?.plugins),
         runAsync: vi.fn((request: {sessionId: string}) => {
           childSessionIds.push(request.sessionId);
           return mockRunAsync();
         }),
-        close: vi.fn(),
         closeToolsets: vi.fn(),
       } as unknown as Runner;
     });
@@ -559,7 +552,6 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
-        pluginManager: new PluginManager(config?.plugins),
         close: vi.fn(),
         runAsync: mockRunAsync,
         closeToolsets: vi.fn(),
@@ -856,7 +848,6 @@ function mockRunner(stream: () => AsyncGenerator<Event, void, void>) {
     return {
       appName: config?.appName,
       sessionService: config?.sessionService,
-      pluginManager: new PluginManager(config?.plugins),
       runAsync: async function* (params: {newMessage: Content}) {
         seen.runCalls += 1;
         seen.messageText = params.newMessage.parts?.[0].text;
@@ -867,7 +858,6 @@ function mockRunner(stream: () => AsyncGenerator<Event, void, void>) {
           seen.streamClosed = true;
         }
       },
-      close: vi.fn(),
       closeToolsets: vi.fn(),
     } as unknown as Runner;
   });
@@ -2011,6 +2001,30 @@ describe('AgentTool declaration build', () => {
     });
   });
 
+  it('declares the request parameter when the genai schema is cleared', () => {
+    vi.stubEnv(ENTERPRISE_MODE_ENV_VAR, 'false');
+    const agent = new LlmAgent({
+      name: 'search_agent',
+      model: 'gemini-2.5-flash',
+      description: 'searches the catalogue',
+      inputSchema: {
+        type: Type.OBJECT,
+        properties: {query: {type: Type.STRING}},
+        required: ['query'],
+      },
+    });
+    // The source survives, because it records what the caller supplied.
+    agent.inputSchema = undefined;
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration.parameters).toEqual({
+      type: Type.OBJECT,
+      properties: {request: {type: Type.STRING}},
+      required: ['request'],
+    });
+  });
+
   it('declares a string response off GEMINI_API without an output schema', () => {
     vi.stubEnv(ENTERPRISE_MODE_ENV_VAR, 'true');
 
@@ -2289,70 +2303,5 @@ describe('AgentTool.fromConfig', () => {
     await expect(building).rejects.toMatchObject({
       message: 'Invalid fully qualified name: /no/such/module.ts#agent',
     });
-  });
-});
-
-describe('AgentTool borrowed plugin teardown', () => {
-  /** A plugin recording whether the sub-runner closed it. */
-  class ClosingPlugin extends BasePlugin {
-    closed = false;
-
-    override async close(): Promise<void> {
-      this.closed = true;
-    }
-  }
-
-  /**
-   * Installs a `Runner` stub whose plugin manager is real, so a test can close
-   * it the way `Runner.close` does and see what the tool configured.
-   */
-  function stubRunnerExposingPluginManager(): {manager?: PluginManager} {
-    const captured: {manager?: PluginManager} = {};
-    vi.mocked(Runner).mockImplementation((config) => {
-      captured.manager = new PluginManager(config?.plugins);
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        pluginManager: captured.manager,
-        close: vi.fn(),
-        closeToolsets: vi.fn(),
-        runAsync: async function* () {
-          yield createEvent({
-            author: 'sub-agent',
-            content: {role: 'model', parts: [{text: 'done'}]},
-          });
-        },
-      } as unknown as Runner;
-    });
-    return captured;
-  }
-
-  it('leaves the borrowed plugins open when the sub-runner closes', async () => {
-    const agent = createSubAgent();
-    const plugin = new ClosingPlugin('recorder');
-    const captured = stubRunnerExposingPluginManager();
-
-    await new AgentTool({agent}).runAsync({
-      args: {request: 'go'},
-      toolContext: createToolContext({agent, plugins: [plugin]}),
-    });
-    await captured.manager?.close();
-
-    expect(plugin.closed).toBe(false);
-  });
-
-  it('closes the plugins the sub-runner owns', async () => {
-    const agent = createSubAgent();
-    const plugin = new ClosingPlugin('recorder');
-    const captured = stubRunnerExposingPluginManager();
-
-    await new AgentTool({agent, includePlugins: false}).runAsync({
-      args: {request: 'go'},
-      toolContext: createToolContext({agent, plugins: [plugin]}),
-    });
-    captured.manager?.registerPlugin(plugin);
-    await captured.manager?.close();
-
-    expect(plugin.closed).toBe(true);
   });
 });

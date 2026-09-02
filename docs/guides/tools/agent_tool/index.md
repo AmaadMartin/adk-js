@@ -93,8 +93,7 @@ The declared parameters are the schema normalised for the API variant, by the
 same builder every other tool's declaration goes through. A nullable property is
 never declared as required, on any variant. On the Gemini Developer API the
 keywords that surface rejects are dropped too, `default` and `nullable` among
-them; Vertex AI keeps them. The tool's own name and the wrapped agent's
-description always win over anything the schema carries.
+them; Vertex AI keeps them.
 
 Validation uses the schema in the form you supplied it. A Zod refinement is
 enforced even though the genai schema sent to the model cannot express it.
@@ -169,20 +168,19 @@ JSON. An empty result, and a result reporting an error, append nothing.
 
 ## Releasing the sub-runner
 
-`AgentTool` awaits `Runner.close()` when the nested run ends — after a normal
-run, after an abort, and after the wrapped agent throws. That call releases the
-toolsets held by the runner's agent and their sub-agents, so an MCP session the
-wrapped agent opened does not outlive the tool call. It then closes the
-sub-runner's own plugins.
+`AgentTool` awaits `Runner.closeToolsets()` when the nested run ends — after a
+normal run, after an abort, and after the wrapped agent throws. That call
+releases the toolsets held by the runner's agent and their sub-agents, so an MCP
+session the wrapped agent opened does not outlive the tool call.
 
-The plugins borrowed from the caller are exempted. `AgentTool` calls
-`PluginManager.setSkipClosingPlugins(true)` on the sub-runner before the run, so
-the caller's plugins stay open and usable. With `includePlugins: false` the
-sub-runner borrows nothing, and `close()` closes whatever plugins it holds.
+It releases nothing else. The session service and the plugins belong to the
+caller, which is still using them. `Runner.close()` is the wider call: it
+releases the toolsets and then the plugins, so use that one for a runner you own
+rather than borrow from.
 
-`Runner.close()` and `Runner.closeToolsets()` are both public, so you can call
-either on a runner of your own. Both are safe to call more than once: a runner
-is reusable across runs, and each call closes the toolsets again.
+Both methods are public, so you can call either on a runner of your own. Both
+are safe to call more than once: a runner is reusable across runs, and each call
+closes the toolsets again.
 
 ## Building from an agent config file
 

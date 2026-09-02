@@ -207,28 +207,6 @@ describe('PluginManager', () => {
     await expect(service.close()).resolves.toBeUndefined();
   });
 
-  it('should close no plugin while closing is skipped', async () => {
-    service.registerPlugin(plugin1);
-    service.registerPlugin(plugin2);
-    service.setSkipClosingPlugins(true);
-
-    await service.close();
-
-    expect(plugin1.callLog).toEqual([]);
-    expect(plugin2.callLog).toEqual([]);
-  });
-
-  it('should close every plugin again once skipping is turned off', async () => {
-    service.registerPlugin(plugin1);
-    service.setSkipClosingPlugins(true);
-    await service.close();
-
-    service.setSkipClosingPlugins(false);
-    await service.close();
-
-    expect(plugin1.callLog).toEqual(['close']);
-  });
-
   it('should close the remaining plugins when one fails to close', async () => {
     plugin1.exceptionsToRaise['close'] = new Error('socket still busy');
     service.registerPlugin(plugin1);

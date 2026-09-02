@@ -107,22 +107,6 @@ const REQUEST_PARAMETERS: Schema = {
   required: ['request'],
 };
 
-/** {@link REQUEST_PARAMETERS} as plain JSON Schema. */
-const REQUEST_PARAMETERS_JSON_SCHEMA = toJsonSchema(REQUEST_PARAMETERS);
-
-/**
- * The declaration of an agent that declares no input schema: it takes one
- * free-text `request`.
- */
-function declareRequestParameter(
-  name: string,
-  description: string,
-): FunctionDeclaration {
-  return isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)
-    ? {name, description, parametersJsonSchema: REQUEST_PARAMETERS_JSON_SCHEMA}
-    : {name, description, parameters: REQUEST_PARAMETERS};
-}
-
 /**
  * The state key the wrapped agent's grounding metadata is published under.
  * Spelled exactly as adk-python spells it, so both SDKs agree on the key.
@@ -277,7 +261,7 @@ function validateAgentToolArgs(config: AgentToolArgsConfig): void {
  */
 async function resolveAgentReference(
   ref: AgentRefConfig,
-  configAbsPath?: string,
+  configAbsPath: string,
 ): Promise<BaseAgent> {
   const {code, configPath} = ref;
   if (code !== undefined && configPath !== undefined) {
@@ -356,7 +340,7 @@ export class AgentTool extends BaseTool {
    */
   static override async fromConfig(
     config: AgentToolArgsConfig,
-    configAbsPath?: string,
+    configAbsPath: string,
   ): Promise<AgentTool> {
     validateAgentToolArgs(config);
     return new AgentTool({
@@ -368,19 +352,20 @@ export class AgentTool extends BaseTool {
 
   override _getDeclaration(): FunctionDeclaration {
     const inputSchema = agentInputSchemaSource(this.agent);
-    const declaration = inputSchema
-      ? buildFunctionDeclaration({
-          name: this.name,
-          // A Zod object renders through the strict converter, which keeps
-          // what the genai translation drops. Any other schema is already
-          // normalised on the agent.
-          parameters: isZodObject(inputSchema)
-            ? inputSchema
-            : agentInputSchema(this.agent),
-          variant: this.apiVariant,
-        })
-      : declareRequestParameter(this.name, this.description);
-    // The agent's description wins over anything the input schema carries.
+    const declaration = buildFunctionDeclaration({
+      name: this.name,
+      // A Zod object renders through the strict converter, which keeps what
+      // the genai translation drops. Any other schema is already normalised on
+      // the agent.
+      parameters:
+        (isZodObject(inputSchema)
+          ? inputSchema
+          : agentInputSchema(this.agent)) ?? REQUEST_PARAMETERS,
+      variant: this.apiVariant,
+    });
+    // Assigned rather than passed to the builder, which runs a description
+    // through `cleanDescription`. adk-python overrides it after the build too,
+    // so both SDKs declare the agent's description verbatim.
     declaration.description = this.description;
 
     if (this.apiVariant !== GoogleLLMVariant.GEMINI_API) {
@@ -444,14 +429,12 @@ export class AgentTool extends BaseTool {
         toolContext.invocationContext.memoryService ??
         new InMemoryMemoryService(),
       credentialService: toolContext.invocationContext.credentialService,
+      // The caller keeps ownership of these plugins: the sub-runner releases
+      // its own toolsets and nothing else.
       plugins: this.includePlugins
         ? toolContext.invocationContext.pluginManager?.listPlugins()
         : undefined,
     });
-
-    if (this.includePlugins) {
-      runner.pluginManager.setSkipClosingPlugins(true);
-    }
 
     try {
       const state = Object.fromEntries(
@@ -532,10 +515,10 @@ export class AgentTool extends BaseTool {
 
       return result;
     } finally {
-      // Release the wrapped agent's toolsets and the sub-runner's own plugins,
-      // on every exit: a normal run, an abort, and a throw. Plugins borrowed
-      // from the caller are exempted above, because the caller still owns them.
-      await runner.close();
+      // Release the toolsets the wrapped agent holds, on every exit: a normal
+      // run, an abort, and a throw. The session service and the plugins belong
+      // to the caller, which is still using them.
+      await runner.closeToolsets();
     }
   }
 }
