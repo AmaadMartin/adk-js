@@ -234,6 +234,13 @@ export type {
   EvalSetResultsManager,
 } from './evaluation/eval_set_results_manager.js';
 export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
+export {
+  convertEventsToEvalInvocations,
+  generateInferencesFromAgentModule,
+  generateInferencesFromRootAgent,
+  generateResponsesFromSession,
+} from './evaluation/evaluation_generator.js';
+export type {EvalRow} from './evaluation/evaluation_generator.js';
 export type {
   EvaluationResult,
   Evaluator,
