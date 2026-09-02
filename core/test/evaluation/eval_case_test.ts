@@ -415,6 +415,40 @@ describe('rubrics', () => {
   });
 });
 
+describe('reading a validated eval case', () => {
+  it('validates a recorded case and pairs its trajectory', () => {
+    const evalCase: EvalCase = validateEvalCase({
+      evalId: 'weather_case',
+      conversation: [
+        {
+          userContent: {role: 'user', parts: [{text: 'weather in SFO?'}]},
+          intermediateData: {
+            toolUses: [{id: 'call1', name: 'get_weather', args: {city: 'SFO'}}],
+            toolResponses: [
+              {id: 'call1', name: 'get_weather', response: {f: 61}},
+            ],
+            intermediateResponses: [],
+          },
+        },
+      ],
+      owner: 'platform',
+    });
+
+    const invocation = evalCase.conversation?.[0];
+    if (!invocation) {
+      expect.fail('the validated eval case lost its conversation');
+    }
+
+    expect(evalCase['owner']).toBe('platform');
+    expect(getAllToolCallsWithResponses(invocation.intermediateData)).toEqual([
+      [
+        {id: 'call1', name: 'get_weather', args: {city: 'SFO'}},
+        {id: 'call1', name: 'get_weather', response: {f: 61}},
+      ],
+    ]);
+  });
+});
+
 describe('type guards', () => {
   it('accepts the events shape and rejects the trajectory shape', () => {
     expect(isInvocationEvents(events())).toBe(true);
