@@ -14,6 +14,7 @@ import {
   Event,
   FunctionTool,
   InvocationContext,
+  LiveRequestQueue,
   LlmAgent,
   LlmRequest,
   LlmResponse,
@@ -62,10 +63,14 @@ function someTool(): FunctionTool {
   });
 }
 
-function createContext(agent: BaseAgent): InvocationContext {
+function createContext(
+  agent: BaseAgent,
+  liveRequestQueue?: LiveRequestQueue,
+): InvocationContext {
   return new InvocationContext({
     invocationId: 'test-invocation',
     agent,
+    liveRequestQueue,
     session: createSession({id: 'test-session', appName: 'test-app'}),
     pluginManager: new PluginManager([]),
   });
@@ -85,6 +90,7 @@ function declaredFunctionNames(
 /** Runs the processor over a fresh request and reports what it yielded. */
 async function run(
   agent: BaseAgent,
+  liveRequestQueue?: LiveRequestQueue,
 ): Promise<{llmRequest: LlmRequest; events: Event[]}> {
   const llmRequest: LlmRequest = {
     contents: [],
@@ -93,7 +99,7 @@ async function run(
   };
   const events: Event[] = [];
   for await (const event of OUTPUT_SCHEMA_REQUEST_PROCESSOR.runAsync(
-    createContext(agent),
+    createContext(agent, liveRequestQueue),
     llmRequest,
   )) {
     events.push(event);
@@ -263,6 +269,27 @@ describe('OutputSchemaRequestProcessor', () => {
 
     expect(llmRequest.toolsDict).toEqual({});
     expect(llmRequest.config).toBeUndefined();
+  });
+
+  it('leaves the request untouched on the live path', async () => {
+    // `LlmAgent.postprocess` reads the tool call back off the merged event. The
+    // live path has no such read-back, so the workaround is skipped there.
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+    const liveRequestQueue = new LiveRequestQueue();
+
+    const {llmRequest, events} = await run(
+      llmAgent({
+        model: 'gemini-2.5-flash',
+        withOutputSchema: true,
+        withTools: true,
+      }),
+      liveRequestQueue,
+    );
+
+    expect(events).toEqual([]);
+    expect(llmRequest.toolsDict).toEqual({});
+    expect(llmRequest.config).toBeUndefined();
+    liveRequestQueue.close();
   });
 
   it('leaves the request untouched for an agent that is not an LlmAgent', async () => {

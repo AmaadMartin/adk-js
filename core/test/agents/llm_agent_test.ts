@@ -6,6 +6,7 @@
 
 import {
   AUTH_PREPROCESSOR,
+  BaseCodeExecutor,
   BaseLlm,
   BaseLlmConnection,
   BaseLlmRequestProcessor,
@@ -13,6 +14,7 @@ import {
   BasePlugin,
   BaseTool,
   BaseToolset,
+  CodeExecutionResult,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   CONTEXT_CACHE_REQUEST_PROCESSOR,
@@ -20,7 +22,9 @@ import {
   createEvent,
   createSession,
   Event,
+  ExecuteCodeParams,
   FunctionTool,
+  InMemoryArtifactService,
   InMemorySessionService,
   INTERACTIONS_REQUEST_PROCESSOR,
   InvocationContext,
@@ -62,6 +66,7 @@ import {
 import {IDENTITY_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/identity_llm_request_processor.js';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/instructions_llm_request_processor.js';
 import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/request_confirmation_llm_request_processor.js';
+import {ScopedArtifactService} from '../../src/artifacts/scoped_artifact_service.js';
 import {appendDynamicInstructions} from '../../src/models/llm_request.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -1382,6 +1387,7 @@ describe('LlmAgent outputSchema with tools', () => {
       name: 'test_agent',
       model: llm,
       instruction: 'Base instruction',
+      mode: options.mode,
       outputSchema: OUTPUT_SCHEMA,
       mode: options.mode,
       tools: options.withTools
@@ -2132,5 +2138,85 @@ describe('LlmAgent dynamic instructions', () => {
       'Prefer the artifact named report.pdf.',
     );
     expect(request.dynamicInstructions).toEqual([]);
+  });
+});
+
+describe('LlmAgent default response processors', () => {
+  /** Records the code it was asked to run and reports a fixed result. */
+  class RecordingCodeExecutor extends BaseCodeExecutor {
+    readonly executed: string[] = [];
+
+    async executeCode(params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+      this.executed.push(params.codeExecutionInput.code);
+      return {stdout: 'hello from python', stderr: '', outputFiles: []};
+    }
+  }
+
+  /**
+   * Answers with a code block once, then plainly. The response processor
+   * clears the content of a code-block turn so the agent asks again, so a
+   * model that always returns code never terminates.
+   */
+  class CodeBlockLlm extends BaseLlm {
+    private calls = 0;
+
+    async *generateContentAsync(
+      _request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      this.calls += 1;
+      yield this.calls === 1
+        ? {
+            content: {
+              role: 'model',
+              parts: [{text: 'Here you go:\n```python\nprint("hi")\n```'}],
+            },
+          }
+        : {content: {role: 'model', parts: [{text: 'All done.'}]}};
+    }
+
+    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  it('runs the code executor on a model response carrying a code block', async () => {
+    const codeExecutor = new RecordingCodeExecutor();
+    const agent = new LlmAgent({
+      name: 'code_agent',
+      model: new CodeBlockLlm({model: 'gemini-2.5-flash'}),
+      codeExecutor,
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_code',
+      session: createSession({
+        id: 'sess_code',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+      artifactService: new ScopedArtifactService(
+        new InMemoryArtifactService(),
+        'test-app',
+        'test-user',
+        'sess_code',
+      ),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    // The executor actually ran, which only happens if the default response
+    // pipeline carries the code execution response processor.
+    expect(codeExecutor.executed).toEqual(['print("hi")']);
+
+    const texts = events.flatMap((e) =>
+      (e.content?.parts ?? []).map((part) => part.text ?? ''),
+    );
+    expect(texts.some((text) => text.includes('print("hi")'))).toBe(true);
+    expect(texts.some((text) => text.includes('hello from python'))).toBe(true);
   });
 });

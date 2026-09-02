@@ -6,10 +6,7 @@
 
 import {AUTH_PREPROCESSOR} from '../../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../../context/base_context_compactor.js';
-import {
-  BaseLlmRequestProcessor,
-  BaseLlmResponseProcessor,
-} from './base_llm_processor.js';
+import {BaseLlmFlow} from './base_llm_flow.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './basic_llm_request_processor.js';
 import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
@@ -36,21 +33,17 @@ import {TOOL_FILTER_REQUEST_PROCESSOR} from './tool_filter_request_processor.js'
  *
  * Sub-agent transfer is not part of it. `AutoFlow` appends the agent-transfer
  * processor for an agent that can transfer, and `LlmAgent` appends it to a
- * caller-supplied pipeline. Both lists are fresh arrays, so a caller that
- * appends to them affects no other agent.
+ * caller-supplied pipeline. A subclass adds its own processors by pushing onto
+ * the lists {@link BaseLlmFlow} gives it, as adk-python's `AutoFlow` does. Both
+ * lists are fresh arrays, so a caller that appends to them affects no other
+ * agent.
  *
  * The order of {@link requestProcessors} is part of the contract. Code
  * execution reads the contents that {@link CONTENT_REQUEST_PROCESSOR}
  * assembles, and compaction rewrites the history those contents come from, so
  * it runs immediately before them.
  */
-export class SingleFlow {
-  /** The request processors, in the order they run. */
-  readonly requestProcessors: BaseLlmRequestProcessor[];
-
-  /** The response processors, in the order they run. */
-  readonly responseProcessors: BaseLlmResponseProcessor[];
-
+export class SingleFlow extends BaseLlmFlow {
   /**
    * @param contextCompactors - Compactors to evaluate before the contents are
    *   assembled. The compaction processor is always inserted, because an agent
@@ -59,7 +52,8 @@ export class SingleFlow {
    *   processor does nothing.
    */
   constructor(contextCompactors: BaseContextCompactor[] = []) {
-    this.requestProcessors = [
+    super();
+    this.requestProcessors.push(
       BASIC_LLM_REQUEST_PROCESSOR,
       AUTH_PREPROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
@@ -85,13 +79,15 @@ export class SingleFlow {
       // optimize data files.
       CODE_EXECUTION_REQUEST_PROCESSOR,
       // The output schema workaround declares a tool, so it runs after the
-      // processors that shape the contents.
+      // processors that shape the contents. It is the last processor that
+      // appends a system instruction, so its instruction lands at the end of
+      // the system prompt. The tool filter that follows appends none.
       OUTPUT_SCHEMA_REQUEST_PROCESSOR,
       TOOL_FILTER_REQUEST_PROCESSOR,
-    ];
-    this.responseProcessors = [
+    );
+    this.responseProcessors.push(
       NL_PLANNING_RESPONSE_PROCESSOR,
       CODE_EXECUTION_RESPONSE_PROCESSOR,
-    ];
+    );
   }
 }

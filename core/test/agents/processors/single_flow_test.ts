@@ -28,6 +28,7 @@ import {
 import {Schema, Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/agent_transfer_llm_request_processor.js';
+import {BaseLlmFlow} from '../../../src/agents/processors/base_llm_flow.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/basic_llm_request_processor.js';
 import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
@@ -49,6 +50,14 @@ const STUB_COMPACTOR: BaseContextCompactor = {
   shouldCompact: () => false,
   compact: () => {},
 };
+
+/** A subclass in the shape adk-python's `AutoFlow` uses. */
+class TransferFlow extends SingleFlow {
+  constructor() {
+    super();
+    this.requestProcessors.push(AGENT_TRANSFER_LLM_REQUEST_PROCESSOR);
+  }
+}
 
 const OUTPUT_SCHEMA: Schema = {
   type: Type.OBJECT,
@@ -125,6 +134,19 @@ describe('SingleFlow request processors', () => {
       requestProcessors.indexOf(OUTPUT_SCHEMA_REQUEST_PROCESSOR),
     ).toBeGreaterThan(
       requestProcessors.indexOf(CODE_EXECUTION_REQUEST_PROCESSOR),
+    );
+  });
+
+  it('runs the output schema processor last of the instruction processors', () => {
+    // Its instruction must land at the end of the system prompt. Only the tool
+    // filter runs after it, and the tool filter appends no instruction.
+    const {requestProcessors} = new SingleFlow([STUB_COMPACTOR]);
+
+    expect(requestProcessors[requestProcessors.length - 2]).toBe(
+      OUTPUT_SCHEMA_REQUEST_PROCESSOR,
+    );
+    expect(requestProcessors[requestProcessors.length - 1]).toBe(
+      TOOL_FILTER_REQUEST_PROCESSOR,
     );
   });
 
@@ -331,6 +353,32 @@ describe('SingleFlow response processors', () => {
     first.responseProcessors.length = 0;
     expect(second.responseProcessors).toContain(
       CODE_EXECUTION_RESPONSE_PROCESSOR,
+    );
+  });
+});
+
+describe('SingleFlow as a base class', () => {
+  it('extends BaseLlmFlow', () => {
+    expect(new SingleFlow()).toBeInstanceOf(BaseLlmFlow);
+  });
+
+  it('lets a subclass append to the lists its super() call populated', () => {
+    const {requestProcessors} = new TransferFlow();
+
+    expect(requestProcessors[0]).toBe(BASIC_LLM_REQUEST_PROCESSOR);
+    expect(requestProcessors[requestProcessors.length - 1]).toBe(
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    );
+  });
+
+  it('leaves a plain SingleFlow unaffected by a subclass instance', () => {
+    const subclassed = new TransferFlow();
+    expect(subclassed.requestProcessors).toContain(
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    );
+
+    expect(new SingleFlow().requestProcessors).not.toContain(
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
     );
   });
 });

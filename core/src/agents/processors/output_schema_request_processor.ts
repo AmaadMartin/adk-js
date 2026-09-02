@@ -37,6 +37,11 @@ export const SET_MODEL_RESPONSE_INSTRUCTION =
  * prompt-based workaround instead: the schema becomes a tool, and the tool call
  * carries the answer.
  *
+ * `LlmAgent.postprocess` reads the call back off the merged event and rewrites
+ * it into the final content. The live path has no such read-back, so this
+ * processor skips it rather than asking the model for an answer that nothing
+ * would collect.
+ *
  * A task-mode agent already returns its structured result through
  * `finish_task`, so this processor leaves it alone.
  */
@@ -55,6 +60,7 @@ export class OutputSchemaRequestProcessor extends BaseLlmRequestProcessor {
   ): AsyncGenerator<Event, void, void> {
     const agent = invocationContext.agent;
     if (
+      invocationContext.liveRequestQueue ||
       !isLlmAgent(agent) ||
       !agent.outputSchema ||
       !agent.tools?.length ||

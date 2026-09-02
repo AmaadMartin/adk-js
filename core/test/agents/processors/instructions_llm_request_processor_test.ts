@@ -7,13 +7,14 @@
 import {
   BaseAgent,
   createSession,
+  FunctionTool,
   InvocationContext,
   LlmAgent,
   LlmRequest,
   PluginManager,
   ReadonlyContext,
 } from '@google/adk';
-import {ContentUnion} from '@google/genai';
+import {ContentUnion, Schema, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   INSTRUCTION_BEGIN,
@@ -21,6 +22,11 @@ import {
   QUOTED_CONTENT_ELIDED,
 } from '../../../src/agents/instructions.js';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/instructions_llm_request_processor.js';
+
+const OUTPUT_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {answer: {type: Type.STRING}},
+};
 
 class MockRootAgent extends BaseAgent {
   constructor(name: string, subAgents: BaseAgent[] = []) {
@@ -527,5 +533,36 @@ describe('InstructionsLlmRequestProcessor', () => {
         INSTRUCTION_END,
       );
     });
+  });
+
+  it('does not append the set_model_response instruction for an agent with a schema and tools', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+      instruction: 'Base instruction',
+      outputSchema: OUTPUT_SCHEMA,
+      tools: [
+        new FunctionTool({
+          name: 'some_tool',
+          description: 'A test tool',
+          execute: () => 'result',
+        }),
+      ],
+    });
+
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INSTRUCTIONS_LLM_REQUEST_PROCESSOR.runAsync(
+      createMockInvocationContext(agent),
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.config?.systemInstruction).toBe('Base instruction');
   });
 });
