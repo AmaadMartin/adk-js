@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {longestSelfContainedPrefix} from '../context/compaction_utils.js';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
@@ -19,15 +20,18 @@ import {EventsCompactionConfig} from './events_compaction_config.js';
  * so consecutive summaries share context instead of butting up against each
  * other.
  *
+ * The window is trimmed to its longest self-contained prefix, so a turn that
+ * ended awaiting a tool, a confirmation or user input keeps its unanswered
+ * call raw. Summarizing past it would leave the next request carrying a
+ * function response with no matching call.
+ *
  * Ported from `google/adk-python`
- * `apps/compaction.py::_run_compaction_for_sliding_window`. Three parts of the
+ * `apps/compaction.py::_run_compaction_for_sliding_window`. Two parts of the
  * Python function are deliberately not ported:
  *
  * - the token-threshold trigger, which ADK for TypeScript serves with
  *   `TokenBasedContextCompactor` instead;
- * - `_apply_rewinds`, because the runner has no rewind pipeline to apply;
- * - `_longest_self_contained_prefix`, a refinement of the window boundary that
- *   the trigger works correctly without.
+ * - `_apply_rewinds`, because the runner has no rewind pipeline to apply.
  *
  * The generator yields the summary and never writes it. The caller owns the
  * append, so one place decides what reaches storage.
@@ -65,10 +69,8 @@ export async function* runSlidingWindowCompaction(
     invocationIds[Math.max(0, firstNewIndex - overlapSize)];
   const endInvocationId = newInvocationIds[newInvocationIds.length - 1];
 
-  const eventsToCompact = sliceInvocationRange(
-    events,
-    startInvocationId,
-    endInvocationId,
+  const eventsToCompact = longestSelfContainedPrefix(
+    sliceInvocationRange(events, startInvocationId, endInvocationId),
   );
   if (!eventsToCompact.length) {
     return;

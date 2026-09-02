@@ -58,6 +58,26 @@ class JoiningSummarizer implements BaseSummarizer {
   }
 }
 
+/** Ends its turn on an unanswered call, as a long-running tool does. */
+class PendingToolAgent extends LlmAgent {
+  constructor() {
+    super({name: 'pending', model: 'gemini-2.5-flash'});
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'fc1', name: 'lookup', args: {}}}],
+      },
+    });
+  }
+}
+
 describe('post-invocation compaction against a real session service', () => {
   it('appends a summary the shipped reader then honours', async () => {
     const sessionService = new InMemorySessionService();
@@ -110,5 +130,58 @@ describe('post-invocation compaction against a real session service', () => {
       'three',
       'ack',
     ]);
+  });
+
+  it('keeps a call the turn never answered out of the summary', async () => {
+    const appName = 'pending_tool_app';
+    const sessionService = new InMemorySessionService();
+    await sessionService.createSession({
+      appName,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+    const runner = new Runner({
+      app: new App({
+        name: appName,
+        rootAgent: new PendingToolAgent(),
+        eventsCompactionConfig: createEventsCompactionConfig({
+          summarizer: new JoiningSummarizer(),
+          compactionInterval: 2,
+          overlapSize: 0,
+        }),
+      }),
+      sessionService,
+    });
+
+    for (const turn of ['one', 'two']) {
+      for await (const _event of runner.runAsync({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        newMessage: {role: 'user', parts: [{text: turn}]},
+      })) {
+        // Drain the turn so its events reach the session.
+      }
+    }
+
+    const session = await sessionService.getSession({
+      appName,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+    if (!session) {
+      expect.fail(`session ${SESSION_ID} is missing`);
+    }
+
+    expect(session.events.filter(isCompactedEvent)).toHaveLength(1);
+
+    // The reader must still show the model the open call, or the user's reply
+    // would arrive as a functionResponse with no matching call.
+    const active = getActiveEvents(session.events);
+    const calls = active.flatMap((e) =>
+      (e.content?.parts ?? []).flatMap((part) =>
+        part.functionCall?.id ? [part.functionCall.id] : [],
+      ),
+    );
+    expect(calls).toContain('fc1');
   });
 });

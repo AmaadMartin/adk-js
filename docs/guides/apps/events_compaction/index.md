@@ -146,8 +146,11 @@ served by the window.
   several model calls; the token trigger fires on the first call that crosses
   the threshold and stands down for the rest. Without that, each call would
   summarize the history again.
-- **A tool call is never split from its response.** The retained range grows
-  backwards rather than cutting between the two.
+- **A tool call is never split from its response.** The token trigger grows the
+  retained range backwards rather than cutting between the two. The
+  sliding-window trigger trims its window to the last point where nothing is
+  outstanding, so a turn that ended awaiting a tool, a confirmation or user
+  input keeps its unanswered call raw until the answer arrives.
 - **Nothing is deleted.** The summary event is appended, and the events it
   covers stay in the session. Later compactions fold the previous summary in.
 - **A summary that loses a write race is dropped, not forced.** A second turn

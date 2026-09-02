@@ -245,6 +245,58 @@ describe('runSlidingWindowCompaction', () => {
     expect(produced).toEqual([]);
   });
 
+  it('stops the window before a call the turn never answered', async () => {
+    // The turn ended awaiting a long-running tool, so its last event is an
+    // unanswered call. Summarizing past it would drop the call while the
+    // reply's functionResponse survives as a raw event.
+    const session = sessionOf([
+      ...turn('inv1', 100),
+      createEvent({invocationId: 'inv2', author: 'user', timestamp: 200}),
+      createEvent({
+        invocationId: 'inv2',
+        author: 'agent',
+        timestamp: 201,
+        content: {
+          role: 'model',
+          parts: [{functionCall: {id: 'fc1', name: 'lookup', args: {}}}],
+        },
+      }),
+    ]);
+
+    const produced = await compact(session, {
+      compactionInterval: 2,
+      overlapSize: 0,
+    });
+
+    expect(produced).toHaveLength(1);
+    expect(summarizer.windows[0].map((e) => e.timestamp)).toEqual([
+      100, 101, 200,
+    ]);
+  });
+
+  it('yields nothing when the whole window is unbalanced', async () => {
+    const session = sessionOf([
+      createEvent({
+        invocationId: 'inv1',
+        author: 'agent',
+        timestamp: 100,
+        content: {
+          role: 'model',
+          parts: [{functionCall: {id: 'fc1', name: 'lookup', args: {}}}],
+        },
+      }),
+      createEvent({invocationId: 'inv2', author: 'user', timestamp: 200}),
+    ]);
+
+    const produced = await compact(session, {
+      compactionInterval: 2,
+      overlapSize: 0,
+    });
+
+    expect(produced).toEqual([]);
+    expect(summarizer.windows).toEqual([]);
+  });
+
   it('skips an event that carries no invocation id', async () => {
     const session = sessionOf([
       createEvent({author: 'system', timestamp: 50}),
