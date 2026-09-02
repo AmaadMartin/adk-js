@@ -12,6 +12,7 @@ import {
   CrewaiTool,
   CrewaiToolConfig,
   CrewaiToolLike,
+  CrewaiToolOptions,
   InputValidationError,
   InvocationContext,
   isBaseTool,
@@ -359,6 +360,22 @@ describe('CrewaiTool', () => {
           toolContext: createContext(),
         }),
       ).rejects.toThrow("Error in tool 'search': upstream failure");
+    });
+  });
+
+  describe('options', () => {
+    it('accepts a CrewaiToolOptions', () => {
+      const {tool} = createEchoTool();
+      const options: CrewaiToolOptions = {
+        tool,
+        name: 'configured_tool',
+        description: 'Configured tool',
+      };
+
+      const crewaiTool = new CrewaiTool(options);
+
+      expect(crewaiTool.name).toBe('configured_tool');
+      expect(crewaiTool.description).toBe('Configured tool');
     });
   });
 });
