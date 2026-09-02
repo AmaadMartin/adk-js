@@ -5,6 +5,8 @@
  */
 
 import {
+  AuthCredential,
+  AuthCredentialTypes,
   BaseAgent,
   BaseAgentConfig,
   Event,
@@ -170,5 +172,58 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+describe('InvocationContext resolved credentials', () => {
+  it('starts a brand-new invocation with an empty credential map', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    expect(context.credentialByKey).toEqual({});
+  });
+
+  it('shares the credential map with child contexts', () => {
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'test-api-key',
+    };
+    const root = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    // Mirrors BaseAgent.createInvocationContext: a child context spreads the
+    // parent, so one credential map must serve the whole invocation.
+    const child = new InvocationContext({
+      ...root,
+      agent: new LoopAgent({name: 'sub'}),
+    });
+    root.credentialByKey['k'] = credential;
+
+    expect(child.credentialByKey['k']).toBe(credential);
+  });
+
+  it('keeps a credential passed in at construction', () => {
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'test-api-key',
+    };
+
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialByKey: {k: credential},
+    });
+
+    expect(context.credentialByKey['k']).toBe(credential);
   });
 });
