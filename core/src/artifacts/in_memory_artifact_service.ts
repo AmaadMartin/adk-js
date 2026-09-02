@@ -23,13 +23,38 @@ export function isInMemoryConnectionString(uri: string): boolean {
 }
 
 /**
+ * One stored version of an artifact.
+ */
+export interface InMemoryArtifactEntry {
+  /** The stored artifact. */
+  data: Part;
+  /** The metadata recorded for this version. */
+  artifactVersion: ArtifactVersion;
+}
+
+/**
+ * The parameters for {@link InMemoryArtifactService.listArtifactKeys}.
+ */
+export interface InMemoryListArtifactKeysRequest extends Omit<
+  ListArtifactKeysRequest,
+  'sessionId'
+> {
+  /** Omit to list only the artifacts in the user namespace. */
+  sessionId?: string;
+}
+
+/**
  * An in-memory implementation of the ArtifactService.
  */
 export class InMemoryArtifactService implements BaseArtifactService {
-  private readonly artifacts: Record<
-    string,
-    {part: Part; metadata: ArtifactVersion}[]
-  > = {};
+  /**
+   * The stored artifact versions, keyed by storage key.
+   *
+   * The store is public so that callers can inspect and seed it, matching the
+   * `artifacts` field of the Python implementation. The entries are live, so a
+   * mutation is visible to every later read.
+   */
+  readonly artifacts: Record<string, InMemoryArtifactEntry[]> = {};
 
   saveArtifact({
     appName,
@@ -52,7 +77,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     }
 
     const version = this.artifacts[path].length;
-    const metadata: ArtifactVersion = {
+    const artifactVersion: ArtifactVersion = {
       version,
       customMetadata,
     };
@@ -60,10 +85,10 @@ export class InMemoryArtifactService implements BaseArtifactService {
     if (!artifact.inlineData && artifact.text === undefined) {
       const fileData = artifact.fileData!;
 
-      metadata.mimeType = fileData.mimeType;
+      artifactVersion.mimeType = fileData.mimeType;
     }
 
-    this.artifacts[path].push({part: artifact, metadata});
+    this.artifacts[path].push({data: artifact, artifactVersion});
 
     return Promise.resolve(version);
   }
@@ -82,31 +107,32 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return Promise.resolve(undefined);
     }
 
-    if (version === undefined) {
-      version = versions.length - 1;
-    }
+    const index = versionIndex(versions.length, version);
 
-    if (!versions[version]) {
+    if (index === undefined) {
       logger.warn(
         `[InMemoryArtifactService] loadArtifact: Artifact ${filename} version ${version} not found`,
       );
       return Promise.resolve(undefined);
     }
 
-    return Promise.resolve(versions[version].part);
+    return Promise.resolve(versions[index].data);
   }
 
   listArtifactKeys({
     appName,
     userId,
     sessionId,
-  }: ListArtifactKeysRequest): Promise<string[]> {
-    const sessionPrefix = artifactPrefix('session', appName, userId, sessionId);
+  }: InMemoryListArtifactKeysRequest): Promise<string[]> {
+    const sessionPrefix =
+      sessionId === undefined
+        ? undefined
+        : artifactPrefix('session', appName, userId, sessionId);
     const userPrefix = artifactPrefix('user', appName, userId);
     const filenames: string[] = [];
 
     for (const path in this.artifacts) {
-      if (path.startsWith(sessionPrefix)) {
+      if (sessionPrefix !== undefined && path.startsWith(sessionPrefix)) {
         filenames.push(decodeURIComponent(path.slice(sessionPrefix.length)));
       } else if (path.startsWith(userPrefix)) {
         filenames.push(decodeURIComponent(path.slice(userPrefix.length)));
@@ -165,7 +191,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return Promise.resolve([]);
     }
 
-    return Promise.resolve(artifacts.map((a) => a.metadata));
+    return Promise.resolve(artifacts.map((a) => a.artifactVersion));
   }
 
   getArtifactVersion({
@@ -182,16 +208,34 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return Promise.resolve(undefined);
     }
 
-    if (version === undefined) {
-      version = versions.length - 1;
+    const index = versionIndex(versions.length, version);
+
+    if (index === undefined) {
+      return Promise.resolve(undefined);
     }
 
-    if (versions[version]) {
-      return Promise.resolve(versions[version].metadata);
-    }
-
-    return Promise.resolve(undefined);
+    return Promise.resolve(versions[index].artifactVersion);
   }
+}
+
+/**
+ * Resolves a caller-supplied version to a stored index.
+ *
+ * A negative version counts from the end, as Python list indexing does, so -1
+ * is the newest version. An omitted version is the newest version.
+ *
+ * @param length The number of stored versions.
+ * @param version The requested version.
+ * @return The index, or undefined when it falls outside the stored range.
+ */
+function versionIndex(length: number, version?: number): number | undefined {
+  let index = version ?? -1;
+
+  if (index < 0) {
+    index += length;
+  }
+
+  return index >= 0 && index < length ? index : undefined;
 }
 
 /**

@@ -90,6 +90,10 @@ export type {
 } from './artifacts/base_artifact_service.js';
 export {InMemoryArtifactService} from './artifacts/in_memory_artifact_service.js';
 export type {
+  InMemoryArtifactEntry,
+  InMemoryListArtifactKeysRequest,
+} from './artifacts/in_memory_artifact_service.js';
+export type {
   SessionArtifactService,
   SessionLoadArtifactRequest,
   SessionSaveArtifactRequest,
