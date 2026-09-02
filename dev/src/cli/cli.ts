@@ -213,6 +213,11 @@ const RELOAD_AGENTS_OPTION = new Option(
   '--reload_agents [boolean]',
   'Optional. Watch agent files for changes and automatically reload them. Default: false. To see any changes to your agent file, you need to initiate a new agent run.',
 ).default(false);
+const DEFAULT_LLM_MODEL_OPTION = new Option(
+  '--default_llm_model <string>',
+  'Optional. Sets the default LLM model used when the agent does not set a ' +
+    'model explicitly.',
+);
 const AGENT_FILE_MODULE_TYPE = new Option('--file_type <string>', 'Optional. ');
 AGENT_FILE_MODULE_TYPE.argChoices = [FileModuleType.CJS, FileModuleType.ESM];
 
@@ -448,6 +453,7 @@ export function createProgram(): Command {
     .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(USE_LOCAL_STORAGE_OPTION)
     .addOption(NO_USE_LOCAL_STORAGE_OPTION)
+    .addOption(DEFAULT_LLM_MODEL_OPTION)
     .action(
       async (
         agentPath: string,
@@ -497,6 +503,7 @@ export function createProgram(): Command {
               otelToCloud: options['otel_to_cloud'] ? true : false,
               agentFileLoadOptions: getAgentFileOptions(options),
               reloadAgents: getBoolean(options['reload_agents']),
+              defaultLlmModel: options['default_llm_model'],
             });
           }
         } catch (error) {
