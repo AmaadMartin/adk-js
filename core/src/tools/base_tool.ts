@@ -98,8 +98,11 @@ export abstract class BaseTool {
    * additionally records the call in `event.longRunningToolIds`, affecting A2A
    * conversion, plugin logging and interrupt tracking.
    *
-   * A tool that defers assigns this after `super(...)`; it is not a
-   * constructor option.
+   * Internal — do not set this from external code. It is not part of the
+   * public API and may change without notice. Only an ADK-internal tool
+   * assigns it, after `super(...)`; it is not a constructor option.
+   *
+   * @internal
    */
   defersResponse = false;
 
