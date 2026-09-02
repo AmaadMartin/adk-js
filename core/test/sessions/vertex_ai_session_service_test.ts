@@ -774,13 +774,22 @@ describe('VertexAiSessionService', () => {
 
   describe('listSessions', () => {
     it('returns list of sessions parsing name extracts', async () => {
+      // Distinct updateTimes so the expected order states intent. Without
+      // them both sessions fall back to Date.now() and the default
+      // (lastUpdateTime, userId, id) sort depends on whether the two calls
+      // land in the same millisecond.
       mockClient.listInternal.mockResolvedValue({
         sessions: [
           {
             name: 'projects/p/locations/l/sessions/test-list-1',
             userId: 'testUser',
+            updateTime: '2026-01-01T00:00:00Z',
           },
-          {name: 'malformed_name', userId: 'testUser'},
+          {
+            name: 'malformed_name',
+            userId: 'testUser',
+            updateTime: '2026-01-02T00:00:00Z',
+          },
         ],
       });
 
@@ -1915,6 +1924,96 @@ describe('VertexAiSessionService', () => {
       await expect(
         service.getUserState({appName: '12345', userId: 'testUser'}),
       ).rejects.toThrow('does not support getUserState');
+    });
+  });
+  describe('listSessions default ordering', () => {
+    it('orders by lastUpdateTime ascending when no order is given', async () => {
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'reasoningEngines/12345/sessions/s3',
+            userId: 'testUser',
+            updateTime: '2026-01-03T00:00:00Z',
+          },
+          {
+            name: 'reasoningEngines/12345/sessions/s1',
+            userId: 'testUser',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+          {
+            name: 'reasoningEngines/12345/sessions/s2',
+            userId: 'testUser',
+            updateTime: '2026-01-02T00:00:00Z',
+          },
+        ],
+      });
+
+      const result = await service.listSessions({appName: '12345'});
+
+      expect(result.sessions.map((s) => s.id)).toEqual(['s1', 's2', 's3']);
+    });
+
+    it('breaks an updateTime tie by userId, then by id', async () => {
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'reasoningEngines/12345/sessions/b',
+            userId: 'bob',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+          {
+            name: 'reasoningEngines/12345/sessions/z',
+            userId: 'alice',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+          {
+            name: 'reasoningEngines/12345/sessions/a',
+            userId: 'alice',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+        ],
+      });
+
+      const result = await service.listSessions({appName: '12345'});
+
+      expect(result.sessions.map((s) => [s.userId, s.id])).toEqual([
+        ['alice', 'a'],
+        ['alice', 'z'],
+        ['bob', 'b'],
+      ]);
+    });
+
+    it('keeps the userId and id tie-breaks ascending when order is desc', async () => {
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'reasoningEngines/12345/sessions/b',
+            userId: 'bob',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+          {
+            name: 'reasoningEngines/12345/sessions/z',
+            userId: 'alice',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+          {
+            name: 'reasoningEngines/12345/sessions/a',
+            userId: 'alice',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+        ],
+      });
+
+      const result = await service.listSessions({
+        appName: '12345',
+        order: 'desc',
+      });
+
+      expect(result.sessions.map((s) => [s.userId, s.id])).toEqual([
+        ['alice', 'a'],
+        ['alice', 'z'],
+        ['bob', 'b'],
+      ]);
     });
   });
 });

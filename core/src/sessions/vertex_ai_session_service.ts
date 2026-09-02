@@ -438,17 +438,7 @@ export class VertexAiSessionService extends BaseSessionService {
       pageToken = (response as {nextPageToken?: string}).nextPageToken;
     } while (pageToken);
 
-    if (order === 'asc') {
-      adkSessions.sort(
-        (a, b) =>
-          a.lastUpdateTime - b.lastUpdateTime || a.id.localeCompare(b.id),
-      );
-    } else if (order === 'desc') {
-      adkSessions.sort(
-        (a, b) =>
-          b.lastUpdateTime - a.lastUpdateTime || a.id.localeCompare(b.id),
-      );
-    }
+    adkSessions.sort((a, b) => compareSessions(a, b, order));
 
     if (limit === undefined) {
       const totalItems = adkSessions.length;
@@ -618,6 +608,26 @@ export class VertexAiSessionService extends BaseSessionService {
 
     return event;
   }
+}
+
+/**
+ * Orders listed sessions by `(lastUpdateTime, userId, id)`, so a repeated
+ * `listSessions` call returns the same sequence whatever order the backend
+ * paginated in. `order` reverses the update-time comparison only; the
+ * tie-breaks stay ascending so equal timestamps still order deterministically.
+ */
+function compareSessions(
+  a: Session,
+  b: Session,
+  order: 'asc' | 'desc' | undefined,
+): number {
+  const byUpdateTime =
+    order === 'desc'
+      ? b.lastUpdateTime - a.lastUpdateTime
+      : a.lastUpdateTime - b.lastUpdateTime;
+  return (
+    byUpdateTime || a.userId.localeCompare(b.userId) || a.id.localeCompare(b.id)
+  );
 }
 
 interface WorkflowEventMetadata {
