@@ -8,7 +8,6 @@
 import {
   BaseArtifactService,
   BaseSessionService,
-  LogLevel,
   getArtifactServiceFromUri,
   getSessionServiceFromUri,
   setLogLevel as setAdkCoreLogLevel,
@@ -23,34 +22,18 @@ import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
+import {AGENT_TYPE_OPTION, toAgentType} from './create_options.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
+import {applyExclusiveOptions} from './exclusive_options.js';
+import {
+  applyVerboseLogLevel,
+  getLogLevelFromOptions,
+  LOG_LEVEL_OPTION,
+  VERBOSE_OPTION,
+} from './log_options.js';
 
 dotenv.config({quiet: true});
-
-const LOG_LEVEL_MAP: Record<string, LogLevel> = {
-  'debug': LogLevel.DEBUG,
-  'info': LogLevel.INFO,
-  'warn': LogLevel.WARN,
-  'error': LogLevel.ERROR,
-};
-
-function getLogLevelFromOptions(options: {
-  verbose?: boolean;
-  log_level?: string;
-}) {
-  if (options.verbose) {
-    return LogLevel.DEBUG;
-  }
-
-  if (typeof options.log_level === 'string') {
-    // `??`, not `||`: LogLevel.DEBUG is 0, so `||` fell through to INFO and
-    // made `--log_level debug` a silent no-op.
-    return LOG_LEVEL_MAP[options.log_level.toLowerCase()] ?? LogLevel.INFO;
-  }
-
-  return LogLevel.INFO;
-}
 
 function getSessionServiceFromOptions(options: {
   session_service_uri?: string;
@@ -132,14 +115,6 @@ const ALLOWED_HOSTS_OPTION = new Option(
     'this to widen the guard for a reverse proxy in front of a ' +
     'loopback-bound server without opening --allow_origins to "*".',
 ).default('');
-const VERBOSE_OPTION = new Option(
-  '-v, --verbose',
-  'Optional. Log at debug level. Shorthand for --log_level debug',
-).default(false);
-const LOG_LEVEL_OPTION = new Option(
-  '--log_level <string>',
-  'Optional. The log level of the server',
-).default('info');
 const SESSION_SERVICE_URI_OPTION = new Option(
   '--session_service_uri <string>',
   'Optional. The URI of the session service. Supported URIs: memory:// for in-memory session service.',
@@ -224,7 +199,7 @@ export function createProgram(): Command {
     colorize: {all: true},
   });
 
-  const program = new Command('ADK CLI');
+  const program = applyVerboseLogLevel(new Command('ADK CLI'));
 
   program
     .addOption(new Option('-v, --version', 'Get ADK CLI version'))
@@ -349,6 +324,7 @@ export function createProgram(): Command {
       '--language <string>',
       'Optional. Either ts or js as the language to output.',
     )
+    .addOption(AGENT_TYPE_OPTION)
     .action(async (agentName: string, options: Record<string, string>) => {
       try {
         await createAgent({
@@ -359,14 +335,14 @@ export function createProgram(): Command {
           project: options['project'],
           region: options['region'],
           language: options['language'],
+          agentType: toAgentType(options['type']),
         });
       } catch (error) {
         logger.error('Error creating agent:', (error as Error).message);
       }
     });
 
-  program
-    .command('run')
+  applyExclusiveOptions(program.command('run'), ['replay', 'resume'])
     .description('Runs agent')
     .argument('<agent>', 'Agent file path (.js or .ts)')
     .option(
