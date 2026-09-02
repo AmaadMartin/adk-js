@@ -12,8 +12,17 @@ import {
 } from '../../events/event.js';
 
 export const SCHEMA_VERSION_KEY = 'schema_version';
+/** The legacy layout, which stores event actions as a Python pickle. */
+export const SCHEMA_VERSION_0_PICKLE = '0';
 export const SCHEMA_VERSION_1_JSON = '1';
 export const STORAGE_KEY_COLUMN_LENGTH = 191;
+
+export const METADATA_TABLE_NAME = 'adk_internal_metadata';
+export const EVENTS_TABLE_NAME = 'events';
+/** The events column only the current layout has. */
+export const EVENT_DATA_COLUMN_NAME = 'event_data';
+/** The events column only the legacy layout has. */
+export const EVENT_ACTIONS_COLUMN_NAME = 'actions';
 
 /**
  * Custom type for serializing and deserializing ADK Event objects.
@@ -36,7 +45,7 @@ class CamelCaseToSnakeCaseJsonType extends JsonType {
   }
 }
 
-@Entity({tableName: 'adk_internal_metadata'})
+@Entity({tableName: METADATA_TABLE_NAME})
 export class StorageMetadata {
   @PrimaryKey({type: 'string'})
   key!: string;
@@ -135,7 +144,7 @@ export class StorageSession {
   [PrimaryKey.name]?: [string, string, string];
 }
 
-@Entity({tableName: 'events'})
+@Entity({tableName: EVENTS_TABLE_NAME})
 export class StorageEvent {
   @PrimaryKey({type: 'string', length: STORAGE_KEY_COLUMN_LENGTH})
   id!: string;
