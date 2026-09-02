@@ -147,8 +147,11 @@ export abstract class BaseTool {
     config: ToolArgsConfig,
     _configAbsPath?: string,
   ): Promise<BaseTool> {
-    // `this` is the class fromConfig was called on. The cast is what lets an
-    // abstract base construct it; subclasses needing another shape override.
+    // Constructing the receiving class from a config bag is unsound by
+    // nature, so the assertion cannot be typed away. Annotating `this`
+    // instead rejects any subclass whose constructor takes extra required
+    // params (TS2684), and returning a generic `T` breaks every subclass that
+    // narrows this signature (TS2417).
     const ctor = this as unknown as new (params: BaseToolParams) => BaseTool;
     return new ctor(toBaseToolParams(config));
   }
@@ -256,10 +259,6 @@ export abstract class BaseTool {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 /**
  * The config is rejected without echoing it back: a tool's declared args can
  * carry credentials.
@@ -275,12 +274,16 @@ function invalidToolConfig(requirement: string): ToolExecutionError {
  * Checks the config entries `BaseTool` reads and returns the constructor
  * params. Unrecognized entries pass through untouched, so a subclass whose
  * params object carries extra fields still receives them.
+ *
+ * The runtime checks are not redundant with the declared type: a loader
+ * parses a config file, so what arrives is whatever the file held.
  */
 function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
-  if (!isRecord(config)) {
+  if (typeof config !== 'object' || config === null) {
     throw invalidToolConfig('the config must be a non-null object');
   }
-  const {name, description, isLongRunning} = config;
+  const entries: Record<string, unknown> = {...config};
+  const {name, description, isLongRunning} = entries;
   if (typeof name !== 'string' || name === '') {
     throw invalidToolConfig('`name` must be a non-empty string');
   }
@@ -290,7 +293,7 @@ function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
   if (isLongRunning !== undefined && typeof isLongRunning !== 'boolean') {
     throw invalidToolConfig('`isLongRunning` must be a boolean');
   }
-  return {...config, name, description, isLongRunning};
+  return {...entries, name, description, isLongRunning};
 }
 
 function findToolWithFunctionDeclarations(

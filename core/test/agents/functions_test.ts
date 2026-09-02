@@ -123,6 +123,18 @@ function callFor(tool: BaseTool): FunctionCall {
  * Builds a long-running tool that mutates its tool context and then returns no
  * response.
  */
+function createStartJobTool(mutate: (toolContext: Context) => void) {
+  return new LongRunningFunctionTool({
+    name: 'startJob',
+    description: 'starts a background job',
+    parameters: z.object({}),
+    execute: async (_args, toolContext) => {
+      mutate(toolContext!);
+      return undefined;
+    },
+  });
+}
+
 /**
  * Builds a tool that defers its response. The flag is assigned after
  * construction because it is not a tool option: framework-internal tools set
@@ -142,18 +154,6 @@ function createDeferringTool(
   });
   tool.defersResponse = true;
   return tool;
-}
-
-function createStartJobTool(mutate: (toolContext: Context) => void) {
-  return new LongRunningFunctionTool({
-    name: 'startJob',
-    description: 'starts a background job',
-    parameters: z.object({}),
-    execute: async (_args, toolContext) => {
-      mutate(toolContext!);
-      return undefined;
-    },
-  });
 }
 
 describe('handleFunctionCallList', () => {

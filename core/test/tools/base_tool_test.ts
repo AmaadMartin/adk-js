@@ -94,8 +94,17 @@ async function rejectionOf(
   expect.fail('expected fromConfig to reject');
 }
 
-async function expectBadConfig(config: ToolArgsConfig): Promise<void> {
+/**
+ * Asserts the rejection, and pins which check produced it. Asserting only the
+ * error type would let any guard stand in for any other.
+ */
+async function expectBadConfig(
+  config: ToolArgsConfig,
+  requirement: string,
+): Promise<void> {
   const error = await rejectionOf(config);
+
+  expect(error.message).toContain(requirement);
 
   expect(error.errorType).toBe(ToolErrorType.BAD_REQUEST);
 }
@@ -154,8 +163,10 @@ describe('BaseTool.fromConfig', () => {
       label: 'from-config',
     });
 
-    expect(tool).toBeInstanceOf(LabelledTool);
-    expect((tool as LabelledTool).label).toBe('from-config');
+    if (!(tool instanceof LabelledTool)) {
+      expect.fail(`expected a LabelledTool, got ${tool.constructor.name}`);
+    }
+    expect(tool.label).toBe('from-config');
   });
 
   it('leaves defersResponse false on the tool it builds', async () => {
@@ -177,31 +188,43 @@ describe('BaseTool.fromConfig', () => {
     expect(tool.target).toBe('somewhere');
   });
 
-  it('rejects a config that is not an object', async () => {
-    await expectBadConfig(parseToolConfig('null'));
+  it('rejects a null config', async () => {
+    await expectBadConfig(parseToolConfig('null'), 'must be a non-null object');
+  });
+
+  it('rejects a config that is a function', async () => {
+    await expectBadConfig(() => undefined, 'must be a non-null object');
   });
 
   it('rejects a config with no name', async () => {
-    await expectBadConfig({description: 'does something'});
+    await expectBadConfig(
+      {description: 'does something'},
+      '`name` must be a non-empty string',
+    );
   });
 
   it('rejects a name that is not a string', async () => {
     await expectBadConfig(
       parseToolConfig('{"name": 7, "description": "does something"}'),
+      '`name` must be a non-empty string',
     );
   });
 
   it('rejects an empty name', async () => {
-    await expectBadConfig({name: '', description: 'does something'});
+    await expectBadConfig(
+      {name: '', description: 'does something'},
+      '`name` must be a non-empty string',
+    );
   });
 
   it('rejects a config with no description', async () => {
-    await expectBadConfig({name: 'my_tool'});
+    await expectBadConfig({name: 'my_tool'}, '`description` must be a string');
   });
 
   it('rejects a description that is not a string', async () => {
     await expectBadConfig(
       parseToolConfig('{"name": "my_tool", "description": []}'),
+      '`description` must be a string',
     );
   });
 
@@ -210,6 +233,7 @@ describe('BaseTool.fromConfig', () => {
       parseToolConfig(
         '{"name": "my_tool", "description": "does something", "isLongRunning": "yes"}',
       ),
+      '`isLongRunning` must be a boolean',
     );
   });
 
