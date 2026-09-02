@@ -87,6 +87,7 @@ describe('parseArtifactUri', () => {
     'artifact://apps/app1/users/user1/sessions/session1/artifacts/file1',
     'artifact://apps/app1/users/user1/artifacts/file1',
     'artifact://apps/app1/users/user1/artifacts/file1/versions/1/extra',
+    'artifact://apps/app1/users/user1/artifacts/file1/versions/abc',
   ])('returns undefined for %s', (uri) => {
     expect(parseArtifactUri(uri)).toBeUndefined();
   });

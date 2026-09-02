@@ -352,11 +352,7 @@ export class GcsArtifactService implements BaseArtifactService {
       return undefined;
     }
 
-    const encodedObjectName = resolved.objectName
-      .split('/')
-      .map(encodeURIComponent)
-      .join('/');
-    return `${AUTHENTICATED_URL_ORIGIN}/${this.bucketName}/${encodedObjectName}`;
+    return `${AUTHENTICATED_URL_ORIGIN}/${this.bucketName}/${encodeObjectName(resolved.objectName)}`;
   }
 
   /**
@@ -516,6 +512,25 @@ async function readMetadata(file: File): Promise<FileMetadata | undefined> {
     }
     throw e;
   }
+}
+
+/**
+ * Percent-encodes an object name for a URL, keeping the `/` separators.
+ *
+ * @param objectName The name of the object in the bucket.
+ * @return The name with every path segment escaped.
+ */
+function encodeObjectName(objectName: string): string {
+  return objectName
+    .split('/')
+    .map((segment) =>
+      // encodeURIComponent keeps `!'()*` where a GCS object path escapes them.
+      encodeURIComponent(segment).replace(
+        /[!'()*]/g,
+        (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+      ),
+    )
+    .join('/');
 }
 
 /**

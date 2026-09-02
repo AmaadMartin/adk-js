@@ -711,6 +711,18 @@ describe('GcsArtifactService', () => {
       );
     });
 
+    it('percent-encodes the characters encodeURIComponent keeps', async () => {
+      const service = createService();
+      const filename = "a!b'c(d)e*f.txt";
+      await service.saveArtifact({...scope, filename, artifact: {text: 'v0'}});
+
+      await expect(
+        service.getAuthenticatedUrl({...scope, filename}),
+      ).resolves.toBe(
+        'https://storage.cloud.google.com/test-bucket/app/user1/sess1/a%21b%27c%28d%29e%2Af.txt/0',
+      );
+    });
+
     it('addresses a user-scoped artifact without a session', async () => {
       const service = createService();
       await service.saveArtifact({
@@ -1061,6 +1073,28 @@ describe('GcsArtifactService', () => {
       );
     });
 
+    it('rejects loading a stored reference URI that does not parse', async () => {
+      const service = createService();
+      await service.saveArtifact({
+        ...scope,
+        filename: 'broken.txt',
+        artifact: {text: 'v0'},
+      });
+      const stored = storageMock
+        .bucket(bucketName)
+        .files.get('app/user1/sess1/broken.txt/0');
+      if (!stored) {
+        expect.fail('the artifact was not stored');
+      }
+      stored.metadata['adkFileUri'] = 'artifact://apps/app/invalid';
+
+      await expect(
+        service.loadArtifact({...scope, filename: 'broken.txt'}),
+      ).rejects.toThrow(
+        'Invalid artifact reference URI: artifact://apps/app/invalid',
+      );
+    });
+
     it('rejects loading a stored reference retargeted at another session', async () => {
       const service = createService();
       await service.saveArtifact({
@@ -1369,6 +1403,18 @@ describe('GcsArtifactService', () => {
       await expect(
         service.listVersions({...scope, filename: 'notes.txt'}),
       ).resolves.toEqual([0]);
+    });
+
+    it('lists an object stored directly under the session prefix', async () => {
+      const service = createService();
+      storageMock.bucket(bucketName).files.set('app/user1/sess1/orphan', {
+        data: Buffer.alloc(0),
+        metadata: {},
+      });
+
+      await expect(service.listArtifactKeys(scope)).resolves.toEqual([
+        'orphan',
+      ]);
     });
   });
 
