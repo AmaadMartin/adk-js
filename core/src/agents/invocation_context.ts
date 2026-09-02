@@ -279,9 +279,7 @@ export class InvocationContext {
    * another. Read through `ReadonlyContext.getCredential`.
    *
    * Created with `Object.create(null)`, as `InMemoryCredentialService` creates
-   * its buckets: the credential key is attacker-influenced, and on a `{}`
-   * literal a key of `__proto__` reparents the map instead of creating an own
-   * property.
+   * its buckets: the credential key is attacker-influenced.
    */
   readonly credentialByKey: Record<string, AuthCredential>;
 
