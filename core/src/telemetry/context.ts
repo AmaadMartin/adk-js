@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getEnvVar} from '../utils/env_aware_utils.js';
+import {getBooleanEnvVar, getEnvVar} from '../utils/env_aware_utils.js';
 
 const ADK_TELEMETRY_IGNORE_RUN_CONFIG = 'ADK_TELEMETRY_IGNORE_RUN_CONFIG';
 const OTEL_SEMCONV_STABILITY_OPT_IN = 'OTEL_SEMCONV_STABILITY_OPT_IN';
@@ -21,7 +21,10 @@ const ADK_EXPERIMENTAL_TELEMETRY = 'ADK_EXPERIMENTAL_TELEMETRY';
  */
 const GENAI_EXPERIMENTAL_OPT_IN = 'gen_ai_latest_experimental';
 
-/** Env values (lowercased) treated as "on" for boolean env vars. */
+/**
+ * Env values (lowercased) that the legacy boolean form of
+ * `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` treats as "on".
+ */
 const TRUTHY_ENV_VALUES = ['1', 'true'];
 
 /** Env values (lowercased) treated as "off" for boolean env vars. */
@@ -102,13 +105,11 @@ function readAddContentToLegacySpans(): boolean {
 }
 
 function readEmitExperimentalTelemetry(): boolean {
-  const value = getEnvVar(ADK_EXPERIMENTAL_TELEMETRY).trim();
-  return TRUTHY_ENV_VALUES.includes(value.toLowerCase());
+  return getBooleanEnvVar(ADK_EXPERIMENTAL_TELEMETRY);
 }
 
 function readIgnorePerRequest(): boolean {
-  const value = getEnvVar(ADK_TELEMETRY_IGNORE_RUN_CONFIG).trim();
-  return TRUTHY_ENV_VALUES.includes(value.toLowerCase());
+  return getBooleanEnvVar(ADK_TELEMETRY_IGNORE_RUN_CONFIG);
 }
 
 /**
