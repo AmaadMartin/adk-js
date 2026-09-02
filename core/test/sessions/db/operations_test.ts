@@ -6,9 +6,14 @@
 
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
+import {mkdtemp, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  connectionIsAlive,
   detectDatabaseSchemaVersion,
+  enableSqliteForeignKeys,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
   getOrCreateRow,
@@ -189,6 +194,22 @@ describe('operations', () => {
       expect(options.pool).toBeUndefined();
     });
 
+    it('installs the foreign-key hook on every sqlite connection', async () => {
+      const options = await getConnectionOptionsFromUri('sqlite:///tmp/a.db');
+      expect(options.driverOptions).toEqual({
+        pool: {afterCreate: enableSqliteForeignKeys},
+      });
+    });
+
+    it('installs the liveness check on a non-sqlite backend', async () => {
+      const options = await getConnectionOptionsFromUri(
+        'postgres://user:pass@localhost:5432/db',
+      );
+      expect(options.driverOptions).toEqual({
+        pool: {validate: connectionIsAlive},
+      });
+    });
+
     it('reports a string that is not a URI at all', async () => {
       await expect(
         getConnectionOptionsFromUri('definitely not a url'),
@@ -309,6 +330,164 @@ describe('operations', () => {
       await expect(detectDatabaseSchemaVersion(orm)).resolves.toBe(
         SCHEMA_VERSION_1_JSON,
       );
+    });
+  });
+
+  describe('enableSqliteForeignKeys', () => {
+    it('runs the pragma and hands the connection back to the pool', () => {
+      const statements: string[] = [];
+      const connection = {
+        run(sql: string, callback: (error: Error | null) => void) {
+          statements.push(sql);
+          callback(null);
+        },
+      };
+
+      let reported: Error | null = new Error('the hook never called back');
+      let handedBack: unknown;
+      enableSqliteForeignKeys(connection, (error, opened) => {
+        reported = error;
+        handedBack = opened;
+      });
+
+      expect(statements).toEqual(['PRAGMA foreign_keys = ON']);
+      expect(reported).toBeNull();
+      expect(handedBack).toBe(connection);
+    });
+
+    it('reports a pragma failure to the pool', () => {
+      const failure = new Error('disk I/O error');
+      const statements: string[] = [];
+      const connection = {
+        run(sql: string, callback: (error: Error | null) => void) {
+          statements.push(sql);
+          callback(failure);
+        },
+      };
+
+      let reported: Error | null = null;
+      enableSqliteForeignKeys(connection, (error) => {
+        reported = error;
+      });
+
+      expect(statements).toEqual(['PRAGMA foreign_keys = ON']);
+      expect(reported).toBe(failure);
+    });
+
+    it('keeps foreign keys on for every connection of a wider pool', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'adk-sqlite-pragma-'));
+      const options = await getConnectionOptionsFromUri(
+        `sqlite://${join(directory, 'sessions.db')}`,
+        {pool: {min: 0, max: 4}},
+      );
+      const orm = await MikroORM.init(options);
+
+      try {
+        const connection = orm.em.getConnection();
+        // More work than the pool is wide, so knex opens every connection it
+        // is allowed to and each one has to answer for itself.
+        const reads: Array<Promise<Array<{foreign_keys: number}>>> = Array.from(
+          {length: 8},
+          () => connection.execute('pragma foreign_keys', [], 'all'),
+        );
+        const results = await Promise.all(reads);
+
+        expect(results.map((rows) => rows[0].foreign_keys)).toEqual(
+          Array.from({length: 8}, () => 1),
+        );
+      } finally {
+        await orm.close();
+        await rm(directory, {recursive: true, force: true});
+      }
+    });
+  });
+
+  /** The statement method a raw `sqlite3` connection exposes. */
+  interface SqliteAllConnection {
+    all(sql: string, callback: (error: Error | null) => void): void;
+  }
+
+  describe('connectionIsAlive', () => {
+    it('reports a connection that answers the probe', async () => {
+      const statements: string[] = [];
+      const connection = {
+        query(sql: string, callback: (error: Error | null) => void) {
+          statements.push(sql);
+          callback(null);
+        },
+      };
+
+      await expect(connectionIsAlive(connection)).resolves.toBe(true);
+      expect(statements).toEqual(['select 1']);
+    });
+
+    it('reports a connection whose probe fails', async () => {
+      const connection = {
+        query(sql: string, callback: (error: Error | null) => void) {
+          callback(new Error(`server closed the connection: ${sql}`));
+        },
+      };
+
+      await expect(connectionIsAlive(connection)).resolves.toBe(false);
+    });
+
+    it('reports a connection that rejects the probe synchronously', async () => {
+      const connection = {
+        query(): never {
+          throw new Error('connection is destroyed');
+        },
+      };
+
+      await expect(connectionIsAlive(connection)).resolves.toBe(false);
+    });
+
+    it('leaves a driver that takes no statement to knex', async () => {
+      await expect(connectionIsAlive({execSql: () => undefined})).resolves.toBe(
+        true,
+      );
+    });
+
+    it('is consulted by the pool before it reuses a connection', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'adk-sqlite-validate-'));
+      const checks: boolean[] = [];
+      const orm = await MikroORM.init({
+        dbName: join(directory, 'sessions.db'),
+        driver: SqliteDriver,
+        entities: ENTITIES,
+        pool: {min: 0, max: 1},
+        driverOptions: {
+          pool: {
+            // sqlite3 names its statement method `all`, so the probe reaches a
+            // real pooled connection through this adapter. A socket backend
+            // exposes `query` and needs none.
+            async validate(connection: SqliteAllConnection) {
+              checks.push(
+                await connectionIsAlive({
+                  query: (
+                    sql: string,
+                    callback: (error: Error | null) => void,
+                  ) => connection.all(sql, callback),
+                }),
+              );
+              return true;
+            },
+          },
+        },
+      });
+
+      try {
+        const connection = orm.em.getConnection();
+        await connection.execute('select 1 as probe', [], 'all');
+        await connection.execute('select 1 as probe', [], 'all');
+
+        // The first statement opens the connection, so only its reuse is
+        // validated. A hook the pool never calls would leave this empty.
+        expect(checks.length).toBeGreaterThan(0);
+        expect(checks.every((alive) => alive)).toBe(true);
+      } finally {
+        await orm.close();
+        await rm(directory, {recursive: true, force: true});
+      }
     });
   });
 

@@ -8,4 +8,4 @@ TypeScript implementation. For the official ADK documentation, visit
 
 ### Sessions
 
-- [DatabaseSessionService](sessions/database_session_service/index.md) - Storing sessions in SQL, rejecting stale writes, and reading user state.
+- [DatabaseSessionService](sessions/database_session_service/index.md) - Storing sessions in SQL, rejecting stale writes, reading user state, and opening a legacy database.

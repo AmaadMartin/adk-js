@@ -18,6 +18,7 @@ import {StaleSessionError} from '../errors/stale_session_error.js';
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {KeyedMutex} from '../utils/keyed_mutex.js';
+import {logger} from '../utils/logger.js';
 import {
   AppendEventRequest,
   applyTempState,
@@ -51,6 +52,11 @@ import {
   StorageSession,
   StorageUserState,
 } from './db/schema.js';
+import {
+  ENTITIES_V0,
+  StorageEventV0,
+  storageEventV0ToEvent,
+} from './db/schema_v0.js';
 import {CompositeSessionKey, createSession, Session} from './session.js';
 
 /**
@@ -60,6 +66,18 @@ import {CompositeSessionKey, createSession, Session} from './session.js';
 const STALE_SESSION_ERROR_MESSAGE =
   'The session has been modified in storage since it was loaded. ' +
   'Please reload the session before appending more events.';
+
+/**
+ * The message a write to a legacy database is refused with.
+ *
+ * It names the migration command, because that is the only way to make such a
+ * database writable from here.
+ */
+const LEGACY_SCHEMA_READ_ONLY_MESSAGE =
+  'This database uses the legacy v0 session schema, which stores event ' +
+  'actions as a Python pickle. adk-js can read such a database but cannot ' +
+  'write to it. Migrate it with the adk-python `adk migrate session` ' +
+  'command first.';
 
 /** Newest event first, with the id breaking a timestamp tie. */
 const NEWEST_EVENT_FIRST = {timestamp: 'DESC', id: 'DESC'} as const;
@@ -186,6 +204,8 @@ export class DatabaseSessionService extends BaseSessionService {
   private options?: MikroDBOptions;
   private connectionString?: string;
   private optionOverrides?: Partial<MikroDBOptions>;
+  private schemaVersion?: string;
+  private warnedAboutLegacyActions = false;
   private readonly ownsOrm: boolean;
   private readonly sessionLocks = new KeyedMutex();
 
@@ -229,7 +249,11 @@ export class DatabaseSessionService extends BaseSessionService {
    * during startup to pay the cost upfront. It is safe to call more than once
    * and safe to call concurrently, and a failed attempt can be retried.
    *
-   * @throws Error if the database holds the legacy v0 session schema.
+   * A database holding the legacy v0 schema is opened for reading only, and
+   * neither its tables nor its rows are altered.
+   *
+   * @throws Error if the database holds the legacy v0 schema and the caller
+   *     supplied the MikroORM instance.
    */
   async init(): Promise<void> {
     if (this.initialized) {
@@ -250,18 +274,45 @@ export class DatabaseSessionService extends BaseSessionService {
     // Detect before creating anything: `ensureDatabaseCreated` adds the v1
     // `event_data` column to a legacy `events` table, which erases the
     // evidence the detection reads.
-    const version = await detectDatabaseSchemaVersion(orm);
-    if (version === SCHEMA_VERSION_0_PICKLE) {
-      throw new Error(
-        'This database uses the legacy v0 session schema, which stores event ' +
-          'actions as a Python pickle that this SDK cannot read. Migrate it ' +
-          'with the adk-python `adk migrate session` command first.',
-      );
+    this.schemaVersion = await detectDatabaseSchemaVersion(orm);
+    if (this.schemaVersion === SCHEMA_VERSION_0_PICKLE) {
+      await this.reopenWithLegacyEntities(orm);
+      this.initialized = true;
+      return;
     }
 
     await ensureDatabaseCreated(orm);
     await validateDatabaseSchemaVersion(orm);
     this.initialized = true;
+  }
+
+  /**
+   * Reopens a legacy database with the entity set that matches its `events`
+   * table.
+   *
+   * No schema is created and no metadata row is written: the tables are
+   * already there, and writing either would turn a readable legacy database
+   * into one that reports itself as current while its events read back empty.
+   *
+   * @throws Error if the caller owns the MikroORM instance, since its entity
+   *     set cannot be replaced.
+   */
+  private async reopenWithLegacyEntities(orm: MikroORM): Promise<void> {
+    if (!this.ownsOrm) {
+      throw new Error(
+        'This database uses the legacy v0 session schema. Reading it needs ' +
+          'the legacy entity set, which this service can only install on a ' +
+          'connection it opened itself. Construct it with a connection ' +
+          'string or an options object rather than a MikroORM instance.',
+      );
+    }
+    const options = await this.resolveOptions();
+    // Drop the reference before closing it. A second `init` that fails would
+    // otherwise leave a closed instance installed, and every later call would
+    // run against it instead of connecting again.
+    this.orm = undefined;
+    await orm.close();
+    this.orm = await MikroORM.init({...options, entities: ENTITIES_V0});
   }
 
   private async resolveOptions(): Promise<MikroDBOptions> {
@@ -296,6 +347,7 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
     await this.init();
+    this.assertWritable();
     const em = this.orm!.em.fork();
 
     const id = sessionId || randomUUID();
@@ -439,13 +491,53 @@ export class DatabaseSessionService extends BaseSessionService {
       // known event receives that event.
       where.timestamp = {$gte: new Date(config.afterTimestamp)};
     }
-
-    const storageEvents = await em.find(StorageEvent, where, {
+    const options = {
       orderBy: NEWEST_EVENT_FIRST,
       limit: config?.numRecentEvents,
-    });
+    };
+
+    if (this.readsLegacySchema()) {
+      const legacyRows = await em.find(StorageEventV0, where, options);
+      legacyRows.reverse();
+      return legacyRows.map((row) => this.toLegacyEvent(row));
+    }
+
+    const storageEvents = await em.find(StorageEvent, where, options);
     storageEvents.reverse();
     return storageEvents.map((storageEvent) => storageEvent.eventData);
+  }
+
+  /** Reports whether the open database holds the legacy v0 schema. */
+  private readsLegacySchema(): boolean {
+    return this.schemaVersion === SCHEMA_VERSION_0_PICKLE;
+  }
+
+  /**
+   * Converts a legacy row, warning once that its actions are not recoverable.
+   */
+  private toLegacyEvent(row: StorageEventV0): Event {
+    if (!this.warnedAboutLegacyActions) {
+      this.warnedAboutLegacyActions = true;
+      logger.warn(
+        'Event actions in this database are stored as a Python pickle and ' +
+          'come back empty. Migrate it with the adk-python `adk migrate ' +
+          'session` command to recover them.',
+      );
+    }
+    return storageEventV0ToEvent(row);
+  }
+
+  /**
+   * Throws when the open database is one this service must not write to.
+   *
+   * A v0 database stores event actions as a Python pickle. TypeScript cannot
+   * produce a pickle that adk-python's restricted unpickler reads back, so an
+   * event written here would break the Python reader.
+   */
+  private assertWritable(): void {
+    if (this.readsLegacySchema()) {
+      throw new Error(LEGACY_SCHEMA_READ_ONLY_MESSAGE);
+    }
   }
 
   async listSessions({
@@ -557,6 +649,10 @@ export class DatabaseSessionService extends BaseSessionService {
     const em = this.orm!.em.fork();
 
     await em.nativeDelete(StorageSession, {appName, userId, id: sessionId});
+    if (this.readsLegacySchema()) {
+      await em.nativeDelete(StorageEventV0, {appName, userId, sessionId});
+      return;
+    }
     await em.nativeDelete(StorageEvent, {appName, userId, sessionId});
   }
 
@@ -577,6 +673,7 @@ export class DatabaseSessionService extends BaseSessionService {
     event,
   }: AppendEventRequest): Promise<Event> {
     await this.init();
+    this.assertWritable();
 
     if (event.partial) {
       return event;
