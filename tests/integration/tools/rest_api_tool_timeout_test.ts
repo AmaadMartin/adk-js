@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, RestApiTool} from '@google/adk';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  PluginManager,
+  RestApiTool,
+} from '@google/adk';
 import {createServer, Server} from 'node:http';
 import {Socket} from 'node:net';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
@@ -64,7 +70,13 @@ describe('RestApiTool against a server that never answers', () => {
 
       const result = await tool.runAsync({
         args: {},
-        toolContext: {} as unknown as Context,
+        toolContext: new Context({
+          invocationContext: new InvocationContext({
+            invocationId: 'inv-timeout-integration',
+            session: createSession({id: 'session-1', appName: 'test-app'}),
+            pluginManager: new PluginManager([]),
+          }),
+        }),
       });
 
       expect(result).toEqual({

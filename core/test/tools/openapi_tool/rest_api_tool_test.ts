@@ -10,9 +10,12 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
   DEFAULT_REQUEST_TIMEOUT,
   getLogger,
+  InvocationContext,
   OpenApiSpecParser,
+  PluginManager,
   requestDeadlineMs,
   resolveRequestTimeout,
   RestApiTool,
@@ -1179,6 +1182,16 @@ describe('RestApiTool request timeouts', () => {
     );
   }
 
+  function callContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'inv-timeout-test',
+        session: createSession({id: 'session-1', appName: 'test-app'}),
+        pluginManager: new PluginManager([]),
+      }),
+    });
+  }
+
   function stubFetch() {
     return vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response('ok', {
@@ -1246,7 +1259,7 @@ describe('RestApiTool request timeouts', () => {
 
       await buildTool().runAsync({
         args: {},
-        toolContext: {} as unknown as Context,
+        toolContext: callContext(),
       });
 
       const init = fetchSpy.mock.calls[0][1];
@@ -1262,7 +1275,7 @@ describe('RestApiTool request timeouts', () => {
 
       await buildTool().runAsync({
         args: {},
-        toolContext: {} as unknown as Context,
+        toolContext: callContext(),
       });
 
       expect(deadlineSpy).toHaveBeenCalledWith(620_000);
@@ -1274,7 +1287,7 @@ describe('RestApiTool request timeouts', () => {
 
       await buildTool({timeout: {connectMs: 500}}).runAsync({
         args: {},
-        toolContext: {} as unknown as Context,
+        toolContext: callContext(),
       });
 
       expect(deadlineSpy).toHaveBeenCalledWith(610_500);
@@ -1290,7 +1303,7 @@ describe('RestApiTool request timeouts', () => {
 
       const result = await buildTool().runAsync({
         args: {},
-        toolContext: {} as unknown as Context,
+        toolContext: callContext(),
       });
 
       expect(result).toEqual({error: timeoutError('TimeoutError')});
@@ -1308,7 +1321,7 @@ describe('RestApiTool request timeouts', () => {
 
       const result = await buildTool().runAsync({
         args: {},
-        toolContext: {} as unknown as Context,
+        toolContext: callContext(),
       });
 
       expect(result).toEqual({error: timeoutError('ConnectTimeoutError')});
@@ -1321,7 +1334,7 @@ describe('RestApiTool request timeouts', () => {
 
       const result = await buildTool().runAsync({
         args: {},
-        toolContext: {} as unknown as Context,
+        toolContext: callContext(),
       });
 
       expect(result).toEqual({
@@ -1339,7 +1352,7 @@ describe('RestApiTool request timeouts', () => {
 
       await buildTool().runAsync({
         args: {},
-        toolContext: {} as unknown as Context,
+        toolContext: callContext(),
       });
 
       expect(warnSpy).toHaveBeenCalledTimes(1);
