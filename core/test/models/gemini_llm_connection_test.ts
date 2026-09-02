@@ -265,7 +265,7 @@ describe('GeminiLlmConnection', () => {
       );
       const content: Content = {role: 'user', parts: [{text: 'half a '}]};
 
-      await connection.sendContent(content, {partial: true});
+      await connection.sendContent(content, true);
 
       expect(mockSession.sendClientContent).toHaveBeenCalledWith({
         turns: [content],
@@ -280,7 +280,7 @@ describe('GeminiLlmConnection', () => {
       );
       const content: Content = {role: 'user', parts: [{text: 'half a '}]};
 
-      await connection.sendContent(content, {partial: true});
+      await connection.sendContent(content, true);
 
       expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
       expect(mockSession.sendClientContent).toHaveBeenCalledWith({
@@ -296,7 +296,7 @@ describe('GeminiLlmConnection', () => {
       );
       const content: Content = {role: 'user', parts: [{text: 'whole turn'}]};
 
-      await connection.sendContent(content, {partial: false});
+      await connection.sendContent(content, false);
 
       expect(mockSession.sendClientContent).toHaveBeenCalledWith({
         turns: [content],

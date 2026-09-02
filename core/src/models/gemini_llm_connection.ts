@@ -63,17 +63,13 @@ export class GeminiLlmConnection implements BaseLlmConnection {
    * responses.
    *
    * @param content The content to send to the model.
-   * @param options.partial If true, the content is a partial turn update that
-   *     does not complete the current model turn.
+   * @param partial If true, the content is a partial turn update that does not
+   *     complete the current model turn.
    */
-  async sendContent(
-    content: Content,
-    options?: {partial?: boolean},
-  ): Promise<void> {
+  async sendContent(content: Content, partial?: boolean): Promise<void> {
     if (!content.parts) {
       throw new Error('Content must have parts.');
     }
-    const partial = options?.partial ?? false;
     if (content.parts[0].functionResponse) {
       // All parts have to be function responses.
       const functionResponses = content.parts

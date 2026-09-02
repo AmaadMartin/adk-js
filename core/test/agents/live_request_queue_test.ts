@@ -46,7 +46,7 @@ describe('LiveRequestQueue', () => {
   it('should mark the request partial when sendContent is told to', async () => {
     const queue = new LiveRequestQueue();
     const content = createUserContent('partial test');
-    queue.sendContent(content, {partial: true});
+    queue.sendContent(content, true);
     expect(await queue.get()).toEqual({content, partial: true});
   });
 

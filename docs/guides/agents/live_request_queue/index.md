@@ -98,12 +98,7 @@ Set `partial` to append to the current turn without completing it. The model
 keeps waiting for more:
 
 ```ts
-queue.sendContent(
-  {role: 'user', parts: [{text: 'Book me a table '}]},
-  {
-    partial: true,
-  },
-);
+queue.sendContent({role: 'user', parts: [{text: 'Book me a table '}]}, true);
 queue.sendContent({role: 'user', parts: [{text: 'for four at eight.'}]});
 ```
 

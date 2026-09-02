@@ -140,11 +140,11 @@ export class LiveRequestQueue {
   /**
    * Sends a content object to the queue.
    * @param content The content to send.
-   * @param options.partial If true, the content is a partial turn update that
-   *     does not complete the current model turn.
+   * @param partial If true, the content is a partial turn update that does not
+   *     complete the current model turn.
    */
-  sendContent(content: Content, options?: {partial?: boolean}) {
-    this.send({content, partial: options?.partial});
+  sendContent(content: Content, partial?: boolean) {
+    this.send({content, partial});
   }
 
   /**
