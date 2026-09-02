@@ -43,32 +43,6 @@ function toFunctionTool(tool: ToolboxTool, prefix?: string) {
 }
 
 /**
- * Keeps the tools the filter selects, matching names after the prefix.
- *
- * A predicate needs a context to run. Without one, every tool is kept and the
- * caller is warned, so a filter is never dropped in silence.
- */
-function selectTools(
-  tools: BaseTool[],
-  filter: ToolPredicate | string[],
-  context?: ReadonlyContext,
-): BaseTool[] {
-  if (typeof filter === 'function') {
-    if (!context) {
-      logger.warn(
-        'ToolboxToolset: toolFilter is a predicate, but getTools() received ' +
-          'no ReadonlyContext. The filter was not applied.',
-      );
-      return tools;
-    }
-    return tools.filter((tool) => filter(tool, context));
-  }
-  return filter.length === 0
-    ? tools
-    : tools.filter((tool) => filter.includes(tool.name));
-}
-
-/**
  * A toolset backed by an MCP Toolbox for Databases server.
  *
  * The server publishes tools, either grouped into named toolsets or addressed
@@ -134,10 +108,15 @@ export class ToolboxToolset extends BaseToolset {
       this.toolsetName ? client.loadToolset(this.toolsetName) : [],
       Promise.all(this.toolNames.map((name) => client.loadTool(name))),
     ]);
-    const tools = [...toolsetTools, ...namedTools].map((tool) =>
-      toFunctionTool(tool, this.prefix),
-    );
-    return selectTools(tools, this.toolFilter, context);
+    if (typeof this.toolFilter === 'function' && !context) {
+      logger.warn(
+        'ToolboxToolset: toolFilter is a predicate, but getTools() received ' +
+          'no ReadonlyContext. The filter was not applied.',
+      );
+    }
+    return [...toolsetTools, ...namedTools]
+      .map((tool) => toFunctionTool(tool, this.prefix))
+      .filter((tool) => this.isToolSelected(tool, context));
   }
 
   /**
