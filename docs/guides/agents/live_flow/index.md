@@ -102,12 +102,47 @@ for await (const event of runner.runLive({
 Send audio with `queue.sendRealtime({data, mimeType})`, where `data` is a
 base64 string. Close the queue to end the session.
 
+## Ending and resuming a session
+
+A live connection can close for three different reasons, and the flow answers
+each one differently:
+
+- It holds a session resumption handle. The flow reopens the session with that
+  handle, whatever close code arrived, up to a bounded number of attempts.
+- It holds no handle and the close code is 1000. The model ended the session on
+  purpose, so `runLive` returns and the live nodes finish normally.
+- Anything else. The flow throws a `LiveConnectionClosedError` carrying the
+  code and the server's reason.
+
+The codes are `LiveCloseCode`. The error is thrown by the connection, so a
+caller driving `BaseLlmConnection.receive()` directly sees it too. A teardown
+you started with `close()` still ends the stream quietly.
+
+Pass a handle from a previous process through
+`RunConfig.sessionResumption.handle` to resume a conversation. The first
+connection then resumes that session rather than replaying the history, and a
+drop before the server's first update still has a handle to retry with. The
+flow copies the config by value, so a handle the server issues later never
+lands in your `RunConfig`.
+
+```ts
+for await (const event of runner.runLive({
+  userId: 'user',
+  sessionId: 'session',
+  liveRequestQueue: queue,
+  runConfig: {sessionResumption: {handle: storedHandle}},
+})) {
+  // The first connection resumes the stored session.
+}
+```
+
 ## Configuration
 
 | Field                | Where       | Effect                                                           |
 | -------------------- | ----------- | ---------------------------------------------------------------- |
 | `saveLiveBlob`       | `RunConfig` | Saves each turn's audio to the artifact service. Off by default. |
 | `historyConfig`      | `RunConfig` | Copied onto the connect config when history is replayed.         |
+| `sessionResumption`  | `RunConfig` | Seeds the first connection's resumption handle.                  |
 | `responseScheduling` | `BaseTool`  | Declares the tool `NON_BLOCKING` on the live path.               |
 
 Turning `saveLiveBlob` on changes the shape of a turn's last event. The flow
@@ -137,3 +172,5 @@ The Gemini API backend rejects the field.
   the default path.
 - Cancelling a background tool is best effort. A task that ignores it is
   logged and dropped from the registry.
+- An agent transfer and a restart both open a session with no handle, so the
+  child never resumes the session it was handed off from.
