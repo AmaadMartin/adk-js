@@ -390,7 +390,8 @@ describe('event_processor_utils', () => {
     it('holds the pause for a credential request too', () => {
       // All three `adk_request_*` kinds count as waiting on a person, and the
       // id that answers each is whichever one the framework's own helper picks
-      // — the credential kind also carries one in `args.function_call_id`.
+      // — the credential kind also carries one in its args envelope, and this
+      // event uses the snake_case form a foreign client can send.
       const credentialRequest = createEvent({
         author: 'agent',
         content: {
