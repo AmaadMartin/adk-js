@@ -23,6 +23,7 @@ import {unwrapResponse} from '../../workflow/utils/rehydration_utils.js';
 import {canonicalToolsFor} from '../canonical_tools.js';
 import {handleFunctionCallList} from '../functions.js';
 import {
+  drainInvocationEvents,
   InvocationContext,
   QueuedInvocationEvent,
 } from '../invocation_context.js';
@@ -130,10 +131,7 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
         eventQueue.close();
       }
     })();
-    for await (const queuedEvent of eventQueue) {
-      yield queuedEvent.event;
-      queuedEvent.markProcessed?.();
-    }
+    yield* drainInvocationEvents(eventQueue);
     const functionResponseEvent = await task;
     invocationContext.eventQueue = undefined;
     if (functionResponseEvent) {

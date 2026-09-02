@@ -155,7 +155,7 @@ describe('App eventsCompactionConfig', () => {
             overlapSize: 1,
           }),
         }),
-    ).toThrowError(/only the sliding-window trigger/);
+    ).toThrowError(/carries no token trigger/);
   });
 
   it('leaves the policy unset when none is given', () => {
@@ -165,5 +165,43 @@ describe('App eventsCompactionConfig', () => {
     });
 
     expect(app.eventsCompactionConfig).toBeUndefined();
+  });
+
+  it('rejects a token threshold without a retention size', () => {
+    expect(
+      () =>
+        new App({
+          name: 'half_pair_app',
+          rootAgent: new DummyAgent('root'),
+          eventsCompactionConfig: {tokenThreshold: 5},
+        }),
+    ).toThrowError(/carries no token trigger/);
+  });
+});
+
+describe('App contextCacheConfig', () => {
+  it('keeps the context cache config it is given', () => {
+    const contextCacheConfig = {
+      cacheIntervals: 5,
+      ttlSeconds: 600,
+      minTokens: 1000,
+    };
+
+    const app = new App({
+      name: 'caching_app',
+      rootAgent: new DummyAgent('root'),
+      contextCacheConfig,
+    });
+
+    expect(app.contextCacheConfig).toBe(contextCacheConfig);
+  });
+
+  it('leaves the context cache config unset when none is given', () => {
+    const app = new App({
+      name: 'plain_app',
+      rootAgent: new DummyAgent('root'),
+    });
+
+    expect(app.contextCacheConfig).toBeUndefined();
   });
 });

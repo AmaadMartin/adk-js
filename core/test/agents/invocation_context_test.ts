@@ -15,6 +15,7 @@ import {
   QueuedInvocationEvent,
   Session,
   createEvent,
+  drainInvocationEvents,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -263,5 +264,45 @@ describe('InvocationContext.enqueueEvent', () => {
     await expect(
       context.enqueueEvent(createEvent({author: 'node'})),
     ).rejects.toThrowError(/InvocationContext.eventQueue is closed/);
+  });
+});
+
+describe('drainInvocationEvents', () => {
+  it('releases each producer once its event has gone downstream', async () => {
+    const context = makeContext();
+    const queue = new AsyncQueue<QueuedInvocationEvent>();
+    context.eventQueue = queue;
+
+    const seen: string[] = [];
+    const consumer = (async () => {
+      for await (const event of drainInvocationEvents(queue)) {
+        seen.push(event.author!);
+      }
+    })();
+
+    await context.enqueueEvent(createEvent({author: 'first'}));
+    await context.enqueueEvent(createEvent({author: 'second'}));
+    queue.close();
+    await consumer;
+
+    expect(seen).toEqual(['first', 'second']);
+  });
+
+  it('releases a waiting producer when the consumer stops early', async () => {
+    const context = makeContext();
+    const queue = new AsyncQueue<QueuedInvocationEvent>();
+    context.eventQueue = queue;
+
+    const drain = drainInvocationEvents(queue);
+    const enqueued = context.enqueueEvent(createEvent({author: 'first'}));
+    await drain.next();
+
+    // The consumer walks away rather than asking for the next event.
+    await drain.return();
+
+    // Without the release this never settles, and the queue stays open for a
+    // producer that would wait on it again.
+    await expect(enqueued).resolves.toBeUndefined();
+    expect(queue.isClosed).toBe(true);
   });
 });

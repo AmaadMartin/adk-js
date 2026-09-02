@@ -8,6 +8,7 @@ import {Content} from '@google/genai';
 
 import type {EventsCompactionConfig} from '../apps/events_compaction_config.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import type {AuthCredential} from '../auth/auth_credential.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {Event} from '../events/event.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -20,6 +21,7 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
+import {ContextCacheConfig} from './context_cache_config.js';
 import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
@@ -89,6 +91,12 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  /** Context cache configuration for this invocation. */
+  contextCacheConfig?: ContextCacheConfig;
+  /**
+   * Credentials already resolved for this invocation, keyed by credential key.
+   */
+  credentialByKey?: Record<string, AuthCredential>;
 }
 
 /**
@@ -304,6 +312,25 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * Context cache configuration for this invocation. Context caching is
+   * enabled for the invocation only while this is set.
+   */
+  readonly contextCacheConfig?: ContextCacheConfig;
+
+  /**
+   * Credentials resolved during this invocation, keyed by the credential key
+   * of the auth config that produced them. Held here rather than in session
+   * state so a credential resolved for one invocation cannot leak into
+   * another. Read through `ReadonlyContext.getCredential`.
+   *
+   * Created with `Object.create(null)`, as `InMemoryCredentialService` creates
+   * its buckets: the credential key is attacker-influenced, and on a `{}`
+   * literal a key of `__proto__` reparents the map instead of creating an own
+   * property.
+   */
+  readonly credentialByKey: Record<string, AuthCredential>;
+
+  /**
    * The compaction policy the `App` declared, applying to every agent under
    * it. An agent that declares its own compactors uses those instead. Mirrors
    * `events_compaction_config` in `google/adk-python`.
@@ -346,6 +373,8 @@ export class InvocationContext {
     this.workflowInstructionScope = params.workflowInstructionScope;
     this.isolationScope = params.isolationScope;
     this.nodePath = params.nodePath;
+    this.contextCacheConfig = params.contextCacheConfig;
+    this.credentialByKey = params.credentialByKey ?? Object.create(null);
     this.eventsCompactionConfig = params.eventsCompactionConfig;
     this.tokenCompactionChecked = params.tokenCompactionChecked ?? false;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
@@ -437,6 +466,33 @@ export class InvocationContext {
    */
   clone(overrides: Partial<InvocationContextParams> = {}): InvocationContext {
     return new InvocationContext({...this, ...overrides});
+  }
+}
+
+/**
+ * Yields the events on an invocation queue, releasing each producer once its
+ * event has gone downstream.
+ *
+ * A consumer that stops early — it breaks out of the agent's stream after an
+ * interrupt, say — still releases the producer it interrupted and closes the
+ * queue. Without that the producer would wait forever on a signal nobody is
+ * left to send.
+ *
+ * @param queue The invocation event queue to drain.
+ */
+export async function* drainInvocationEvents(
+  queue: AsyncQueue<QueuedInvocationEvent>,
+): AsyncGenerator<Event, void, void> {
+  try {
+    for await (const queued of queue) {
+      try {
+        yield queued.event;
+      } finally {
+        queued.markProcessed?.();
+      }
+    }
+  } finally {
+    queue.close();
   }
 }
 

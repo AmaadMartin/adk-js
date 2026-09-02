@@ -38,6 +38,13 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
     llmRequest.model = agent.canonicalModel.model;
 
     llmRequest.config = {...(agent.generateContentConfig ?? {})};
+
+    // Context caching is on for this request only while the app declared a
+    // config for the invocation.
+    if (invocationContext.contextCacheConfig) {
+      llmRequest.cacheConfig = invocationContext.contextCacheConfig;
+    }
+
     // Models that cannot take an output schema alongside tools get the
     // prompt-based `set_model_response` workaround instead, injected by
     // `LlmAgent.runOneStepAsync` and the instructions processor.

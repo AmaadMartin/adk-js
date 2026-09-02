@@ -53,6 +53,7 @@ describe('AuthPreprocessor', () => {
     const invocationContext = {
       agent: {}, // Not an LlmAgent
       session: {events: []},
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -65,6 +66,7 @@ describe('AuthPreprocessor', () => {
     const invocationContext = {
       agent: {[LLM_AGENT_SYMBOL]: true},
       session: {events: []},
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -81,6 +83,7 @@ describe('AuthPreprocessor', () => {
           {author: 'system', content: {parts: [{text: 'hello'}]}} as Event,
         ],
       },
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -102,6 +105,7 @@ describe('AuthPreprocessor', () => {
           } as Event,
         ],
       },
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -179,6 +183,7 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -257,6 +262,7 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -335,6 +341,7 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -371,6 +378,7 @@ describe('AuthPreprocessor', () => {
           } as Event,
         ],
       },
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -425,6 +433,7 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -461,6 +470,7 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -531,6 +541,7 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
+      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -600,6 +611,7 @@ describe('AuthPreprocessor', () => {
             }),
           ],
         },
+        credentialByKey: {},
       } as unknown as InvocationContext;
     }
 
@@ -667,6 +679,7 @@ describe('AuthPreprocessor', () => {
             }),
           ],
         },
+        credentialByKey: {},
       } as unknown as InvocationContext;
 
       const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -734,6 +747,7 @@ describe('AuthPreprocessor', () => {
             }),
           ],
         },
+        credentialByKey: {},
       } as unknown as InvocationContext;
     }
 
@@ -769,6 +783,98 @@ describe('AuthPreprocessor', () => {
 
       expect((await generator.next()).done).toBe(true);
       expect(storeCredential).not.toHaveBeenCalled();
+    });
+  });
+  describe('toolset credential storage', () => {
+    /**
+     * A toolset credential request and the client's answer to it. A toolset
+     * resumes no tool call, so the invocation is where its credential lands.
+     */
+    function toolsetAuthContext(
+      authConfig: Record<string, unknown>,
+    ): InvocationContext {
+      return {
+        agent: {[LLM_AGENT_SYMBOL]: true, name: 'agent'},
+        session: {
+          state: {},
+          events: [
+            createEvent({
+              author: 'agent',
+              id: 'originalEvent',
+              content: {
+                parts: [
+                  {
+                    functionCall: {
+                      id: 'fc1',
+                      name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                      args: {
+                        authConfig,
+                        functionCallId: '_adk_toolset_auth_MyToolset',
+                      },
+                    },
+                  },
+                ],
+              },
+            }),
+            createEvent({
+              author: 'user',
+              content: {
+                parts: [
+                  {
+                    functionResponse: {
+                      id: 'fc1',
+                      name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                      response: CREDENTIAL_RESPONSE,
+                    },
+                  },
+                ],
+              },
+            }),
+          ],
+        },
+        credentialByKey: Object.create(null),
+      } as unknown as InvocationContext;
+    }
+
+    it('stores a resolved toolset credential under its credential key', async () => {
+      const invocationContext = toolsetAuthContext({
+        credentialKey: 'testKey',
+        authScheme: API_KEY_SCHEME,
+      });
+
+      const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
+      expect((await generator.next()).done).toBe(true);
+
+      expect(invocationContext.credentialByKey['testKey']).toEqual(
+        CREDENTIAL_RESPONSE.exchangedAuthCredential,
+      );
+    });
+
+    it('stores nothing when the toolset request names no credential key', async () => {
+      // `bindCredentialResponse` refuses the response, so nothing reaches the
+      // credential store and the invocation carries no key to read back.
+      const invocationContext = toolsetAuthContext({
+        authScheme: API_KEY_SCHEME,
+      });
+
+      const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
+      expect((await generator.next()).done).toBe(true);
+
+      expect(Object.keys(invocationContext.credentialByKey)).toEqual([]);
+    });
+
+    it('stores nothing when the toolset response carries no credential', async () => {
+      const invocationContext = toolsetAuthContext({
+        credentialKey: 'testKey',
+        authScheme: API_KEY_SCHEME,
+      });
+      const answer = invocationContext.session.events[1];
+      answer.content!.parts![0].functionResponse!.response = {};
+
+      const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
+      expect((await generator.next()).done).toBe(true);
+
+      expect(Object.keys(invocationContext.credentialByKey)).toEqual([]);
     });
   });
 });

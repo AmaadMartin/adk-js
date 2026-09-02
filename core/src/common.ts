@@ -15,9 +15,10 @@ export type {
 } from './agents/base_agent.js';
 export {
   canonicalToolsFor,
-  refreshCanonicalTools,
+  clearCanonicalToolsCache,
 } from './agents/canonical_tools.js';
 export {Context} from './agents/context.js';
+export type {ContextCacheConfig} from './agents/context_cache_config.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
@@ -27,7 +28,11 @@ export {
   functionsExportedForTestingOnly,
   isToolNotFound,
 } from './agents/functions.js';
-export {InvocationContext, requireAgent} from './agents/invocation_context.js';
+export {
+  InvocationContext,
+  drainInvocationEvents,
+  requireAgent,
+} from './agents/invocation_context.js';
 export type {
   InvocationContextParams,
   QueuedInvocationEvent,

@@ -21,6 +21,7 @@ import {State} from '../sessions/state.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {logger} from '../utils/logger.js';
+import {AuthCredential} from './auth_credential.js';
 import {AuthHandler} from './auth_handler.js';
 import {AuthConfig} from './auth_tool.js';
 import {bindCredentialResponse} from './credential_response_binding.js';
@@ -77,6 +78,7 @@ async function storeAuthAndCollectResumeTargets(
   authResponses: Record<string, unknown>,
   state: State,
   agentName: string,
+  credentialByKey: Record<string, AuthCredential>,
 ): Promise<Set<string>> {
   const requests = requestedAuthConfigs(events, authFcIds, agentName);
 
@@ -113,7 +115,16 @@ async function storeAuthAndCollectResumeTargets(
       !functionCallId.startsWith(TOOLSET_AUTH_CREDENTIAL_ID_PREFIX)
     ) {
       toolsToResume.add(functionCallId);
+      continue;
     }
+
+    // A toolset resumes no tool call, so its credential has to be reachable
+    // some other way: the invocation carries it under the key the request
+    // named, for `ReadonlyContext.getCredential` to read back.
+    // `bindCredentialResponse` refuses a config that names no credential key
+    // and one that carries no credential, so both are present here.
+    credentialByKey[authConfig.credentialKey] =
+      authConfig.exchangedAuthCredential!;
   }
 
   return toolsToResume;
@@ -175,6 +186,7 @@ export class AuthPreprocessor extends BaseLlmRequestProcessor {
       authResponses,
       state,
       agent.name,
+      invocationContext.credentialByKey,
     );
 
     if (toolsToResume.size === 0) {

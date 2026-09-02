@@ -8,6 +8,7 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  ContextCacheConfig,
   createEvent,
   createEventsCompactionConfig,
   createResumabilityConfig,
@@ -394,6 +395,42 @@ describe('Runner.determineAgentForResumption', () => {
     }
 
     expect(seen).toEqual([eventsCompactionConfig]);
+  });
+
+  it('should carry the app contextCacheConfig onto each invocation', async () => {
+    const contextCacheConfig = {
+      cacheIntervals: 5,
+      ttlSeconds: 600,
+      minTokens: 1000,
+    };
+    const app = new App({name: TEST_APP_ID, rootAgent, contextCacheConfig});
+    const appRunner = new Runner({app, sessionService, artifactService});
+    expect(appRunner.contextCacheConfig).toBe(contextCacheConfig);
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+    });
+    const seen: Array<ContextCacheConfig | undefined> = [];
+    vi.spyOn(rootAgent, 'runAsync').mockImplementation(async function* (
+      context: InvocationContext,
+    ) {
+      seen.push(context.contextCacheConfig);
+      yield createEvent({
+        author: rootAgent.name,
+        invocationId: context.invocationId,
+      });
+    });
+
+    for await (const _ of appRunner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the run.
+    }
+
+    expect(seen).toEqual([contextCacheConfig]);
   });
 
   it('should leave the invocation compaction policy unset without an App policy', async () => {

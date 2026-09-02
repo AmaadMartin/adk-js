@@ -10,15 +10,21 @@ import {
   LlmAgent,
   PluginManager,
   canonicalToolsFor,
+  clearCanonicalToolsCache,
   createSession,
-  refreshCanonicalTools,
 } from '@google/adk';
+import {Content} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
+import {ScriptedLlm} from '../workflow/test_helpers.js';
 
-function makeContext(agent: LlmAgent): InvocationContext {
+function makeContext(
+  agent: LlmAgent,
+  userContent?: Content,
+): InvocationContext {
   return new InvocationContext({
     invocationId: 'inv-tools',
     agent,
+    userContent,
     session: createSession({
       id: 's1',
       appName: 'app',
@@ -72,15 +78,61 @@ describe('canonicalToolsFor', () => {
   });
 });
 
-describe('refreshCanonicalTools', () => {
-  it('replaces the tools a previous model step cached', async () => {
+describe('clearCanonicalToolsCache', () => {
+  it('makes the next reader resolve the tools again', async () => {
     const agent = makeAgent(true);
     const context = makeContext(agent);
+    const resolve = vi.spyOn(agent, 'canonicalTools');
     const stale = await canonicalToolsFor(agent, context);
 
-    const fresh = await refreshCanonicalTools(agent, context);
+    clearCanonicalToolsCache(context);
+    const fresh = await canonicalToolsFor(agent, context);
 
+    expect(resolve).toHaveBeenCalledTimes(2);
     expect(fresh).not.toBe(stale);
     expect(context.canonicalToolsCache).toBe(fresh);
+  });
+
+  it('clears an empty resolution too, not just a populated one', async () => {
+    const agent = makeAgent(false);
+    const context = makeContext(agent);
+    await canonicalToolsFor(agent, context);
+
+    clearCanonicalToolsCache(context);
+
+    expect(context.canonicalToolsCache).toBeUndefined();
+  });
+});
+
+describe('canonical tools memo across a real agent run', () => {
+  it('resolves once per model step, not once per invocation', async () => {
+    // Two model steps: the first asks for the tool, the second answers.
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: new ScriptedLlm([
+        {functionCall: {id: 'c1', name: 'ping'}},
+        'done',
+      ]),
+      tools: [
+        new FunctionTool({
+          name: 'ping',
+          description: 'ping',
+          execute: () => 'pong',
+        }),
+      ],
+    });
+    const resolve = vi.spyOn(agent, 'canonicalTools');
+    const context = makeContext(agent, {
+      role: 'user',
+      parts: [{text: 'ping please'}],
+    });
+
+    for await (const _ of agent.runAsync(context)) {
+      // Drain the run.
+    }
+
+    // One resolution per step, rather than one for the whole invocation or
+    // one per reader within a step.
+    expect(resolve).toHaveBeenCalledTimes(2);
   });
 });

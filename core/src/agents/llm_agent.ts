@@ -67,7 +67,9 @@ import {
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
+import {clearCanonicalToolsCache} from './canonical_tools.js';
 import {
+  drainInvocationEvents,
   InvocationContext,
   QueuedInvocationEvent,
   requireAgent,
@@ -1124,6 +1126,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
   ): AsyncGenerator<Event, void, void> {
+    // A tool set can change between steps, so the memo covers this step only.
+    clearCanonicalToolsCache(invocationContext);
+
     for (const processor of this.requestProcessors) {
       for await (const event of processor.runAsync(
         invocationContext,
@@ -1458,6 +1463,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       liveConnectConfig: {},
     };
 
+    // A tool set can change between steps, so the memo covers this step only.
+    clearCanonicalToolsCache(invocationContext);
+
     // =========================================================================
     // Preprocess before calling the LLM
     // =========================================================================
@@ -1718,12 +1726,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         eventQueue.close();
       }
     })();
-    for await (const queuedEvent of eventQueue) {
-      yield queuedEvent.event;
-      // Signalled only after the event has gone downstream, so the producer's
-      // wait means what it says: the consumer has taken it.
-      queuedEvent.markProcessed?.();
-    }
+    yield* drainInvocationEvents(eventQueue);
     const {event: functionResponseEvent, error: toolError} = await toolTask;
     invocationContext.eventQueue = undefined;
     if (toolError) {

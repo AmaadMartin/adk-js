@@ -32,25 +32,24 @@ export async function canonicalToolsFor(
   ctx: InvocationContext,
 ): Promise<BaseTool[]> {
   const cached = ctx.canonicalToolsCache;
-  return cached ?? refreshCanonicalTools(agent, ctx);
-}
-
-/**
- * Resolves the agent's tools and replaces whatever the cache held.
- *
- * The step that assembles the model request calls this, so a later step sees
- * that step's tools rather than an earlier one's. Everything else reads the
- * result through {@link canonicalToolsFor}.
- *
- * @param agent The agent whose tools to resolve.
- * @param ctx The invocation holding the cache.
- * @returns The agent's resolved tools.
- */
-export async function refreshCanonicalTools(
-  agent: LlmAgent,
-  ctx: InvocationContext,
-): Promise<BaseTool[]> {
+  if (cached !== undefined) {
+    return cached;
+  }
   const tools = await agent.canonicalTools(new ReadonlyContext(ctx));
   ctx.canonicalToolsCache = tools;
   return tools;
+}
+
+/**
+ * Drops the tools cached for the model step that just ended.
+ *
+ * Called where a step begins, so the memo covers exactly one step whichever
+ * reader happens to fill it. Leaving it to a particular request processor
+ * would freeze the first resolution for an agent whose processor list omits
+ * that one.
+ *
+ * @param ctx The invocation holding the cache.
+ */
+export function clearCanonicalToolsCache(ctx: InvocationContext): void {
+  ctx.canonicalToolsCache = undefined;
 }

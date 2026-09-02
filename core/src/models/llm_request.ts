@@ -12,6 +12,7 @@ import {
   SchemaUnion,
 } from '@google/genai';
 
+import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import {BaseTool} from '../tools/base_tool.js';
 
 /**
@@ -51,6 +52,11 @@ export interface LlmRequest {
    * The interaction ID from the previous turn, if any.
    */
   previousInteractionId?: string;
+
+  /**
+   * Context cache configuration for this request.
+   */
+  cacheConfig?: ContextCacheConfig;
 }
 
 /**

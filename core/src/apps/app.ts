@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
 import {
   asRunnableRoot,
@@ -66,6 +67,11 @@ export interface AppOptions {
    * app that does not declare its own compactors.
    */
   eventsCompactionConfig?: EventsCompactionConfig;
+  /**
+   * How this app caches request context. Context caching is enabled for every
+   * LLM agent under the app while this is set.
+   */
+  contextCacheConfig?: ContextCacheConfig;
 }
 
 /**
@@ -87,6 +93,7 @@ export class App {
   readonly plugins: BasePlugin[];
   readonly resumabilityConfig?: ResumabilityConfig;
   readonly eventsCompactionConfig?: EventsCompactionConfig;
+  readonly contextCacheConfig?: ContextCacheConfig;
 
   constructor(options: AppOptions) {
     validateAppName(options.name);
@@ -105,6 +112,7 @@ export class App {
       requireSupportedCompactionTrigger(options.eventsCompactionConfig);
     }
     this.eventsCompactionConfig = options.eventsCompactionConfig;
+    this.contextCacheConfig = options.contextCacheConfig;
   }
 }
 
@@ -121,11 +129,14 @@ export class App {
 function requireSupportedCompactionTrigger(
   config: EventsCompactionConfig,
 ): void {
-  if (config.tokenThreshold === undefined) {
+  if (
+    config.tokenThreshold === undefined ||
+    config.eventRetentionSize === undefined
+  ) {
     throw new Error(
-      'eventsCompactionConfig sets only the sliding-window trigger ' +
-        '(compactionInterval and overlapSize), which adk-js has no compactor ' +
-        'for. Set tokenThreshold and eventRetentionSize as well.',
+      'eventsCompactionConfig carries no token trigger, and adk-js has no ' +
+        'compactor for the sliding-window one. Set both tokenThreshold and ' +
+        'eventRetentionSize.',
     );
   }
 }
