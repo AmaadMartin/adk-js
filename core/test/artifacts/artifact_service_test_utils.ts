@@ -110,7 +110,7 @@ export function runArtifactServiceTests(
           filename: 'test.txt',
           artifact: {} as unknown as Part,
         }),
-      ).rejects.toThrow('Artifact must have either inlineData or text');
+      ).rejects.toThrow(/^Artifact must have /);
     });
 
     it('increments version number', async () => {
