@@ -380,9 +380,8 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             // A non-empty stderr is what marks the result failed and drives
             // the retry counter, so it has to mean the program failed rather
             // than that the program wrote a warning. The exit status says
-            // which happened. `exitCode` rather than `exitStatus`: a failed
-            // spawn closes with both `null`, and the 'error' handler's text
-            // has to survive that.
+            // which happened, and a failed spawn reports a negative errno
+            // here, so the 'error' handler's text survives.
             stderr = '';
           } else if (!stderr && exitStatus !== null) {
             // The code died without saying why: a signal, or a call to
