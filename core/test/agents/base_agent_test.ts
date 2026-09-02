@@ -863,9 +863,10 @@ describe('BaseAgent', () => {
     });
 
     it('leaves a closure over the original agent alone', async () => {
-      const original = new MockAgent({
+      const original: MockAgent = new MockAgent({
         name: 'original',
-        beforeAgentCallback: () => said(`closed over ${original.name}`),
+        beforeAgentCallback: (): Content =>
+          said(`closed over ${original.name}`),
       });
 
       const events = await run(original.clone({name: 'copy'}));
