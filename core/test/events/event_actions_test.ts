@@ -8,6 +8,7 @@ import type {MockInstance} from 'vitest';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {InputValidationError} from '../../src/errors/input_validation_error.js';
+import {transformToCamelCaseEvent} from '../../src/events/event.js';
 import {
   createEventActions,
   EventActions,
@@ -276,43 +277,46 @@ describe('createEventActions requestedAuthConfigs validation', () => {
     expect(() => createEventActions({requestedAuthConfigs: {}})).not.toThrow();
   });
 
+  // A malformed entry reaches this code from storage, not from a literal, so
+  // the rejection cases rebuild one the way a session service would: through
+  // `transformToCamelCaseEvent`, which preserves the entries verbatim.
+  function restoredAuthConfigs(
+    entries: Record<string, unknown>,
+  ): Partial<EventActions> {
+    return transformToCamelCaseEvent({
+      id: 'e1',
+      invocation_id: 'inv1',
+      actions: {requested_auth_configs: entries},
+    }).actions;
+  }
+
   it('rejects an entry missing authScheme', () => {
     expect(() =>
-      createEventActions({
-        requestedAuthConfigs: {
-          'call-1': {credentialKey: 'k'} as unknown as AuthConfig,
-        },
-      }),
+      createEventActions(restoredAuthConfigs({'call-1': {credentialKey: 'k'}})),
     ).toThrow(InputValidationError);
   });
 
   it('rejects an entry missing credentialKey', () => {
     expect(() =>
-      createEventActions({
-        requestedAuthConfigs: {
+      createEventActions(
+        restoredAuthConfigs({
           'call-1': {
             authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},
-          } as unknown as AuthConfig,
-        },
-      }),
+          },
+        }),
+      ),
     ).toThrow(InputValidationError);
   });
 
   it('rejects a non-object entry and names the offending key', () => {
     expect(() =>
-      createEventActions({
-        requestedAuthConfigs: {
-          'call-2': 'auth_config' as unknown as AuthConfig,
-        },
-      }),
+      createEventActions(restoredAuthConfigs({'call-2': 'auth_config'})),
     ).toThrow(/requestedAuthConfigs\['call-2'\]/);
   });
 
   it('rejects a null entry', () => {
     expect(() =>
-      createEventActions({
-        requestedAuthConfigs: {'call-1': null as unknown as AuthConfig},
-      }),
+      createEventActions(restoredAuthConfigs({'call-1': null})),
     ).toThrow(InputValidationError);
   });
 });
