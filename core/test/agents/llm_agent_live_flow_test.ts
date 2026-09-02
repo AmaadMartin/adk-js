@@ -5,6 +5,7 @@
  */
 
 import {
+  ActiveStreamingTool,
   AuthConfig,
   BaseLlm,
   BaseLlmRequestProcessor,
@@ -79,7 +80,9 @@ class BackgroundTaskProcessor extends BaseLlmRequestProcessor {
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
     this.invocationContext = invocationContext;
-    invocationContext.activeNonBlockingToolTasks = {worker: this.task};
+    invocationContext.activeStreamingTools = {
+      worker: new ActiveStreamingTool({task: this.task}),
+    };
   }
 }
 
@@ -401,9 +404,7 @@ describe('LlmAgent live flow', () => {
       await drain(runner, queue);
 
       expect(processor.task.done()).toBe(true);
-      expect(processor.invocationContext?.activeNonBlockingToolTasks).toEqual(
-        {},
-      );
+      expect(processor.invocationContext?.activeStreamingTools).toEqual({});
     });
   });
 });

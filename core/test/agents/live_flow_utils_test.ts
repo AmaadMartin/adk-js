@@ -28,7 +28,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {
   markLiveAsyncToolsNonBlocking,
-  mergeEventStreams,
+  pumpEventsInto,
   stopBackgroundToolTasks,
 } from '../../src/agents/live_flow_utils.js';
 import {logger} from '../../src/utils/logger.js';
@@ -64,40 +64,34 @@ describe('stopBackgroundToolTasks', () => {
     await stopBackgroundToolTasks(invocationContext);
 
     expect(invocationContext.activeStreamingTools).toBeUndefined();
-    expect(invocationContext.activeNonBlockingToolTasks).toBeUndefined();
   });
 
-  it('leaves a registry alone when every task has already finished', async () => {
+  it('leaves the registry alone when every task has already finished', async () => {
     const invocationContext = makeContext();
     const task = new Task<void>(async () => {});
     await task.promise;
-    invocationContext.activeNonBlockingToolTasks = {done: task};
+    const streamer = new ActiveStreamingTool({task});
+    invocationContext.activeStreamingTools = {streamer};
 
     await stopBackgroundToolTasks(invocationContext);
 
-    expect(invocationContext.activeNonBlockingToolTasks).toEqual({done: task});
+    expect(invocationContext.activeStreamingTools).toEqual({streamer});
   });
 
-  it('cancels a cooperative task and empties both registries', async () => {
+  it('cancels a cooperative task and empties the registry', async () => {
     const invocationContext = makeContext();
     const streamingTask = cooperativeTask();
-    const nonBlockingTask = cooperativeTask();
     invocationContext.activeStreamingTools = {
       streamer: new ActiveStreamingTool({
         task: streamingTask,
         stream: new LiveRequestQueue(),
       }),
     };
-    invocationContext.activeNonBlockingToolTasks = {
-      worker: nonBlockingTask,
-    };
 
     await stopBackgroundToolTasks(invocationContext);
 
     expect(streamingTask.done()).toBe(true);
-    expect(nonBlockingTask.done()).toBe(true);
     expect(invocationContext.activeStreamingTools).toEqual({});
-    expect(invocationContext.activeNonBlockingToolTasks).toEqual({});
   });
 
   it('skips a streaming tool that registered no task', async () => {
@@ -118,7 +112,9 @@ describe('stopBackgroundToolTasks', () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     const invocationContext = makeContext();
-    invocationContext.activeNonBlockingToolTasks = {stubborn: stubbornTask()};
+    invocationContext.activeStreamingTools = {
+      stubborn: new ActiveStreamingTool({task: stubbornTask()}),
+    };
 
     const stopped = stopBackgroundToolTasks(invocationContext);
     await vi.advanceTimersByTimeAsync(1000);
@@ -127,7 +123,7 @@ describe('stopBackgroundToolTasks', () => {
     expect(warn).toHaveBeenCalledWith(
       "Tool task 'stubborn' ignored cancellation and outlives its agent.",
     );
-    expect(invocationContext.activeNonBlockingToolTasks).toEqual({});
+    expect(invocationContext.activeStreamingTools).toEqual({});
     warn.mockRestore();
     vi.useRealTimers();
   });
@@ -257,100 +253,59 @@ function textOf(event: Event): string | undefined {
   return event.content?.parts?.[0].text;
 }
 
-describe('mergeEventStreams', () => {
-  it('yields the primary stream when nothing is screened', async () => {
-    const screened = new AsyncQueue<Event>();
-    const merged: string[] = [];
+describe('pumpEventsInto', () => {
+  it('hands the source events to the queue and closes it', async () => {
+    const queue = new AsyncQueue<Event>();
 
-    for await (const event of mergeEventStreams(
-      eventsOf('one', 'two'),
-      screened,
-    )) {
-      merged.push(textOf(event)!);
+    await pumpEventsInto(eventsOf('one', 'two'), queue);
+
+    const drained: string[] = [];
+    for await (const event of queue) {
+      drained.push(textOf(event)!);
     }
-
-    expect(merged).toEqual(['one', 'two']);
+    expect(drained).toEqual(['one', 'two']);
+    expect(queue.isClosed).toBe(true);
   });
 
-  it('delivers a screened event without waiting for the primary stream', async () => {
-    const screened = new AsyncQueue<Event>();
+  it('interleaves an event pushed while the source is still running', async () => {
+    const queue = new AsyncQueue<Event>();
     let released!: () => void;
     const gate = new Promise<void>((resolve) => {
       released = resolve;
     });
-    async function* slowPrimary(): AsyncGenerator<Event, void, void> {
+    async function* slowSource(): AsyncGenerator<Event, void, void> {
       await gate;
       yield createEvent({author: 'agent', content: {parts: [{text: 'late'}]}});
     }
+    const pumped = pumpEventsInto(slowSource(), queue);
 
-    const iterator = mergeEventStreams(slowPrimary(), screened);
-    screened.push(
+    // The screened event lands first because the source is still parked.
+    queue.push(
       createEvent({author: 'agent', content: {parts: [{text: 'blocked'}]}}),
     );
-
-    const first = await iterator.next();
-    expect(textOf(first.value as Event)).toBe('blocked');
+    const iterator = queue[Symbol.asyncIterator]();
+    expect(textOf((await iterator.next()).value as Event)).toBe('blocked');
 
     released();
-    const second = await iterator.next();
-    expect(textOf(second.value as Event)).toBe('late');
+    await pumped;
+    expect(textOf((await iterator.next()).value as Event)).toBe('late');
     expect((await iterator.next()).done).toBe(true);
   });
 
-  it('hands over a screened event that arrives as the primary stream ends', async () => {
-    const screened = new AsyncQueue<Event>();
-    screened.push(
-      createEvent({author: 'agent', content: {parts: [{text: 'blocked'}]}}),
-    );
-    const merged: string[] = [];
-
-    for await (const event of mergeEventStreams(eventsOf(), screened)) {
-      merged.push(textOf(event)!);
-    }
-
-    expect(merged).toEqual(['blocked']);
-  });
-
-  it('keeps yielding the primary stream after the screened queue closes', async () => {
-    const screened = new AsyncQueue<Event>();
-    screened.close();
-    const merged: string[] = [];
-
-    for await (const event of mergeEventStreams(eventsOf('one'), screened)) {
-      merged.push(textOf(event)!);
-    }
-
-    expect(merged).toEqual(['one']);
-  });
-
-  it('propagates an error the primary stream throws', async () => {
-    const screened = new AsyncQueue<Event>();
-    async function* failingPrimary(): AsyncGenerator<Event, void, void> {
+  it('delivers buffered events before the error the source threw', async () => {
+    const queue = new AsyncQueue<Event>();
+    async function* failingSource(): AsyncGenerator<Event, void, void> {
       yield createEvent({author: 'agent', content: {parts: [{text: 'one'}]}});
       throw new Error('receive loop failed');
     }
 
-    const iterator = mergeEventStreams(failingPrimary(), screened);
-    await iterator.next();
+    // The pump itself never rejects; the error reaches the consumer.
+    await expect(
+      pumpEventsInto(failingSource(), queue),
+    ).resolves.toBeUndefined();
 
+    const iterator = queue[Symbol.asyncIterator]();
+    expect(textOf((await iterator.next()).value as Event)).toBe('one');
     await expect(iterator.next()).rejects.toThrow('receive loop failed');
-  });
-
-  it('closes the primary stream when the caller stops early', async () => {
-    const screened = new AsyncQueue<Event>();
-    let closed = false;
-    async function* closablePrimary(): AsyncGenerator<Event, void, void> {
-      try {
-        yield createEvent({author: 'agent', content: {parts: [{text: 'one'}]}});
-        yield createEvent({author: 'agent', content: {parts: [{text: 'two'}]}});
-      } finally {
-        closed = true;
-      }
-    }
-
-    for await (const _ of mergeEventStreams(closablePrimary(), screened)) {
-      break;
-    }
-    await vi.waitFor(() => expect(closed).toBe(true));
   });
 });

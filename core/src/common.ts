@@ -8,7 +8,6 @@ export {ActiveStreamingTool} from './agents/active_streaming_tool.js';
 export type {ActiveStreamingToolParams} from './agents/active_streaming_tool.js';
 export {AudioCacheManager} from './agents/audio_cache_manager.js';
 export type {
-  AudioCacheStats,
   AudioCacheType,
   FlushCachesOptions,
 } from './agents/audio_cache_manager.js';

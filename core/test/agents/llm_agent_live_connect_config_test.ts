@@ -12,7 +12,6 @@ import {
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
-  LiveConnectConfigWithHistory,
   LiveRequestQueue,
   LlmAgent,
   LlmRequest,
@@ -65,13 +64,6 @@ class TransparentOffProcessor extends BaseLlmRequestProcessor {
   ): AsyncGenerator<Event, void, void> {
     llmRequest.liveConnectConfig.sessionResumption = {transparent: false};
   }
-}
-
-function historyConfigOf(
-  llmRequest: LlmRequest,
-): LiveConnectConfigWithHistory['historyConfig'] {
-  return (llmRequest.liveConnectConfig as LiveConnectConfigWithHistory)
-    .historyConfig;
 }
 
 describe('LlmAgent live connect config', () => {
@@ -129,7 +121,7 @@ describe('LlmAgent live connect config', () => {
 
       await runLive(llm);
 
-      expect(historyConfigOf(llm.requestsSeen[0])).toEqual({
+      expect(llm.requestsSeen[0].liveConnectConfig.historyConfig).toEqual({
         initialHistoryInClientContent: true,
       });
     });
@@ -140,7 +132,7 @@ describe('LlmAgent live connect config', () => {
 
       await runLive(llm);
 
-      expect(historyConfigOf(llm.requestsSeen[0])).toEqual({
+      expect(llm.requestsSeen[0].liveConnectConfig.historyConfig).toEqual({
         initialHistoryInClientContent: true,
       });
     });
@@ -166,7 +158,7 @@ describe('LlmAgent live connect config', () => {
         // drain
       }
 
-      expect(historyConfigOf(llm.requestsSeen[0])).toEqual({
+      expect(llm.requestsSeen[0].liveConnectConfig.historyConfig).toEqual({
         initialHistoryInClientContent: false,
       });
     });
@@ -177,7 +169,9 @@ describe('LlmAgent live connect config', () => {
 
       await runLive(llm, {liveSessionResumptionHandle: 'handle-1'});
 
-      expect(historyConfigOf(llm.requestsSeen[0])).toBeUndefined();
+      expect(
+        llm.requestsSeen[0].liveConnectConfig.historyConfig,
+      ).toBeUndefined();
     });
 
     it('is left unset when there is no history to replay', async () => {
@@ -185,7 +179,9 @@ describe('LlmAgent live connect config', () => {
 
       await runLive(llm);
 
-      expect(historyConfigOf(llm.requestsSeen[0])).toBeUndefined();
+      expect(
+        llm.requestsSeen[0].liveConnectConfig.historyConfig,
+      ).toBeUndefined();
     });
   });
 

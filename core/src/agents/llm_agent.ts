@@ -73,9 +73,8 @@ import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {AudioCacheManager} from './audio_cache_manager.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {
-  handleControlEventFlush,
   markLiveAsyncToolsNonBlocking,
-  mergeEventStreams,
+  pumpEventsInto,
   stopBackgroundToolTasks,
 } from './live_flow_utils.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
@@ -91,7 +90,7 @@ import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_c
 import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './processors/request_input_llm_request_processor.js';
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
 import {ReadonlyContext} from './readonly_context.js';
-import {LiveConnectConfigWithHistory, StreamingMode} from './run_config.js';
+import {StreamingMode} from './run_config.js';
 
 /**
  * Maximum number of reconnect attempts on transient live connection failure
@@ -236,8 +235,7 @@ function applyLiveHistoryConfig(
   ) {
     return;
   }
-  const liveConfig =
-    llmRequest.liveConnectConfig as LiveConnectConfigWithHistory;
+  const liveConfig = llmRequest.liveConnectConfig;
   liveConfig.historyConfig = {
     ...invocationContext.runConfig?.historyConfig,
     ...liveConfig.historyConfig,
@@ -1192,17 +1190,23 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         });
       });
 
+      // The model's events and the send loop's screened events share one
+      // queue, so a blocked message reaches the caller without waiting on a
+      // server message that is never coming.
+      const receiveLoop = this.runReceiveLoop(
+        invocationContext,
+        connection,
+        llmRequest,
+        sendAbort,
+      );
+      void pumpEventsInto(receiveLoop, screenedEvents);
+
       let reconnectMode: LiveReconnectMode | undefined;
+      let fatalError: unknown;
       try {
-        yield* mergeEventStreams(
-          this.runReceiveLoop(
-            invocationContext,
-            connection,
-            llmRequest,
-            sendAbort,
-          ),
-          screenedEvents,
-        );
+        for await (const event of screenedEvents) {
+          yield event;
+        }
       } catch (err) {
         // A restart opens a new session, so it does not need a handle; every
         // other reconnect resumes the session the handle names.
@@ -1221,16 +1225,20 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
             err,
           );
         } else {
-          // Tear down before rethrowing.
-          screenedEvents.close();
-          await this.teardownLiveConnection(sendAbort, connection, sendTask);
-          throw err;
+          fatalError = err;
         }
+      } finally {
+        // Close the receive loop without waiting on it: when the caller walks
+        // away it is usually parked on a server message that is not coming.
+        void receiveLoop.return(undefined).catch(() => undefined);
+        // Stop this attempt's send loop and connection on every exit path,
+        // including the one where the caller stopped iterating.
+        await this.teardownLiveConnection(sendAbort, connection, sendTask);
       }
 
-      // Cancel send loop for this attempt; receive loop has exited.
-      screenedEvents.close();
-      await this.teardownLiveConnection(sendAbort, connection, sendTask);
+      if (fatalError) {
+        throw fatalError;
+      }
 
       if (invocationContext.abortSignal?.aborted) {
         return;
@@ -1767,15 +1775,19 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       return;
     }
 
-    if (invocationContext.runConfig?.saveLiveBlob) {
-      const flushedEvents = await handleControlEventFlush(
+    // A turn ends on `interrupted` or `turnComplete`, and neither carries
+    // content worth merging into an event of its own, so the flushed audio
+    // replaces the control event. An interruption stops the model while the
+    // user keeps speaking, so it leaves the user's audio for the next flush.
+    if (
+      invocationContext.runConfig?.saveLiveBlob &&
+      (llmResponse.interrupted || llmResponse.turnComplete)
+    ) {
+      const flushedEvents = await this.audioCacheManager.flushCaches(
         invocationContext,
-        llmResponse,
-        this.audioCacheManager,
+        {flushUserAudio: !llmResponse.interrupted},
       );
       if (flushedEvents.length) {
-        // A flush only happens on `interrupted` or `turnComplete`, and neither
-        // carries content worth merging into an event of its own.
         for (const event of flushedEvents) {
           yield event;
         }

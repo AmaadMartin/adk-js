@@ -16,7 +16,6 @@ import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
-import {Task} from '../utils/task.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
@@ -69,7 +68,6 @@ export interface InvocationContextParams {
   transcriptionCache?: TranscriptionEntry[];
   runConfig?: RunConfig;
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
-  activeNonBlockingToolTasks?: Record<string, Task<void>>;
   inputRealtimeCache?: RealtimeCacheEntry[];
   outputRealtimeCache?: RealtimeCacheEntry[];
   credentialByKey?: Record<string, AuthCredential>;
@@ -236,12 +234,6 @@ export class InvocationContext {
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
 
   /**
-   * The non-blocking tool tasks the current live run started, by function call
-   * id. Cancelled and cleared when that run ends.
-   */
-  activeNonBlockingToolTasks?: Record<string, Task<void>>;
-
-  /**
    * User audio chunks received on the live path, held until the flow flushes
    * them to the artifact service.
    */
@@ -331,7 +323,6 @@ export class InvocationContext {
     this.transcriptionCache = params.transcriptionCache;
     this.runConfig = params.runConfig;
     this.activeStreamingTools = params.activeStreamingTools;
-    this.activeNonBlockingToolTasks = params.activeNonBlockingToolTasks;
     this.inputRealtimeCache = params.inputRealtimeCache;
     this.outputRealtimeCache = params.outputRealtimeCache;
     this.credentialByKey = params.credentialByKey ?? {};

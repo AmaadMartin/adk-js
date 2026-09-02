@@ -199,20 +199,6 @@ describe('AudioCacheManager.flushCaches', () => {
     expect(invocationContext.outputRealtimeCache).toEqual([]);
   });
 
-  it('keeps the model cache when only user audio is flushed', async () => {
-    const invocationContext = makeContext(makeArtifactService());
-    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
-    manager.cacheAudio(invocationContext, {data: SECOND_CHUNK}, 'output');
-
-    const events = await manager.flushCaches(invocationContext, {
-      flushModelAudio: false,
-    });
-
-    expect(events).toHaveLength(1);
-    expect(events[0].content?.role).toBe('user');
-    expect(invocationContext.outputRealtimeCache).toHaveLength(1);
-  });
-
   it('keeps the audio when there is no artifact service', async () => {
     const invocationContext = makeContext();
     manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
@@ -221,6 +207,21 @@ describe('AudioCacheManager.flushCaches', () => {
 
     expect(events).toEqual([]);
     expect(invocationContext.inputRealtimeCache).toHaveLength(1);
+  });
+
+  it('saves an empty artifact for a cache whose chunks carry no data', async () => {
+    const artifactService = makeArtifactService();
+    const invocationContext = makeContext(artifactService);
+    invocationContext.outputRealtimeCache = [
+      {role: 'model', data: {mimeType: 'audio/pcm'}, timestamp: 1},
+    ];
+
+    const events = await new AudioCacheManager().flushCaches(invocationContext);
+
+    expect(events).toHaveLength(1);
+    const filename = 'adk_live_audio_storage_output_audio_1000.pcm';
+    const saved = await artifactService.loadArtifact({filename});
+    expect(saved?.inlineData?.data).toBe('');
   });
 
   it('returns nothing when both caches are empty', async () => {
@@ -247,62 +248,5 @@ describe('AudioCacheManager.flushCaches', () => {
       expect.any(Error),
     );
     error.mockRestore();
-  });
-});
-
-describe('AudioCacheManager.getCacheStats', () => {
-  it('reports zero for an invocation that cached nothing', () => {
-    expect(new AudioCacheManager().getCacheStats(makeContext())).toEqual({
-      inputChunks: 0,
-      outputChunks: 0,
-      inputBytes: 0,
-      outputBytes: 0,
-      totalChunks: 0,
-      totalBytes: 0,
-    });
-  });
-
-  it('counts a chunk that carries no data as zero bytes', () => {
-    const invocationContext = makeContext();
-    // A caller can seed the cache directly; cacheAudio would reject this blob.
-    invocationContext.outputRealtimeCache = [
-      {role: 'model', data: {mimeType: 'audio/pcm'}, timestamp: 1},
-    ];
-
-    expect(
-      new AudioCacheManager().getCacheStats(invocationContext).outputBytes,
-    ).toBe(0);
-  });
-
-  it('saves an empty artifact for a cache whose chunks carry no data', async () => {
-    const artifactService = makeArtifactService();
-    const invocationContext = makeContext(artifactService);
-    invocationContext.outputRealtimeCache = [
-      {role: 'model', data: {mimeType: 'audio/pcm'}, timestamp: 1},
-    ];
-
-    const events = await new AudioCacheManager().flushCaches(invocationContext);
-
-    expect(events).toHaveLength(1);
-    const filename = 'adk_live_audio_storage_output_audio_1000.pcm';
-    const saved = await artifactService.loadArtifact({filename});
-    expect(saved?.inlineData?.data).toBe('');
-  });
-
-  it('counts the chunks and the decoded bytes of each cache', () => {
-    const manager = new AudioCacheManager();
-    const invocationContext = makeContext();
-    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
-    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'output');
-    manager.cacheAudio(invocationContext, {data: SECOND_CHUNK}, 'output');
-
-    expect(manager.getCacheStats(invocationContext)).toEqual({
-      inputChunks: 1,
-      outputChunks: 2,
-      inputBytes: 2,
-      outputBytes: 4,
-      totalChunks: 3,
-      totalBytes: 6,
-    });
   });
 });

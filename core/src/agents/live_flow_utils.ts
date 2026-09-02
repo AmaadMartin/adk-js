@@ -8,11 +8,9 @@ import {Behavior} from '@google/genai';
 
 import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
-import {LlmResponse} from '../models/llm_response.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {logger} from '../utils/logger.js';
 import {Task} from '../utils/task.js';
-import {AudioCacheManager} from './audio_cache_manager.js';
 import {InvocationContext} from './invocation_context.js';
 
 /**
@@ -22,19 +20,17 @@ import {InvocationContext} from './invocation_context.js';
 const TOOL_SHUTDOWN_TIMEOUT_MS = 1000;
 
 /**
- * Cancels the background tool tasks the current live run started.
+ * Cancels the streaming tool tasks the current live run started.
  *
- * A live run starts two kinds of tool in the background: streaming tools, in
- * `activeStreamingTools`, and non-blocking tools, in
- * `activeNonBlockingToolTasks`. Neither is tied to the lifetime of the run
- * that started it, so a tool outlives its agent and keeps writing function
- * responses to a live request queue that now belongs to somebody else.
+ * Nothing tied a streaming tool to the lifetime of the run that started it, so
+ * a tool outlives its agent and keeps writing function responses to a live
+ * request queue that now belongs to somebody else.
  *
  * Cancellation is best effort. A task that does not stop within
  * {@link TOOL_SHUTDOWN_TIMEOUT_MS} is logged and left behind rather than
  * stalling the caller's teardown.
  *
- * @param invocationContext The invocation context holding both registries.
+ * @param invocationContext The invocation context holding the registry.
  */
 export async function stopBackgroundToolTasks(
   invocationContext: InvocationContext,
@@ -46,11 +42,6 @@ export async function stopBackgroundToolTasks(
     if (active.task) {
       tasks.push([name, active.task]);
     }
-  }
-  for (const [name, task] of Object.entries(
-    invocationContext.activeNonBlockingToolTasks ?? {},
-  )) {
-    tasks.push([name, task]);
   }
 
   const pending = tasks.filter(([, task]) => !task.done());
@@ -80,9 +71,6 @@ export async function stopBackgroundToolTasks(
   // one left behind grows for as long as the session lasts.
   if (invocationContext.activeStreamingTools) {
     invocationContext.activeStreamingTools = {};
-  }
-  if (invocationContext.activeNonBlockingToolTasks) {
-    invocationContext.activeNonBlockingToolTasks = {};
   }
 }
 
@@ -136,102 +124,31 @@ export function markLiveAsyncToolsNonBlocking(llmRequest: LlmRequest): void {
 }
 
 /**
- * Flushes the audio caches that a control-event response ends.
+ * Drains `source` into `queue`, closing it when the source ends and failing it
+ * with whatever the source threw.
  *
- * An `interrupted` response flushes the model's audio, because the model has
- * stopped while the user keeps speaking. A `turnComplete` response flushes
- * both. Any other response flushes nothing.
+ * The live flow puts the model's events and the send loop's screened events on
+ * one queue. A blocked typed message never reaches the model, so no server
+ * message follows it; sharing the queue is what delivers that event to the
+ * caller instead of parking it behind a message that never comes.
+ * {@link AsyncQueue} hands over every buffered item before the end or the
+ * error, so nothing the source produced is lost either way.
  *
- * @param invocationContext The current invocation context.
- * @param llmResponse The response received from the live connection.
- * @param audioCacheManager The audio cache manager of this live flow.
- * @return The events created from the flushed caches.
+ * @param source The receive loop.
+ * @param queue The queue the flow yields from.
+ * @return A promise that settles when the source ends. It never rejects: the
+ *     error reaches the consumer through the queue.
  */
-export function handleControlEventFlush(
-  invocationContext: InvocationContext,
-  llmResponse: LlmResponse,
-  audioCacheManager: AudioCacheManager,
-): Promise<Event[]> {
-  if (llmResponse.interrupted) {
-    return audioCacheManager.flushCaches(invocationContext, {
-      flushUserAudio: false,
-      flushModelAudio: true,
-    });
-  }
-  if (llmResponse.turnComplete) {
-    return audioCacheManager.flushCaches(invocationContext);
-  }
-  return Promise.resolve([]);
-}
-
-/** One step of {@link mergeEventStreams}: which stream produced it. */
-type MergeStep =
-  | {readonly from: 'primary'; readonly result: IteratorResult<Event, void>}
-  | {
-      readonly from: 'screened';
-      readonly result: IteratorResult<Event, unknown>;
-    };
-
-/**
- * Yields the events of `primary` and of `screened` as each arrives, and ends
- * when `primary` ends.
- *
- * The live flow receives model events on one path and screens the user's typed
- * text on another. A blocked typed message never reaches the model, so no
- * server message follows it; racing the two paths is what delivers that event
- * to the caller instead of parking it behind a message that never comes.
- *
- * @param primary The receive loop. Its end ends the merged stream, and its
- *     error propagates.
- * @param screened Events the send loop produced.
- */
-export async function* mergeEventStreams(
-  primary: AsyncGenerator<Event, void, void>,
-  screened: AsyncQueue<Event>,
-): AsyncGenerator<Event, void, void> {
-  const screenedIterator = screened[Symbol.asyncIterator]();
-  let primaryNext = primary.next();
-  let screenedNext: Promise<IteratorResult<Event, unknown>> | undefined =
-    screenedIterator.next();
-
+export async function pumpEventsInto(
+  source: AsyncGenerator<Event, void, void>,
+  queue: AsyncQueue<Event>,
+): Promise<void> {
   try {
-    while (true) {
-      const candidates: Array<Promise<MergeStep>> = [
-        primaryNext.then((result) => ({from: 'primary', result}) as const),
-      ];
-      if (screenedNext) {
-        candidates.push(
-          screenedNext.then((result) => ({from: 'screened', result}) as const),
-        );
-      }
-      const winner = await Promise.race(candidates);
-
-      if (winner.from === 'screened') {
-        if (winner.result.done) {
-          screenedNext = undefined;
-          continue;
-        }
-        yield winner.result.value;
-        screenedNext = screenedIterator.next();
-        continue;
-      }
-
-      if (winner.result.done) {
-        // Hand over a screened event that landed in the same tick, then stop.
-        const buffered = screenedNext
-          ? await Promise.race([screenedNext, Promise.resolve(undefined)])
-          : undefined;
-        if (buffered && !buffered.done) {
-          yield buffered.value;
-        }
-        return;
-      }
-      yield winner.result.value;
-      primaryNext = primary.next();
+    for await (const event of source) {
+      queue.push(event);
     }
-  } finally {
-    // Close the receive loop without waiting on it: when the caller walks
-    // away it is usually parked on a server message that is not coming.
-    void primary.return(undefined).catch(() => undefined);
+    queue.close();
+  } catch (error: unknown) {
+    queue.fail(error);
   }
 }

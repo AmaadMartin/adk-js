@@ -26,25 +26,14 @@ export type AudioCacheType = 'input' | 'output';
 /** Identifies a flushed cache in the artifact filename. */
 type AudioCacheArtifactType = 'input_audio' | 'output_audio';
 
-/**
- * Which caches {@link AudioCacheManager.flushCaches} flushes. Both default to
- * `true`.
- */
+/** Which caches {@link AudioCacheManager.flushCaches} flushes. */
 export interface FlushCachesOptions {
-  /** Whether to flush the input (user) audio cache. */
+  /**
+   * Whether to flush the input (user) audio cache. Defaults to `true`. The
+   * model's audio is always flushed: an interruption ends the model's turn
+   * while the user keeps speaking, and a completed turn ends both.
+   */
   flushUserAudio?: boolean;
-  /** Whether to flush the output (model) audio cache. */
-  flushModelAudio?: boolean;
-}
-
-/** How much audio each cache currently holds. */
-export interface AudioCacheStats {
-  inputChunks: number;
-  outputChunks: number;
-  inputBytes: number;
-  outputBytes: number;
-  totalChunks: number;
-  totalBytes: number;
 }
 
 /**
@@ -99,7 +88,7 @@ export class AudioCacheManager {
    * keeps the audio for the next flush.
    *
    * @param invocationContext The invocation context holding the caches.
-   * @param options Which caches to flush. Both default to `true`.
+   * @param options Which caches to flush.
    * @return The events created from the flushed caches, user audio first.
    */
   async flushCaches(
@@ -107,7 +96,6 @@ export class AudioCacheManager {
     options: FlushCachesOptions = {},
   ): Promise<Event[]> {
     const flushUserAudio = options.flushUserAudio ?? true;
-    const flushModelAudio = options.flushModelAudio ?? true;
     const flushedEvents: Event[] = [];
 
     if (flushUserAudio && invocationContext.inputRealtimeCache?.length) {
@@ -122,7 +110,7 @@ export class AudioCacheManager {
       }
     }
 
-    if (flushModelAudio && invocationContext.outputRealtimeCache?.length) {
+    if (invocationContext.outputRealtimeCache?.length) {
       const audioEvent = await this.flushCacheToServices(
         invocationContext,
         invocationContext.outputRealtimeCache,
@@ -135,28 +123,6 @@ export class AudioCacheManager {
     }
 
     return flushedEvents;
-  }
-
-  /**
-   * Reports how much audio each cache currently holds.
-   *
-   * @param invocationContext The invocation context holding the caches.
-   * @return The chunk and byte counts per cache, and their totals.
-   */
-  getCacheStats(invocationContext: InvocationContext): AudioCacheStats {
-    const inputCache = invocationContext.inputRealtimeCache ?? [];
-    const outputCache = invocationContext.outputRealtimeCache ?? [];
-    const inputBytes = countBytes(inputCache);
-    const outputBytes = countBytes(outputCache);
-
-    return {
-      inputChunks: inputCache.length,
-      outputChunks: outputCache.length,
-      inputBytes,
-      outputBytes,
-      totalChunks: inputCache.length + outputCache.length,
-      totalBytes: inputBytes + outputBytes,
-    };
   }
 
   /**
@@ -225,13 +191,4 @@ function concatAudioChunks(cache: RealtimeCacheEntry[]): string {
     Buffer.from(entry.data.data ?? '', 'base64'),
   );
   return Buffer.concat(buffers).toString('base64');
-}
-
-/** Counts the decoded bytes a cache holds. */
-function countBytes(cache: RealtimeCacheEntry[]): number {
-  return cache.reduce(
-    (total, entry) =>
-      total + Buffer.from(entry.data.data ?? '', 'base64').length,
-    0,
-  );
 }
