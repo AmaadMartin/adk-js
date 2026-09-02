@@ -17,6 +17,7 @@ import {z as z3} from 'zod/v3';
 import {toJSONSchema as toJSONSchemaV4, z as z4} from 'zod/v4';
 
 import {genaiSchemaToJsonSchema} from './genai_schema_to_json.js';
+import {logger} from './logger.js';
 import {
   isZodSchema,
   isZodV3Schema,
@@ -105,6 +106,62 @@ export function parseWithSchema<T>(
   }
   const validator = genaiSchemaValidator(schema as Schema);
   return validator ? (validator.parse(value) as T) : value;
+}
+
+/** The marker that opens and closes a markdown code fence. */
+const CODE_FENCE = '```';
+
+/** The language tag a code fence opens with, such as the `json` of ```json. */
+const LANGUAGE_TAG_PATTERN = /^\w*/;
+
+/**
+ * Removes a markdown code fence wrapping a whole JSON payload.
+ *
+ * A model asked for structured output sometimes wraps it in a fence, most
+ * often when tools are configured alongside an output schema. Well-formed JSON
+ * never starts with a fence, so valid input is returned unchanged.
+ *
+ * The fence is matched by position rather than by one regular expression. A
+ * pattern of the form ```` ```\s*(.*?)\s*``` ```` backtracks catastrophically
+ * on an unterminated fence followed by a long run of whitespace, and this text
+ * is whatever a model produced.
+ */
+export function stripJsonCodeFence(text: string): string {
+  const trimmed = text.trim();
+  if (
+    trimmed.length < 2 * CODE_FENCE.length ||
+    !trimmed.startsWith(CODE_FENCE) ||
+    !trimmed.endsWith(CODE_FENCE)
+  ) {
+    return text;
+  }
+  const fenced = trimmed.slice(CODE_FENCE.length, -CODE_FENCE.length);
+  return fenced.replace(LANGUAGE_TAG_PATTERN, '').trim();
+}
+
+/**
+ * Validates `value` against `schema`, returning `value` unchanged when it does
+ * not satisfy the schema.
+ *
+ * This is the best-effort form of {@link parseWithSchema}, for callers that
+ * must not reject data the schema disagrees with — model-supplied tool
+ * arguments, where the declaration is a hint the model may ignore and the tool
+ * itself decides what it can work with. A successful parse still applies the
+ * schema's defaults, which is the reason to attempt it.
+ */
+export function tryParseWithSchema<T>(
+  schema: SchemaLike | undefined,
+  value: T,
+): T {
+  try {
+    return parseWithSchema(schema, value);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.debug(
+      `Value does not match its schema, using it unparsed: ${reason}`,
+    );
+    return value;
+  }
 }
 
 /**

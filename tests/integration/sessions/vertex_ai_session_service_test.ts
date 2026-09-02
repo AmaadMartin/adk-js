@@ -96,6 +96,86 @@ const unauthenticated: Auth = {
 };
 
 /**
+ * Drives getSession's session-id handling through the real Sessions client
+ * against a loopback server. The unit tests assert the name handed to a mock
+ * client; these assert the URL the SDK builds from it, so they fail if the id
+ * is normalized too late to reach the request path.
+ */
+describe('VertexAiSessionService session ids over the wire', () => {
+  let server: http.Server;
+  let service: VertexAiSessionService;
+  let paths: string[];
+
+  beforeAll(async () => {
+    server = http.createServer((request, response) => {
+      paths.push(request.url ?? '');
+      response.writeHead(200, {'content-type': 'application/json'});
+      response.end(
+        JSON.stringify({
+          name: `reasoningEngines/${AGENT_ENGINE_ID}/sessions/session-123`,
+          userId: 'user-1',
+          updateTime: '2026-01-01T00:00:00Z',
+        }),
+      );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+
+    const apiClient = new ApiClient({
+      auth: unauthenticated,
+      uploader: new NodeUploader(),
+      downloader: new NodeDownloader(),
+      project: 'test-project',
+      location: 'us-central1',
+      vertexai: true,
+      httpOptions: {
+        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      },
+    });
+    service = new VertexAiSessionService({
+      agentEngineId: AGENT_ENGINE_ID,
+      sessions: createSessionsClient(apiClient),
+    });
+  });
+
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  beforeEach(() => {
+    paths = [];
+  });
+
+  it('requests the short id when given a full resource name', async () => {
+    const session = await service.getSession({
+      appName: AGENT_ENGINE_ID,
+      userId: 'user-1',
+      sessionId:
+        `projects/test-project/locations/us-central1/reasoningEngines/` +
+        `${AGENT_ENGINE_ID}/sessions/session-123`,
+      config: {numRecentEvents: 0},
+    });
+
+    expect(paths).toHaveLength(1);
+    expect(paths[0]).toContain(
+      `reasoningEngines/${AGENT_ENGINE_ID}/sessions/session-123`,
+    );
+    expect(session?.id).toBe('session-123');
+  });
+
+  it('sends no request for a session id that escapes the path', async () => {
+    await expect(
+      service.getSession({
+        appName: AGENT_ENGINE_ID,
+        userId: 'user-1',
+        sessionId: '../../sandboxes/other',
+      }),
+    ).rejects.toThrow(/Invalid session_id/);
+
+    expect(paths).toEqual([]);
+  });
+});
+
+/**
  * Drives createSession through the real Agent Engine Sessions client against a
  * loopback server. The unit tests can only assert the config object handed to
  * the SDK; these assert the request body the SDK actually produces from it, so

@@ -8,6 +8,7 @@ import {
   AuthCredentialTypes,
   Context,
   createSession,
+  HttpDispatcher,
   InvocationContext,
   LlmAgent,
   OpenAPIToolset,
@@ -26,6 +27,56 @@ describe('OpenAPIToolset Integration', () => {
     truanonSpec = fs.readFileSync(specPath, 'utf8');
 
     globalThis.fetch = vi.fn();
+  });
+
+  it('should declare a required array on every generated tool', async () => {
+    const toolset = new OpenAPIToolset({
+      specStr: truanonSpec,
+      specType: 'yaml',
+    });
+    const tools = await toolset.getTools();
+    const getProfile = tools.find((tool) => tool.name === 'get_profile');
+    if (!getProfile) expect.fail('get_profile tool was not created');
+
+    expect(getProfile._getDeclaration()?.parameters).toEqual(
+      expect.objectContaining({required: []}),
+    );
+  });
+
+  it('should list the required arguments a spec declares', async () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'User API', version: '1.0.0'},
+      servers: [{url: 'https://api.example.com/v1'}],
+      paths: {
+        '/users/{userId}': {
+          get: {
+            operationId: 'getUser',
+            parameters: [
+              {
+                name: 'userId',
+                in: 'path',
+                required: true,
+                schema: {type: 'string'},
+              },
+              {name: 'fields', in: 'query', schema: {type: 'string'}},
+            ],
+            responses: {'200': {description: 'ok'}},
+          },
+        },
+      },
+    };
+    const toolset = new OpenAPIToolset({
+      specStr: JSON.stringify(spec),
+      specType: 'json',
+    });
+    const tools = await toolset.getTools();
+    const getUser = tools.find((tool) => tool.name === 'get_user');
+    if (!getUser) expect.fail('get_user tool was not created');
+
+    expect(getUser._getDeclaration()?.parameters).toEqual(
+      expect.objectContaining({required: ['user_id']}),
+    );
   });
 
   it('should parse truanon spec and create tools', async () => {
@@ -102,7 +153,37 @@ describe('OpenAPIToolset Integration', () => {
       toolContext: mockContext as unknown as Context,
     });
 
-    expect(result).toBe('plain text response');
+    expect(result).toEqual({text: 'plain text response'});
+  });
+
+  it('should parse a JSON body served under a text content type', async () => {
+    const toolset = new OpenAPIToolset({
+      specStr: truanonSpec,
+      specType: 'yaml',
+    });
+    const tools = await toolset.getTools();
+    const getProfileTool = tools.find((t) => t.name === 'get_profile');
+
+    const mockResponse = {status: 'success', data: {confirmed: true}};
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify(mockResponse), {
+        headers: {'content-type': 'text/plain; charset=utf-8'},
+      }),
+    );
+
+    const result = await getProfileTool!.runAsync({
+      args: {id: 'user1', service: 'myservice'},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    expect(result).toEqual(mockResponse);
   });
 
   it('should handle fetch error', async () => {
@@ -129,6 +210,41 @@ describe('OpenAPIToolset Integration', () => {
     expect(result).toEqual({
       error: 'Failed to execute API call: Network error',
     });
+  });
+
+  it('should send the configured dispatcher alongside the unchanged request', async () => {
+    const fakeDispatcher: HttpDispatcher = {dispatch: () => true};
+    const toolset = new OpenAPIToolset({
+      specStr: truanonSpec,
+      specType: 'yaml',
+      sslVerify: fakeDispatcher,
+    });
+    const getProfileTool = toolset.getTool('get_profile');
+    if (!getProfileTool) expect.fail('get_profile tool was not created');
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response('{"status":"success"}', {
+        headers: {'content-type': 'application/json'},
+      }),
+    );
+
+    const result = await getProfileTool.runAsync({
+      args: {id: 'user1', service: 'myservice'},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    expect(result).toEqual({status: 'success'});
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://staging.truanon.com/api/get_profile?id=user1&service=myservice',
+      expect.objectContaining({method: 'GET', dispatcher: fakeDispatcher}),
+    );
   });
 
   it('should keep a malicious path argument inside the declared endpoint', async () => {

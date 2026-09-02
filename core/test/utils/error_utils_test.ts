@@ -5,7 +5,11 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {
+  formatError,
+  isAbortError,
+  truncateBody,
+} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +210,76 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('isAbortError', () => {
+  it('reports an AbortError', () => {
+    const err = new Error('aborted');
+    err.name = 'AbortError';
+    expect(isAbortError(err)).toBe(true);
+  });
+
+  it('reports a TimeoutError', () => {
+    const err = new Error('timed out');
+    err.name = 'TimeoutError';
+    expect(isAbortError(err)).toBe(true);
+  });
+
+  it('reports an ordinary error as not a cancellation', () => {
+    expect(isAbortError(new Error('boom'))).toBe(false);
+  });
+
+  it('finds a cancellation wrapped as a cause', () => {
+    const inner = new Error('aborted');
+    inner.name = 'AbortError';
+    const outer = new Error('failed to connect', {cause: inner});
+    expect(isAbortError(outer)).toBe(true);
+  });
+
+  it('finds a cancellation two causes deep', () => {
+    const inner = Object.assign(new Error('cancelled'), {name: 'AbortError'});
+    const middle = new Error('transport closed', {cause: inner});
+    expect(isAbortError(new Error('call failed', {cause: middle}))).toBe(true);
+  });
+
+  it('finds a cancellation inside an AggregateError', () => {
+    const inner = new Error('aborted');
+    inner.name = 'AbortError';
+    expect(isAbortError(new AggregateError([new Error('boom'), inner]))).toBe(
+      true,
+    );
+  });
+
+  it('returns false for an AggregateError with no cancellation', () => {
+    expect(isAbortError(new AggregateError([new Error('boom')]))).toBe(false);
+  });
+
+  it('is safe on null, undefined and primitives', () => {
+    expect(isAbortError(null)).toBe(false);
+    expect(isAbortError(undefined)).toBe(false);
+    expect(isAbortError('AbortError')).toBe(false);
+  });
+
+  it('terminates on a cyclic cause chain', () => {
+    const err: Error & {cause?: unknown} = new Error('outer');
+    err.cause = err;
+    expect(isAbortError(err)).toBe(false);
+  });
+});
+
+describe('truncateBody', () => {
+  it('appends the marker to a body over the cap', () => {
+    const body = 'x'.repeat(MAX_RESPONSE_BODY_LENGTH + 1);
+
+    expect(truncateBody(body)).toBe(
+      'x'.repeat(MAX_RESPONSE_BODY_LENGTH) + TRUNCATION_MARKER,
+    );
+  });
+
+  it('leaves a body at the cap untouched', () => {
+    const body = 'x'.repeat(MAX_RESPONSE_BODY_LENGTH);
+
+    expect(truncateBody(body)).toBe(body);
   });
 });

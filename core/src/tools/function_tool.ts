@@ -5,13 +5,32 @@
  */
 
 import {FunctionDeclaration, Schema, Type} from '@google/genai';
+import {cloneDeep} from 'lodash-es';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
+import {
+  DestructuredParameters,
+  parseDestructuredParameters,
+} from '../utils/function_signature_utils.js';
+import {toJsonSchema, tryParseWithSchema} from '../utils/schema.js';
+import {
+  flattenNullableAnyOf,
+  stripUnsupportedGeminiFormats,
+} from '../utils/schema_variant_utils.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
+import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
+import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import {
+  getSyncCallableRunner,
+  isAsyncCallable,
+  runWithSyncCallableRunner,
+} from './sync_callable_runner.js';
+import {applyConfirmationGate} from './tool_confirmation.js';
 
 /**
  * Input parameters of the function tool.
@@ -25,6 +44,9 @@ export type ToolInputParameters =
 /**
  * The arguments passed to the function tool's `execute` callback, inferred
  * from the `parameters` schema type.
+ *
+ * Without a `parameters` schema there is nothing to infer from, so `execute`
+ * receives the model's argument object as it arrived.
  */
 export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
   TParameters extends z3.ZodObject<infer T, infer U, infer V>
@@ -33,14 +55,19 @@ export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
       ? z4.infer<z4.ZodObject<T>>
       : TParameters extends Schema
         ? unknown
-        : string;
+        : Record<string, unknown>;
 
 /**
  * The signature of the user-provided function executed by a {@link FunctionTool}.
+ *
+ * `inputStream` is the queue registered for this tool at
+ * `invocationContext.activeStreamingTools[name].stream`, set only in a live
+ * session. The tool reads it; whoever created it closes it.
  */
 export type ToolExecuteFunction<TParameters extends ToolInputParameters> = (
   input: ToolExecuteArgument<TParameters>,
   toolContext?: Context,
+  inputStream?: LiveRequestQueue,
 ) => Promise<unknown> | unknown;
 
 /**
@@ -60,10 +87,17 @@ export type RequireConfirmation<TParameters extends ToolInputParameters> =
  * The `name`, `description` and `parameters` fields are used to generate the
  * tool definition that is passed to the LLM prompt.
  *
- * Note: Unlike Python's ADK, JSDoc on the `execute` function is ignored
- * for tool definition generation.
+ * Note: Python's ADK reads a function's docstring for the tool description,
+ * which TypeScript cannot do: JSDoc is a comment, and
+ * `Function.prototype.toString()` starts at the parameter list, so the text is
+ * gone at runtime. `description` is therefore required. The parameter list
+ * does survive, so `parameters` is derived from `execute` when it is omitted.
  */
 export type ToolOptions<TParameters extends ToolInputParameters> = {
+  /**
+   * The name the model is told about, which is also the name the framework
+   * registers the tool under. Defaults to the `execute` function's own name.
+   */
   name?: string;
   description: string;
   parameters?: TParameters;
@@ -89,11 +123,19 @@ export type ToolOptions<TParameters extends ToolInputParameters> = {
   requireConfirmation?: RequireConfirmation<TParameters>;
 };
 
+/** The `error.type` a tool reports for a response that carries an error. */
+const TOOL_ERROR = 'TOOL_ERROR';
+
+/** The schema of a tool that declares no parameters. */
+function emptyObjectSchema(): Schema {
+  return {type: Type.OBJECT, properties: {}};
+}
+
 function toSchema<TParameters extends ToolInputParameters>(
   parameters: TParameters,
 ): Schema {
   if (parameters === undefined) {
-    return {type: Type.OBJECT, properties: {}};
+    return emptyObjectSchema();
   }
 
   if (isZodObject(parameters)) {
@@ -101,6 +143,74 @@ function toSchema<TParameters extends ToolInputParameters>(
   }
 
   return parameters;
+}
+
+/**
+ * Builds the model-facing schema for parameters read off the `execute`
+ * signature.
+ *
+ * TypeScript erases parameter types, so every derived property is in the
+ * position adk-python gives an unannotated parameter, and takes the same
+ * `TYPE_UNSPECIFIED` type.
+ */
+function derivedSchema(parameters: DestructuredParameters): Schema {
+  const properties: Record<string, Schema> = {};
+  for (const name of parameters.names) {
+    properties[name] = {type: Type.TYPE_UNSPECIFIED};
+  }
+  const schema: Schema = {type: Type.OBJECT, properties};
+  if (parameters.required.length > 0) {
+    schema.required = [...parameters.required];
+  }
+  return schema;
+}
+
+/**
+ * Renders a tool as the declaration sent to the model.
+ *
+ * Exactly one of `parameters` and `parametersJsonSchema` is populated: the
+ * JSON-schema form is what the `JSON_SCHEMA_FOR_FUNC_DECL` feature selects,
+ * and the genai `Schema` form is the default. Mirrors adk-python's
+ * `build_function_declaration`.
+ *
+ * The result shares no object with `parameters`, so a caller that keeps its
+ * own `Schema` and later edits it cannot reach a cached declaration.
+ */
+function buildDeclaration(
+  name: string,
+  description: string,
+  parameters: ToolInputParameters,
+  variant: GoogleLLMVariant,
+  jsonSchema: boolean,
+): FunctionDeclaration {
+  if (jsonSchema) {
+    const rendered = toJsonSchema(parameters ?? emptyObjectSchema());
+    return {
+      name,
+      description,
+      parametersJsonSchema:
+        variant === GoogleLLMVariant.VERTEX_AI
+          ? flattenNullableAnyOf(rendered)
+          : rendered,
+    };
+  }
+  const schema = cloneDeep(toSchema(parameters));
+  return {
+    name,
+    description,
+    parameters:
+      variant === GoogleLLMVariant.GEMINI_API
+        ? stripUnsupportedGeminiFormats(schema)
+        : schema,
+  };
+}
+
+/** The declared-required keys absent from `args`, in declaration order. */
+function missingRequiredArgs(
+  schema: Schema,
+  args: Record<string, unknown>,
+): string[] {
+  return (schema.required ?? []).filter((name) => !Object.hasOwn(args, name));
 }
 
 /**
@@ -141,8 +251,12 @@ export class FunctionTool<
   private readonly execute: ToolExecuteFunction<TParameters>;
   // Typed input parameters.
   private readonly parameters?: TParameters;
+  // Parameters read off the `execute` signature, when none were declared.
+  private readonly derivedParameters?: DestructuredParameters;
   // Whether the tool requires user confirmation before running.
   private readonly requireConfirmation: RequireConfirmation<TParameters>;
+  // The last built declaration, and the `variant:jsonSchema` key it is for.
+  private cache?: {key: string; declaration: FunctionDeclaration};
 
   /**
    * The constructor acts as the user-friendly factory.
@@ -162,31 +276,106 @@ export class FunctionTool<
     });
     this.execute = options.execute;
     this.parameters = options.parameters;
+    // Parsed once: reading the signature costs a `toString()` and a scan, and
+    // the declaration is rebuilt on every LLM call.
+    this.derivedParameters =
+      options.parameters === undefined
+        ? parseDestructuredParameters(options.execute)
+        : undefined;
     this.requireConfirmation = options.requireConfirmation ?? false;
   }
 
   /**
    * Returns the function declaration derived from the tool's name, description,
    * and parameter schema.
+   *
+   * The build is cached, and rebuilds when the API variant or the
+   * `JSON_SCHEMA_FOR_FUNC_DECL` feature changes. Every call returns a fresh
+   * copy, so a caller that prefixes the name or annotates the schema — as
+   * {@link LongRunningFunctionTool} does — never mutates the cached
+   * declaration or the tool itself.
    */
   override _getDeclaration(): FunctionDeclaration {
-    return {
-      name: this.name,
-      description: this.description,
-      parameters: toSchema(this.parameters),
-    };
+    const variant = this.apiVariant;
+    const jsonSchema = isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL);
+    const key = `${variant}:${jsonSchema}`;
+    let cache = this.cache;
+    if (cache?.key !== key) {
+      cache = {
+        key,
+        declaration: buildDeclaration(
+          this.name,
+          this.description,
+          this.declaredParameters(),
+          variant,
+          jsonSchema,
+        ),
+      };
+      this.cache = cache;
+    }
+    return cloneDeep(cache.declaration);
+  }
+
+  /**
+   * The error type to record on this call's telemetry span, or `undefined`
+   * when the response is not a failure.
+   *
+   * A tool reports a failure by returning `{error: ...}` rather than by
+   * throwing, which is otherwise indistinguishable from a success in a trace.
+   */
+  detectErrorInResponse(response: unknown): string | undefined {
+    if (
+      typeof response === 'object' &&
+      response !== null &&
+      'error' in response &&
+      response.error
+    ) {
+      return TOOL_ERROR;
+    }
+    return undefined;
+  }
+
+  /**
+   * The parameters advertised to the model: the declared `parameters` when
+   * there are some, otherwise the signature of `execute`.
+   *
+   * A declared schema is returned in the form the caller gave it, so
+   * {@link buildDeclaration} still renders a Zod object through the Zod path.
+   */
+  private declaredParameters(): ToolInputParameters {
+    if (this.parameters === undefined && this.derivedParameters !== undefined) {
+      return derivedSchema(this.derivedParameters);
+    }
+    return this.parameters;
   }
 
   /**
    * Validates the model-provided arguments against the parameter schema and
    * invokes the user-defined `execute` function.
    *
+   * A call that omits a declared-required argument resolves to an error object
+   * telling the model to retry with the missing arguments, matching adk-python.
+   * It never reaches the confirmation gate or `execute`.
+   *
    * @param req The tool request containing arguments and tool context.
    * @returns A promise resolving to the function's return value.
    */
   override async runAsync(req: RunAsyncToolRequest): Promise<unknown> {
     try {
-      const validatedArgs = this.validateArgs(req.args);
+      const schema = toSchema(this.parameters);
+      const callArgs = this.marshalArgs(schema, req.args);
+
+      const missing = missingRequiredArgs(schema, callArgs);
+      if (missing.length > 0) {
+        return {
+          error:
+            `Invoking \`${this.name}()\` failed as the following mandatory input parameters are not present:\n` +
+            `${missing.join('\n')}\n` +
+            'You could retry calling this tool, but it is IMPORTANT for you to provide all the mandatory parameters.',
+        };
+      }
+
+      const validatedArgs = this.validateArgs(callArgs);
 
       const pending = await this.checkConfirmation(
         validatedArgs,
@@ -196,7 +385,12 @@ export class FunctionTool<
         return pending;
       }
 
-      return await this.execute(validatedArgs, req.toolContext);
+      return await this.invokeExecute(
+        validatedArgs,
+        req.toolContext,
+        req.toolContext.invocationContext?.activeStreamingTools?.[this.name]
+          ?.stream,
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -224,14 +418,74 @@ export class FunctionTool<
     return this.requireConfirmation(this.validateArgs(args), toolContext);
   }
 
-  /** Parses `args` against the parameter schema, when one is declared. */
+  /**
+   * Drops the model-supplied arguments the declaration does not mention.
+   *
+   * A Zod object applies its own unknown-key policy when {@link validateArgs}
+   * parses, and a tool that declares no parameters accepts whatever it is
+   * given, so only a raw `Schema` with declared properties filters here.
+   */
+  private marshalArgs(
+    schema: Schema,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const {properties} = schema;
+    if (
+      this.parameters === undefined ||
+      isZodObject(this.parameters) ||
+      !properties
+    ) {
+      return args;
+    }
+    return Object.fromEntries(
+      Object.entries(args).filter(([key]) => Object.hasOwn(properties, key)),
+    );
+  }
+
+  /**
+   * Calls `execute`, through the ambient {@link SyncCallableRunner} when a host
+   * bound one and the callback is synchronous.
+   *
+   * The binding is cleared around the offloaded call, so a tool called from
+   * inside an offloaded body runs inline instead of offloading again.
+   */
+  private async invokeExecute(
+    input: ToolExecuteArgument<TParameters>,
+    toolContext?: Context,
+    inputStream?: LiveRequestQueue,
+  ): Promise<unknown> {
+    const runner = getSyncCallableRunner();
+    if (runner === undefined || isAsyncCallable(this.execute)) {
+      return this.execute(input, toolContext, inputStream);
+    }
+    return runner(() =>
+      runWithSyncCallableRunner(undefined, () =>
+        this.execute(input, toolContext, inputStream),
+      ),
+    );
+  }
+
+  /**
+   * Parses `args` against the parameter schema, when one is declared.
+   *
+   * A Zod object rejects arguments it disagrees with, which `runAsync` turns
+   * into an error the model can retry. A raw `Schema` is best-effort instead:
+   * it parses to pick up the schema's defaults, and keeps the model's own
+   * arguments when they do not validate. Tools declared with a `Schema` — the
+   * shape MCP and OpenAPI toolsets produce — received no validation at all
+   * before, so rejecting those calls would break working tools. This is the
+   * same leniency as adk-python's `_preprocess_args`.
+   */
   private validateArgs(
     args: Record<string, unknown>,
   ): ToolExecuteArgument<TParameters> {
     if (isZodObject(this.parameters)) {
       return this.parameters.parse(args) as ToolExecuteArgument<TParameters>;
     }
-    return args as ToolExecuteArgument<TParameters>;
+    return tryParseWithSchema(
+      this.parameters,
+      args,
+    ) as ToolExecuteArgument<TParameters>;
   }
 
   /** Resolves `requireConfirmation`, which may be a flag or a predicate. */
@@ -261,27 +515,6 @@ export class FunctionTool<
     if (!requireConfirmation) {
       return undefined;
     }
-    if (!toolContext) {
-      throw new Error(
-        `Tool '${this.name}' requires confirmation but no tool context was provided.`,
-      );
-    }
-    if (!toolContext.toolConfirmation) {
-      toolContext.requestConfirmation({
-        hint:
-          `Please approve or reject the tool call ${this.name}() by ` +
-          'responding with a FunctionResponse with an expected ' +
-          'ToolConfirmation payload.',
-      });
-      toolContext.actions.skipSummarization = true;
-      return {
-        error:
-          'This tool call requires confirmation, please approve or reject.',
-      };
-    }
-    if (!toolContext.toolConfirmation.confirmed) {
-      return {error: 'This tool call is rejected.'};
-    }
-    return undefined;
+    return applyConfirmationGate(this.name, toolContext);
   }
 }

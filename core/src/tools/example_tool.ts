@@ -4,10 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseExampleProvider} from '../examples/base_example_provider.js';
+import {
+  ToolErrorType,
+  ToolExecutionError,
+} from '../errors/tool_execution_error.js';
+import {
+  BaseExampleProvider,
+  isBaseExampleProvider,
+} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
-import {buildExampleSi} from '../examples/example_util.js';
+import {buildExampleSi, validateExamples} from '../examples/example_util.js';
 import {appendInstructions} from '../models/llm_request.js';
+import {resolveFullyQualifiedName} from '../utils/module_utils.js';
 
 import {
   BaseTool,
@@ -16,20 +24,112 @@ import {
 } from './base_tool.js';
 
 /**
+ * The declarative configuration of an {@link ExampleTool}, as an agent config
+ * file supplies it.
+ *
+ * It differs from the constructor argument because a config file cannot hold a
+ * provider object. It names one instead.
+ */
+export interface ExampleToolConfig {
+  /**
+   * The few-shot examples themselves, or a fully-qualified name of the form
+   * `<module specifier>#<export>` that resolves to a
+   * {@link BaseExampleProvider} exported by user code.
+   */
+  examples: Example[] | string;
+}
+
+/** Returns true when the value has the shape of an {@link Example}. */
+function isExample(value: unknown): value is Example {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'input' in value &&
+    typeof value.input === 'object' &&
+    value.input !== null &&
+    'output' in value &&
+    Array.isArray(value.output)
+  );
+}
+
+/** Returns true when the value is a list of {@link Example}s. */
+function isExampleArray(value: unknown): value is Example[] {
+  return Array.isArray(value) && value.every(isExample);
+}
+
+/**
  * A tool that adds (few-shot) examples to the LLM request.
  *
  * This tool is executed for each LLM request and is never called by the model;
  * it only mutates the outgoing request by appending few-shot instructions built
  * from the latest user query.
+ *
+ * The constructor checks `examples` at runtime, so a malformed value fails
+ * where it is supplied rather than on every later LLM request.
  */
 export class ExampleTool extends BaseTool {
-  constructor(readonly examples: Example[] | BaseExampleProvider) {
+  /** The examples to add to the LLM request. */
+  readonly examples: Example[] | BaseExampleProvider;
+
+  /**
+   * @param examples - A list of {@link Example}s, or a
+   *   {@link BaseExampleProvider} that returns them for a query.
+   * @throws {InputValidationError} When `examples` is neither a
+   *   {@link BaseExampleProvider} nor a list of well-formed examples.
+   */
+  constructor(examples: Example[] | BaseExampleProvider) {
     super({
       // Name and description are not used because this tool only changes
       // llmRequest.
       name: 'example_tool',
       description: 'example tool',
     });
+    if (!isBaseExampleProvider(examples)) {
+      validateExamples(examples);
+    }
+    this.examples = examples;
+  }
+
+  /**
+   * Builds a tool from its declarative configuration.
+   *
+   * The method is asynchronous because JavaScript loads a module
+   * asynchronously. The adk-python counterpart is synchronous only because
+   * `importlib` is.
+   *
+   * @param config The tool configuration read from an agent config file.
+   * @param configAbsPath Absolute path of that config file. A relative module
+   *   specifier in `config.examples` resolves against its directory.
+   * @return The configured tool.
+   * @throws {ToolExecutionError} When `examples` names a value that is not a
+   *   {@link BaseExampleProvider}, or is neither a name nor a list of
+   *   examples.
+   * @throws {InputValidationError} When `examples` is a name that does not
+   *   resolve.
+   */
+  static async fromConfig(
+    config: ExampleToolConfig,
+    configAbsPath: string,
+  ): Promise<ExampleTool> {
+    const {examples} = config;
+    if (typeof examples === 'string') {
+      const provider = await resolveFullyQualifiedName(examples, configAbsPath);
+      if (!isBaseExampleProvider(provider)) {
+        throw new ToolExecutionError(
+          'Example provider must be an instance of BaseExampleProvider.',
+          ToolErrorType.BAD_REQUEST,
+        );
+      }
+      return new ExampleTool(provider);
+    }
+    if (isExampleArray(examples)) {
+      return new ExampleTool(examples);
+    }
+    throw new ToolExecutionError(
+      'Example tool config must be a list of examples or a fully-qualified ' +
+        'name to a BaseExampleProvider object in code.',
+      ToolErrorType.BAD_REQUEST,
+    );
   }
 
   override async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
@@ -46,7 +146,7 @@ export class ExampleTool extends BaseTool {
       return;
     }
     appendInstructions(llmRequest, [
-      buildExampleSi(this.examples, parts[0].text, llmRequest.model),
+      await buildExampleSi(this.examples, parts[0].text, llmRequest.model),
     ]);
   }
 }

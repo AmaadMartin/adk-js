@@ -5,20 +5,25 @@
  */
 
 /**
- * Helpers for turning arbitrary thrown values into readable, root-cause
- * messages, so that wrapped, aggregated or HTTP-flavoured failures are not
- * reduced to an empty or generic string when they are reported.
+ * Helpers for inspecting arbitrary thrown values: turning them into readable,
+ * root-cause messages, so that wrapped, aggregated or HTTP-flavoured failures
+ * are not reduced to an empty or generic string when they are reported, and
+ * telling a cancellation apart from a real failure.
  */
+
+import {isRecord} from './type_utils.js';
 
 /**
- * Maximum number of characters of an HTTP response body surfaced by
- * {@link formatError} before it is truncated. Bounds both log volume and the
- * exposure of potentially sensitive response payloads.
+ * Maximum number of characters of a request or response body kept in a log or
+ * an error message before it is truncated. Bounds both log volume and the
+ * exposure of potentially sensitive payloads. Shared through
+ * {@link truncateBody}, so that a body reported through an error and the same
+ * body captured for debugging are cut at the same point.
  */
-const MAX_RESPONSE_BODY_LENGTH = 1000;
+export const MAX_LOG_BODY_LENGTH = 1000;
 
-/** Marker appended to a response body that exceeds {@link MAX_RESPONSE_BODY_LENGTH}. */
-const TRUNCATION_MARKER = '... [truncated]';
+/** Marker appended to a body that exceeds {@link MAX_LOG_BODY_LENGTH}. */
+export const TRUNCATION_MARKER = '... [truncated]';
 
 /** Returned by {@link formatError} when the input carries no usable message. */
 const UNKNOWN_ERROR = 'Unknown error';
@@ -28,11 +33,19 @@ const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
 
 /**
- * Narrows an arbitrary value to an indexable record, or `undefined` when it is
- * not a non-null object. Used to safely inspect duck-typed error shapes without
+ * Error `name` values that mean the caller cancelled the operation rather than
+ * the operation failing. An aborted `AbortSignal` produces `AbortError`, and
+ * `AbortSignal.timeout` produces `TimeoutError`.
+ */
+const CANCELLATION_ERROR_NAMES = new Set(['AbortError', 'TimeoutError']);
+
+/**
+ * Narrows `value` to an indexable record, or returns `undefined` when `value`
+ * is null or not a non-null object. Used to safely inspect duck-typed error
+ * shapes without
  * resorting to `any`.
  */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : undefined;
@@ -48,10 +61,17 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
-/** Truncates a response body to {@link MAX_RESPONSE_BODY_LENGTH} characters. */
-function truncateBody(body: string): string {
-  return body.length > MAX_RESPONSE_BODY_LENGTH
-    ? body.slice(0, MAX_RESPONSE_BODY_LENGTH) + TRUNCATION_MARKER
+/**
+ * Truncates a body to {@link MAX_LOG_BODY_LENGTH} characters, appending a
+ * marker when it did.
+ *
+ * @param body The request or response body to bound.
+ * @return The body, at most {@link MAX_LOG_BODY_LENGTH} characters plus the
+ *   marker.
+ */
+export function truncateBody(body: string): string {
+  return body.length > MAX_LOG_BODY_LENGTH
+    ? body.slice(0, MAX_LOG_BODY_LENGTH) + TRUNCATION_MARKER
     : body;
 }
 
@@ -76,11 +96,12 @@ function baseMessage(err: unknown): string {
  * string, so no async `Response.text()` is ever invoked.
  */
 function extractHttpDetails(err: unknown): string | undefined {
-  const record = asRecord(err);
-  if (record === undefined) {
+  if (!isRecord(err)) {
     return undefined;
   }
-  const response = asRecord(record['response']);
+  const record = err;
+  const responseValue = record['response'];
+  const response = isRecord(responseValue) ? responseValue : undefined;
   const rawStatus = record['status'] ?? record['code'] ?? response?.['status'];
   const status =
     typeof rawStatus === 'number' &&
@@ -127,7 +148,7 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
   const http = extractHttpDetails(err);
   const base = baseMessage(err);
   // Cycles (including a direct `err.cause === err`) are handled by `seen`.
-  const cause = asRecord(err)?.['cause'];
+  const cause = isRecord(err) ? err['cause'] : undefined;
   const causeMessage =
     cause !== undefined ? formatErrorRecursive(cause, seen) : undefined;
   let message = base.length > 0 ? base : UNKNOWN_ERROR;
@@ -158,4 +179,47 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
  */
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
+}
+
+/**
+ * Recursively searches an error graph for a cancellation. `seen` guards
+ * against cyclic `cause`/`errors` graphs.
+ */
+function hasCancellationName(err: unknown, seen: Set<unknown>): boolean {
+  if (!isRecord(err) || seen.has(err)) {
+    return false;
+  }
+  const record = err;
+  seen.add(record);
+  const name = record['name'];
+  if (typeof name === 'string' && CANCELLATION_ERROR_NAMES.has(name)) {
+    return true;
+  }
+  const errors = record['errors'];
+  if (
+    Array.isArray(errors) &&
+    errors.some((sub) => hasCancellationName(sub, seen))
+  ) {
+    return true;
+  }
+  return hasCancellationName(record['cause'], seen);
+}
+
+/**
+ * Reports whether `err`, or anything reachable through its `cause` chain or
+ * its `AggregateError.errors`, is a cancellation.
+ *
+ * The whole graph is searched because a transport often translates a
+ * cancellation into another error while it tears the connection down. The
+ * match is on the error `name` rather than on the class, so an error built by
+ * a second copy of a package still matches.
+ *
+ * Never throws, and is safe on `null`, `undefined`, primitives and cyclic
+ * error graphs.
+ *
+ * @param err The thrown or rejected value to classify.
+ * @return `true` when the value carries a cancellation.
+ */
+export function isAbortError(err: unknown): boolean {
+  return hasCancellationName(err, new Set<unknown>());
 }

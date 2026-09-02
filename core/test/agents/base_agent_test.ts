@@ -8,15 +8,23 @@ import {
   AgentTransferLlmRequestProcessor,
   BaseAgent,
   BaseAgentConfig,
+  BaseAgentState,
+  BasePlugin,
+  ContextCompactorRequestProcessor,
   Event,
   FunctionTool,
   InvocationContext,
   LlmAgent,
+  LlmAgentConfig,
   PluginManager,
   Session,
+  TruncatingContextCompactor,
   createEvent,
+  createSession,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {Content} from '@google/genai';
+import {describe, expect, it, vi} from 'vitest';
+import {logger} from '../../src/utils/logger.js';
 
 class MockAgent extends BaseAgent {
   constructor(config: BaseAgentConfig) {
@@ -297,5 +305,444 @@ describe('BaseAgent', () => {
       expect(clone.name).toBe('mock');
       expect(clone.description).toBe('a mock');
     });
+  });
+
+  describe('plugin agent callbacks', () => {
+    class AgentHookPlugin extends BasePlugin {
+      beforeCalls = 0;
+      afterCalls = 0;
+
+      constructor(
+        name: string,
+        private readonly beforeContent?: Content,
+        private readonly afterContent?: Content,
+      ) {
+        super(name);
+      }
+
+      override async beforeAgentCallback(): Promise<Content | undefined> {
+        this.beforeCalls++;
+        return this.beforeContent;
+      }
+
+      override async afterAgentCallback(): Promise<Content | undefined> {
+        this.afterCalls++;
+        return this.afterContent;
+      }
+    }
+
+    const text = (value: string): Content => ({
+      role: 'model',
+      parts: [{text: value}],
+    });
+
+    const contextFor = (agent: BaseAgent, plugin: BasePlugin) =>
+      new InvocationContext({
+        invocationId: 'test',
+        agent,
+        session: createSession({id: 'test-session', appName: 'test-app'}),
+        pluginManager: new PluginManager([plugin]),
+      });
+
+    const drain = async (events: AsyncGenerator<Event, void, void>) => {
+      const collected: Event[] = [];
+      for await (const event of events) {
+        collected.push(event);
+      }
+      return collected;
+    };
+
+    it('runs the plugin hooks on an agent that declares none of its own', async () => {
+      const plugin = new AgentHookPlugin('hooks');
+      const agent = new MockAgent({name: 'test_agent'});
+
+      const events = await drain(agent.runAsync(contextFor(agent, plugin)));
+
+      expect(plugin.beforeCalls).toBe(1);
+      expect(plugin.afterCalls).toBe(1);
+      expect(events).toHaveLength(1);
+    });
+
+    it('lets plugin before-content short-circuit the whole run', async () => {
+      const plugin = new AgentHookPlugin('hooks', text('from plugin'));
+      let ownCallbackCalled = false;
+      const agent = new MockAgent({
+        name: 'test_agent',
+        beforeAgentCallback: () => {
+          ownCallbackCalled = true;
+          return undefined;
+        },
+      });
+
+      const events = await drain(agent.runAsync(contextFor(agent, plugin)));
+
+      // MockAgent's body yields one event of its own; only the plugin's
+      // content came back, so the body never ran.
+      expect(events).toHaveLength(1);
+      expect(events[0].content).toEqual(text('from plugin'));
+      expect(events[0].author).toBe('test_agent');
+      expect(ownCallbackCalled).toBe(false);
+    });
+
+    it('appends plugin after-content and skips the agent\u2019s own hook', async () => {
+      const plugin = new AgentHookPlugin(
+        'hooks',
+        undefined,
+        text('after plugin'),
+      );
+      let ownCallbackCalled = false;
+      const agent = new MockAgent({
+        name: 'test_agent',
+        afterAgentCallback: () => {
+          ownCallbackCalled = true;
+          return undefined;
+        },
+      });
+
+      const events = await drain(agent.runAsync(contextFor(agent, plugin)));
+
+      expect(events).toHaveLength(2);
+      expect(events[1].content).toEqual(text('after plugin'));
+      expect(ownCallbackCalled).toBe(false);
+    });
+
+    it("falls through to the agent's own callbacks when the plugin returns nothing", async () => {
+      const plugin = new AgentHookPlugin('hooks');
+      const agent = new MockAgent({
+        name: 'test_agent',
+        beforeAgentCallback: () => text('from agent'),
+      });
+
+      const events = await drain(agent.runAsync(contextFor(agent, plugin)));
+
+      expect(plugin.beforeCalls).toBe(1);
+      expect(events).toHaveLength(1);
+      expect(events[0].content).toEqual(text('from agent'));
+    });
+
+    it('runs the plugin hooks on runLive too', async () => {
+      const plugin = new AgentHookPlugin('hooks', text('from plugin'));
+      const agent = new MockAgent({name: 'test_agent'});
+
+      const events = await drain(agent.runLive(contextFor(agent, plugin)));
+
+      expect(plugin.beforeCalls).toBe(1);
+      expect(events).toHaveLength(1);
+      expect(events[0].content).toEqual(text('from plugin'));
+    });
+
+    it('yields plugin after-content from runLive', async () => {
+      const plugin = new AgentHookPlugin(
+        'hooks',
+        undefined,
+        text('after live'),
+      );
+      const agent = new MockAgent({name: 'test_agent'});
+
+      const events = await drain(agent.runLive(contextFor(agent, plugin)));
+
+      expect(events).toHaveLength(1);
+      expect(events[0].content).toEqual(text('after live'));
+    });
+  });
+
+  describe('clone validation', () => {
+    it('throws on an override key the agent does not have', () => {
+      const agent = new LlmAgent({name: 'original'});
+
+      expect(() =>
+        agent.clone({instrction: 'be brief'} as Partial<LlmAgentConfig>),
+      ).toThrow(/Cannot update nonexistent fields in LlmAgent: instrction/);
+    });
+
+    it('lists every rejected key, sorted', () => {
+      const agent = new LlmAgent({name: 'original'});
+
+      expect(() =>
+        agent.clone({zebra: 1, alpha: 2} as Partial<LlmAgentConfig>),
+      ).toThrow(/nonexistent fields in LlmAgent: alpha, zebra/);
+    });
+
+    it('accepts a config field the subclass folds away instead of storing', () => {
+      const agent = new LlmAgent({name: 'original'});
+      const countCompactors = (a: LlmAgent) =>
+        a.requestProcessors.filter(
+          (p) => p instanceof ContextCompactorRequestProcessor,
+        ).length;
+      expect(countCompactors(agent)).toBe(0);
+
+      const clone = agent.clone({
+        contextCompactors: [new TruncatingContextCompactor({threshold: 5})],
+      });
+
+      expect(countCompactors(clone)).toBe(1);
+    });
+
+    it('accepts a field the agent was constructed without', () => {
+      const agent = new LlmAgent({name: 'original'});
+
+      const clone = agent.clone({instruction: 'be brief'});
+
+      expect(clone.instruction).toBe('be brief');
+    });
+
+    it('accepts several valid keys at once', () => {
+      const agent = new LlmAgent({name: 'original'});
+      const replacement = new LlmAgent({name: 'replacement'});
+
+      const clone = agent.clone({
+        name: 'renamed',
+        subAgents: [replacement],
+        description: 'a renamed agent',
+      });
+
+      expect(clone.name).toBe('renamed');
+      expect(clone.subAgents).toEqual([replacement]);
+      expect(clone.description).toBe('a renamed agent');
+    });
+
+    it('reports the concrete subclass name', () => {
+      const agent = new MockAgent({name: 'mock'});
+
+      expect(() =>
+        agent.clone({nope: true} as Partial<BaseAgentConfig>),
+      ).toThrow(/nonexistent fields in MockAgent: nope/);
+    });
+  });
+
+  describe('duplicate sub-agent names', () => {
+    it('warns once for a duplicated name', () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      new LlmAgent({
+        name: 'root',
+        subAgents: [new LlmAgent({name: 'search'}), new LlmAgent({name: 'x'})],
+      });
+      expect(warn).not.toHaveBeenCalled();
+
+      new LlmAgent({
+        name: 'root2',
+        subAgents: [
+          new LlmAgent({name: 'search'}),
+          new LlmAgent({name: 'search'}),
+        ],
+      });
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toBe(
+        'Found duplicate sub-agent names: `search`. ' +
+          'All sub-agents must have unique names.',
+      );
+      warn.mockRestore();
+    });
+
+    it('lists two duplicated names, sorted, each once', () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      new LlmAgent({
+        name: 'root',
+        subAgents: [
+          new LlmAgent({name: 'zebra'}),
+          new LlmAgent({name: 'alpha'}),
+          new LlmAgent({name: 'zebra'}),
+          new LlmAgent({name: 'alpha'}),
+        ],
+      });
+
+      expect(warn.mock.calls[0][0]).toBe(
+        'Found duplicate sub-agent names: `alpha`, `zebra`. ' +
+          'All sub-agents must have unique names.',
+      );
+      warn.mockRestore();
+    });
+
+    it('names a triple duplicate exactly once', () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      new LlmAgent({
+        name: 'root',
+        subAgents: [
+          new LlmAgent({name: 'search'}),
+          new LlmAgent({name: 'search'}),
+          new LlmAgent({name: 'search'}),
+        ],
+      });
+
+      const message = String(warn.mock.calls[0][0]);
+      expect(message.match(/`search`/g)).toHaveLength(1);
+      warn.mockRestore();
+    });
+
+    it('logs nothing for unique names or an empty list', () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      const root = new LlmAgent({
+        name: 'root',
+        subAgents: [new LlmAgent({name: 'a'}), new LlmAgent({name: 'b'})],
+      });
+      new LlmAgent({name: 'leaf'});
+
+      expect(warn).not.toHaveBeenCalled();
+      expect(root.subAgents).toHaveLength(2);
+      warn.mockRestore();
+    });
+
+    it('still builds the tree, and findSubAgent returns the first match', () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const first = new LlmAgent({name: 'search'});
+
+      const root = new LlmAgent({
+        name: 'root',
+        subAgents: [first, new LlmAgent({name: 'search'})],
+      });
+
+      expect(root.findSubAgent('search')).toBe(first);
+      warn.mockRestore();
+    });
+  });
+});
+
+/**
+ * The parsed shape {@link AgentStateProbe} reads its checkpoint into.
+ */
+type ProbeState = {step: number};
+
+/**
+ * Exercises the protected agent-state helpers through the public `runAsync`,
+ * so the test never widens their visibility. Each run yields the checkpoint
+ * event, then an event whose text reports what `loadAgentState` returned.
+ *
+ * `parse` is injectable so that a test can make it throw.
+ */
+class AgentStateProbe extends BaseAgent {
+  constructor(
+    config: BaseAgentConfig,
+    private readonly parse: (raw: BaseAgentState) => ProbeState = (raw) => ({
+      step: Number(raw['step']),
+    }),
+  ) {
+    super(config);
+  }
+
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const loaded = this.loadAgentState(context, this.parse);
+    yield this.createAgentStateEvent(context);
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {
+        role: 'model',
+        parts: [{text: describeProbeState(loaded)}],
+      },
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
+}
+
+function describeProbeState(state: ProbeState | undefined): string {
+  return state === undefined ? 'undefined' : `step=${state.step}`;
+}
+
+async function collectEvents(
+  agent: BaseAgent,
+  context: InvocationContext,
+): Promise<Event[]> {
+  const events: Event[] = [];
+  for await (const event of agent.runAsync(context)) {
+    events.push(event);
+  }
+  return events;
+}
+
+describe('BaseAgent agent state helpers', () => {
+  function makeProbeContext(agent: BaseAgent): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'inv-state',
+      branch: 'root.probe',
+      agent,
+      session: createSession({id: 's', appName: 'app', userId: 'u'}),
+      pluginManager: new PluginManager(),
+    });
+  }
+
+  it('loadAgentState returns undefined when this agent has no checkpoint', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[1].content?.parts?.[0].text).toBe('undefined');
+  });
+
+  it('loadAgentState parses the recorded checkpoint', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {agentState: {step: 3}});
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[1].content?.parts?.[0].text).toBe('step=3');
+  });
+
+  it('loadAgentState ignores another agent\u2019s checkpoint', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('other', {agentState: {step: 9}});
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[1].content?.parts?.[0].text).toBe('undefined');
+  });
+
+  it('loadAgentState propagates the error a parse throws', async () => {
+    const agent = new AgentStateProbe({name: 'probe'}, () => {
+      throw new Error('unreadable checkpoint');
+    });
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {agentState: {step: 'nonsense'}});
+
+    await expect(collectEvents(agent, context)).rejects.toThrowError(
+      /unreadable checkpoint/,
+    );
+  });
+
+  it('createAgentStateEvent carries the author, branch and invocation id', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {agentState: {step: 1}});
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[0].author).toBe('probe');
+    expect(events[0].branch).toBe('root.probe');
+    expect(events[0].invocationId).toBe('inv-state');
+    expect(events[0].actions.agentState).toEqual({step: 1});
+    expect(events[0].actions.endOfAgent).toBeUndefined();
+  });
+
+  it('createAgentStateEvent marks the end of the agent', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {endOfAgent: true});
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[0].actions.endOfAgent).toBe(true);
+    expect(events[0].actions.agentState).toBeUndefined();
+  });
+
+  it('createAgentStateEvent carries neither field when nothing is recorded', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[0].actions.agentState).toBeUndefined();
+    expect(events[0].actions.endOfAgent).toBeUndefined();
   });
 });

@@ -129,15 +129,11 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
       );
 
       // Inject gcp.mcp.server.destination.id telemetry key for tracing tools execution
-      const toolWithMetadata = mcpTool as unknown as {
-        customMetadata?: Record<string, string>;
-      };
       if (this.destinationResourceId) {
-        if (!toolWithMetadata.customMetadata) {
-          toolWithMetadata.customMetadata = {};
-        }
-        toolWithMetadata.customMetadata[GCP_MCP_SERVER_DESTINATION_ID] =
-          this.destinationResourceId;
+        mcpTool.customMetadata = {
+          ...mcpTool.customMetadata,
+          [GCP_MCP_SERVER_DESTINATION_ID]: this.destinationResourceId,
+        };
       }
       return mcpTool;
     });

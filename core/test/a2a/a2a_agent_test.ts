@@ -23,6 +23,7 @@ import {
   createEvent,
   createEventActions,
   InvocationContext,
+  PluginManager,
   RemoteA2AAgent,
   Runner,
   RunnerConfig,
@@ -740,6 +741,7 @@ describe('A2A Remote Agent', () => {
         ],
         state: {},
       } as unknown as Session,
+      pluginManager: new PluginManager(),
       ...overrides,
     } as unknown as InvocationContext;
   };

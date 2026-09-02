@@ -4,10 +4,101 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {snakeToLowerCamel} from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys} from '../../src/utils/case_utils.js';
+import {
+  camelCaseKeys,
+  camelCaseRecordKeys,
+  snakeCase,
+  toSnakeCaseIdentifier,
+  toSnakeCaseName,
+} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
+  describe('snakeCase', () => {
+    it.each([
+      ['camelCase', 'camel_case'],
+      ['UpperCamelCase', 'upper_camel_case'],
+      ['space separated', 'space_separated'],
+      ['REST API', 'rest_api'],
+      ['getHTTPResponse', 'get_http_response'],
+      ['already_snake', 'already_snake'],
+    ])('should convert %s to %s', (input, expected) => {
+      expect(snakeCase(input)).toBe(expected);
+    });
+
+    it.each([
+      ['/test_get', 'test_get'],
+      ['/users/{id}_get', 'users_id_get'],
+      ['/pets/{petId}_get', 'pets_pet_id_get'],
+      ['/Orders/{orderId}/lineItems_patch', 'orders_order_id_line_items_patch'],
+      ['/v1/REST API/items_post', 'v1_rest_api_items_post'],
+      ['/a--b/_delete', 'a_b_delete'],
+    ])('should name the operation %s the way adk-python does', (path, name) => {
+      expect(snakeCase(path)).toBe(name);
+    });
+
+    it('should return an empty string when nothing alphanumeric remains', () => {
+      expect(snakeCase('___')).toBe('');
+      expect(snakeCase('')).toBe('');
+    });
+  });
+
+  describe('toSnakeCaseName', () => {
+    it('should split lowerCamelCase', () => {
+      expect(toSnakeCaseName('camelCase')).toBe('camel_case');
+    });
+
+    it('should split UpperCamelCase', () => {
+      expect(toSnakeCaseName('UpperCamelCase')).toBe('upper_camel_case');
+    });
+
+    it('should replace a space', () => {
+      expect(toSnakeCaseName('space separated')).toBe('space_separated');
+    });
+
+    it('should keep an acronym whole', () => {
+      expect(toSnakeCaseName('REST API')).toBe('rest_api');
+    });
+
+    it('should replace the punctuation in a header name', () => {
+      expect(toSnakeCaseName('X-Trace-Id')).toBe('x_trace_id');
+    });
+
+    it('should split an acronym from the word after it', () => {
+      expect(toSnakeCaseName('HTTPResponse')).toBe('http_response');
+    });
+
+    it('should collapse repeated and trailing separators', () => {
+      expect(toSnakeCaseName('get__users__id_')).toBe('get_users_id');
+    });
+
+    it('should return an empty string for an empty name', () => {
+      expect(toSnakeCaseName('')).toBe('');
+    });
+
+    it('should return an empty string for punctuation alone', () => {
+      expect(toSnakeCaseName('---')).toBe('');
+    });
+  });
+
+  describe('toSnakeCaseIdentifier', () => {
+    it.each([
+      ['camelCase', 'camel_case'],
+      ['UpperCamelCase', 'upper_camel_case'],
+      ['space separated', 'space_separated'],
+      ['REST API', 'rest_api'],
+      ['HTTPResponse', 'http_response'],
+      ['user-id', 'user_id'],
+      ['a__b', 'a_b'],
+      ['__leading__', 'leading'],
+      ['', ''],
+      ['alreadysnake', 'alreadysnake'],
+    ])('should convert %s to %s', (input, expected) => {
+      expect(toSnakeCaseIdentifier(input)).toBe(expected);
+    });
+  });
+
   describe('camelCaseKeys', () => {
     it('should convert simple object keys', () => {
       const input = {
@@ -89,6 +180,87 @@ describe('case_utils', () => {
       expect(camelCaseKeys(123)).toBe(123);
       expect(camelCaseKeys('hello')).toBe('hello');
       expect(camelCaseKeys(true)).toBe(true);
+    });
+  });
+
+  describe('snakeCase', () => {
+    it('should split lowerCamelCase', () => {
+      expect(snakeCase('camelCase')).toBe('camel_case');
+    });
+
+    it('should split UpperCamelCase', () => {
+      expect(snakeCase('UpperCamelCase')).toBe('upper_camel_case');
+    });
+
+    it('should replace spaces', () => {
+      expect(snakeCase('space separated')).toBe('space_separated');
+    });
+
+    it('should split an acronym from the word that follows it', () => {
+      expect(snakeCase('REST API')).toBe('rest_api');
+      expect(snakeCase('RESTApi')).toBe('rest_api');
+    });
+
+    it('should convert the spec titles the toolset derives its name from', () => {
+      expect(snakeCase('Mock API')).toBe('mock_api');
+      expect(snakeCase('Empty Description API')).toBe('empty_description_api');
+    });
+
+    it('should collapse and trim runs of separators', () => {
+      expect(snakeCase('!!weird--input!!')).toBe('weird_input');
+    });
+
+    it('should return an empty string for an empty input', () => {
+      expect(snakeCase('')).toBe('');
+    });
+  });
+
+  describe('camelCaseRecordKeys', () => {
+    it('converts keys recursively and returns a record', () => {
+      const result = camelCaseRecordKeys({
+        'foo_bar': 'value',
+        'nested_one': {'deep_key': [{'array_key': 1}]},
+      });
+
+      expect(result).toEqual({
+        fooBar: 'value',
+        nestedOne: {deepKey: [{arrayKey: 1}]},
+      });
+      expect(Object.keys(result)).toEqual(['fooBar', 'nestedOne']);
+    });
+
+    it('returns an empty record for an empty record', () => {
+      expect(camelCaseRecordKeys({})).toEqual({});
+    });
+  });
+
+  describe('snakeToLowerCamel', () => {
+    it('should return a single word unchanged', () => {
+      expect(snakeToLowerCamel('single')).toBe('single');
+    });
+
+    it('should join two words', () => {
+      expect(snakeToLowerCamel('two_words')).toBe('twoWords');
+    });
+
+    it('should join three words', () => {
+      expect(snakeToLowerCamel('three_word_example')).toBe('threeWordExample');
+    });
+
+    it('should return an empty string unchanged', () => {
+      expect(snakeToLowerCamel('')).toBe('');
+    });
+
+    it('should return an already camelCase name unchanged', () => {
+      expect(snakeToLowerCamel('alreadyCamelCase')).toBe('alreadyCamelCase');
+    });
+
+    it('should lowercase every segment before joining', () => {
+      expect(snakeToLowerCamel('TWO_WORDS')).toBe('twoWords');
+    });
+
+    it('should tolerate a trailing underscore', () => {
+      expect(snakeToLowerCamel('trailing_')).toBe('trailing');
     });
   });
 });

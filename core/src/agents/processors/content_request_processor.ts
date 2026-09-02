@@ -6,13 +6,16 @@
 
 import {getActiveEvents} from '../../context/compaction_utils.js';
 import {Event} from '../../events/event.js';
+import {isGemini} from '../../models/google_llm.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 import {
   getContents,
+  GetContentsOptions,
   getCurrentTurnContents,
+  insertModelInputContext,
 } from './content_processor_utils.js';
 
 /**
@@ -43,24 +46,60 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
     }
 
     const events = getActiveEvents(invocationContext.session.events);
+    const model = agent.canonicalModel;
+    const options: GetContentsOptions = {
+      preserveFunctionCallIds: isGemini(model) && model.useInteractionsApi,
+      isSingleTurn: agent.mode === 'single_turn',
+      userContent: invocationContext.userContent,
+    };
 
-    if (agent.includeContents === 'default') {
+    // The instructions processor is the only producer of contents this early,
+    // and only for a static instruction, whose content must stay a stable
+    // request prefix. The reassignment below would otherwise discard it.
+    const instructionContents = llmRequest.contents;
+
+    if (
+      agent.includeContents === 'default' &&
+      !llmRequest.previousInteractionId
+    ) {
       // Include full conversation history
       llmRequest.contents = getContents(
         events,
         agent.name,
         invocationContext.branch,
         invocationContext.isolationScope,
+        {
+          ...options,
+          includeThoughtsFromOtherAgents:
+            invocationContext.runConfig?.includeThoughtsFromOtherAgents ??
+            false,
+        },
       );
     } else {
-      // Include current turn context only (no conversation history).
+      // Include current turn context only (no conversation history). Another
+      // agent's thoughts are history, so they stay out of a current-turn build.
+      // A request that carries a previous interaction id is a chained
+      // Interactions request, and the service already retains the earlier
+      // turns.
       llmRequest.contents = getCurrentTurnContents(
         events,
         agent.name,
         invocationContext.branch,
         invocationContext.isolationScope,
+        {...options, includeThoughtsFromOtherAgents: false},
       );
     }
+
+    const modelInputContext = invocationContext.runConfig?.modelInputContext;
+    if (modelInputContext) {
+      insertModelInputContext(
+        llmRequest.contents,
+        modelInputContext,
+        invocationContext.userContent,
+      );
+    }
+
+    llmRequest.contents.unshift(...instructionContents);
 
     return;
   }

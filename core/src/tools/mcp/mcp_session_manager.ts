@@ -7,10 +7,27 @@
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
 import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {FetchLike} from '@modelcontextprotocol/sdk/shared/transport.js';
+import type {
+  ClientCapabilities,
+  CreateMessageRequest,
+  CreateMessageResult,
+  ElicitRequest,
+  ElicitResult,
+} from '@modelcontextprotocol/sdk/types.js';
+import type {Stream, Writable} from 'node:stream';
 
 import {formatError} from '../../utils/error_utils.js';
+import {
+  describeHttpExchange,
+  instrumentFetch,
+  isCapturingHttpDebug,
+  recordHttpExchange,
+} from '../../utils/http_debug_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
+
+import {createRecordingFetch, getHttpDebugSink} from './http_debug_recorder.js';
 
 /**
  * The optional peer backing every MCP connection.
@@ -24,9 +41,188 @@ const MCP_SDK: OptionalPeer = {
   feature: 'MCPSessionManager (and the MCP tools built on it)',
 };
 
-/** Surfaces a background transport error that would otherwise be dropped. */
-function logTransportError(err: unknown): void {
-  logger.error('MCP transport error: ' + formatError(err));
+/** The `name` carried by every {@link McpConnectionError}. */
+export const MCP_CONNECTION_ERROR_NAME = 'McpConnectionError';
+
+/**
+ * Raised when an MCP operation fails, naming the operation that failed.
+ *
+ * The original failure is kept as `cause`, so a caller can still inspect the
+ * transport error underneath the contextual message.
+ */
+export class McpConnectionError extends Error {
+  constructor(message: string, options?: {cause?: unknown}) {
+    super(message, options);
+    this.name = MCP_CONNECTION_ERROR_NAME;
+  }
+}
+
+/**
+ * Handles a `sampling/createMessage` request from the MCP server: the server
+ * asks this client to run an inference on its behalf.
+ */
+export type McpSamplingCallback = (
+  request: CreateMessageRequest['params'],
+) => CreateMessageResult | Promise<CreateMessageResult>;
+
+/**
+ * Handles an `elicitation/create` request from the MCP server: the server asks
+ * this client for a value from the user mid-call.
+ */
+export type McpElicitationCallback = (
+  request: ElicitRequest['params'],
+) => ElicitResult | Promise<ElicitResult>;
+
+/** Optional configuration for an {@link MCPSessionManager}. */
+export interface MCPSessionManagerOptions {
+  /**
+   * Stream that receives the MCP server's stderr and the transport errors of
+   * every session this manager opens, including the ones an {@link MCPTool}
+   * opens to run a tool. When omitted, transport errors go to `logger.error`
+   * and a stdio server's stderr is inherited by the parent process.
+   */
+  errlog?: Writable;
+  /**
+   * The server-to-client callbacks to register on every session this manager
+   * creates.
+   *
+   * A capability is declared to the server only when its callback is supplied,
+   * so a server never asks for something this client cannot answer.
+   */
+  samplingCallback?: McpSamplingCallback;
+  /** Extra detail for the declared `sampling` capability. */
+  samplingCapabilities?: ClientCapabilities['sampling'];
+  elicitationCallback?: McpElicitationCallback;
+}
+
+/**
+ * Surfaces a background transport error that would otherwise be dropped.
+ * Writes to `errlog` when the caller supplied one, and to the ADK logger
+ * otherwise.
+ */
+function logTransportError(err: unknown, errlog?: Writable): void {
+  const message = 'MCP transport error: ' + formatError(err);
+  if (errlog) {
+    errlog.write(message + '\n');
+    return;
+  }
+  logger.error(message);
+}
+
+/**
+ * Forwards a stdio server's stderr into `errlog`, and returns the teardown
+ * that stops forwarding. A long-lived manager opens one session per call, so
+ * the listener has to come off again when the session closes.
+ *
+ * Returns `undefined` when the transport exposes no stderr, which is what a
+ * transport does unless `StdioServerParameters.stderr` asked for a pipe.
+ */
+function pipeStderr(
+  stderr: Stream | null,
+  errlog: Writable,
+): (() => void) | undefined {
+  if (!stderr) {
+    return undefined;
+  }
+  const forward = (chunk: string | Uint8Array) => {
+    errlog.write(chunk);
+  };
+  stderr.on('data', forward);
+  return () => {
+    stderr.off('data', forward);
+  };
+}
+
+/** The header shapes `fetch` accepts, as the MCP transport declares them. */
+type TransportHeaders = NonNullable<
+  NonNullable<StreamableHTTPClientTransportOptions['requestInit']>['headers']
+>;
+
+/**
+ * Merges per-session headers on top of the configured ones.
+ *
+ * `Headers` normalizes the three accepted shapes (record, entry list, and
+ * `Headers`) into one, so the result is a plain record with lower-case names.
+ *
+ * @param configured The transport's own headers, if it has any.
+ * @param extra The headers to apply on top.
+ * @return The merged headers.
+ */
+function mergeHeaders(
+  configured: TransportHeaders | undefined,
+  extra: Record<string, string>,
+): Record<string, string> {
+  const headers = new Headers(configured);
+  for (const [name, value] of Object.entries(extra)) {
+    headers.set(name, value);
+  }
+  const merged: Record<string, string> = {};
+  headers.forEach((value, name) => {
+    merged[name] = value;
+  });
+  return merged;
+}
+
+/**
+ * Returns `options` with a recording `fetch` installed, but only while a debug
+ * sink is active. With no sink the caller's options are handed back untouched,
+ * so an ordinary run sends exactly the bytes it sends today.
+ */
+function withHttpDebugRecording(
+  options: StreamableHTTPClientTransportOptions,
+): StreamableHTTPClientTransportOptions {
+  const sink = getHttpDebugSink();
+  if (!sink) {
+    return options;
+  }
+  return {...options, fetch: createRecordingFetch(sink, options.fetch)};
+}
+
+/**
+ * Returns `options` with an instrumented `fetch` installed. This is the second
+ * of the three debug recorders. Unlike the other two it is always installed,
+ * because its capture can start after the session is open; it records only
+ * while a capture is active, and delegates untouched otherwise.
+ */
+function withInstrumentedFetch(
+  options: StreamableHTTPClientTransportOptions,
+): StreamableHTTPClientTransportOptions {
+  return {...options, fetch: instrumentFetch(options.fetch)};
+}
+
+/**
+ * Wraps `baseFetch` so that each exchange it performs is described and
+ * recorded as an `HttpExchange`. A caller-supplied `fetch` is called, never
+ * replaced.
+ */
+function recordingFetch(baseFetch?: FetchLike): FetchLike {
+  const doFetch: FetchLike = baseFetch ?? ((url, init) => fetch(url, init));
+  return async (url, init) => {
+    const response = await doFetch(url, init);
+    const request = {
+      url: String(url),
+      method: init?.method ?? 'GET',
+      headers: new Headers(init?.headers),
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    };
+    recordHttpExchange(await describeHttpExchange(request, response));
+    return response;
+  };
+}
+
+/**
+ * Returns `options` with {@link recordingFetch} installed, but only while an
+ * exchange capture is open. This is the third debug recorder; it reads the
+ * response body eagerly, so it stays off unless a capture is already waiting
+ * for the exchanges.
+ */
+function withExchangeRecording(
+  options: StreamableHTTPClientTransportOptions,
+): StreamableHTTPClientTransportOptions {
+  if (!isCapturingHttpDebug()) {
+    return options;
+  }
+  return {...options, fetch: recordingFetch(options.fetch)};
 }
 
 /**
@@ -37,6 +233,10 @@ function logTransportError(err: unknown): void {
 export interface StdioConnectionParams {
   type: 'StdioConnectionParams';
   serverParams: StdioServerParameters;
+  /**
+   * How long one MCP call may take, in seconds — the unit adk-python uses.
+   * A call that outlives it rejects. Unset means no bound.
+   */
   timeout?: number;
 }
 
@@ -59,6 +259,10 @@ export interface StreamableHTTPConnectionParams {
    * This field will be ignored if transportOptions is provided even if no headers are specified in transportOptions.
    */
   header?: Record<string, unknown>;
+  /**
+   * How long one MCP call may take, in seconds — the unit adk-python uses.
+   * A call that outlives it rejects. Unset means no bound.
+   */
   timeout?: number;
   sseReadTimeout?: number;
   terminateOnClose?: boolean;
@@ -87,18 +291,45 @@ export type MCPConnectionParams =
  */
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
-  private readonly activeSessions = new Set<Client>();
+  private readonly options: MCPSessionManagerOptions;
+  /**
+   * Active sessions, each mapped to the teardown for the resources that
+   * outlive `client.close()` — currently the stderr pipe into `errlog`.
+   */
+  private readonly activeSessions = new Map<Client, (() => void) | undefined>();
 
-  constructor(connectionParams: MCPConnectionParams) {
+  constructor(
+    connectionParams: MCPConnectionParams,
+    options: MCPSessionManagerOptions = {},
+  ) {
     this.connectionParams = connectionParams;
+    this.options = options;
   }
 
-  async createSession(): Promise<Client> {
+  /**
+   * Opens a new MCP client session.
+   *
+   * @param options.headers Extra HTTP headers for this session, applied on top
+   *     of the configured transport headers. An empty set is the same as none.
+   *     Ignored by the stdio transport, which carries no headers. Header names
+   *     are compared case-insensitively, so a per-session header replaces a
+   *     configured one that differs only in case.
+   * @return The connected client.
+   */
+  async createSession(
+    options: {headers?: Record<string, string>} = {},
+  ): Promise<Client> {
+    const {errlog} = this.options;
     const {Client} = await loadOptionalPeer(
       MCP_SDK,
       () => import('@modelcontextprotocol/sdk/client/index.js'),
     );
-    const client = new Client({name: 'MCPClient', version: '1.0.0'});
+    const capabilities = this.clientCapabilities();
+    const client = capabilities
+      ? new Client({name: 'MCPClient', version: '1.0.0'}, {capabilities})
+      : new Client({name: 'MCPClient', version: '1.0.0'});
+    await this.registerServerCallbacks(client);
+    let detach: (() => void) | undefined;
 
     try {
       switch (this.connectionParams.type) {
@@ -108,21 +339,41 @@ export class MCPSessionManager {
             () => import('@modelcontextprotocol/sdk/client/stdio.js'),
           );
           const transport = new StdioClientTransport(
-            this.connectionParams.serverParams,
+            errlog
+              ? {...this.connectionParams.serverParams, stderr: 'pipe'}
+              : this.connectionParams.serverParams,
           );
-          transport.onerror = logTransportError;
+          transport.onerror = (err) => logTransportError(err, errlog);
           await client.connect(transport);
+          if (errlog) {
+            detach = pipeStderr(transport.stderr, errlog);
+          }
           break;
         }
         case 'StreamableHTTPConnectionParams': {
-          const options = this.connectionParams.transportOptions ?? {};
-
-          if (
-            !options.requestInit &&
-            this.connectionParams.header !== undefined
-          ) {
-            options.requestInit = {
-              headers: this.connectionParams.header as Record<string, string>,
+          const configured = this.connectionParams.transportOptions ?? {};
+          const requestInit =
+            configured.requestInit ??
+            (this.connectionParams.header !== undefined
+              ? {
+                  headers: this.connectionParams.header as Record<
+                    string,
+                    string
+                  >,
+                }
+              : undefined);
+          // Rebuilt rather than mutated: `configured` is the caller's object,
+          // reused by every session, so per-session headers must not stick to
+          // it.
+          const transportOptions: StreamableHTTPClientTransportOptions = {
+            ...configured,
+            ...(requestInit === undefined ? {} : {requestInit}),
+          };
+          const {headers} = options;
+          if (headers !== undefined && Object.keys(headers).length > 0) {
+            transportOptions.requestInit = {
+              ...requestInit,
+              headers: mergeHeaders(requestInit?.headers, headers),
             };
           }
 
@@ -130,11 +381,17 @@ export class MCPSessionManager {
             MCP_SDK,
             () => import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
           );
+          // Three recorders can sit in front of the transport's fetch, one
+          // per debug sink. Each installs itself only while its own sink is
+          // active, so an ordinary session sends exactly the bytes it sends
+          // today, and a session under several captures reports to each.
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
-            options,
+            withExchangeRecording(
+              withInstrumentedFetch(withHttpDebugRecording(transportOptions)),
+            ),
           );
-          transport.onerror = logTransportError;
+          transport.onerror = (err) => logTransportError(err, errlog);
           await client.connect(transport);
           break;
         }
@@ -150,18 +407,61 @@ export class MCPSessionManager {
       });
     }
 
-    this.activeSessions.add(client);
+    this.activeSessions.set(client, detach);
     return client;
+  }
+
+  /** The capabilities to declare, or `undefined` when there are none. */
+  private clientCapabilities(): ClientCapabilities | undefined {
+    const {samplingCallback, samplingCapabilities, elicitationCallback} =
+      this.options;
+    const capabilities: ClientCapabilities = {};
+    if (samplingCallback) {
+      capabilities.sampling = samplingCapabilities ?? {};
+    }
+    if (elicitationCallback) {
+      capabilities.elicitation = {};
+    }
+    return samplingCallback || elicitationCallback ? capabilities : undefined;
+  }
+
+  /** Wires the configured callbacks to the requests the server sends back. */
+  private async registerServerCallbacks(client: Client): Promise<void> {
+    const {samplingCallback, elicitationCallback} = this.options;
+    if (!samplingCallback && !elicitationCallback) {
+      return;
+    }
+
+    // The schemas are needed as values, not as types, so this import has to
+    // go through the optional peer loader like every other MCP SDK import.
+    const {CreateMessageRequestSchema, ElicitRequestSchema} =
+      await loadOptionalPeer(
+        MCP_SDK,
+        () => import('@modelcontextprotocol/sdk/types.js'),
+      );
+
+    if (samplingCallback) {
+      client.setRequestHandler(CreateMessageRequestSchema, (request) =>
+        samplingCallback(request.params),
+      );
+    }
+    if (elicitationCallback) {
+      client.setRequestHandler(ElicitRequestSchema, (request) =>
+        elicitationCallback(request.params),
+      );
+    }
   }
 
   async closeSession(client: Client): Promise<void> {
     if (this.activeSessions.has(client)) {
+      const detach = this.activeSessions.get(client);
       this.activeSessions.delete(client);
+      detach?.();
       await client.close();
     }
   }
 
   getActiveSessions(): Client[] {
-    return Array.from(this.activeSessions);
+    return Array.from(this.activeSessions.keys());
   }
 }

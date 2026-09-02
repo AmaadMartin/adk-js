@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, FunctionResponse} from '@google/genai';
-
-import {LlmResponse} from '../models/llm_response.js';
+import {
+  getFunctionCalls,
+  getFunctionResponses,
+  LlmResponse,
+} from '../models/llm_response.js';
 
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
@@ -169,13 +171,20 @@ export interface CreateEventParams extends Omit<Partial<Event>, 'actions'> {
  * @returns The event.
  */
 export function createEvent(params: CreateEventParams = {}): Event {
+  const actions = createEventActions(params.actions);
+  // `actions.route` is the copy that crosses the wire. Mirrors the `route`
+  // convenience kwarg in `google/adk-python` `event.py`.
+  if (params.route !== undefined) {
+    actions.route = params.route;
+  }
+
   return {
     ...params,
     [EVENT_SIGNATURE_SYMBOL]: true,
     id: params.id || createNewEventId(),
     invocationId: params.invocationId || '',
     author: params.author,
-    actions: createEventActions(params.actions),
+    actions,
     longRunningToolIds: params.longRunningToolIds || [],
     branch: params.branch,
     timestamp: params.timestamp || Date.now(),
@@ -203,22 +212,6 @@ export function isFinalResponse(event: Event) {
   );
 }
 
-/**
- * Returns the function calls in the event.
- */
-export function getFunctionCalls(event: Event): FunctionCall[] {
-  const funcCalls = [];
-  if (event.content && event.content.parts) {
-    for (const part of event.content.parts) {
-      if (part.functionCall) {
-        funcCalls.push(part.functionCall);
-      }
-    }
-  }
-
-  return funcCalls;
-}
-
 export const AF_FUNCTION_CALL_ID_PREFIX = 'adk-';
 
 export function generateClientFunctionCallId(): string {
@@ -237,22 +230,6 @@ export function populateClientFunctionCallId(modelResponseEvent: Event): void {
       functionCall.id = generateClientFunctionCallId();
     }
   }
-}
-
-/**
- * Returns the function responses in the event.
- */
-export function getFunctionResponses(event: Event): FunctionResponse[] {
-  const funcResponses = [];
-  if (event.content && event.content.parts) {
-    for (const part of event.content.parts) {
-      if (part.functionResponse) {
-        funcResponses.push(part.functionResponse);
-      }
-    }
-  }
-
-  return funcResponses;
 }
 
 /**
@@ -383,6 +360,12 @@ const PRESERVE_KEYS_CAMEL_CASE = [
   'output',
   'route',
   'actions.agentState',
+  // A UI widget's payload is provider-defined: it carries the raw MCP tool
+  // declaration and the call arguments, whose keys must reach the host exactly
+  // as the server and the model spelled them.
+  'actions.renderUiWidgets.payload',
+  // Arbitrary structured model output: its keys are the model's, not ours.
+  'actions.setModelResponse',
 ];
 
 /**
@@ -407,6 +390,9 @@ const PRESERVE_KEYS_SNAKE_CASE = [
   'output',
   'route',
   'actions.agent_state',
+  'actions.render_ui_widgets.payload',
+  // See the camelCase list above.
+  'actions.set_model_response',
 ];
 
 /**
@@ -418,7 +404,14 @@ const PRESERVE_KEYS_SNAKE_CASE = [
 export function transformToCamelCaseEvent(
   event: Record<string, unknown>,
 ): Event {
-  return toCamelCase(event, PRESERVE_KEYS_SNAKE_CASE) as Event;
+  const restored = toCamelCase(event, PRESERVE_KEYS_SNAKE_CASE) as Event;
+  // `google/adk-python` keeps the route on `actions.route`, the only copy that
+  // crosses the wire, while the workflow engine reads `event.route`. Promote it
+  // here so a session written by a Python runner routes the same way.
+  if (restored.route === undefined && restored.actions?.route !== undefined) {
+    restored.route = restored.actions.route;
+  }
+  return restored;
 }
 
 /**

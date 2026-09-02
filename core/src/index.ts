@@ -9,6 +9,15 @@
 export * from './a2a/index.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
+// Node-only: the checkpointer thread id is a `node:crypto` digest, and the web
+// bundle aliases `node:crypto` to a shim that provides only `randomUUID`. So
+// this barrel and not `common.ts`, which `index_web.ts` re-exports wholesale.
+export {LangGraphAgent, isLangGraphAgent} from './agents/langgraph_agent.js';
+export type {
+  CompiledLangGraph,
+  LangGraphAgentConfig,
+  LangGraphThreadConfig,
+} from './agents/langgraph_agent.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
 export {GcsArtifactService} from './artifacts/gcs_artifact_service.js';
 export {getArtifactServiceFromUri} from './artifacts/registry.js';
@@ -17,13 +26,41 @@ export {
   type AgentEngineSandboxCodeExecutorOptions,
 } from './code_executors/agent_engine_sandbox_code_executor.js';
 export {CodeExecutionLanguage} from './code_executors/code_execution_utils.js';
+export type {
+  CodeInterpreterExecuteParams,
+  CodeInterpreterExecuteResponse,
+  CodeInterpreterExtensionClient,
+  CodeInterpreterFile,
+} from './code_executors/code_interpreter_extension_client.js';
+export {
+  ContainerCodeExecutor,
+  type ContainerCodeExecutorOptions,
+} from './code_executors/container_code_executor.js';
 export {
   UnsafeLocalCodeExecutor,
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
+export {
+  VertexAiCodeExecutor,
+  type VertexAiCodeExecutorOptions,
+} from './code_executors/vertex_ai_code_executor.js';
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+// Node-only: the local managers read and write files, and the GCS managers
+// load the `@google-cloud/storage` client. So this barrel and not
+// `common.ts`, which `index_web.ts` re-exports wholesale.
+export {createGcsEvalManagersFromUri} from './evaluation/eval_managers.js';
+export type {EvalManagers} from './evaluation/eval_managers.js';
+export {GcsEvalSetResultsManager} from './evaluation/gcs_eval_set_results_manager.js';
+export {GcsEvalSetsManager} from './evaluation/gcs_eval_sets_manager.js';
+export {LocalEvalSetResultsManager} from './evaluation/local_eval_set_results_manager.js';
+export {
+  LocalEvalSetsManager,
+  loadEvalSetFromFile,
+} from './evaluation/local_eval_sets_manager.js';
+export {VertexAiExampleStore} from './examples/vertex_ai_example_store.js';
+export {getMemoryServiceFromUri} from './memory/registry.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
@@ -36,6 +73,53 @@ export {
   loadSkillFromDir,
   validateSkillDir,
 } from './skills/loader.js';
+// The API Hub tools use Node-only APIs (`google-auth-library`, `Buffer`,
+// `node:https`), so they are exported here and not from the browser barrel
+// `common.ts`.
+export {APIHubToolset} from './tools/apihub_tool/apihub_toolset.js';
+export type {APIHubToolsetOptions} from './tools/apihub_tool/apihub_toolset.js';
+export {APIHubClient} from './tools/apihub_tool/clients/apihub_client.js';
+export type {
+  APIHubClientOptions,
+  ApiHubApi,
+  ApiHubApiVersion,
+  BaseAPIHubClient,
+} from './tools/apihub_tool/clients/apihub_client.js';
+// The Application Integration clients reach 'google-auth-library' through
+// ApiTransport, which is Node only, so they are exported here and not from the
+// browser barrel 'common.ts'.
+export {ConnectionsClient} from './tools/application_integration_tool/clients/connections_client.js';
+export type {
+  ActionSchema,
+  ConnectionDetails,
+  ConnectionsClientOptions,
+  EntitySchemaAndOperations,
+} from './tools/application_integration_tool/clients/connections_client.js';
+export {
+  ENTITY_OPERATIONS,
+  actionRequest,
+  actionResponse,
+  convertJsonSchemaToOpenApiSchema,
+  executeCustomQueryRequest,
+  getActionOperation,
+  getConnectorBaseSpec,
+} from './tools/application_integration_tool/clients/connector_spec_builders.js';
+export type {
+  ConnectorOperationExtensions,
+  ConnectorPathItem,
+  ConnectorSpec,
+  EntityOperationBuilder,
+  EntityOperationContext,
+} from './tools/application_integration_tool/clients/connector_spec_builders.js';
+export {IntegrationClient} from './tools/application_integration_tool/clients/integration_client.js';
+export type {IntegrationClientOptions} from './tools/application_integration_tool/clients/integration_client.js';
+export {
+  GoogleApiToOpenApiConverter,
+  convertDiscoveryDocument,
+} from './tools/google_api_tool/googleapi_to_openapi_converter.js';
+export {loadTextChunks} from './tools/retrieval/document_loader.js';
+export {FilesRetrieval} from './tools/retrieval/files_retrieval.js';
+export type {FilesRetrievalOptions} from './tools/retrieval/files_retrieval.js';
 export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
@@ -43,6 +127,8 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
+export * from './integrations/langchain/langchain_tool.js';
+export * from './integrations/secret_manager/secret_client.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest

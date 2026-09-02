@@ -4,9 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Tool} from '@google/genai';
+import {FunctionDeclaration, FunctionResponseScheduling} from '@google/genai';
 
-import {LlmRequest} from '../models/llm_request.js';
+import {
+  ToolErrorType,
+  ToolExecutionError,
+} from '../errors/tool_execution_error.js';
+import {
+  findToolWithFunctionDeclarations,
+  LlmRequest,
+} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
@@ -34,7 +41,21 @@ export interface BaseToolParams {
   name: string;
   description: string;
   isLongRunning?: boolean;
+  /** Tool-specific metadata. The whole object must be JSON serializable. */
+  customMetadata?: Record<string, unknown>;
+  /** Tool-wide default for when the model reacts to this tool's response. */
+  responseScheduling?: FunctionResponseScheduling;
 }
+
+/**
+ * The declared args of one tool in a configuration file.
+ *
+ * Structural (`object`) rather than an index signature on purpose: a subclass
+ * that narrows {@link BaseTool.fromConfig} to its own config interface must
+ * stay assignable to this type, and a TypeScript interface is not assignable
+ * to an index-signature type.
+ */
+export type ToolArgsConfig = object;
 
 /**
  * A unique symbol to identify ADK agent classes.
@@ -87,6 +108,40 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
+   * Tool-specific metadata, such as a tool manifest or a deployment
+   * identifier. ADK stores it and never interprets it.
+   *
+   * The whole object must be JSON serializable. Assignable after construction,
+   * which is how a tool whose constructor does not forward it (`FunctionTool`,
+   * for one) gets one.
+   */
+  customMetadata?: Record<string, unknown>;
+
+  /**
+   * Controls when the model reacts to this tool's response (Live API only).
+   *
+   * The value is stamped onto the emitted `FunctionResponse`:
+   * `SILENT` feeds the response back without starting a model turn,
+   * `WHEN_IDLE` defers the reaction until the model is idle, and `INTERRUPT`
+   * reacts immediately. A model that does not support asynchronous function
+   * calling ignores it, and `undefined` keeps the default behaviour.
+   */
+  responseScheduling?: FunctionResponseScheduling;
+
+  /**
+   * Internal and unstable — framework code sets this, external code must not.
+   *
+   * When true, the framework skips the automatic `FunctionResponse` build for
+   * a call whose `runAsync` resolves to nothing, because another orchestrator
+   * emits the matching response later in the conversation. A `runAsync` that
+   * resolves to a value is handled normally.
+   *
+   * Unlike {@link isLongRunning}, which shares the skip-on-empty behaviour,
+   * this does not add the call id to `event.longRunningToolIds`.
+   */
+  defersResponse = false;
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
@@ -95,6 +150,49 @@ export abstract class BaseTool {
     this.name = params.name;
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
+    this.customMetadata = params.customMetadata;
+    this.responseScheduling = params.responseScheduling;
+  }
+
+  /**
+   * The `error.type` to record on this call's telemetry span, or `undefined`
+   * when the response is not a failure. Must not modify the response.
+   *
+   * Optional on purpose: a tool that does not implement it reports no error
+   * type at all, rather than inheriting a classification that does not fit it.
+   */
+  detectErrorInResponse?(response: unknown): string | undefined;
+
+  /**
+   * Builds a tool from its declared args in a configuration file.
+   *
+   * The returned tool is an instance of the class this was called on, so
+   * `MyTool.fromConfig(...)` resolves to a `MyTool`. The default
+   * implementation forwards every config entry to the constructor after
+   * checking the entries `BaseTool` itself reads. A subclass whose
+   * constructor needs more than a plain forward overrides this method.
+   *
+   * @param config The tool's declared args. A config file is a trust
+   *   boundary, so the declared shape is checked rather than assumed.
+   * @param _configAbsPath The absolute path of the config file the
+   *   declaration came from. Unused here — no entry `BaseTool` reads names a
+   *   file — and accepted so one loader can call every tool's `fromConfig`
+   *   the same way.
+   * @return The tool instance.
+   * @throws {ToolExecutionError} If the config does not declare a non-empty
+   *   `name` and a `description`.
+   */
+  static async fromConfig(
+    config: ToolArgsConfig,
+    _configAbsPath?: string,
+  ): Promise<BaseTool> {
+    // Constructing the receiving class from a config bag is unsound by
+    // nature, so the assertion cannot be typed away. Annotating `this`
+    // instead rejects any subclass whose constructor takes extra required
+    // params (TS2684), and returning a generic `T` breaks every subclass that
+    // narrows this signature (TS2417).
+    const ctor = this as unknown as new (params: BaseToolParams) => BaseTool;
+    return new ctor(toBaseToolParams(config));
   }
 
   /**
@@ -200,10 +298,39 @@ export abstract class BaseTool {
   }
 }
 
-function findToolWithFunctionDeclarations(
-  llmRequest: LlmRequest,
-): Tool | undefined {
-  return (llmRequest.config?.tools || []).find(
-    (tool) => 'functionDeclarations' in tool,
-  ) as Tool | undefined;
+/**
+ * The config is rejected without echoing it back: a tool's declared args can
+ * carry credentials.
+ */
+export function invalidToolConfig(requirement: string): ToolExecutionError {
+  return new ToolExecutionError(
+    `Invalid tool config: ${requirement}.`,
+    ToolErrorType.BAD_REQUEST,
+  );
+}
+
+/**
+ * Checks the config entries `BaseTool` reads and returns the constructor
+ * params. Unrecognized entries pass through untouched, so a subclass whose
+ * params object carries extra fields still receives them.
+ *
+ * The runtime checks are not redundant with the declared type: a loader
+ * parses a config file, so what arrives is whatever the file held.
+ */
+function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
+  if (typeof config !== 'object' || config === null) {
+    throw invalidToolConfig('the config must be a non-null object');
+  }
+  const entries: Record<string, unknown> = {...config};
+  const {name, description, isLongRunning} = entries;
+  if (typeof name !== 'string' || name === '') {
+    throw invalidToolConfig('`name` must be a non-empty string');
+  }
+  if (typeof description !== 'string') {
+    throw invalidToolConfig('`description` must be a string');
+  }
+  if (isLongRunning !== undefined && typeof isLongRunning !== 'boolean') {
+    throw invalidToolConfig('`isLongRunning` must be a boolean');
+  }
+  return {...entries, name, description, isLongRunning};
 }

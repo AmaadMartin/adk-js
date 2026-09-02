@@ -7,93 +7,113 @@
 import {FunctionDeclaration, Part, Type} from '@google/genai';
 
 import {Context} from '../agents/context.js';
-import {appendInstructions, LlmRequest} from '../models/llm_request.js';
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
+import {appendDynamicInstructions, LlmRequest} from '../models/llm_request.js';
+import {formatError} from '../utils/error_utils.js';
 import {getLogger} from '../utils/logger.js';
+import {asSafePartForLlm} from '../utils/part_utils.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
   ToolProcessLlmRequest,
 } from './base_tool.js';
 
+// The conversion lives in `utils/part_utils.js`, where the Gemini model also
+// calls it. It stays exported here because that is where callers import it
+// from.
+export {asSafePartForLlm};
+
 const logger = getLogger();
 
-const GEMINI_SUPPORTED_INLINE_MIME_PREFIXES = ['image/', 'audio/', 'video/'];
-const GEMINI_SUPPORTED_INLINE_MIME_TYPES = new Set(['application/pdf']);
-const TEXT_LIKE_MIME_TYPES = new Set([
-  'application/csv',
-  'application/json',
-  'application/xml',
-]);
-
-function normalizeMimeType(mimeType?: string): string | undefined {
-  if (!mimeType) {
+/**
+ * Narrows a model-supplied `artifact_names` value to a list of strings.
+ *
+ * Returns `undefined` when the value is anything other than an array of
+ * strings, so callers can reject it. An absent value is an empty list.
+ */
+function parseArtifactNames(value: unknown): string[] | undefined {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
     return undefined;
   }
-  return mimeType.split(';')[0].trim();
-}
-
-function isInlineMimeTypeSupported(mimeType?: string): boolean {
-  const normalized = normalizeMimeType(mimeType);
-  if (!normalized) {
-    return false;
-  }
-  return (
-    GEMINI_SUPPORTED_INLINE_MIME_PREFIXES.some((prefix) =>
-      normalized.startsWith(prefix),
-    ) || GEMINI_SUPPORTED_INLINE_MIME_TYPES.has(normalized)
+  const names = value.filter(
+    (name): name is string => typeof name === 'string',
   );
+  return names.length === value.length ? names : undefined;
 }
 
-function asSafePartForLlm(artifact: Part, artifactName: string): Part {
-  const inlineData = artifact.inlineData;
-  if (!inlineData) {
-    return artifact;
-  }
+/** Model-facing description of the tool's only parameter. */
+const ARTIFACT_NAMES_DESCRIPTION = 'The names of the artifacts to load.';
 
-  if (isInlineMimeTypeSupported(inlineData.mimeType)) {
-    return artifact;
-  }
+/**
+ * Customizes or filters an artifact before it is added to the LLM request.
+ *
+ * @param artifact The artifact as it was loaded, unconverted.
+ * @param artifactName The name the artifact was loaded under, without the
+ *     `user:` prefix even when the artifact was found under that prefix.
+ * @return The part to add, or `undefined` to leave the artifact out.
+ */
+export type ProcessArtifactCallback = (
+  artifact: Part,
+  artifactName: string,
+) => Part | undefined | Promise<Part | undefined>;
 
-  const mimeType =
-    normalizeMimeType(inlineData.mimeType) || 'application/octet-stream';
-  const data = inlineData.data;
-  if (!data) {
-    return {
-      text: `[Artifact: ${artifactName}, type: ${mimeType}. No inline data was provided.]`,
-    };
-  }
-
-  const isTextLike =
-    mimeType.startsWith('text/') || TEXT_LIKE_MIME_TYPES.has(mimeType);
-
-  const decodedBuffer = Buffer.from(data, 'base64');
-  if (isTextLike) {
-    try {
-      const decoded = decodedBuffer.toString('utf8');
-      return {text: decoded};
-    } catch {
-      // Fallback
-    }
-  }
-
-  const sizeKb = decodedBuffer.length / 1024;
-  return {
-    text: `[Binary artifact: ${artifactName}, type: ${mimeType}, size: ${sizeKb.toFixed(1)} KB. Content cannot be displayed inline.]`,
-  };
+/** Parameters for {@link LoadArtifactsTool}. */
+export interface LoadArtifactsToolParams {
+  /**
+   * Called for each artifact in place of the built-in safety conversion, so
+   * supplying it bypasses {@link asSafePartForLlm} entirely. Returning
+   * `undefined` leaves that artifact out of the request. If it throws, the
+   * tool logs the error and leaves the artifact out.
+   */
+  processArtifact?: ProcessArtifactCallback;
+  /**
+   * Renders an XLSX artifact as a markdown table instead of a placeholder.
+   * Defaults to `false`.
+   *
+   * Two limitations are worth knowing before you turn this on. The legacy
+   * binary `.xls` format is not a zip, so it reports an invalid format. Cells
+   * are rendered from their stored values, so a date held as a serial number
+   * renders as that number.
+   */
+  enableSpreadsheetParsing?: boolean;
 }
 
 /**
  * A tool that loads the artifacts and adds them to the session.
  */
 export class LoadArtifactsTool extends BaseTool {
-  constructor() {
+  private readonly processArtifact?: ProcessArtifactCallback;
+  private readonly enableSpreadsheetParsing: boolean;
+
+  constructor(params: LoadArtifactsToolParams = {}) {
     super({
       name: 'load_artifacts',
       description: `Loads artifacts into the session for this request.\n\nNOTE: Call when you need access to artifacts (for example, uploads saved by the web UI).`,
     });
+    this.processArtifact = params.processArtifact;
+    this.enableSpreadsheetParsing = params.enableSpreadsheetParsing ?? false;
   }
 
   override _getDeclaration(): FunctionDeclaration | undefined {
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.name,
+        description: this.description,
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            artifact_names: {
+              type: 'array',
+              items: {type: 'string'},
+              description: ARTIFACT_NAMES_DESCRIPTION,
+            },
+          },
+        },
+      };
+    }
     return {
       name: this.name,
       description: this.description,
@@ -105,7 +125,7 @@ export class LoadArtifactsTool extends BaseTool {
             items: {
               type: Type.STRING,
             },
-            description: 'The names of the artifacts to load.',
+            description: ARTIFACT_NAMES_DESCRIPTION,
           },
         },
       },
@@ -113,7 +133,13 @@ export class LoadArtifactsTool extends BaseTool {
   }
 
   override async runAsync({args}: RunAsyncToolRequest): Promise<unknown> {
-    const artifactNames = (args['artifact_names'] as string[]) || [];
+    const artifactNames = parseArtifactNames(args['artifact_names']);
+    if (!artifactNames) {
+      return {
+        error: "'artifact_names' must be a list of strings.",
+        error_code: 'INVALID_ARGUMENTS',
+      };
+    }
     return {
       artifact_names: artifactNames,
       status:
@@ -131,6 +157,15 @@ export class LoadArtifactsTool extends BaseTool {
     );
   }
 
+  /**
+   * Appends every artifact the current turn asked for to the request.
+   *
+   * This scans all `load_artifacts` function responses in the current turn.
+   * adk-python reads only the first part of the last content, so it misses a
+   * response that shares a turn with another tool. Keep the scan: it is what
+   * fixes google/adk-js#632 for parallel and sequential tool calls. Each
+   * artifact name loads once, however often the turn names it.
+   */
   private async appendArtifactsToLlmRequest(
     toolContext: Context,
     llmRequest: LlmRequest,
@@ -144,7 +179,7 @@ export class LoadArtifactsTool extends BaseTool {
       return;
     }
 
-    appendInstructions(llmRequest, [
+    appendDynamicInstructions(llmRequest, [
       `You have a list of artifacts:\n  ${JSON.stringify(
         artifactNames,
       )}\n\n  When the user asks questions about any of the artifacts, you should call the\n  \`load_artifacts\` function to load the artifact. Always call load_artifacts\n  before answering questions related to the artifacts, regardless of whether the\n  artifacts have been loaded before. Do not depend on prior answers about the\n  artifacts.`,
@@ -186,9 +221,16 @@ export class LoadArtifactsTool extends BaseTool {
           if (functionResponse && functionResponse.name === this.name) {
             const response =
               (functionResponse.response as Record<string, unknown>) || {};
-            const artifactNames =
-              (response['artifact_names'] as string[]) || [];
-            for (const name of artifactNames) {
+            const responseArtifactNames = parseArtifactNames(
+              response['artifact_names'],
+            );
+            if (!responseArtifactNames) {
+              logger.warn(
+                'Ignoring invalid artifact_names in load_artifacts response.',
+              );
+              continue;
+            }
+            for (const name of responseArtifactNames) {
               if (name && !namesToLoad.includes(name)) {
                 namesToLoad.push(name);
               }
@@ -211,7 +253,32 @@ export class LoadArtifactsTool extends BaseTool {
         continue;
       }
 
-      const artifactPart = asSafePartForLlm(artifact, artifactName);
+      let artifactPart: Part | undefined;
+      if (this.processArtifact) {
+        try {
+          artifactPart = await this.processArtifact(artifact, artifactName);
+        } catch (err: unknown) {
+          logger.error(
+            `Failed to process artifact "${artifactName}", skipping: ${formatError(err)}`,
+          );
+          continue;
+        }
+      } else {
+        artifactPart = asSafePartForLlm(
+          artifact,
+          artifactName,
+          this.enableSpreadsheetParsing,
+        );
+      }
+
+      if (!artifactPart) {
+        continue;
+      }
+      if (artifactPart !== artifact) {
+        logger.debug(
+          `Transformed artifact "${artifactName}" (mimeType=${artifact.inlineData?.mimeType}) to Part`,
+        );
+      }
 
       llmRequest.contents.push({
         role: 'user',

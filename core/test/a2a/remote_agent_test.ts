@@ -20,6 +20,7 @@ import {
   Event as AdkEvent,
   createEvent,
   InvocationContext,
+  PluginManager,
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
   Session,
@@ -87,6 +88,7 @@ describe('A2ARemoteAgent', () => {
         ],
         state: {},
       } as unknown as Session,
+      pluginManager: new PluginManager(),
       ...overrides,
     } as unknown as InvocationContext;
   };

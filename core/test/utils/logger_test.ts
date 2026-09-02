@@ -6,7 +6,7 @@
 
 import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {resetLogger} from '../../src/utils/logger.js';
+import {isDebugEnabled, logger, resetLogger} from '../../src/utils/logger.js';
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -140,5 +140,152 @@ describe('setLogger', () => {
 
       expect(logger.constructor.name).toBe('SimpleLogger');
     });
+  });
+
+  describe('isDebugEnabled', () => {
+    it('reports true at DEBUG', () => {
+      setLogLevel(LogLevel.DEBUG);
+      expect(isDebugEnabled()).toBe(true);
+    });
+
+    it.each([LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR])(
+      'reports false above DEBUG (%i)',
+      (level) => {
+        setLogLevel(level);
+        expect(isDebugEnabled()).toBe(false);
+      },
+    );
+
+    it('reports false for a disabled logger', () => {
+      setLogger(null);
+      expect(isDebugEnabled()).toBe(false);
+    });
+
+    it('reports false for a custom logger that omits the probe', () => {
+      const customLogger: Logger = {
+        setLogLevel: () => {},
+        log: () => {},
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+      };
+      setLogger(customLogger);
+
+      expect(isDebugEnabled()).toBe(false);
+    });
+
+    it('defers to a custom logger that implements the probe', () => {
+      const customLogger: Logger = {
+        setLogLevel: () => {},
+        log: () => {},
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        isDebugEnabled: () => true,
+      };
+      setLogger(customLogger);
+
+      expect(isDebugEnabled()).toBe(true);
+    });
+  });
+});
+
+describe('isEnabledFor', () => {
+  beforeEach(() => {
+    resetLogger();
+  });
+
+  afterEach(() => {
+    resetLogger();
+  });
+
+  it('reports the levels the current log level admits', () => {
+    setLogLevel(LogLevel.INFO);
+
+    expect(getLogger().isEnabledFor?.(LogLevel.DEBUG)).toBe(false);
+    expect(getLogger().isEnabledFor?.(LogLevel.INFO)).toBe(true);
+    expect(getLogger().isEnabledFor?.(LogLevel.ERROR)).toBe(true);
+  });
+
+  it('admits debug once the level is lowered', () => {
+    setLogLevel(LogLevel.DEBUG);
+
+    expect(getLogger().isEnabledFor?.(LogLevel.DEBUG)).toBe(true);
+  });
+
+  it('reports nothing enabled for a custom logger that omits it', () => {
+    setLogger({
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    });
+
+    expect(getLogger().isEnabledFor?.(LogLevel.ERROR)).toBeUndefined();
+  });
+
+  it('answers through the module-level logger proxy', () => {
+    setLogLevel(LogLevel.DEBUG);
+
+    expect(logger.isEnabledFor?.(LogLevel.DEBUG)).toBe(true);
+
+    setLogLevel(LogLevel.ERROR);
+
+    expect(logger.isEnabledFor?.(LogLevel.DEBUG)).toBe(false);
+  });
+
+  it('reports nothing enabled once logging is disabled', () => {
+    setLogger(null);
+
+    expect(getLogger().isEnabledFor?.(LogLevel.ERROR)).toBe(false);
+  });
+});
+
+describe('isEnabledFor', () => {
+  beforeEach(() => {
+    resetLogger();
+  });
+
+  afterEach(() => {
+    resetLogger();
+  });
+
+  it('reports every level at or above the configured one', () => {
+    setLogLevel(LogLevel.WARN);
+
+    expect(logger.isEnabledFor?.(LogLevel.DEBUG)).toBe(false);
+    expect(logger.isEnabledFor?.(LogLevel.INFO)).toBe(false);
+    expect(logger.isEnabledFor?.(LogLevel.WARN)).toBe(true);
+    expect(logger.isEnabledFor?.(LogLevel.ERROR)).toBe(true);
+  });
+
+  it('reports debug once the level is lowered to DEBUG', () => {
+    setLogLevel(LogLevel.DEBUG);
+
+    expect(logger.isEnabledFor?.(LogLevel.DEBUG)).toBe(true);
+  });
+
+  it('reports nothing for the no-op logger', () => {
+    setLogger(null);
+
+    expect(logger.isEnabledFor?.(LogLevel.ERROR)).toBe(false);
+  });
+
+  it('falls back to false for a logger that does not implement it', () => {
+    const legacyLogger: Logger = {
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    };
+    setLogger(legacyLogger);
+
+    expect(logger.isEnabledFor?.(LogLevel.DEBUG)).toBe(false);
   });
 });

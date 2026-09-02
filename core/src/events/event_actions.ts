@@ -6,9 +6,17 @@
 
 import {isEmpty} from 'lodash-es';
 
-import {AuthConfig} from '../auth/auth_tool.js';
+import {AuthConfig, isAuthConfig} from '../auth/auth_tool.js';
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {toJsonSerializable} from '../utils/json_utils.js';
+import {logger} from '../utils/logger.js';
+// `event.ts` imports this module at runtime, so `Route` is imported as a type
+// to keep the dependency one-way.
+import type {Route} from './event.js';
+
+import {UiWidget} from './ui_widget.js';
 
 /**
  * Represents the actions attached to an event.
@@ -71,6 +79,44 @@ export interface EventActions {
    * execution for this invocation. Mirrors Python `EventActions.end_of_agent`.
    */
   endOfAgent?: boolean;
+
+  /**
+   * UI widgets the host should render alongside this event, appended by
+   * `Context.renderUiWidget`. Mirrors Python
+   * `EventActions.render_ui_widgets`, which defaults to `None`, so the field
+   * stays unset until a widget is pushed.
+   */
+  renderUiWidgets?: UiWidget[];
+
+  /**
+   * The reason for transferring to the target agent. Mirrors Python
+   * `EventActions.transfer_reason`.
+   */
+  transferReason?: string;
+
+  /**
+   * The route key(s) emitted by a routing node, used by the graph to select the
+   * matching outgoing edge(s). Mirrors Python `EventActions.route`.
+   *
+   * This is the copy that crosses the wire. The workflow engine reads
+   * {@link Event.route}, which `transformToCamelCaseEvent` fills from this
+   * field when it rehydrates an event.
+   */
+  route?: Route;
+
+  /**
+   * The structured output a model produced for this event. Mirrors Python
+   * `EventActions.set_model_response`, which is untyped there too.
+   */
+  setModelResponse?: unknown;
+
+  /**
+   * The invocation id to rewind to. This is only set for a rewind event.
+   *
+   * `applyRewinds` reads it to drop the rewound invocations, so the annulled
+   * turns never reach the model.
+   */
+  rewindBeforeInvocationId?: string;
 }
 
 /**
@@ -80,20 +126,44 @@ export interface EventActions {
  * @param state - Optional partial {@link EventActions} whose properties
  *   override the defaults. Dictionary fields (`stateDelta`, `artifactDelta`,
  *   `requestedAuthConfigs`, `requestedToolConfirmations`) default to `{}`;
- *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`) default
- *   to `undefined`.
+ *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`,
+ *   `rewindBeforeInvocationId`) default to `undefined`.
  * @returns A fully populated {@link EventActions} object.
  */
 export function createEventActions(
   state: Partial<EventActions> = {},
 ): EventActions {
-  return {
+  const actions = {
     stateDelta: {},
     artifactDelta: {},
     requestedAuthConfigs: {},
     requestedToolConfirmations: {},
     ...state,
   };
+  validateRequestedAuthConfigs(actions.requestedAuthConfigs);
+  return actions;
+}
+
+/**
+ * Rejects a `requestedAuthConfigs` entry that is not an {@link AuthConfig}.
+ *
+ * Mirrors the reference's `_parse_auth_configs` validator, which runs
+ * `AuthConfig.model_validate` on every entry. An event rehydrated from storage
+ * carries plain objects here, and one that has lost `authScheme` or
+ * `credentialKey` fails much later, inside the auth flow.
+ *
+ * @throws {InputValidationError} When an entry is not an {@link AuthConfig}.
+ */
+function validateRequestedAuthConfigs(
+  configs: {[key: string]: AuthConfig} | undefined,
+): void {
+  for (const [key, config] of Object.entries(configs ?? {})) {
+    if (!isAuthConfig(config)) {
+      throw new InputValidationError(
+        `requestedAuthConfigs['${key}'] is not a valid AuthConfig: expected an object with 'authScheme' and 'credentialKey'.`,
+      );
+    }
+  }
 }
 
 /**
@@ -102,8 +172,12 @@ export function createEventActions(
  * transfer, escalation or summarization signal.
  *
  * An actions object is considered non-default when any dictionary field has at
- * least one entry, or when any scalar field has been explicitly set (including
- * being set to `false`).
+ * least one entry, when any scalar field has been explicitly set (including
+ * being set to `false`), or when a UI widget is attached.
+ *
+ * A pushed UI widget counts as a signal too: a tool that renders a widget and
+ * nothing else still has something for the host to draw, so its event must
+ * survive the callers that drop default-only actions.
  *
  * @param actions - The actions to inspect.
  * @returns `true` when every field is at its default value.
@@ -114,9 +188,13 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     isEmpty(actions.artifactDelta) &&
     isEmpty(actions.requestedAuthConfigs) &&
     isEmpty(actions.requestedToolConfirmations) &&
+    isEmpty(actions.renderUiWidgets) &&
     actions.skipSummarization === undefined &&
     actions.transferToAgent === undefined &&
-    actions.escalate === undefined
+    actions.escalate === undefined &&
+    actions.transferReason === undefined &&
+    actions.route === undefined &&
+    actions.setModelResponse === undefined
   );
 }
 
@@ -129,9 +207,12 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  *    `requestedAuthConfigs`, `requestedToolConfirmations`) — all entries from
  *    every source are combined via `Object.assign`. Later sources win on
  *    duplicate keys.
- * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
- *    last-writer-wins: the value from the last source that sets the field is
- *    kept.
+ * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`,
+ *    `rewindBeforeInvocationId`) — last-writer-wins: the value from the last
+ *    source that sets the field is kept.
+ * 3. **List fields** (`renderUiWidgets`) — the widgets of every source are
+ *    concatenated in source order. A source that sets nothing contributes
+ *    nothing, so the result stays `undefined` when no source sets it.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -171,6 +252,13 @@ export function mergeEventActions(
       );
     }
 
+    if (source.renderUiWidgets) {
+      result.renderUiWidgets = [
+        ...(result.renderUiWidgets ?? []),
+        ...source.renderUiWidgets,
+      ];
+    }
+
     if (source.skipSummarization !== undefined) {
       result.skipSummarization = source.skipSummarization;
     }
@@ -180,6 +268,68 @@ export function mergeEventActions(
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
     }
+    if (source.transferReason !== undefined) {
+      result.transferReason = source.transferReason;
+    }
+    if (source.route !== undefined) {
+      result.route = source.route;
+    }
+    if (source.setModelResponse !== undefined) {
+      result.setModelResponse = source.setModelResponse;
+    }
+    if (source.rewindBeforeInvocationId !== undefined) {
+      result.rewindBeforeInvocationId = source.rewindBeforeInvocationId;
+    }
   }
   return result;
+}
+
+/**
+ * Returns a copy of the actions whose `stateDelta` and `agentState` are safe
+ * to hand to `JSON.stringify`.
+ *
+ * A tool can write anything into session state, including a callback or a
+ * bigint. Persisting such an event used to throw or drop the offending key
+ * along with its siblings. Mirrors the reference's `_serialize_state_delta`
+ * and `_serialize_agent_state` wrap serializers: the value is sanitized, one
+ * warning per field is logged, and the event still persists.
+ *
+ * @param actions The actions about to be persisted.
+ * @returns A shallow copy holding the sanitized fields. Never throws.
+ */
+export function serializeEventActions(actions: EventActions): EventActions {
+  return {
+    ...actions,
+    stateDelta: sanitizeState(actions.stateDelta, 'stateDelta'),
+    agentState:
+      actions.agentState === undefined
+        ? undefined
+        : sanitizeState(actions.agentState, 'agentState'),
+  };
+}
+
+function sanitizeState(
+  state: Record<string, unknown> | undefined,
+  field: string,
+): Record<string, unknown> {
+  let replaced = false;
+  const sanitized: Record<string, unknown> = {};
+
+  // `stateDelta` is a required field, but a caller can still hand us an
+  // actions object that leaves it unset. Treat that as the empty delta that
+  // `createEventActions` defaults to, so the event still persists.
+  for (const [key, value] of Object.entries(state ?? {})) {
+    sanitized[key] = toJsonSerializable(value, () => {
+      replaced = true;
+    });
+  }
+
+  if (replaced) {
+    logger.warn(
+      `Failed to serialize \`${field}\`; some values are not JSON-serializable ` +
+        `(e.g. functions) and will be replaced with a string representation ` +
+        `in the persisted event.`,
+    );
+  }
+  return sanitized;
 }

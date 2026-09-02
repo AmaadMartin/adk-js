@@ -43,6 +43,25 @@ describe('BranchPath.append', () => {
   });
 });
 
+describe('BranchPath.getRunIds', () => {
+  it('collects the run id of every segment that has one', () => {
+    const ids = branchPathFromString('parent@1.child@2.node').getRunIds();
+    expect([...ids]).toEqual(['1', '2']);
+  });
+
+  it('returns an empty set when no segment carries a run id', () => {
+    expect(branchPathFromString('a.b.c').getRunIds().size).toBe(0);
+  });
+
+  it('skips a segment whose @ has nothing after it', () => {
+    expect([...branchPathFromString('a@.b@2').getRunIds()]).toEqual(['2']);
+  });
+
+  it('takes the text after the last @ of a segment', () => {
+    expect([...branchPathFromString('a@1@2').getRunIds()]).toEqual(['2']);
+  });
+});
+
 describe('BranchPath.isDescendantOf', () => {
   it('is true for a strict descendant', () => {
     expect(
@@ -60,6 +79,30 @@ describe('BranchPath.isDescendantOf', () => {
     expect(
       branchPathFromString('a.c').isDescendantOf(branchPathFromString('a.b')),
     ).toBe(false);
+  });
+});
+
+describe('BranchPath.getRunIds', () => {
+  it('collects the run id of every segment that carries one', () => {
+    expect(branchPathFromString('parent@1.child@2.node').getRunIds()).toEqual(
+      new Set(['1', '2']),
+    );
+  });
+
+  it('returns an empty set for an empty path', () => {
+    expect(branchPathFromString('').getRunIds()).toEqual(new Set());
+  });
+
+  it('ignores a segment whose run id is empty', () => {
+    expect(branchPathFromString('node@').getRunIds()).toEqual(new Set());
+  });
+
+  it('reads a run id from a segment with no name', () => {
+    expect(branchPathFromString('@abc').getRunIds()).toEqual(new Set(['abc']));
+  });
+
+  it('splits on the last @ of a segment', () => {
+    expect(branchPathFromString('a@b@c').getRunIds()).toEqual(new Set(['c']));
   });
 });
 
@@ -104,5 +147,46 @@ describe('commonPrefixOf', () => {
 
   it('returns an empty string for no inputs', () => {
     expect(commonPrefixOf([])).toBe('');
+  });
+});
+
+describe('BranchPath.getRunIds', () => {
+  it('collects the run id of every segment that carries one', () => {
+    expect(branchPathFromString('parent@1.child@2.node').getRunIds()).toEqual(
+      new Set(['1', '2']),
+    );
+    const ids = branchPathFromString('parent@1.child@2.node').getRunIds();
+    expect([...ids].sort()).toEqual(['1', '2']);
+  });
+
+  it('returns nothing for a path whose segments carry no run id', () => {
+    expect(branchPathFromString('parent.child').getRunIds()).toEqual(new Set());
+  });
+
+  it('skips a segment whose separator has no run id after it', () => {
+    expect(branchPathFromString('parent@.child@2').getRunIds()).toEqual(
+      new Set(['2']),
+    );
+  });
+
+  it('reads the run id after the last separator', () => {
+    expect(branchPathFromString('tool@call@7').getRunIds()).toEqual(
+      new Set(['7']),
+    );
+  });
+
+  it('excludes a segment whose run id is empty', () => {
+    expect([...branchPathFromString('parent@.child@2').getRunIds()]).toEqual([
+      '2',
+    ]);
+  });
+
+  it('takes the text after the last @ when a segment has several', () => {
+    expect([...branchPathFromString('tool@a@b').getRunIds()]).toEqual(['b']);
+  });
+
+  it('returns an empty set for a path with no run ids', () => {
+    expect(branchPathFromString('a.b.c').getRunIds().size).toBe(0);
+    expect(new BranchPath([]).getRunIds().size).toBe(0);
   });
 });

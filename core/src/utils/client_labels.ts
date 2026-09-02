@@ -83,3 +83,15 @@ export function getClientLabels(): string[] {
   }
   return labels;
 }
+
+/**
+ * Returns the headers that identify this client to Google APIs, built from
+ * {@link getClientLabels}.
+ */
+export function getTrackingHeaders(): Record<string, string> {
+  const headerValue = getClientLabels().join(' ');
+  return {
+    'x-goog-api-client': headerValue,
+    'user-agent': headerValue,
+  };
+}

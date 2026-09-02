@@ -21,7 +21,6 @@ import {
   LlmResponse,
   URL_CONTEXT,
   VertexAiSearchTool,
-  VertexRagRetrievalTool,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
@@ -44,7 +43,15 @@ function requestFor(model: string): LlmRequest {
   return {model, contents: [], toolsDict: {}, liveConnectConfig: {}};
 }
 
-/** Every built-in tool, with a model each one accepts. */
+/**
+ * Every built-in tool, with a model each one accepts.
+ *
+ * `VertexRagRetrievalTool` is not one of them here. It retrieves client-side
+ * for a model that cannot serve the built-in tool, so it declares a callable
+ * function and extends `BaseRetrievalTool`. Its own test covers the same
+ * guarantee: the server-side branch registers the name, and a call naming it
+ * resolves and retrieves.
+ */
 const BUILT_IN_TOOLS: Array<{tool: BuiltInTool; name: string}> = [
   {tool: GOOGLE_SEARCH, name: 'google_search'},
   {tool: URL_CONTEXT, name: 'url_context'},
@@ -53,10 +60,6 @@ const BUILT_IN_TOOLS: Array<{tool: BuiltInTool; name: string}> = [
   {
     tool: new VertexAiSearchTool({dataStoreId: 'ds-1'}),
     name: 'vertex_ai_search',
-  },
-  {
-    tool: new VertexRagRetrievalTool({ragResources: [{ragCorpus: 'corpus-1'}]}),
-    name: 'vertex_rag_retrieval',
   },
 ];
 

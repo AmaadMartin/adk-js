@@ -6,18 +6,18 @@
 
 import {FunctionCall} from '@google/genai';
 import {isEqual} from 'lodash-es';
+import {Event} from '../../events/event.js';
+import {eventsOnCurrentBranch} from '../../events/event_scope.js';
 import {
-  Event,
   getFunctionCalls,
   getFunctionResponses,
-} from '../../events/event.js';
+} from '../../models/llm_response.js';
 import {BaseTool} from '../../tools/base_tool.js';
 import {
   IntentMismatchError,
   IntentMismatchReason,
   ToolConfirmation,
 } from '../../tools/tool_confirmation.js';
-import {isSegmentPrefix} from '../../utils/branch_trie.js';
 import {logger} from '../../utils/logger.js';
 import {Context} from '../context.js';
 import {
@@ -67,7 +67,10 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
     if (!isLlmAgent(agent)) {
       return;
     }
-    const events = eventsInScope(invocationContext);
+    const events = eventsOnCurrentBranch(
+      invocationContext.session.events,
+      invocationContext.branch,
+    );
     if (events.length === 0) {
       return;
     }
@@ -164,25 +167,6 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
     }
     yield functionResponseEvent;
   }
-}
-
-/**
- * The session events this invocation may act on: those on the current branch.
- *
- * A confirmation belongs to the branch that raised it. Without this an agent
- * could resume a sibling branch's paused call — an approval that was never
- * shown in this context, for a tool this agent may not even have. Mirrors
- * Python's `_get_events(current_branch=True)`.
- */
-function eventsInScope(invocationContext: InvocationContext): Event[] {
-  const events = invocationContext.session.events;
-  const currentBranch = invocationContext.branch;
-  if (!currentBranch) {
-    return events;
-  }
-  return events.filter(
-    (event) => !event.branch || isSegmentPrefix(currentBranch, event.branch),
-  );
 }
 
 /**

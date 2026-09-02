@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {ContentUnion, GenerateContentConfig, Part, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
+import {SingleTurnAgentTool, TaskAgentTool} from '../tools/agent_tool.js';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
@@ -23,26 +24,33 @@ import {
   createEvent,
   createNewEventId,
   Event,
-  getFunctionCalls,
-  getFunctionResponses,
   isFinalResponse,
   populateClientFunctionCallId,
 } from '../events/event.js';
 import {isDefaultEventActions} from '../events/event_actions.js';
+import {
+  getFunctionCalls,
+  getFunctionResponses,
+} from '../models/llm_response.js';
 
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
 import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
 import {BaseLlmConnection} from '../models/base_llm_connection.js';
-import {LlmRequest} from '../models/llm_request.js';
+import {
+  finalizeDynamicInstructions,
+  LlmRequest,
+} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
+
+import {BasePlanner} from '../planners/base_planner.js';
 
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
 
+import {copyHttpOptions} from '../utils/genai_config_utils.js';
 import {logger} from '../utils/logger.js';
-import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
 
 import {
@@ -50,7 +58,11 @@ import {
   traceCallLlm,
   tracer,
 } from '../telemetry/tracing.js';
-import {parseWithSchema, SchemaLike} from '../utils/schema.js';
+import {
+  parseWithSchema,
+  SchemaLike,
+  stripJsonCodeFence,
+} from '../utils/schema.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 import {BaseAgent, BaseAgentConfig} from './base_agent.js';
 import {
@@ -65,21 +77,13 @@ import {
   handleFunctionCallsAsync,
 } from './functions.js';
 
-import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
-import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
-import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
-import {CONTENT_REQUEST_PROCESSOR} from './processors/content_request_processor.js';
-import {ContextCompactorRequestProcessor} from './processors/context_compactor_request_processor.js';
-import {IDENTITY_LLM_REQUEST_PROCESSOR} from './processors/identity_llm_request_processor.js';
-import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from './processors/instructions_llm_request_processor.js';
-import {INTERACTIONS_REQUEST_PROCESSOR} from './processors/interactions_request_processor.js';
-import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_confirmation_llm_request_processor.js';
-import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './processors/request_input_llm_request_processor.js';
-import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
+import {AutoFlow} from './processors/auto_flow.js';
+import {applyRunConfigToLiveConfig} from './processors/basic_llm_request_processor.js';
+import {SingleFlow} from './processors/single_flow.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
 
@@ -132,32 +136,22 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Copies the live-relevant fields from the run config onto the live connect
- * config so the model connection is opened with the caller's modalities,
- * speech, transcription, and proactivity settings.
+ * Builds an empty request, seeded with the run config's HTTP options.
+ *
+ * `BasicLlmRequestProcessor` merges the seeded options back in after it
+ * overwrites the config with the agent's own.
  */
-const LIVE_KEYS = [
-  'responseModalities',
-  'speechConfig',
-  'outputAudioTranscription',
-  'inputAudioTranscription',
-  'realtimeInputConfig',
-  'contextWindowCompression',
-  'proactivity',
-  'enableAffectiveDialog',
-] as const;
-
-function applyLiveRunConfig(
-  runConfig: InvocationContext['runConfig'],
-  llmRequest: LlmRequest,
-): void {
-  if (!runConfig) return;
-  const liveConfig = (llmRequest.liveConnectConfig ??= {});
-  for (const k of LIVE_KEYS) {
-    if (runConfig[k] !== undefined) {
-      (liveConfig as Record<string, unknown>)[k] = runConfig[k];
-    }
+function newLlmRequest(invocationContext: InvocationContext): LlmRequest {
+  const llmRequest: LlmRequest = {
+    contents: [],
+    toolsDict: {},
+    liveConnectConfig: {},
+  };
+  const httpOptions = invocationContext.runConfig?.httpOptions;
+  if (httpOptions) {
+    llmRequest.config = {httpOptions: copyHttpOptions(httpOptions)};
   }
+  return llmRequest;
 }
 
 /**
@@ -309,6 +303,24 @@ export interface LlmAgentConfig extends BaseAgentConfig {
    */
   globalInstruction?: string | InstructionProvider;
 
+  /**
+   * Static instruction content sent literally at the start of the system
+   * instruction.
+   *
+   * The content never changes and is never processed: placeholders are not
+   * substituted and session state is not injected. It exists for context
+   * caching, which needs a byte-stable request prefix. The Live API has its
+   * own cache, so this field does not help there.
+   *
+   * Setting it moves {@link LlmAgentConfig.instruction} out of the system
+   * instruction and into the request contents, after the static content.
+   *
+   * Non-text parts (inline data, file data) cannot go in a system
+   * instruction, so each becomes a textual reference there plus a user
+   * content carrying the data.
+   */
+  staticInstruction?: ContentUnion;
+
   /** Tools available to this agent. */
   tools?: ToolUnion[];
 
@@ -348,14 +360,17 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   includeContents?: 'default' | 'none';
 
   /**
-   * The agent's execution mode when run as a workflow node.
+   * The agent's execution mode.
    *
-   * - `single_turn` (default): the agent runs once against the node input.
+   * - `chat`: the agent holds a conversation. This is the default for a root
+   *   agent, and the only other mode a root agent may use is `task`.
+   * - `single_turn` (the default as a workflow node): the agent runs once
+   *   against the node input.
    * - `task`: the agent is given a `finish_task` tool and runs a multi-round
    *   loop until it calls `finish_task`, whose arguments (conforming to
    *   `outputSchema`) become the node output. Mirrors Python's `Agent(mode=...)`.
    */
-  mode?: 'single_turn' | 'task';
+  mode?: 'chat' | 'single_turn' | 'task';
 
   /** The input schema when agent is used as a tool. */
   inputSchema?: LlmAgentSchema;
@@ -409,9 +424,26 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   contextCompactors?: BaseContextCompactor[];
 
   /**
-   * Instructs the agent to make a plan and execute it step by step.
+   * Runs the code blocks the model writes, and feeds their output back to it.
    */
   codeExecutor?: BaseCodeExecutor;
+
+  /**
+   * Instructs the agent to make a plan and execute it step by step.
+   */
+  planner?: BasePlanner;
+}
+
+/**
+ * Joins the text the model addressed to the user, skipping thought parts.
+ *
+ * Returns `undefined` when no part carries user-facing text. That is distinct
+ * from `''`: a part with `text: ''` is a real empty answer, while an event
+ * holding only function responses carries no answer at all.
+ */
+function joinVisibleText(parts: Part[]): string | undefined {
+  const visible = parts.filter((p) => !p.thought && p.text !== undefined);
+  return visible.length ? visible.map((p) => p.text).join('') : undefined;
 }
 
 async function convertToolUnionToTools(
@@ -426,7 +458,19 @@ async function convertToolUnionToTools(
     // model can call it (mirrors Python's Agent(tools=[node/workflow])).
     return [new NodeTool(toolUnion)];
   }
-  return await toolUnion.getTools(context);
+  try {
+    return await toolUnion.getTools(context);
+  } catch (e: unknown) {
+    // The agent still runs, just without this toolset's tools, and the model
+    // answers as though it never had them. That is a lost capability rather
+    // than a degraded one, so report it at error level and name the toolset.
+    logger.error(
+      `Agent ${context?.agentName ?? '<unknown>'} will run without the tools ` +
+        `from toolset ${toolUnion.constructor.name}, which failed to load:`,
+      e,
+    );
+    return [];
+  }
 }
 
 /**
@@ -434,6 +478,21 @@ async function convertToolUnionToTools(
  * Defined once and shared by all LlmAgent instances.
  */
 const LLM_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.llmAgent');
+
+const DEFAULT_MODEL_SYMBOL = Symbol.for('google.adk.llmAgent.defaultModel');
+
+/**
+ * The default model override, held on `globalThis` rather than on the class.
+ *
+ * A bundler inlines `@google/adk` into an agent's bundle, so one process can
+ * hold two copies of `LlmAgent`. A class-level field would be private to the
+ * copy that wrote it, and the CLI's override would never reach the agent. The
+ * shared key mirrors the `Symbol.for('google.adk.*')` brands used for the same
+ * reason elsewhere.
+ */
+const defaultModelHolder: typeof globalThis & {
+  [DEFAULT_MODEL_SYMBOL]?: string | BaseLlm;
+} = globalThis;
 
 /**
  * Type guard to check if an object is an instance of LlmAgent.
@@ -450,6 +509,32 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 }
 
 /**
+ * The tools that expose mode-declaring sub-agents to the parent model.
+ *
+ * A sub-agent that declares an execution `mode` is driven by a tool call rather
+ * than by an LLM transfer, so it is wrapped and appended to the parent's tools.
+ * A sub-agent with no `mode` is left alone: it stays a transfer target and no
+ * tool is created for it. That is adk-js's equivalent of adk-python's default
+ * `mode='chat'`, which is likewise neither wrapped nor excluded from transfer.
+ *
+ * Mirrors the sub-agent loop in adk-python's `LlmAgent.model_post_init`.
+ */
+function delegationToolsFor(subAgents: BaseAgent[]): BaseTool[] {
+  const tools: BaseTool[] = [];
+  for (const subAgent of subAgents) {
+    if (!isLlmAgent(subAgent)) {
+      continue;
+    }
+    if (subAgent.mode === 'single_turn') {
+      tools.push(new SingleTurnAgentTool({agent: subAgent}));
+    } else if (subAgent.mode === 'task') {
+      tools.push(new TaskAgentTool({agent: subAgent}));
+    }
+  }
+  return tools;
+}
+
+/**
  * An agent that uses a large language model to generate responses.
  */
 export class LlmAgent extends BaseAgent<LlmAgentConfig> {
@@ -460,6 +545,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   instruction: string | InstructionProvider;
   /** @deprecated Use GlobalInstructionPlugin instead. */
   globalInstruction: string | InstructionProvider;
+  /** See {@link LlmAgentConfig.staticInstruction}. */
+  staticInstruction?: ContentUnion;
   tools: ToolUnion[];
   generateContentConfig?: GenerateContentConfig;
   disallowTransferToParent: boolean;
@@ -475,7 +562,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    * `'include_contents' in agent.model_fields_set`.
    */
   readonly includeContentsExplicit: boolean;
-  mode?: 'single_turn' | 'task';
+  mode?: 'chat' | 'single_turn' | 'task';
   inputSchema?: Schema;
   outputSchema?: Schema;
   /**
@@ -501,6 +588,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   requestProcessors: BaseLlmRequestProcessor[];
   responseProcessors: BaseLlmResponseProcessor[];
   codeExecutor?: BaseCodeExecutor;
+  planner?: BasePlanner;
 
   constructor(config: LlmAgentConfig) {
     // Node defaults for an agent used in a graph, matching adk-python's
@@ -515,7 +603,15 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.model = config.model;
     this.instruction = config.instruction ?? '';
     this.globalInstruction = config.globalInstruction ?? '';
+    this.staticInstruction = config.staticInstruction;
     this.tools = config.tools ?? [];
+    const delegationTools = delegationToolsFor(this.subAgents);
+    if (delegationTools.length > 0) {
+      // A new array rather than a push: `config.tools` is the caller's own
+      // array, and two agents built from it must not accumulate each other's
+      // wrappers.
+      this.tools = [...this.tools, ...delegationTools];
+    }
     this.generateContentConfig = config.generateContentConfig;
     this.disallowTransferToParent = config.disallowTransferToParent ?? false;
     this.disallowTransferToPeers = config.disallowTransferToPeers ?? false;
@@ -536,52 +632,22 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.beforeToolCallback = config.beforeToolCallback;
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
+    this.planner = config.planner;
 
-    // TODO - b/425992518: Define these processor arrays.
-    // Orders matter, don't change. Append new processors to the end
-    this.requestProcessors = config.requestProcessors ?? [
-      BASIC_LLM_REQUEST_PROCESSOR,
-      AUTH_PREPROCESSOR,
-      IDENTITY_LLM_REQUEST_PROCESSOR,
-      INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
-      REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
-      REQUEST_INPUT_LLM_REQUEST_PROCESSOR,
-      CONTENT_REQUEST_PROCESSOR,
-      INTERACTIONS_REQUEST_PROCESSOR,
-      CODE_EXECUTION_REQUEST_PROCESSOR,
-      TOOL_FILTER_REQUEST_PROCESSOR,
-    ];
-
-    if (
-      !config.requestProcessors &&
-      config.contextCompactors &&
-      config.contextCompactors.length > 0
-    ) {
-      // Find where CONTENT_REQUEST_PROCESSOR is to place compaction immediately before it.
-      const contentIndex = this.requestProcessors.indexOf(
-        CONTENT_REQUEST_PROCESSOR,
-      );
-      if (contentIndex !== -1) {
-        this.requestProcessors.splice(
-          contentIndex,
-          0,
-          new ContextCompactorRequestProcessor(config.contextCompactors),
-        );
-      } else {
-        this.requestProcessors.push(
-          new ContextCompactorRequestProcessor(config.contextCompactors),
-        );
-      }
-    }
-
-    this.responseProcessors = config.responseProcessors ?? [];
-
-    // Preserve the agent transfer behavior.
     const agentTransferDisabled =
       this.disallowTransferToParent &&
       this.disallowTransferToPeers &&
       !this.subAgents?.length;
-    if (!agentTransferDisabled) {
+
+    const Flow = agentTransferDisabled ? SingleFlow : AutoFlow;
+    const flow = new Flow(config.contextCompactors);
+
+    this.requestProcessors = config.requestProcessors ?? flow.requestProcessors;
+    this.responseProcessors =
+      config.responseProcessors ?? flow.responseProcessors;
+
+    // A caller-supplied pipeline still gets agent transfer appended.
+    if (config.requestProcessors && !agentTransferDisabled) {
       this.requestProcessors.push(AGENT_TRANSFER_LLM_REQUEST_PROCESSOR);
     }
 
@@ -623,9 +689,41 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   /**
+   * Overrides the model used by any agent that sets none and has no ancestor
+   * that does. Process-wide: it affects every `LlmAgent` in the runtime, so it
+   * belongs to an entry point such as the CLI rather than to library code.
+   *
+   * @param model Model name or instance; `undefined` clears the override.
+   * @throws If given an empty model name.
+   */
+  static setDefaultModel(model: string | BaseLlm | undefined): void {
+    if (model === '') {
+      throw new Error('Default model must be a non-empty string.');
+    }
+    defaultModelHolder[DEFAULT_MODEL_SYMBOL] = model;
+  }
+
+  private static resolveDefaultModel(agentName: string): BaseLlm {
+    const model = defaultModelHolder[DEFAULT_MODEL_SYMBOL];
+    if (model === undefined) {
+      throw new Error(`No model found for ${agentName}.`);
+    }
+    return isBaseLlm(model) ? model : LLMRegistry.newLlm(model);
+  }
+
+  /**
+   * `contextCompactors` is folded into {@link requestProcessors} rather than
+   * stored, so `clone()` has no instance field to recognize it by.
+   */
+  protected override get configOnlyKeys(): readonly string[] {
+    return ['contextCompactors'];
+  }
+
+  /**
    * The resolved BaseLlm instance.
    *
-   * When not set, the agent will inherit the model from its ancestor.
+   * When not set, the agent will inherit the model from its ancestor, and then
+   * fall back to the model set by {@link LlmAgent.setDefaultModel}.
    */
   get canonicalModel(): BaseLlm {
     if (isBaseLlm(this.model)) {
@@ -643,7 +741,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
       ancestorAgent = ancestorAgent.parentAgent;
     }
-    throw new Error(`No model found for ${this.name}.`);
+    return LlmAgent.resolveDefaultModel(this.name);
   }
 
   /**
@@ -793,6 +891,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       );
       return;
     }
+    if (this.mode === 'task') {
+      // A task agent delivers its result through `finish_task`, so the
+      // conversational text it emits on the way there is not the output.
+      logger.debug(
+        `Skipping output save for agent ${this.name}: agent is in task mode`,
+      );
+      return;
+    }
     if (!isFinalResponse(event)) {
       logger.debug(
         `Skipping output save for agent ${
@@ -808,9 +914,17 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       return;
     }
 
-    const resultStr: string = event.content.parts
-      .map((part) => (part.text ? part.text : ''))
-      .join('');
+    const resultStr = joinVisibleText(event.content.parts);
+    if (resultStr === undefined) {
+      // A function-response-only event carries no answer. Writing `''` here
+      // would clobber a value an `afterToolCallback` already put in the same
+      // event's state delta.
+      logger.debug(
+        `Skipping output save for agent ${this.name}: event has no text part`,
+      );
+      return;
+    }
+
     let result: unknown = resultStr;
     if (this.outputSchema) {
       // If the result from the final chunk is just whitespace or empty,
@@ -821,7 +935,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
       let parsed: unknown;
       try {
-        parsed = JSON.parse(resultStr);
+        parsed = JSON.parse(stripJsonCodeFence(resultStr));
       } catch (e) {
         // A model can return malformed JSON. Log and keep the raw text so the
         // failure is visible without dropping the response, exactly as this
@@ -846,6 +960,48 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
     }
     event.actions.stateDelta[this.outputKey] = result;
+  }
+
+  /**
+   * Accumulates {@link outputKey} text across one streaming model turn.
+   *
+   * Streaming with tool calls produces non-partial events that carry text
+   * alongside a function call. {@link isFinalResponse} rejects those, so
+   * {@link maybeSaveOutputToState} skips them and their text never reaches
+   * `outputKey`. This appends the text of every non-partial text-bearing event
+   * of this agent, so the segments around the tool calls survive.
+   *
+   * The running value overwrites whatever {@link maybeSaveOutputToState} wrote
+   * on the same event.
+   *
+   * @param event The event to accumulate.
+   * @param accumulator The text accumulated so far in this model turn.
+   * @returns The new accumulator value, unchanged when the event does not
+   *     contribute.
+   */
+  private maybeAccumulateStreamingOutput(
+    event: Event,
+    accumulator: string,
+  ): string {
+    if (
+      !this.outputKey ||
+      this.mode === 'task' ||
+      this.outputSchema ||
+      event.author !== this.name ||
+      event.partial ||
+      !event.content?.parts?.length
+    ) {
+      return accumulator;
+    }
+
+    const text = joinVisibleText(event.content.parts);
+    if (!text) {
+      return accumulator;
+    }
+
+    const accumulated = accumulator + text;
+    event.actions.stateDelta[this.outputKey] = accumulated;
+    return accumulated;
   }
 
   /**
@@ -879,9 +1035,25 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     yield* runLlmAgentAsNode(this, ctx, nodeInput);
   }
 
+  /**
+   * Saves the output of a short-circuiting `beforeAgentCallback` under
+   * {@link outputKey}, so a cached answer reaches session state exactly as a
+   * model answer would.
+   */
+  protected override async handleBeforeAgentCallback(
+    invocationContext: InvocationContext,
+  ): Promise<Event | undefined> {
+    const event = await super.handleBeforeAgentCallback(invocationContext);
+    if (event) {
+      this.maybeSaveOutputToState(event);
+    }
+    return event;
+  }
+
   protected async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    let outputAccumulator = '';
     while (true) {
       let lastEvent: Event | undefined = undefined;
       let stepHadToolCalls = false;
@@ -898,6 +1070,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           stepHadToolCalls = true;
         }
         this.maybeSaveOutputToState(event);
+        outputAccumulator = this.maybeAccumulateStreamingOutput(
+          event,
+          outputAccumulator,
+        );
         yield event;
       }
 
@@ -928,12 +1104,17 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   protected async *runLiveImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    let outputAccumulator = '';
     for await (const event of this.runLiveFlow(context)) {
       if (context.abortSignal?.aborted) {
         return;
       }
 
       this.maybeSaveOutputToState(event);
+      outputAccumulator = this.maybeAccumulateStreamingOutput(
+        event,
+        outputAccumulator,
+      );
       yield event;
     }
     if (context.endInvocation) {
@@ -965,11 +1146,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       throw new Error('liveRequestQueue is required for LlmAgent.runLiveFlow.');
     }
 
-    const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-    };
+    const llmRequest = newLlmRequest(invocationContext);
 
     // =========================================================================
     // Preprocess: same processors as runAsync. Yields agent-emitted events
@@ -990,9 +1167,13 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     }
 
     // =========================================================================
-    // Apply live-only request config from the run config.
+    // Apply live-only request config from the run config. The basic request
+    // processor already did this, so the call is idempotent; it repeats here
+    // for a caller that replaced the request processors.
     // =========================================================================
-    applyLiveRunConfig(invocationContext.runConfig, llmRequest);
+    if (invocationContext.runConfig) {
+      applyRunConfigToLiveConfig(invocationContext.runConfig, llmRequest);
+    }
 
     const llm = this.canonicalModel;
     let reconnectAttempts = 0;
@@ -1154,6 +1335,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
+    finalizeDynamicInstructions(llmRequest);
   }
 
   private async runSendLoop(
@@ -1452,11 +1634,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   private async *runOneStepAsync(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-    };
+    const llmRequest = newLlmRequest(invocationContext);
 
     // =========================================================================
     // Preprocess before calling the LLM
@@ -1484,7 +1662,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     } else if (
       this.outputSchema &&
       allTools.length > 0 &&
-      !canUseOutputSchemaWithTools(this.canonicalModel.model)
+      !this.canonicalModel.capabilities.outputSchemaAndTools
     ) {
       const setModelResponseTool = new FunctionTool({
         name: 'set_model_response',
@@ -1538,6 +1716,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
+    finalizeDynamicInstructions(llmRequest);
     // =========================================================================
     // Global runtime interruption
     // =========================================================================

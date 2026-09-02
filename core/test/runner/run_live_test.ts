@@ -12,6 +12,7 @@ import {
   Event,
   InMemoryArtifactService,
   InMemorySessionService,
+  LiveConnectConfigWithHistory,
   LiveRequestQueue,
   LlmAgent,
   LlmRequest,
@@ -109,6 +110,8 @@ class FakeLiveLlm extends BaseLlm {
   }
   readonly connections: RecordingConnection[] = [];
   readonly llmRequestsSeen: LlmRequest[] = [];
+  /** The live request objects themselves, for aliasing assertions. */
+  readonly llmRequestsSeenByReference: LlmRequest[] = [];
 
   constructor(
     private readonly responses:
@@ -134,6 +137,7 @@ class FakeLiveLlm extends BaseLlm {
     this.llmRequestsSeen.push(
       JSON.parse(JSON.stringify(llmRequest)) as LlmRequest,
     );
+    this.llmRequestsSeenByReference.push(llmRequest);
     const isSequence =
       Array.isArray(this.responses) && Array.isArray(this.responses[0]);
     const responses = isSequence
@@ -941,6 +945,68 @@ describe('Runner.runLive', () => {
     expect(liveConfig?.enableAffectiveDialog).toBe(true);
   });
 
+  it('opens a Gemini 3.x live connection without affective dialog or proactivity', async () => {
+    const llm = new FakeLiveLlm(
+      [{turnComplete: true}],
+      'gemini-3.5-flash-lite-live-preview',
+    );
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {
+        proactivity: {proactiveAudio: true},
+        enableAffectiveDialog: true,
+      },
+    })) {
+      // drain
+    }
+
+    const liveConfig = llm.llmRequestSeen?.liveConnectConfig;
+    expect(liveConfig?.enableAffectiveDialog).toBeUndefined();
+    expect(liveConfig?.proactivity).toBeUndefined();
+  });
+
+  it('opens a live connection with the agent sampling settings', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: llm,
+      generateContentConfig: {temperature: 0.25, maxOutputTokens: 256},
+    });
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {responseModalities: [Modality.AUDIO]},
+    })) {
+      // drain
+    }
+
+    const liveConfig = llm.llmRequestSeen?.liveConnectConfig;
+    expect(liveConfig?.temperature).toBe(0.25);
+    expect(liveConfig?.maxOutputTokens).toBe(256);
+  });
+
   it.each([1006, 1011, 1012])(
     'reconnects with session handle on websocket close code %i with non-matching message',
     async (code) => {
@@ -1111,5 +1177,270 @@ describe('Runner.runLive', () => {
     }).rejects.toThrow('Simulated outbound connection error on empty receive');
 
     expect(llm.connection!.closed).toBe(true);
+  });
+});
+
+describe('Runner.runLive run config parity fields', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+
+  beforeEach(async () => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+  });
+
+  it('opens the connection with the live-connect fields from the run config', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {
+        explicitVadSignal: true,
+        translationConfig: {targetLanguageCode: 'es-ES'},
+        avatarConfig: {avatarName: 'ada'},
+        sessionResumption: {transparent: true},
+        historyConfig: {initialHistoryInClientContent: true},
+      },
+    })) {
+      // drain
+    }
+
+    const liveConfig: LiveConnectConfigWithHistory =
+      llm.llmRequestsSeen[0].liveConnectConfig;
+    expect(liveConfig.explicitVadSignal).toBe(true);
+    expect(liveConfig.translationConfig).toEqual({targetLanguageCode: 'es-ES'});
+    expect(liveConfig.avatarConfig).toEqual({avatarName: 'ada'});
+    expect(liveConfig.sessionResumption).toEqual({transparent: true});
+    expect(liveConfig.historyConfig).toEqual({
+      initialHistoryInClientContent: true,
+    });
+  });
+
+  it('applies the live-connect fields without the basic request processor', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: llm,
+      requestProcessors: [],
+    });
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+    const sessionResumption = {transparent: true};
+    const historyConfig = {initialHistoryInClientContent: true};
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {
+        explicitVadSignal: true,
+        translationConfig: {targetLanguageCode: 'es-ES'},
+        avatarConfig: {avatarName: 'ada'},
+        sessionResumption,
+        historyConfig,
+      },
+    })) {
+      // drain
+    }
+
+    const liveConfig: LiveConnectConfigWithHistory =
+      llm.llmRequestsSeen[0].liveConnectConfig;
+    expect(liveConfig.explicitVadSignal).toBe(true);
+    expect(liveConfig.translationConfig).toEqual({targetLanguageCode: 'es-ES'});
+    expect(liveConfig.avatarConfig).toEqual({avatarName: 'ada'});
+    expect(liveConfig.sessionResumption).toEqual({transparent: true});
+    expect(liveConfig.historyConfig).toEqual({
+      initialHistoryInClientContent: true,
+    });
+
+    const liveConfigByReference: LiveConnectConfigWithHistory =
+      llm.llmRequestsSeenByReference[0].liveConnectConfig;
+    liveConfigByReference.sessionResumption!.handle = 'server-handle';
+    liveConfigByReference.historyConfig!.initialHistoryInClientContent = false;
+    expect(sessionResumption).toEqual({transparent: true});
+    expect(historyConfig).toEqual({initialHistoryInClientContent: true});
+  });
+
+  it('lets a caller resumption handle override the run config sessionResumption', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+    const sessionResumption = {transparent: false};
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      liveSessionResumptionHandle: 'external-handle',
+      runConfig: {sessionResumption},
+    })) {
+      // drain
+    }
+
+    expect(llm.llmRequestsSeen[0].liveConnectConfig?.sessionResumption).toEqual(
+      {handle: 'external-handle', transparent: true},
+    );
+    expect(sessionResumption).toEqual({transparent: false});
+  });
+
+  it('drops a live audio event when saveLiveBlob is off', async () => {
+    const audioPart: Content = {
+      role: 'model',
+      parts: [{inlineData: {data: 'AAA=', mimeType: 'audio/pcm'}}],
+    };
+    const llm = new FakeLiveLlm([{content: audioPart}, {turnComplete: true}]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    const events: Event[] = [];
+    for await (const event of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {saveLiveBlob: false},
+    })) {
+      events.push(event);
+    }
+
+    expect(events.some((e) => e.content === audioPart)).toBe(true);
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    expect(session!.events.some((e) => e.content?.parts?.length)).toBe(false);
+    expect(
+      await artifactService.listArtifactKeys({
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+      }),
+    ).toEqual([]);
+  });
+
+  it('saves a live audio event as an artifact when saveLiveBlob is on', async () => {
+    const audioPart: Content = {
+      role: 'model',
+      parts: [{inlineData: {data: 'AAA=', mimeType: 'audio/pcm'}}],
+    };
+    const llm = new FakeLiveLlm([{content: audioPart}, {turnComplete: true}]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {saveLiveBlob: true},
+    })) {
+      // drain
+    }
+
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const persisted = session!.events.filter((e) => e.content?.parts?.length);
+    expect(persisted).toHaveLength(1);
+    expect(
+      persisted[0].content?.parts?.some((part) => part.inlineData),
+    ).toBeFalsy();
+    expect(persisted[0].content?.parts?.[0].text).toContain(
+      'Uploaded Artifact',
+    );
+    expect(
+      await artifactService.listArtifactKeys({
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+      }),
+    ).toHaveLength(1);
+  });
+
+  it('does not save an artifact for a partial live audio event', async () => {
+    const audioPart: Content = {
+      role: 'model',
+      parts: [{inlineData: {data: 'AAA=', mimeType: 'audio/pcm'}}],
+    };
+    const llm = new FakeLiveLlm([
+      {content: audioPart, partial: true},
+      {turnComplete: true},
+    ]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {saveLiveBlob: true},
+    })) {
+      // drain
+    }
+
+    expect(
+      await artifactService.listArtifactKeys({
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+      }),
+    ).toEqual([]);
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    expect(session!.events.some((e) => e.content?.parts?.length)).toBe(false);
   });
 });

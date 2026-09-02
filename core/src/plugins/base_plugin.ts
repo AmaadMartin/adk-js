@@ -122,6 +122,17 @@ export abstract class BasePlugin {
   }
 
   /**
+   * Releases the resources this plugin holds, such as network connections or
+   * file handles.
+   *
+   * `Runner.close` calls this once for every registered plugin. The default
+   * does nothing, so a plugin that holds no resource needs no override.
+   */
+  async close(): Promise<void> {
+    return;
+  }
+
+  /**
    * Callback executed when a user message is received before an invocation
    * starts.
    *
@@ -236,6 +247,25 @@ export abstract class BasePlugin {
     agent: BaseAgent;
     callbackContext: Context;
   }): Promise<Content | undefined> {
+    return;
+  }
+
+  /**
+   * Callback executed when an error escapes an agent's execution.
+   *
+   * This callback only notifies. The agent re-throws the error once every
+   * registered plugin is notified, so a plugin cannot suppress it.
+   *
+   * @param params.agent The agent that raised the error.
+   * @param params.callbackContext The context for the agent invocation.
+   * @param params.error The error raised during agent execution.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async onAgentErrorCallback(params: {
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }): Promise<void> {
     return;
   }
 

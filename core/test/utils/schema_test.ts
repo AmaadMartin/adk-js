@@ -11,7 +11,9 @@ import {z as z4} from 'zod/v4';
 import {
   objectSchemaFields,
   parseWithSchema,
+  stripJsonCodeFence,
   toJsonSchema,
+  tryParseWithSchema,
 } from '../../src/utils/schema.js';
 import {zodObjectToSchema} from '../../src/utils/simple_zod_to_json.js';
 
@@ -123,6 +125,72 @@ describe('parseWithSchema', () => {
   });
 });
 
+describe('tryParseWithSchema', () => {
+  it('returns the value unchanged when no schema is given', () => {
+    const value = {a: 1};
+    expect(tryParseWithSchema(undefined, value)).toBe(value);
+  });
+
+  it('returns the parsed value for a valid genai Schema', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {count: {type: Type.INTEGER}},
+      required: ['count'],
+    };
+    expect(tryParseWithSchema(schema, {count: 3})).toEqual({count: 3});
+  });
+
+  it('applies a genai Schema default the value omits', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        count: {type: Type.INTEGER},
+        unit: {type: Type.STRING, default: 'items'},
+      },
+      required: ['count'],
+    };
+    expect(tryParseWithSchema(schema, {count: 3})).toEqual({
+      count: 3,
+      unit: 'items',
+    });
+  });
+
+  it('returns the original value when a genai Schema rejects it', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {count: {type: Type.INTEGER}},
+      required: ['count'],
+    };
+    const value = {count: '3'};
+    expect(tryParseWithSchema(schema, value)).toBe(value);
+  });
+
+  it('returns the parsed value for a valid Zod schema', () => {
+    expect(
+      tryParseWithSchema(z4.object({count: z4.number()}), {count: 3}),
+    ).toEqual({count: 3});
+    expect(
+      tryParseWithSchema(z3.object({count: z3.number()}), {count: 3}),
+    ).toEqual({count: 3});
+  });
+
+  it('returns the original value when a Zod schema rejects it', () => {
+    const value = {count: 'no'};
+    expect(tryParseWithSchema(z4.object({count: z4.number()}), value)).toBe(
+      value,
+    );
+    expect(tryParseWithSchema(z3.object({count: z3.number()}), value)).toBe(
+      value,
+    );
+  });
+
+  it('leaves a genai Schema that has no Zod equivalent unenforced', () => {
+    const schema: Schema = {type: Type.TYPE_UNSPECIFIED};
+    const value = {anything: 'goes'};
+    expect(tryParseWithSchema(schema, value)).toEqual(value);
+  });
+});
+
 describe('toJsonSchema', () => {
   it('converts a Zod v4 schema to a JSON schema', () => {
     const json = toJsonSchema(z4.object({count: z4.number()}));
@@ -231,5 +299,38 @@ describe('objectSchemaFields', () => {
   it('returns undefined for a schema that is not an object', () => {
     expect(fieldsOf(z4.string())).toBeUndefined();
     expect(fieldsOf(z3.string())).toBeUndefined();
+  });
+});
+
+describe('stripJsonCodeFence', () => {
+  it.each([
+    ['```json\n{"a": 1}\n```', '{"a": 1}'],
+    ['```\n{"a": 1}\n```', '{"a": 1}'],
+    ['```{"a": 1}```', '{"a": 1}'],
+    ['  ```json\n{"a": 1}\n```  ', '{"a": 1}'],
+    ['``````', ''],
+  ])('unwraps %j', (fenced, expected) => {
+    expect(stripJsonCodeFence(fenced)).toBe(expected);
+  });
+
+  it.each([['{"a": 1}'], ['not json at all'], ['```'], ['```json\n{"a": 1}']])(
+    'returns %j unchanged',
+    (text) => {
+      expect(stripJsonCodeFence(text)).toBe(text);
+    },
+  );
+
+  it('keeps a fence that is part of the payload', () => {
+    expect(stripJsonCodeFence('```json\n{"a": "```"}\n```')).toBe(
+      '{"a": "```"}',
+    );
+  });
+
+  it('returns an unterminated fence padded with blank lines without stalling', () => {
+    // A pattern of the form ```\\s*(.*?)\\s*``` backtracks catastrophically on
+    // this shape and takes seconds, so the call must finish inside the timeout.
+    const unclosed = `\`\`\`json\n${'\n'.repeat(4000)}{"a": 1}`;
+
+    expect(stripJsonCodeFence(unclosed)).toBe(unclosed);
   });
 });

@@ -5,18 +5,16 @@
  */
 
 import {Schema, Type} from '@google/genai';
-import {z} from 'zod';
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const MCPToolSchemaObject = z.object({
-  type: z.literal('object'),
-  properties: z.record(z.string(), z.unknown()).optional(),
-  required: z.string().array().optional(),
-});
-type MCPToolSchema = z.infer<typeof MCPToolSchemaObject>;
 type MCPTypeArrayItem = string | {type: string};
 
-function toGeminiType(mcpType: string | undefined): Type {
+/**
+ * Maps a JSON Schema type name onto the Gemini `Type` enum.
+ *
+ * @param mcpType The schema type name, or `undefined` when none is declared.
+ * @returns The matching `Type`, or `Type.TYPE_UNSPECIFIED`.
+ */
+export function toGeminiType(mcpType: string | undefined): Type {
   if (!mcpType) return Type.TYPE_UNSPECIFIED;
 
   switch (mcpType.toLowerCase()) {
@@ -49,8 +47,12 @@ const getTypeFromArrayItem = (
   return mcpType?.type?.toLowerCase?.();
 };
 
-export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
-  if (!mcpSchema) {
+/**
+ * Converts a plain JSON Schema object to the genai `Schema` a function
+ * declaration carries. Returns `undefined` when there is no schema to convert.
+ */
+export function toGeminiSchema(jsonSchema?: object): Schema | undefined {
+  if (!jsonSchema) {
     return undefined;
   }
 
@@ -157,5 +159,5 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
     }
     return geminiSchema;
   }
-  return recursiveConvert(mcpSchema);
+  return recursiveConvert(jsonSchema);
 }

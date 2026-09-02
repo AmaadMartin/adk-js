@@ -10,12 +10,11 @@ import {
   WorkflowInstructionScope,
 } from '../agents/invocation_context.js';
 import {LlmAgent} from '../agents/llm_agent.js';
+import {createEvent, Event} from '../events/event.js';
 import {
-  createEvent,
-  Event,
   getFunctionCalls,
   getFunctionResponses,
-} from '../events/event.js';
+} from '../models/llm_response.js';
 import {
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,
@@ -40,8 +39,9 @@ import {NodeContext} from './node_context.js';
  * `BaseAgent.runImpl`, which is plain delegation to `runAsync` — an agent whose
  * input is its conversation has nothing to inject and no model text to promote.
  *
- * `single_turn` and `task` modes are ported; `chat` mode (task delegation via
- * `FinishTaskTool`, isolation scopes) is not yet supported.
+ * `single_turn` and `task` modes are ported. A `chat`-mode agent is run by the
+ * runner directly rather than as a node, so it does not reach here; one placed
+ * inside a graph is run for a single turn like any other node.
  */
 export async function* runLlmAgentAsNode(
   agent: LlmAgent,
@@ -58,12 +58,18 @@ export async function* runLlmAgentAsNode(
     await appendNodeInputAsUserTurn(ctx, nodeInput);
   }
 
-  const agentIc = withWorkflowInstructionScope(ctx.getInvocationContext(), {
+  let agentIc = withWorkflowInstructionScope(ctx.getInvocationContext(), {
     input: nodeInput,
     outputsByNode: collectPredecessorOutputs(ctx),
   });
 
   if (isTaskMode) {
+    // A task node has no delegating function call to state its task, so the
+    // node input takes that place. `single_turn` is excluded: it already
+    // appends the input as a scoped user turn above.
+    if (nodeInput != null) {
+      agentIc = agentIc.clone({userContent: toUserContent(nodeInput)});
+    }
     yield* runTaskMode(ctx, agentIc, agent);
     return;
   }

@@ -12,13 +12,13 @@ import {
   createEvent,
   Event,
   generateClientFunctionCallId,
-  getFunctionCalls,
-  getFunctionResponses,
 } from '../events/event.js';
 import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../events/event_actions.js';
+import {getFunctionCalls} from '../models/llm_response.js';
+import {isAgentTool} from '../tools/agent_tool_signature.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
@@ -57,6 +57,10 @@ export {
   generateClientFunctionCallId,
   populateClientFunctionCallId,
 } from '../events/event.js';
+export {
+  findEventByFunctionCallId,
+  findMatchingFunctionCall,
+} from '../events/event_filters.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
@@ -193,6 +197,36 @@ export function generateRequestConfirmationEvent({
   });
 }
 
+/**
+ * The error type a tool reports for its own response, for telemetry only.
+ *
+ * Detection is skipped while the tool is asking for credentials or for
+ * confirmation, because such a response carries an `error` key without the
+ * tool having failed. A detector that throws is logged and treated as "no
+ * error type", so telemetry can never break a tool call.
+ */
+function detectErrorTypeForTelemetry(
+  tool: BaseTool,
+  toolContext: Context,
+  response: unknown,
+): string | undefined {
+  if (
+    !isEmpty(toolContext.actions.requestedAuthConfigs) ||
+    !isEmpty(toolContext.actions.requestedToolConfirmations)
+  ) {
+    return undefined;
+  }
+  try {
+    return tool.detectErrorInResponse?.(response);
+  } catch (error) {
+    logger.error(
+      `Error while detecting the error type of tool '${tool.name}'.`,
+      error,
+    );
+    return undefined;
+  }
+}
+
 async function callToolAsync(
   tool: BaseTool,
   args: Record<string, any>, // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -212,6 +246,7 @@ async function callToolAsync(
           toolContext,
           toolContext.invocationContext,
         ),
+        errorType: detectErrorTypeForTelemetry(tool, toolContext, result),
       });
       return result;
     } finally {
@@ -240,6 +275,7 @@ function buildResponseEvent(
       name: tool.name,
       response: responseResult,
       id: toolContext.functionCallId,
+      ...(tool.responseScheduling && {scheduling: tool.responseScheduling}),
     },
   };
 
@@ -318,6 +354,33 @@ function normalizeCallbackResponse(
     return {results: response};
   }
   return response as Record<string, unknown>;
+}
+
+/** Whether a normalized tool response reports an error rather than a result. */
+function isErrorResponse(
+  response: Record<string, unknown> | undefined,
+): boolean {
+  return response !== undefined && 'error' in response;
+}
+
+/**
+ * Whether a raw tool result carries something a user can read. An empty string,
+ * a nullish value, and the `{result: null}` a void tool produces all render as
+ * noise rather than as an answer.
+ */
+function isDisplayableResult(result: unknown): boolean {
+  if (result == null || result === '') {
+    return false;
+  }
+  if (typeof result !== 'object') {
+    return true;
+  }
+  const entries = Object.entries(result);
+  return !(
+    entries.length === 1 &&
+    entries[0][0] === 'result' &&
+    entries[0][1] === null
+  );
 }
 
 /**
@@ -600,12 +663,16 @@ export async function handleFunctionCallList({
       functionResponse = normalizeCallbackResponse(alteredFunctionResponse);
     }
 
-    // Allow long running function to return None as response.
+    // Allow a tool that runs long, or that defers its response by design, to
+    // return None as response.
     // Only a nullish response defers the event. A falsy-but-present response
     // ('', 0, false) is a real result and still emits one, so long-running
     // tools that return such a value now produce a response event where they
     // previously produced none.
-    if (tool.isLongRunning && functionResponse == null) {
+    if (
+      (tool.isLongRunning || tool.defersResponse) &&
+      functionResponse == null
+    ) {
       // The tool's response will arrive later, but any actions it recorded on
       // the tool context (state/artifact deltas, auth or confirmation
       // requests, transfer, escalation, skipSummarization) must not be lost.
@@ -622,6 +689,10 @@ export async function handleFunctionCallList({
       continue;
     }
 
+    // The raw result, before normalization wraps or replaces it, is what a UI
+    // can display.
+    const displayResult = functionResponse;
+
     if (functionResponseError) {
       functionResponse = {error: functionResponseError};
     } else if (functionResponse == null) {
@@ -630,16 +701,42 @@ export async function handleFunctionCallList({
       functionResponse = normalizeCallbackResponse(functionResponse);
     }
 
+    const content = createUserContent({
+      functionResponse: {
+        id: toolContext.functionCallId,
+        name: tool.name,
+        response: functionResponse,
+        ...(tool.responseScheduling && {scheduling: tool.responseScheduling}),
+      },
+    });
+
+    // Nothing summarises an AgentTool result when the flag is set, so the
+    // sub-agent's answer is added as text or it never reaches the user. This is
+    // scoped to AgentTool deliberately: other tools set the flag precisely
+    // because their response is an internal acknowledgement that must not be
+    // surfaced. A tool that returns an error as its value carries an `error`
+    // key here, which is why the thrown-error flag alone is not enough.
+    if (
+      toolContext.actions.skipSummarization &&
+      !isErrorResponse(functionResponse) &&
+      isAgentTool(tool) &&
+      isDisplayableResult(displayResult)
+    ) {
+      content.parts = [
+        ...(content.parts ?? []),
+        {
+          text:
+            typeof displayResult === 'string'
+              ? displayResult
+              : JSON.stringify(displayResult),
+        },
+      ];
+    }
+
     const functionResponseEvent = createEvent({
       invocationId: invocationContext.invocationId,
       author: toolEventAuthor(invocationContext),
-      content: createUserContent({
-        functionResponse: {
-          id: toolContext.functionCallId,
-          name: tool.name,
-          response: functionResponse,
-        },
-      }),
+      content,
       actions: toolContext.actions,
       branch: invocationContext.branch,
     });
@@ -720,44 +817,3 @@ export function mergeParallelFunctionResponseEvents(
 }
 
 // TODO - b/425992518: support function call in live connection.
-
-/**
- * Finds the function call event that matches the function call ID.
- * Mirrors Python ADK's `find_event_by_function_call_id`.
- */
-export function findEventByFunctionCallId(
-  events: Event[],
-  functionCallId: string,
-  endIndex: number = events.length,
-): Event | undefined {
-  for (let i = endIndex - 1; i >= 0; i--) {
-    const event = events[i];
-    const functionCalls = getFunctionCalls(event);
-    for (const functionCall of functionCalls) {
-      if (functionCall.id === functionCallId) {
-        return event;
-      }
-    }
-  }
-  return undefined;
-}
-
-/**
- * Finds the function call event that matches the function response ID of the last event.
- * Mirrors Python ADK's `find_matching_function_call`.
- */
-export function findMatchingFunctionCall(events: Event[]): Event | undefined {
-  if (!events.length) {
-    return undefined;
-  }
-  const lastEvent = events[events.length - 1];
-  const functionResponses = getFunctionResponses(lastEvent);
-  if (!functionResponses.length || !functionResponses[0].id) {
-    return undefined;
-  }
-  return findEventByFunctionCallId(
-    events,
-    functionResponses[0].id,
-    events.length - 1,
-  );
-}

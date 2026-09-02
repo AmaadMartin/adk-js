@@ -9,9 +9,11 @@ import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
+import {ensurePart} from './artifact_util.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
+  createArtifactVersion,
   DeleteArtifactRequest,
   ListArtifactKeysRequest,
   ListVersionsRequest,
@@ -23,6 +25,14 @@ const GCS_FILE_URI_METADATA_KEY = 'adkFileUri';
 const GCS_FILE_MIME_TYPE_METADATA_KEY = 'adkFileMimeType';
 const GCS_DISPLAY_NAME_METADATA_KEY = 'adkDisplayName';
 const GCS_IS_TEXT_METADATA_KEY = 'adkIsText';
+
+/** The blob metadata keys the service owns, rather than the caller. */
+const ADK_METADATA_KEYS: readonly string[] = [
+  GCS_FILE_URI_METADATA_KEY,
+  GCS_FILE_MIME_TYPE_METADATA_KEY,
+  GCS_DISPLAY_NAME_METADATA_KEY,
+  GCS_IS_TEXT_METADATA_KEY,
+];
 
 export class GcsArtifactService implements BaseArtifactService {
   private readonly bucketName: string;
@@ -49,11 +59,8 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact(request: SaveArtifactRequest): Promise<number> {
-    if (
-      !request.artifact.inlineData &&
-      !request.artifact.text &&
-      !request.artifact.fileData
-    ) {
+    const artifact = ensurePart(request.artifact);
+    if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
       throw new Error('Artifact must have either inlineData or text content.');
     }
 
@@ -71,22 +78,19 @@ export class GcsArtifactService implements BaseArtifactService {
       ...request.customMetadata,
     };
 
-    if (request.artifact.inlineData) {
-      if (request.artifact.inlineData.displayName) {
+    if (artifact.inlineData) {
+      if (artifact.inlineData.displayName) {
         customMetadata[GCS_DISPLAY_NAME_METADATA_KEY] =
-          request.artifact.inlineData.displayName;
+          artifact.inlineData.displayName;
       }
-      await file.save(
-        Buffer.from(request.artifact.inlineData.data || '', 'base64'),
-        {
-          contentType: request.artifact.inlineData.mimeType,
-          metadata: {metadata: customMetadata},
-        },
-      );
+      await file.save(Buffer.from(artifact.inlineData.data || '', 'base64'), {
+        contentType: artifact.inlineData.mimeType,
+        metadata: {metadata: customMetadata},
+      });
 
       return version;
-    } else if (request.artifact.text !== undefined) {
-      await file.save(request.artifact.text, {
+    } else if (artifact.text !== undefined) {
+      await file.save(artifact.text, {
         contentType: 'text/plain',
         metadata: {
           metadata: {...customMetadata, [GCS_IS_TEXT_METADATA_KEY]: 'true'},
@@ -95,7 +99,7 @@ export class GcsArtifactService implements BaseArtifactService {
 
       return version;
     } else {
-      const fileData = request.artifact.fileData;
+      const fileData = artifact.fileData;
       const fileUri = fileData?.fileUri;
       if (!fileUri) {
         throw new Error('Artifact fileData must have a fileUri.');
@@ -276,12 +280,13 @@ export class GcsArtifactService implements BaseArtifactService {
 
       const [metadata] = await file.getMetadata();
 
-      return {
+      return createArtifactVersion({
         version,
         mimeType: metadata.contentType,
-        customMetadata: metadata.metadata as Record<string, unknown>,
+        customMetadata: toCustomMetadata(metadata.metadata),
         canonicalUri: file.publicUrl(),
-      };
+        createTime: toUnixSeconds(metadata.timeCreated),
+      });
     } catch (e) {
       logger.warn(
         `[GcsArtifactService] getArtifactVersion: Failed to get artifact version for userId: ${request.userId} sessionId: ${request.sessionId} filename: ${request.filename} version: ${request.version}`,
@@ -290,6 +295,37 @@ export class GcsArtifactService implements BaseArtifactService {
       return undefined;
     }
   }
+}
+
+/**
+ * Reads back the metadata the caller supplied.
+ *
+ * The service stores its own keys in the same blob metadata, so a version
+ * record reports only the keys that came from the caller.
+ *
+ * @param stored The blob metadata GCS reported.
+ * @return The caller's metadata.
+ */
+function toCustomMetadata(
+  stored?: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(stored ?? {}).filter(
+      ([key]) => !ADK_METADATA_KEYS.includes(key),
+    ),
+  );
+}
+
+/**
+ * Converts the RFC 3339 timestamp GCS reports into Unix seconds.
+ *
+ * @param timestamp The timestamp the client reported, if it reported one.
+ * @return The time in Unix seconds, or undefined when GCS reported no usable
+ *     timestamp.
+ */
+function toUnixSeconds(timestamp?: string): number | undefined {
+  const milliseconds = timestamp ? Date.parse(timestamp) : Number.NaN;
+  return Number.isNaN(milliseconds) ? undefined : milliseconds / 1000;
 }
 
 function getFileName({

@@ -12,6 +12,7 @@ import {
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  BaseToolset,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
@@ -20,12 +21,18 @@ import {
   Event,
   FunctionTool,
   InMemorySessionService,
+  INTERACTIONS_REQUEST_PROCESSOR,
   InvocationContext,
   LlmAgent,
+  LLMRegistry,
   LlmRequest,
   LlmResponse,
   LongRunningFunctionTool,
+  NL_PLANNING_REQUEST_PROCESSOR,
+  NL_PLANNING_RESPONSE_PROCESSOR,
+  PlanReActPlanner,
   PluginManager,
+  ReadonlyContext,
   RunAsyncToolRequest,
   Runner,
   Session,
@@ -34,6 +41,7 @@ import {
 import {Content, Schema, Type} from '@google/genai';
 import {
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -43,6 +51,12 @@ import {
 } from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/agent_transfer_llm_request_processor.js';
+import {
+  CODE_EXECUTION_REQUEST_PROCESSOR,
+  responseProcessor as CODE_EXECUTION_RESPONSE_PROCESSOR,
+} from '../../src/agents/processors/code_execution_request_processor.js';
+import {appendDynamicInstructions} from '../../src/models/llm_request.js';
 import {logger} from '../../src/utils/logger.js';
 
 class MockLlmConnection implements BaseLlmConnection {
@@ -578,6 +592,21 @@ describe('LlmAgent Output Processing', () => {
     expect(lastEvent.actions?.stateDelta?.['result']).toEqual(invalidJson);
   });
 
+  it('saves the parsed object when the model fences its JSON reply', async () => {
+    const response: LlmResponse = {
+      content: {parts: [{text: '```json\n{"answer": "42"}\n```'}]},
+    };
+    agent.model = new MockLlm(response);
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    const lastEvent = events[events.length - 1];
+    expect(lastEvent.actions?.stateDelta?.['result']).toEqual({answer: '42'});
+  });
+
   it('keeps the parsed object in state when it violates the output schema', async () => {
     // Well-formed JSON, but `answer` is declared STRING. The violation is
     // logged rather than thrown, and state keeps the object the model
@@ -650,6 +679,65 @@ describe('LlmAgent Configuration with contextCompactors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(contentIndex).toBe(processorIndex + 1);
+  });
+});
+
+describe('LlmAgent flow selection', () => {
+  it('omits agent transfer when a leaf agent forbids every direction', () => {
+    const agent = new LlmAgent({
+      name: 'leaf_agent',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    expect(agent.requestProcessors).not.toContain(
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    );
+  });
+
+  it('adds agent transfer last when transfer stays allowed', () => {
+    const agent = new LlmAgent({name: 'default_agent'});
+
+    expect(agent.requestProcessors[agent.requestProcessors.length - 1]).toBe(
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    );
+  });
+
+  it('adds agent transfer when an agent has sub-agents despite the flags', () => {
+    const agent = new LlmAgent({
+      name: 'parent_agent',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+      subAgents: [new LlmAgent({name: 'child_agent'})],
+    });
+
+    expect(agent.requestProcessors).toContain(
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    );
+  });
+
+  it('appends agent transfer to a caller-supplied pipeline', () => {
+    const agent = new LlmAgent({
+      name: 'custom_agent',
+      requestProcessors: [CONTENT_REQUEST_PROCESSOR],
+    });
+
+    expect(agent.requestProcessors).toEqual([
+      CONTENT_REQUEST_PROCESSOR,
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    ]);
+  });
+
+  it('gives every agent its own processor arrays', () => {
+    const first = new LlmAgent({name: 'first_agent'});
+    const second = new LlmAgent({name: 'second_agent'});
+
+    first.requestProcessors.push(CONTENT_REQUEST_PROCESSOR);
+
+    expect(first.requestProcessors).toHaveLength(
+      second.requestProcessors.length + 1,
+    );
+    expect(first.responseProcessors).not.toBe(second.responseProcessors);
   });
 });
 
@@ -1026,6 +1114,103 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+
+  it('resolves the interaction chain id before building the contents', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+    });
+    const interactionsIndex = agent.requestProcessors.indexOf(
+      INTERACTIONS_REQUEST_PROCESSOR,
+    );
+    const contentIndex = agent.requestProcessors.indexOf(
+      CONTENT_REQUEST_PROCESSOR,
+    );
+    expect(interactionsIndex).toBeGreaterThanOrEqual(0);
+    expect(interactionsIndex).toBeLessThan(contentIndex);
+  });
+
+  it('runs NL_PLANNING_REQUEST_PROCESSOR after contents and before code execution', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    const contentIndex = agent.requestProcessors.indexOf(
+      CONTENT_REQUEST_PROCESSOR,
+    );
+    const planningIndex = agent.requestProcessors.indexOf(
+      NL_PLANNING_REQUEST_PROCESSOR,
+    );
+    const codeExecutionIndex = agent.requestProcessors.indexOf(
+      CODE_EXECUTION_REQUEST_PROCESSOR,
+    );
+    expect(planningIndex).toBeGreaterThan(contentIndex);
+    expect(planningIndex).toBeLessThan(codeExecutionIndex);
+  });
+});
+
+describe('LlmAgent Single Flow Defaults', () => {
+  it('runs INTERACTIONS_REQUEST_PROCESSOR before CONTENT_REQUEST_PROCESSOR', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    const interactionsIndex = agent.requestProcessors.indexOf(
+      INTERACTIONS_REQUEST_PROCESSOR,
+    );
+    const contentIndex = agent.requestProcessors.indexOf(
+      CONTENT_REQUEST_PROCESSOR,
+    );
+    expect(interactionsIndex).toBeGreaterThanOrEqual(0);
+    expect(interactionsIndex).toBeLessThan(contentIndex);
+  });
+
+  it('defaults responseProcessors to the code execution response processor', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    expect(agent.responseProcessors).toContain(
+      CODE_EXECUTION_RESPONSE_PROCESSOR,
+    );
+  });
+
+  it('runs NL_PLANNING_RESPONSE_PROCESSOR before the code execution response processor', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    expect(agent.responseProcessors).toEqual([
+      NL_PLANNING_RESPONSE_PROCESSOR,
+      CODE_EXECUTION_RESPONSE_PROCESSOR,
+    ]);
+  });
+
+  it('keeps an explicitly empty responseProcessors list empty', () => {
+    const agent = new LlmAgent({name: 'test_agent', responseProcessors: []});
+
+    expect(agent.responseProcessors).toEqual([]);
+  });
+
+  it('gives each agent its own requestProcessors array', () => {
+    const first = new LlmAgent({name: 'first_agent'});
+    const second = new LlmAgent({name: 'second_agent'});
+
+    expect(first.requestProcessors).not.toBe(second.requestProcessors);
+    first.requestProcessors.push(CONTENT_REQUEST_PROCESSOR);
+    expect(
+      second.requestProcessors.filter(
+        (processor) => processor === CONTENT_REQUEST_PROCESSOR,
+      ),
+    ).toHaveLength(1);
+  });
+});
+
+describe('LlmAgent planner', () => {
+  it('round-trips the planner from the config', () => {
+    const planner = new PlanReActPlanner();
+
+    const agent = new LlmAgent({name: 'test_agent', planner});
+
+    expect(agent.planner).toBe(planner);
+  });
+
+  it('leaves planner undefined when the config omits it', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    expect(agent.planner).toBeUndefined();
   });
 });
 
@@ -1427,5 +1612,326 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+describe('LlmAgent run config httpOptions', () => {
+  /** Records the request the agent builds on the unary path. */
+  class RequestCapturingLlm extends BaseLlm {
+    capturedRequest?: LlmRequest;
+
+    async *generateContentAsync(
+      request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      this.capturedRequest = request;
+      yield {content: {role: 'model', parts: [{text: 'done'}]}};
+    }
+
+    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  it('reach the model request and win over the agent options', async () => {
+    const llm = new RequestCapturingLlm({model: 'capture-http-options'});
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: llm,
+      generateContentConfig: {
+        httpOptions: {timeout: 1000, headers: {'Agent-Header': 'agent'}},
+      },
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_http_options',
+      session: createSession({
+        id: 'sess_http_options',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+      runConfig: {
+        httpOptions: {timeout: 5000, headers: {'RunConfig-Header': 'run'}},
+        labels: {owner: 'run'},
+      },
+    });
+
+    for await (const _ of agent.runAsync(invocationContext)) {
+      // Drain the run so that the request is fully built.
+    }
+
+    expect(llm.capturedRequest?.config?.httpOptions).toEqual({
+      timeout: 5000,
+      headers: {'Agent-Header': 'agent', 'RunConfig-Header': 'run'},
+    });
+    expect(llm.capturedRequest?.config?.labels).toMatchObject({owner: 'run'});
+  });
+});
+
+class FailingToolset extends BaseToolset {
+  constructor() {
+    super([]);
+  }
+
+  getTools(_context?: ReadonlyContext): Promise<BaseTool[]> {
+    return Promise.reject(new Error('transport closed'));
+  }
+
+  async close(): Promise<void> {}
+}
+
+class WorkingToolset extends BaseToolset {
+  constructor(private readonly tool: BaseTool) {
+    super([]);
+  }
+
+  async getTools(_context?: ReadonlyContext): Promise<BaseTool[]> {
+    return [this.tool];
+  }
+
+  async close(): Promise<void> {}
+}
+
+describe('LlmAgent toolset load failures', () => {
+  it('keeps the other tools and names the failed toolset in an error log', async () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    onTestFinished(() => errorSpy.mockRestore());
+    const survivor = new FunctionTool({
+      name: 'survivor',
+      description: 'A tool from the toolset that loaded.',
+      parameters: z3.object({}),
+      execute: async () => ({result: 'ok'}),
+    });
+    const agent = new LlmAgent({
+      name: 'resilient_agent',
+      tools: [new FailingToolset(), new WorkingToolset(survivor)],
+    });
+
+    const tools = await agent.canonicalTools();
+
+    expect(tools).toEqual([survivor]);
+    expect(errorSpy).toHaveBeenCalledOnce();
+    const [message, cause] = errorSpy.mock.calls[0];
+    expect(message).toContain('FailingToolset');
+    expect(message).toContain('<unknown>');
+    expect(cause).toBeInstanceOf(Error);
+  });
+
+  it('names the agent when a readonly context is available', async () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    onTestFinished(() => errorSpy.mockRestore());
+    const agent = new LlmAgent({
+      name: 'named_agent',
+      tools: [new FailingToolset()],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_toolset',
+      session: createSession({id: 'sess_toolset', appName: 'app'}),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const tools = await agent.canonicalTools(
+      new ReadonlyContext(invocationContext),
+    );
+
+    expect(tools).toEqual([]);
+    expect(errorSpy.mock.calls[0][0]).toContain('named_agent');
+  });
+});
+
+/**
+ * Budget (ms) for a test that re-evaluates the agent module graph. Well above
+ * the ~5s it costs on a developer machine, because CI adds v8 coverage
+ * instrumentation on slower runners.
+ */
+const MODULE_RELOAD_TIMEOUT_MS = 120_000;
+
+class DefaultTestLlm extends BaseLlm {
+  static override readonly supportedModels = ['default-test-llm'];
+
+  async *generateContentAsync(
+    _request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {}
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
+describe('LlmAgent default model', () => {
+  beforeAll(() => {
+    LLMRegistry.register(DefaultTestLlm);
+  });
+
+  // The override is process-global, so a leak would decide the model for
+  // unrelated agents in the same worker.
+  afterEach(() => {
+    LlmAgent.setDefaultModel(undefined);
+  });
+
+  it('throws when no model, no ancestor and no override', () => {
+    const agent = new LlmAgent({name: 'lonely_agent'});
+
+    expect(() => agent.canonicalModel).toThrow(
+      'No model found for lonely_agent.',
+    );
+  });
+
+  it('resolves an override given as a model name', () => {
+    LlmAgent.setDefaultModel('default-test-llm');
+    const agent = new LlmAgent({name: 'named_override_agent'});
+
+    expect(agent.canonicalModel).toBeInstanceOf(DefaultTestLlm);
+    expect(agent.canonicalModel.model).toBe('default-test-llm');
+  });
+
+  it('returns the exact instance an override was given as', () => {
+    const llm = new DefaultTestLlm({model: 'default-test-llm'});
+    LlmAgent.setDefaultModel(llm);
+    const agent = new LlmAgent({name: 'instance_override_agent'});
+
+    expect(agent.canonicalModel).toBe(llm);
+  });
+
+  it('ignores the override when the agent sets its own model', () => {
+    LlmAgent.setDefaultModel('default-test-llm');
+    const own = new MockLlm(null);
+    const agent = new LlmAgent({name: 'own_model_agent', model: own});
+
+    expect(agent.canonicalModel).toBe(own);
+  });
+
+  it('prefers an ancestor model over the override', () => {
+    LlmAgent.setDefaultModel('default-test-llm');
+    const leaf = new LlmAgent({name: 'leaf_agent'});
+    const parentModel = new MockLlm(null);
+    new LlmAgent({
+      name: 'parent_agent',
+      model: parentModel,
+      subAgents: [leaf],
+    });
+
+    expect(leaf.canonicalModel).toBe(parentModel);
+  });
+
+  it('falls through a model-less ancestor to the override', () => {
+    LlmAgent.setDefaultModel('default-test-llm');
+    const leaf = new LlmAgent({name: 'leaf_agent'});
+    new LlmAgent({name: 'parent_agent', subAgents: [leaf]});
+
+    expect(leaf.canonicalModel).toBeInstanceOf(DefaultTestLlm);
+  });
+
+  // An agent file is bundled with its own copy of `@google/adk`, so the class
+  // the CLI configures is not the class the agent uses. `resetModules` gives a
+  // second copy of the module graph to stand in for that one. Re-evaluating
+  // that graph costs seconds, so this test needs more than the default budget.
+  it(
+    'shares the override with a second copy of the module graph',
+    async () => {
+      const llm = new DefaultTestLlm({model: 'default-test-llm'});
+      LlmAgent.setDefaultModel(llm);
+
+      vi.resetModules();
+      const {LlmAgent: ReloadedLlmAgent} =
+        await import('../../src/agents/llm_agent.js');
+      expect(ReloadedLlmAgent).not.toBe(LlmAgent);
+
+      const agent = new ReloadedLlmAgent({name: 'bundled_agent'});
+      expect(agent.canonicalModel).toBe(llm);
+    },
+    MODULE_RELOAD_TIMEOUT_MS,
+  );
+
+  it('rejects an empty model name', () => {
+    expect(() => LlmAgent.setDefaultModel('')).toThrow(
+      'Default model must be a non-empty string.',
+    );
+  });
+
+  it('throws again after the override is cleared', () => {
+    LlmAgent.setDefaultModel('default-test-llm');
+    const agent = new LlmAgent({name: 'cleared_agent'});
+    expect(agent.canonicalModel).toBeInstanceOf(DefaultTestLlm);
+
+    LlmAgent.setDefaultModel(undefined);
+
+    expect(() => agent.canonicalModel).toThrow(
+      'No model found for cleared_agent.',
+    );
+  });
+});
+
+describe('LlmAgent dynamic instructions', () => {
+  class DynamicInstructionCapturingLlm extends BaseLlm {
+    capturedRequest?: LlmRequest;
+
+    async *generateContentAsync(
+      request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      this.capturedRequest = request;
+      yield {content: {role: 'model', parts: [{text: 'done'}]}};
+    }
+
+    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  class DynamicInstructionTool extends BaseTool {
+    constructor(private readonly instruction: string) {
+      super({
+        name: 'dynamic_instruction_tool',
+        description: 'contributes an instruction',
+      });
+    }
+
+    async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
+      return {};
+    }
+
+    override async processLlmRequest({
+      llmRequest,
+    }: ToolProcessLlmRequest): Promise<void> {
+      appendDynamicInstructions(llmRequest, [this.instruction]);
+    }
+  }
+
+  it('resolves a tool instruction into the system instruction before the model runs', async () => {
+    const llm = new DynamicInstructionCapturingLlm({model: 'gemini-2.5-flash'});
+    const agent = new LlmAgent({
+      name: 'dynamic_instruction_agent',
+      model: llm,
+      instruction: 'Base instruction',
+      tools: [
+        new DynamicInstructionTool('Prefer the artifact named report.pdf.'),
+      ],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_dynamic_1',
+      session: createSession({
+        id: 'sess_dynamic_1',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    for await (const _ of agent.runAsync(invocationContext)) {
+      // Drain the run so that the request is fully built.
+    }
+
+    const request = llm.capturedRequest;
+    if (!request) {
+      expect.fail('the agent never called the model');
+    }
+    expect(request.config?.systemInstruction).toContain(
+      'Prefer the artifact named report.pdf.',
+    );
+    expect(request.dynamicInstructions).toEqual([]);
   });
 });

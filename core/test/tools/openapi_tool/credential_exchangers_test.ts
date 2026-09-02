@@ -5,13 +5,22 @@
  */
 
 import {JWT} from 'google-auth-library';
-import {describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AuthCredential,
   AuthCredentialTypes,
 } from '../../../src/auth/auth_credential.js';
+import {
+  AuthScheme,
+  OpenIdConnectWithConfig,
+} from '../../../src/auth/auth_schemes.js';
+import {
+  AuthCredentialMissingError,
+  BaseCredentialExchanger,
+} from '../../../src/auth/exchanger/base_credential_exchanger.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
+import {resetServiceAccountTokenCache} from '../../../src/tools/openapi_tool/auth/credential_exchangers/token_cache.js';
 
 vi.mock('google-auth-library', () => {
   return {
@@ -25,6 +34,31 @@ vi.mock('google-auth-library', () => {
     })),
   };
 });
+
+// The exchanger caches tokens in a module-level map, so a case that expects a
+// fresh exchange has to start from an empty cache.
+beforeEach(() => {
+  resetServiceAccountTokenCache();
+});
+
+const AUTH_SCHEME: AuthScheme = {
+  type: 'openIdConnect',
+  openIdConnectUrl: 'https://example.com/.well-known/openid-configuration',
+};
+
+/** The credential a stub exchanger resolves to, used as a fingerprint. */
+const STUB_CREDENTIAL: AuthCredential = {
+  authType: AuthCredentialTypes.HTTP,
+  http: {scheme: 'bearer', credentials: {token: 'stub-token'}},
+};
+
+function createStubExchanger(): BaseCredentialExchanger {
+  return {
+    exchange: vi
+      .fn()
+      .mockResolvedValue({credential: STUB_CREDENTIAL, wasExchanged: true}),
+  };
+}
 
 describe('AutoAuthCredentialExchanger', () => {
   it('should return original credential if no exchanger registered', async () => {
@@ -53,6 +87,138 @@ describe('AutoAuthCredentialExchanger', () => {
     expect(result.wasExchanged).toBe(true);
     expect(result.credential.http?.credentials.token).toBe('mock-adc-token');
   });
+
+  it('should convert an oauth2 access token into a bearer credential', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {accessToken: 'oauth2-access-token'},
+    };
+    const authScheme = {
+      type: 'openIdConnect',
+      openIdConnectUrl: 'https://example.com/.well-known/openid-configuration',
+      authorizationEndpoint: 'https://example.com/auth',
+      tokenEndpoint: 'https://example.com/token',
+    } satisfies OpenIdConnectWithConfig;
+
+    const result = await exchanger.exchange({
+      authScheme,
+      authCredential: credential,
+    });
+
+    expect(result.credential.authType).toBe(AuthCredentialTypes.HTTP);
+    expect(result.credential.http?.credentials.token).toBe(
+      'oauth2-access-token',
+    );
+  });
+
+  it('should merge custom exchangers over the built-ins', () => {
+    const stub = createStubExchanger();
+
+    const exchanger = new AutoAuthCredentialExchanger(
+      new Map([[AuthCredentialTypes.API_KEY, stub]]),
+    );
+
+    expect(exchanger.exchangers.get(AuthCredentialTypes.API_KEY)).toBe(stub);
+    expect(exchanger.exchangers.has(AuthCredentialTypes.SERVICE_ACCOUNT)).toBe(
+      true,
+    );
+    expect(exchanger.exchangers.get(AuthCredentialTypes.OAUTH2)).toBe(
+      exchanger.exchangers.get(AuthCredentialTypes.OPEN_ID_CONNECT),
+    );
+  });
+
+  it('should keep the OAuth2 built-in for openIdConnect when a custom exchanger is added', async () => {
+    const exchanger = new AutoAuthCredentialExchanger(
+      new Map([[AuthCredentialTypes.API_KEY, createStubExchanger()]]),
+    );
+
+    await expect(
+      exchanger.exchange({
+        authCredential: {authType: AuthCredentialTypes.OPEN_ID_CONNECT},
+      }),
+    ).rejects.toThrow('authScheme is required for OAuth2 credential exchange');
+  });
+
+  it('should return null when the credential is absent', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+
+    await expect(
+      exchanger.exchange({authScheme: AUTH_SCHEME, authCredential: undefined}),
+    ).resolves.toBeNull();
+    await expect(
+      exchanger.exchange({authScheme: AUTH_SCHEME, authCredential: null}),
+    ).resolves.toBeNull();
+  });
+
+  it('should route through an exchanger set on the public exchangers map', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+    const stub = createStubExchanger();
+    exchanger.exchangers.set(AuthCredentialTypes.OPEN_ID_CONNECT, stub);
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+    };
+
+    const result = await exchanger.exchange({
+      authScheme: AUTH_SCHEME,
+      authCredential,
+    });
+
+    expect(result).toEqual({credential: STUB_CREDENTIAL, wasExchanged: true});
+    const calls = vi.mocked(stub.exchange).mock.calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0].authScheme).toBe(AUTH_SCHEME);
+    expect(calls[0][0].authCredential).toBe(authCredential);
+  });
+
+  it('should let a custom exchanger replace a built-in', async () => {
+    const stub = createStubExchanger();
+    const exchanger = new AutoAuthCredentialExchanger(
+      new Map([[AuthCredentialTypes.SERVICE_ACCOUNT, stub]]),
+    );
+
+    const result = await exchanger.exchange({
+      authScheme: AUTH_SCHEME,
+      authCredential: {
+        authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+        serviceAccount: {useDefaultCredential: true},
+      },
+    });
+
+    expect(result.credential).toBe(STUB_CREDENTIAL);
+    expect(vi.mocked(stub.exchange)).toHaveBeenCalledTimes(1);
+  });
+
+  it('should add a custom exchanger for a type with no built-in', async () => {
+    const stub = createStubExchanger();
+    const exchanger = new AutoAuthCredentialExchanger(
+      new Map([[AuthCredentialTypes.API_KEY, stub]]),
+    );
+
+    const result = await exchanger.exchange({
+      authScheme: AUTH_SCHEME,
+      authCredential: {authType: AuthCredentialTypes.API_KEY, apiKey: 'key'},
+    });
+
+    expect(result.credential).toBe(STUB_CREDENTIAL);
+    expect(vi.mocked(stub.exchange)).toHaveBeenCalledTimes(1);
+  });
+
+  it('should ignore a change made to the custom exchangers map after construction', async () => {
+    const stub = createStubExchanger();
+    const customExchangers = new Map([[AuthCredentialTypes.API_KEY, stub]]);
+    const exchanger = new AutoAuthCredentialExchanger(customExchangers);
+    const replacement = createStubExchanger();
+
+    customExchangers.set(AuthCredentialTypes.API_KEY, replacement);
+    await exchanger.exchange({
+      authScheme: AUTH_SCHEME,
+      authCredential: {authType: AuthCredentialTypes.API_KEY, apiKey: 'key'},
+    });
+
+    expect(vi.mocked(stub.exchange)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(replacement.exchange)).not.toHaveBeenCalled();
+  });
 });
 
 describe('ServiceAccountCredentialExchanger', () => {
@@ -78,6 +244,7 @@ describe('ServiceAccountCredentialExchanger', () => {
           clientEmail: 'test@example.com',
           privateKey: 'key',
         },
+        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
       },
     };
 
@@ -122,6 +289,20 @@ describe('ServiceAccountCredentialExchanger', () => {
     ).rejects.toThrow('Service account credentials are missing.');
   });
 
+  it('should report a missing credential as AuthCredentialMissingError', async () => {
+    const exchanger = new ServiceAccountCredentialExchanger();
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: {
+        useDefaultCredential: false,
+      },
+    };
+
+    await expect(exchanger.exchange({authCredential})).rejects.toThrow(
+      AuthCredentialMissingError,
+    );
+  });
+
   it('should throw if token exchange fails (missing token)', async () => {
     const exchanger = new ServiceAccountCredentialExchanger();
     const credential = {
@@ -131,6 +312,7 @@ describe('ServiceAccountCredentialExchanger', () => {
           clientEmail: 'test@example.com',
           privateKey: 'key',
         },
+        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
       },
     };
 
@@ -148,7 +330,7 @@ describe('ServiceAccountCredentialExchanger', () => {
         authCredential: credential as unknown as AuthCredential,
       }),
     ).rejects.toThrow(
-      'Failed to exchange explicit service account token: Failed to get access token from explicit credentials',
+      'Failed to exchange service account token: Failed to get access token from explicit credentials',
     );
   });
 
@@ -161,6 +343,7 @@ describe('ServiceAccountCredentialExchanger', () => {
           clientEmail: 'test@example.com',
           privateKey: 'key',
         },
+        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
       },
     };
 
@@ -177,8 +360,6 @@ describe('ServiceAccountCredentialExchanger', () => {
       exchanger.exchange({
         authCredential: credential as unknown as AuthCredential,
       }),
-    ).rejects.toThrow(
-      'Failed to exchange explicit service account token: Auth failed',
-    );
+    ).rejects.toThrow('Failed to exchange service account token: Auth failed');
   });
 });

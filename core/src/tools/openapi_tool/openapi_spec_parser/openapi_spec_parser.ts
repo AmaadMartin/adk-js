@@ -5,8 +5,11 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {AuthCredential} from '../../../auth/auth_credential.js';
+import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
-import {ApiParameter, OperationParser} from './operation_parser.js';
+import type {ApiParameter} from '../common/common.js';
+import {OperationParser, requiredSchemeName} from './operation_parser.js';
 
 const VALID_SCHEMA_TYPES = new Set([
   'array',
@@ -32,6 +35,17 @@ export interface ParsedOperation {
   parameters: ApiParameter[];
   returnValue?: ApiParameter;
   authScheme?: OpenAPIV3.SecuritySchemeObject;
+  /**
+   * The credential the operation authenticates with. The spec parser leaves it
+   * unset; a caller that knows the credential fills it in before it builds the
+   * tool.
+   */
+  authCredential?: AuthCredential;
+  /**
+   * Context a caller attaches to the operation before it builds a tool. The
+   * parser initialises it empty.
+   */
+  additionalContext?: Record<string, unknown>;
 }
 
 @experimental
@@ -60,8 +74,14 @@ export class OpenApiSpecParser {
 
 /**
  * Resolves all internal $ref references in the OpenAPI spec document.
+ *
+ * The cache holds one resolved subtree per reference and hands out a copy of
+ * it, so the returned document is a tree. A caller that edits one operation's
+ * resolved schema does not change another's.
  */
-function resolveReferences(spec: OpenAPIV3.Document): OpenAPIV3.Document {
+export function resolveReferences(
+  spec: OpenAPIV3.Document,
+): OpenAPIV3.Document {
   const resolvedCache = new Map<string, unknown>();
   const specCopy = JSON.parse(JSON.stringify(spec)); // Deep copy
 
@@ -92,7 +112,7 @@ function resolveReferences(spec: OpenAPIV3.Document): OpenAPIV3.Document {
       seenRefs.add(refString);
 
       if (resolvedCache.has(refString)) {
-        return resolvedCache.get(refString);
+        return structuredClone(resolvedCache.get(refString));
       }
 
       let resolvedValue = resolveRef(refString, currentDoc);
@@ -239,11 +259,7 @@ function collectOperations(
   const server = spec.servers?.[0];
   const baseUrl = server ? resolveServerUrl(server) : '';
 
-  const globalSecurity = spec.security || [];
-  let globalSchemeName: string | undefined;
-  if (globalSecurity.length > 0) {
-    globalSchemeName = Object.keys(globalSecurity[0])[0];
-  }
+  const globalSchemeName = requiredSchemeName(spec.security);
 
   const authSchemes =
     (spec.components?.securitySchemes as Record<
@@ -275,19 +291,19 @@ function collectOperations(
       operation.parameters = [...opParams, ...pathParams];
 
       if (!operation.operationId) {
-        // Generate operation ID if missing
-        operation.operationId = `${method}_${path.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        operation.operationId = snakeCase(`${path}_${method}`);
       }
 
       const parser = new OperationParser(operation, {
         preservePropertyNames,
       });
 
-      let authSchemeName: string | undefined;
-      if (operation.security && operation.security.length > 0) {
-        authSchemeName = Object.keys(operation.security[0])[0];
-      }
-      authSchemeName = authSchemeName || globalSchemeName;
+      // An operation that declares its own security replaces the global
+      // requirement, including when it declares that no credential is needed.
+      const authSchemeName =
+        operation.security === undefined
+          ? globalSchemeName
+          : requiredSchemeName(operation.security);
 
       const authScheme = authSchemeName
         ? authSchemes[authSchemeName]
@@ -299,7 +315,9 @@ function collectOperations(
         endpoint: {baseUrl, path, method},
         operation: operation,
         parameters: parser.getParameters(),
+        returnValue: parser.getReturnValue(),
         authScheme: authScheme,
+        additionalContext: {},
       });
     }
   }

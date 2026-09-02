@@ -8,6 +8,9 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  BaseTool,
+  BaseToolset,
+  createArtifactVersion,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -17,6 +20,7 @@ import {
   InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
+  ResumabilityConfig,
   Runner,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
@@ -1105,11 +1109,13 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
       sessionId: TEST_SESSION_ID,
     });
 
-    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue({
-      version: 0,
-      canonicalUri: 'gs://test-bucket/file.pdf/versions/0',
-      mimeType: 'application/pdf',
-    });
+    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue(
+      createArtifactVersion({
+        version: 0,
+        canonicalUri: 'gs://test-bucket/file.pdf/versions/0',
+        mimeType: 'application/pdf',
+      }),
+    );
 
     const newMessage: Content = {
       role: 'user',
@@ -1160,11 +1166,13 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
       sessionId: TEST_SESSION_ID,
     });
 
-    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue({
-      version: 0,
-      canonicalUri: 'file:///tmp/file.pdf',
-      mimeType: 'application/pdf',
-    });
+    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue(
+      createArtifactVersion({
+        version: 0,
+        canonicalUri: 'file:///tmp/file.pdf',
+        mimeType: 'application/pdf',
+      }),
+    );
 
     const newMessage: Content = {
       role: 'user',
@@ -1243,10 +1251,12 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
       sessionId: TEST_SESSION_ID,
     });
 
-    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue({
-      version: 0,
-      canonicalUri: 'gs://test-bucket/doc/versions/0',
-    });
+    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue(
+      createArtifactVersion({
+        version: 0,
+        canonicalUri: 'gs://test-bucket/doc/versions/0',
+      }),
+    );
 
     // Test with displayName and without displayName
     const newMessage: Content = {
@@ -1489,7 +1499,7 @@ describe('Runner reserved function call rejection', () => {
     expect(session?.events).toEqual([]);
   });
 
-  it('accepts the function response that answers such a call', async () => {
+  it('lets the function response that answers such a call past the gate', async () => {
     const {error} = await send({
       role: 'user',
       parts: [
@@ -1503,15 +1513,500 @@ describe('Runner reserved function call rejection', () => {
       ],
     });
 
-    expect(error).toBeUndefined();
+    // The gate does not fire. The runner then resolves the invocation the
+    // response answers, and this session holds no such call.
+    expect(error?.message).not.toContain('may not contain');
+    expect(error?.message).toContain(
+      'Function call not found for function response ids: gate-1',
+    );
   });
 
-  it('accepts an ordinary tool call part', async () => {
+  it('lets an ordinary tool call part past the gate', async () => {
     const {error} = await send({
       role: 'user',
       parts: [{functionCall: {id: 'call-1', name: 'wire_transfer', args: {}}}],
     });
 
-    expect(error).toBeUndefined();
+    // The gate does not fire. A user message may carry no function call at
+    // all, so the generic rule refuses it.
+    expect(error?.message).not.toContain('may not contain');
+    expect(error?.message).toBe('User message cannot contain function calls.');
+  });
+});
+
+/** A toolset that records how often the runner closed it. */
+class CountingToolset extends BaseToolset {
+  closeCount = 0;
+
+  constructor(private readonly failOnClose = false) {
+    super([]);
+  }
+
+  override async getTools(): Promise<BaseTool[]> {
+    return [];
+  }
+
+  override async close(): Promise<void> {
+    this.closeCount++;
+    if (this.failOnClose) {
+      throw new Error('the toolset held a socket open');
+    }
+  }
+}
+
+/** An agent that holds a toolset and answers without reaching a model. */
+class ToolsetAgent extends LlmAgent {
+  constructor(toolset: BaseToolset) {
+    super({name: 'toolset_agent', model: 'gemini-2.5-flash', tools: [toolset]});
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'Test LLM response'}]},
+    });
+  }
+}
+
+/** A plugin that records whether the runner closed it. */
+class ClosablePlugin extends BasePlugin {
+  closed = false;
+
+  constructor(name = 'closable_plugin') {
+    super(name);
+  }
+
+  override async close(): Promise<void> {
+    this.closed = true;
+  }
+}
+
+describe('Runner.close', () => {
+  function runnerWith(
+    toolset: BaseToolset,
+    plugin: BasePlugin,
+    sessionService: InMemorySessionService,
+  ): Runner {
+    return new Runner({
+      appName: TEST_APP_ID,
+      agent: new ToolsetAgent(toolset),
+      sessionService,
+      plugins: [plugin],
+    });
+  }
+
+  it('should close the toolsets of its agent and its plugins', async () => {
+    const toolset = new CountingToolset();
+    const plugin = new ClosablePlugin();
+
+    await runnerWith(toolset, plugin, new InMemorySessionService()).close();
+
+    expect(toolset.closeCount).toBe(1);
+    expect(plugin.closed).toBe(true);
+  });
+
+  it('should close the plugins when a toolset fails to close', async () => {
+    const toolset = new CountingToolset(true);
+    const plugin = new ClosablePlugin();
+
+    await runnerWith(toolset, plugin, new InMemorySessionService()).close();
+
+    expect(plugin.closed).toBe(true);
+  });
+
+  it('should close the toolsets again after a run already closed them', async () => {
+    const toolset = new CountingToolset();
+    const sessionService = new InMemorySessionService();
+    const runner = runnerWith(toolset, new ClosablePlugin(), sessionService);
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Consume the stream so the run reaches its toolset cleanup.
+    }
+    expect(toolset.closeCount).toBe(1);
+
+    await expect(runner.close()).resolves.toBeUndefined();
+
+    expect(toolset.closeCount).toBe(2);
+  });
+});
+
+describe('Runner resumability wiring', () => {
+  /** Records whether the context the runner built reports itself resumable. */
+  class ResumabilityProbeAgent extends BaseAgent {
+    isResumable: boolean | undefined;
+
+    protected async *runAsyncImpl(
+      context: InvocationContext,
+    ): AsyncGenerator<Event, void, void> {
+      this.isResumable = context.isResumable;
+      yield createEvent({
+        invocationId: context.invocationId,
+        author: this.name,
+        content: {role: 'model', parts: [{text: 'ok'}]},
+      });
+    }
+
+    protected async *runLiveImpl(
+      _context: InvocationContext,
+    ): AsyncGenerator<Event, void, void> {
+      // Not needed for this test.
+    }
+  }
+
+  async function runProbe(
+    resumabilityConfig?: ReturnType<typeof createResumabilityConfig>,
+  ): Promise<boolean | undefined> {
+    const agent = new ResumabilityProbeAgent({name: 'probe'});
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      resumabilityConfig,
+    });
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Draining the run is what makes the probe record the flag.
+    }
+    return agent.isResumable;
+  }
+
+  it('reports the invocation resumable when the runner is configured for it', async () => {
+    expect(await runProbe(createResumabilityConfig({isResumable: true}))).toBe(
+      true,
+    );
+  });
+
+  it('reports the invocation not resumable without a config', async () => {
+    expect(await runProbe()).toBe(false);
+  });
+});
+
+/** Records the invocation context its run was given. */
+class ContextCapturingAgent extends BaseAgent {
+  capturedContext?: InvocationContext;
+
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    this.capturedContext = context;
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'ok'}]},
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
+}
+
+describe('Runner resumability wiring', () => {
+  const RESUMED_INVOCATION_ID = 'e-resumed';
+
+  async function runAndCapture(
+    resumabilityConfig?: ReturnType<typeof createResumabilityConfig>,
+    seedEvents: Event[] = [],
+    invocationId?: string,
+  ): Promise<InvocationContext> {
+    const agent = new ContextCapturingAgent({name: 'capture'});
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    for (const event of seedEvents) {
+      await sessionService.appendEvent({session, event});
+    }
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      resumabilityConfig,
+    });
+
+    for await (const _event of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      invocationId,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the stream so the run completes.
+    }
+
+    const captured = agent.capturedContext;
+    if (!captured) {
+      expect.fail('the agent did not run');
+    }
+    return captured;
+  }
+
+  it('gives the invocation context a resumable flag', async () => {
+    const context = await runAndCapture(
+      createResumabilityConfig({isResumable: true}),
+    );
+
+    expect(context.isResumable).toBe(true);
+  });
+
+  it('leaves the invocation context non-resumable without a config', async () => {
+    const context = await runAndCapture();
+
+    expect(context.isResumable).toBe(false);
+  });
+
+  it('starts with empty agent states for a brand-new invocation', async () => {
+    const context = await runAndCapture(
+      createResumabilityConfig({isResumable: true}),
+    );
+
+    expect(context.agentStates).toEqual({});
+  });
+
+  it('rebuilds the agent states of a resumed invocation from its history', async () => {
+    const context = await runAndCapture(
+      createResumabilityConfig({isResumable: true}),
+      [
+        createEvent({
+          invocationId: RESUMED_INVOCATION_ID,
+          author: 'capture',
+          actions: {agentState: {current_sub_agent: 'second'}},
+        }),
+      ],
+      RESUMED_INVOCATION_ID,
+    );
+
+    expect(context.invocationId).toBe(RESUMED_INVOCATION_ID);
+    expect(context.agentStates['capture']).toEqual({
+      current_sub_agent: 'second',
+    });
+  });
+
+  it('ignores the recorded checkpoints when the runner is not resumable', async () => {
+    const context = await runAndCapture(
+      undefined,
+      [
+        createEvent({
+          invocationId: RESUMED_INVOCATION_ID,
+          author: 'capture',
+          actions: {agentState: {current_sub_agent: 'second'}},
+        }),
+      ],
+      RESUMED_INVOCATION_ID,
+    );
+
+    expect(context.agentStates).toEqual({});
+  });
+});
+
+/** Records the invocation context the runner builds for it. */
+class CapturedContextAgent extends BaseAgent {
+  context?: InvocationContext;
+
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    this.context = context;
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'done'}]},
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for these tests.
+  }
+}
+
+describe('Runner resumability wiring', () => {
+  async function runAndCaptureContext(
+    resumabilityConfig?: ResumabilityConfig,
+  ): Promise<InvocationContext> {
+    const agent = new CapturedContextAgent({name: 'capturing_agent'});
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      resumabilityConfig,
+    });
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: 'user',
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: 'user',
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'go'}]},
+    })) {
+      // Drain the stream so the agent runs to completion.
+    }
+
+    const captured = agent.context;
+    if (!captured) {
+      expect.fail('the agent never received an invocation context');
+    }
+    return captured;
+  }
+
+  it('marks the invocation resumable when the runner is', async () => {
+    const context = await runAndCaptureContext(
+      createResumabilityConfig({isResumable: true}),
+    );
+
+    expect(context.isResumable).toBe(true);
+  });
+
+  it('marks the invocation non-resumable without a resumability config', async () => {
+    const context = await runAndCaptureContext();
+
+    expect(context.isResumable).toBe(false);
+  });
+});
+
+describe('Runner close', () => {
+  class StubToolset extends BaseToolset {
+    readonly closed = vi.fn();
+
+    constructor() {
+      super([]);
+    }
+
+    override async getTools(): Promise<BaseTool[]> {
+      return [];
+    }
+
+    override async close(): Promise<void> {
+      this.closed();
+    }
+  }
+
+  function createRunnerWithToolset(): {runner: Runner; toolset: StubToolset} {
+    const toolset = new StubToolset();
+    const agent = new MockLlmAgent('root_agent');
+    agent.tools = [toolset];
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService: new InMemorySessionService(),
+    });
+    return {runner, toolset};
+  }
+
+  it('closes the toolsets the agent holds', async () => {
+    const {runner, toolset} = createRunnerWithToolset();
+
+    await runner.close();
+
+    expect(toolset.closed).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the toolsets again after a completed run', async () => {
+    const {runner, toolset} = createRunnerWithToolset();
+    const session = await runner.sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the run so its own cleanup completes.
+    }
+    expect(toolset.closed).toHaveBeenCalledTimes(1);
+
+    await runner.close();
+
+    expect(toolset.closed).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** A toolset that records its closes, and can fail them. */
+class RecordingToolset extends BaseToolset {
+  closeCount = 0;
+
+  constructor(private readonly failOnClose = false) {
+    super([]);
+  }
+
+  async getTools(): Promise<BaseTool[]> {
+    return [];
+  }
+
+  async close(): Promise<void> {
+    this.closeCount++;
+    if (this.failOnClose) {
+      throw new Error('toolset close failed');
+    }
+  }
+}
+
+describe('Runner.close', () => {
+  it("closes the root agent's toolsets", async () => {
+    const toolset = new RecordingToolset();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new LlmAgent({name: 'root', tools: [toolset]}),
+      sessionService: new InMemorySessionService(),
+    });
+
+    await runner.close();
+
+    expect(toolset.closeCount).toBe(1);
+  });
+
+  it('is safe to call twice', async () => {
+    const toolset = new RecordingToolset();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new LlmAgent({name: 'root', tools: [toolset]}),
+      sessionService: new InMemorySessionService(),
+    });
+
+    await runner.close();
+    await runner.close();
+
+    expect(toolset.closeCount).toBe(2);
+  });
+
+  it('does not reject when a toolset close throws', async () => {
+    const failing = new RecordingToolset(true);
+    const healthy = new RecordingToolset();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new LlmAgent({name: 'root', tools: [failing, healthy]}),
+      sessionService: new InMemorySessionService(),
+    });
+
+    await expect(runner.close()).resolves.toBeUndefined();
+    expect(healthy.closeCount).toBe(1);
   });
 });

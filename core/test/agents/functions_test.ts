@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AgentTool,
+  AuthConfig,
   BasePlugin,
   BaseTool,
   Context,
@@ -17,12 +19,13 @@ import {
   LlmAgent,
   LongRunningFunctionTool,
   PluginManager,
+  RunAsyncToolRequest,
   Session,
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
   ToolConfirmation,
 } from '@google/adk';
-import {FunctionCall} from '@google/genai';
+import {FunctionCall, FunctionResponseScheduling} from '@google/genai';
 import type {MockInstance} from 'vitest';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
@@ -133,6 +136,27 @@ function createStartJobTool(mutate: (toolContext: Context) => void) {
       return undefined;
     },
   });
+}
+
+/**
+ * Builds a tool that defers its response. The flag is assigned after
+ * construction because it is not a tool option: framework-internal tools set
+ * it, and `FunctionTool` does not accept it.
+ */
+function createDeferringTool(
+  execute: (
+    args: Record<string, never>,
+    toolContext?: Context,
+  ) => Promise<unknown>,
+) {
+  const tool = new FunctionTool({
+    name: 'delegate',
+    description: 'delegates the call and answers it later',
+    parameters: z.object({}),
+    execute,
+  });
+  tool.defersResponse = true;
+  return tool;
 }
 
 describe('handleFunctionCallList', () => {
@@ -776,7 +800,130 @@ describe('handleFunctionCallList', () => {
     });
     expect(event!.actions.stateDelta).toEqual({jobStarted: true});
   });
+
+  it('should stamp the scheduling of the tool onto the function response', async () => {
+    const scheduledTool = new FunctionTool({
+      name: 'scheduledTool',
+      description: 'answers without interrupting the model',
+      parameters: z.object({}),
+      execute: async () => ({result: 'noted'}),
+    });
+    scheduledTool.responseScheduling = FunctionResponseScheduling.SILENT;
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(scheduledTool)],
+      toolsDict: {scheduledTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.scheduling).toBe(
+      FunctionResponseScheduling.SILENT,
+    );
+  });
+
+  it('should emit no scheduling key for a tool that sets no scheduling', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const functionResponse = event!.content!.parts![0].functionResponse!;
+    expect(Object.keys(functionResponse)).not.toContain('scheduling');
+  });
+
+  it.each([
+    ['undefined', async () => undefined],
+    ['null', async () => null],
+  ])(
+    'should emit no event when a deferring tool returns %s',
+    async (_label, execute) => {
+      const delegate = createDeferringTool(execute);
+
+      const event = await handleFunctionCallList({
+        invocationContext,
+        functionCalls: [callFor(delegate)],
+        toolsDict: {delegate},
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      });
+
+      expect(event).toBeNull();
+    },
+  );
+
+  it('should emit the function response of a deferring tool that does respond', async () => {
+    const delegate = createDeferringTool(async () => ({status: 'answered'}));
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(delegate)],
+      toolsDict: {delegate},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      status: 'answered',
+    });
+  });
+
+  it('should emit the function response of a deferring tool that returns an empty string', async () => {
+    const delegate = createDeferringTool(async () => '');
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(delegate)],
+      toolsDict: {delegate},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: '',
+    });
+  });
+
+  it('should emit a content-less event carrying the actions of a silent deferring tool', async () => {
+    const delegate = createDeferringTool(async (_args, toolContext) => {
+      toolContext!.state.set('delegated', true);
+      return undefined;
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(delegate)],
+      toolsDict: {delegate},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content).toBeUndefined();
+    expect(event!.actions.stateDelta).toEqual({delegated: true});
+  });
 });
+
+describe('getLongRunningFunctionCalls with a deferring tool', () => {
+  it('should not mark the call of a deferring tool as long running', () => {
+    const delegate = createDeferringTool(async () => undefined);
+    const call = {id: 'defer_1', name: delegate.name, args: {}};
+
+    const ids = getLongRunningFunctionCalls([call], {delegate});
+
+    expect(ids.size).toBe(0);
+  });
+});
+
+function authConfigFor(credentialKey: string): AuthConfig {
+  return {
+    authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+    credentialKey,
+  };
+}
 
 describe('generateAuthEvent', () => {
   let invocationContext: InvocationContext;
@@ -812,14 +959,11 @@ describe('generateAuthEvent', () => {
   });
 
   it('should return auth event if requestedAuthConfigs is present', () => {
+    const authConfig1 = authConfigFor('key_1');
+    const authConfig2 = authConfigFor('key_2');
     const functionResponseEvent = createEvent({
       actions: createEventActions({
-        requestedAuthConfigs: {
-          // @ts-expect-error - testing string assignments
-          'call_1': 'auth_config_1',
-          // @ts-expect-error - testing string assignments
-          'call_2': 'auth_config_2',
-        },
+        requestedAuthConfigs: {'call_1': authConfig1, 'call_2': authConfig2},
       }),
       content: {role: 'model', parts: []},
     });
@@ -836,14 +980,14 @@ describe('generateAuthEvent', () => {
     );
     expect(call1).toBeDefined();
     expect(call1!.functionCall!.name).toBe('adk_request_credential');
-    expect(call1!.functionCall!.args!['auth_config']).toBe('auth_config_1');
+    expect(call1!.functionCall!.args!['auth_config']).toBe(authConfig1);
 
     const call2 = parts.find(
       (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
     );
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
-    expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+    expect(call2!.functionCall!.args!['auth_config']).toBe(authConfig2);
   });
 
   it('should default the role to user for a content-less event', () => {
@@ -1226,5 +1370,158 @@ describe('findMatchingFunctionCall', () => {
     });
     expect(findMatchingFunctionCall([callEvent])).toBeUndefined();
     expect(findMatchingFunctionCall([])).toBeUndefined();
+  });
+});
+
+const SUB_AGENT_NAME = 'sub_agent';
+
+/**
+ * An `AgentTool` that answers with `result` without running a sub-agent, and
+ * sets `skipSummarization` exactly as `AgentTool.runAsync` does.
+ */
+class StubAgentTool extends AgentTool {
+  constructor(private readonly result: unknown) {
+    super({
+      agent: new LlmAgent({
+        name: SUB_AGENT_NAME,
+        description: 'a sub-agent',
+      }),
+      skipSummarization: true,
+    });
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    toolContext.actions.skipSummarization = true;
+    return this.result;
+  }
+}
+
+/** An `AgentTool` that reports its failure as a value rather than throwing. */
+class ErrorValueAgentTool extends AgentTool {
+  constructor() {
+    super({
+      agent: new LlmAgent({
+        name: SUB_AGENT_NAME,
+        description: 'a sub-agent',
+      }),
+      skipSummarization: true,
+    });
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    toolContext.actions.skipSummarization = true;
+    return {error: 'sub-agent refused'};
+  }
+}
+
+/** An `AgentTool` whose sub-agent run fails. */
+class FailingAgentTool extends AgentTool {
+  constructor() {
+    super({
+      agent: new LlmAgent({
+        name: SUB_AGENT_NAME,
+        description: 'a sub-agent',
+      }),
+      skipSummarization: true,
+    });
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    toolContext.actions.skipSummarization = true;
+    throw new Error('sub-agent exploded');
+  }
+}
+
+/** A non-agent tool that skips summarization of an internal acknowledgement. */
+class AcknowledgingTool extends BaseTool {
+  constructor() {
+    super({name: 'acknowledgingTool', description: 'acknowledges'});
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    toolContext.actions.skipSummarization = true;
+    return 'internal acknowledgement';
+  }
+}
+
+/** Runs one tool call and returns the resulting event. */
+function runOneCall(tool: BaseTool): Promise<Event | null> {
+  const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+  return functionsExportedForTestingOnly.handleFunctionCallList({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv_skip',
+      session: {} as Session,
+      agent,
+      pluginManager: new PluginManager(),
+    }),
+    functionCalls: [callFor(tool)],
+    toolsDict: {[tool.name]: tool},
+    beforeToolCallbacks: [],
+    afterToolCallbacks: [],
+  });
+}
+
+/** The text parts of an event's content. */
+function textParts(event: Event | null): string[] {
+  return (event?.content?.parts ?? [])
+    .map((part) => part.text)
+    .filter((text): text is string => text !== undefined);
+}
+
+describe('skipSummarization on an AgentTool response', () => {
+  it('appends the string result as a text part', async () => {
+    const event = await runOneCall(new StubAgentTool('the sub-agent answer'));
+
+    expect(textParts(event)).toEqual(['the sub-agent answer']);
+  });
+
+  it('appends a non-string result as JSON', async () => {
+    const event = await runOneCall(new StubAgentTool({answer: 42}));
+
+    expect(textParts(event)).toEqual(['{"answer":42}']);
+  });
+
+  it('appends nothing for an empty string result', async () => {
+    const event = await runOneCall(new StubAgentTool(''));
+
+    expect(textParts(event)).toEqual([]);
+  });
+
+  it('appends nothing for a {result: null} placeholder', async () => {
+    const event = await runOneCall(new StubAgentTool({result: null}));
+
+    expect(textParts(event)).toEqual([]);
+  });
+
+  it('appends nothing when the sub-agent run failed', async () => {
+    const event = await runOneCall(new FailingAgentTool());
+
+    expect(textParts(event)).toEqual([]);
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      error: 'sub-agent exploded',
+    });
+  });
+
+  it('appends nothing when the result itself reports an error', async () => {
+    const event = await runOneCall(new ErrorValueAgentTool());
+
+    expect(textParts(event)).toEqual([]);
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      error: 'sub-agent refused',
+    });
+  });
+
+  it('appends nothing for a tool that is not an AgentTool', async () => {
+    const event = await runOneCall(new AcknowledgingTool());
+
+    expect(textParts(event)).toEqual([]);
   });
 });
