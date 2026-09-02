@@ -6,6 +6,8 @@
 
 import {
   App,
+  BaseLlm,
+  BaseLlmConnection,
   BasePlugin,
   Context,
   convertEventsToEvalInvocations,
@@ -17,6 +19,7 @@ import {
   Event,
   generateInferencesFromAgentModule,
   generateInferencesFromRootAgent,
+  generateInferencesFromRootAgentLive,
   generateResponses,
   generateResponsesFromSession,
   getAllToolCalls,
@@ -1805,5 +1808,337 @@ describe('processQueryWithSession and generateResponsesFromSession', () => {
     expect(() =>
       processQueryWithSession(buildSession(recordedEvents()), [{query: 42}]),
     ).toThrow('Each evaluation entry must contain a string query.');
+  });
+});
+
+/**
+ * A live agent that answers each user turn it reads off the live request
+ * queue, the way a real live flow does, so a live eval run can be driven
+ * offline.
+ */
+class EchoLiveAgent extends LlmAgent {
+  /** Whether the live request queue reached its close marker. */
+  sawClose = false;
+
+  /** How many turns the agent answers before it ends the stream. */
+  constructor(
+    name: string,
+    private readonly turnsToAnswer = Number.POSITIVE_INFINITY,
+  ) {
+    super({name, model: new ScriptedLlm(['unused'])});
+  }
+
+  protected override async *runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const queue = context.liveRequestQueue;
+    if (queue === undefined) {
+      expect.fail('the live driver must supply a live request queue');
+    }
+    let answered = 0;
+    for await (const request of queue) {
+      if (request.close) {
+        this.sawClose = true;
+        return;
+      }
+      const text = request.content?.parts?.[0]?.text;
+      if (text === undefined) {
+        continue;
+      }
+      yield createEvent({
+        author: this.name,
+        invocationId: context.invocationId,
+        content: {role: 'model', parts: [{text: `reply to ${text}`}]},
+        turnComplete: true,
+      });
+      answered++;
+      if (answered >= this.turnsToAnswer) {
+        return;
+      }
+    }
+  }
+}
+
+/** A live agent that keeps streaming and never completes a turn. */
+class NeverCompletingLiveAgent extends LlmAgent {
+  /** Whether the live request queue reached its close marker. */
+  sawClose = false;
+
+  constructor(name: string) {
+    super({name, model: new ScriptedLlm(['unused'])});
+  }
+
+  protected override async *runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const queue = context.liveRequestQueue;
+    if (queue === undefined) {
+      expect.fail('the live driver must supply a live request queue');
+    }
+    for await (const request of queue) {
+      if (request.close) {
+        this.sawClose = true;
+        return;
+      }
+      if (request.content === undefined) {
+        continue;
+      }
+      yield createEvent({
+        author: this.name,
+        invocationId: context.invocationId,
+        content: {role: 'model', parts: [{text: 'still thinking'}]},
+        partial: true,
+      });
+    }
+  }
+}
+
+/** A model that records the requests the runner sends it. */
+class RequestRecordingLlm extends BaseLlm {
+  readonly requests: LlmRequest[] = [];
+
+  constructor() {
+    super({model: 'request-recording-llm'});
+  }
+
+  async *generateContentAsync(
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {
+    this.requests.push(llmRequest);
+    yield {content: {role: 'model', parts: [{text: 'ok'}]}};
+  }
+
+  async connect(): Promise<BaseLlmConnection> {
+    throw new Error('RequestRecordingLlm does not support live connections.');
+  }
+}
+
+describe('eval runner plugins', () => {
+  it('gives every request of a bare-agent run a retry policy', async () => {
+    const model = new RequestRecordingLlm();
+
+    await generateInferencesFromRootAgent({
+      rootAgent: new LlmAgent({name: 'root_agent', model}),
+      userSimulator: new ScriptedUserSimulator(['hello']),
+    });
+
+    expect(model.requests).toHaveLength(1);
+    expect(model.requests[0].config?.httpOptions?.retryOptions).toEqual({
+      attempts: 7,
+    });
+  });
+
+  it('gives every request of an app-backed run a retry policy', async () => {
+    const model = new RequestRecordingLlm();
+    const rootAgent = new LlmAgent({name: 'root_agent', model});
+
+    await generateInferencesFromRootAgent({
+      rootAgent,
+      userSimulator: new ScriptedUserSimulator(['hello']),
+      app: new App({
+        name: 'my_app',
+        rootAgent,
+        plugins: [new SpyPlugin('user_plugin')],
+      }),
+    });
+
+    expect(model.requests).toHaveLength(1);
+    expect(model.requests[0].config?.httpOptions?.retryOptions).toEqual({
+      attempts: 7,
+    });
+  });
+});
+
+describe('buildEvalRunnerConfig app copy', () => {
+  it('carries every configuration field of the app it copies', () => {
+    const rootAgent = createScriptedAgent('root_agent', ['hi']);
+    const app = new App({
+      name: 'my_app',
+      rootAgent,
+      plugins: [new SpyPlugin('user_plugin')],
+      resumabilityConfig: {isResumable: true},
+    });
+
+    const config = buildEvalRunnerConfig({
+      rootAgent,
+      appName: 'session_app',
+      app,
+      internalEvalPlugins: [],
+      sessionService: new InMemorySessionService(),
+    });
+
+    // Everything except the three fields the eval copy deliberately replaces
+    // must survive, including any field `App` grows later.
+    const {
+      name: _name,
+      rootAgent: _rootAgent,
+      plugins: _plugins,
+      ...rest
+    } = app;
+    expect(Object.keys(rest).length).toBeGreaterThan(0);
+    expect(config.app).toMatchObject(rest);
+  });
+});
+
+describe('generateInferencesFromRootAgentLive', () => {
+  it('grades every turn of a live conversation', async () => {
+    const simulator = new ScriptedUserSimulator(['hello', 'thanks']);
+
+    const invocations = await generateInferencesFromRootAgentLive({
+      rootAgent: new EchoLiveAgent('live_agent'),
+      userSimulator: simulator,
+      liveTimeoutSeconds: 5,
+    });
+
+    expect(invocations).toHaveLength(2);
+    expect(invocations[0].userContent.parts?.[0].text).toBe('hello');
+    expect(invocations[0].finalResponse?.parts?.[0].text).toBe(
+      'reply to hello',
+    );
+    expect(invocations[1].finalResponse?.parts?.[0].text).toBe(
+      'reply to thanks',
+    );
+    // The simulator is asked once per turn, then once more to learn it stops.
+    expect(simulator.receivedEvents).toHaveLength(3);
+  });
+
+  it('records the app details of every invocation', async () => {
+    const invocations = await generateInferencesFromRootAgentLive({
+      rootAgent: new EchoLiveAgent('live_agent'),
+      userSimulator: new ScriptedUserSimulator(['hello']),
+      liveTimeoutSeconds: 5,
+    });
+
+    expect(Object.keys(invocations[0].appDetails?.agentDetails ?? {})).toEqual([
+      'live_agent',
+    ]);
+  });
+
+  it('stops once the live stream has ended, without asking again', async () => {
+    // The agent answers one turn and ends the stream. The teardown releases
+    // the waiter of the turn already in flight, so that turn still completes
+    // -- with no reply -- and the run then stops instead of working through
+    // the third message the simulator still holds.
+    const simulator = new ScriptedUserSimulator(['hello', 'thanks', 'bye']);
+
+    const invocations = await generateInferencesFromRootAgentLive({
+      rootAgent: new EchoLiveAgent('live_agent', 1),
+      userSimulator: simulator,
+      liveTimeoutSeconds: 5,
+    });
+
+    expect(simulator.receivedEvents).toHaveLength(2);
+    expect(invocations).toHaveLength(2);
+    expect(invocations[0].finalResponse?.parts?.[0].text).toBe(
+      'reply to hello',
+    );
+    expect(invocations[1].finalResponse).toBeUndefined();
+  });
+
+  it('closes the live session when a turn runs out of time', async () => {
+    const agent = new NeverCompletingLiveAgent('slow_agent');
+
+    await expect(
+      generateInferencesFromRootAgentLive({
+        rootAgent: agent,
+        userSimulator: new ScriptedUserSimulator(['hello']),
+        liveTimeoutSeconds: 0.01,
+      }),
+    ).rejects.toThrow(TIMEOUT_WARNING);
+
+    expect(agent.sawClose).toBe(true);
+  });
+});
+
+/**
+ * A native-audio live agent: it answers when the user's audio activity ends,
+ * and reports its words as a transcription rather than as content.
+ */
+class TranscribingLiveAgent extends LlmAgent {
+  /** The realtime blobs the agent received, in arrival order. */
+  readonly receivedBlobs: string[] = [];
+
+  constructor(
+    name: string,
+    private readonly transcript: string,
+  ) {
+    super({name, model: new ScriptedLlm(['unused'])});
+  }
+
+  protected override async *runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const queue = context.liveRequestQueue;
+    if (queue === undefined) {
+      expect.fail('the live driver must supply a live request queue');
+    }
+    for await (const request of queue) {
+      if (request.close) {
+        return;
+      }
+      if (request.blob?.data) {
+        this.receivedBlobs.push(request.blob.data);
+      }
+      if (!request.activityEnd) {
+        continue;
+      }
+      yield createEvent({
+        author: this.name,
+        invocationId: context.invocationId,
+        outputTranscription: {text: this.transcript},
+      });
+      yield createEvent({
+        author: this.name,
+        invocationId: context.invocationId,
+        turnComplete: true,
+      });
+    }
+  }
+}
+
+/** Plays one audio turn, then ends the conversation. */
+class AudioUserSimulator implements UserSimulator {
+  private sent = false;
+
+  constructor(private readonly audio: string) {}
+
+  async getNextUserMessage(): Promise<NextUserMessage> {
+    if (this.sent) {
+      return {status: UserSimulatorStatus.STOP_SIGNAL_DETECTED};
+    }
+    this.sent = true;
+    return {
+      status: UserSimulatorStatus.SUCCESS,
+      userMessage: {
+        role: 'user',
+        parts: [
+          {text: 'what colour is the sky?'},
+          {inlineData: {data: this.audio, mimeType: 'audio/pcm'}},
+        ],
+      },
+    };
+  }
+}
+
+describe('generateInferencesFromRootAgentLive over native audio', () => {
+  it('streams the audio and grades the transcribed reply', async () => {
+    const audio = Buffer.alloc(AUDIO_CHUNK_BYTES + 100, 3).toString('base64');
+    const agent = new TranscribingLiveAgent('audio_agent', 'The sky is blue.');
+
+    const invocations = await generateInferencesFromRootAgentLive({
+      rootAgent: agent,
+      userSimulator: new AudioUserSimulator(audio),
+      liveTimeoutSeconds: 5,
+    });
+
+    expect(agent.receivedBlobs).toHaveLength(2);
+    expect(invocations).toHaveLength(1);
+    // The user turn keeps its text, which the model never saw.
+    expect(invocations[0].userContent.parts?.[0].text).toBe(
+      'what colour is the sky?',
+    );
+    expect(invocations[0].finalResponse?.parts?.[0].text).toBe(
+      'The sky is blue.',
+    );
   });
 });
