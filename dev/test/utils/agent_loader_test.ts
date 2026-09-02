@@ -20,7 +20,7 @@ import {
   vi,
 } from 'vitest';
 
-import {App, isApp} from '@google/adk';
+import {App, isApp, isBaseAgent} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
@@ -768,6 +768,33 @@ describe('AgentLoader', () => {
       const agentFile = await agentLoader.getAgentFile('agent1');
       const agent = await agentFile.load();
       expect(agent.name).toEqual('agent1');
+      await agentLoader.disposeAll();
+    });
+
+    it('records the origin of an agent loaded from a single file', async () => {
+      const agentLoader = new AgentLoader(tempAgentsDir);
+      const agent = await (await agentLoader.getAgentFile('agent1')).load();
+      if (!isBaseAgent(agent)) {
+        expect.fail('expected agent1 to load as a BaseAgent');
+      }
+      expect(agent.adkOrigin).toEqual({
+        appName: 'agent1',
+        path: tempAgentsDir,
+      });
+      await agentLoader.disposeAll();
+    });
+
+    it('records the origin of an agent loaded from a directory', async () => {
+      const agentDir = path.join(tempAgentsDir, 'dir_agent');
+      await fs.mkdir(agentDir, {recursive: true});
+      await fs.writeFile(path.join(agentDir, 'agent.js'), agent1JsContent);
+
+      const agentLoader = new AgentLoader(tempAgentsDir);
+      const agent = await (await agentLoader.getAgentFile('dir_agent')).load();
+      if (!isBaseAgent(agent)) {
+        expect.fail('expected dir_agent to load as a BaseAgent');
+      }
+      expect(agent.adkOrigin).toEqual({appName: 'dir_agent', path: agentDir});
       await agentLoader.disposeAll();
     });
 
