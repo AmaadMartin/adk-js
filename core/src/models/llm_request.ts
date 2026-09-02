@@ -94,16 +94,15 @@ export function insertTransientUserContent(
   // adk-python also clamps this index behind a non-text static instruction
   // prefix; LlmRequest carries no static instruction, so there is none here.
   let insertIndex = llmRequest.contents.length;
-  for (let i = llmRequest.contents.length - 1; i >= 0; i--) {
-    const content = llmRequest.contents[i];
+  while (insertIndex > 0) {
+    const content = llmRequest.contents[insertIndex - 1];
     if (
       content.role !== 'user' ||
       content.parts?.some((part) => part.functionResponse)
     ) {
-      insertIndex = i + 1;
       break;
     }
-    insertIndex = i;
+    insertIndex--;
   }
 
   llmRequest.contents.splice(insertIndex, 0, ...contents);

@@ -28,6 +28,15 @@ export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
 export const ADK_FRAMEWORK_FUNCTION_CALL_NAME = 'adk_framework';
 
 /**
+ * The built-in tool an agent calls to hand control to another agent.
+ *
+ * `AgentTransferLlmRequestProcessor` registers the tool under this name and
+ * the content processor recognises the resulting call. Both read the name from
+ * here, so a rename cannot break the pairing silently.
+ */
+export const TRANSFER_TO_AGENT_FUNCTION_CALL_NAME = 'transfer_to_agent';
+
+/**
  * Names reserved for the framework's own control-plane calls.
  *
  * These are questions the framework asks — approve this, authenticate that,

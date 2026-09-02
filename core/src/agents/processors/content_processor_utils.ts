@@ -24,10 +24,8 @@ import {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
+  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
 } from '../functions.js';
-
-/** The name of the tool an agent calls to hand control to another agent. */
-const TRANSFER_TO_AGENT_FUNCTION_CALL_NAME = 'transfer_to_agent';
 
 /**
  * Removes the client-generated function call IDs from a given content object.

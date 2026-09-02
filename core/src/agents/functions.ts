@@ -63,6 +63,7 @@ export {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
   reservedFunctionCallName,
+  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
 } from './framework_function_calls.js';
 
 // Export these items for testing purposes only
