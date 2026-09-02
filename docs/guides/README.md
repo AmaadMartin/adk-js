@@ -13,3 +13,8 @@ replaces it.
 
 - [Events compaction](apps/events_compaction/index.md) - Declaring one
   compaction policy for every agent in an app, and what it guarantees.
+
+### Runner
+
+- [Choosing a Runner entry point](runner/run_entry_points/index.md) - When to
+  run an invocation ahead of the caller that reads it, and what that changes.

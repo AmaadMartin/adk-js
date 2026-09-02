@@ -76,6 +76,10 @@ export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
 export {
+  canTransferBetweenAgents,
+  getTransferTargets,
+} from './agents/transfer_utils.js';
+export {
   getPendingUserInputRequests,
   getUserInputRequests,
   requiresUserInput,
@@ -84,6 +88,7 @@ export type {
   UserInputKind,
   UserInputRequest,
 } from './agents/user_input_request.js';
+export {runSlidingWindowCompaction} from './apps/compaction.js';
 export {createEventsCompactionConfig} from './apps/events_compaction_config.js';
 export type {EventsCompactionConfig} from './apps/events_compaction_config.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
@@ -145,6 +150,7 @@ export {AnchoredContextCompactor} from './context/anchored_context_compactor.js'
 export type {AnchoredContextCompactorOptions} from './context/anchored_context_compactor.js';
 export type {BaseContextCompactor} from './context/base_context_compactor.js';
 export type {BaseSummarizer} from './context/summarizers/base_summarizer.js';
+export {defaultSummarizer} from './context/summarizers/default_summarizer.js';
 export {LlmSummarizer} from './context/summarizers/llm_summarizer.js';
 export type {LlmSummarizerOptions} from './context/summarizers/llm_summarizer.js';
 export {TokenBasedContextCompactor} from './context/token_based_context_compactor.js';
@@ -160,10 +166,18 @@ export {InputValidationError} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
+  StaleSessionError,
+  isStaleSessionError,
+} from './errors/stale_session_error.js';
+export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
-export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
+export {
+  createCompactedEvent,
+  isCompactedEvent,
+  isScratchpadEvent,
+} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
   createEvent,

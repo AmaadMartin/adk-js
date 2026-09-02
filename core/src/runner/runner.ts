@@ -18,7 +18,9 @@ import {
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
+import {canTransferBetweenAgents} from '../agents/transfer_utils.js';
 import {App} from '../apps/app.js';
+import {runSlidingWindowCompaction} from '../apps/compaction.js';
 import {EventsCompactionConfig} from '../apps/events_compaction_config.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
@@ -29,6 +31,8 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
+import {defaultSummarizer} from '../context/summarizers/default_summarizer.js';
+import {isStaleSessionError} from '../errors/stale_session_error.js';
 import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -111,6 +115,125 @@ export interface RunnerConfig {
  * Defined once and shared by all Runner instances.
  */
 const RUNNER_SIGNATURE_SYMBOL = Symbol.for('google.adk.runner');
+
+/**
+ * The most events {@link Runner.run} holds before the invocation has to wait.
+ *
+ * The buffer exists so a slow caller does not throttle the agent; the cap
+ * exists so a caller that stops reading altogether cannot grow it without
+ * bound.
+ */
+const MAX_BUFFERED_RUN_EVENTS = 1000;
+
+/**
+ * Drains `source` as fast as it produces, and hands the events on in order.
+ *
+ * The pump runs independently of the caller, which is what makes
+ * {@link Runner.run} eager where {@link Runner.runAsync} is demand-driven. A
+ * failure is held until the events that preceded it have been handed on, then
+ * thrown. A caller that stops iterating early closes `source` and sees no
+ * error.
+ *
+ * @param source The invocation to drain.
+ * @yields The events `source` produced, in production order.
+ */
+async function* pumpEagerly(
+  source: AsyncGenerator<Event, void, undefined>,
+): AsyncGenerator<Event, void, undefined> {
+  const buffer: Event[] = [];
+  let failure: {thrown: unknown} | undefined;
+  let producing = true;
+  let stopped = false;
+  let wakeConsumer: (() => void) | undefined;
+  let wakeProducer: (() => void) | undefined;
+
+  const pump = (async () => {
+    try {
+      for await (const event of source) {
+        buffer.push(event);
+        wakeConsumer?.();
+        wakeConsumer = undefined;
+        while (!stopped && buffer.length >= MAX_BUFFERED_RUN_EVENTS) {
+          await new Promise<void>((resolve) => (wakeProducer = resolve));
+        }
+      }
+    } catch (thrown: unknown) {
+      failure = {thrown};
+    } finally {
+      producing = false;
+      wakeConsumer?.();
+      wakeConsumer = undefined;
+    }
+  })();
+
+  try {
+    while (producing || buffer.length) {
+      if (!buffer.length) {
+        await new Promise<void>((resolve) => (wakeConsumer = resolve));
+        continue;
+      }
+      yield buffer.shift()!;
+      wakeProducer?.();
+      wakeProducer = undefined;
+    }
+    if (failure) {
+      throw asRunFailure(failure.thrown);
+    }
+  } finally {
+    stopped = true;
+    wakeProducer?.();
+    await source.return(undefined);
+    await pump;
+  }
+}
+
+/**
+ * The error a failed run reports.
+ *
+ * A thrown `Error` is the caller's answer already. Anything else is wrapped,
+ * so a run that ends on a cancellation token or a bare string cannot
+ * impersonate the caller's own control flow. The analogue of `adk-python`
+ * re-raising a bare `BaseException` as a chained `RuntimeError`.
+ */
+function asRunFailure(thrown: unknown): Error {
+  if (thrown instanceof Error) {
+    return thrown;
+  }
+  return new Error(`Agent run terminated by ${String(thrown)}.`, {
+    cause: thrown,
+  });
+}
+
+/** App names already warned about an uncached transfer, so each warns once. */
+const uncachedTransferApps = new Set<string>();
+
+/**
+ * Warns once per app when agent transfer runs with no context cache.
+ *
+ * Every transfer swaps the system instruction and the tool set, so the request
+ * prefix changes and the whole prompt is re-sent uncached. Ported from
+ * `google/adk-python` `runners.py::Runner._warn_uncached_agent_transfer`.
+ */
+function warnUncachedAgentTransfer(
+  appName: string,
+  contextCacheConfig: ContextCacheConfig | undefined,
+  root: RunnableRoot,
+): void {
+  if (contextCacheConfig || uncachedTransferApps.has(appName)) {
+    return;
+  }
+  if (!canTransferBetweenAgents(root)) {
+    return;
+  }
+  uncachedTransferApps.add(appName);
+  logger.warn(
+    `App "${appName}" can transfer between agents but has no ` +
+      'contextCacheConfig. Every transfer swaps the system instruction and ' +
+      'the tool set, so the request prefix changes and the whole prompt is ' +
+      're-sent uncached after each transfer. Set contextCacheConfig on the ' +
+      'app to give each agent its own cache.',
+  );
+}
 
 /**
  * Type guard to check if an object is an instance of Runner.
@@ -480,6 +603,9 @@ export class Runner {
                 return;
               }
             }
+            // Step 5: Compact the turn that just finished, so the generator
+            // completes only once the summary is persisted.
+            await this.runPostInvocationCompaction(session);
           }
         },
       );
@@ -490,6 +616,87 @@ export class Runner {
         : [];
       await Promise.allSettled(toolsets.map((t) => t.close()));
     }
+  }
+
+  /**
+   * Compacts the session once the invocation has finished.
+   *
+   * Runs only for an app that declared the sliding-window trigger. The runner
+   * is the single append site: {@link runSlidingWindowCompaction} produces the
+   * summary and this method decides that it reaches storage. Ported from
+   * `google/adk-python` `runners.py::Runner._run_post_invocation_compaction`.
+   *
+   * A concurrent turn can advance the session while the summarizer is still
+   * running. The persistent session services report that as a
+   * {@link StaleSessionError}, and a summary that lost the race is discarded
+   * rather than overwriting the newer history. Every other failure propagates.
+   *
+   * @param session The session the invocation ran against.
+   */
+  private async runPostInvocationCompaction(session: Session): Promise<void> {
+    const config = this.eventsCompactionConfig;
+    if (config?.compactionInterval === undefined) {
+      return;
+    }
+    // Resolved after the trigger check, so an app that never slides does not
+    // pay for a model it will not use.
+    const summarizer = config.summarizer ?? defaultSummarizer(this.agent);
+    if (!summarizer) {
+      return;
+    }
+    try {
+      for await (const event of runSlidingWindowCompaction(
+        {...config, summarizer},
+        session,
+      )) {
+        await this.sessionService.appendEvent({session, event});
+      }
+    } catch (e: unknown) {
+      if (!isStaleSessionError(e)) {
+        throw e;
+      }
+      logger.info(
+        `Discarding stale post-invocation compaction for session ` +
+          `${session.id}; a newer turn updated the session while ` +
+          'summarization was running.',
+      );
+    }
+  }
+
+  /**
+   * Runs the agent, producing events ahead of the caller that reads them.
+   *
+   * This is the convenience entry point for local testing. Unlike
+   * {@link runAsync}, which is demand-driven, the invocation starts as soon as
+   * iteration starts and keeps going while the caller is busy, so a slow
+   * consumer does not throttle the agent. Events arrive in production order.
+   *
+   * Ported from `google/adk-python` `runners.py::Runner.run`, which returns a
+   * *synchronous* generator by draining an async run on a background thread.
+   * That is not expressible here: JavaScript cannot block the calling thread
+   * for async work, and `core` ships a browser bundle, so worker threads are
+   * unavailable. The observable behaviour is ported, the synchronicity is not.
+   *
+   * At most 1000 events are held (`MAX_BUFFERED_RUN_EVENTS`). On reaching the
+   * cap the invocation waits for the caller to catch up, so nothing is
+   * dropped. An agent failure arrives after the events it managed to emit.
+   * Nothing is raised if the caller stops iterating before the run finishes.
+   *
+   * @param params.userId The user ID of the session.
+   * @param params.sessionId The session to run against.
+   * @param params.newMessage The message that starts the invocation.
+   * @param params.stateDelta An optional state delta to apply to the session.
+   * @param params.runConfig The run config for the agent.
+   * @yields The Events generated by the agent.
+   */
+  async *run(params: {
+    userId: string;
+    sessionId: string;
+    newMessage: Content;
+    stateDelta?: Record<string, unknown>;
+    runConfig?: RunConfig;
+  }): AsyncGenerator<Event, void, undefined> {
+    yield* pumpEagerly(this.runAsync(params));
   }
 
   /**

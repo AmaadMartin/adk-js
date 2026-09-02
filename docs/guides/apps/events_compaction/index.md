@@ -25,9 +25,10 @@ override, so adding one to an existing app does not change an agent that
 already manages its own compaction.
 
 `adk-python` names the same field `events_compaction_config` and applies the
-same precedence. It supports two triggers; ADK for TypeScript has a compactor
-for the token trigger only, so a policy that configures the sliding-window
-trigger alone is rejected when you build the `App`.
+same precedence. Both SDKs support two triggers, and they fire in different
+places. The token trigger runs *inside* an invocation, before the contents are
+built. The sliding-window trigger runs *after* the invocation, once every event
+of the turn has been handed to the caller.
 
 ## Get started
 
@@ -95,6 +96,50 @@ createEventsCompactionConfig({
 });
 ```
 
+## The sliding-window trigger
+
+Set `compactionInterval` and `overlapSize` to compact by whole turns instead of
+by prompt size. The runner counts the invocations that arrived since the last
+summary. Once that count reaches `compactionInterval`, it summarizes them
+together with the `overlapSize` invocations before them, so consecutive
+summaries share context.
+
+```typescript
+import {
+  App,
+  InMemoryRunner,
+  LlmAgent,
+  createEventsCompactionConfig,
+} from '@google/adk';
+
+const app = new App({
+  name: 'chat_app',
+  rootAgent: new LlmAgent({
+    name: 'assistant',
+    model: 'gemini-2.0-flash',
+    instruction: 'Answer the user.',
+  }),
+  eventsCompactionConfig: createEventsCompactionConfig({
+    // Summarize after every second turn.
+    compactionInterval: 2,
+    // Re-read the turn before the window, so the summaries overlap.
+    overlapSize: 1,
+  }),
+});
+
+const runner = new InMemoryRunner({app});
+```
+
+The runner appends the summary to the session after the last event of the turn
+has been yielded, so `runAsync` completes only once the summary is stored. The
+next request reads it back through the same reader the token trigger writes
+for: the summary replaces the raw events it covers, and the turns after it stay
+raw.
+
+Both triggers may be set on one policy. They are independent, so a long single
+turn is served by the token trigger while a long conversation of short turns is
+served by the window.
+
 ## What it guarantees
 
 - **Compaction runs at most once per invocation.** A long invocation can make
@@ -105,13 +150,15 @@ createEventsCompactionConfig({
   backwards rather than cutting between the two.
 - **Nothing is deleted.** The summary event is appended, and the events it
   covers stay in the session. Later compactions fold the previous summary in.
+- **A summary that loses a write race is dropped, not forced.** A second turn
+  can advance the session while the summarizer is still running. The runner
+  discards the late summary rather than overwriting the newer history, and the
+  invocation still succeeds.
 
 ## Failure modes
 
-- An `eventsCompactionConfig` that sets only `compactionInterval` and
-  `overlapSize` throws when the `App` is built. ADK for TypeScript has no
-  interval-based compactor, so such a policy would never compact. Add
-  `tokenThreshold` and `eventRetentionSize`.
+- An `eventsCompactionConfig` that configures no trigger, or half of one,
+  throws when the `App` is built.
 - A bare node run as the app root has no model. With no `summarizer` in the
   policy there is nothing to summarize with, so compaction does not run.
 - A session whose events carry no `usageMetadata.promptTokenCount` falls back
