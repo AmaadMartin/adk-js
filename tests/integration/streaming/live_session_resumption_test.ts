@@ -67,12 +67,12 @@ class ScriptedLiveModel extends BaseLlm {
     super({model: 'live-test-model'});
   }
 
-  // eslint-disable-next-line require-yield -- the live path never calls it.
   override async *generateContentAsync(): AsyncGenerator<
     LlmResponse,
     void,
     void
   > {
+    yield* [];
     throw new Error('generateContentAsync is not part of this scenario.');
   }
 

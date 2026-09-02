@@ -6,9 +6,7 @@
 
 import {
   ActiveStreamingTool,
-  AsyncQueue,
   BaseTool,
-  Event,
   FunctionTool,
   InvocationContext,
   LiveRequestQueue,
@@ -16,7 +14,6 @@ import {
   LlmRequest,
   PluginManager,
   Task,
-  createEvent,
   createSession,
 } from '@google/adk';
 import {
@@ -28,7 +25,6 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {
   markLiveAsyncToolsNonBlocking,
-  pumpEventsInto,
   runConfigForNewLiveSession,
   stopBackgroundToolTasks,
 } from '../../src/agents/live_flow_utils.js';
@@ -239,75 +235,6 @@ describe('markLiveAsyncToolsNonBlocking', () => {
     };
 
     expect(() => markLiveAsyncToolsNonBlocking(llmRequest)).not.toThrow();
-  });
-});
-
-async function* eventsOf(
-  ...texts: string[]
-): AsyncGenerator<Event, void, void> {
-  for (const text of texts) {
-    yield createEvent({author: 'agent', content: {parts: [{text}]}});
-  }
-}
-
-function textOf(event: Event): string | undefined {
-  return event.content?.parts?.[0].text;
-}
-
-describe('pumpEventsInto', () => {
-  it('hands the source events to the queue and closes it', async () => {
-    const queue = new AsyncQueue<Event>();
-
-    await pumpEventsInto(eventsOf('one', 'two'), queue);
-
-    const drained: string[] = [];
-    for await (const event of queue) {
-      drained.push(textOf(event)!);
-    }
-    expect(drained).toEqual(['one', 'two']);
-    expect(queue.isClosed).toBe(true);
-  });
-
-  it('interleaves an event pushed while the source is still running', async () => {
-    const queue = new AsyncQueue<Event>();
-    let released!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      released = resolve;
-    });
-    async function* slowSource(): AsyncGenerator<Event, void, void> {
-      await gate;
-      yield createEvent({author: 'agent', content: {parts: [{text: 'late'}]}});
-    }
-    const pumped = pumpEventsInto(slowSource(), queue);
-
-    // The screened event lands first because the source is still parked.
-    queue.push(
-      createEvent({author: 'agent', content: {parts: [{text: 'blocked'}]}}),
-    );
-    const iterator = queue[Symbol.asyncIterator]();
-    expect(textOf((await iterator.next()).value as Event)).toBe('blocked');
-
-    released();
-    await pumped;
-    expect(textOf((await iterator.next()).value as Event)).toBe('late');
-    expect((await iterator.next()).done).toBe(true);
-  });
-
-  it('delivers buffered events before the error the source threw', async () => {
-    const queue = new AsyncQueue<Event>();
-    async function* failingSource(): AsyncGenerator<Event, void, void> {
-      yield createEvent({author: 'agent', content: {parts: [{text: 'one'}]}});
-      throw new Error('receive loop failed');
-    }
-
-    // The pump itself never rejects; the error reaches the consumer.
-    await expect(
-      pumpEventsInto(failingSource(), queue),
-    ).resolves.toBeUndefined();
-
-    const iterator = queue[Symbol.asyncIterator]();
-    expect(textOf((await iterator.next()).value as Event)).toBe('one');
-    await expect(iterator.next()).rejects.toThrow('receive loop failed');
   });
 });
 

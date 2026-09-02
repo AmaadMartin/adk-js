@@ -95,10 +95,10 @@ class ThrowingLlm extends BaseLlm {
     super({model: 'throwing-llm'});
   }
 
-  // eslint-disable-next-line require-yield -- the generator only ever throws.
   async *generateContentAsync(
     _request: LlmRequest,
   ): AsyncGenerator<LlmResponse, void, void> {
+    yield* [];
     throw this.thrown;
   }
 

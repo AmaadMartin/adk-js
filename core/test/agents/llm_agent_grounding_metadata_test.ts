@@ -8,8 +8,8 @@ import {
   AgentTool,
   BaseLlm,
   BaseLlmConnection,
+  BaseLlmRequestProcessor,
   BasePlugin,
-  BaseTool,
   Context,
   createSession,
   Event,
@@ -113,10 +113,26 @@ function unrelatedTool(): FunctionTool {
   });
 }
 
+/** Restricts the request to the named tools, as a tool filter would. */
+class AllowedToolsProcessor extends BaseLlmRequestProcessor {
+  constructor(private readonly allowed: string[]) {
+    super();
+  }
+
+  async *runAsync(
+    _invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<Event, void, void> {
+    yield* [];
+    llmRequest.allowedTools = this.allowed;
+  }
+}
+
 interface RunOptions {
   tools?: Array<AgentTool | FunctionTool>;
   groundingMetadata?: GroundingMetadata;
   plugins?: BasePlugin[];
+  allowedTools?: string[];
   beforeModelCallback?: LlmAgent['beforeModelCallback'];
   afterModelCallback?: LlmAgent['afterModelCallback'];
 }
@@ -138,6 +154,11 @@ async function runAgent(options: RunOptions = {}): Promise<Event[]> {
     beforeModelCallback: options.beforeModelCallback,
     afterModelCallback: options.afterModelCallback,
   });
+  if (options.allowedTools) {
+    agent.requestProcessors.push(
+      new AllowedToolsProcessor(options.allowedTools),
+    );
+  }
   const invocationContext = new InvocationContext({
     invocationId: 'inv-1',
     session: buildSession(options.groundingMetadata),
@@ -338,42 +359,26 @@ describe('a search tool that writes its own metadata', () => {
   });
 });
 
-describe('canonicalToolsCache', () => {
-  it('holds the tools preprocessing resolved, before the model is called', async () => {
-    const tool = searchAgentTool();
-    let cacheBeforeModelCall: BaseTool[] | undefined;
+describe('the tools the model can actually call', () => {
+  it('does not ground when allowedTools excludes the search tool', async () => {
+    // The gate reads `llmRequest.toolsDict`, which holds only the tools the
+    // model was offered. A tool it cannot call must not turn grounding on.
     const events = await runAgent({
-      tools: [tool],
+      tools: [searchAgentTool(), unrelatedTool()],
       groundingMetadata: GROUNDING_METADATA,
-      beforeModelCallback: ({context}) => {
-        // Only the preprocess pass can have filled the cache by now, so this
-        // pins that write rather than the grounding lookup's own fallback.
-        cacheBeforeModelCall = context.invocationContext.canonicalToolsCache;
-        return undefined;
-      },
+      allowedTools: ['weather'],
     });
 
-    expect(modelEvent(events).groundingMetadata).toEqual(GROUNDING_METADATA);
-    expect(cacheBeforeModelCall).toEqual([tool]);
+    expect(modelEvent(events).groundingMetadata).toBeUndefined();
   });
 
-  it('is filled on demand when the cache is empty', async () => {
-    let stepContext: InvocationContext | undefined;
+  it('grounds when allowedTools includes the search tool', async () => {
     const events = await runAgent({
-      tools: [searchAgentTool()],
+      tools: [searchAgentTool(), unrelatedTool()],
       groundingMetadata: GROUNDING_METADATA,
-      afterModelCallback: ({context}) => {
-        // Clear the cache the preprocess pass filled, so the grounding lookup
-        // has to resolve the tools itself.
-        context.invocationContext.canonicalToolsCache = undefined;
-        stepContext = context.invocationContext;
-        return undefined;
-      },
+      allowedTools: ['google_search_agent'],
     });
 
     expect(modelEvent(events).groundingMetadata).toEqual(GROUNDING_METADATA);
-    expect(stepContext?.canonicalToolsCache?.map((tool) => tool.name)).toEqual([
-      'google_search_agent',
-    ]);
   });
 });

@@ -5,7 +5,6 @@
  */
 
 import {
-  AudioCacheManager,
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
@@ -14,8 +13,12 @@ import {
   SessionArtifactService,
   createSession,
 } from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
+import {
+  cacheAudio,
+  flushAudioCaches,
+} from '../../src/agents/audio_cache_manager.js';
 import {ScopedArtifactService} from '../../src/artifacts/scoped_artifact_service.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -54,18 +57,12 @@ function makeArtifactService(): SessionArtifactService {
   );
 }
 
-describe('AudioCacheManager.cacheAudio', () => {
-  let manager: AudioCacheManager;
-
-  beforeEach(() => {
-    manager = new AudioCacheManager();
-  });
-
+describe('cacheAudio', () => {
   it('caches user audio under the user role', () => {
     const invocationContext = makeContext();
     const blob = {data: FIRST_CHUNK, mimeType: 'audio/pcm'};
 
-    manager.cacheAudio(invocationContext, blob, 'input');
+    cacheAudio(invocationContext, blob, 'input');
 
     expect(invocationContext.inputRealtimeCache).toHaveLength(1);
     expect(invocationContext.inputRealtimeCache?.[0].role).toBe('user');
@@ -79,7 +76,7 @@ describe('AudioCacheManager.cacheAudio', () => {
   it('caches model audio under the model role', () => {
     const invocationContext = makeContext();
 
-    manager.cacheAudio(
+    cacheAudio(
       invocationContext,
       {data: FIRST_CHUNK, mimeType: 'audio/pcm'},
       'output',
@@ -93,8 +90,8 @@ describe('AudioCacheManager.cacheAudio', () => {
   it('appends further chunks to the same cache', () => {
     const invocationContext = makeContext();
 
-    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
-    manager.cacheAudio(invocationContext, {data: SECOND_CHUNK}, 'input');
+    cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
+    cacheAudio(invocationContext, {data: SECOND_CHUNK}, 'input');
 
     expect(invocationContext.inputRealtimeCache).toHaveLength(2);
   });
@@ -103,34 +100,28 @@ describe('AudioCacheManager.cacheAudio', () => {
     const invocationContext = makeContext();
 
     expect(() =>
-      manager.cacheAudio(invocationContext, {mimeType: 'audio/pcm'}, 'input'),
+      cacheAudio(invocationContext, {mimeType: 'audio/pcm'}, 'input'),
     ).toThrow('Audio blobs must contain byte data.');
     expect(invocationContext.inputRealtimeCache).toBeUndefined();
   });
 });
 
-describe('AudioCacheManager.flushCaches', () => {
-  let manager: AudioCacheManager;
-
-  beforeEach(() => {
-    manager = new AudioCacheManager();
-  });
-
+describe('flushAudioCaches', () => {
   it('writes one artifact per cache and clears both', async () => {
     const artifactService = makeArtifactService();
     const invocationContext = makeContext(artifactService);
-    manager.cacheAudio(
+    cacheAudio(
       invocationContext,
       {data: FIRST_CHUNK, mimeType: 'audio/pcm'},
       'input',
     );
-    manager.cacheAudio(
+    cacheAudio(
       invocationContext,
       {data: SECOND_CHUNK, mimeType: 'audio/pcm'},
       'output',
     );
 
-    const events = await manager.flushCaches(invocationContext);
+    const events = await flushAudioCaches(invocationContext);
 
     expect(events).toHaveLength(2);
     expect(events[0].author).toBe('user');
@@ -150,12 +141,12 @@ describe('AudioCacheManager.flushCaches', () => {
   it('joins a cache into one artifact under the reference format', async () => {
     const artifactService = makeArtifactService();
     const invocationContext = makeContext(artifactService);
-    manager.cacheAudio(
+    cacheAudio(
       invocationContext,
       {data: FIRST_CHUNK, mimeType: 'audio/pcm'},
       'output',
     );
-    manager.cacheAudio(
+    cacheAudio(
       invocationContext,
       {data: SECOND_CHUNK, mimeType: 'audio/pcm'},
       'output',
@@ -164,7 +155,7 @@ describe('AudioCacheManager.flushCaches', () => {
       invocationContext.outputRealtimeCache![0].timestamp,
     );
 
-    const events = await manager.flushCaches(invocationContext);
+    const events = await flushAudioCaches(invocationContext);
 
     const filename = `adk_live_audio_storage_output_audio_${timestampMs}.pcm`;
     expect(events[0].content?.parts?.[0].fileData).toEqual({
@@ -178,19 +169,19 @@ describe('AudioCacheManager.flushCaches', () => {
   it('defaults the mime type when a chunk declares none', async () => {
     const artifactService = makeArtifactService();
     const invocationContext = makeContext(artifactService);
-    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
+    cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
 
-    const events = await manager.flushCaches(invocationContext);
+    const events = await flushAudioCaches(invocationContext);
 
     expect(events[0].content?.parts?.[0].fileData?.mimeType).toBe('audio/pcm');
   });
 
   it('flushes only the cache the caller asked for', async () => {
     const invocationContext = makeContext(makeArtifactService());
-    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
-    manager.cacheAudio(invocationContext, {data: SECOND_CHUNK}, 'output');
+    cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
+    cacheAudio(invocationContext, {data: SECOND_CHUNK}, 'output');
 
-    const events = await manager.flushCaches(invocationContext, false);
+    const events = await flushAudioCaches(invocationContext, false);
 
     expect(events).toHaveLength(1);
     expect(events[0].content?.role).toBe('model');
@@ -200,9 +191,9 @@ describe('AudioCacheManager.flushCaches', () => {
 
   it('keeps the audio when there is no artifact service', async () => {
     const invocationContext = makeContext();
-    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
+    cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
 
-    const events = await manager.flushCaches(invocationContext);
+    const events = await flushAudioCaches(invocationContext);
 
     expect(events).toEqual([]);
     expect(invocationContext.inputRealtimeCache).toHaveLength(1);
@@ -215,7 +206,7 @@ describe('AudioCacheManager.flushCaches', () => {
       {role: 'model', data: {mimeType: 'audio/pcm'}, timestamp: 1},
     ];
 
-    const events = await new AudioCacheManager().flushCaches(invocationContext);
+    const events = await flushAudioCaches(invocationContext);
 
     expect(events).toHaveLength(1);
     const filename = 'adk_live_audio_storage_output_audio_1.pcm';
@@ -226,15 +217,15 @@ describe('AudioCacheManager.flushCaches', () => {
   it('returns nothing when both caches are empty', async () => {
     const invocationContext = makeContext(makeArtifactService());
 
-    expect(await manager.flushCaches(invocationContext)).toEqual([]);
+    expect(await flushAudioCaches(invocationContext)).toEqual([]);
   });
 
   it('timestamps the flushed event in epoch milliseconds', async () => {
     const invocationContext = makeContext(makeArtifactService());
     const before = Date.now();
-    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'output');
+    cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'output');
 
-    const events = await manager.flushCaches(invocationContext);
+    const events = await flushAudioCaches(invocationContext);
 
     // An event timestamped in seconds lands in 1970 and drags
     // `session.lastUpdateTime` back with it when the runner persists it.
@@ -250,8 +241,8 @@ describe('AudioCacheManager.flushCaches', () => {
       sessionId: SESSION_ID,
     });
     const invocationContext = makeContext(makeArtifactService());
-    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'output');
-    const events = await manager.flushCaches(invocationContext);
+    cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'output');
+    const events = await flushAudioCaches(invocationContext);
     const createdAt = session.lastUpdateTime;
 
     await sessionService.appendEvent({session, event: events[0]});
@@ -266,9 +257,9 @@ describe('AudioCacheManager.flushCaches', () => {
       new Error('artifact service unavailable'),
     );
     const invocationContext = makeContext(artifactService);
-    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'output');
+    cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'output');
 
-    const events = await manager.flushCaches(invocationContext);
+    const events = await flushAudioCaches(invocationContext);
 
     expect(events).toEqual([]);
     expect(invocationContext.outputRealtimeCache).toHaveLength(1);

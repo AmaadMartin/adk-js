@@ -13,7 +13,7 @@ import {
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
-import {AsyncQueue} from '../utils/async_queue.js';
+import {AsyncQueue, pumpInto} from '../utils/async_queue.js';
 import {isBaseNode, type BaseNode} from '../workflow/base_node.js';
 import {NodeContext} from '../workflow/node_context.js';
 import {NodeTool} from '../workflow/nodes/node_tool.js';
@@ -80,11 +80,10 @@ import {
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {TOOLSET_AUTH_PREPROCESSOR} from '../auth/toolset_auth.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
-import {AudioCacheManager} from './audio_cache_manager.js';
+import {cacheAudio, flushAudioCaches} from './audio_cache_manager.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {
   markLiveAsyncToolsNonBlocking,
-  pumpEventsInto,
   runConfigForNewLiveSession,
   stopBackgroundToolTasks,
 } from './live_flow_utils.js';
@@ -148,6 +147,49 @@ function isGroundingMetadata(value: unknown): value is GroundingMetadata {
   return (
     typeof value === 'object' && value !== null && Object.keys(value).length > 0
   );
+}
+
+/**
+ * Attaches the grounding metadata a `google_search_agent` tool left in temp
+ * state to the response the flow is about to yield.
+ *
+ * The search runs as a tool, so its grounding metadata reaches the flow
+ * through session state rather than through the model response. Mirrors
+ * `_maybe_add_grounding_metadata` in adk-python's
+ * `flows/llm_flows/base_llm_flow.py`, including the match on the tool's name
+ * rather than on its class.
+ *
+ * The live path does not call this. There the flow reads a response returned
+ * by the after-model callbacks as "the callbacks blocked this turn", so
+ * returning one for a turn nobody blocked would end the turn.
+ *
+ * @param invocationContext The current invocation.
+ * @param llmRequest The request this step sent, whose `toolsDict` holds the
+ *     tools the model can call.
+ * @param llmResponse The response the model returned.
+ * @param response The response an after-model callback returned, if any.
+ * @returns `response` unchanged when there is no grounding metadata to attach,
+ *     otherwise the response carrying it.
+ */
+function withGroundingMetadata(
+  invocationContext: InvocationContext,
+  llmRequest: LlmRequest,
+  llmResponse: LlmResponse,
+  response?: LlmResponse,
+): LlmResponse | undefined {
+  if (!llmRequest.toolsDict[GROUNDING_SEARCH_AGENT_NAME]) {
+    return response;
+  }
+
+  const groundingMetadata =
+    invocationContext.session.state[GROUNDING_METADATA_STATE_KEY];
+  if (!isGroundingMetadata(groundingMetadata)) {
+    return response;
+  }
+
+  const grounded = response ?? llmResponse;
+  grounded.groundingMetadata = groundingMetadata;
+  return grounded;
 }
 
 /**
@@ -664,8 +706,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   readonly outputSchemaSource?: SchemaLike;
   outputKey?: string;
   private _finishTaskTool?: FinishTaskTool;
-  /** Caches this agent's live audio until a turn ends. */
-  private readonly audioCacheManager = new AudioCacheManager();
   beforeModelCallback?: BeforeModelCallback;
   afterModelCallback?: AfterModelCallback;
   onModelErrorCallback?: OnModelErrorCallback;
@@ -1286,7 +1326,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         llmRequest,
         sendAbort,
       );
-      void pumpEventsInto(receiveLoop, screenedEvents);
+      void pumpInto(receiveLoop, screenedEvents);
 
       let reconnectMode: LiveReconnectMode | undefined;
       let fatalError: unknown;
@@ -1540,11 +1580,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       // `saveLiveBlob` is off, so caching then would grow it for the life of
       // the session. adk-python caches unconditionally and has that leak.
       if (invocationContext.runConfig?.saveLiveBlob) {
-        this.audioCacheManager.cacheAudio(
-          invocationContext,
-          liveRequest.blob,
-          'input',
-        );
+        cacheAudio(invocationContext, liveRequest.blob, 'input');
       }
       await connection.sendRealtime(liveRequest.blob);
       return;
@@ -1819,7 +1855,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     for (const part of event.content?.parts ?? []) {
       const inlineData = part.inlineData;
       if (inlineData?.mimeType?.startsWith('audio/')) {
-        this.audioCacheManager.cacheAudio(
+        cacheAudio(
           invocationContext,
           {data: inlineData.data, mimeType: inlineData.mimeType},
           'output',
@@ -1895,7 +1931,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       invocationContext.runConfig?.saveLiveBlob &&
       (llmResponse.interrupted || llmResponse.turnComplete)
     ) {
-      const flushedEvents = await this.audioCacheManager.flushCaches(
+      const flushedEvents = await flushAudioCaches(
         invocationContext,
         !llmResponse.interrupted,
       );
@@ -2011,7 +2047,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       author: this.name,
       branch: invocationContext.branch,
     });
-    const resolvedTools: BaseTool[] = [];
     for (const toolUnion of allTools) {
       const toolContext = new Context({
         invocationContext,
@@ -2019,12 +2054,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       });
 
       // process all tools from this tool union
-      const unionTools = await convertToolUnionToTools(
-        toolUnion,
-        new ReadonlyContext(invocationContext),
-      );
-      resolvedTools.push(...unionTools);
-      const tools = unionTools.filter((tool) => {
+      const tools = (
+        await convertToolUnionToTools(
+          toolUnion,
+          new ReadonlyContext(invocationContext),
+        )
+      ).filter((tool) => {
         // If allowedTools is not set, allow all tools. Otherwise, only allow
         // tools that are in the allowedTools set.
         // The allowedTools set is populated by request processors.
@@ -2043,7 +2078,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
-    invocationContext.canonicalToolsCache = resolvedTools;
     // =========================================================================
     // Global runtime interruption
     // =========================================================================
@@ -2367,8 +2401,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           return;
         }
 
-        const groundedLlmResponse = await this.withGroundingMetadata(
+        const groundedLlmResponse = withGroundingMetadata(
           invocationContext,
+          llmRequest,
           llmResponse,
           alteredLlmResponse,
         );
@@ -2458,51 +2493,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
     }
     return undefined;
-  }
-
-  /**
-   * Attaches the grounding metadata a `google_search_agent` tool left in temp
-   * state to the response the flow is about to yield.
-   *
-   * The search runs as a tool, so its grounding metadata reaches the flow
-   * through session state rather than through the model response. Mirrors
-   * `_maybe_add_grounding_metadata` in adk-python's
-   * `flows/llm_flows/base_llm_flow.py`, including the match on the tool's name
-   * rather than on its class.
-   *
-   * The live path does not call this. There the flow reads a response returned
-   * by the after-model callbacks as "the callbacks blocked this turn", so
-   * returning one for a turn nobody blocked would end the turn.
-   *
-   * @param invocationContext The current invocation.
-   * @param llmResponse The response the model returned.
-   * @param response The response an after-model callback returned, if any.
-   * @returns `response` unchanged when there is no grounding metadata to
-   *   attach, otherwise the response carrying it.
-   */
-  private async withGroundingMetadata(
-    invocationContext: InvocationContext,
-    llmResponse: LlmResponse,
-    response?: LlmResponse,
-  ): Promise<LlmResponse | undefined> {
-    let tools = invocationContext.canonicalToolsCache;
-    if (!tools) {
-      tools = await this.canonicalTools(new ReadonlyContext(invocationContext));
-      invocationContext.canonicalToolsCache = tools;
-    }
-    if (!tools.some((tool) => tool.name === GROUNDING_SEARCH_AGENT_NAME)) {
-      return response;
-    }
-
-    const groundingMetadata =
-      invocationContext.session.state[GROUNDING_METADATA_STATE_KEY];
-    if (!isGroundingMetadata(groundingMetadata)) {
-      return response;
-    }
-
-    const grounded = response ?? llmResponse;
-    grounded.groundingMetadata = groundingMetadata;
-    return grounded;
   }
 
   /**

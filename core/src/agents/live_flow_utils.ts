@@ -6,9 +6,7 @@
 
 import {Behavior} from '@google/genai';
 
-import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
-import {AsyncQueue} from '../utils/async_queue.js';
 import {logger} from '../utils/logger.js';
 import {Task} from '../utils/task.js';
 import {InvocationContext} from './invocation_context.js';
@@ -142,35 +140,5 @@ export function markLiveAsyncToolsNonBlocking(llmRequest: LlmRequest): void {
         declaration.behavior = Behavior.NON_BLOCKING;
       }
     }
-  }
-}
-
-/**
- * Drains `source` into `queue`, closing it when the source ends and failing it
- * with whatever the source threw.
- *
- * The live flow puts the model's events and the send loop's screened events on
- * one queue. A blocked typed message never reaches the model, so no server
- * message follows it; sharing the queue is what delivers that event to the
- * caller instead of parking it behind a message that never comes.
- * {@link AsyncQueue} hands over every buffered item before the end or the
- * error, so nothing the source produced is lost either way.
- *
- * @param source The receive loop.
- * @param queue The queue the flow yields from.
- * @return A promise that settles when the source ends. It never rejects: the
- *     error reaches the consumer through the queue.
- */
-export async function pumpEventsInto(
-  source: AsyncGenerator<Event, void, void>,
-  queue: AsyncQueue<Event>,
-): Promise<void> {
-  try {
-    for await (const event of source) {
-      queue.push(event);
-    }
-    queue.close();
-  } catch (error: unknown) {
-    queue.fail(error);
   }
 }

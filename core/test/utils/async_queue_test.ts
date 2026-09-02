@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {AsyncQueue} from '../../src/utils/async_queue.js';
+import {AsyncQueue, pumpInto} from '../../src/utils/async_queue.js';
 
 describe('AsyncQueue', () => {
   it('should yield pushed values', async () => {
@@ -150,5 +150,64 @@ describe('AsyncQueue — failure & lifecycle', () => {
     queue.fail(new Error('first'));
     queue.fail(new Error('second'));
     await expect(drain(queue)).rejects.toThrow('first');
+  });
+});
+
+describe('pumpInto', () => {
+  async function* itemsOf(...values: string[]): AsyncGenerator<string> {
+    for (const value of values) {
+      yield value;
+    }
+  }
+
+  it('hands the source items to the queue and closes it', async () => {
+    const queue = new AsyncQueue<string>();
+
+    await pumpInto(itemsOf('one', 'two'), queue);
+
+    const drained: string[] = [];
+    for await (const item of queue) {
+      drained.push(item);
+    }
+    expect(drained).toEqual(['one', 'two']);
+    expect(queue.isClosed).toBe(true);
+  });
+
+  it('interleaves an item pushed while the source is still running', async () => {
+    const queue = new AsyncQueue<string>();
+    let released!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      released = resolve;
+    });
+    async function* slowSource(): AsyncGenerator<string> {
+      await gate;
+      yield 'late';
+    }
+    const pumped = pumpInto(slowSource(), queue);
+
+    // The directly pushed item lands first because the source is still parked.
+    queue.push('direct');
+    const iterator = queue[Symbol.asyncIterator]();
+    expect((await iterator.next()).value).toBe('direct');
+
+    released();
+    await pumped;
+    expect((await iterator.next()).value).toBe('late');
+    expect((await iterator.next()).done).toBe(true);
+  });
+
+  it('delivers buffered items before the error the source threw', async () => {
+    const queue = new AsyncQueue<string>();
+    async function* failingSource(): AsyncGenerator<string> {
+      yield 'one';
+      throw new Error('source failed');
+    }
+
+    // The pump itself never rejects; the error reaches the consumer.
+    await expect(pumpInto(failingSource(), queue)).resolves.toBeUndefined();
+
+    const iterator = queue[Symbol.asyncIterator]();
+    expect((await iterator.next()).value).toBe('one');
+    await expect(iterator.next()).rejects.toThrow('source failed');
   });
 });
