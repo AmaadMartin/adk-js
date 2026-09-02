@@ -6,21 +6,10 @@
 
 import type {Content} from '@google/genai';
 import {InputValidationError} from '../errors/input_validation_error.js';
-import type {ConversationScenario} from './conversation_scenarios.js';
-import type {Invocation} from './eval_case.js';
+import type {ConversationScenario, Invocation} from './eval_case.js';
 import type {BaseCriterion} from './eval_metrics.js';
 import {EvalStatus} from './eval_metrics.js';
 import type {RubricScore} from './eval_rubrics.js';
-
-/**
- * The verdict a metric returns for an invocation, or for a whole eval case.
- *
- * The numeric values match the `EvalStatus` of `google/adk-python`, so a
- * serialized status is portable between the two runtimes. The enum lives in
- * `eval_metrics.ts`, and is re-exported here so that a metric reads its whole
- * contract from this module.
- */
-export {EvalStatus};
 
 /** The name reported for the criterion type every metric accepts. */
 const BASE_CRITERION_NAME = 'BaseCriterion';
@@ -138,28 +127,22 @@ export const BASE_CRITERION_TYPE: CriterionType<BaseCriterion> = {
 };
 
 /**
- * The static side of an evaluator class that names its criterion type.
+ * The static side of an evaluator class.
  *
- * A class satisfies it by declaring
- * `static readonly criterionType: CriterionType<MyCriterion>`.
+ * A class names the criterion type it accepts by declaring
+ * `static readonly criterionType`. A class that declares none accepts
+ * {@link BASE_CRITERION_TYPE}.
  */
 export interface EvaluatorClass<C extends BaseCriterion = BaseCriterion> {
-  readonly criterionType: CriterionType<C>;
-}
+  /** The class name, which every class carries. */
+  readonly name: string;
 
-/**
- * An evaluator class, whether or not it names a criterion type.
- *
- * The construct signature is part of the type because TypeScript refuses a
- * class that has no property in common with a type whose properties are all
- * optional, which is exactly the class that names no criterion type.
- */
-export type EvaluatorClassLike = Partial<EvaluatorClass> &
-  (abstract new (...args: never[]) => object);
+  readonly criterionType?: CriterionType<C>;
+}
 
 /** Returns the criterion type a class names, or the default one. */
 export function getCriterionType(
-  evaluatorClass: EvaluatorClassLike,
+  evaluatorClass: EvaluatorClass,
 ): CriterionType<BaseCriterion> {
   return evaluatorClass.criterionType ?? BASE_CRITERION_TYPE;
 }

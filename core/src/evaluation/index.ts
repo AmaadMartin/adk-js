@@ -36,7 +36,6 @@ export type {
   EvaluationResult,
   Evaluator,
   EvaluatorClass,
-  EvaluatorClassLike,
   PerInvocationResult,
 } from './evaluator.js';
 export type {
