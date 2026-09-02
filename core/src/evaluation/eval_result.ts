@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Session} from '../sessions/session.js';
 import {
+  EvalMetric,
   EvalMetricResult,
   EvalMetricResultPerInvocation,
   EvalStatus,
@@ -12,6 +14,9 @@ import {
 
 /** The evaluation result for one eval case. */
 export interface EvalCaseResult {
+  /** @deprecated Use {@link evalSetId} instead. */
+  evalSetFile?: string;
+
   evalSetId: string;
 
   /** The eval case id. */
@@ -23,6 +28,9 @@ export interface EvalCaseResult {
    */
   finalEvalStatus: EvalStatus;
 
+  /** @deprecated Use {@link overallEvalMetricResults} instead. */
+  evalMetricResults?: Array<[EvalMetric, EvalMetricResult]>;
+
   /**
    * Each metric aggregated over the whole eval case, which is what
    * {@link finalEvalStatus} summarizes. An eval service that reports only
@@ -32,4 +40,28 @@ export interface EvalCaseResult {
   overallEvalMetricResults?: EvalMetricResult[];
 
   evalMetricResultPerInvocation: EvalMetricResultPerInvocation[];
+
+  /** The id of the session the inference stage of the eval produced. */
+  sessionId: string;
+
+  /** The session itself, when the eval service recorded it. */
+  sessionDetails?: Session;
+
+  /** The user id the inference stage ran under. */
+  userId?: string;
+}
+
+/** The results of evaluating every case in one eval set. */
+export interface EvalSetResult {
+  evalSetResultId: string;
+
+  /** The name a manager stores the result under. */
+  evalSetResultName?: string;
+
+  evalSetId: string;
+
+  evalCaseResults: EvalCaseResult[];
+
+  /** Creation time in seconds since the epoch. */
+  creationTimestamp: number;
 }

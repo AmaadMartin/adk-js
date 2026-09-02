@@ -14,8 +14,7 @@
 
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {isRecord, toCamelKeys, toSnakeKeys} from './eval_json.js';
-import {EvalCaseResult} from './eval_result.js';
-import {EvalSetResult} from './eval_set_results_manager.js';
+import {EvalCaseResult, EvalSetResult} from './eval_result.js';
 
 /** Milliseconds per second, for the epoch-seconds timestamps eval data uses. */
 const MILLIS_PER_SECOND = 1000;

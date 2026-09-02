@@ -37,6 +37,15 @@ const OPAQUE_KEYS: ReadonlySet<string> = new Set([
   'state',
   'final_session_state',
   'finalSessionState',
+  // A `Session` carried on an eval case result holds maps whose keys are user
+  // data: session state keys, artifact file names, and an opaque agent state
+  // snapshot. Renaming those keys corrupts them.
+  'state_delta',
+  'stateDelta',
+  'artifact_delta',
+  'artifactDelta',
+  'agent_state',
+  'agentState',
 ]);
 
 /** Narrows an unknown value to a plain (non-array) record. */
