@@ -5,6 +5,7 @@
  */
 
 import type {
+  ContentUnion,
   FunctionCall,
   GenerateContentConfig,
   Part,
@@ -321,6 +322,21 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   instruction?: string | InstructionProvider;
 
   /**
+   * Static instruction content sent verbatim as the system instruction, ahead
+   * of everything else.
+   *
+   * Placeholders are not interpolated and session state is not injected: the
+   * text is sent exactly as written, which is what makes it a stable prefix
+   * for provider-side context caching. Live API has its own cache mechanism,
+   * so this field does not apply there.
+   *
+   * When set, {@link LlmAgentConfig.instruction} no longer goes to the system
+   * instruction; it is placed in the request contents after the static
+   * content, so the static prefix stays byte-identical across turns.
+   */
+  staticInstruction?: ContentUnion;
+
+  /**
    * Instructions for all the agents in the entire agent tree.
    *
    * ONLY the globalInstruction in root agent will take effect.
@@ -525,6 +541,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
   model?: string | BaseLlm;
   instruction: string | InstructionProvider;
+  /** See {@link LlmAgentConfig.staticInstruction}. */
+  staticInstruction?: ContentUnion;
   /** @deprecated Use GlobalInstructionPlugin instead. */
   globalInstruction: string | InstructionProvider;
   tools: ToolUnion[];
@@ -583,6 +601,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     });
     this.model = config.model;
     this.instruction = config.instruction ?? '';
+    this.staticInstruction = config.staticInstruction;
     this.globalInstruction = config.globalInstruction ?? '';
     this.tools = config.tools ?? [];
     const delegationTools = delegationToolsFor(this.subAgents);

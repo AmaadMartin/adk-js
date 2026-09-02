@@ -20,6 +20,7 @@ import {
   LlmAgent,
   PluginManager,
 } from '@google/adk';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 /** Text carried only by the invocation that gets rewound. */
@@ -391,5 +392,57 @@ describe('ContentRequestProcessor', () => {
     expect(llmRequest.contents[0].parts?.[1].text).toBe(
       '[other_agent] thought: thinking process',
     );
+  });
+});
+
+describe('ContentRequestProcessor instruction contents', () => {
+  async function runProcessor(
+    events: Event[],
+    contents: Content[],
+  ): Promise<LlmRequest> {
+    const llmRequest: LlmRequest = {
+      contents,
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      createMockInvocationContext(events),
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    return llmRequest;
+  }
+
+  it('keeps contents the instructions processor added, ahead of the history', async () => {
+    const staticContent: Content = {
+      role: 'user',
+      parts: [{text: 'Referenced file data: file_data_0'}],
+    };
+
+    const llmRequest = await runProcessor(
+      [createMockEvent('1', 1000, 'Earlier turn')],
+      [staticContent],
+    );
+
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(llmRequest.contents[0]).toBe(staticContent);
+    expect(llmRequest.contents[1].parts?.[0]?.text).toBe('Earlier turn');
+  });
+
+  it('leaves the rebuilt history alone when the request has no contents', async () => {
+    const llmRequest = await runProcessor(
+      [
+        createMockEvent('1', 1000, 'Earlier turn'),
+        createMockEvent('2', 2000, 'Later turn'),
+      ],
+      [],
+    );
+
+    expect(llmRequest.contents).toHaveLength(2);
+    expect(llmRequest.contents[0].parts?.[0]?.text).toBe('Earlier turn');
+    expect(llmRequest.contents[1].parts?.[0]?.text).toBe('Later turn');
   });
 });

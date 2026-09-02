@@ -18,6 +18,9 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
   answers, and marking its reasoning as thought parts.
 - [LlmAgent single-turn and task modes](agents/llm_agent/single_turn.md) -
   Exposing a sub-agent to its parent as a callable tool that runs inline.
+- [Static instructions](agents/static_instruction/index.md) - Splitting an
+  agent's prompt into a cacheable static prefix and a per-turn dynamic
+  instruction.
 
 ### Evaluation
 
