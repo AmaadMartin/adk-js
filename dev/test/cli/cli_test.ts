@@ -31,6 +31,7 @@ import {
 } from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
+import {runEvalCli} from '../../src/cli/cli_eval.js';
 import {runAgent, runOnceCli} from '../../src/cli/cli_run.js';
 import {maybePromptForTelemetryConsent} from '../../src/cli/cli_telemetry.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
@@ -60,6 +61,10 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
   runOnceCli: vi.fn(),
+}));
+
+vi.mock('../../src/cli/cli_eval', () => ({
+  runEvalCli: vi.fn(),
 }));
 
 vi.mock('../../src/cli/cli_telemetry', async (importOriginal) => ({
@@ -318,8 +323,6 @@ describe('CLI Entrypoint', () => {
         'sess-123',
         '--replay',
         'replay.json',
-        '--resume',
-        'resume.json',
         '--otel_to_cloud',
       ]);
 
@@ -329,7 +332,6 @@ describe('CLI Entrypoint', () => {
           saveSession: true,
           sessionId: 'sess-123',
           inputFile: 'replay.json',
-          savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
       );
@@ -354,6 +356,14 @@ describe('CLI Entrypoint', () => {
       expect(
         (runAgent as Mock).mock.calls[0][0].defaultLlmModel,
       ).toBeUndefined();
+    });
+
+    it('should pass --resume to runAgent as the saved session file', async () => {
+      await parse(['run', 'agent.ts', '--resume', 'resume.json']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({savedSessionFile: 'resume.json'}),
+      );
     });
   });
 
@@ -782,6 +792,91 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('mutually exclusive run options', () => {
+    it('rejects --replay together with --resume', async () => {
+      const stderr = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation(() => true);
+      const exit = vi.spyOn(process, 'exit').mockImplementation((code) => {
+        throw new Error(`exit ${code}`);
+      });
+
+      await expect(
+        parse(['run', 'agent.ts', '--replay', 'a.json', '--resume', 'b.json']),
+      ).rejects.toThrow('exit 1');
+
+      expect(stderr.mock.calls.join('')).toContain(
+        "Options 'resume' and 'replay' cannot be set together.",
+      );
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(runAgent).not.toHaveBeenCalled();
+      expect(runOnceCli).not.toHaveBeenCalled();
+    });
+
+    it('still accepts --replay on its own', async () => {
+      await parse(['run', 'agent.ts', '--replay', 'a.json']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({inputFile: 'a.json'}),
+      );
+    });
+  });
+
+  describe('command: eval', () => {
+    it('forwards every option to the eval entry point', async () => {
+      await parse([
+        'eval',
+        'agent.ts',
+        'my_set:case1',
+        'other_set',
+        '--config_file_path',
+        'test_config.json',
+        '--print_detailed_results',
+        '--eval_storage_uri',
+        'gs://my-bucket',
+        '--log_level',
+        'debug',
+      ]);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+      expect(runEvalCli).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          evalSetFileOrIds: ['my_set:case1', 'other_set'],
+          configFilePath: 'test_config.json',
+          printDetailedResults: true,
+          evalStorageUri: 'gs://my-bucket',
+        }),
+      );
+    });
+
+    it('defaults the optional eval options', async () => {
+      await parse(['eval', 'agent.ts', 'my_set']);
+
+      expect(runEvalCli).toHaveBeenCalledWith(
+        expect.objectContaining({
+          evalSetFileOrIds: ['my_set'],
+          configFilePath: undefined,
+          printDetailedResults: false,
+          evalStorageUri: undefined,
+        }),
+      );
+    });
+
+    it('exits non-zero when the eval run fails', async () => {
+      vi.mocked(runEvalCli).mockRejectedValueOnce(new Error('no eval runtime'));
+      const exit = vi.spyOn(process, 'exit').mockImplementation((code) => {
+        throw new Error(`exit ${code}`);
+      });
+
+      await expect(parse(['eval', 'agent.ts', 'my_set'])).rejects.toThrow(
+        'exit 1',
+      );
+
+      expect(exit).toHaveBeenCalledWith(1);
     });
   });
 });
