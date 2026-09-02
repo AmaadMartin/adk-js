@@ -31,7 +31,7 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
     return (authScheme as OpenIdConnectWithConfig).tokenEndpoint;
   }
 
-  if (isOAuth2Scheme(authScheme) && authScheme.flows) {
+  if (isOAuth2Scheme(authScheme)) {
     const flows = authScheme.flows;
     const flow =
       flows.authorizationCode ||
@@ -78,20 +78,21 @@ export async function populateAuthSchemeFromDiscovery(
 
   const flows = authScheme.flows;
 
-  if (flows.implicit && !flows.implicit.authorizationUrl) {
-    flows.implicit.authorizationUrl = metadata.authorization_endpoint;
+  // The empty string is the "not configured" sentinel, so `||=` is the
+  // operator that fills it and leaves a configured endpoint alone.
+  if (flows.implicit) {
+    flows.implicit.authorizationUrl ||= metadata.authorization_endpoint;
   }
-  if (flows.password && !flows.password.tokenUrl) {
-    flows.password.tokenUrl = metadata.token_endpoint;
+  if (flows.password) {
+    flows.password.tokenUrl ||= metadata.token_endpoint;
   }
-  if (flows.clientCredentials && !flows.clientCredentials.tokenUrl) {
-    flows.clientCredentials.tokenUrl = metadata.token_endpoint;
+  if (flows.clientCredentials) {
+    flows.clientCredentials.tokenUrl ||= metadata.token_endpoint;
   }
-  if (flows.authorizationCode && !flows.authorizationCode.authorizationUrl) {
-    flows.authorizationCode.authorizationUrl = metadata.authorization_endpoint;
-  }
-  if (flows.authorizationCode && !flows.authorizationCode.tokenUrl) {
-    flows.authorizationCode.tokenUrl = metadata.token_endpoint;
+  if (flows.authorizationCode) {
+    flows.authorizationCode.authorizationUrl ||=
+      metadata.authorization_endpoint;
+    flows.authorizationCode.tokenUrl ||= metadata.token_endpoint;
   }
 
   return true;

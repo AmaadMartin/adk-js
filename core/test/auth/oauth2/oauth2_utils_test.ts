@@ -338,6 +338,10 @@ describe('oauth2_utils', () => {
       warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     });
 
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
     it('rejects a plain OAuth2 scheme that names no issuer', async () => {
       const scheme: AuthScheme = {
         type: 'oauth2',

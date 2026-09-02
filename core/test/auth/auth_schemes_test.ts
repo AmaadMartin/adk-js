@@ -149,6 +149,15 @@ describe('auth_schemes', () => {
       expect(isOAuth2Scheme({type: 'oauth2'})).toBe(false);
     });
 
+    it('rejects an OAuth2 scheme whose flows are undefined', () => {
+      interface UnconfiguredOAuth2 extends CustomAuthScheme {
+        type: 'oauth2';
+        flows: undefined;
+      }
+      const scheme: UnconfiguredOAuth2 = {type: 'oauth2', flows: undefined};
+      expect(isOAuth2Scheme(scheme)).toBe(false);
+    });
+
     it('rejects an OpenIdConnectWithConfig scheme', () => {
       expect(isOAuth2Scheme(oidcScheme)).toBe(false);
     });

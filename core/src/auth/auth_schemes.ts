@@ -110,7 +110,9 @@ export function isCustomAuthScheme(
 export function isOAuth2Scheme(
   scheme: AuthScheme,
 ): scheme is OpenAPIV3.OAuth2SecurityScheme {
-  return scheme.type === AuthSchemeType.OAUTH2 && 'flows' in scheme;
+  return (
+    scheme.type === AuthSchemeType.OAUTH2 && 'flows' in scheme && !!scheme.flows
+  );
 }
 
 /**
