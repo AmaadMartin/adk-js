@@ -321,6 +321,22 @@ export {VertexAiMemoryBankService} from './memory/vertex_ai_memory_bank_service.
 export type {VertexAiMemoryBankServiceOptions} from './memory/vertex_ai_memory_bank_service.js';
 export {VertexAiRagMemoryService} from './memory/vertex_ai_rag_memory_service.js';
 export type {VertexAiRagMemoryServiceOptions} from './memory/vertex_ai_rag_memory_service.js';
+export type {
+  AnthropicEffort,
+  AnthropicGenerateContentConfig,
+} from './models/anthropic_config.js';
+export {
+  AnthropicCredentialError,
+  AnthropicLlm,
+  AnthropicRateLimitError,
+  Claude,
+} from './models/anthropic_llm.js';
+export type {
+  AnthropicClient,
+  AnthropicLlmParams,
+  AnthropicMessages,
+  AnthropicRequestOptions,
+} from './models/anthropic_llm.js';
 export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
