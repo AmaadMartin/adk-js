@@ -182,6 +182,26 @@ describe('AsyncQueue — failure & lifecycle', () => {
     expect(drained).toBe(true);
   });
 
+  it('keeps a producer waiting while the buffer is still at the mark', async () => {
+    const queue = new AsyncQueue<number>({highWaterMark: 1});
+    queue.push(1);
+    queue.push(2);
+
+    let drained = false;
+    const waiting = queue.whenDrained().then(() => {
+      drained = true;
+    });
+
+    const iterator = queue[Symbol.asyncIterator]();
+    await iterator.next();
+    await Promise.resolve();
+    expect(drained).toBe(false);
+
+    await iterator.next();
+    await waiting;
+    expect(drained).toBe(true);
+  });
+
   it('releases a waiting producer on close()', async () => {
     const queue = new AsyncQueue<number>({highWaterMark: 1});
     queue.push(1);
