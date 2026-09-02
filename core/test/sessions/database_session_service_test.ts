@@ -23,6 +23,43 @@ import {isDatabaseConnectionString} from '../../src/sessions/database_session_se
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
 import {ENTITIES} from '../../src/sessions/db/schema.js';
 
+/** Opens a service that records every statement MikroORM sends. */
+async function createLoggingService(): Promise<{
+  service: DatabaseSessionService;
+  queries: string[];
+}> {
+  const queries: string[] = [];
+  const service = new DatabaseSessionService({
+    dbName: ':memory:',
+    driver: SqliteDriver,
+    allowGlobalContext: true,
+    debug: ['query'],
+    logger: (message: string) => queries.push(message),
+  });
+  await service.init();
+  return {service, queries};
+}
+
+/** Reports whether a logged statement reads the events table. */
+function readsEventsTable(query: string): boolean {
+  return /select .* from .?events.?/.test(query);
+}
+
+/** Appends `count` events, one millisecond apart, to an existing session. */
+async function appendEvents(
+  service: DatabaseSessionService,
+  session: Session,
+  count: number,
+): Promise<void> {
+  const start = Date.now();
+  for (let index = 0; index < count; index++) {
+    await service.appendEvent({
+      session,
+      event: createEvent({timestamp: start + index}),
+    });
+  }
+}
+
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
 
@@ -296,8 +333,82 @@ describe('DatabaseSessionService', () => {
       sessionId: 's1',
       config: {afterTimestamp: now},
     });
-    expect(after2?.events.length).toBe(1);
-    expect(after2?.events[0].id).toBe(e3.id);
+    expect(after2?.events.length).toBe(2);
+    expect(after2?.events[0].id).toBe(e2.id);
+    expect(after2?.events[1].id).toBe(e3.id);
+  });
+
+  it('includes the event whose timestamp equals afterTimestamp', async () => {
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 'boundary',
+    });
+
+    const boundary = Date.now();
+    const before = createEvent({timestamp: boundary - 1});
+    const onBoundary = createEvent({timestamp: boundary});
+    const after = createEvent({timestamp: boundary + 1});
+    for (const event of [before, onBoundary, after]) {
+      await service.appendEvent({session, event});
+    }
+
+    const retrieved = await service.getSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 'boundary',
+      config: {afterTimestamp: boundary},
+    });
+
+    expect(retrieved?.events.map((event) => event.id)).toEqual([
+      onBoundary.id,
+      after.id,
+    ]);
+  });
+
+  it('skips the events query when numRecentEvents is zero', async () => {
+    const {service: logged, queries} = await createLoggingService();
+    const session = await logged.createSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 'metadata-only',
+      state: {'greeting': 'hi'},
+    });
+    await appendEvents(logged, session, 3);
+
+    queries.length = 0;
+    const retrieved = await logged.getSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 'metadata-only',
+      config: {numRecentEvents: 0},
+    });
+
+    expect(queries.filter(readsEventsTable)).toEqual([]);
+    expect(retrieved?.events).toEqual([]);
+    expect(retrieved?.state['greeting']).toBe('hi');
+    await logged.close();
+  });
+
+  it('reads every event when numRecentEvents is omitted', async () => {
+    const {service: logged, queries} = await createLoggingService();
+    const session = await logged.createSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 'all-events',
+    });
+    await appendEvents(logged, session, 3);
+
+    queries.length = 0;
+    const retrieved = await logged.getSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 'all-events',
+    });
+
+    expect(queries.filter(readsEventsTable).length).toBe(1);
+    expect(retrieved?.events.length).toBe(3);
+    await logged.close();
   });
 
   it('should filter sessions by userId in listSessions', async () => {
@@ -651,6 +762,108 @@ describe('DatabaseSessionService', () => {
 
       expect(response.sessions.map((s) => s.id)).toEqual(['s3', 's4']);
       expect(response.page).toBe(2);
+    });
+
+    it('orders oldest-first when order is omitted', async () => {
+      for (const [sessionId, timestamp] of [
+        ['s1', 3000],
+        ['s2', 1000],
+        ['s3', 2000],
+      ] as const) {
+        const session = await service.createSession({
+          appName,
+          userId,
+          sessionId,
+        });
+        await service.appendEvent({session, event: createEvent({timestamp})});
+      }
+
+      const response = await service.listSessions({appName, userId});
+
+      expect(response.sessions.map((s) => s.id)).toEqual(['s2', 's3', 's1']);
+    });
+
+    it('breaks an update-time tie on user id, then session id', async () => {
+      const tied = 5000;
+      for (const [tieUserId, sessionId] of [
+        ['u2', 's2'],
+        ['u1', 's3'],
+        ['u1', 's1'],
+      ] as const) {
+        const session = await service.createSession({
+          appName,
+          userId: tieUserId,
+          sessionId,
+        });
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: tied}),
+        });
+      }
+
+      const response = await service.listSessions({appName});
+
+      expect(
+        response.sessions.map((session) => [session.userId, session.id]),
+      ).toEqual([
+        ['u1', 's1'],
+        ['u1', 's3'],
+        ['u2', 's2'],
+      ]);
+    });
+
+    it('returns the same order on repeated calls', async () => {
+      const tied = 7000;
+      for (const sessionId of ['s3', 's1', 's2']) {
+        const session = await service.createSession({
+          appName,
+          userId,
+          sessionId,
+        });
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: tied}),
+        });
+      }
+
+      const first = await service.listSessions({appName, userId});
+      const second = await service.listSessions({appName, userId});
+
+      expect(first.sessions.map((s) => s.id)).toEqual(['s1', 's2', 's3']);
+      expect(second.sessions.map((s) => s.id)).toEqual(
+        first.sessions.map((s) => s.id),
+      );
+    });
+
+    it('partitions tied sessions across pages without a gap or a repeat', async () => {
+      const tied = 9000;
+      for (const sessionId of ['s4', 's2', 's1', 's3']) {
+        const session = await service.createSession({
+          appName,
+          userId,
+          sessionId,
+        });
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: tied}),
+        });
+      }
+
+      const firstPage = await service.listSessions({
+        appName,
+        userId,
+        limit: 2,
+        page: 1,
+      });
+      const secondPage = await service.listSessions({
+        appName,
+        userId,
+        limit: 2,
+        page: 2,
+      });
+
+      expect(firstPage.sessions.map((s) => s.id)).toEqual(['s1', 's2']);
+      expect(secondPage.sessions.map((s) => s.id)).toEqual(['s3', 's4']);
     });
   });
 

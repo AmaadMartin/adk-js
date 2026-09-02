@@ -26,6 +26,7 @@ import {
   CreateSessionRequest,
   DeleteSessionRequest,
   extractStateDelta,
+  GetSessionConfig,
   GetSessionRequest,
   GetUserStateRequest,
   ListSessionsRequest,
@@ -48,7 +49,7 @@ import {
   StorageSession,
   StorageUserState,
 } from './db/schema.js';
-import {createSession, Session} from './session.js';
+import {CompositeSessionKey, createSession, Session} from './session.js';
 
 /**
  * The message a stale write is rejected with. The wording matches adk-python,
@@ -60,6 +61,38 @@ const STALE_SESSION_ERROR_MESSAGE =
 
 /** Newest event first, with the id breaking a timestamp tie. */
 const NEWEST_EVENT_FIRST = {timestamp: 'DESC', id: 'DESC'} as const;
+
+/**
+ * Selects the events of one session, optionally from a timestamp onwards.
+ *
+ * Spelled out rather than built from `CompositeSessionKey`, because MikroORM's
+ * `FilterQuery` only accepts a type that carries an implicit index signature,
+ * which an interface does not have.
+ */
+type EventFilter = {
+  appName: string;
+  userId: string;
+  sessionId: string;
+  timestamp?: {$gte: Date};
+};
+
+/**
+ * Oldest session first, with the user id and then the session id breaking a
+ * tie. A total order is what makes `limit`/`offset`/`page` well defined: two
+ * pages of an unordered query can repeat a session and skip another.
+ */
+const OLDEST_SESSION_FIRST = {
+  updateTime: 'ASC',
+  userId: 'ASC',
+  id: 'ASC',
+} as const;
+
+/** Newest session first, keeping the tie-break keys ascending. */
+const NEWEST_SESSION_FIRST = {
+  updateTime: 'DESC',
+  userId: 'ASC',
+  id: 'ASC',
+} as const;
 
 /**
  * Checks if a URI is a database connection URI.
@@ -371,28 +404,11 @@ export class DatabaseSessionService extends BaseSessionService {
       return undefined;
     }
 
-    const eventWhere: FilterQuery<StorageEvent> = {
-      appName,
-      userId,
-      sessionId,
-    };
-
-    if (config?.afterTimestamp) {
-      eventWhere.timestamp = {$gt: new Date(config.afterTimestamp)};
-    }
-
-    // Get latest numRecentEvents events or all events in DESC order. The id
-    // breaks timestamp ties, matching the ordering the staleness check uses:
-    // without it the database may return tied events in a different order on
-    // every read, so a replayed conversation shuffles and `numRecentEvents`
-    // truncates at an arbitrary point inside the tie.
-    const storageEvents = await em.find(StorageEvent, eventWhere, {
-      orderBy: NEWEST_EVENT_FIRST,
-      limit: config?.numRecentEvents,
-    });
-    // Reverse the events to maintain the original order as we get events in DESC order
-    // to get the latest events first.
-    storageEvents.reverse();
+    const events = await this.findEvents(
+      em,
+      {appName, userId, sessionId},
+      config,
+    );
 
     const appStateModel = await em.findOne(StorageAppState, {appName});
     const userStateModel = await em.findOne(StorageUserState, {
@@ -411,10 +427,41 @@ export class DatabaseSessionService extends BaseSessionService {
       appName,
       userId,
       state: mergedState,
-      events: storageEvents.map((se) => se.eventData),
+      events,
       lastUpdateTime: storageSession.updateTime.getTime(),
       storageUpdateMarker: updateMarkerOf(storageSession),
     });
+  }
+
+  /**
+   * Reads the stored events of one session, oldest first.
+   *
+   * A `numRecentEvents` of zero makes this an existence or metadata-only
+   * read, so the query is skipped rather than issued with a limit no dialect
+   * defines.
+   */
+  private async findEvents(
+    em: EntityManager,
+    key: CompositeSessionKey,
+    config?: GetSessionConfig,
+  ): Promise<Event[]> {
+    if (config?.numRecentEvents === 0) {
+      return [];
+    }
+
+    const where: EventFilter = {...key};
+    if (config?.afterTimestamp) {
+      // Inclusive, matching adk-python: a caller passing the timestamp of a
+      // known event receives that event.
+      where.timestamp = {$gte: new Date(config.afterTimestamp)};
+    }
+
+    const storageEvents = await em.find(StorageEvent, where, {
+      orderBy: NEWEST_EVENT_FIRST,
+      limit: config?.numRecentEvents,
+    });
+    storageEvents.reverse();
+    return storageEvents.map((storageEvent) => storageEvent.eventData);
   }
 
   async listSessions({
@@ -434,11 +481,7 @@ export class DatabaseSessionService extends BaseSessionService {
     }
 
     const orderBy =
-      order === 'asc'
-        ? {updateTime: 'ASC' as const, id: 'ASC' as const}
-        : order === 'desc'
-          ? {updateTime: 'DESC' as const, id: 'ASC' as const}
-          : undefined;
+      order === 'desc' ? NEWEST_SESSION_FIRST : OLDEST_SESSION_FIRST;
 
     let storageSessions;
     let paginationMeta: Pick<
