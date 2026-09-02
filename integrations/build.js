@@ -8,7 +8,9 @@ import {writeFile} from 'node:fs/promises';
 
 const platformBuildTargets = {
   'node': ['node10.4'],
-  'browser': ['chrome58', 'firefox57', 'safari11'],
+  // esbuild >= 0.27.7 treats destructuring as unsupported below Safari 14.1
+  // and has no lowering for it, so an older floor here fails the web build.
+  'browser': ['chrome58', 'firefox57', 'safari14.1'],
 };
 
 const licenseHeaderText = `/**
