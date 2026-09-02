@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import {Blob, Content} from '@google/genai';
 
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import {AuthCredential} from '../auth/auth_credential.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {Event} from '../events/event.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -15,6 +16,7 @@ import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {Task} from '../utils/task.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
@@ -36,6 +38,21 @@ export interface WorkflowInstructionScope {
 }
 
 /**
+ * An audio chunk held in a realtime cache until the live flow flushes it to the
+ * artifact service.
+ */
+export interface RealtimeCacheEntry {
+  /** The role that created this audio data, `'user'` or `'model'`. */
+  role: string;
+
+  /** The audio data chunk. */
+  data: Blob;
+
+  /** Epoch seconds at which the audio chunk was received. */
+  timestamp: number;
+}
+
+/**
  * The parameters for creating an invocation context.
  */
 export interface InvocationContextParams {
@@ -52,6 +69,10 @@ export interface InvocationContextParams {
   transcriptionCache?: TranscriptionEntry[];
   runConfig?: RunConfig;
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
+  activeNonBlockingToolTasks?: Record<string, Task<void>>;
+  inputRealtimeCache?: RealtimeCacheEntry[];
+  outputRealtimeCache?: RealtimeCacheEntry[];
+  credentialByKey?: Record<string, AuthCredential>;
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
   workflowInstructionScope?: WorkflowInstructionScope;
@@ -215,6 +236,33 @@ export class InvocationContext {
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
 
   /**
+   * The non-blocking tool tasks the current live run started, by function call
+   * id. Cancelled and cleared when that run ends.
+   */
+  activeNonBlockingToolTasks?: Record<string, Task<void>>;
+
+  /**
+   * User audio chunks received on the live path, held until the flow flushes
+   * them to the artifact service.
+   */
+  inputRealtimeCache?: RealtimeCacheEntry[];
+
+  /**
+   * Model audio chunks received on the live path, held until the flow flushes
+   * them to the artifact service.
+   */
+  outputRealtimeCache?: RealtimeCacheEntry[];
+
+  /**
+   * Credentials resolved for this invocation's toolsets, by credential key.
+   *
+   * A resolved credential is kept here rather than on the toolset's own
+   * `AuthConfig`, which is shared across invocations and would leak one
+   * caller's credential to the next.
+   */
+  readonly credentialByKey: Record<string, AuthCredential>;
+
+  /**
    * The manager for keeping track of plugins in this invocation.
    */
   pluginManager: PluginManager;
@@ -283,6 +331,10 @@ export class InvocationContext {
     this.transcriptionCache = params.transcriptionCache;
     this.runConfig = params.runConfig;
     this.activeStreamingTools = params.activeStreamingTools;
+    this.activeNonBlockingToolTasks = params.activeNonBlockingToolTasks;
+    this.inputRealtimeCache = params.inputRealtimeCache;
+    this.outputRealtimeCache = params.outputRealtimeCache;
+    this.credentialByKey = params.credentialByKey ?? {};
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;
     this.workflowInstructionScope = params.workflowInstructionScope;
