@@ -77,7 +77,8 @@ export class InstructionsLlmRequestProcessor extends BaseLlmRequestProcessor {
       if (agent.staticInstruction) {
         // The static prefix must stay byte-identical across turns for
         // provider-side context caching, so the per-turn instruction rides in
-        // the contents instead of the system instruction.
+        // the contents instead of the system instruction. It is labelled
+        // there, so the model does not read it as user speech.
         llmRequest.contents.push(
           createUserContent(labelDynamicInstruction(instructionWithState)),
         );

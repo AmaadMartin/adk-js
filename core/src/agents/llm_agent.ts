@@ -333,6 +333,10 @@ export interface LlmAgentConfig extends BaseAgentConfig {
    * When set, {@link LlmAgentConfig.instruction} no longer goes to the system
    * instruction; it is placed in the request contents after the static
    * content, so the static prefix stays byte-identical across turns.
+   *
+   * Non-text parts (inline data, file data) cannot go in a system
+   * instruction, so each becomes a textual reference there plus a user
+   * content carrying the data.
    */
   staticInstruction?: ContentUnion;
 

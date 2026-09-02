@@ -102,6 +102,22 @@ function appendSystemInstructionText(llmRequest: LlmRequest, text: string) {
 }
 
 /**
+ * `Content` is a structural interface, so there is no constructor to test
+ * against. A non-array object carrying either of its two fields is one.
+ *
+ * Named for what it tests, because `utils/content_utils.ts` exports a stricter
+ * `isContent` that rejects a `Content` carrying only a role.
+ */
+export function isContentLike(value: unknown): value is Content {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    ('parts' in value || 'role' in value)
+  );
+}
+
+/**
  * Appends instructions to the system instruction.
  *
  * `systemInstruction` is a `ContentUnion`, so any text it already carries is
@@ -114,6 +130,7 @@ function appendSystemInstructionText(llmRequest: LlmRequest, text: string) {
  * user content.
  *
  * @param instructions The instructions to append.
+ * @throws TypeError if `instructions` is neither a `string[]` nor a `Content`.
  */
 export function appendInstructions(
   llmRequest: LlmRequest,
@@ -124,6 +141,11 @@ export function appendInstructions(
       appendSystemInstructionText(llmRequest, instructions.join('\n\n'));
     }
     return;
+  }
+  if (!isContentLike(instructions)) {
+    throw new TypeError(
+      `instructions must be string[] or Content, got ${typeof instructions}.`,
+    );
   }
 
   const texts: string[] = [];

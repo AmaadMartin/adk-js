@@ -22,12 +22,22 @@ while the dynamic part still reaches the model.
 Two consequences follow from that move, and both are handled for you.
 `Content` has no system role, so the relocated instruction would arrive looking
 like something the user said. ADK wraps it in a preamble and a marker pair that
-tell the model the block is its own instruction. The instruction is
-state-interpolated, so session state could contain the literal end marker and
-close the block early; every marker inside the text is replaced with
-`<<<ELIDED_MARKER>>>` before wrapping.
+tell the model the block is its own instruction:
 
-The Live API has its own cache mechanism, so this field does not apply there.
+```
+<preamble explaining the markers>
+<<<BEGIN_SYSTEM_INSTRUCTION>>>
+Your interpolated instruction.
+<<<END_SYSTEM_INSTRUCTION>>>
+```
+
+The instruction is state-interpolated, so session state could contain the
+literal end marker and close the block early; every marker inside the text is
+replaced with `<<<ELIDED_MARKER>>>` before wrapping.
+
+Setting `staticInstruction` does not enable caching on its own. It makes the
+request cacheable, and the provider decides the rest. The Live API has its own
+cache mechanism, so this field does not apply there.
 
 ## Get started
 
@@ -44,10 +54,15 @@ const agent = new LlmAgent({
 });
 ```
 
-The request the agent builds carries `You are a document analyst.` in its
-system instruction, and the interpolated dynamic instruction as a labelled
-user content ahead of the history. Other processors, such as the agent
-identity one, contribute their own text to the system instruction as usual.
+With `user_name` set to `Ada` in the session, the request carries:
+
+- `config.systemInstruction` — `You are a document analyst.`
+- `contents[0]` — a user content holding the preamble, the begin marker,
+  `The user is Ada. Answer from the manual only.`, and the end marker.
+- `contents[1..]` — the conversation history.
+
+Other processors, such as the agent identity one, contribute their own text to
+the system instruction as usual.
 
 ## Non-text content
 
@@ -85,7 +100,10 @@ You are a document analyst.
 
 The PDF becomes the first entry in `contents`, so it too stays a stable
 request prefix. Inline binary parts get the same treatment under
-`inline_data_<n>` ids. One counter numbers both kinds, in document order.
+`inline_data_<n>` ids. One counter numbers both kinds, in document order, so a
+run of inline, file, inline yields `inline_data_0`, `file_data_1`,
+`inline_data_2`. A `displayName` on the part is named first in the reference
+line, then the URI, then the MIME type.
 
 ## What it guarantees
 

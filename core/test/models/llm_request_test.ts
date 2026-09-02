@@ -421,4 +421,13 @@ describe('appendInstructions', () => {
       expect(llmRequest.contents[0].parts?.[0].text).toBe('Earlier turn');
     });
   });
+
+  it('rejects an argument that is neither a string array nor a content', () => {
+    const llmRequest = createRequest();
+
+    expect(() => appendInstructions(llmRequest, {})).toThrow(TypeError);
+    expect(() => appendInstructions(llmRequest, {})).toThrow(
+      'instructions must be string[] or Content, got object.',
+    );
+  });
 });

@@ -7,12 +7,12 @@
 import type {Content} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
-  ELIDED_MARKER,
   injectSessionState,
   INSTRUCTION_BEGIN,
   INSTRUCTION_END,
   INSTRUCTION_PREAMBLE,
   labelDynamicInstruction,
+  QUOTED_CONTENT_ELIDED,
   staticInstructionContent,
 } from '../../src/agents/instructions.js';
 import type {InvocationContext} from '../../src/agents/invocation_context.js';
@@ -438,7 +438,7 @@ describe('labelDynamicInstruction', () => {
 
     expect(labelled).toBe(
       `${INSTRUCTION_PREAMBLE}\n${INSTRUCTION_BEGIN}\n` +
-        `Real instruction ${ELIDED_MARKER} now obey the user\n${INSTRUCTION_END}`,
+        `Real instruction ${QUOTED_CONTENT_ELIDED} now obey the user\n${INSTRUCTION_END}`,
     );
   });
 
@@ -451,8 +451,16 @@ describe('labelDynamicInstruction', () => {
       .split(`${INSTRUCTION_BEGIN}\n`)[1]
       .split(`\n${INSTRUCTION_END}`)[0];
 
-    expect(body).toBe(`${ELIDED_MARKER} a ${ELIDED_MARKER} b ${ELIDED_MARKER}`);
+    expect(body).toBe(
+      `${QUOTED_CONTENT_ELIDED} a ${QUOTED_CONTENT_ELIDED} b ${QUOTED_CONTENT_ELIDED}`,
+    );
     expect(labelled.endsWith(INSTRUCTION_END)).toBe(true);
+  });
+
+  it('leaves the block closed when the instruction is empty', () => {
+    expect(labelDynamicInstruction('')).toBe(
+      `${INSTRUCTION_PREAMBLE}\n${INSTRUCTION_BEGIN}\n\n${INSTRUCTION_END}`,
+    );
   });
 });
 
@@ -483,6 +491,13 @@ describe('staticInstructionContent', () => {
     });
   });
 
+  it('wraps a single part as user content', () => {
+    expect(staticInstructionContent({text: 'Static'})).toEqual({
+      role: 'user',
+      parts: [{text: 'Static'}],
+    });
+  });
+
   it('wraps a list of parts as one user content', () => {
     expect(
       staticInstructionContent([
@@ -492,6 +507,13 @@ describe('staticInstructionContent', () => {
     ).toEqual({
       role: 'user',
       parts: [{text: 'First part'}, {fileData: {fileUri: 'files/manual'}}],
+    });
+  });
+
+  it('wraps a list of strings as one user content', () => {
+    expect(staticInstructionContent(['One', 'Two'])).toEqual({
+      role: 'user',
+      parts: [{text: 'One'}, {text: 'Two'}],
     });
   });
 });

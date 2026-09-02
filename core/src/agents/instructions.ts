@@ -19,8 +19,12 @@ export const INSTRUCTION_BEGIN = '<<<BEGIN_SYSTEM_INSTRUCTION>>>';
 /** Closes that block. */
 export const INSTRUCTION_END = '<<<END_SYSTEM_INSTRUCTION>>>';
 
-/** Replaces a marker the instruction text carries itself. */
-export const ELIDED_MARKER = '<<<ELIDED_MARKER>>>';
+/**
+ * Replaces a marker the instruction text carries itself, so the text cannot
+ * forge the end of its own block. Named after `QUOTED_CONTENT_ELIDED` in
+ * `adk-python`'s `_fencing.py`, because the value reaches the model.
+ */
+export const QUOTED_CONTENT_ELIDED = '<<<ELIDED_MARKER>>>';
 
 /**
  * Tells the model that the fenced block is its own instruction.
@@ -47,13 +51,17 @@ export const INSTRUCTION_PREAMBLE =
  */
 export function labelDynamicInstruction(instruction: string): string {
   const fenced = instruction
-    .replaceAll(INSTRUCTION_BEGIN, ELIDED_MARKER)
-    .replaceAll(INSTRUCTION_END, ELIDED_MARKER);
+    .replaceAll(INSTRUCTION_BEGIN, QUOTED_CONTENT_ELIDED)
+    .replaceAll(INSTRUCTION_END, QUOTED_CONTENT_ELIDED);
   return `${INSTRUCTION_PREAMBLE}\n${INSTRUCTION_BEGIN}\n${fenced}\n${INSTRUCTION_END}`;
 }
 
 /**
  * Normalizes an agent's static instruction into a single `Content`.
+ *
+ * Mirrors the `t_content` transformer `adk-python` applies to the same field.
+ * That transformer is not part of the genai package's public surface, so this
+ * reproduces it with a type guard plus `createUserContent`.
  *
  * @param staticInstruction A string, a part, a content, or a list of either.
  * @returns The equivalent `Content`.
