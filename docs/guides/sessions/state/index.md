@@ -130,8 +130,8 @@ order is stable across calls. Pass `order: 'desc'` for newest-first.
   It does not throw, and it leaves the session you passed untouched.
 
 - **A re-delivered event is ignored.** An event whose id and fields match one
-  already stored is dropped, so its state delta is applied once. Two distinct
-  events that only share an id are both kept.
+  already stored is dropped, so its state delta is applied once. An event that
+  reuses a stored id with different content replaces that entry instead.
 
 - **A partial event is ignored.** `appendEvent` returns immediately for
   `partial: true`, so a streaming chunk changes neither the events nor
