@@ -13,19 +13,7 @@
  * the wire.
  */
 
-/** Any value that survives a JSON round trip. */
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | JsonObject;
-
-/** A JSON object, used for payloads whose shape the provider defines. */
-export interface JsonObject {
-  [key: string]: JsonValue;
-}
+import {JsonObject} from '../utils/json_utils.js';
 
 /** The roles an OpenAI-compatible chat message can carry. */
 export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';

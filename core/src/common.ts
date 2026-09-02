@@ -211,7 +211,6 @@ export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
-export type {LlmCapabilities} from './models/capabilities.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export {LiteLlm} from './models/lite_llm.js';
@@ -233,8 +232,6 @@ export type {
   FileContentObject,
   FileUrlObject,
   ImageContentObject,
-  JsonObject,
-  JsonValue,
   MessageContent,
   MessageRole,
   ModelResponse,
@@ -382,6 +379,7 @@ export type {
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export type {JsonObject, JsonValue} from './utils/json_utils.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';

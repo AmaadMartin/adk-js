@@ -290,7 +290,6 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
       apiBase: endpoint.apiBase,
     });
     const cacheConfig: ContextCacheConfig = {
-      cacheIntervals: 10,
       ttlSeconds: 3600,
       minTokens: 0,
     };

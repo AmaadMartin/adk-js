@@ -19,8 +19,16 @@ import {
   inferMimeTypeFromUri,
   mediaKindFromMimeType,
   normalizeMimeType,
+  UNKNOWN_MIME_TYPE,
 } from '../utils/file_extension_utils.js';
 import {genaiSchemaToJsonSchema} from '../utils/genai_schema_to_json.js';
+import {
+  isJsonObject,
+  JsonObject,
+  safeJsonSerialize,
+  toJsonObject,
+  toJsonValue,
+} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {extractSystemInstruction} from './interactions_utils.js';
@@ -37,8 +45,6 @@ import {
   ChatMessage,
   ContentObject,
   GenerationParams,
-  JsonObject,
-  JsonValue,
   MessageContent,
   ToolCall,
   ToolChoice,
@@ -72,9 +78,6 @@ const MISSING_TOOL_RESULT_MESSAGE =
 const FALLBACK_USER_TEXT =
   'Handle the requests as specified in the System Instruction.';
 
-/** The MIME type that names no format, which providers reject. */
-const UNKNOWN_MIME_TYPE = 'application/octet-stream';
-
 /** Options that select provider-specific request shaping. */
 export interface ProviderOptions {
   /** The provider name, for example `openai`. */
@@ -90,50 +93,6 @@ export interface CompletionInputs {
   responseFormat?: JsonObject;
   generationParams?: GenerationParams;
   toolChoice?: ToolChoice;
-}
-
-/** Returns true when the value is a plain JSON object. */
-export function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Deep-copies a value into JSON, dropping anything JSON cannot represent.
- *
- * This is how a genai object becomes a plain data object, and it guarantees
- * the caller's value is never mutated downstream. A member of an array that
- * JSON cannot represent becomes `null`, which is what `JSON.stringify` does.
- *
- * @throws TypeError When the value contains a cycle.
- */
-export function toJsonValue(value: unknown): JsonValue | undefined {
-  const json = JSON.stringify(value);
-  if (json === undefined) {
-    return undefined;
-  }
-  const parsed: JsonValue = JSON.parse(json);
-  return parsed;
-}
-
-/**
- * Deep-copies an object into JSON. Unlike {@link toJsonValue} this cannot
- * return undefined, because an object always survives the round trip.
- */
-export function toJsonObject(value: object): JsonObject {
-  const parsed: JsonObject = JSON.parse(JSON.stringify(value));
-  return parsed;
-}
-
-/**
- * Serializes a value to JSON, falling back to its string form when JSON cannot
- * represent it (a circular structure, a `BigInt`).
- */
-export function safeJsonSerialize(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? String(value);
-  } catch {
-    return String(value);
-  }
 }
 
 /** Returns true when the part carries something the model can read. */

@@ -22,19 +22,16 @@ import {
   functionDeclarationToToolParam,
   getCompletionInputs,
   getContent,
-  isJsonObject,
   mergeReasoningTexts,
   partHasPayload,
   ProviderOptions,
-  safeJsonSerialize,
-  toJsonObject,
-  toJsonValue,
   toLiteLlmResponseFormat,
   toLiteLlmRole,
 } from '../../src/models/lite_llm_request_converters.js';
 import {messageToGenerateContentResponse} from '../../src/models/lite_llm_response_converters.js';
-import {ChatMessage, JsonObject} from '../../src/models/lite_llm_types.js';
+import {ChatMessage} from '../../src/models/lite_llm_types.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
+import {JsonObject} from '../../src/utils/json_utils.js';
 
 const OPENAI: ProviderOptions = {provider: 'openai', model: 'openai/gpt-4o'};
 const GROQ: ProviderOptions = {provider: 'groq', model: 'groq/llama3'};
@@ -62,57 +59,6 @@ function singleMessage(
   }
   return converted;
 }
-
-describe('safeJsonSerialize', () => {
-  it('serializes a plain value', () => {
-    expect(safeJsonSerialize({a: 1})).toBe('{"a":1}');
-  });
-
-  it('falls back to the string form for a circular structure', () => {
-    const circular: Record<string, unknown> = {};
-    circular['self'] = circular;
-    expect(safeJsonSerialize(circular)).toBe('[object Object]');
-  });
-
-  it('falls back to the string form for a bigint', () => {
-    expect(safeJsonSerialize(7n)).toBe('7');
-  });
-
-  it('falls back to the string form for undefined', () => {
-    expect(safeJsonSerialize(undefined)).toBe('undefined');
-  });
-});
-
-describe('toJsonValue', () => {
-  it('copies nested structures', () => {
-    expect(toJsonValue({a: [1, 'b', true], c: {d: null}})).toEqual({
-      a: [1, 'b', true],
-      c: {d: null},
-    });
-  });
-
-  it('drops object fields JSON cannot represent', () => {
-    expect(toJsonValue({a: undefined, b: () => 1, c: 1})).toEqual({c: 1});
-    expect(toJsonValue(undefined)).toBeUndefined();
-  });
-
-  it('renders an unrepresentable array member as null', () => {
-    expect(toJsonValue([undefined, 1])).toEqual([null, 1]);
-  });
-
-  it('rejects a circular structure', () => {
-    const circular: Record<string, unknown> = {};
-    circular['self'] = circular;
-    expect(() => toJsonValue(circular)).toThrow(TypeError);
-  });
-
-  it('recognises plain objects', () => {
-    expect(isJsonObject({})).toBe(true);
-    expect(isJsonObject([])).toBe(false);
-    expect(isJsonObject(null)).toBe(false);
-    expect(isJsonObject('a')).toBe(false);
-  });
-});
 
 describe('partHasPayload', () => {
   it.each([
@@ -733,19 +679,6 @@ describe('ensureToolResults', () => {
 
   it('returns an empty list unchanged', () => {
     expect(ensureToolResults([])).toEqual([]);
-  });
-});
-
-describe('toJsonObject', () => {
-  it('deep-copies an object into JSON', () => {
-    const source = {a: [1, 'b'], c: {d: null}};
-    const copy = toJsonObject(source);
-    expect(copy).toEqual(source);
-    expect(copy['c']).not.toBe(source.c);
-  });
-
-  it('drops values JSON cannot represent', () => {
-    expect(toJsonObject({a: undefined, b: () => 1, c: 1})).toEqual({c: 1});
   });
 });
 

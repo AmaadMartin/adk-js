@@ -5,23 +5,22 @@
  */
 
 import {
+  FinishReason,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
   Part,
 } from '@google/genai';
 
 import {base64Encode, randomUUID} from '../utils/env_aware_utils.js';
+import {isJsonObject, JsonObject, JsonValue} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {
   finishReasonToErrorMessage,
   mapFinishReason,
 } from './lite_llm_model_utils.js';
-import {isJsonObject} from './lite_llm_request_converters.js';
 import {
   ChatMessage,
-  JsonObject,
-  JsonValue,
   MessageContent,
   ModelResponse,
   ModelResponseStream,
@@ -751,7 +750,7 @@ export function applyFinishReason(
     return;
   }
   llmResponse.finishReason = mapped;
-  if (mapped !== 'STOP') {
+  if (mapped !== FinishReason.STOP) {
     llmResponse.errorCode = mapped;
     llmResponse.errorMessage = finishReasonToErrorMessage(mapped);
   }
