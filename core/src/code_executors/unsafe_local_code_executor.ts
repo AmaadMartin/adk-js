@@ -107,14 +107,6 @@ export interface UnsafeLocalCodeExecutorOptions {
    * shell script.
    */
   shellCommandPath?: string;
-  /**
-   * Rejected when true: this executor cannot be stateful.
-   */
-  stateful?: boolean;
-  /**
-   * Rejected when true: this executor cannot optimize data files.
-   */
-  optimizeDataFile?: boolean;
 }
 
 function createTempDir(): Promise<string> {
@@ -197,14 +189,6 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
 
   constructor(options: UnsafeLocalCodeExecutorOptions = {}) {
     super();
-    if (options.stateful) {
-      throw new Error('Cannot set `stateful=true` in UnsafeLocalCodeExecutor.');
-    }
-    if (options.optimizeDataFile) {
-      throw new Error(
-        'Cannot set `optimizeDataFile=true` in UnsafeLocalCodeExecutor.',
-      );
-    }
     this.timeoutSeconds = options.timeoutSeconds ?? 30;
     this.nodeCommandPath = options.commandPath ?? process.execPath;
     this.pythonCommandPath =
@@ -296,7 +280,6 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       const executionResult = await new Promise<{
         stdout: string;
         stderr: string;
-        exitCode: number | null;
       }>((resolve) => {
         const child = spawn(command, args, {
           cwd: tempDir,
@@ -388,7 +371,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             // `os._exit`. Reporting nothing would show the model a clean run.
             stderr = `Code execution exited with status ${exitStatus}.`;
           }
-          resolve({stdout, stderr, exitCode});
+          resolve({stdout, stderr});
         });
       });
 

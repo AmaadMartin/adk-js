@@ -708,35 +708,9 @@ describe('UnsafeLocalCodeExecutor', () => {
     });
   });
 
-  describe('constructor validation', () => {
-    it('reports itself stateless and unable to optimize data files', () => {
-      expect(executor.stateful).toBe(false);
-      expect(executor.optimizeDataFile).toBe(false);
-    });
-
-    it('rejects stateful', () => {
-      expect(() => new UnsafeLocalCodeExecutor({stateful: true})).toThrow(
-        'Cannot set `stateful=true` in UnsafeLocalCodeExecutor.',
-      );
-    });
-
-    it('rejects optimizeDataFile', () => {
-      expect(
-        () => new UnsafeLocalCodeExecutor({optimizeDataFile: true}),
-      ).toThrow(
-        'Cannot set `optimizeDataFile=true` in UnsafeLocalCodeExecutor.',
-      );
-    });
-
-    it('accepts both options set to false', () => {
-      expect(
-        () =>
-          new UnsafeLocalCodeExecutor({
-            stateful: false,
-            optimizeDataFile: false,
-          }),
-      ).not.toThrow();
-    });
+  it('reports itself stateless and unable to optimize data files', () => {
+    expect(executor.stateful).toBe(false);
+    expect(executor.optimizeDataFile).toBe(false);
   });
 
   describe('exit status classification', () => {

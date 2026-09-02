@@ -125,15 +125,8 @@ The Python child also gets two environment variables:
 - `PYTHONIOENCODING` is `utf-8`. Without it the child encodes its output with
   the host locale and dies printing non-ASCII on a non-UTF-8 host.
 
-## Options this executor rejects
+## State between runs
 
-`stateful` and `optimizeDataFile` are always false, and the constructor throws
-when you ask for either:
-
-```typescript
-new UnsafeLocalCodeExecutor({stateful: true});
-// Error: Cannot set `stateful=true` in UnsafeLocalCodeExecutor.
-```
-
-Every execution gets a fresh process and a fresh scratch directory, so no
-variable defined in one run survives into the next.
+`stateful` and `optimizeDataFile` are always false. Every execution gets a fresh
+process and a fresh scratch directory, so no variable defined in one run
+survives into the next.
