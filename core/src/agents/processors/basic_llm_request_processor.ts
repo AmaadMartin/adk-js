@@ -8,21 +8,16 @@ import {GenerateContentConfig, HttpOptions} from '@google/genai';
 
 import {Event} from '../../events/event.js';
 import {LlmRequest, setOutputSchema} from '../../models/llm_request.js';
+import {
+  copyHttpOptions,
+  copyRequestScopedConfig,
+} from '../../utils/genai_config_utils.js';
+import {isGemini3xLive} from '../../utils/model_name.js';
 import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
-import {LiveConnectConfigWithHistory} from '../run_config.js';
+import {LiveConnectConfigWithHistory, RunConfig} from '../run_config.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
-
-/**
- * Copies HTTP options, including the `headers` object, so a later write into
- * the copy cannot reach the object it came from.
- */
-function copyHttpOptions(httpOptions: HttpOptions): HttpOptions {
-  return httpOptions.headers
-    ? {...httpOptions, headers: {...httpOptions.headers}}
-    : {...httpOptions};
-}
 
 /**
  * Merges the run config's HTTP options into the request config. The run config
@@ -50,12 +45,80 @@ function mergeRunConfigHttpOptions(
     merged.timeout = runConfigHttpOptions.timeout;
   }
   if (runConfigHttpOptions.retryOptions !== undefined) {
-    merged.retryOptions = runConfigHttpOptions.retryOptions;
+    merged.retryOptions = {...runConfigHttpOptions.retryOptions};
   }
   if (runConfigHttpOptions.extraBody !== undefined) {
-    merged.extraBody = runConfigHttpOptions.extraBody;
+    merged.extraBody = {...runConfigHttpOptions.extraBody};
   }
   config.httpOptions = merged;
+}
+
+/**
+ * Copies the agent's sampling settings onto the live connect config.
+ *
+ * A live session reads `liveConnectConfig`, not `llmRequest.config`, so the
+ * agent's sampling settings would not otherwise reach it. A field already set
+ * on the live config outranks the agent's.
+ */
+function applyAgentSamplingToLiveConfig(
+  liveConnectConfig: LlmRequest['liveConnectConfig'],
+  agentConfig: GenerateContentConfig,
+): void {
+  liveConnectConfig.temperature ??= agentConfig.temperature;
+  liveConnectConfig.topP ??= agentConfig.topP;
+  liveConnectConfig.topK ??= agentConfig.topK;
+  liveConnectConfig.maxOutputTokens ??= agentConfig.maxOutputTokens;
+  liveConnectConfig.seed ??= agentConfig.seed;
+  liveConnectConfig.mediaResolution ??= agentConfig.mediaResolution;
+}
+
+/**
+ * Copies the live-relevant fields from the run config onto the request's live
+ * connect config.
+ *
+ * `LlmAgent.runLiveFlow` calls this again after preprocessing, so a caller that
+ * replaces the request processors still opens the connection with the run
+ * config's modalities, speech, transcription and resumption settings. The pass
+ * is idempotent.
+ *
+ * @param runConfig - The run config of the current invocation.
+ * @param llmRequest - The request whose live connect config is populated.
+ */
+export function applyRunConfigToLiveConfig(
+  runConfig: RunConfig,
+  llmRequest: LlmRequest,
+): void {
+  const liveConnectConfig: LiveConnectConfigWithHistory =
+    (llmRequest.liveConnectConfig ??= {});
+  liveConnectConfig.responseModalities = runConfig.responseModalities;
+  liveConnectConfig.speechConfig = runConfig.speechConfig;
+  liveConnectConfig.outputAudioTranscription =
+    runConfig.outputAudioTranscription;
+  liveConnectConfig.inputAudioTranscription = runConfig.inputAudioTranscription;
+  liveConnectConfig.realtimeInputConfig = runConfig.realtimeInputConfig;
+  liveConnectConfig.explicitVadSignal = runConfig.explicitVadSignal;
+  liveConnectConfig.translationConfig = runConfig.translationConfig;
+  liveConnectConfig.contextWindowCompression =
+    runConfig.contextWindowCompression;
+  liveConnectConfig.avatarConfig = runConfig.avatarConfig;
+  // Copied rather than aliased: `GoogleLlm.connect` deletes `transparent` from
+  // `sessionResumption` in place, the live flow stamps each server-issued
+  // resumption handle onto it, and it seeds `historyConfig` when it replays
+  // history on a fresh connection. Aliasing the caller's run config would carry
+  // those writes into a later run.
+  liveConnectConfig.sessionResumption = runConfig.sessionResumption
+    ? {...runConfig.sessionResumption}
+    : undefined;
+  liveConnectConfig.historyConfig = runConfig.historyConfig
+    ? {...runConfig.historyConfig}
+    : undefined;
+
+  // Gemini 3.x live models reject both fields.
+  const gated = isGemini3xLive(llmRequest.model);
+  liveConnectConfig.enableAffectiveDialog = gated
+    ? undefined
+    : runConfig.enableAffectiveDialog;
+  liveConnectConfig.proactivity = gated ? undefined : runConfig.proactivity;
 }
 
 /**
@@ -84,12 +147,20 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
     // set model string, not model instance.
     llmRequest.model = agent.canonicalModel.model;
 
-    llmRequest.config = {...(agent.generateContentConfig ?? {})};
-
     const runConfig = invocationContext.runConfig;
-    if (runConfig?.httpOptions) {
-      mergeRunConfigHttpOptions(llmRequest.config, runConfig.httpOptions);
+    // `LlmAgent` seeds the request with the run config's HTTP options, so read
+    // them back before the agent config overwrites them. A request assembled
+    // elsewhere carries no seed, so fall back to the run config itself.
+    const runConfigHttpOptions =
+      llmRequest.config?.httpOptions ?? runConfig?.httpOptions;
+
+    const agentConfig = agent.generateContentConfig ?? {};
+    llmRequest.config = copyRequestScopedConfig(agentConfig);
+
+    if (runConfigHttpOptions) {
+      mergeRunConfigHttpOptions(llmRequest.config, runConfigHttpOptions);
     }
+
     if (runConfig?.labels) {
       llmRequest.config.labels = {
         ...llmRequest.config.labels,
@@ -112,31 +183,10 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
       setOutputSchema(llmRequest, agent.outputSchema);
     }
 
+    applyAgentSamplingToLiveConfig(llmRequest.liveConnectConfig, agentConfig);
+
     if (runConfig) {
-      const liveConnectConfig: LiveConnectConfigWithHistory =
-        llmRequest.liveConnectConfig;
-      liveConnectConfig.responseModalities = runConfig.responseModalities;
-      liveConnectConfig.speechConfig = runConfig.speechConfig;
-      liveConnectConfig.outputAudioTranscription =
-        runConfig.outputAudioTranscription;
-      liveConnectConfig.inputAudioTranscription =
-        runConfig.inputAudioTranscription;
-      liveConnectConfig.realtimeInputConfig = runConfig.realtimeInputConfig;
-      liveConnectConfig.explicitVadSignal = runConfig.explicitVadSignal;
-      liveConnectConfig.translationConfig = runConfig.translationConfig;
-      liveConnectConfig.enableAffectiveDialog = runConfig.enableAffectiveDialog;
-      liveConnectConfig.proactivity = runConfig.proactivity;
-      liveConnectConfig.avatarConfig = runConfig.avatarConfig;
-      // Copied rather than aliased: the live flow stamps each server-issued
-      // resumption handle onto `sessionResumption`, and seeds `historyConfig`
-      // when it replays history on a fresh connection. Aliasing the caller's
-      // run config would carry those writes into a later run.
-      liveConnectConfig.sessionResumption = runConfig.sessionResumption
-        ? {...runConfig.sessionResumption}
-        : undefined;
-      liveConnectConfig.historyConfig = runConfig.historyConfig
-        ? {...runConfig.historyConfig}
-        : undefined;
+      applyRunConfigToLiveConfig(runConfig, llmRequest);
     }
   }
 }

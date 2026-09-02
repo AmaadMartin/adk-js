@@ -583,7 +583,11 @@ export {getHttpDebugInfo} from './utils/http_debug_utils.js';
 export type {HttpDebugRecord, HttpExchange} from './utils/http_debug_utils.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
-export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';
+export {
+  isGemini2OrAbove,
+  isGemini3xFlashLive,
+  isGemini3xLive,
+} from './utils/model_name.js';
 export type {SchemaLike} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
 export {Task} from './utils/task.js';

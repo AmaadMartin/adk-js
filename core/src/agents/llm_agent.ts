@@ -42,6 +42,7 @@ import {LLMRegistry} from '../models/registry.js';
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
 
+import {copyHttpOptions} from '../utils/genai_config_utils.js';
 import {logger} from '../utils/logger.js';
 import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
@@ -74,6 +75,7 @@ import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
+import {applyRunConfigToLiveConfig} from './processors/basic_llm_request_processor.js';
 import {SingleFlow} from './processors/single_flow.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
@@ -127,49 +129,22 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Copies the live-relevant fields from the run config onto the live connect
- * config so the model connection is opened with the caller's modalities,
- * speech, transcription, and proactivity settings.
+ * Builds an empty request, seeded with the run config's HTTP options.
+ *
+ * `BasicLlmRequestProcessor` merges the seeded options back in after it
+ * overwrites the config with the agent's own.
  */
-const LIVE_KEYS = [
-  'responseModalities',
-  'speechConfig',
-  'outputAudioTranscription',
-  'inputAudioTranscription',
-  'realtimeInputConfig',
-  'explicitVadSignal',
-  'translationConfig',
-  'avatarConfig',
-  'contextWindowCompression',
-  'proactivity',
-  'enableAffectiveDialog',
-] as const;
-
-/**
- * Live keys whose value is copied rather than aliased. The live flow stamps
- * each server-issued resumption handle onto `sessionResumption`, and seeds
- * `historyConfig` when it replays history on a fresh connection. Aliasing the
- * caller's run config would carry those writes into a later run.
- */
-const LIVE_COPY_KEYS = ['sessionResumption', 'historyConfig'] as const;
-
-function applyLiveRunConfig(
-  runConfig: InvocationContext['runConfig'],
-  llmRequest: LlmRequest,
-): void {
-  if (!runConfig) return;
-  const liveConfig = (llmRequest.liveConnectConfig ??= {});
-  for (const k of LIVE_KEYS) {
-    if (runConfig[k] !== undefined) {
-      (liveConfig as Record<string, unknown>)[k] = runConfig[k];
-    }
+function newLlmRequest(invocationContext: InvocationContext): LlmRequest {
+  const llmRequest: LlmRequest = {
+    contents: [],
+    toolsDict: {},
+    liveConnectConfig: {},
+  };
+  const httpOptions = invocationContext.runConfig?.httpOptions;
+  if (httpOptions) {
+    llmRequest.config = {httpOptions: copyHttpOptions(httpOptions)};
   }
-  for (const k of LIVE_COPY_KEYS) {
-    const value = runConfig[k];
-    if (value !== undefined) {
-      (liveConfig as Record<string, unknown>)[k] = {...value};
-    }
-  }
+  return llmRequest;
 }
 
 /**
@@ -977,11 +952,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       throw new Error('liveRequestQueue is required for LlmAgent.runLiveFlow.');
     }
 
-    const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-    };
+    const llmRequest = newLlmRequest(invocationContext);
 
     // =========================================================================
     // Preprocess: same processors as runAsync. Yields agent-emitted events
@@ -1002,9 +973,13 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     }
 
     // =========================================================================
-    // Apply live-only request config from the run config.
+    // Apply live-only request config from the run config. The basic request
+    // processor already did this, so the call is idempotent; it repeats here
+    // for a caller that replaced the request processors.
     // =========================================================================
-    applyLiveRunConfig(invocationContext.runConfig, llmRequest);
+    if (invocationContext.runConfig) {
+      applyRunConfigToLiveConfig(invocationContext.runConfig, llmRequest);
+    }
 
     const llm = this.canonicalModel;
     let reconnectAttempts = 0;
@@ -1464,11 +1439,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   private async *runOneStepAsync(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-    };
+    const llmRequest = newLlmRequest(invocationContext);
 
     // =========================================================================
     // Preprocess before calling the LLM

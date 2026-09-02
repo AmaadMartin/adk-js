@@ -74,6 +74,9 @@ export interface RunConfig {
    * HTTP options for this invocation, for example custom headers or a
    * request timeout. Merged over the agent's own `generateContentConfig`
    * HTTP options, with these values winning.
+   *
+   * `baseUrl` and `apiVersion` are configuration-time settings, so they only
+   * apply when the agent set no HTTP options of its own.
    */
   httpOptions?: HttpOptions;
 

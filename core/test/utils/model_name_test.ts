@@ -4,8 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {isGemini2OrAbove, isGemini3xFlashLive} from '@google/adk';
+import {
+  isGemini2OrAbove,
+  isGemini3xFlashLive,
+  isGemini3xLive,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {isGemini35LiveTranslate} from '../../src/utils/model_name.js';
 
 describe('isGemini2OrAbove', () => {
   describe('valid models', () => {
@@ -79,4 +84,47 @@ describe('isGemini3xFlashLive', () => {
     expect(isGemini3xFlashLive(undefined)).toBe(false);
     expect(isGemini3xFlashLive('')).toBe(false);
   });
+});
+
+describe('isGemini3xLive', () => {
+  const cases: Array<[string | undefined, boolean]> = [
+    ['gemini-3.5-flash-lite-live-preview', true],
+    ['gemini-3.0-live', true],
+    ['gemini-3.1-flash-live', true],
+    [
+      'projects/my-project/locations/us-central1/publishers/google/models/gemini-3.5-flash-lite-live-preview',
+      true,
+    ],
+    ['gemini-3.5-live-translate-preview', false],
+    ['gemini-2.5-flash-live', false],
+    ['gemini-3.5-flash', false],
+    [undefined, false],
+    ['', false],
+  ];
+
+  for (const [modelString, expected] of cases) {
+    it(`should return ${expected} for ${modelString ?? 'undefined'}`, () => {
+      expect(isGemini3xLive(modelString)).toBe(expected);
+    });
+  }
+});
+
+describe('isGemini35LiveTranslate', () => {
+  const cases: Array<[string | undefined, boolean]> = [
+    ['gemini-3.5-live-translate-preview', true],
+    [
+      'projects/my-project/locations/us-central1/publishers/google/models/gemini-3.5-live-translate-preview',
+      true,
+    ],
+    ['gemini-3.5-flash-lite-live-preview', false],
+    ['gemini-2.5-flash-live', false],
+    [undefined, false],
+    ['', false],
+  ];
+
+  for (const [modelString, expected] of cases) {
+    it(`should return ${expected} for ${modelString ?? 'undefined'}`, () => {
+      expect(isGemini35LiveTranslate(modelString)).toBe(expected);
+    });
+  }
 });
