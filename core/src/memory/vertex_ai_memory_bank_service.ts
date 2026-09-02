@@ -107,7 +107,7 @@ function toVertexMetadataValue(
 function fromVertexMetadataValue(value: MemoryMetadataValue): unknown {
   for (const key of VERTEX_METADATA_KEYS) {
     const unwrapped = value[key];
-    if (unwrapped !== null && unwrapped !== undefined) {
+    if (unwrapped != null) {
       return unwrapped;
     }
   }

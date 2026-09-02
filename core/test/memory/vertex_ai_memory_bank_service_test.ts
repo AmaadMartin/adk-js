@@ -275,6 +275,53 @@ describe('VertexAiMemoryBankService', () => {
       );
     });
 
+    it('forwards the entry id as the memoryId create-config key', async () => {
+      await service.addMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        memories: [
+          {id: 'mem-123', content: {parts: [{text: 'fact 1'}]} as Content},
+        ],
+      });
+
+      expect(mockMemories.createInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({memoryId: 'mem-123'}),
+        }),
+      );
+    });
+
+    it('lets customMetadata.memoryId override the entry id', async () => {
+      await service.addMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        memories: [
+          {
+            id: 'from-entry',
+            content: {parts: [{text: 'fact 1'}]} as Content,
+            customMetadata: {memoryId: 'explicit'},
+          },
+        ],
+      });
+
+      expect(mockMemories.createInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({memoryId: 'explicit'}),
+        }),
+      );
+    });
+
+    it('omits memoryId when the entry has no id', async () => {
+      await service.addMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        memories: [{content: {parts: [{text: 'fact 1'}]} as Content}],
+      });
+
+      const config = mockMemories.createInternal.mock.calls[0][0].config;
+      expect(config).not.toHaveProperty('memoryId');
+    });
+
     it('throws error if memories list is empty', async () => {
       await expect(
         service.addMemory({
@@ -344,6 +391,70 @@ describe('VertexAiMemoryBankService', () => {
       expect(response.memories[0].content.parts?.[0].text).toBe(
         'user likes blue',
       );
+    });
+
+    it('defaults customMetadata to {} when the memory has no metadata', async () => {
+      const response = await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(response.memories[0].customMetadata).toEqual({});
+    });
+
+    it('converts Vertex metadata back into customMetadata', async () => {
+      mockMemories.retrieveInternal.mockResolvedValue({
+        retrievedMemories: [
+          {
+            memory: {
+              fact: 'user likes blue',
+              updateTime: '2026-04-21T12:00:00Z',
+              metadata: {
+                aBool: {boolValue: true},
+                aDouble: {doubleValue: 1.5},
+                aString: {stringValue: 'record-123'},
+                aTimestamp: {timestampValue: '2024-12-12T12:12:12.123Z'},
+              },
+            },
+          },
+        ],
+      });
+
+      const response = await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(response.memories[0].customMetadata).toEqual({
+        aBool: true,
+        aDouble: 1.5,
+        aString: 'record-123',
+        aTimestamp: '2024-12-12T12:12:12.123Z',
+      });
+    });
+
+    it('returns an unrecognised metadata value unchanged', async () => {
+      mockMemories.retrieveInternal.mockResolvedValue({
+        retrievedMemories: [
+          {
+            memory: {
+              fact: 'user likes blue',
+              updateTime: '2026-04-21T12:00:00Z',
+              metadata: {unknownShape: {}},
+            },
+          },
+        ],
+      });
+
+      const response = await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(response.memories[0].customMetadata).toEqual({unknownShape: {}});
     });
   });
 
@@ -556,7 +667,7 @@ describe('VertexAiMemoryBankService', () => {
         {
           content: {parts: [{text: 'fact 1'}]} as Content,
           customMetadata: {entryKey: 'entryValue'},
-        } as unknown as MemoryEntry, // cast to pass customMetadata
+        },
       ];
 
       await service.addMemory({
