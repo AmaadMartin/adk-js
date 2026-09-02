@@ -76,6 +76,8 @@ export interface InvocationContextParams {
   isolationScope?: string;
   /** The path of the workflow node this invocation runs, if any. */
   nodePath?: string;
+  /** Whether token-threshold compaction already ran in this invocation. */
+  tokenCompactionChecked?: boolean;
   /** Nesting depth of node-as-tool executions; used to bound recursion. */
   nodeToolDepth?: number;
   liveRequestQueue?: LiveRequestQueue;
@@ -299,6 +301,14 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * Whether token-threshold compaction already ran in this invocation. The
+   * token compactor sets it once it has compacted, so a later model step in
+   * the same invocation does not compact again. Mirrors
+   * `token_compaction_checked` in `google/adk-python`.
+   */
+  tokenCompactionChecked: boolean;
+
+  /**
    * The agent's tools as resolved for the current model step, or `undefined`
    * before anything resolved them. Read and written through
    * `canonicalToolsFor`; the empty array is a resolved set, not a miss.
@@ -326,6 +336,7 @@ export class InvocationContext {
     this.workflowInstructionScope = params.workflowInstructionScope;
     this.isolationScope = params.isolationScope;
     this.nodePath = params.nodePath;
+    this.tokenCompactionChecked = params.tokenCompactionChecked ?? false;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
     // Inherit the parent invocation's cost manager when one is available.
