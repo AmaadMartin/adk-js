@@ -7,7 +7,15 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {
   getServiceRegistry,
   loadServicesModule,
@@ -59,13 +67,14 @@ export class Artifacts {
 describe('service registry', () => {
   let agentRoot: string;
   let registry: ServiceRegistry;
-  let warn: Mock;
+  let warn: MockInstance<AdkLogger['warn']>;
 
   beforeEach(async () => {
     agentRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-agent-root-'));
     registry = new ServiceRegistry();
-    warn = vi.spyOn(AdkLogger.prototype, 'warn') as unknown as Mock;
-    warn.mockImplementation(() => {});
+    warn = vi
+      .spyOn(AdkLogger.prototype, 'warn')
+      .mockImplementation(() => undefined);
   });
 
   afterEach(async () => {
