@@ -44,6 +44,7 @@ import {
   normalizeLiveTranscriptions,
   PluginManager,
   Runner,
+  SequentialAgent,
   Session,
   setLogger,
   UserSimulator,
@@ -2196,16 +2197,16 @@ describe('generateInferencesFromRootAgentLive', () => {
     expect(llm.connections[0]?.closed).toBe(true);
   });
 
-  it('refuses a workflow root', async () => {
+  it('refuses a root with no live path', async () => {
     await expect(
       generateInferencesFromRootAgentLive({
-        rootAgent: new Workflow({
-          name: 'eval_workflow',
-          edges: [['START', new LlmAgent({name: 'node_agent'})]],
+        rootAgent: new SequentialAgent({
+          name: 'eval_sequence',
+          subAgents: [new LlmAgent({name: 'step_agent'})],
         }),
         userSimulator: new ScriptedUserSimulator(['hello']),
       }),
-    ).rejects.toThrow('eval_workflow');
+    ).rejects.toThrow('eval_sequence');
   });
 });
 

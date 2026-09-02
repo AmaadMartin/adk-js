@@ -22,6 +22,7 @@ import {
   Logger,
   RunAsyncToolRequest,
   Runner,
+  SequentialAgent,
   Session,
   setLogger,
   StreamingMode,
@@ -37,7 +38,7 @@ import {
   isNormalClosure,
   LIVE_RUN_CONFIG,
   LIVE_SHUTDOWN_TIMEOUT_SECONDS,
-  requireLiveEvalAgent,
+  requireLiveEvalRoot,
 } from '../../src/evaluation/live_session.js';
 
 import {FakeLiveLlm} from './test_helpers.js';
@@ -314,21 +315,30 @@ describe('isNormalClosure', () => {
   });
 });
 
-describe('requireLiveEvalAgent', () => {
+describe('requireLiveEvalRoot', () => {
   it('returns an LlmAgent root unchanged', () => {
     const agent = new LlmAgent({name: AGENT_NAME});
 
-    expect(requireLiveEvalAgent(agent)).toBe(agent);
+    expect(requireLiveEvalRoot(agent)).toBe(agent);
   });
 
-  it('refuses a workflow root and names it', () => {
+  it('returns a workflow root unchanged', () => {
     const workflow = new Workflow({
       name: 'eval_workflow',
       edges: [['START', new LlmAgent({name: 'node_agent'})]],
     });
 
-    expect(() => requireLiveEvalAgent(workflow)).toThrow(InputValidationError);
-    expect(() => requireLiveEvalAgent(workflow)).toThrow('eval_workflow');
+    expect(requireLiveEvalRoot(workflow)).toBe(workflow);
+  });
+
+  it('refuses a root with no live path and names it', () => {
+    const sequence = new SequentialAgent({
+      name: 'eval_sequence',
+      subAgents: [new LlmAgent({name: 'step_agent'})],
+    });
+
+    expect(() => requireLiveEvalRoot(sequence)).toThrow(InputValidationError);
+    expect(() => requireLiveEvalRoot(sequence)).toThrow('eval_sequence');
   });
 });
 
@@ -341,7 +351,7 @@ describe('EvalLiveSession', () => {
     vi.useRealTimers();
   });
 
-  it('refuses a workflow root before anything is started', async () => {
+  it('refuses a root with no live path before anything is started', async () => {
     const sessionService = new InMemorySessionService();
     const session = await sessionService.createSession({
       appName: APP_NAME,
@@ -349,9 +359,9 @@ describe('EvalLiveSession', () => {
     });
     const runner = new Runner({
       appName: APP_NAME,
-      agent: new Workflow({
-        name: 'eval_workflow',
-        edges: [['START', new LlmAgent({name: 'node_agent'})]],
+      agent: new SequentialAgent({
+        name: 'eval_sequence',
+        subAgents: [new LlmAgent({name: 'step_agent'})],
       }),
       sessionService,
     });
