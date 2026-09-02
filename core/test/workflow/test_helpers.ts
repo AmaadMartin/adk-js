@@ -131,6 +131,47 @@ export function transferringAgent(
   });
 }
 
+/** A workflow node event at `path`, carrying whatever `extra` says it produced. */
+export function nodeEvent(
+  invocationId: string,
+  path: string,
+  extra: Partial<Event> = {},
+): Event {
+  return createEvent({
+    author: path.split('.').pop(),
+    invocationId,
+    nodeInfo: {path},
+    ...extra,
+  });
+}
+
+/**
+ * A node event that paused for a human, shaped like the engine's own: an
+ * `adk_request_input` call whose id is also a long-running tool id (see
+ * `createRequestInputEvent`).
+ */
+export function pauseEvent(
+  invocationId: string,
+  path: string,
+  interruptId: string,
+): Event {
+  return nodeEvent(invocationId, path, {
+    content: {
+      role: 'model',
+      parts: [
+        {functionCall: {name: 'adk_request_input', id: interruptId, args: {}}},
+      ],
+    },
+    longRunningToolIds: [interruptId],
+  });
+}
+
+/** Lets every already-resolved promise settle without advancing the clock. */
+export async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 /** Builds a throwaway InvocationContext for driving nodes directly in tests. */
 export function createIc(
   state: Record<string, unknown> = {},

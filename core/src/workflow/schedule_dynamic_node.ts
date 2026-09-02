@@ -7,6 +7,7 @@
 import type {BaseNode} from './base_node.js';
 import type {NodeContext, NodeResult} from './node_context.js';
 import {NodeState} from './node_state.js';
+import {ReplayManager} from './utils/replay_manager.js';
 
 /**
  * Options for scheduling a dynamic node via {@link ScheduleDynamicNode}.
@@ -30,8 +31,8 @@ export interface ScheduleDynamicNodeOptions {
  * Protocol for scheduling a dynamically-invoked node (via `ctx.runNode()`).
  *
  * Implementations handle fresh execution, deduplication of concurrent calls,
- * and (Phase 5) resumption from session events. Ported from
- * `google/adk-python` `workflow/_schedule_dynamic_node.py`.
+ * and resumption from session events. Ported from `google/adk-python`
+ * `workflow/_schedule_dynamic_node.py`.
  */
 export interface ScheduleDynamicNode {
   schedule(
@@ -62,13 +63,18 @@ export interface DynamicNodeRun {
 /**
  * State for tracking dynamic nodes scheduled via `ctx.runNode()`.
  *
- * Ported (Phase 4 subset) from `google/adk-python`
- * `workflow/_dynamic_node_scheduler.py::DynamicNodeState`. Replay/rehydration
- * fields are added in Phase 5.
+ * Ported from `google/adk-python`
+ * `workflow/_dynamic_node_scheduler.py::DynamicNodeState`.
  */
 export class DynamicNodeState {
   /** Dynamic node runs keyed by unique node path (e.g. `wf/node_a@1`). */
   readonly runs = new Map<string, DynamicNodeRun>();
+
+  /**
+   * The replay barriers for this workflow subtree, shared by the static graph
+   * loop and the dynamic scheduler so both replay against one recorded order.
+   */
+  readonly replayManager = new ReplayManager();
 
   /** Union of unresolved interrupt ids across dynamic child nodes. */
   readonly interruptIds = new Set<string>();

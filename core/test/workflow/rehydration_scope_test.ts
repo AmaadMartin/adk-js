@@ -14,6 +14,7 @@ import {RequestInput} from '../../src/workflow/request_input.js';
 import {hasRequestInputFunctionCall} from '../../src/workflow/utils/hitl_utils.js';
 import {eventsForCurrentRun} from '../../src/workflow/utils/rehydration_utils.js';
 import {Workflow} from '../../src/workflow/workflow.js';
+import {nodeEvent, pauseEvent} from './test_helpers.js';
 
 async function drain(gen: AsyncGenerator<Event>): Promise<Event[]> {
   const out: Event[] = [];
@@ -21,40 +22,6 @@ async function drain(gen: AsyncGenerator<Event>): Promise<Event[]> {
     out.push(event);
   }
   return out;
-}
-
-function nodeEvent(
-  invocationId: string,
-  path: string,
-  extra: Partial<Event> = {},
-): Event {
-  return createEvent({
-    author: path.split('.').pop(),
-    invocationId,
-    nodeInfo: {path},
-    ...extra,
-  });
-}
-
-/**
- * A node event that paused for a human, shaped like the engine's own: an
- * `adk_request_input` call whose id is also a long-running tool id (see
- * `createRequestInputEvent`).
- */
-function pauseEvent(
-  invocationId: string,
-  path: string,
-  interruptId: string,
-): Event {
-  return nodeEvent(invocationId, path, {
-    content: {
-      role: 'model',
-      parts: [
-        {functionCall: {name: 'adk_request_input', id: interruptId, args: {}}},
-      ],
-    },
-    longRunningToolIds: [interruptId],
-  });
 }
 
 describe('eventsForCurrentRun', () => {
