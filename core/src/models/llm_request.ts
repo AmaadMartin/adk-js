@@ -67,21 +67,17 @@ function isStringArray(value: unknown): value is string[] {
 /**
  * `Content` is a structural interface, so there is no constructor to test
  * against. A non-array object carrying either of its two fields is one.
+ *
+ * Named for what it tests, because `workflow/base_node.ts` exports a stricter
+ * `isContent` that rejects a `Content` carrying only a role.
  */
-export function isContent(value: unknown): value is Content {
+export function isContentLike(value: unknown): value is Content {
   return (
     typeof value === 'object' &&
     value !== null &&
     !Array.isArray(value) &&
     ('parts' in value || 'role' in value)
   );
-}
-
-function ensureConfig(llmRequest: LlmRequest): GenerateContentConfig {
-  if (!llmRequest.config) {
-    llmRequest.config = {};
-  }
-  return llmRequest.config;
 }
 
 /**
@@ -110,42 +106,27 @@ function appendToSystemInstruction(
 function referenceLine(
   label: string,
   referenceId: string,
-  descriptor: string[],
+  data: Blob | FileData,
 ): string {
-  const suffix = descriptor.length ? ` (${descriptor.join(', ')})` : '';
-  return `[Reference to ${label}: ${referenceId}${suffix}]`;
-}
-
-function inlineDataDescriptor(data: Blob): string[] {
   const descriptor: string[] = [];
   if (data.displayName) {
     descriptor.push(`'${data.displayName}'`);
   }
-  if (data.mimeType) {
-    descriptor.push(`type: ${data.mimeType}`);
-  }
-  return descriptor;
-}
-
-function fileDataDescriptor(data: FileData): string[] {
-  const descriptor: string[] = [];
-  if (data.displayName) {
-    descriptor.push(`'${data.displayName}'`);
-  }
-  if (data.fileUri) {
+  if ('fileUri' in data && data.fileUri) {
     descriptor.push(`URI: ${data.fileUri}`);
   }
   if (data.mimeType) {
     descriptor.push(`type: ${data.mimeType}`);
   }
-  return descriptor;
+  const suffix = descriptor.length ? ` (${descriptor.join(', ')})` : '';
+  return `[Reference to ${label}: ${referenceId}${suffix}]`;
 }
 
 function appendContentInstructions(
   config: GenerateContentConfig,
   llmRequest: LlmRequest,
   instructions: Content,
-): Content[] {
+): void {
   const textParts: string[] = [];
   const userContents: Content[] = [];
   let nonTextCount = 0;
@@ -156,11 +137,7 @@ function appendContentInstructions(
     } else if (part.inlineData) {
       const referenceId = `inline_data_${nonTextCount++}`;
       textParts.push(
-        referenceLine(
-          'inline binary data',
-          referenceId,
-          inlineDataDescriptor(part.inlineData),
-        ),
+        referenceLine('inline binary data', referenceId, part.inlineData),
       );
       userContents.push(
         createUserContent([
@@ -170,13 +147,7 @@ function appendContentInstructions(
       );
     } else if (part.fileData) {
       const referenceId = `file_data_${nonTextCount++}`;
-      textParts.push(
-        referenceLine(
-          'file data',
-          referenceId,
-          fileDataDescriptor(part.fileData),
-        ),
-      );
+      textParts.push(referenceLine('file data', referenceId, part.fileData));
       userContents.push(
         createUserContent([
           createPartFromText(`Referenced file data: ${referenceId}`),
@@ -189,10 +160,7 @@ function appendContentInstructions(
   if (textParts.length) {
     appendToSystemInstruction(config, textParts.join('\n\n'));
   }
-  if (userContents.length) {
-    llmRequest.contents.push(...userContents);
-  }
-  return userContents;
+  llmRequest.contents.push(...userContents);
 }
 
 /**
@@ -200,27 +168,27 @@ function appendContentInstructions(
  *
  * The model API accepts only a string system instruction. A `Content` may also
  * carry inline or file data, so each such part becomes a textual reference in
- * the system instruction plus a user content holding the data itself.
+ * the system instruction plus a user content appended to
+ * {@link LlmRequest.contents}.
  *
  * @param instructions The instructions to append.
- * @returns The user contents synthesized from non-text parts, empty on every
- *     other path.
  * @throws TypeError if `instructions` is neither a `string[]` nor a `Content`.
  */
 export function appendInstructions(
   llmRequest: LlmRequest,
   instructions: string[] | Content,
-): Content[] {
-  const config = ensureConfig(llmRequest);
+): void {
+  llmRequest.config ??= {};
 
   if (isStringArray(instructions)) {
     if (instructions.length) {
-      appendToSystemInstruction(config, instructions.join('\n\n'));
+      appendToSystemInstruction(llmRequest.config, instructions.join('\n\n'));
     }
-    return [];
+    return;
   }
-  if (isContent(instructions)) {
-    return appendContentInstructions(config, llmRequest, instructions);
+  if (isContentLike(instructions)) {
+    appendContentInstructions(llmRequest.config, llmRequest, instructions);
+    return;
   }
   throw new TypeError(
     `instructions must be string[] or Content, got ${typeof instructions}.`,

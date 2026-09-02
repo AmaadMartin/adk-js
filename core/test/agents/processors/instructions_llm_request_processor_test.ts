@@ -22,9 +22,9 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   INSTRUCTION_BEGIN,
   INSTRUCTION_END,
+  QUOTED_CONTENT_ELIDED,
 } from '../../../src/agents/instructions.js';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/instructions_llm_request_processor.js';
-import {QUOTED_CONTENT_ELIDED} from '../../../src/utils/fencing_utils.js';
 
 const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 

@@ -8,14 +8,14 @@ import {InvocationContext, ReadonlyContext} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
+  injectSessionState,
   INSTRUCTION_BEGIN,
   INSTRUCTION_END,
   INSTRUCTION_PREAMBLE,
-  injectSessionState,
   labelDynamicInstruction,
+  QUOTED_CONTENT_ELIDED,
   staticInstructionContent,
 } from '../../src/agents/instructions.js';
-import {QUOTED_CONTENT_ELIDED} from '../../src/utils/fencing_utils.js';
 
 /**
  * Builds a minimal ReadonlyContext backed by a plain-object invocation context.

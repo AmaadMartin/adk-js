@@ -17,8 +17,10 @@ describe('appendInstructions', () => {
     it('leaves the request untouched for an empty array', () => {
       const request = createRequest();
 
-      expect(appendInstructions(request, [])).toEqual([]);
+      appendInstructions(request, []);
+
       expect(request.config?.systemInstruction).toBeUndefined();
+      expect(request.contents).toEqual([]);
     });
 
     it('sets the system instruction on the first append', () => {
@@ -43,7 +45,7 @@ describe('appendInstructions', () => {
     it('joins the text parts into the system instruction', () => {
       const request = createRequest();
 
-      const userContents = appendInstructions(request, {
+      appendInstructions(request, {
         role: 'user',
         parts: [{text: 'First part'}, {text: 'Second part'}],
       });
@@ -51,14 +53,13 @@ describe('appendInstructions', () => {
       expect(request.config?.systemInstruction).toBe(
         'First part\n\nSecond part',
       );
-      expect(userContents).toEqual([]);
       expect(request.contents).toEqual([]);
     });
 
-    it('returns a user content for an inline data part', () => {
+    it('adds a user content for an inline data part', () => {
       const request = createRequest();
 
-      const userContents = appendInstructions(request, {
+      appendInstructions(request, {
         role: 'user',
         parts: [{inlineData: {data: 'ZGF0YQ==', mimeType: 'image/png'}}],
       });
@@ -66,19 +67,18 @@ describe('appendInstructions', () => {
       expect(request.config?.systemInstruction).toBe(
         '[Reference to inline binary data: inline_data_0 (type: image/png)]',
       );
-      expect(userContents).toHaveLength(1);
-      expect(userContents[0].role).toBe('user');
-      expect(userContents[0].parts?.[0].text).toBe(
+      expect(request.contents).toHaveLength(1);
+      expect(request.contents[0].role).toBe('user');
+      expect(request.contents[0].parts?.[0].text).toBe(
         'Referenced inline data: inline_data_0',
       );
-      expect(userContents[0].parts?.[1].inlineData?.data).toBe('ZGF0YQ==');
-      expect(request.contents).toEqual(userContents);
+      expect(request.contents[0].parts?.[1].inlineData?.data).toBe('ZGF0YQ==');
     });
 
-    it('returns a user content for a file data part', () => {
+    it('adds a user content for a file data part', () => {
       const request = createRequest();
 
-      const userContents = appendInstructions(request, {
+      appendInstructions(request, {
         role: 'user',
         parts: [{fileData: {fileUri: 'files/doc', mimeType: 'text/plain'}}],
       });
@@ -86,12 +86,13 @@ describe('appendInstructions', () => {
       expect(request.config?.systemInstruction).toBe(
         '[Reference to file data: file_data_0 (URI: files/doc, type: text/plain)]',
       );
-      expect(userContents).toHaveLength(1);
-      expect(userContents[0].parts?.[0].text).toBe(
+      expect(request.contents).toHaveLength(1);
+      expect(request.contents[0].parts?.[0].text).toBe(
         'Referenced file data: file_data_0',
       );
-      expect(userContents[0].parts?.[1].fileData?.fileUri).toBe('files/doc');
-      expect(request.contents).toEqual(userContents);
+      expect(request.contents[0].parts?.[1].fileData?.fileUri).toBe(
+        'files/doc',
+      );
     });
 
     it('numbers inline and file references from one counter', () => {
@@ -158,19 +159,20 @@ describe('appendInstructions', () => {
     it('skips a part that is neither text nor data', () => {
       const request = createRequest();
 
-      const userContents = appendInstructions(request, {
+      appendInstructions(request, {
         role: 'user',
         parts: [{functionCall: {name: 'do_it'}}, {text: 'Only this'}],
       });
 
       expect(request.config?.systemInstruction).toBe('Only this');
-      expect(userContents).toEqual([]);
+      expect(request.contents).toEqual([]);
     });
 
     it('adds nothing for a content without parts', () => {
       const request = createRequest();
 
-      expect(appendInstructions(request, {role: 'user'})).toEqual([]);
+      appendInstructions(request, {role: 'user'});
+
       expect(request.config?.systemInstruction).toBeUndefined();
       expect(request.contents).toEqual([]);
     });

@@ -6,9 +6,8 @@
 
 import {Content, ContentUnion, createUserContent} from '@google/genai';
 
-import {isContent} from '../models/llm_request.js';
+import {isContentLike} from '../models/llm_request.js';
 import {State} from '../sessions/state.js';
-import {QUOTED_CONTENT_ELIDED} from '../utils/fencing_utils.js';
 import type {WorkflowInstructionScope} from './invocation_context.js';
 import {ReadonlyContext} from './readonly_context.js';
 
@@ -19,6 +18,13 @@ export const INSTRUCTION_BEGIN = '<<<BEGIN_SYSTEM_INSTRUCTION>>>';
 
 /** Closes the fenced block holding a routed dynamic instruction. */
 export const INSTRUCTION_END = '<<<END_SYSTEM_INSTRUCTION>>>';
+
+/**
+ * Replaces a marker string found inside fenced text, so the text cannot forge
+ * the end of its own block. Matches `QUOTED_CONTENT_ELIDED` in `adk-python`'s
+ * `_fencing.py`, because the value reaches the model.
+ */
+export const QUOTED_CONTENT_ELIDED = '<<<ELIDED_MARKER>>>';
 
 /**
  * Explains the fence to the model.
@@ -59,7 +65,7 @@ export function labelDynamicInstruction(instruction: string): string {
  * reproduces it with a type guard plus `createUserContent`.
  */
 export function staticInstructionContent(value: ContentUnion): Content {
-  return isContent(value) ? value : createUserContent(value);
+  return isContentLike(value) ? value : createUserContent(value);
 }
 
 /** Matches a `{Class.field}` workflow placeholder key (dotted identifier pair). */
