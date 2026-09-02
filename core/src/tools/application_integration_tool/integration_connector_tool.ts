@@ -69,17 +69,13 @@ export interface IntegrationConnectorToolOptions {
   /** Tool performing the underlying `ExecuteConnection` call. */
   restApiTool: RestApiTool;
   /**
-   * Scheme of the end-user credential, when the connection allows one.
-   *
-   * A string is the serialized form, accepted so that a stored configuration
-   * round-trips through the constructor. {@link IntegrationConnectorTool.runAsync}
-   * rejects it, because nothing parses it back.
+   * Scheme of the end-user credential, when the connection allows one. A
+   * string is its serialized form, which a call rejects.
    */
   authScheme?: AuthScheme | string;
   /**
-   * End-user credential, when the connection allows one.
-   *
-   * A string is the serialized form, on the same terms as {@link authScheme}.
+   * End-user credential, when the connection allows one. A string is its
+   * serialized form, which a call rejects.
    */
   authCredential?: AuthCredential | string;
   /** Slot the prepared credential is cached under. */
@@ -149,11 +145,15 @@ export class IntegrationConnectorTool extends BaseTool {
     const {options} = this;
 
     const {authScheme, authCredential} = options;
-    if (typeof authScheme === 'string') {
-      throw serializedAuthError(this.name, 'authScheme');
-    }
-    if (typeof authCredential === 'string') {
-      throw serializedAuthError(this.name, 'authCredential');
+    // Dropping a serialized option and calling the handler with `undefined`
+    // would read as "this connection needs no credential", and the call would
+    // reach the connector unauthenticated.
+    if (typeof authScheme === 'string' || typeof authCredential === 'string') {
+      throw new Error(
+        `IntegrationConnectorTool '${this.name}' holds authScheme or ` +
+          'authCredential in its serialized string form, which it cannot ' +
+          'authenticate with.',
+      );
     }
 
     const authHandler = ToolAuthHandler.fromToolContext(
@@ -236,25 +236,6 @@ export class IntegrationConnectorTool extends BaseTool {
       `action="${action}", rest_api_tool="${restApiTool.name}")`
     );
   }
-}
-
-/**
- * Returns the error raised for an auth option held in its serialized string
- * form.
- *
- * The options take a string so that a stored configuration round-trips,
- * matching adk-python's `Optional[Union[AuthScheme, str]]`. Nothing parses one
- * back into a scheme or a credential, so a call that needs it stops here.
- * Dropping the option and calling the handler with `undefined` would instead
- * read as "this connection needs no credential" and would reach the connector
- * unauthenticated.
- */
-function serializedAuthError(toolName: string, option: string): Error {
-  return new Error(
-    `IntegrationConnectorTool '${toolName}' was configured with ${option} as ` +
-      'a string; it accepts the serialized form for configuration ' +
-      'round-trips but cannot authenticate with it.',
-  );
 }
 
 /**

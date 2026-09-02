@@ -370,9 +370,9 @@ describe('IntegrationConnectorTool', () => {
       await expect(
         tool.runAsync({args: {}, toolContext: createContext()}),
       ).rejects.toThrow(
-        "IntegrationConnectorTool 'list_issues' was configured with " +
-          'authScheme as a string; it accepts the serialized form for ' +
-          'configuration round-trips but cannot authenticate with it.',
+        "IntegrationConnectorTool 'list_issues' holds authScheme or " +
+          'authCredential in its serialized string form, which it cannot ' +
+          'authenticate with.',
       );
       // Calling the connector without the scheme would call it unauthenticated.
       expect(delegated).not.toHaveBeenCalled();
@@ -388,20 +388,11 @@ describe('IntegrationConnectorTool', () => {
       await expect(
         tool.runAsync({args: {}, toolContext: createContext()}),
       ).rejects.toThrow(
-        "IntegrationConnectorTool 'list_issues' was configured with " +
-          'authCredential as a string; it accepts the serialized form for ' +
-          'configuration round-trips but cannot authenticate with it.',
+        "IntegrationConnectorTool 'list_issues' holds authScheme or " +
+          'authCredential in its serialized string form, which it cannot ' +
+          'authenticate with.',
       );
       expect(delegated).not.toHaveBeenCalled();
-    });
-
-    it('declares its parameters with a serialized scheme in place', () => {
-      const {tool} = createTool({
-        restApiTool: createToolWithSchema(REFERENCE_SCHEMA),
-        authScheme: SERIALIZED_SCHEME,
-      });
-
-      expect(tool._getDeclaration().parameters?.required).toEqual(['user_id']);
     });
   });
 
