@@ -443,6 +443,55 @@ describe('BaseAgent', () => {
       expect(events).toHaveLength(1);
       expect(events[0].content).toEqual(text('after live'));
     });
+
+    it('yields the agent\u2019s own after-content', async () => {
+      const plugin = new AgentHookPlugin('hooks');
+      const agent = new MockAgent({
+        name: 'test_agent',
+        afterAgentCallback: () => text('from agent'),
+      });
+
+      const events = await drain(agent.runAsync(contextFor(agent, plugin)));
+
+      expect(events).toHaveLength(2);
+      expect(events[1].content).toEqual(text('from agent'));
+    });
+
+    it('reports a state delta a before-callback wrote, without content', async () => {
+      const plugin = new AgentHookPlugin('hooks');
+      const agent = new MockAgent({
+        name: 'test_agent',
+        beforeAgentCallback: (callbackContext) => {
+          callbackContext.state.set('before_key', 'before_value');
+          return undefined;
+        },
+      });
+
+      const events = await drain(agent.runAsync(contextFor(agent, plugin)));
+
+      expect(events).toHaveLength(2);
+      expect(events[0].content).toBeUndefined();
+      expect(events[0].actions.stateDelta).toEqual({
+        before_key: 'before_value',
+      });
+    });
+
+    it('reports a state delta an after-callback wrote, without content', async () => {
+      const plugin = new AgentHookPlugin('hooks');
+      const agent = new MockAgent({
+        name: 'test_agent',
+        afterAgentCallback: (callbackContext) => {
+          callbackContext.state.set('after_key', 'after_value');
+          return undefined;
+        },
+      });
+
+      const events = await drain(agent.runAsync(contextFor(agent, plugin)));
+
+      expect(events).toHaveLength(2);
+      expect(events[1].content).toBeUndefined();
+      expect(events[1].actions.stateDelta).toEqual({after_key: 'after_value'});
+    });
   });
 
   describe('clone validation', () => {

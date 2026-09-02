@@ -442,10 +442,10 @@ export class PluginManager {
   /**
    * Runs the `onAgentErrorCallback` for all plugins.
    *
-   * Unlike {@link runCallbacks} this never exits early and never re-throws: a
-   * plugin that fails is logged and the next one still runs. The notification
-   * reports an error that already happened, so a failure here must not replace
-   * the error the caller is about to propagate.
+   * Unlike the other callbacks this one never exits early and never re-throws:
+   * a plugin that fails is logged and the next one still runs. The
+   * notification reports an error that already happened, so a failure here
+   * must not replace the error the caller is about to propagate.
    */
   async runOnAgentErrorCallback({
     agent,
