@@ -44,7 +44,18 @@ function isInlineMimeTypeSupported(mimeType?: string): boolean {
   );
 }
 
-function asSafePartForLlm(artifact: Part, artifactName: string): Part {
+/**
+ * Converts an artifact part the model cannot read into one it can.
+ *
+ * A part whose inline MIME type Gemini supports is returned as it is.
+ * Anything else becomes a text part: the decoded text for a text-like type, or
+ * a short description naming the artifact otherwise.
+ *
+ * @param artifact The part to convert.
+ * @param artifactName The name to quote in the description.
+ * @returns A part that is safe to send to the model.
+ */
+export function asSafePartForLlm(artifact: Part, artifactName: string): Part {
   const inlineData = artifact.inlineData;
   if (!inlineData) {
     return artifact;

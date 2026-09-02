@@ -150,6 +150,11 @@ export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
 export {InputValidationError} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
+export {
+  RESOURCE_EXHAUSTED_MITIGATION_MESSAGE,
+  ResourceExhaustedError,
+  isResourceExhaustedError,
+} from './errors/resource_exhausted_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
@@ -315,6 +320,7 @@ export {GOOGLE_SEARCH, GoogleSearchTool} from './tools/google_search_tool.js';
 export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
+  asSafePartForLlm,
 } from './tools/load_artifacts_tool.js';
 export {LOAD_MEMORY, LoadMemoryTool} from './tools/load_memory_tool.js';
 export {LOAD_WEB_PAGE, loadWebPage} from './tools/load_web_page.js';
