@@ -92,7 +92,6 @@ for await (const event of runner.runLive({
   userId: 'user',
   sessionId: 'session',
   liveRequestQueue: queue,
-  runConfig: {saveLiveBlob: true},
 })) {
   if (event.turnComplete) {
     queue.close();
@@ -111,6 +110,12 @@ base64 string. Close the queue to end the session.
 | `historyConfig`      | `RunConfig` | Copied onto the connect config when history is replayed.         |
 | `responseScheduling` | `BaseTool`  | Declares the tool `NON_BLOCKING` on the live path.               |
 
+Turning `saveLiveBlob` on changes the shape of a turn's last event. The flow
+yields the flushed audio events instead of the control event, so a turn that
+produced audio emits no `turnComplete`. Do not build a turn boundary on that
+flag; close the queue on your own input instead, or on the `fileData` event
+the flush produces.
+
 The flow sets `historyConfig.initialHistoryInClientContent` to `true` when it
 replays history on a fresh connection, so the server does not answer those
 turns again. An explicit value in `RunConfig.historyConfig` is kept.
@@ -127,5 +132,8 @@ The Gemini API backend rejects the field.
   `InvocationContext.credentialByKey`, never on the toolset's own config.
 - Audio is written only when the artifact service is present. A failed save
   keeps the audio for the next flush and produces no event.
+- A turn that flushes audio emits no `turnComplete` event.
+- No audio is cached while `saveLiveBlob` is off, so the caches cannot grow on
+  the default path.
 - Cancelling a background tool is best effort. A task that ignores it is
   logged and dropped from the registry.

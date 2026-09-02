@@ -52,6 +52,18 @@ class ProtectedToolset extends BaseToolset {
   override async close(): Promise<void> {}
 }
 
+/** Captures the invocation context so a test can inspect it after the run. */
+class ContextCapturingProcessor extends BaseLlmRequestProcessor {
+  invocationContext?: InvocationContext;
+
+  // eslint-disable-next-line require-yield -- it only records the context.
+  override async *runAsync(
+    invocationContext: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    this.invocationContext = invocationContext;
+  }
+}
+
 /** Registers a background tool task so the teardown has something to stop. */
 class BackgroundTaskProcessor extends BaseLlmRequestProcessor {
   invocationContext?: InvocationContext;
@@ -192,6 +204,54 @@ describe('LlmAgent live flow', () => {
           `artifact://${APP_NAME}/${USER_ID}/${SESSION_ID}/_adk_live/`,
         );
       }
+    });
+
+    it('caches nothing while saveLiveBlob is off', async () => {
+      const llm = new ScriptedLiveLlm([[{turnComplete: true}]]);
+      const agent = new LlmAgent({name: 'agent', model: llm});
+      const processor = new ContextCapturingProcessor();
+      agent.requestProcessors.push(processor);
+      const runner = makeRunner(agent);
+      const queue = new LiveRequestQueue();
+      for (let i = 0; i < 5; i++) {
+        queue.sendRealtime({data: AUDIO_CHUNK, mimeType: 'audio/pcm'});
+      }
+      queue.close();
+
+      await drain(runner, queue);
+
+      // Nothing flushes the cache while the flag is off, so nothing may enter
+      // it either.
+      expect(processor.invocationContext?.inputRealtimeCache).toBeUndefined();
+      expect(llm.connections[0].realtimeCalls).toHaveLength(5);
+    });
+
+    it('emits no turnComplete on a turn whose audio it flushed', async () => {
+      const llm = new ScriptedLiveLlm([
+        [
+          {
+            content: {
+              role: 'model',
+              parts: [{inlineData: {data: AUDIO_CHUNK, mimeType: 'audio/pcm'}}],
+            },
+          },
+          {turnComplete: true},
+        ],
+      ]);
+      const runner = makeRunner(new LlmAgent({name: 'agent', model: llm}));
+      const queue = new LiveRequestQueue();
+      queue.close();
+
+      const events = await drain(runner, queue, {saveLiveBlob: true});
+
+      // The flush replaces the control event, so a caller cannot use
+      // turnComplete as the turn boundary. The guide says so too.
+      expect(events.some((event) => event.turnComplete)).toBe(false);
+      expect(
+        events.some((event) =>
+          event.content?.parts?.some((part) => part.fileData),
+        ),
+      ).toBe(true);
     });
 
     it('writes nothing when saveLiveBlob is off', async () => {

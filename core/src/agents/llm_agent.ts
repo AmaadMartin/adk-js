@@ -1421,11 +1421,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       return;
     }
     if (liveRequest.blob) {
-      this.audioCacheManager.cacheAudio(
-        invocationContext,
-        liveRequest.blob,
-        'input',
-      );
+      // Only cache what a flush can write. Nothing empties the cache while
+      // `saveLiveBlob` is off, so caching then would grow it for the life of
+      // the session. adk-python caches unconditionally and has that leak.
+      if (invocationContext.runConfig?.saveLiveBlob) {
+        this.audioCacheManager.cacheAudio(
+          invocationContext,
+          liveRequest.blob,
+          'input',
+        );
+      }
       await connection.sendRealtime(liveRequest.blob);
       return;
     }
