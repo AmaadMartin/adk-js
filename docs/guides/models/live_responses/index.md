@@ -31,6 +31,7 @@ connection closes. Nothing from turn _n_ reaches turn _n+1_.
 ```ts
 import {
   InMemorySessionService,
+  InteractionStatus,
   LiveRequestQueue,
   LlmAgent,
   Runner,
@@ -53,8 +54,11 @@ for await (const event of runner.runLive({
   if (event.partial) {
     continue; // A text fragment; the full text follows.
   }
-  if (event.turnComplete) {
-    console.log(event.groundingMetadata, event.interactionStatus);
+  if (
+    event.turnComplete &&
+    event.interactionStatus !== InteractionStatus.IN_PROGRESS
+  ) {
+    queue.close(); // The model finished the prompt and waits for more input.
   }
 }
 ```
