@@ -90,7 +90,8 @@ export interface AppendEventRequest {
 /**
  * The response of listing sessions.
  *
- * The events and states are not set within each Session object.
+ * The events are not set within each Session object. The state is the same
+ * merged view that `getSession` returns.
  * When no pagination params were requested, `page` is 1, `limit` equals
  * `totalItems`, and `totalPages` is 1 (or 0 when there are no sessions).
  */
@@ -181,6 +182,7 @@ export abstract class BaseSessionService {
    * can bootstrap context before the first turn instead of paying for a
    * `listSessions` sweep.
    *
+   * @param _request The request to get the user state.
    * @return A promise that resolves to the raw user-scoped key/value pairs.
    * @throws Error when the implementation cannot read user state without a
    *     session. Callers can fall back to `listSessions` plus `getSession`,
@@ -210,41 +212,61 @@ export abstract class BaseSessionService {
     applyTempState({session, event});
     event = trimTempDeltaState(event);
 
-    this.updateSessionState({session, event});
-    const index = session.events.findIndex((e) => e.id === event.id);
-    if (index >= 0) {
-      session.events[index] = event;
-    } else {
-      session.events.push(event);
+    if (event.actions?.stateDelta) {
+      applyStateDelta(session.state, event.actions.stateDelta);
     }
+    upsertEvent(session.events, event);
 
     return event;
   }
+}
 
-  /**
-   * Updates the session state based on the event.
-   *
-   * @param request The request to update the session state.
-   */
-  private updateSessionState({session, event}: AppendEventRequest): void {
-    if (!event.actions || !event.actions.stateDelta) {
-      return;
+/**
+ * Appends an event to an event list, replacing an entry that already carries
+ * the same id.
+ *
+ * An event id names one logical event, so an event that reuses a stored id
+ * revises that entry instead of adding a second one. Every event list a
+ * session service keeps follows this rule, so a caller's session and the
+ * stored session hold the same events.
+ *
+ * @param events The event list to write into.
+ * @param event The event to append or revise.
+ */
+export function upsertEvent(events: Event[], event: Event): void {
+  const index = events.findIndex((e) => e.id === event.id);
+  if (index >= 0) {
+    events[index] = event;
+  } else {
+    events.push(event);
+  }
+}
+
+/**
+ * Commits the entries of a state delta into a state object.
+ *
+ * `temp:` entries are never committed: they live for the current invocation
+ * only.
+ *
+ * @param state The state to write into.
+ * @param stateDelta The delta to commit.
+ */
+export function applyStateDelta(
+  state: Record<string, unknown>,
+  stateDelta: Record<string, unknown>,
+): void {
+  for (const [key, value] of Object.entries(stateDelta)) {
+    if (key.startsWith(State.TEMP_PREFIX)) {
+      continue;
     }
-    for (const [key, value] of Object.entries(event.actions.stateDelta)) {
-      if (key.startsWith(State.TEMP_PREFIX)) {
-        continue;
-      }
-      // Commits lag the writes they carry, and events arrive here in the order
-      // they were streamed rather than the order their writes happened.
-      // Applying an entry that a newer write already superseded would roll the
-      // key back until that newer event commits in turn; skip it instead.
-      if (
-        !shouldApplyDeltaWrite(session.state, event.actions.stateDelta, key)
-      ) {
-        continue;
-      }
-      defineStateEntry(session.state, key, value);
+    // Commits lag the writes they carry, and events arrive here in the order
+    // they were streamed rather than the order their writes happened.
+    // Applying an entry that a newer write already superseded would roll the
+    // key back until that newer event commits in turn; skip it instead.
+    if (!shouldApplyDeltaWrite(state, stateDelta, key)) {
+      continue;
     }
+    defineStateEntry(state, key, value);
   }
 }
 
@@ -378,6 +400,9 @@ export function extractStateDelta(
       delta.session[key] = value;
     }
   }
+  // The session bucket is a different object, so the write order recorded
+  // against the original has to come with it or the commit loses its ordering.
+  carryDeltaStamps(state, delta.session);
   return delta;
 }
 

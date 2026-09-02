@@ -1117,6 +1117,14 @@ describe('VertexAiSessionService', () => {
     });
   });
 
+  describe('getUserState', () => {
+    it('rejects because the service cannot read user state', async () => {
+      await expect(
+        service.getUserState({appName: '12345', userId: 'testUser'}),
+      ).rejects.toThrow('VertexAiSessionService does not support getUserState');
+    });
+  });
+
   describe('appendEvent', () => {
     it('appends event to session and falls back on empty invocationId/author', async () => {
       const session = {
