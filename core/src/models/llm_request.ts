@@ -15,6 +15,7 @@ import {
 } from '@google/genai';
 
 import type {BaseTool} from '../tools/base_tool.js';
+import {logger} from '../utils/logger.js';
 
 /**
  * LLM request class that allows passing in tools, output schema and system
@@ -142,15 +143,50 @@ export function appendTools(llmRequest: LlmRequest, tools: BaseTool[]): void {
   llmRequest.config.tools.push({functionDeclarations});
 }
 
+/** Thrown by {@link setOutputSchema} when the caller supplies no schema. */
+export const MISSING_OUTPUT_SCHEMA_MESSAGE =
+  'Either outputSchema or baseModel must be provided. Pass ' +
+  'outputSchema=<your schema> (baseModel is deprecated).';
+
+const DEPRECATED_BASE_MODEL_MESSAGE =
+  'setOutputSchema: the baseModel option is deprecated; pass the schema as ' +
+  'the outputSchema argument instead.';
+
+/** Options for {@link setOutputSchema}. */
+export interface SetOutputSchemaOptions {
+  /**
+   * @deprecated Use the `outputSchema` argument. This is the TypeScript
+   * spelling of adk-python's `set_output_schema(base_model=…)`.
+   */
+  baseModel?: SchemaUnion;
+}
+
 /**
- * Sets the output schema for the request.
+ * Sets the output schema for the request and puts the model in JSON mode.
  *
- * @param schema The JSON Schema object to set as the output schema.
+ * `SchemaUnion` resolves to `unknown`, so the compiler accepts `undefined` for
+ * the schema. Without this guard the request ends up asking for JSON with no
+ * schema to answer against, which the caller only discovers from the model's
+ * reply.
+ *
+ * @param outputSchema The JSON Schema object the model must answer against.
+ * @param options Deprecated aliases; see {@link SetOutputSchemaOptions}.
+ * @throws Error if neither `outputSchema` nor `options.baseModel` is supplied.
+ *     The request is left untouched.
  */
 export function setOutputSchema(
   llmRequest: LlmRequest,
-  schema: SchemaUnion,
+  outputSchema?: SchemaUnion,
+  options?: SetOutputSchemaOptions,
 ): void {
+  const schema = outputSchema ?? options?.baseModel;
+  if (schema == null) {
+    throw new Error(MISSING_OUTPUT_SCHEMA_MESSAGE);
+  }
+  if (options?.baseModel != null) {
+    logger.warn(DEPRECATED_BASE_MODEL_MESSAGE);
+  }
+
   if (!llmRequest.config) {
     llmRequest.config = {};
   }
