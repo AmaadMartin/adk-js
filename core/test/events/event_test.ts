@@ -420,6 +420,83 @@ describe('Event Utils', () => {
     });
   });
 
+  describe('createEvent route sync', () => {
+    it('mirrors a top-level route onto actions.route', () => {
+      const event = createEvent({route: 'next'});
+      expect(event.route).toBe('next');
+      expect(event.actions.route).toBe('next');
+    });
+
+    it('mirrors actions.route onto the top-level route', () => {
+      const event = createEvent({actions: {route: 'next'}});
+      expect(event.route).toBe('next');
+      expect(event.actions.route).toBe('next');
+    });
+
+    it('prefers the top-level route when both are supplied', () => {
+      const event = createEvent({route: 'top', actions: {route: 'nested'}});
+      expect(event.route).toBe('top');
+      expect(event.actions.route).toBe('top');
+    });
+
+    it('mirrors a falsy route key rather than treating it as unset', () => {
+      const event = createEvent({route: false});
+      expect(event.route).toBe(false);
+      expect(event.actions.route).toBe(false);
+    });
+
+    it('mirrors a multi-route array', () => {
+      const event = createEvent({route: ['a', 'b']});
+      expect(event.actions.route).toEqual(['a', 'b']);
+    });
+
+    it('leaves both undefined when neither is supplied', () => {
+      const event = createEvent();
+      expect(event.route).toBeUndefined();
+      expect(event.actions.route).toBeUndefined();
+    });
+  });
+
+  describe('parity field round-trip serialization', () => {
+    it('keeps setModelResponse keys verbatim and snake_cases the field names', () => {
+      const original = createEvent({
+        id: '123',
+        invocationId: 'inv1',
+        actions: createEventActions({
+          transferReason: 'billing question',
+          route: 'approved',
+          setModelResponse: {some_key: 1, otherKey: 2},
+        }),
+      });
+
+      const snake = transformToSnakeCaseEvent(original);
+      const actions = snake['actions'] as Record<string, unknown>;
+      expect(actions['transfer_reason']).toBe('billing question');
+      expect(actions['route']).toBe('approved');
+      expect(actions['set_model_response']).toEqual({
+        some_key: 1,
+        otherKey: 2,
+      });
+
+      const restored = transformToCamelCaseEvent(snake);
+      expect(restored.actions.transferReason).toBe('billing question');
+      expect(restored.actions.route).toBe('approved');
+      expect(restored.actions.setModelResponse).toEqual({
+        some_key: 1,
+        otherKey: 2,
+      });
+    });
+
+    it('restores a route written by a Python runner onto the top-level field', () => {
+      const restored = transformToCamelCaseEvent({
+        id: '123',
+        invocation_id: 'inv1',
+        actions: {state_delta: {}, route: 'approved'},
+      });
+      expect(createEvent(restored).route).toBe('approved');
+    });
+  });
+
   describe('generateClientFunctionCallId', () => {
     it('should generate a valid ID with prefix', () => {
       const id = generateClientFunctionCallId();
