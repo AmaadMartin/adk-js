@@ -91,6 +91,47 @@ and one user content whose parts are the text
 number the non-text parts in the order they appear, across both kinds, so an
 inline part followed by a file part yields `inline_data_0` then `file_data_1`.
 
+## Instructions contributed by a tool
+
+A tool sometimes needs to tell the model something, not only declare itself. It
+adds the text to `LlmRequest.dynamicInstructions` while the request is being
+built. `LlmAgent` resolves the whole accumulator once every tool has run: it
+joins the entries with a blank line, appends the result to the system
+instruction, and empties the accumulator.
+
+Two properties follow from that order. A tool does not need to know where
+instructions end up, so the routing can change without touching the tool. And
+the resolution is idempotent, because the accumulator is empty afterwards, so a
+second resolution cannot duplicate the text.
+
+`dynamicInstructions` is internal request state. Read it in a test to check
+what a tool contributed; do not treat it as the place a user configures an
+instruction.
+
+## Structured output
+
+`LlmRequest` asks for JSON by setting `config.responseSchema` and
+`config.responseMimeType`. Set them through the agent, not by hand:
+
+```ts
+import {LlmAgent} from '@google/adk';
+import {Type} from '@google/genai';
+
+const agent = new LlmAgent({
+  name: 'weather_agent',
+  model: 'gemini-2.5-flash',
+  instruction: 'Answer with the forecast.',
+  outputSchema: {
+    type: Type.OBJECT,
+    properties: {forecast: {type: Type.STRING}},
+    required: ['forecast'],
+  },
+});
+```
+
+A request with no schema at all is a programming error, so the request rejects
+it rather than sending a JSON mime type the model cannot satisfy.
+
 ## Context caching fields
 
 `LlmRequest` carries three fields a caching layer reads: `cacheConfig`,

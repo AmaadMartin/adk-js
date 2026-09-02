@@ -16,8 +16,10 @@ import {
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
+  appendDynamicInstructions,
   appendInstructions,
   appendTools,
+  finalizeDynamicInstructions,
   findToolWithFunctionDeclarations,
   insertTransientUserContent,
   setOutputSchema,
@@ -638,5 +640,127 @@ describe('setOutputSchema', () => {
 
     expect(request.config?.responseSchema).toBe(schema);
     expect(request.config?.responseMimeType).toBe('application/json');
+  });
+
+  it('accepts the deprecated baseModel alias', () => {
+    const request = createRequest();
+    const schema: Schema = {type: Type.STRING};
+
+    setOutputSchema(request, undefined, {baseModel: schema});
+
+    expect(request.config?.responseSchema).toBe(schema);
+    expect(request.config?.responseMimeType).toBe('application/json');
+  });
+
+  it('prefers outputSchema over the deprecated baseModel alias', () => {
+    const request = createRequest();
+    const preferred: Schema = {type: Type.STRING};
+    const deprecated: Schema = {type: Type.NUMBER};
+
+    setOutputSchema(request, preferred, {baseModel: deprecated});
+
+    expect(request.config?.responseSchema).toBe(preferred);
+  });
+
+  it('honours a structurally empty schema instead of the alias', () => {
+    const request = createRequest();
+    const empty: Schema = {};
+    const deprecated: Schema = {type: Type.NUMBER};
+
+    setOutputSchema(request, empty, {baseModel: deprecated});
+
+    expect(request.config?.responseSchema).toBe(empty);
+  });
+
+  it('throws when no schema is given, and leaves the config alone', () => {
+    const request = createRequest();
+
+    expect(() => {
+      setOutputSchema(request);
+    }).toThrow(
+      'Either outputSchema or baseModel must be provided. Pass ' +
+        'outputSchema=<your schema> (baseModel is deprecated).',
+    );
+    expect(request.config?.responseSchema).toBeUndefined();
+    expect(request.config?.responseMimeType).toBeUndefined();
+  });
+
+  it('throws when both the schema and the alias are null', () => {
+    const request = createRequest();
+
+    expect(() => {
+      setOutputSchema(request, null, {baseModel: null});
+    }).toThrow('Either outputSchema or baseModel must be provided.');
+    expect(request.config?.responseSchema).toBeUndefined();
+  });
+});
+
+describe('appendDynamicInstructions', () => {
+  it('accumulates entries across successive calls, in order', () => {
+    const request = createRequest();
+
+    appendDynamicInstructions(request, ['first', 'second']);
+    appendDynamicInstructions(request, ['third']);
+
+    expect(request.dynamicInstructions).toEqual(['first', 'second', 'third']);
+  });
+
+  it('is a no-op for an empty array', () => {
+    const request = createRequest();
+
+    appendDynamicInstructions(request, []);
+
+    expect(request.dynamicInstructions).toBeUndefined();
+  });
+
+  it('leaves the system instruction alone', () => {
+    const request = createRequest();
+    appendInstructions(request, ['Be brief.']);
+
+    appendDynamicInstructions(request, ['Prefer report.pdf.']);
+
+    expect(request.config?.systemInstruction).toBe('Be brief.');
+  });
+});
+
+describe('finalizeDynamicInstructions', () => {
+  it('joins the accumulated entries with a blank line', () => {
+    const request = createRequest();
+    appendDynamicInstructions(request, ['first', 'second']);
+
+    finalizeDynamicInstructions(request);
+
+    expect(request.config?.systemInstruction).toBe('first\n\nsecond');
+  });
+
+  it('appends after an instruction already set, separated by a blank line', () => {
+    const request = createRequest();
+    appendInstructions(request, ['Be brief.']);
+    appendDynamicInstructions(request, ['Prefer report.pdf.']);
+
+    finalizeDynamicInstructions(request);
+
+    expect(request.config?.systemInstruction).toBe(
+      'Be brief.\n\nPrefer report.pdf.',
+    );
+  });
+
+  it('clears the accumulator, so a second call adds nothing', () => {
+    const request = createRequest();
+    appendDynamicInstructions(request, ['Prefer report.pdf.']);
+
+    finalizeDynamicInstructions(request);
+    finalizeDynamicInstructions(request);
+
+    expect(request.config?.systemInstruction).toBe('Prefer report.pdf.');
+    expect(request.dynamicInstructions).toEqual([]);
+  });
+
+  it('is a no-op when nothing was accumulated', () => {
+    const request = createRequest();
+
+    finalizeDynamicInstructions(request);
+
+    expect(request.config?.systemInstruction).toBeUndefined();
   });
 });
