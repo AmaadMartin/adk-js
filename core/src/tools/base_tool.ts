@@ -34,6 +34,9 @@ export interface BaseToolParams {
   name: string;
   description: string;
   isLongRunning?: boolean;
+
+  /** See {@link BaseTool.defersResponse}. Framework-internal. */
+  defersResponse?: boolean;
 }
 
 /**
@@ -87,6 +90,21 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
+   * Framework-internal, and not public API — external code must leave this
+   * false.
+   *
+   * When true, the framework builds no `FunctionResponse` for a call whose
+   * `runAsync` resolves to nothing, because another orchestrator answers the
+   * call later. A `runAsync` that resolves to a value is handled normally.
+   *
+   * {@link isLongRunning} skips the same auto-built response, and additionally
+   * records the call on `event.longRunningToolIds`, which drives A2A
+   * conversion, plugin logging and interrupt tracking. This marker records
+   * nothing.
+   */
+  readonly defersResponse: boolean;
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
@@ -95,6 +113,7 @@ export abstract class BaseTool {
     this.name = params.name;
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
+    this.defersResponse = params.defersResponse ?? false;
   }
 
   /**
