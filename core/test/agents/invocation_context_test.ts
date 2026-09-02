@@ -5,12 +5,14 @@
  */
 
 import {
+  AsyncQueue,
   BaseAgent,
   BaseAgentConfig,
   Event,
   InvocationContext,
   LoopAgent,
   PluginManager,
+  QueuedInvocationEvent,
   Session,
   createEvent,
 } from '@google/adk';
@@ -170,5 +172,96 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+function makeContext(): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'inv-queue',
+    agent: new LoopAgent({name: 'root'}),
+    session: makeSession(),
+    pluginManager: new PluginManager(),
+  });
+}
+
+/** Lets the microtask queue drain, so a pending promise can settle if it can. */
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+describe('InvocationContext.enqueueEvent', () => {
+  it('holds a non-partial event until the consumer marks it processed', async () => {
+    const context = makeContext();
+    const queue = new AsyncQueue<QueuedInvocationEvent>();
+    context.eventQueue = queue;
+
+    let resolved = false;
+    const enqueued = context
+      .enqueueEvent(createEvent({author: 'node'}))
+      .then(() => {
+        resolved = true;
+      });
+
+    const iterator = queue[Symbol.asyncIterator]();
+    const first = await iterator.next();
+    expect(first.done).toBe(false);
+    await flushMicrotasks();
+    expect(resolved).toBe(false);
+
+    first.value?.markProcessed?.();
+    await enqueued;
+    expect(resolved).toBe(true);
+  });
+
+  it('does not hold a partial event and sends no callback with it', async () => {
+    const context = makeContext();
+    const queue = new AsyncQueue<QueuedInvocationEvent>();
+    context.eventQueue = queue;
+
+    await context.enqueueEvent(createEvent({author: 'node', partial: true}));
+
+    expect(queue.size).toBe(1);
+    const first = await queue[Symbol.asyncIterator]().next();
+    expect(first.value?.markProcessed).toBeUndefined();
+  });
+
+  it('delivers events in the order they were enqueued', async () => {
+    const context = makeContext();
+    const queue = new AsyncQueue<QueuedInvocationEvent>();
+    context.eventQueue = queue;
+
+    const authors: string[] = [];
+    const consumer = (async () => {
+      for await (const queued of queue) {
+        authors.push(queued.event.author!);
+        queued.markProcessed?.();
+      }
+    })();
+
+    for (const author of ['first', 'second', 'third']) {
+      await context.enqueueEvent(createEvent({author}));
+    }
+    queue.close();
+    await consumer;
+
+    expect(authors).toEqual(['first', 'second', 'third']);
+  });
+
+  it('throws when no queue is set', async () => {
+    await expect(
+      makeContext().enqueueEvent(createEvent({author: 'node'})),
+    ).rejects.toThrowError(/InvocationContext.eventQueue is not set/);
+  });
+
+  it('rejects rather than waiting forever when the queue is closed', async () => {
+    const context = makeContext();
+    const queue = new AsyncQueue<QueuedInvocationEvent>();
+    queue.close();
+    context.eventQueue = queue;
+
+    await expect(
+      context.enqueueEvent(createEvent({author: 'node'})),
+    ).rejects.toThrowError(/InvocationContext.eventQueue is closed/);
   });
 });

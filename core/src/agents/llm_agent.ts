@@ -67,7 +67,11 @@ import {
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
-import {InvocationContext, requireAgent} from './invocation_context.js';
+import {
+  InvocationContext,
+  QueuedInvocationEvent,
+  requireAgent,
+} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
@@ -1697,7 +1701,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // so those events interleave into this agent's output stream. The tool runs
     // in a self-contained task that captures its result/error and always closes
     // the queue, so there is a single error path (no unhandled rejection).
-    const eventQueue = new AsyncQueue<Event>();
+    const eventQueue = new AsyncQueue<QueuedInvocationEvent>();
     invocationContext.eventQueue = eventQueue;
     const toolTask = (async (): Promise<{
       event: Event | null;
@@ -1719,7 +1723,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
     })();
     for await (const queuedEvent of eventQueue) {
-      yield queuedEvent;
+      yield queuedEvent.event;
+      // Signalled only after the event has gone downstream, so the producer's
+      // wait means what it says: the consumer has taken it.
+      queuedEvent.markProcessed?.();
     }
     const {event: functionResponseEvent, error: toolError} = await toolTask;
     invocationContext.eventQueue = undefined;

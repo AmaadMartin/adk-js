@@ -26,6 +26,7 @@ export {
 export {InvocationContext, requireAgent} from './agents/invocation_context.js';
 export type {
   InvocationContextParams,
+  QueuedInvocationEvent,
   WorkflowInstructionScope,
 } from './agents/invocation_context.js';
 export {LiveRequestQueue} from './agents/live_request_queue.js';

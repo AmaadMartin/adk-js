@@ -36,6 +36,23 @@ export interface WorkflowInstructionScope {
 }
 
 /**
+ * One item on the invocation event queue: the event, and the callback that
+ * releases the producer that enqueued it.
+ *
+ * Mirrors the `(event, processed)` tuple `google/adk-python` puts on
+ * `InvocationContext._event_queue`.
+ */
+export interface QueuedInvocationEvent {
+  /** The event to interleave into the agent's output stream. */
+  event: Event;
+  /**
+   * Called by the consumer once it has taken the event, releasing the blocked
+   * producer. Absent for a partial event, which does not block its producer.
+   */
+  markProcessed?: () => void;
+}
+
+/**
  * The parameters for creating an invocation context.
  */
 export interface InvocationContextParams {
@@ -226,8 +243,11 @@ export class InvocationContext {
    * interleaved into the agent's output stream. Set by the LLM flow around tool
    * execution so a {@link NodeTool} (running a node/workflow) can surface the
    * node's intermediate and interrupt events. Cleared once tools finish.
+   *
+   * Write to it through {@link enqueueEvent} rather than pushing directly, so
+   * every producer honours the same handshake.
    */
-  eventQueue?: AsyncQueue<Event>;
+  eventQueue?: AsyncQueue<QueuedInvocationEvent>;
 
   /**
    * Workflow: field-resolution scope for `{Class.field}` /
@@ -315,6 +335,45 @@ export class InvocationContext {
    */
   get userId() {
     return this.session.userId;
+  }
+
+  /**
+   * Puts an event on {@link eventQueue} for the invocation's consumer to take.
+   *
+   * A non-partial event waits until the consumer has taken it, so the order the
+   * consumer sees — and appends to the session — is the order the producers
+   * emitted in. A partial (streaming) event does not wait.
+   *
+   * Ports `_enqueue_event` from `google/adk-python`, with one addition it has
+   * no counterpart for: `AsyncQueue.push` is a no-op once the queue is closed,
+   * so a non-partial event pushed onto a closed queue would wait forever. This
+   * rejects instead.
+   *
+   * @param event The event to enqueue.
+   * @throws If no queue is set, or if a non-partial event reaches a closed
+   *   queue.
+   */
+  async enqueueEvent(event: Event): Promise<void> {
+    const queue = this.eventQueue;
+    if (!queue) {
+      throw new Error(
+        'InvocationContext.eventQueue is not set: the Runner or the LLM flow ' +
+          'must set it before an event can be enqueued.',
+      );
+    }
+    if (event.partial) {
+      queue.push({event});
+      return;
+    }
+    if (queue.isClosed) {
+      throw new Error(
+        'InvocationContext.eventQueue is closed: no consumer is left to take ' +
+          `event '${event.id}'.`,
+      );
+    }
+    return new Promise<void>((resolve) => {
+      queue.push({event, markProcessed: resolve});
+    });
   }
 
   /**
