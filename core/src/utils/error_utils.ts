@@ -28,6 +28,26 @@ const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
 
 /**
+ * Error names that mean a deadline expired. `TimeoutError` is what
+ * `AbortSignal.timeout` aborts with; the rest are undici's transport errors,
+ * which Node's `fetch` reports as the `cause` of a `TypeError`.
+ */
+const TIMEOUT_ERROR_NAMES: ReadonlySet<string> = new Set([
+  'TimeoutError',
+  'ConnectTimeoutError',
+  'HeadersTimeoutError',
+  'BodyTimeoutError',
+]);
+
+/** Error codes that mean a deadline expired. */
+const TIMEOUT_ERROR_CODES: ReadonlySet<string> = new Set([
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'ETIMEDOUT',
+]);
+
+/**
  * Narrows an arbitrary value to an indexable record, or `undefined` when it is
  * not a non-null object. Used to safely inspect duck-typed error shapes without
  * resorting to `any`.
@@ -158,4 +178,63 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
  */
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
+}
+
+/**
+ * Returns the timeout name a single value carries, ignoring anything it wraps.
+ * A value with a timeout code but no name reports the code instead.
+ */
+function ownTimeoutName(record: Record<string, unknown>): string | undefined {
+  const name = firstString(record['name']);
+  if (name !== undefined && TIMEOUT_ERROR_NAMES.has(name)) {
+    return name;
+  }
+  const code = firstString(record['code']);
+  if (code !== undefined && TIMEOUT_ERROR_CODES.has(code)) {
+    return name ?? code;
+  }
+  return undefined;
+}
+
+/**
+ * Searches an error and everything it wraps for a timeout. `seen` guards
+ * against cyclic `cause`/`errors` graphs.
+ */
+function findTimeoutName(err: unknown, seen: Set<unknown>): string | undefined {
+  const record = asRecord(err);
+  if (record === undefined || seen.has(err)) {
+    return undefined;
+  }
+  seen.add(err);
+  const own = ownTimeoutName(record);
+  if (own !== undefined) {
+    return own;
+  }
+  const nested =
+    err instanceof AggregateError
+      ? [...err.errors, record['cause']]
+      : [record['cause']];
+  for (const value of nested) {
+    const found = findTimeoutName(value, seen);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Returns the name of the timeout an arbitrary thrown value reports, or
+ * `undefined` when it reports none.
+ *
+ * The `AggregateError.errors` list and the `Error.cause` chain are searched as
+ * well, because Node's `fetch` rejects with a plain `TypeError: fetch failed`
+ * that carries the real transport error as its cause. It never throws and is
+ * safe on `null`/`undefined` and cyclic error graphs.
+ *
+ * @param err The thrown or rejected value to classify.
+ * @return The timeout's name, or `undefined` when the value is not a timeout.
+ */
+export function timeoutErrorName(err: unknown): string | undefined {
+  return findTimeoutName(err, new Set<unknown>());
 }
