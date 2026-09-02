@@ -765,14 +765,13 @@ describe('AgentEvaluator.evaluate', () => {
   });
 
   it('surfaces a file system error that is not a missing path', async () => {
-    const testFile = await write('a.test.json', evalSetFile('set-a'));
-
+    // A NUL byte makes `fs.stat` reject before the syscall, on every platform.
     await expect(
       AgentEvaluator.evaluate({
         agentModule: createAgentModule(),
-        evalDatasetFilePathOrDir: path.join(testFile, 'nested.test.json'),
+        evalDatasetFilePathOrDir: path.join(workDir, 'a\u0000b.test.json'),
       }),
-    ).rejects.toThrowError(/ENOTDIR/);
+    ).rejects.toThrowError('without null bytes');
   });
 
   it('reads eval data written in the older format', async () => {
