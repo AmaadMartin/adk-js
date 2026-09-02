@@ -7,6 +7,7 @@
 import type {FunctionDeclaration} from '@google/genai';
 import {Type} from '@google/genai';
 import path from 'node:path';
+import {State} from '../../sessions/state.js';
 import {traceSkillResourceLoad} from '../../telemetry/skill_tracing.js';
 import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
@@ -26,7 +27,16 @@ export enum LoadSkillResourceErrorCode {
   SKILL_NOT_FOUND = 'SKILL_NOT_FOUND',
   INVALID_RESOURCE_PATH = 'INVALID_RESOURCE_PATH',
   RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND',
+  RESOURCE_NOT_FOUND_FATAL = 'RESOURCE_NOT_FOUND_FATAL',
 }
+
+/**
+ * Prefix of the invocation-scoped resource-lookup failure counter. The
+ * {@link State.TEMP_PREFIX} keeps the counter out of durable session storage;
+ * the invocation id suffix stops in-memory session backends from carrying a
+ * count into the next invocation.
+ */
+const RESOURCE_NOT_FOUND_COUNT_KEY_PREFIX = `${State.TEMP_PREFIX}_adk_skill_resource_not_found_count_`;
 
 const BINARY_FILE_DETECTED_MSG =
   'Binary file detected. The content has been injected into the conversation history for you to analyze.';
@@ -131,8 +141,24 @@ export class LoadSkillResourceTool extends BaseTool {
     }
 
     if (content === undefined) {
+      // Counted across all paths and skills so the guard still fires when the
+      // model hallucinates a different resource path on each retry.
+      const counterKey = `${RESOURCE_NOT_FOUND_COUNT_KEY_PREFIX}${toolContext.invocationId}`;
+      const failCount = (toolContext.state.get<number>(counterKey) ?? 0) + 1;
+      toolContext.state.set(counterKey, failCount);
+
+      const notFoundMessage = `Resource '${resourcePath}' not found in skill '${skillName}'.`;
+      if (failCount > 1) {
+        return {
+          error:
+            `${notFoundMessage} This is resource lookup failure #${failCount}` +
+            ' this invocation. Do not retry any path — report the error to' +
+            ' the user and stop.',
+          error_code: LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND_FATAL,
+        };
+      }
       return {
-        error: `Resource '${resourcePath}' not found in skill '${skillName}'.`,
+        error: notFoundMessage,
         error_code: LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND,
       };
     }
