@@ -41,6 +41,8 @@ import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
 
+import {BasePlanner} from '../planners/base_planner.js';
+
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
 
@@ -397,9 +399,14 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   contextCompactors?: BaseContextCompactor[];
 
   /**
-   * Instructs the agent to make a plan and execute it step by step.
+   * Runs the code blocks the model writes, and feeds their output back to it.
    */
   codeExecutor?: BaseCodeExecutor;
+
+  /**
+   * Instructs the agent to make a plan and execute it step by step.
+   */
+  planner?: BasePlanner;
 }
 
 async function convertToolUnionToTools(
@@ -515,6 +522,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   requestProcessors: BaseLlmRequestProcessor[];
   responseProcessors: BaseLlmResponseProcessor[];
   codeExecutor?: BaseCodeExecutor;
+  planner?: BasePlanner;
 
   constructor(config: LlmAgentConfig) {
     // Node defaults for an agent used in a graph, matching adk-python's
@@ -557,6 +565,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.beforeToolCallback = config.beforeToolCallback;
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
+    this.planner = config.planner;
 
     const singleFlow = new SingleFlow(config.contextCompactors);
     this.requestProcessors =

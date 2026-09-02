@@ -75,6 +75,10 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [LiteLlm](models/lite_llm/index.md) - Running an agent on a non-Gemini model over the OpenAI chat-completions protocol.
 - [LlmRequest](models/llm_request/index.md) - The request object ADK builds for one model call, and the rules that keep it valid for the provider.
 
+### Planners
+
+- [BasePlanner](planners/planner/index.md) - Applying an agent's planner to the model request, and splitting the reply into a plan and an answer.
+
 ### Sessions
 
 - [DatabaseSessionService](sessions/database_session_service/index.md) - Storing sessions in SQL, rejecting stale writes, and reading user state.
