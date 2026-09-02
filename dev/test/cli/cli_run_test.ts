@@ -629,7 +629,7 @@ describe('cli_run', () => {
       );
     });
 
-    it('warns when a scripted run ends still waiting on the user', async () => {
+    it('announces a pause in a scripted run and adds no closing warning', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       (loadFileData as Mock).mockResolvedValue({state: {}, queries: ['start']});
       runnerState.events = [savedInterrupt('interrupt-1')];
@@ -640,12 +640,14 @@ describe('cli_run', () => {
         sessionService: createMockSessionService(),
       });
 
+      const output = (console.log as Mock).mock.calls
+        .map((call) => call.join(' '))
+        .join('\n');
       const errors = (console.error as Mock).mock.calls
         .map((call) => call.join(' '))
         .join('\n');
-      expect(errors).toContain(
-        'The run ended while still waiting for user input.',
-      );
+      expect(output).toContain('[step1] is waiting for your input');
+      expect(errors).toBe('');
     });
 
     it('does not announce a pause for an unnamed function call', async () => {

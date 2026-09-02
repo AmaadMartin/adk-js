@@ -16,7 +16,6 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
-  requiresUserInput,
   RunnableRoot,
   Runner,
   Session,
@@ -210,7 +209,6 @@ async function runFromInputFile(
   });
 
   const runner = new Runner(options);
-  let waitingOnUser = false;
 
   for (const query of fileContent.queries) {
     console.log(`[user]: ${query}`);
@@ -224,20 +222,9 @@ async function runFromInputFile(
       runConfig: {plainTextToolConfirmation: true},
     };
 
-    waitingOnUser = false;
     for await (const event of runner.runAsync(runOptions)) {
       printEvent(event);
-      // A scripted run has no prompt to answer at: whatever the pause asked
-      // for has to be the next query in the file.
-      waitingOnUser = requiresUserInput(event) || waitingOnUser;
     }
-  }
-
-  if (waitingOnUser) {
-    console.error(
-      'The run ended while still waiting for user input. ' +
-        'Add the answer as the next query in the input file.',
-    );
   }
 
   return session;
