@@ -6,6 +6,7 @@
 
 import {
   BaseTool,
+  ContextCacheConfig,
   FunctionTool,
   LiteLlm,
   LlmAgent,
@@ -14,6 +15,7 @@ import {
 } from '@google/adk';
 import {
   createServer,
+  type IncomingHttpHeaders,
   type IncomingMessage,
   type Server,
   type ServerResponse,
@@ -30,6 +32,8 @@ interface FakeEndpoint {
   apiBase: string;
   /** The body of every request the endpoint received, in order. */
   requests: Array<Record<string, unknown>>;
+  /** The headers of every request the endpoint received, in order. */
+  headers: IncomingHttpHeaders[];
   close(): Promise<void>;
 }
 
@@ -74,10 +78,12 @@ function writeReply(response: ServerResponse, reply: Reply): void {
 /** Starts an endpoint that answers each request with the next reply. */
 async function startEndpoint(replies: Reply[]): Promise<FakeEndpoint> {
   const requests: Array<Record<string, unknown>> = [];
+  const headers: IncomingHttpHeaders[] = [];
   let served = 0;
 
   const server: Server = createServer((request, response) => {
     void (async () => {
+      headers.push(request.headers);
       requests.push(await readJsonBody(request));
       const reply = replies[served++];
       if (!reply) {
@@ -94,6 +100,7 @@ async function startEndpoint(replies: Reply[]): Promise<FakeEndpoint> {
   return {
     apiBase: `http://127.0.0.1:${port}/v1`,
     requests,
+    headers,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
@@ -273,6 +280,45 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
     expect(responses[2].content?.parts).toEqual([{text: 'Hello world'}]);
     expect(responses[2].usageMetadata?.totalTokenCount).toBe(6);
     expect(endpoint.requests[0]['stream']).toBe(true);
+  });
+
+  it('puts the cache breakpoints in the body and the tracking headers on the wire', async () => {
+    endpoint = await startEndpoint([textReply('Cached.')]);
+
+    const model = new LiteLlm({
+      model: 'vertex_ai/gemini-2.5-flash',
+      apiBase: endpoint.apiBase,
+    });
+    const cacheConfig: ContextCacheConfig = {
+      cacheIntervals: 10,
+      ttlSeconds: 3600,
+      minTokens: 0,
+    };
+    const llmRequest: LlmRequest = {
+      contents: [{role: 'user', parts: [{text: 'Say hello.'}]}],
+      liveConnectConfig: {},
+      toolsDict: {},
+      cacheConfig,
+    };
+
+    for await (const _ of model.generateContentAsync(llmRequest)) {
+      // The reply is not what this test is about; the request is.
+    }
+
+    expect(endpoint.requests[0]['cache_control_injection_points']).toEqual([
+      {
+        location: 'message',
+        role: 'system',
+        control: {type: 'ephemeral', ttl: '1h'},
+      },
+      {
+        location: 'message',
+        index: -1,
+        control: {type: 'ephemeral', ttl: '1h'},
+      },
+    ]);
+    expect(endpoint.headers[0]['x-goog-api-client']).toContain('google-adk/');
+    expect(endpoint.headers[0]['user-agent']).toContain('gl-typescript/');
   });
 
   it('reports an endpoint error', async () => {

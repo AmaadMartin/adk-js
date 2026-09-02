@@ -59,8 +59,6 @@ import {
 } from './simulation/user_simulator.js';
 import {UserSimulatorProvider} from './simulation/user_simulator_provider.js';
 
-export {LiveEventQueue} from './live_session.js';
-
 /** Author of the events the user contributed to a session. */
 const USER_AUTHOR = 'user';
 
@@ -602,17 +600,9 @@ async function prepareEvalRun(params: EvalRunParams): Promise<EvalRun> {
  * @param params.app The app the agent belongs to, when there is one.
  * @returns One invocation per turn of the conversation.
  */
-export async function generateInferencesFromRootAgent(params: {
-  rootAgent: RunnableRoot;
-  userSimulator: UserSimulator;
-  resetFunc?: () => unknown;
-  initialSession?: SessionInput;
-  sessionId?: string;
-  sessionService?: BaseSessionService;
-  artifactService?: BaseArtifactService;
-  memoryService?: BaseMemoryService;
-  app?: App;
-}): Promise<Invocation[]> {
+export async function generateInferencesFromRootAgent(
+  params: EvalRunParams & {userSimulator: UserSimulator},
+): Promise<Invocation[]> {
   const {runner, session, requestIntercepter} = await prepareEvalRun(params);
 
   const events: Event[] = [];
@@ -1005,18 +995,12 @@ export async function* generateInferencesForSingleUserInvocationLive(params: {
  * @returns One invocation per turn of the conversation.
  * @throws {InputValidationError} If `rootAgent` is not an `LlmAgent`.
  */
-export async function generateInferencesFromRootAgentLive(params: {
-  rootAgent: RunnableRoot;
-  userSimulator: UserSimulator;
-  resetFunc?: () => unknown;
-  initialSession?: SessionInput;
-  sessionId?: string;
-  sessionService?: BaseSessionService;
-  artifactService?: BaseArtifactService;
-  memoryService?: BaseMemoryService;
-  liveTimeoutSeconds?: number;
-  app?: App;
-}): Promise<Invocation[]> {
+export async function generateInferencesFromRootAgentLive(
+  params: EvalRunParams & {
+    userSimulator: UserSimulator;
+    liveTimeoutSeconds?: number;
+  },
+): Promise<Invocation[]> {
   // Refused before any service or connection is built, so an unsupported root
   // costs nothing.
   requireLiveEvalAgent(params.rootAgent);

@@ -88,6 +88,8 @@ export type MessageContent = string | ContentObject[];
 export interface ToolCallFunction {
   name?: string;
   arguments?: string;
+  /** Provider extensions, which is one place a thought signature travels. */
+  provider_specific_fields?: JsonObject;
 }
 
 /** A tool call requested by the model, or a streamed fragment of one. */
@@ -96,6 +98,10 @@ export interface ToolCall {
   id?: string;
   index?: number;
   function?: ToolCallFunction;
+  /** The OpenAI-compatible channel for provider extensions. */
+  extra_content?: JsonObject;
+  /** Provider extensions, which is one place a thought signature travels. */
+  provider_specific_fields?: JsonObject;
 }
 
 /**
@@ -191,6 +197,25 @@ export interface ModelResponseStream {
 /** The value of the `tool_choice` request field ADK sends. */
 export type ToolChoice = 'required' | 'none';
 
+/**
+ * How long a provider should keep a marked prefix. `ephemeral` is the
+ * short-lived default; `1h` asks for the longest cache a provider offers.
+ */
+export interface CacheControl {
+  type: 'ephemeral';
+  ttl?: '1h';
+}
+
+/** One prefix LiteLLM should mark as cacheable. */
+export interface CacheControlInjectionPoint {
+  location: 'message';
+  /** Marks the system message, wherever it sits in the request. */
+  role?: 'system';
+  /** Marks a message by position. `-1` is the last one. */
+  index?: number;
+  control: CacheControl;
+}
+
 /** The generation parameters, under the names the wire protocol uses. */
 export interface GenerationParams {
   temperature?: number;
@@ -218,6 +243,7 @@ export interface CompletionArgs extends GenerationParams {
   stream_options?: {include_usage: boolean};
   extra_headers?: Record<string, string>;
   extra_body?: Record<string, unknown>;
+  cache_control_injection_points?: CacheControlInjectionPoint[];
   /** Request timeout in seconds, matching LiteLLM rather than `HttpOptions`. */
   timeout?: number;
   num_retries?: number;

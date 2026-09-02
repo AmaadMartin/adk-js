@@ -115,6 +115,7 @@ export {createEventsCompactionConfig} from './apps/events_compaction_config.js';
 export type {EventsCompactionConfig} from './apps/events_compaction_config.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';
+export type {ArtifactScope} from './artifacts/artifact_util.js';
 export type {
   BaseArtifactService,
   DeleteArtifactRequest,
@@ -123,6 +124,10 @@ export type {
   LoadArtifactRequest,
   SaveArtifactRequest,
 } from './artifacts/base_artifact_service.js';
+export type {
+  GetAuthenticatedUrlRequest,
+  GetSignedUrlRequest,
+} from './artifacts/gcs_artifact_service.js';
 export {InMemoryArtifactService} from './artifacts/in_memory_artifact_service.js';
 export type {
   SessionArtifactService,
@@ -335,19 +340,6 @@ export type {
 export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.js';
 export {convertLegacyEvalSet} from './evaluation/legacy_eval_set_converter.js';
 export type {LegacyEvalCase} from './evaluation/legacy_eval_set_converter.js';
-export {
-  EvalLiveSession,
-  LIVE_RUN_CONFIG,
-  LIVE_SHUTDOWN_TIMEOUT_SECONDS,
-  LiveEventQueue,
-  isNormalClosure,
-  requireLiveEvalAgent,
-} from './evaluation/live_session.js';
-export {
-  DEFAULT_RETRY_ATTEMPTS,
-  EnsureRetryOptionsPlugin,
-  addDefaultRetryOptionsIfNotPresent,
-} from './evaluation/retry_options_utils.js';
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
 export {
   UserSimulatorStatus,
@@ -478,6 +470,8 @@ export type {
 } from './models/lite_llm_client.js';
 export type {
   AudioContentObject,
+  CacheControl,
+  CacheControlInjectionPoint,
   ChatMessage,
   Choice,
   CompletionArgs,
@@ -721,6 +715,7 @@ export type {VertexRagRetrievalToolParams} from './tools/vertex_rag_retrieval_to
 export {AsyncQueue} from './utils/async_queue.js';
 export {snakeToLowerCamel} from './utils/case_utils.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {getBooleanEnvVar} from './utils/env_aware_utils.js';
 export {getHttpDebugInfo} from './utils/http_debug_utils.js';
 export type {HttpDebugRecord, HttpExchange} from './utils/http_debug_utils.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';

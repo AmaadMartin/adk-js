@@ -74,10 +74,17 @@ export function getProviderFromModel(model: string): string {
   return '';
 }
 
+/** Returns true when the model reaches Vertex AI through LiteLLM. */
+export function isLiteLlmVertexModel(model: string): boolean {
+  return stripProxyPrefix(model).startsWith('vertex_ai/');
+}
+
 /** Returns true when the model reaches Gemini through LiteLLM. */
 export function isLiteLlmGeminiModel(model: string): boolean {
+  const stripped = stripProxyPrefix(model);
   return (
-    model.startsWith('gemini/gemini-') || model.startsWith('vertex_ai/gemini-')
+    stripped.startsWith('gemini/gemini-') ||
+    stripped.startsWith('vertex_ai/gemini-')
   );
 }
 

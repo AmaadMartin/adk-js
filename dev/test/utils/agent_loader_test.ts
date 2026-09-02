@@ -25,17 +25,24 @@ import {
   AgentFile,
   AgentLoader,
   replaceDirnamePlugin,
+  resolveAgentLocation,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
 
-vi.mock('../../src/utils/file_utils.js', () => ({
-  createTempDir: vi.fn(),
-  isFile: vi.fn(),
-  isFileExists: vi.fn(),
-  isFolderExists: vi.fn(),
-  removeFolder: vi.fn(),
-  tryToFindFileRecursively: vi.fn(),
-}));
+vi.mock('../../src/utils/file_utils.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/utils/file_utils.js')>();
+  return {
+    // `resolveAgentLocation` resolves paths for real; only the I/O is faked.
+    getAbsolutePath: actual.getAbsolutePath,
+    createTempDir: vi.fn(),
+    isFile: vi.fn(),
+    isFileExists: vi.fn(),
+    isFolderExists: vi.fn(),
+    removeFolder: vi.fn(),
+    tryToFindFileRecursively: vi.fn(),
+  };
+});
 
 vi.mock('esbuild', async (importOriginal) => {
   const actual = await importOriginal<typeof import('esbuild')>();
@@ -951,6 +958,45 @@ describe('AgentLoader', () => {
       expect(agents).not.toContain('.hidden');
 
       await loader.disposeAll();
+    });
+  });
+});
+
+describe('resolveAgentLocation', () => {
+  const agentsDir = path.resolve(path.sep, 'tmp', 'x', 'agents');
+
+  it.each(['agent.ts', 'agent.js', 'app.mts', 'app.cjs'])(
+    'names a directory agent after its folder for %s',
+    (entryFile) => {
+      const agentDir = path.join(agentsDir, 'weather');
+
+      expect(resolveAgentLocation(path.join(agentDir, entryFile))).toEqual({
+        name: 'weather',
+        parentDir: agentsDir,
+      });
+    },
+  );
+
+  it('names a single-file agent after the file', () => {
+    expect(resolveAgentLocation(path.join(agentsDir, 'weather.ts'))).toEqual({
+      name: 'weather',
+      parentDir: agentsDir,
+    });
+  });
+
+  it('keeps a file name that merely starts with an entry name', () => {
+    expect(resolveAgentLocation(path.join(agentsDir, 'agent_two.ts'))).toEqual({
+      name: 'agent_two',
+      parentDir: agentsDir,
+    });
+  });
+
+  it('resolves a relative path against the working directory', () => {
+    // Without resolving first, `path.dirname('agent.ts')` is '.' and the agent
+    // is named after the current directory entry rather than its folder.
+    expect(resolveAgentLocation('agent.ts')).toEqual({
+      name: path.basename(process.cwd()),
+      parentDir: path.dirname(process.cwd()),
     });
   });
 });

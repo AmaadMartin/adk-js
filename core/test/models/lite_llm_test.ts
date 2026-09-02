@@ -6,6 +6,7 @@
 
 import {
   CompletionArgs,
+  ContextCacheConfig,
   LiteLlm,
   LiteLlmClient,
   LLMRegistry,
@@ -13,9 +14,12 @@ import {
   LlmResponse,
   ModelResponse,
   ModelResponseStream,
+  ToolCall,
 } from '@google/adk';
-import {FinishReason, FunctionCallingConfigMode} from '@google/genai';
+import {FinishReason, FunctionCallingConfigMode, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+
+import {getTrackingHeaders} from '../../src/utils/client_labels.js';
 
 /** A client that records what it was sent and replays canned responses. */
 class RecordingClient implements LiteLlmClient {
@@ -88,6 +92,51 @@ function textChunk(text: string, finishReason?: string): ModelResponseStream {
       {delta: {role: 'assistant', content: text}, finish_reason: finishReason},
     ],
   };
+}
+
+/** A base64 thought signature, the shape a Gemini thinking model returns. */
+const THOUGHT_SIGNATURE = 'c2lnbmF0dXJl';
+
+/** Builds a cache config, defaulting every field the test does not name. */
+function cacheConfig(
+  overrides: Partial<ContextCacheConfig> = {},
+): ContextCacheConfig {
+  return {cacheIntervals: 10, ttlSeconds: 1800, minTokens: 0, ...overrides};
+}
+
+/** A non-streaming response carrying one tool call. */
+function toolCallResponse(toolCall: Partial<ToolCall>): ModelResponse {
+  return {
+    model: 'gpt-4o',
+    choices: [
+      {
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              type: 'function',
+              id: 'call_abc',
+              function: {name: 'lookup', arguments: '{"q":"adk"}'},
+              ...toolCall,
+            },
+          ],
+        },
+        finish_reason: 'tool_calls',
+      },
+    ],
+  };
+}
+
+/** Returns the single function-call part of a response. */
+function functionCallPart(response: LlmResponse): Part {
+  const part = response.content?.parts?.find((candidate) =>
+    Boolean(candidate.functionCall),
+  );
+  if (!part) {
+    expect.fail('the response carried no function-call part');
+  }
+  return part;
 }
 
 /** A stream chunk that only reports why the stream ended. */
@@ -815,6 +864,311 @@ describe('LiteLlm', () => {
       expect(
         await collect(model.generateContentAsync(request(), true)),
       ).toEqual([]);
+    });
+  });
+
+  describe('context caching', () => {
+    it('sends no injection points without a cache config', async () => {
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      await collect(model.generateContentAsync(request()));
+
+      expect(client.args?.cache_control_injection_points).toBeUndefined();
+    });
+
+    it('marks the system message and the last message, in that order', async () => {
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      await collect(
+        model.generateContentAsync(request({cacheConfig: cacheConfig()})),
+      );
+
+      expect(client.args?.cache_control_injection_points).toEqual([
+        {location: 'message', role: 'system', control: {type: 'ephemeral'}},
+        {location: 'message', index: -1, control: {type: 'ephemeral'}},
+      ]);
+    });
+
+    it.each([300, 1800, 3599])(
+      'asks for the default cache lifetime at %d seconds',
+      async (ttlSeconds) => {
+        const client = new RecordingClient(textResponse());
+        const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+        await collect(
+          model.generateContentAsync(
+            request({cacheConfig: cacheConfig({ttlSeconds})}),
+          ),
+        );
+
+        for (const point of client.args?.cache_control_injection_points ?? []) {
+          expect(point.control).toEqual({type: 'ephemeral'});
+        }
+      },
+    );
+
+    it.each([3600, 86_400])(
+      'asks for the hour-long cache at %d seconds',
+      async (ttlSeconds) => {
+        const client = new RecordingClient(textResponse());
+        const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+        await collect(
+          model.generateContentAsync(
+            request({cacheConfig: cacheConfig({ttlSeconds})}),
+          ),
+        );
+
+        const points = client.args?.cache_control_injection_points;
+        expect(points).toHaveLength(2);
+        for (const point of points ?? []) {
+          expect(point.control).toEqual({type: 'ephemeral', ttl: '1h'});
+        }
+      },
+    );
+
+    it('sends no injection points below the configured minimum', async () => {
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      await collect(
+        model.generateContentAsync(
+          request({
+            cacheConfig: cacheConfig({minTokens: 5000}),
+            cacheableContentsTokenCount: 4999,
+          }),
+        ),
+      );
+
+      expect(client.args?.cache_control_injection_points).toBeUndefined();
+    });
+
+    it('sends the injection points once the minimum is met', async () => {
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      await collect(
+        model.generateContentAsync(
+          request({
+            cacheConfig: cacheConfig({minTokens: 5000}),
+            cacheableContentsTokenCount: 5000,
+          }),
+        ),
+      );
+
+      expect(client.args?.cache_control_injection_points).toHaveLength(2);
+    });
+
+    it('leaves injection points the caller named alone', async () => {
+      const callerPoints = [{location: 'tool_config'}];
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({
+        model: 'openai/gpt-4o',
+        client,
+        additionalArgs: {cache_control_injection_points: callerPoints},
+      });
+
+      await collect(
+        model.generateContentAsync(request({cacheConfig: cacheConfig()})),
+      );
+
+      expect(client.args?.cache_control_injection_points).toEqual(callerPoints);
+    });
+  });
+
+  describe('tracking headers', () => {
+    it.each([
+      'vertex_ai/test-model',
+      'gemini/gemini-2.5-flash',
+      'litellm_proxy/vertex_ai/gemini-2.5-flash',
+      'litellm_proxy/gemini/gemini-2.5-flash',
+    ])('identifies ADK to %s', async (modelName) => {
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({model: modelName, client});
+
+      await collect(model.generateContentAsync(request()));
+
+      expect(client.args?.extra_headers).toEqual(getTrackingHeaders());
+    });
+
+    it('sends no tracking headers to a non-Google provider', async () => {
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      await collect(model.generateContentAsync(request()));
+
+      expect(client.args?.extra_headers).toBeUndefined();
+    });
+
+    it('keeps a caller header alongside the tracking headers', async () => {
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({model: 'vertex_ai/test-model', client});
+
+      await collect(
+        model.generateContentAsync(
+          request({config: {httpOptions: {headers: {'X-Trace': 'abc'}}}}),
+        ),
+      );
+
+      expect(client.args?.extra_headers).toEqual({
+        ...getTrackingHeaders(),
+        'X-Trace': 'abc',
+      });
+    });
+
+    it('appends a caller value to the tracking labels it shares a key with', async () => {
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({model: 'vertex_ai/test-model', client});
+
+      await collect(
+        model.generateContentAsync(
+          request({
+            config: {httpOptions: {headers: {'user-agent': 'my-app/1.0'}}},
+          }),
+        ),
+      );
+
+      expect(client.args?.extra_headers?.['user-agent']).toBe(
+        `${getTrackingHeaders()['user-agent']} my-app/1.0`,
+      );
+    });
+  });
+
+  describe('thought signatures', () => {
+    it('reads a signature from the OpenAI-compatible extra content', async () => {
+      const client = new RecordingClient(
+        toolCallResponse({
+          extra_content: {google: {thought_signature: THOUGHT_SIGNATURE}},
+        }),
+      );
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      const [response] = await collect(model.generateContentAsync(request()));
+
+      expect(functionCallPart(response).thoughtSignature).toBe(
+        THOUGHT_SIGNATURE,
+      );
+    });
+
+    it('reads a signature from the tool call provider fields', async () => {
+      const client = new RecordingClient(
+        toolCallResponse({
+          provider_specific_fields: {thought_signature: THOUGHT_SIGNATURE},
+        }),
+      );
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      const [response] = await collect(model.generateContentAsync(request()));
+
+      expect(functionCallPart(response).thoughtSignature).toBe(
+        THOUGHT_SIGNATURE,
+      );
+    });
+
+    it('reads a signature from the function provider fields', async () => {
+      const client = new RecordingClient(
+        toolCallResponse({
+          function: {
+            name: 'lookup',
+            arguments: '{"q":"adk"}',
+            provider_specific_fields: {thought_signature: THOUGHT_SIGNATURE},
+          },
+        }),
+      );
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      const [response] = await collect(model.generateContentAsync(request()));
+
+      expect(functionCallPart(response).thoughtSignature).toBe(
+        THOUGHT_SIGNATURE,
+      );
+    });
+
+    it('reads a signature embedded in the tool call id', async () => {
+      const client = new RecordingClient(
+        toolCallResponse({id: `call_abc__thought__${THOUGHT_SIGNATURE}`}),
+      );
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      const [response] = await collect(model.generateContentAsync(request()));
+
+      expect(functionCallPart(response).thoughtSignature).toBe(
+        THOUGHT_SIGNATURE,
+      );
+    });
+
+    it('passes an empty location over for the next one', async () => {
+      const client = new RecordingClient(
+        toolCallResponse({
+          extra_content: {google: {thought_signature: ''}},
+          provider_specific_fields: {thought_signature: THOUGHT_SIGNATURE},
+        }),
+      );
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      const [response] = await collect(model.generateContentAsync(request()));
+
+      expect(functionCallPart(response).thoughtSignature).toBe(
+        THOUGHT_SIGNATURE,
+      );
+    });
+
+    it('leaves the field unset when the tool call carries no signature', async () => {
+      const client = new RecordingClient(toolCallResponse({}));
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      const [response] = await collect(model.generateContentAsync(request()));
+
+      expect(functionCallPart(response).thoughtSignature).toBeUndefined();
+    });
+
+    it('drops a signature that is not base64 and keeps the tool call', async () => {
+      const client = new RecordingClient(
+        toolCallResponse({
+          extra_content: {
+            google: {thought_signature: '!!!not_valid_base64!!!'},
+          },
+        }),
+      );
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+
+      const [response] = await collect(model.generateContentAsync(request()));
+
+      const part = functionCallPart(response);
+      expect(part.thoughtSignature).toBeUndefined();
+      expect(part.functionCall?.name).toBe('lookup');
+    });
+
+    it('sends the signature back on the following turn', async () => {
+      const client = new RecordingClient(
+        toolCallResponse({
+          extra_content: {google: {thought_signature: THOUGHT_SIGNATURE}},
+        }),
+      );
+      const model = new LiteLlm({model: 'openai/gpt-4o', client});
+      const [response] = await collect(model.generateContentAsync(request()));
+      const modelTurn = response.content;
+      if (!modelTurn) {
+        expect.fail('the first turn produced no content to send back');
+      }
+
+      await collect(
+        model.generateContentAsync(
+          request({
+            contents: [{role: 'user', parts: [{text: 'hi'}]}, modelTurn],
+          }),
+        ),
+      );
+
+      const assistant = client.args?.messages.find((message) =>
+        Boolean(message.tool_calls?.length),
+      );
+      expect(assistant?.tool_calls?.[0]).toMatchObject({
+        provider_specific_fields: {thought_signature: THOUGHT_SIGNATURE},
+        extra_content: {google: {thought_signature: THOUGHT_SIGNATURE}},
+      });
     });
   });
 });

@@ -6,7 +6,6 @@
 
 import {
   Content,
-  FunctionCall,
   FunctionCallingConfigMode,
   FunctionDeclaration,
   Part,
@@ -379,13 +378,18 @@ function functionResponseMediaParts(part: Part): Part[] {
   return mediaParts;
 }
 
-/** Builds the `tool_calls` of an assistant message from function calls. */
-function toToolCalls(functionCalls: FunctionCall[]): ToolCall[] {
-  return functionCalls.map((functionCall) => {
+/** Builds the `tool_calls` of an assistant message from its parts. */
+function toToolCalls(parts: Part[]): ToolCall[] {
+  const toolCalls: ToolCall[] = [];
+  for (const part of parts) {
+    const functionCall = part.functionCall;
+    if (!functionCall) {
+      continue;
+    }
     if (!functionCall.name) {
       throw new Error('LiteLLM function calls require a name');
     }
-    return {
+    const toolCall: ToolCall = {
       type: 'function',
       id: functionCall.id ?? '',
       function: {
@@ -393,7 +397,18 @@ function toToolCalls(functionCalls: FunctionCall[]): ToolCall[] {
         arguments: safeJsonSerialize(functionCall.args),
       },
     };
-  });
+    // LiteLLM's Gemini prompt conversion reads provider_specific_fields, while
+    // the OpenAI-compatible Gemini endpoint reads extra_content. Sending both
+    // keeps a thinking model's reasoning chain intact on either path.
+    // See https://ai.google.dev/gemini-api/docs/thought-signatures.
+    const signature = part.thoughtSignature;
+    if (signature) {
+      toolCall.provider_specific_fields = {thought_signature: signature};
+      toolCall.extra_content = {google: {thought_signature: signature}};
+    }
+    toolCalls.push(toolCall);
+  }
+  return toolCalls;
 }
 
 /** Builds the assistant message for a model turn. */
@@ -401,7 +416,6 @@ function assistantMessage(
   parts: Part[],
   options: ProviderOptions,
 ): ChatMessage {
-  const functionCalls = parts.flatMap((part) => part.functionCall ?? []);
   const reasoningParts = parts.filter(
     (part) => !part.functionCall && part.thought,
   );
@@ -409,7 +423,7 @@ function assistantMessage(
     (part) => !part.functionCall && !part.thought,
   );
 
-  const toolCalls = toToolCalls(functionCalls);
+  const toolCalls = toToolCalls(parts);
   let content =
     contentParts.length > 0
       ? emptyToUndefined(getContent(contentParts, options))

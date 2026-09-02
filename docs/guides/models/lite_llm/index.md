@@ -112,6 +112,85 @@ reason and any grounding metadata. Tool-call fragments are accumulated across
 chunks, including providers that split one call's arguments over many deltas
 or that give every parallel call the same index.
 
+## Prompt caching
+
+Set `cacheConfig` on the request and `LiteLlm` asks the endpoint to cache the
+stable head of the prompt. It sends a `cache_control_injection_points` field
+naming two places to mark: the system message, and the last message.
+
+```ts
+import {ContextCacheConfig, LiteLlm, LlmRequest} from '@google/adk';
+
+const cacheConfig: ContextCacheConfig = {
+  cacheIntervals: 10,
+  ttlSeconds: 3600,
+  minTokens: 4096,
+};
+
+const model = new LiteLlm({
+  model: 'anthropic/claude-sonnet-4',
+  apiBase: 'http://localhost:4000/v1',
+});
+
+const llmRequest: LlmRequest = {
+  contents: [{role: 'user', parts: [{text: 'Summarise the contract.'}]}],
+  liveConnectConfig: {},
+  toolsDict: {},
+  cacheConfig,
+};
+
+let answer = '';
+for await (const response of model.generateContentAsync(llmRequest)) {
+  answer += response.content?.parts?.[0]?.text ?? '';
+}
+```
+
+The system message is the stable head of the prompt. The last message caches
+the conversation so far, and moves forward on its own as the conversation
+grows. A `ttlSeconds` of 3600 or more adds `ttl: '1h'` to both points, which
+asks for the longest cache a provider offers. Anything shorter gets the
+provider's default lifetime.
+
+`minTokens` gates on the previous turn's measured prompt size, which the
+request carries as `cacheableContentsTokenCount`. A prompt below that size
+sends no injection points, because writing a cache for it costs more than it
+saves. The first turn has no measured size, so it is always marked.
+
+LiteLLM applies the points and then lets each provider decide. Claude honours
+them. A provider that caches automatically, or not at all, has them dropped
+before the request leaves. Naming your own `cache_control_injection_points` in
+`additionalArgs` overrides all of this: you know your provider better than the
+app-level config does.
+
+## Tracking headers
+
+A request to a Vertex AI or Gemini model carries `x-goog-api-client` and
+`user-agent` headers that identify ADK to Google's usage pipeline. This covers
+`vertex_ai/…`, `gemini/gemini-…`, and either of those behind a `litellm_proxy/`
+prefix. No other provider gets them.
+
+Your own value for one of those headers survives. The ADK labels come first and
+yours is appended, with no label repeated.
+
+## Thought signatures
+
+A Gemini thinking model attaches a thought signature to each function call, and
+the next turn has to send it back or the model's reasoning chain breaks.
+`LiteLlm` carries the signature in both directions with no configuration.
+
+On the way in, the signature arrives in one of four places depending on the
+provider path, and `LiteLlm` reads whichever one carries it:
+`extra_content.google` on the tool call, `provider_specific_fields` on the tool
+call or on the function, or embedded in the tool call id after a `__thought__`
+separator. It lands on the function-call `Part` as `thoughtSignature`. A
+malformed signature is dropped and the tool call is still emitted.
+
+On the way out, a `Part` carrying a `thoughtSignature` sends it as both
+`provider_specific_fields` and `extra_content.google` on the tool call, because
+LiteLLM's Gemini prompt conversion reads the first and the OpenAI-compatible
+endpoint reads the second. See
+[the Gemini thought-signature documentation](https://ai.google.dev/gemini-api/docs/thought-signatures).
+
 ## Supplying your own client
 
 `LiteLlmClient` has two methods, one per mode. Implementing it replaces the

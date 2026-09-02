@@ -45,7 +45,8 @@ export function resolveCacheConfig(
 
   // `minTokens` gates on the previous turn's measured prompt size, the same
   // signal the Gemini path uses. That size is unknown on the first turn, where
-  // marking a prefix costs nothing beyond writing the cache.
+  // marking a prefix costs nothing beyond writing the cache. A measured size of
+  // zero is a size, so the check is for an absent count rather than a falsy one.
   const previousPromptTokens = llmRequest.cacheableContentsTokenCount;
   if (
     previousPromptTokens !== undefined &&

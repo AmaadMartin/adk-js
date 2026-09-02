@@ -8,6 +8,7 @@ import {
   DatabaseSessionService,
   FeatureName,
   FileArtifactService,
+  getSessionServiceFromUri,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
@@ -31,11 +32,17 @@ import {
 } from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
+import {runEvalCli} from '../../src/cli/cli_eval.js';
 import {runAgent, runOnceCli} from '../../src/cli/cli_run.js';
 import {maybePromptForTelemetryConsent} from '../../src/cli/cli_telemetry.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {loadDotenvForAgent} from '../../src/utils/envs.js';
+
+vi.mock('../../src/utils/envs.js', () => ({
+  loadDotenvForAgent: vi.fn(),
+}));
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -62,6 +69,10 @@ vi.mock('../../src/cli/cli_run', () => ({
   runOnceCli: vi.fn(),
 }));
 
+vi.mock('../../src/cli/cli_eval', () => ({
+  runEvalCli: vi.fn(),
+}));
+
 vi.mock('../../src/cli/cli_telemetry', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/cli/cli_telemetry.js')>()),
   maybePromptForTelemetryConsent: vi.fn(),
@@ -72,10 +83,14 @@ vi.mock('../../src/version', () => ({
 }));
 
 vi.mock('@google/adk', async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = await importOriginal<typeof import('@google/adk')>();
   return {
     ...(actual as object),
     setLogLevel: vi.fn(),
+    // The storage tests below assert on the services this builds, so the mock
+    // keeps the real behaviour. Only the ordering test replaces it, for one
+    // call.
+    getSessionServiceFromUri: vi.fn(actual.getSessionServiceFromUri),
   };
 });
 
@@ -318,8 +333,6 @@ describe('CLI Entrypoint', () => {
         'sess-123',
         '--replay',
         'replay.json',
-        '--resume',
-        'resume.json',
         '--otel_to_cloud',
       ]);
 
@@ -329,7 +342,6 @@ describe('CLI Entrypoint', () => {
           saveSession: true,
           sessionId: 'sess-123',
           inputFile: 'replay.json',
-          savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
       );
@@ -354,6 +366,51 @@ describe('CLI Entrypoint', () => {
       expect(
         (runAgent as Mock).mock.calls[0][0].defaultLlmModel,
       ).toBeUndefined();
+    });
+
+    it('should pass --resume to runAgent as the saved session file', async () => {
+      await parse(['run', 'agent.ts', '--resume', 'resume.json']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({savedSessionFile: 'resume.json'}),
+      );
+    });
+
+    it("loads the agent's .env before building the session service", async () => {
+      // The `.env` may hold the DATABASE_URL the session service is built
+      // from, so a load after the service is a load too late.
+      const order: string[] = [];
+      vi.mocked(loadDotenvForAgent).mockImplementationOnce(() => {
+        order.push('dotenv');
+      });
+      vi.mocked(getSessionServiceFromUri).mockImplementationOnce(() => {
+        order.push('session-service');
+        return new InMemorySessionService();
+      });
+      // The URI is what makes the run build a session service at all.
+      process.env['DATABASE_URL'] = 'memory://';
+
+      await parse(['run', 'agent.ts']);
+      delete process.env['DATABASE_URL'];
+
+      expect(order).toEqual(['dotenv', 'session-service']);
+    });
+
+    it("loads the .env of the agent's own directory", async () => {
+      const agentPath = path.resolve(
+        path.sep,
+        'tmp',
+        'agents',
+        'weather',
+        'agent.ts',
+      );
+
+      await parse(['run', agentPath]);
+
+      expect(loadDotenvForAgent).toHaveBeenCalledWith(
+        'weather',
+        path.resolve(path.sep, 'tmp', 'agents'),
+      );
     });
   });
 
@@ -782,6 +839,91 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('mutually exclusive run options', () => {
+    it('rejects --replay together with --resume', async () => {
+      const stderr = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation(() => true);
+      const exit = vi.spyOn(process, 'exit').mockImplementation((code) => {
+        throw new Error(`exit ${code}`);
+      });
+
+      await expect(
+        parse(['run', 'agent.ts', '--replay', 'a.json', '--resume', 'b.json']),
+      ).rejects.toThrow('exit 1');
+
+      expect(stderr.mock.calls.join('')).toContain(
+        "Options 'resume' and 'replay' cannot be set together.",
+      );
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(runAgent).not.toHaveBeenCalled();
+      expect(runOnceCli).not.toHaveBeenCalled();
+    });
+
+    it('still accepts --replay on its own', async () => {
+      await parse(['run', 'agent.ts', '--replay', 'a.json']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({inputFile: 'a.json'}),
+      );
+    });
+  });
+
+  describe('command: eval', () => {
+    it('forwards every option to the eval entry point', async () => {
+      await parse([
+        'eval',
+        'agent.ts',
+        'my_set:case1',
+        'other_set',
+        '--config_file_path',
+        'test_config.json',
+        '--print_detailed_results',
+        '--eval_storage_uri',
+        'gs://my-bucket',
+        '--log_level',
+        'debug',
+      ]);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+      expect(runEvalCli).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          evalSetFileOrIds: ['my_set:case1', 'other_set'],
+          configFilePath: 'test_config.json',
+          printDetailedResults: true,
+          evalStorageUri: 'gs://my-bucket',
+        }),
+      );
+    });
+
+    it('defaults the optional eval options', async () => {
+      await parse(['eval', 'agent.ts', 'my_set']);
+
+      expect(runEvalCli).toHaveBeenCalledWith(
+        expect.objectContaining({
+          evalSetFileOrIds: ['my_set'],
+          configFilePath: undefined,
+          printDetailedResults: false,
+          evalStorageUri: undefined,
+        }),
+      );
+    });
+
+    it('exits non-zero when the eval run fails', async () => {
+      vi.mocked(runEvalCli).mockRejectedValueOnce(new Error('no eval runtime'));
+      const exit = vi.spyOn(process, 'exit').mockImplementation((code) => {
+        throw new Error(`exit ${code}`);
+      });
+
+      await expect(parse(['eval', 'agent.ts', 'my_set'])).rejects.toThrow(
+        'exit 1',
+      );
+
+      expect(exit).toHaveBeenCalledWith(1);
     });
   });
 });
