@@ -17,10 +17,16 @@ import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
  * The instruction that redirects the model's final answer into the
- * `set_model_response` call.
+ * `set_model_response` call. The model is prompted against this exact wording,
+ * which the Python implementation also uses, so treat it as part of the
+ * contract.
  */
 export const SET_MODEL_RESPONSE_INSTRUCTION =
-  'To output the final result, you must call the "set_model_response" function with the appropriate values. Do not output anything else.';
+  'IMPORTANT: You have access to other tools, but you must provide your ' +
+  'final response using the set_model_response tool with the required ' +
+  'structured format. After using any other tools needed to complete the ' +
+  'task, always call set_model_response with your final answer in the ' +
+  'specified schema format.';
 
 /**
  * Declares the `set_model_response` tool and instructs the model to call it.

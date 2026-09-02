@@ -38,6 +38,7 @@ import {
   RunAsyncToolRequest,
   Runner,
   Session,
+  SingleFlow,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
@@ -1185,6 +1186,38 @@ describe('LlmAgent Single Flow Defaults', () => {
     expect(interactionsIndex).toBeLessThan(contentIndex);
   });
 
+  it('takes its default pipeline from SingleFlow when transfer is disabled', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    expect(agent.requestProcessors).toStrictEqual(
+      new SingleFlow().requestProcessors,
+    );
+  });
+
+  it('appends the agent transfer processor when transfer is enabled', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      subAgents: [new LlmAgent({name: 'sub_agent'})],
+    });
+
+    expect(agent.requestProcessors).toStrictEqual([
+      ...new SingleFlow().requestProcessors,
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    ]);
+  });
+
+  it('takes its default response pipeline from SingleFlow', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    expect(agent.responseProcessors).toStrictEqual(
+      new SingleFlow().responseProcessors,
+    );
+  });
+
   it('defaults responseProcessors to the code execution response processor', () => {
     const agent = new LlmAgent({name: 'test_agent'});
 
@@ -1312,6 +1345,18 @@ describe('LlmAgent default processor pipeline order', () => {
     });
 
     expect(agent.requestProcessors).toEqual(supplied);
+  });
+
+  it('injects no compaction processor into a caller-supplied pipeline', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+      requestProcessors: [AUTH_PREPROCESSOR],
+      contextCompactors: [{shouldCompact: () => true, compact: () => {}}],
+    });
+
+    expect(agent.requestProcessors).toStrictEqual([AUTH_PREPROCESSOR]);
   });
 });
 
@@ -1449,6 +1494,60 @@ describe('LlmAgent outputSchema with tools', () => {
       );
     },
   );
+
+  it('offers set_model_response even when allowedTools excludes it', async () => {
+    // The tool reaches the model through toolsDict, which the allowedTools
+    // filter never touches, so no exemption for its name is needed.
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+    const narrowAllowedTools = new (class extends BaseLlmRequestProcessor {
+      // eslint-disable-next-line require-yield -- BaseLlmRequestProcessor mandates an AsyncGenerator; this processor only mutates the request.
+      async *runAsync(
+        _invocationContext: InvocationContext,
+        request: LlmRequest,
+      ): AsyncGenerator<Event, void, void> {
+        request.allowedTools = ['nothing_matches_this'];
+      }
+    })();
+    const llm = new CapturingLlm({model: 'gemini-2.5-flash'});
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: llm,
+      outputSchema: OUTPUT_SCHEMA,
+      tools: [
+        new FunctionTool({
+          name: 'some_tool',
+          description: 'A test tool',
+          execute: () => 'result',
+        }),
+      ],
+      requestProcessors: [
+        ...new SingleFlow().requestProcessors,
+        narrowAllowedTools,
+      ],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_allowed_tools',
+      session: createSession({
+        id: 'sess_allowed_tools',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    for await (const _ of agent.runAsync(invocationContext)) {
+      // Drain the run so that the request is fully built.
+    }
+
+    const request = llm.capturedRequest;
+    if (!request) {
+      expect.fail('the agent never called the model');
+    }
+    expect(request.toolsDict).toHaveProperty('set_model_response');
+    expect(request.toolsDict).not.toHaveProperty('some_tool');
+  });
 
   it('persists state writes made in processLlmRequest across turns', async () => {
     class StateProbeTool extends BaseTool {

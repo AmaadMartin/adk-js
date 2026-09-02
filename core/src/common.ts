@@ -87,6 +87,7 @@ export {
 export {
   OUTPUT_SCHEMA_REQUEST_PROCESSOR,
   OutputSchemaRequestProcessor,
+  SET_MODEL_RESPONSE_INSTRUCTION,
 } from './agents/processors/output_schema_request_processor.js';
 export {SingleFlow} from './agents/processors/single_flow.js';
 export {ReadonlyContext} from './agents/readonly_context.js';
@@ -681,6 +682,10 @@ export type {
   Retriever,
   RetrieverToolParams,
 } from './tools/retrieval/retriever_tool.js';
+export {
+  SET_MODEL_RESPONSE_TOOL_NAME,
+  createSetModelResponseTool,
+} from './tools/set_model_response_tool.js';
 export {runWithSyncCallableRunner} from './tools/sync_callable_runner.js';
 export type {SyncCallableRunner} from './tools/sync_callable_runner.js';
 export {

@@ -47,6 +47,7 @@ import {BasePlanner} from '../planners/base_planner.js';
 
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
+import {SET_MODEL_RESPONSE_TOOL_NAME} from '../tools/set_model_response_tool.js';
 
 import {copyHttpOptions} from '../utils/genai_config_utils.js';
 import {logger} from '../utils/logger.js';
@@ -639,6 +640,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.codeExecutor = config.codeExecutor;
     this.planner = config.planner;
 
+    // The flow owns the default pipeline and its order. A caller-supplied
+    // list replaces it wholesale, compaction included.
     const agentTransferDisabled =
       this.disallowTransferToParent &&
       this.disallowTransferToPeers &&
@@ -1827,7 +1830,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     if (mergedEvent.content) {
       const functionCalls = getFunctionCalls(mergedEvent);
       const setModelResponseCall = functionCalls.find(
-        (call) => call.name === 'set_model_response',
+        (call) => call.name === SET_MODEL_RESPONSE_TOOL_NAME,
       );
       if (setModelResponseCall) {
         const args = setModelResponseCall.args;

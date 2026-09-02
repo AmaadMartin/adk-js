@@ -83,9 +83,10 @@ function echoAgent(name = 'echo'): LlmAgent {
 
 /**
  * An agent whose instruction is `template`, answering with the instruction as
- * the model received it — i.e. after placeholder resolution. The instructions
- * processor runs before the identity processor, so the agent's own instruction
- * is the first non-empty line of the system instruction.
+ * the model received it — i.e. after placeholder resolution. The agent has no
+ * global instruction, and the instructions processor runs before the identity
+ * processor. The agent's own instruction is therefore the first non-empty line
+ * of the system instruction, and the identity preamble follows it.
  */
 function templateProbeAgent(template: string, name = 'probe'): LlmAgent {
   return new LlmAgent({

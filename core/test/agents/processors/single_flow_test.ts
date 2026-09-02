@@ -7,18 +7,26 @@
 import {
   AUTH_PREPROCESSOR,
   BaseContextCompactor,
+  BaseLlm,
+  BaseLlmConnection,
   CONTENT_REQUEST_PROCESSOR,
   CONTEXT_CACHE_REQUEST_PROCESSOR,
   ContextCompactorRequestProcessor,
+  Event,
+  FunctionTool,
   INTERACTIONS_REQUEST_PROCESSOR,
   InvocationContext,
+  LlmAgent,
   LlmRequest,
+  LlmResponse,
   OUTPUT_SCHEMA_REQUEST_PROCESSOR,
   PluginManager,
+  SET_MODEL_RESPONSE_TOOL_NAME,
   SingleFlow,
   createSession,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {Schema, Type} from '@google/genai';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/basic_llm_request_processor.js';
 import {
@@ -35,14 +43,36 @@ import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../../src/agents/pr
 import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_input_llm_request_processor.js';
 import {TOOL_FILTER_REQUEST_PROCESSOR} from '../../../src/agents/processors/tool_filter_request_processor.js';
 
+const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
+
 const STUB_COMPACTOR: BaseContextCompactor = {
   shouldCompact: () => false,
   compact: () => {},
 };
 
-function makeInvocationContext(): InvocationContext {
+const OUTPUT_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {answer: {type: Type.STRING}},
+};
+
+/**
+ * A model instance is used rather than a model name so that `canonicalModel`
+ * resolves without credentials.
+ */
+class MockLlm extends BaseLlm {
+  async *generateContentAsync(
+    _llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {}
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('connect is not exercised by these tests');
+  }
+}
+
+function makeInvocationContext(agent?: LlmAgent): InvocationContext {
   return new InvocationContext({
     invocationId: 'single-flow-test',
+    agent,
     session: createSession({id: 'session', appName: 'app', userId: 'user'}),
     pluginManager: new PluginManager(),
   });
@@ -78,6 +108,24 @@ describe('SingleFlow request processors', () => {
     expect(
       requestProcessors.indexOf(INTERACTIONS_REQUEST_PROCESSOR),
     ).toBeLessThan(requestProcessors.indexOf(CONTENT_REQUEST_PROCESSOR));
+  });
+
+  it('runs the instructions processor before the identity processor', () => {
+    const {requestProcessors} = new SingleFlow();
+
+    expect(
+      requestProcessors.indexOf(INSTRUCTIONS_LLM_REQUEST_PROCESSOR),
+    ).toBeLessThan(requestProcessors.indexOf(IDENTITY_LLM_REQUEST_PROCESSOR));
+  });
+
+  it('runs the output schema processor after the code execution processor', () => {
+    const {requestProcessors} = new SingleFlow();
+
+    expect(
+      requestProcessors.indexOf(OUTPUT_SCHEMA_REQUEST_PROCESSOR),
+    ).toBeGreaterThan(
+      requestProcessors.indexOf(CODE_EXECUTION_REQUEST_PROCESSOR),
+    );
   });
 
   it('places the compaction processor immediately before the contents processor', () => {
@@ -142,6 +190,31 @@ describe('SingleFlow request processors', () => {
     expect(asked).toBe(true);
   });
 
+  it('passes the invocation context to the compactor and compacts nothing', async () => {
+    const shouldCompact = vi.fn().mockReturnValue(false);
+    const compactor: BaseContextCompactor = {shouldCompact, compact: vi.fn()};
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: new MockLlm({model: 'gemini-2.5-flash'}),
+    });
+    const invocationContext = makeInvocationContext(agent);
+    const processors = new SingleFlow([compactor]).requestProcessors;
+    const compaction =
+      processors[processors.indexOf(CONTENT_REQUEST_PROCESSOR) - 1];
+
+    const events: Event[] = [];
+    for await (const event of compaction.runAsync(
+      invocationContext,
+      makeLlmRequest(),
+    )) {
+      events.push(event);
+    }
+
+    expect(shouldCompact).toHaveBeenCalledWith(invocationContext);
+    expect(compactor.compact).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+  });
+
   it('keeps the compaction processor when no compactor is supplied', () => {
     // An agent that declares no compactors still honours the compaction policy
     // its App declares, and that policy only reaches the processor per
@@ -193,6 +266,46 @@ describe('SingleFlow request processors', () => {
     expect(second.requestProcessors).not.toContain(
       AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
     );
+  });
+
+  describe('the whole request pipeline', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('offers set_model_response to an agent with an output schema and a tool', async () => {
+      vi.stubEnv(VERTEX_ENV_VAR, undefined);
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: new MockLlm({model: 'gemini-2.5-flash'}),
+        instruction: 'Answer the question.',
+        outputSchema: OUTPUT_SCHEMA,
+        tools: [
+          new FunctionTool({
+            name: 'some_tool',
+            description: 'A test tool',
+            execute: () => 'result',
+          }),
+        ],
+      });
+      const invocationContext = makeInvocationContext(agent);
+      const llmRequest = makeLlmRequest();
+
+      for (const processor of new SingleFlow().requestProcessors) {
+        for await (const _ of processor.runAsync(
+          invocationContext,
+          llmRequest,
+        )) {
+          // The pipeline yields no events for this agent.
+        }
+      }
+
+      expect(llmRequest.toolsDict).toHaveProperty(SET_MODEL_RESPONSE_TOOL_NAME);
+      expect(llmRequest.config?.systemInstruction).toContain(
+        SET_MODEL_RESPONSE_TOOL_NAME,
+      );
+      expect(llmRequest.config?.responseSchema).toBeUndefined();
+    });
   });
 });
 

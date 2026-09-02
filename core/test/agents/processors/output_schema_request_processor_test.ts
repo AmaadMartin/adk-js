@@ -8,6 +8,8 @@ import {
   BaseAgent,
   BaseLlm,
   BaseLlmConnection,
+  BaseTool,
+  Context,
   createSession,
   Event,
   FunctionTool,
@@ -17,6 +19,7 @@ import {
   LlmResponse,
   OUTPUT_SCHEMA_REQUEST_PROCESSOR,
   PluginManager,
+  SET_MODEL_RESPONSE_TOOL_NAME,
 } from '@google/adk';
 import {Schema, Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -135,6 +138,53 @@ describe('OutputSchemaRequestProcessor', () => {
       SET_MODEL_RESPONSE_INSTRUCTION,
     );
     expect(declaredFunctionNames(llmRequest)).toEqual(['set_model_response']);
+  });
+
+  it('declares the tool with the output schema as its parameters', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const {llmRequest} = await run(
+      llmAgent({
+        model: 'gemini-2.5-flash',
+        withOutputSchema: true,
+        withTools: true,
+      }),
+    );
+
+    const [declaredTool] = llmRequest.config?.tools ?? [];
+    if (!declaredTool || !('functionDeclarations' in declaredTool)) {
+      expect.fail('no function declarations were added to the request');
+    }
+    expect(declaredTool.functionDeclarations).toEqual([
+      {
+        name: SET_MODEL_RESPONSE_TOOL_NAME,
+        description: expect.stringContaining('output schema'),
+        parameters: OUTPUT_SCHEMA,
+      },
+    ]);
+  });
+
+  it('returns the arguments as JSON and skips summarization when the tool runs', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+    const agent = llmAgent({
+      model: 'gemini-2.5-flash',
+      withOutputSchema: true,
+      withTools: true,
+    });
+    const {llmRequest} = await run(agent);
+    const tool: BaseTool | undefined =
+      llmRequest.toolsDict[SET_MODEL_RESPONSE_TOOL_NAME];
+    if (!tool) {
+      expect.fail(`${SET_MODEL_RESPONSE_TOOL_NAME} was not registered`);
+    }
+    const toolContext = new Context({
+      invocationContext: createContext(agent),
+    });
+
+    const result = await tool.runAsync({args: {answer: '42'}, toolContext});
+
+    expect(result).toBe(JSON.stringify({answer: '42'}));
+    expect(toolContext.actions.skipSummarization).toBe(true);
   });
 
   it('applies the workaround on Vertex AI with a pre-2.0 model', async () => {
