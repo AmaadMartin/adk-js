@@ -1538,6 +1538,25 @@ class StampingAgent extends LlmAgent {
   }
 }
 
+/** Records the metadata each event carries when the on-event callback runs. */
+class MetadataObservingPlugin extends BasePlugin {
+  constructor(
+    private readonly seen: Array<Record<string, unknown> | undefined>,
+  ) {
+    super('metadata_observing_plugin');
+  }
+
+  override async onEventCallback({
+    event,
+  }: {
+    invocationContext: InvocationContext;
+    event: Event;
+  }): Promise<undefined> {
+    this.seen.push(event.customMetadata);
+    return undefined;
+  }
+}
+
 describe('Runner runConfig.customMetadata', () => {
   let sessionService: InMemorySessionService;
 
@@ -1624,6 +1643,25 @@ describe('Runner runConfig.customMetadata', () => {
 
     for (const event of events) {
       expect(event.customMetadata).toBeUndefined();
+    }
+  });
+
+  it('shows the merged metadata to an on-event plugin callback', async () => {
+    const seen: Array<Record<string, unknown> | undefined> = [];
+    const plugin = new MetadataObservingPlugin(seen);
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new MockLlmAgent('test_agent'),
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+      plugins: [plugin],
+    });
+
+    await run(runner, {customMetadata: {tenant: 'acme'}});
+
+    expect(seen).not.toHaveLength(0);
+    for (const customMetadata of seen) {
+      expect(customMetadata).toEqual({tenant: 'acme'});
     }
   });
 
