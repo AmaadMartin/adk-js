@@ -968,13 +968,14 @@ describe('AuthPreprocessor', () => {
       expect(resumedFilters()).toEqual(new Set(['toolFc1', 'toolFc2']));
     });
 
-    it('skips an event that carries no actions at all', async () => {
-      const originalCalls = {
+    it('skips an event whose actions carry no auth map', async () => {
+      const originalCalls = createEvent({
         author: 'agent',
+        actions: {requestedAuthConfigs: undefined},
         content: {
           parts: [{functionCall: {id: 'toolFc1', name: 'someTool', args: {}}}],
         },
-      } as Event;
+      });
       const generator = AUTH_PREPROCESSOR.runAsync(
         contextOn([
           originalCalls,

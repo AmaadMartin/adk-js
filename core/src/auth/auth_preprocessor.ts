@@ -88,7 +88,7 @@ function pendingAuthConfigs(
   if (event.author !== agentName) {
     return [];
   }
-  return Object.entries(event.actions?.requestedAuthConfigs ?? {});
+  return Object.entries(event.actions.requestedAuthConfigs ?? {});
 }
 
 /**
@@ -101,8 +101,8 @@ function pendingAuthConfigs(
  *
  * Only an event that already names a directly-answered call is read. That is
  * what stops a stale request for the same credential from being resurrected.
- * The selection is taken before anything widens, so a sibling added here
- * cannot pull in a further event.
+ * The widened ids collect in their own set, so a sibling added here never
+ * becomes a direct target and cannot pull in a further event.
  */
 function siblingsAwaitingAuthorizedKeys(
   events: Event[],
@@ -110,15 +110,13 @@ function siblingsAwaitingAuthorizedKeys(
   authorizedKeys: ReadonlySet<string>,
   agentName: string,
 ): Set<string> {
-  const matching = events.filter((event) =>
-    pendingAuthConfigs(event, agentName).some(([fcId]) =>
-      directTargets.has(fcId),
-    ),
-  );
-
   const siblings = new Set<string>();
-  for (const event of matching) {
-    for (const [fcId, config] of pendingAuthConfigs(event, agentName)) {
+  for (const event of events) {
+    const pending = pendingAuthConfigs(event, agentName);
+    if (!pending.some(([fcId]) => directTargets.has(fcId))) {
+      continue;
+    }
+    for (const [fcId, config] of pending) {
       if (authorizedKeys.has(config.credentialKey)) {
         siblings.add(fcId);
       }
@@ -199,7 +197,7 @@ export class AuthPreprocessor extends BaseLlmRequestProcessor {
       invocationContext.session.events,
       invocationContext.branch,
     );
-    if (!events || events.length === 0) {
+    if (events.length === 0) {
       return;
     }
 
