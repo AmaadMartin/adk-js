@@ -35,11 +35,9 @@ const ARTIFACT_URI_SCHEME = 'artifact://';
 
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 
-const SESSION_SCOPED_ARTIFACT_URI_RE =
-  /^artifact:\/\/apps\/([^/]+)\/users\/([^/]+)\/sessions\/([^/]+)\/artifacts\/(.+)\/versions\/(\d+)$/;
-
-const USER_SCOPED_ARTIFACT_URI_RE =
-  /^artifact:\/\/apps\/([^/]+)\/users\/([^/]+)\/artifacts\/(.+)\/versions\/(\d+)$/;
+/** The session segment is absent from a user-scoped reference. */
+const ARTIFACT_URI_RE =
+  /^artifact:\/\/apps\/([^/]+)\/users\/([^/]+)(?:\/sessions\/([^/]+))?\/artifacts\/(.+)\/versions\/(\d+)$/;
 
 /**
  * Parses an artifact URI.
@@ -48,32 +46,17 @@ const USER_SCOPED_ARTIFACT_URI_RE =
  * @return The parsed URI, or undefined when the URI does not match the grammar.
  */
 export function parseArtifactUri(uri: string): ParsedArtifactUri | undefined {
-  if (!uri.startsWith(ARTIFACT_URI_SCHEME)) {
+  const match = ARTIFACT_URI_RE.exec(uri);
+  if (!match) {
     return undefined;
   }
-
-  const sessionScoped = SESSION_SCOPED_ARTIFACT_URI_RE.exec(uri);
-  if (sessionScoped) {
-    return {
-      appName: sessionScoped[1],
-      userId: sessionScoped[2],
-      sessionId: sessionScoped[3],
-      filename: sessionScoped[4],
-      version: Number.parseInt(sessionScoped[5], 10),
-    };
-  }
-
-  const userScoped = USER_SCOPED_ARTIFACT_URI_RE.exec(uri);
-  if (userScoped) {
-    return {
-      appName: userScoped[1],
-      userId: userScoped[2],
-      filename: userScoped[3],
-      version: Number.parseInt(userScoped[4], 10),
-    };
-  }
-
-  return undefined;
+  return {
+    appName: match[1],
+    userId: match[2],
+    sessionId: match[3],
+    filename: match[4],
+    version: Number.parseInt(match[5], 10),
+  };
 }
 
 /**

@@ -70,6 +70,15 @@ describe('parseArtifactUri', () => {
     expect(parsed?.sessionId).toBeUndefined();
   });
 
+  it('keeps a sessions segment inside a user-scoped filename', () => {
+    const parsed = parseArtifactUri(
+      'artifact://apps/app2/users/user2/artifacts/sessions/session1/versions/456',
+    );
+
+    expect(parsed?.filename).toBe('sessions/session1');
+    expect(parsed?.sessionId).toBeUndefined();
+  });
+
   it.each([
     'http://example.com',
     'artifact://invalid',

@@ -18,7 +18,6 @@ import {loadOptionalPeer} from '../utils/optional_peer.js';
 
 import {
   ArtifactScope,
-  isArtifactRef,
   isArtifactUri,
   parseArtifactUri,
   ParsedArtifactUri,
@@ -59,13 +58,7 @@ const VERSION_LEAF_RE = /^[0-9]+$/;
 const OBJECT_NOT_FOUND_CODE = 404;
 
 /** The parameters for {@link GcsArtifactService.getAuthenticatedUrl}. */
-export interface GetAuthenticatedUrlRequest {
-  /** The name of the application. */
-  appName: string;
-  /** The ID of the user. */
-  userId: string;
-  /** Omitted for a `user:` filename, which is user-scoped. */
-  sessionId?: string;
+export interface GetAuthenticatedUrlRequest extends ArtifactScope {
   /** The filename of the artifact. */
   filename: string;
   /** Defaults to the latest version. */
@@ -162,7 +155,7 @@ export class GcsArtifactService implements BaseArtifactService {
           'Artifact fileData must have a fileUri.',
         );
       }
-      if (isArtifactRef(request.artifact)) {
+      if (isArtifactUri(fileUri)) {
         referenceTarget(request, fileUri);
       }
       // Store the URI and mime_type (if any) as blob metadata; no content to upload.
