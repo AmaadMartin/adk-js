@@ -63,6 +63,10 @@ The `Runner` copies the policy onto every invocation it starts. Compaction runs
 before the contents are built, so the very request that would have been too
 large is the one that carries the summary.
 
+A companion knob, `App.contextCacheConfig`, reaches the same invocation and
+lands on `LlmRequest.cacheConfig`. The two are independent: compaction shrinks
+what is sent, caching reuses what was sent before.
+
 ## Configuration
 
 `createEventsCompactionConfig` validates the policy and returns it.
