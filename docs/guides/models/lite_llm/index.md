@@ -177,12 +177,20 @@ app-level config does.
 ## Tracking headers
 
 A request to a Vertex AI or Gemini model carries `x-goog-api-client` and
-`user-agent` headers that identify ADK to Google's usage pipeline. This covers
+`user-agent` values that identify ADK to Google's usage pipeline. This covers
 `vertex_ai/…`, `gemini/gemini-…`, and either of those behind a `litellm_proxy/`
 prefix. No other provider gets them.
 
-Your own value for one of those headers survives. The ADK labels come first and
-yours is appended, with no label repeated.
+They travel in the `headers` request parameter, which LiteLLM applies to the
+call it makes to the provider. That is not the same channel as
+`config.httpOptions.headers`, which becomes `extra_headers` and reaches only
+the endpoint you point `apiBase` at. A LiteLLM Proxy does not forward the
+headers its client sent, so the request parameter is the one that arrives.
+
+Your own value for one of those keys survives. Set it through
+`additionalArgs: {headers: {...}}`: the ADK labels come first, yours is
+appended, and no label is repeated. A `user-agent` you set in
+`config.httpOptions.headers` is left exactly as you wrote it.
 
 ## Thought signatures
 

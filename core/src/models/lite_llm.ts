@@ -291,9 +291,11 @@ export class LiteLlm extends BaseLlm {
       applyHttpOptions(args, httpOptions);
     }
 
-    // Last, so a caller's own header value is present to de-duplicate against.
+    // Last, so a caller's own `headers` is there to de-duplicate against. This
+    // is the `headers` request parameter, which LiteLLM passes to the provider;
+    // `extra_headers` would stop at the endpoint this request is sent to.
     if (isLiteLlmVertexModel(model) || isLiteLlmGeminiModel(model)) {
-      args.extra_headers = mergeTrackingHeaders(args.extra_headers);
+      args.headers = mergeTrackingHeaders(args.headers);
     }
     return args;
   }

@@ -247,6 +247,15 @@ export interface CompletionArgs extends GenerationParams {
   tool_choice?: ToolChoice;
   stream?: boolean;
   stream_options?: {include_usage: boolean};
+  /**
+   * Headers LiteLLM adds to the call it makes to the provider.
+   *
+   * This is a request parameter, not a header of the request that carries it.
+   * A LiteLLM Proxy does not forward the headers a client sent it, so this is
+   * the only channel that reaches the provider. Use `extra_headers` for the
+   * headers of the hop to the endpoint itself.
+   */
+  headers?: Record<string, string>;
   extra_headers?: Record<string, string>;
   extra_body?: Record<string, unknown>;
   cache_control_injection_points?: CacheControlInjectionPoint[];

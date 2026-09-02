@@ -1026,7 +1026,7 @@ describe('LiteLlm', () => {
 
       await collect(model.generateContentAsync(request()));
 
-      expect(client.args?.extra_headers).toEqual(getTrackingHeaders());
+      expect(client.args?.headers).toEqual(getTrackingHeaders());
     });
 
     it('sends no tracking headers to a non-Google provider', async () => {
@@ -1035,20 +1035,20 @@ describe('LiteLlm', () => {
 
       await collect(model.generateContentAsync(request()));
 
-      expect(client.args?.extra_headers).toBeUndefined();
+      expect(client.args?.headers).toBeUndefined();
     });
 
     it('keeps a caller header alongside the tracking headers', async () => {
       const client = new RecordingClient(textResponse());
-      const model = new LiteLlm({model: 'vertex_ai/test-model', client});
+      const model = new LiteLlm({
+        model: 'vertex_ai/test-model',
+        client,
+        additionalArgs: {headers: {'X-Trace': 'abc'}},
+      });
 
-      await collect(
-        model.generateContentAsync(
-          request({config: {httpOptions: {headers: {'X-Trace': 'abc'}}}}),
-        ),
-      );
+      await collect(model.generateContentAsync(request()));
 
-      expect(client.args?.extra_headers).toEqual({
+      expect(client.args?.headers).toEqual({
         ...getTrackingHeaders(),
         'X-Trace': 'abc',
       });
@@ -1056,19 +1056,35 @@ describe('LiteLlm', () => {
 
     it('appends a caller value to the tracking labels it shares a key with', async () => {
       const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({
+        model: 'vertex_ai/test-model',
+        client,
+        additionalArgs: {headers: {'user-agent': 'my-app/1.0'}},
+      });
+
+      await collect(model.generateContentAsync(request()));
+
+      expect(client.args?.headers?.['user-agent']).toBe(
+        `${getTrackingHeaders()['user-agent']} my-app/1.0`,
+      );
+    });
+
+    it('leaves the headers of the hop to the endpoint alone', async () => {
+      const client = new RecordingClient(textResponse());
       const model = new LiteLlm({model: 'vertex_ai/test-model', client});
 
       await collect(
         model.generateContentAsync(
           request({
-            config: {httpOptions: {headers: {'user-agent': 'my-app/1.0'}}},
+            config: {
+              httpOptions: {headers: {'user-agent': 'my-app/1.0'}},
+            },
           }),
         ),
       );
 
-      expect(client.args?.extra_headers?.['user-agent']).toBe(
-        `${getTrackingHeaders()['user-agent']} my-app/1.0`,
-      );
+      expect(client.args?.extra_headers).toEqual({'user-agent': 'my-app/1.0'});
+      expect(client.args?.headers).toEqual(getTrackingHeaders());
     });
   });
 

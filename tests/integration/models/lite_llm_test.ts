@@ -282,7 +282,7 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
     expect(endpoint.requests[0]['stream']).toBe(true);
   });
 
-  it('puts the cache breakpoints in the body and the tracking headers on the wire', async () => {
+  it('puts the cache breakpoints and the tracking headers in the body', async () => {
     endpoint = await startEndpoint([textReply('Cached.')]);
 
     const model = new LiteLlm({
@@ -317,8 +317,12 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
         control: {type: 'ephemeral', ttl: '1h'},
       },
     ]);
-    expect(endpoint.headers[0]['x-goog-api-client']).toContain('google-adk/');
-    expect(endpoint.headers[0]['user-agent']).toContain('gl-typescript/');
+    // The tracking headers travel as a request parameter, because a LiteLLM
+    // Proxy passes that to the provider and does not forward its own headers.
+    const headers = endpoint.requests[0]['headers'] as Record<string, string>;
+    expect(headers['x-goog-api-client']).toContain('google-adk/');
+    expect(headers['user-agent']).toContain('gl-typescript/');
+    expect(endpoint.headers[0]['x-goog-api-client']).toBeUndefined();
   });
 
   it('reads token counts from a usage block sent as a JSON string', async () => {
