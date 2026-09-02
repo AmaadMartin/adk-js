@@ -14,7 +14,29 @@ import {
   LiveServerGoAway,
   LiveServerSessionResumptionUpdate,
   Transcription,
+  TurnCompleteReason,
+  VoiceActivity,
 } from '@google/genai';
+
+/**
+ * The activity state of a live session, reported alongside `turnComplete`.
+ *
+ * This mirrors the `InteractionStatus` enum of `@google/genai`, which the
+ * pinned version of that package does not export yet. The string values are
+ * the same, so the two are wire-compatible.
+ *
+ * NOTE: this is unrelated to the Interactions API `InteractionStatusUpdate`.
+ */
+export enum InteractionStatus {
+  /** The model reported no activity state. */
+  INTERACTION_STATUS_UNSPECIFIED = 'INTERACTION_STATUS_UNSPECIFIED',
+  /** The model still works on the prompt, and more model turns follow. */
+  IN_PROGRESS = 'IN_PROGRESS',
+  /** @deprecated Use {@link InteractionStatus.IDLE} instead. */
+  REQUIRES_ACTION = 'REQUIRES_ACTION',
+  /** The model finished the prompt and waits for more user input. */
+  IDLE = 'IDLE',
+}
 
 /**
  * LLM response class that provides the first candidate response from the
@@ -47,6 +69,31 @@ export interface LlmResponse {
    * Only used for streaming mode.
    */
   turnComplete?: boolean;
+
+  /**
+   * The reason why the turn is complete.
+   * Only used for streaming mode.
+   */
+  turnCompleteReason?: TurnCompleteReason;
+
+  /**
+   * The activity state of the live session, reported with `turnComplete`.
+   *
+   * Newer live models may answer one user prompt with several model turns, so
+   * `turnComplete` alone no longer means the model is done. This field
+   * separates the two cases:
+   *
+   * * `IN_PROGRESS`: the model still works on the user's prompt, and more
+   *   turns follow. The app must not treat the interaction as finished, and
+   *   must not re-enable the microphone yet.
+   * * `IDLE`: the model finished the user's prompt and waits for more user
+   *   input.
+   *
+   * It stays absent for models that do not report it. A caller that builds a
+   * turn-taking user interface should then treat `turnComplete === true` as
+   * terminal.
+   */
+  interactionStatus?: InteractionStatus;
 
   /**
    * Error code if the response is an error. Code varies by model.
@@ -91,6 +138,11 @@ export interface LlmResponse {
    * caller should reconnect using the latest session resumption handle.
    */
   goAway?: LiveServerGoAway;
+
+  /**
+   * Voice activity signal from the Live model.
+   */
+  voiceActivity?: VoiceActivity;
 
   /**
    * Audio transcription of user input.
