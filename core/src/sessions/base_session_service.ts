@@ -82,7 +82,13 @@ export interface ListSessionsRequest {
   offset?: number;
   /** 1-based page number. Requires `limit`. Takes precedence over `offset`. */
   page?: number;
-  /** Sort direction by last update time. No ordering is applied if omitted. */
+  /**
+   * Sort direction of the last-update-time key.
+   *
+   * Sessions come back oldest-first, with the user id and then the session id
+   * breaking a tie, so that a paginated sweep cannot repeat or skip one. This
+   * option only flips the direction of the update-time key.
+   */
   order?: 'asc' | 'desc';
 }
 
