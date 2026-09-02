@@ -531,9 +531,11 @@ describe('Runner.runLive', () => {
     expect(
       llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption?.handle,
     ).toBe('handle-1');
+    // Transparent resumption is Vertex-only, so a non-Gemini model never
+    // requests it.
     expect(
       llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption?.transparent,
-    ).toBe(true);
+    ).toBeUndefined();
     // First connect had no resumption handle set.
     expect(
       llm.llmRequestsSeen[0].liveConnectConfig?.sessionResumption?.handle,

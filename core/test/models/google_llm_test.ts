@@ -777,7 +777,7 @@ describe('GoogleLlm', () => {
       );
     });
 
-    it('strips sessionResumption.transparent on the Gemini API backend', async () => {
+    it('rejects sessionResumption.transparent on the Gemini API backend', async () => {
       const llm = new TestGemini({
         apiKey: 'test-key',
         model: 'gemini-2.5-flash',
@@ -792,15 +792,10 @@ describe('GoogleLlm', () => {
         toolsDict: {},
       };
 
-      await llm.connect(request);
-
-      expect(llm.liveApiClient.live.connect).toHaveBeenCalledWith(
-        expect.objectContaining({
-          config: expect.objectContaining({
-            sessionResumption: {handle: 'h-1'},
-          }),
-        }),
+      await expect(llm.connect(request)).rejects.toThrow(
+        'Transparent session resumption is only supported for Vertex AI backend. Please use Vertex AI backend.',
       );
+      expect(llm.liveApiClient.live.connect).not.toHaveBeenCalled();
     });
   });
 
