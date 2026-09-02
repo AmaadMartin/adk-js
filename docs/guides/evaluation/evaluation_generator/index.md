@@ -199,18 +199,17 @@ writes and reads. A query the session never saw yields an empty
 
 ## Live mode
 
-Two pieces of the live (bidi) path are available. `sendAudioToLive` streams a
-turn's audio to a `LiveRequestQueue` as realtime input, in 16000-byte chunks
-bracketed by one activity start and one activity end.
-`generateInferencesForSingleUserInvocationLive` runs one turn against a live
-connection and yields the events of that invocation, failing after
-`DEFAULT_LIVE_TIMEOUT_SECONDS` if the model never reports its turn complete.
+`generateInferencesFromRootAgentLive` is the live counterpart of
+`generateInferencesFromRootAgent`: it drives the same simulated conversation
+over a bidirectional audio connection and returns the same `Invocation[]`.
+[Live eval inference](../live_inference/index.md) covers the connection
+lifecycle, the run config and the failure modes.
 
 `normalizeLiveTranscriptions` rewrites the transcription events a native-audio
 model produces into text content events, so an evaluator has text to grade.
-
-The driver that wires these to a live connection is not ported. Building it
-needs `Runner.runLive` support that adk-js does not have yet.
+`sendAudioToLive` streams a turn's audio to a `LiveRequestQueue` as realtime
+input, in 16000-byte chunks bracketed by one activity start and one activity
+end.
 
 ## Failure modes
 

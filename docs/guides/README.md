@@ -58,6 +58,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [EvaluationGenerator](evaluation/evaluation_generator/index.md) - Driving an
   agent through a simulated conversation and recording it as gradable
   invocations.
+- [Live eval inference](evaluation/live_inference/index.md) - Driving that same
+  simulated conversation over a bidirectional audio connection, and grading the
+  transcript it produces.
 - [ResponseEvaluator](evaluation/response_evaluator/index.md) - Scoring an agent's final answer against a golden answer, or against the Vertex AI coherence metric.
 - [TrajectoryEvaluator](evaluation/tool_trajectory/index.md) - Scoring the tool
   calls an agent made against a golden trajectory.
