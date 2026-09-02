@@ -5,22 +5,9 @@
  */
 
 /**
- * Resolved capabilities for an LLM instance.
- *
- * Each field holds the computed result for one capability, not an override, so
- * there is no "defer to auto-detection" placeholder. Models self-report by
- * overriding {@link BaseLlm.capabilities}. Callers read the field instead of
- * re-deriving support from the model name, backend variant, or type:
- *
- * ```ts
- * if (model.capabilities.outputSchemaAndTools) {
- *   // ...
- * }
- * ```
- *
- * The fields are `readonly` because {@link BaseLlm.capabilities} recomputes a
- * fresh snapshot on every access: mutating one in place would have no effect on
- * the model. Override a capability by subclassing the model instead.
+ * Resolved capabilities for an LLM instance, as reported by
+ * {@link BaseLlm.capabilities}. The fields are `readonly` because every access
+ * returns a fresh snapshot; override a capability by subclassing the model.
  */
 export interface LlmCapabilities {
   /** Whether the model can use an output schema together with tools. */

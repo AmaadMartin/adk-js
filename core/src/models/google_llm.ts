@@ -132,11 +132,8 @@ export class Gemini extends BaseLlm {
   }
 
   /**
-   * The capabilities of this Gemini instance.
-   *
-   * Declared here rather than inherited from `BaseLlm`: the base
-   * implementation is a deprecated fallback that warns and will be removed,
-   * whereas this is Gemini's permanent self-report.
+   * The capabilities of this Gemini instance. Declared rather than inherited,
+   * because the base implementation is a deprecated fallback that warns.
    *
    * @returns A fresh snapshot of the resolved capabilities.
    */

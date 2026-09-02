@@ -19,14 +19,7 @@ import {LlmResponse} from './llm_response.js';
  */
 const BASE_MODEL_SYMBOL = Symbol.for('google.adk.baseModel');
 
-/**
- * The subclasses already told to migrate off the name-based fallback, so the
- * notice is logged once per class rather than once per access.
- *
- * Keyed on the constructor rather than on its name: a minifier collapses
- * unrelated names, and a weak reference lets a class that goes out of scope be
- * collected.
- */
+/** Subclasses already told to migrate, so the notice is logged once each. */
 const warnedNameBasedModels = new WeakSet<object>();
 
 /**
@@ -65,15 +58,12 @@ export abstract class BaseLlm {
   }
 
   /**
-   * The capabilities of this model instance.
+   * The capabilities of this model instance, recomputed on every access.
    *
-   * Subclasses override this to declare what they support, so that callers can
-   * ask the model instead of deriving support from its name, backend variant,
-   * or type. A model that does not override it falls back to name-based
-   * detection, which reproduces the behavior that predates this property.
-   *
-   * Build on what the parent reports when subclassing a shipped model, so that
-   * capabilities the override does not name keep the parent's value:
+   * Subclasses override this to declare what they support, so that callers ask
+   * the model instead of deriving support from its name. Declare every field
+   * when extending `BaseLlm` directly: spreading `super.capabilities` there
+   * routes through the deprecated name-based fallback below.
    *
    * ```ts
    * class MyGemini extends Gemini {
@@ -82,21 +72,6 @@ export abstract class BaseLlm {
    *   }
    * }
    * ```
-   *
-   * Declare every capability outright when subclassing `BaseLlm` directly,
-   * rather than spreading `super.capabilities`, which would route through the
-   * deprecated name-based fallback below:
-   *
-   * ```ts
-   * class MyModel extends BaseLlm {
-   *   override get capabilities(): LlmCapabilities {
-   *     return {outputSchemaAndTools: true};
-   *   }
-   * }
-   * ```
-   *
-   * An override stays a plain getter and never caches: a capability may depend
-   * on state that changes after construction, such as an environment variable.
    *
    * @return A fresh snapshot of the resolved capabilities.
    */
@@ -124,8 +99,6 @@ export abstract class BaseLlm {
     }
     if (!warnedNameBasedModels.has(this.constructor)) {
       warnedNameBasedModels.add(this.constructor);
-      // `constructor.name` names the class in the message; it is not a type
-      // check, so the ban on identifying types by class name does not apply.
       logger.warn(
         `${this.constructor.name} relies on name-based detection of ` +
           'outputSchemaAndTools. Override BaseLlm.capabilities to declare it ' +
