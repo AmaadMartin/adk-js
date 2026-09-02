@@ -22,7 +22,7 @@ import {isGemini3xLive} from './model_name.js';
  * `LiveServerContent` plus the fields `@google/genai@2.9.0` does not declare
  * yet. The live API sends `interactionStatus` on the wire.
  */
-interface LiveServerContentWithStatus extends LiveServerContent {
+export interface LiveServerContentWithStatus extends LiveServerContent {
   interactionStatus?: InteractionStatus;
 }
 
@@ -35,20 +35,6 @@ const GROUNDING_STRING_LIST_FIELDS = [
   'retrievalQueries',
   'webSearchQueries',
 ] as const;
-
-/** Appends the values that `existing` does not already contain. */
-function unionOfStrings(
-  existing: string[] | undefined,
-  incoming: string[],
-): string[] {
-  const merged = existing ? [...existing] : [];
-  for (const value of incoming) {
-    if (!merged.includes(value)) {
-      merged.push(value);
-    }
-  }
-  return merged;
-}
 
 /**
  * Copies a support with its chunk indices moved past the chunks already
@@ -77,7 +63,7 @@ function shiftChunkIndices(
  * only the queries, chunks and supports it added. Overwriting therefore loses
  * everything the earlier messages reported. A support indexes into the chunk
  * list of its own message, so its indices move past the chunks already
- * accumulated.
+ * accumulated. Every other field takes the incoming value.
  *
  * Neither argument is modified, nested supports included.
  *
@@ -94,12 +80,12 @@ function mergeGroundingMetadata(
   }
 
   const chunkOffset = existing.groundingChunks?.length ?? 0;
-  const merged: GroundingMetadata = {...existing};
+  const merged: GroundingMetadata = {...existing, ...incoming};
 
   for (const field of GROUNDING_STRING_LIST_FIELDS) {
     const values = incoming[field];
     if (values !== undefined) {
-      merged[field] = unionOfStrings(existing[field], values);
+      merged[field] = [...new Set([...(existing[field] ?? []), ...values])];
     }
   }
   if (incoming.groundingChunks !== undefined) {
@@ -115,18 +101,6 @@ function mergeGroundingMetadata(
         shiftChunkIndices(support, chunkOffset),
       ),
     ];
-  }
-  if (incoming.googleMapsWidgetContextToken !== undefined) {
-    merged.googleMapsWidgetContextToken = incoming.googleMapsWidgetContextToken;
-  }
-  if (incoming.retrievalMetadata !== undefined) {
-    merged.retrievalMetadata = incoming.retrievalMetadata;
-  }
-  if (incoming.searchEntryPoint !== undefined) {
-    merged.searchEntryPoint = incoming.searchEntryPoint;
-  }
-  if (incoming.sourceFlaggingUris !== undefined) {
-    merged.sourceFlaggingUris = incoming.sourceFlaggingUris;
   }
   return merged;
 }

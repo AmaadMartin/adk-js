@@ -7,7 +7,6 @@
 import {InteractionStatus} from '@google/adk';
 import {
   GroundingMetadata,
-  LiveServerContent,
   LiveServerGoAway,
   MediaModality,
   ServiceTier,
@@ -26,14 +25,12 @@ import {
   vi,
   type MockInstance,
 } from 'vitest';
-import {LiveResponseAggregator} from '../../src/utils/live_connection_utils.js';
+import {
+  LiveResponseAggregator,
+  type LiveServerContentWithStatus,
+} from '../../src/utils/live_connection_utils.js';
 import {logger} from '../../src/utils/logger.js';
 import {liveServerMessage} from './live_server_message_test_utils.js';
-
-/** `LiveServerContent` plus the field `@google/genai@2.9.0` does not declare. */
-interface LiveServerContentWithStatus extends LiveServerContent {
-  interactionStatus?: InteractionStatus;
-}
 
 describe('LiveResponseAggregator', () => {
   let warnSpy: MockInstance<typeof logger.warn>;
