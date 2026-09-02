@@ -107,7 +107,14 @@ export type {
 } from './artifacts/session_artifact_service.js';
 export {
   AuthCredentialTypes,
+  DEFAULT_TOKEN_ENDPOINT_AUTH_METHOD,
+  REDACTED,
+  createOAuth2Auth,
+  createServiceAccount,
   parseAuthCredential,
+  redactAuthCredential,
+  toHttpCredentials,
+  validateServiceAccount,
 } from './auth/auth_credential.js';
 export type {
   AuthCredential,
@@ -116,6 +123,7 @@ export type {
   OAuth2Auth,
   ServiceAccount,
   ServiceAccountCredential,
+  TokenEndpointAuthMethod,
 } from './auth/auth_credential.js';
 export {AuthHandler} from './auth/auth_handler.js';
 export {AUTH_PREPROCESSOR, AuthPreprocessor} from './auth/auth_preprocessor.js';
