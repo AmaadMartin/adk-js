@@ -12,11 +12,14 @@ import {
   isFunctionTool,
   LlmAgent,
   PluginManager,
+  ReadonlyContext,
   ToolboxToolset,
+  ToolPredicate,
 } from '@google/adk';
 import {Type} from '@google/genai';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {z} from 'zod';
+import {logger} from '../../src/utils/logger.js';
 import {loadOptionalPeer} from '../../src/utils/optional_peer.js';
 
 type OptionalPeerModule = typeof import('../../src/utils/optional_peer.js');
@@ -73,25 +76,32 @@ function createFakeTool(
   });
 }
 
-/** A real tool context, for the tools returned by the toolset. */
-function createToolContext(): Context {
+function createInvocationContext(): InvocationContext {
   const agent = new LlmAgent({
     name: 'toolbox_agent',
     model: 'gemini-2.0-flash',
   });
-  return new Context({
-    invocationContext: new InvocationContext({
-      invocationId: 'test-invocation',
-      agent,
-      session: createSession({
-        id: 'test-session',
-        appName: 'toolbox_agent',
-        userId: 'test-user',
-      }),
-      pluginManager: new PluginManager([]),
-      sessionService: new InMemorySessionService(),
+  return new InvocationContext({
+    invocationId: 'test-invocation',
+    agent,
+    session: createSession({
+      id: 'test-session',
+      appName: 'toolbox_agent',
+      userId: 'test-user',
     }),
+    pluginManager: new PluginManager([]),
+    sessionService: new InMemorySessionService(),
   });
+}
+
+/** A real tool context, for the tools returned by the toolset. */
+function createToolContext(): Context {
+  return new Context({invocationContext: createInvocationContext()});
+}
+
+/** A real readonly context, for the tools a predicate filter judges. */
+function createReadonlyContext(): ReadonlyContext {
+  return new ReadonlyContext(createInvocationContext());
 }
 
 describe('ToolboxToolset', () => {
@@ -307,5 +317,105 @@ describe('ToolboxToolset', () => {
     );
     await expect(failure).rejects.toThrow(/npm install @toolbox-sdk\/core/);
     await expect(failure).rejects.toMatchObject({cause: notInstalled});
+  });
+
+  it('prefixes the tool names, and still calls the remote tool', async () => {
+    const remote = createFakeTool('book-hotel');
+    sdk.loadToolset.mockResolvedValue([remote]);
+
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolsetName: 'hotels',
+      prefix: 'travel',
+    });
+    const [tool] = await toolset.getTools();
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expect(tool.name).toBe('travel_book-hotel');
+    expect(tool._getDeclaration()?.name).toBe('travel_book-hotel');
+    expect(remote).toHaveBeenCalledExactlyOnceWith({});
+  });
+
+  it('keeps only the tools a name filter lists, matching the prefixed name', async () => {
+    sdk.loadToolset.mockResolvedValue([
+      createFakeTool('list-hotels'),
+      createFakeTool('book-hotel'),
+    ]);
+
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolsetName: 'hotels',
+      prefix: 'travel',
+      toolFilter: ['travel_book-hotel', 'list-hotels'],
+    });
+
+    expect((await toolset.getTools()).map((tool) => tool.name)).toEqual([
+      'travel_book-hotel',
+    ]);
+  });
+
+  it('keeps every tool when the name filter is empty', async () => {
+    sdk.loadToolset.mockResolvedValue([
+      createFakeTool('list-hotels'),
+      createFakeTool('book-hotel'),
+    ]);
+
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolsetName: 'hotels',
+      toolFilter: [],
+    });
+
+    expect((await toolset.getTools()).map((tool) => tool.name)).toEqual([
+      'list-hotels',
+      'book-hotel',
+    ]);
+  });
+
+  it('lets a predicate filter decide, given a context', async () => {
+    sdk.loadToolset.mockResolvedValue([
+      createFakeTool('list-hotels'),
+      createFakeTool('book-hotel'),
+    ]);
+    const predicate = vi.fn<ToolPredicate>(
+      (tool) => tool.name !== 'book-hotel',
+    );
+    const context = createReadonlyContext();
+
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolsetName: 'hotels',
+      toolFilter: predicate,
+    });
+
+    expect((await toolset.getTools(context)).map((tool) => tool.name)).toEqual([
+      'list-hotels',
+    ]);
+    expect(predicate).toHaveBeenCalledTimes(2);
+    expect(predicate).toHaveBeenLastCalledWith(
+      expect.objectContaining({name: 'book-hotel'}),
+      context,
+    );
+  });
+
+  it('keeps every tool and warns when a predicate filter has no context', async () => {
+    sdk.loadToolset.mockResolvedValue([
+      createFakeTool('list-hotels'),
+      createFakeTool('book-hotel'),
+    ]);
+    const predicate = vi.fn<ToolPredicate>(() => false);
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolsetName: 'hotels',
+      toolFilter: predicate,
+    });
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'list-hotels',
+      'book-hotel',
+    ]);
+    expect(predicate).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining('The filter was not applied.'),
+    );
+    warn.mockRestore();
   });
 });

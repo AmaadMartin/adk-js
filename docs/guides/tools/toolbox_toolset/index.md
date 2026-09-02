@@ -60,6 +60,26 @@ const toolbox = new ToolboxToolset('http://127.0.0.1:5000', {
 `getTools()` returns the toolset's tools first, then the named tools in the
 order you gave them.
 
+## Renaming and narrowing the tools
+
+A `prefix` renames every tool the server publishes, which keeps two toolbox
+servers apart when both publish a `search`. A `toolFilter` then decides which of
+those tools the agent sees. Give it the names to keep, or a predicate:
+
+```ts
+const toolbox = new ToolboxToolset('http://127.0.0.1:5000', {
+  toolsetName: 'my-toolset',
+  prefix: 'hotels',
+  toolFilter: ['hotels_search-hotels-by-name'],
+});
+```
+
+Both options behave as they do on `MCPToolset`. A name filter matches the
+prefixed name, because that is the name the model calls. A predicate needs the
+`ReadonlyContext` that an agent passes to `getTools()`; called without one, the
+toolset keeps every tool and logs a warning rather than dropping the filter in
+silence.
+
 ## What it guarantees
 
 - **The constructor does no I/O.** The `@toolbox-sdk/core` package loads on the
