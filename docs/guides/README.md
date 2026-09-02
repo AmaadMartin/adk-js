@@ -19,6 +19,12 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Per-run request configuration](agents/request_config/index.md) - How `RunConfig` and the agent's own `generateContentConfig` combine into one model request.
 - [SequentialAgent resumability](agents/sequential_agent/index.md) - Checkpointing a sequential pipeline so it resumes where it stopped, and pausing it on a human-in-the-loop call.
 
+### Artifacts
+
+- [Artifact version metadata](artifacts/artifact_version/index.md) - The record
+  a service keeps about one saved version: its URI, its creation time, and the
+  metadata the caller attached.
+
 ### Auth
 
 - [BaseAuthCredentialExchanger](auth/credential_exchanger/index.md) - The

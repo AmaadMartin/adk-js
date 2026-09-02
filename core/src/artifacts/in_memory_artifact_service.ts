@@ -11,16 +11,17 @@ import {logger} from '../utils/logger.js';
 
 import {
   ArtifactScope,
-  ParsedArtifactUri,
   ensurePart,
   isArtifactRef,
   parseArtifactUri,
+  ParsedArtifactUri,
   validateArtifactReferenceScope,
   validatePathSegment,
 } from './artifact_util.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
+  createArtifactVersion,
   DeleteArtifactRequest,
   ListArtifactKeysRequest,
   ListVersionsRequest,
@@ -57,11 +58,11 @@ export class InMemoryArtifactService implements BaseArtifactService {
 
     const versions = this.artifacts[path] ?? [];
     const version = versions.length;
-    const metadata: ArtifactVersion = {
+    const metadata = createArtifactVersion({
       version,
       canonicalUri: canonicalUri(scope, filename, version),
       customMetadata,
-    };
+    });
 
     if (artifact.inlineData) {
       metadata.mimeType = artifact.inlineData.mimeType;

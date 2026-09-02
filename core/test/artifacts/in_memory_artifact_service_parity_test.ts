@@ -59,6 +59,7 @@ describe('InMemoryArtifactService adk-python parity', () => {
           version,
           canonicalUri: `memory://apps/app0/users/user0/sessions/123/artifacts/filename/versions/${version}`,
           customMetadata: {key: `value${version}`},
+          createTime: expect.any(Number),
           mimeType: 'text/plain',
         })),
       );

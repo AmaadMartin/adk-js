@@ -26,6 +26,7 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
         data: Buffer.isBuffer(data) ? data : Buffer.from(data),
         metadata: options?.metadata?.metadata || {},
         contentType: options?.metadata?.contentType ?? options?.contentType,
+        timeCreated: new Date().toISOString(),
       });
     }
 
@@ -38,13 +39,27 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
     }
 
     async getMetadata(): Promise<
-      [{contentType?: string; metadata?: Record<string, unknown>}]
+      [
+        {
+          contentType?: string;
+          metadata?: Record<string, unknown>;
+          timeCreated?: string;
+        },
+      ]
     > {
       const file = this.bucket.files.get(this.name);
       if (!file) {
         throw new Error(`File not found: ${this.name}`);
       }
-      return [{contentType: file.contentType, metadata: file.metadata}];
+      return [
+        {
+          contentType: file.contentType,
+          // GCS omits the key when the blob carries no metadata.
+          metadata:
+            Object.keys(file.metadata).length > 0 ? file.metadata : undefined,
+          timeCreated: file.timeCreated,
+        },
+      ];
     }
 
     async delete(): Promise<void> {
@@ -63,6 +78,7 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
         data: Buffer;
         metadata: Record<string, unknown>;
         contentType?: string;
+        timeCreated?: string;
       }
     >();
 
@@ -116,6 +132,79 @@ describe('GcsArtifactService', () => {
     },
   );
 
+  describe('createTime', () => {
+    const key = 'test-app/test-user/test-session/stamped.txt/0';
+
+    const saveStamped = async (): Promise<GcsArtifactService> => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'stamped.txt',
+        artifact: {text: 'hello'},
+      });
+      return service;
+    };
+
+    const readCreateTime = async (
+      service: GcsArtifactService,
+    ): Promise<number> => {
+      const metadata = await service.getArtifactVersion({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'stamped.txt',
+        version: 0,
+      });
+      if (!metadata) {
+        expect.fail('Expected the saved version to report its metadata.');
+      }
+      return metadata.createTime;
+    };
+
+    it('reports the blob creation time in Unix seconds', async () => {
+      const service = await saveStamped();
+      const entry = storageMock.bucket(bucketName).files.get(key);
+      if (!entry?.timeCreated) {
+        expect.fail('Expected the stored blob to carry a creation time.');
+      }
+      // A time far from now, so the current time cannot pass for it.
+      entry.timeCreated = '2020-01-02T03:04:05.000Z';
+
+      expect(await readCreateTime(service)).toBe(1577934245);
+    });
+
+    it('falls back to the current time when the blob reports none', async () => {
+      const service = await saveStamped();
+      const entry = storageMock.bucket(bucketName).files.get(key);
+      if (!entry) {
+        expect.fail('Expected the blob to be stored.');
+      }
+      entry.timeCreated = undefined;
+
+      const createTime = await readCreateTime(service);
+
+      expect(createTime).toBeLessThanOrEqual(Date.now() / 1000 + 1);
+      expect(createTime).toBeGreaterThan(0);
+    });
+
+    it('falls back to the current time when the blob reports a bad time', async () => {
+      const service = await saveStamped();
+      const entry = storageMock.bucket(bucketName).files.get(key);
+      if (!entry) {
+        expect.fail('Expected the blob to be stored.');
+      }
+      entry.timeCreated = 'not a timestamp';
+
+      const createTime = await readCreateTime(service);
+
+      expect(createTime).toBeLessThanOrEqual(Date.now() / 1000 + 1);
+      expect(createTime).toBeGreaterThan(0);
+    });
+  });
+
   describe('customMetadata GCS shape', () => {
     it('stores customMetadata nested under metadata.metadata, not flat', async () => {
       storageMock.buckets.clear();
@@ -136,6 +225,60 @@ describe('GcsArtifactService', () => {
 
       expect(entry).toBeDefined();
       expect(entry?.metadata).toMatchObject({foo: 'bar'});
+    });
+
+    it('reports an empty customMetadata when the blob carries none', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'bare.txt',
+        artifact: {text: 'hello'},
+      });
+      const entry = storageMock
+        .bucket(bucketName)
+        .files.get('test-app/test-user/test-session/bare.txt/0');
+      if (!entry) {
+        expect.fail('Expected the blob to be stored.');
+      }
+      entry.metadata = {};
+
+      const metadata = await service.getArtifactVersion({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'bare.txt',
+        version: 0,
+      });
+
+      expect(metadata?.customMetadata).toEqual({});
+    });
+
+    it('reports only the caller keys as customMetadata', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'note.txt',
+        artifact: {text: 'hello'},
+        customMetadata: {foo: 'bar'},
+      });
+
+      const metadata = await service.getArtifactVersion({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'note.txt',
+        version: 0,
+      });
+
+      expect(metadata?.customMetadata).toEqual({foo: 'bar'});
     });
 
     it('does not mutate the caller customMetadata object or leak ADK keys across saves', async () => {
