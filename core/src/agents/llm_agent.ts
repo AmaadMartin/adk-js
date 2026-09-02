@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {GenerateContentConfig, GroundingMetadata, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
@@ -437,6 +437,67 @@ async function convertToolUnionToTools(
     return [new NodeTool(toolUnion)];
   }
   return await toolUnion.getTools(context);
+}
+
+/**
+ * Name of the agent tool that wraps the built-in Google Search tool. Its
+ * presence in the agent's resolved tools is what makes a search result's
+ * grounding metadata belong on the agent's own response.
+ */
+const GROUNDING_SEARCH_AGENT_TOOL_NAME = 'google_search_agent';
+
+/**
+ * Session state key the search agent tool writes its grounding metadata to.
+ * The `temp:` prefix keeps it out of the persisted session state.
+ */
+const GROUNDING_METADATA_STATE_KEY = 'temp:_adk_grounding_metadata';
+
+/**
+ * Narrows a session state value to {@link GroundingMetadata}.
+ *
+ * Every field of `GroundingMetadata` is optional, so an object is the only
+ * property a runtime check can establish. The framework writes this state key,
+ * so the guard exists to keep the read typed, not to police a caller.
+ */
+function isGroundingMetadata(value: unknown): value is GroundingMetadata {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Copies the search agent's grounding metadata onto the response the flow is
+ * about to return, so a citation survives the hop from the nested search agent
+ * to its parent.
+ *
+ * Mirrors `_maybe_add_grounding_metadata` in the Python ADK
+ * `flows/llm_flows/base_llm_flow.py`. Python resolves the agent's tools when
+ * the cache is empty; here both preprocess paths fill the cache before the
+ * model is called, so a miss means no step ran and there is nothing to add.
+ *
+ * @param invocationContext The invocation the response belongs to.
+ * @param llmResponse The unmodified response from the model.
+ * @param response The response an after-model callback returned, if any.
+ * @returns `response` unchanged when there is no metadata to add; otherwise
+ *     the response carrying the metadata, defaulting to `llmResponse`.
+ */
+function maybeAddGroundingMetadata(
+  invocationContext: InvocationContext,
+  llmResponse: LlmResponse,
+  response?: LlmResponse,
+): LlmResponse | undefined {
+  const tools = invocationContext.canonicalToolsCache;
+  if (!tools?.some((tool) => tool.name === GROUNDING_SEARCH_AGENT_TOOL_NAME)) {
+    return response;
+  }
+
+  const groundingMetadata =
+    invocationContext.session.state[GROUNDING_METADATA_STATE_KEY];
+  if (!isGroundingMetadata(groundingMetadata)) {
+    return response;
+  }
+
+  const target = response ?? llmResponse;
+  target.groundingMetadata = groundingMetadata;
+  return target;
 }
 
 /**
@@ -1145,14 +1206,15 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         yield event;
       }
     }
+    const resolvedTools: BaseTool[] = [];
     for (const toolUnion of this.tools) {
       const toolContext = new Context({invocationContext});
-      const tools = (
-        await convertToolUnionToTools(
-          toolUnion,
-          new ReadonlyContext(invocationContext),
-        )
-      ).filter(
+      const unionTools = await convertToolUnionToTools(
+        toolUnion,
+        new ReadonlyContext(invocationContext),
+      );
+      resolvedTools.push(...unionTools);
+      const tools = unionTools.filter(
         (tool) =>
           !llmRequest.allowedTools ||
           llmRequest.allowedTools.includes(tool.name),
@@ -1164,6 +1226,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
+    invocationContext.canonicalToolsCache = resolvedTools;
   }
 
   private async runSendLoop(
@@ -1517,6 +1580,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       author: this.name,
       branch: invocationContext.branch,
     });
+    const resolvedTools: BaseTool[] = [];
     for (const toolUnion of allTools) {
       const toolContext = new Context({
         invocationContext,
@@ -1524,12 +1588,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       });
 
       // process all tools from this tool union
-      const tools = (
-        await convertToolUnionToTools(
-          toolUnion,
-          new ReadonlyContext(invocationContext),
-        )
-      ).filter((tool) => {
+      const unionTools = await convertToolUnionToTools(
+        toolUnion,
+        new ReadonlyContext(invocationContext),
+      );
+      resolvedTools.push(...unionTools);
+      const tools = unionTools.filter((tool) => {
         // If allowedTools is not set, allow all tools. Otherwise, only allow
         // tools that are in the allowedTools set.
         // The allowedTools set is populated by request processors.
@@ -1548,6 +1612,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
+    invocationContext.canonicalToolsCache = resolvedTools;
     // =========================================================================
     // Global runtime interruption
     // =========================================================================
@@ -1937,7 +2002,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         llmResponse,
       });
     if (afterModelCallbackResponse) {
-      return afterModelCallbackResponse;
+      return maybeAddGroundingMetadata(
+        invocationContext,
+        llmResponse,
+        afterModelCallbackResponse,
+      );
     }
 
     // If no override was returned from the plugins, run the canonical callbacks
@@ -1952,10 +2021,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
 
       if (callbackResponse) {
-        return callbackResponse;
+        return maybeAddGroundingMetadata(
+          invocationContext,
+          llmResponse,
+          callbackResponse,
+        );
       }
     }
-    return undefined;
+    return maybeAddGroundingMetadata(invocationContext, llmResponse);
   }
 
   protected async *runAndHandleError<T extends LlmResponse | Event>(
