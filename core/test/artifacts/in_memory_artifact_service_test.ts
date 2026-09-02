@@ -103,4 +103,65 @@ describe('InMemoryArtifactService', () => {
 
     expect(keys).toEqual([]);
   });
+
+  describe('canonicalUri', () => {
+    const appName = 'test-app';
+    const userId = 'test-user';
+    const sessionId = 'test-session';
+
+    const saveAndReadUri = async (
+      service: InMemoryArtifactService,
+      filename: string,
+    ): Promise<string> => {
+      const version = await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: 'content'},
+      });
+      const metadata = await service.getArtifactVersion({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version,
+      });
+      if (!metadata) {
+        expect.fail('Expected the saved version to report its metadata.');
+      }
+      return metadata.canonicalUri;
+    };
+
+    it('addresses a session-scoped artifact through its session', async () => {
+      const service = new InMemoryArtifactService();
+
+      const uri = await saveAndReadUri(service, 'f.txt');
+
+      expect(uri).toBe(
+        'memory://apps/test-app/users/test-user/sessions/test-session/artifacts/f.txt/versions/0',
+      );
+    });
+
+    it('leaves the session out of a user-scoped artifact', async () => {
+      const service = new InMemoryArtifactService();
+
+      const uri = await saveAndReadUri(service, 'user:f.txt');
+
+      expect(uri).toBe(
+        'memory://apps/test-app/users/test-user/artifacts/user:f.txt/versions/0',
+      );
+    });
+
+    it('advances the version segment on each save', async () => {
+      const service = new InMemoryArtifactService();
+
+      await saveAndReadUri(service, 'f.txt');
+      const uri = await saveAndReadUri(service, 'f.txt');
+
+      expect(uri).toBe(
+        'memory://apps/test-app/users/test-user/sessions/test-session/artifacts/f.txt/versions/1',
+      );
+    });
+  });
 });

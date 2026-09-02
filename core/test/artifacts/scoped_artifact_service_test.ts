@@ -163,7 +163,9 @@ describe('ScopedArtifactService', () => {
   describe('listArtifactVersions', () => {
     it('delegates with scoped context', async () => {
       const delegate = makeBaseArtifactServiceStub();
-      const versions = [createArtifactVersion({version: 1, canonicalUri: 'memory://v1'})];
+      const versions = [
+        createArtifactVersion({version: 1, canonicalUri: 'memory://v1'}),
+      ];
       vi.mocked(delegate.listArtifactVersions).mockResolvedValue(versions);
       const service = new ScopedArtifactService(
         delegate,
@@ -187,7 +189,10 @@ describe('ScopedArtifactService', () => {
   describe('getArtifactVersion', () => {
     it('delegates with scoped context', async () => {
       const delegate = makeBaseArtifactServiceStub();
-      const version = createArtifactVersion({version: 1, canonicalUri: 'memory://v1'});
+      const version = createArtifactVersion({
+        version: 1,
+        canonicalUri: 'memory://v1',
+      });
       vi.mocked(delegate.getArtifactVersion).mockResolvedValue(version);
       const service = new ScopedArtifactService(
         delegate,
