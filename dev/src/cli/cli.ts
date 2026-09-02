@@ -19,6 +19,7 @@ import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {toMessage} from '../utils/value_utils.js';
 import {version} from '../version.js';
+import {registerConformanceCommands} from './cli_conformance.js';
 import {createAgent} from './cli_create.js';
 import {
   convertGoogleApi,
@@ -711,6 +712,8 @@ export function createProgram(): Command {
         forceRunAll: getBoolean(options['force']),
       });
     });
+
+  registerConformanceCommands(program);
 
   return program;
 }

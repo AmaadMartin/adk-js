@@ -207,6 +207,13 @@ function filterPartFields(part: FilteredPart) {
 }
 
 function filterEventFields(event: FilteredEvent) {
+  // A live event carries the symbol brands core identifies it by. An event
+  // read back from YAML cannot, and deepStrictEqual compares own symbol
+  // properties, so every replay would differ on a brand alone.
+  for (const brand of Object.getOwnPropertySymbols(event)) {
+    Reflect.deleteProperty(event, brand);
+  }
+
   /* eslint-disable @typescript-eslint/no-explicit-any */
   delete (event as any).id;
   delete (event as any).timestamp;
