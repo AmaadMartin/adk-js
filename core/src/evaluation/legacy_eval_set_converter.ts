@@ -16,7 +16,7 @@
 import {Content, createPartFromText, FunctionCall, Part} from '@google/genai';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {EvalCase, Invocation, SessionInput} from './eval_case.js';
-import {isRecord} from './eval_json.js';
+import {EvalSetSchemaError, isRecord} from './eval_json.js';
 import {EvalSet} from './eval_set.js';
 
 /** Milliseconds per second, for the epoch-seconds timestamps eval data uses. */
@@ -32,6 +32,39 @@ export interface LegacyEvalCase {
 
   /** Session state shared by every turn, keyed in snake_case. */
   initialSession?: Record<string, unknown>;
+}
+
+/**
+ * Reads the eval cases of a file written in the original format.
+ *
+ * @throws {EvalSetSchemaError} When the value is not a list of eval cases in
+ *   the original format either.
+ */
+export function parseLegacyEvalCases(raw: unknown): LegacyEvalCase[] {
+  if (!Array.isArray(raw)) {
+    throw new EvalSetSchemaError(
+      'Eval data in the original format must be a JSON array of eval cases.',
+    );
+  }
+  return raw.map((legacyEvalCase) => {
+    if (
+      !isRecord(legacyEvalCase) ||
+      typeof legacyEvalCase['name'] !== 'string' ||
+      !Array.isArray(legacyEvalCase['data'])
+    ) {
+      throw new EvalSetSchemaError(
+        'Every eval case in the original format must have a `name` and ' +
+          '`data`.',
+      );
+    }
+    return {
+      name: legacyEvalCase['name'],
+      data: legacyEvalCase['data'].filter(isRecord),
+      initialSession: isRecord(legacyEvalCase['initial_session'])
+        ? legacyEvalCase['initial_session']
+        : undefined,
+    };
+  });
 }
 
 /** Converts eval cases in the original format to an {@link EvalSet}. */

@@ -25,6 +25,13 @@ function isInsideDir(resolvedPath: string, resolvedBaseDir: string): boolean {
   );
 }
 
+/** Reports whether an error is the file system saying "no such file". */
+export function isFileNotFoundError(err: unknown): boolean {
+  return (
+    err instanceof Error && (err as Error & {code?: string}).code === 'ENOENT'
+  );
+}
+
 /**
  * Writes `files` into `dir`, refusing any entry that resolves outside of it.
  *
