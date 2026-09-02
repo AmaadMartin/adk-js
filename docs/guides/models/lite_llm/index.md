@@ -116,8 +116,7 @@ new LiteLlm({model: 'openai/gpt-4o', apiBase}).capabilities;
 
 LiteLLM reconciles the two per provider. A provider with native support gets
 both passed through, and the rest get a JSON tool call with `tool_choice`
-enforcement. Other models resolve the same capability from the model name, so
-they answer `true` only for Gemini on Vertex AI.
+enforcement.
 
 Streaming yields a `partial: true` response per text or reasoning delta,
 followed by the aggregated response carrying the usage metadata, the finish

@@ -5,9 +5,9 @@
  */
 
 /**
- * Resolved capabilities for an LLM instance, as reported by
- * {@link BaseLlm.capabilities}. The fields are `readonly` because every access
- * returns a fresh snapshot; override a capability by subclassing the model.
+ * Resolved capabilities for an LLM instance, as reported by a model's
+ * `capabilities` getter. The fields are `readonly` because every access
+ * returns a fresh snapshot; declare a capability by subclassing the model.
  */
 export interface LlmCapabilities {
   /** Whether the model can use an output schema together with tools. */

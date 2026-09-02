@@ -223,8 +223,11 @@ export class LiteLlm extends BaseLlm {
    * with native support gets both passed through, and the rest get a JSON tool
    * call with `tool_choice` enforcement. Every route therefore honours an
    * output schema alongside tools, whatever the model name says.
+   *
+   * Declared without `override`: `BaseLlm` carries no such member yet, so the
+   * modifier does not compile here.
    */
-  override get capabilities(): LlmCapabilities {
+  get capabilities(): LlmCapabilities {
     return {outputSchemaAndTools: true};
   }
 

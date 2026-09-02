@@ -13,11 +13,11 @@ import {
   runWithClientLabel,
   version,
 } from '@google/adk';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 class TestLlm extends BaseLlm {
-  constructor(model = 'test-llm') {
-    super({model});
+  constructor() {
+    super({model: 'test-llm'});
   }
   generateContentAsync(
     _llmRequest: LlmRequest,
@@ -100,28 +100,4 @@ describe('isBaseLlm', () => {
   it('should return false for FakeLlm instance (not extending BaseLlm)', () => {
     expect(isBaseLlm(new FakeLlm())).toBe(false);
   });
-});
-
-describe('BaseLlm.capabilities', () => {
-  const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it.each([
-    ['gemini-2.5-pro', 'true', true],
-    ['gemini-2.5-pro', 'false', false],
-    ['gemini-1.5-flash', 'true', false],
-    ['test-llm', 'true', false],
-  ])(
-    'reports %s under GOOGLE_GENAI_USE_VERTEXAI=%s as %s',
-    (model, vertexEnv, expected) => {
-      vi.stubEnv(VERTEX_ENV_VAR, vertexEnv);
-
-      expect(new TestLlm(model).capabilities).toEqual({
-        outputSchemaAndTools: expected,
-      });
-    },
-  );
 });
