@@ -19,7 +19,16 @@ import {
   TranslationConfig,
 } from '@google/genai';
 
+import {GetSessionConfig} from '../sessions/base_session_service.js';
+import {TelemetryConfig} from '../telemetry/context.js';
+import {getEnvVar} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+
+/** Default used when `ADK_MAX_LLM_CALLS` is unset or unusable. */
+const DEFAULT_MAX_LLM_CALLS = 500;
+
+/** Environment variable that overrides the `maxLlmCalls` default. */
+const MAX_LLM_CALLS_ENV_VAR = 'ADK_MAX_LLM_CALLS';
 
 /**
  * The streaming mode for the run config.
@@ -28,9 +37,8 @@ export enum StreamingMode {
   NONE = 'none',
   SSE = 'sse',
   /**
-   * Bidirectional streaming. Not yet supported; passing this value to
-   * `createRunConfig` throws. Use {@link StreamingMode.SSE} for token
-   * streaming.
+   * Bidirectional streaming. The `runner.runAsync()` path does not read it;
+   * call `runner.runLive()` for bidirectional streaming.
    */
   BIDI = 'bidi',
 }
@@ -60,6 +68,19 @@ export interface HistoryConfig {
  */
 export interface LiveConnectConfigWithHistory extends LiveConnectConfig {
   historyConfig?: HistoryConfig;
+}
+
+/**
+ * Configuration for running tools in a thread pool for live mode.
+ *
+ * Accepted so that one configuration can drive several ADK SDKs, but inert in
+ * adk-js: a tool callback is not structured-cloneable, so Node cannot move it
+ * onto a worker thread. Tools always run on the main event loop, and nothing
+ * here reads this field.
+ */
+export interface ToolThreadPoolConfig {
+  /** Maximum number of worker threads in the pool. adk-python defaults it to 4. */
+  maxWorkers?: number;
 }
 
 /**
@@ -113,9 +134,8 @@ export interface RunConfig {
   supportCfc?: boolean;
 
   /**
-   * Streaming mode. Supported values are {@link StreamingMode.NONE} and
-   * {@link StreamingMode.SSE}. {@link StreamingMode.BIDI} is not yet
-   * supported and is rejected by `createRunConfig`.
+   * Streaming mode: {@link StreamingMode.NONE}, {@link StreamingMode.SSE} or
+   * {@link StreamingMode.BIDI}.
    */
   streamingMode?: StreamingMode;
 
@@ -190,12 +210,45 @@ export interface RunConfig {
   /**
    * A limit on the total number of llm calls for a given run.
    *
+   * The default is read from the `ADK_MAX_LLM_CALLS` environment variable, and
+   * falls back to 500.
+   *
    * Valid Values:
    *   - More than 0 and less than sys.maxsize: The bound on the number of llm
    *     calls is enforced, if the value is set in this range.
    *   - Less than or equal to 0: This allows for unbounded number of llm calls.
    */
   maxLlmCalls?: number;
+
+  /**
+   * Custom metadata for the current invocation. The runner merges it onto every
+   * event of the run. A key the event already carries keeps the event's value.
+   */
+  customMetadata?: Record<string, unknown>;
+
+  /**
+   * Per-request OpenTelemetry configuration, which overrides the process-wide
+   * telemetry environment variables for this invocation only. Lets a
+   * multi-tenant host set the telemetry knobs per request without leaking one
+   * request's configuration into a concurrent one.
+   *
+   * WARNING: This feature is **experimental** and its API or behavior may
+   * change in future releases.
+   */
+  telemetry?: TelemetryConfig;
+
+  /**
+   * Controls which events the runner fetches when it loads the session. Use it
+   * to avoid loading the full event history on every invocation, for example
+   * with `{numRecentEvents: 50}`.
+   */
+  getSessionConfig?: GetSessionConfig;
+
+  /**
+   * Configuration for running tools in a thread pool for live mode. See
+   * {@link ToolThreadPoolConfig}.
+   */
+  toolThreadPoolConfig?: ToolThreadPoolConfig;
 
   /**
    * If true, the agent loop will suspend on ANY tool call, allowing the client
@@ -274,19 +327,18 @@ export interface RunConfig {
  * - `supportCfc` → `false`
  * - `enableAffectiveDialog` → `false`
  * - `streamingMode` → {@link StreamingMode.NONE}
- * - `maxLlmCalls` → `500` (validated via `validateMaxLlmCalls`)
+ * - `maxLlmCalls` → `ADK_MAX_LLM_CALLS`, else `500`
  * - `pauseOnToolCalls` → `false`
  * - `saveLiveBlob` → `false`
+ * - `inputAudioTranscription` and `outputAudioTranscription` → a fresh `{}`
  *
  * A deprecated `saveLiveAudio` flag turns `saveLiveBlob` on and logs a warning.
  *
  * @param params - Optional partial {@link RunConfig} overriding defaults.
  * @returns A merged {@link RunConfig} object.
  * @throws {Error} When `params.maxLlmCalls` exceeds `Number.MAX_SAFE_INTEGER`.
- * @throws {Error} When `params.streamingMode` is {@link StreamingMode.BIDI}.
  */
 export function createRunConfig(params: Partial<RunConfig> = {}) {
-  validateStreamingMode(params.streamingMode);
   const config = {
     saveInputBlobsAsArtifacts: false,
     supportCfc: false,
@@ -294,8 +346,14 @@ export function createRunConfig(params: Partial<RunConfig> = {}) {
     streamingMode: StreamingMode.NONE,
     pauseOnToolCalls: false,
     saveLiveBlob: false,
+    // A fresh object per call: two configs must never share a transcription
+    // config, or a mutation on one silently changes the other.
+    inputAudioTranscription: {},
+    outputAudioTranscription: {},
     ...params,
-    maxLlmCalls: validateMaxLlmCalls(params.maxLlmCalls ?? 500),
+    maxLlmCalls: validateMaxLlmCalls(
+      params.maxLlmCalls ?? resolveDefaultMaxLlmCalls(),
+    ),
   };
   if (params.saveLiveAudio !== undefined) {
     logger.warn(
@@ -308,12 +366,26 @@ export function createRunConfig(params: Partial<RunConfig> = {}) {
   return config;
 }
 
-function validateStreamingMode(streamingMode?: StreamingMode): void {
-  if (streamingMode === StreamingMode.BIDI) {
-    throw new Error(
-      'StreamingMode.BIDI is not supported; use StreamingMode.SSE.',
-    );
+/**
+ * Resolves the `maxLlmCalls` default from `ADK_MAX_LLM_CALLS`.
+ *
+ * A value that is not a plain integer logs a warning and yields the default: an
+ * operator's typo must not break every run.
+ */
+function resolveDefaultMaxLlmCalls(): number {
+  const envValue = getEnvVar(MAX_LLM_CALLS_ENV_VAR);
+  if (!envValue) {
+    return DEFAULT_MAX_LLM_CALLS;
   }
+  // Number('  ') is 0, so a blank value must not read as a limit of zero.
+  const parsed = envValue.trim() ? Number(envValue) : Number.NaN;
+  if (!Number.isInteger(parsed)) {
+    logger.warn(
+      `Invalid value for ${MAX_LLM_CALLS_ENV_VAR} env var: ${envValue}. Using default ${DEFAULT_MAX_LLM_CALLS}.`,
+    );
+    return DEFAULT_MAX_LLM_CALLS;
+  }
+  return parsed;
 }
 
 function validateMaxLlmCalls(value: number): number {

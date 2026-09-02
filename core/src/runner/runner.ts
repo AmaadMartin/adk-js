@@ -469,6 +469,7 @@ export class Runner {
             appName: this.appName,
             userId,
             sessionId,
+            config: runConfig.getSessionConfig,
           });
 
           if (params.abortSignal?.aborted) {
@@ -633,6 +634,7 @@ export class Runner {
                 return;
               }
             }
+            // Append the user message to the session with optional state delta.
             const userEvent = createEvent({
               invocationId: invocationContext.invocationId,
               author: 'user',
@@ -642,6 +644,7 @@ export class Runner {
               content: newMessage,
               customMetadata: params.customMetadata,
             });
+            applyRunConfigCustomMetadata(userEvent, runConfig);
             // A paused task agent only sees events inside its isolation scope,
             // so a reply that is not stamped with that scope never reaches it.
             userEvent.isolationScope = activeTaskScope?.isolationScope;
@@ -694,6 +697,7 @@ export class Runner {
               author: 'model',
               content: beforeRunCallbackResponse,
             });
+            applyRunConfigCustomMetadata(earlyExitEvent, runConfig);
             // Live call audio content should not be saved to the session, as
             // it is in adk-python. Not implemented here yet.
             await this.sessionService.appendEvent({
@@ -712,6 +716,10 @@ export class Runner {
                 return;
               }
 
+              // Stamped before the callback so a plugin reads the merged
+              // metadata, and again below because a plugin that replaces the
+              // event returns an unstamped one.
+              applyRunConfigCustomMetadata(event, runConfig);
               // Step 3: Run the on_event callbacks before persisting so callback
               // changes are stored in the session and match the streamed event.
               const modifiedEvent = await this.pluginManager.runOnEventCallback(
@@ -730,6 +738,7 @@ export class Runner {
                     branch: modifiedEvent.branch ?? event.branch,
                   }
                 : event;
+              applyRunConfigCustomMetadata(outputEvent, runConfig);
               if (!event.partial) {
                 await this.sessionService.appendEvent({
                   session,
@@ -994,6 +1003,7 @@ export class Runner {
             appName: this.appName,
             userId: params.userId,
             sessionId: params.sessionId,
+            config: runConfig.getSessionConfig,
           });
 
           if (params.abortSignal?.aborted) {
@@ -1044,6 +1054,7 @@ export class Runner {
               author: 'model',
               content: beforeRunCallbackResponse,
             });
+            applyRunConfigCustomMetadata(earlyExitEvent, runConfig);
             await this.sessionService.appendEvent({
               session,
               event: earlyExitEvent,
@@ -1069,6 +1080,7 @@ export class Runner {
             }
 
             const eventToProcess = modifiedEvent ?? event;
+            applyRunConfigCustomMetadata(eventToProcess, runConfig);
 
             // An event carrying inline audio, video or image data is persisted
             // only when `saveLiveBlob` is on, and then its blobs go to the
@@ -1215,6 +1227,23 @@ export function determineAgentForResumption(
  */
 function isWorkflowNodeEvent(event: Event): boolean {
   return Boolean(event.nodeInfo?.path);
+}
+
+/**
+ * Merges the run's custom metadata into the event.
+ *
+ * The event's own keys win, so a key that an emitter set on purpose survives
+ * the run-level default.
+ */
+function applyRunConfigCustomMetadata(
+  event: Event,
+  runConfig?: RunConfig,
+): void {
+  const customMetadata = runConfig?.customMetadata;
+  if (!customMetadata || Object.keys(customMetadata).length === 0) {
+    return;
+  }
+  event.customMetadata = {...customMetadata, ...event.customMetadata};
 }
 
 /**

@@ -249,6 +249,7 @@ async function callToolAsync(
           toolContext.invocationContext,
         ),
         errorType: detectErrorTypeForTelemetry(tool, toolContext, result),
+        invocationContext: toolContext.invocationContext,
       });
       return result;
     } finally {
@@ -771,6 +772,7 @@ export async function handleFunctionCallList({
         traceMergedToolCalls({
           responseEventId: mergedEvent.id,
           functionResponseEvent: mergedEvent,
+          invocationContext,
         });
       } finally {
         span.end();

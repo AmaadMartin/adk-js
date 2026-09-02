@@ -121,6 +121,19 @@ export function isBase64Encoded(data: string): boolean {
 }
 
 /**
+ * Gets the raw value of the given environment variable.
+ *
+ * Returns an empty string when the variable is unset, and in the web build,
+ * where `process.env` does not exist.
+ *
+ * @param envVar The environment variable to get the value of.
+ * @return The raw value of the environment variable, or an empty string.
+ */
+export function getEnvVar(envVar: string): string {
+  return process.env?.[envVar] ?? '';
+}
+
+/**
  * Gets the boolean value of the given environment variable.
  *
  * @param envVar The environment variable to get the value of.

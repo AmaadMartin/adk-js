@@ -862,3 +862,142 @@ describe('ContentRequestProcessor instruction contents', () => {
     ).toEqual(['recalled memory', 'question']);
   });
 });
+
+describe('ContentRequestProcessor modelInputContext', () => {
+  function createContextWithModelInputContext(params: {
+    events: Event[];
+    userContent?: Content;
+    modelInputContext?: Content[];
+  }): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({
+        name: 'test_agent',
+        model: new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
+      }) as BaseAgent,
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: params.events,
+      }),
+      pluginManager: new PluginManager([]),
+      userContent: params.userContent,
+      runConfig: {modelInputContext: params.modelInputContext},
+    });
+  }
+
+  // Nested so it does not collide with the module-level `runProcessor`, which
+  // takes the request instead of building one.
+  async function runProcessor(
+    invocationContext: InvocationContext,
+  ): Promise<LlmRequest> {
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+    return llmRequest;
+  }
+
+  const events = [
+    createMockEvent('1', 1000, 'Earlier message'),
+    createMockEvent('2', 2000, 'Current message'),
+  ];
+  const userContent: Content = {
+    role: 'user',
+    parts: [{text: 'Current message'}],
+  };
+  const transientContext: Content = {
+    role: 'user',
+    parts: [{text: 'Today is Tuesday.'}],
+  };
+
+  it('inserts the context immediately before the matching user content', async () => {
+    const llmRequest = await runProcessor(
+      createContextWithModelInputContext({
+        events,
+        userContent,
+        modelInputContext: [transientContext],
+      }),
+    );
+
+    expect(
+      llmRequest.contents.map((content) => content.parts?.[0]?.text),
+    ).toEqual(['Earlier message', 'Today is Tuesday.', 'Current message']);
+  });
+
+  it('inserts at the front when no content matches the user content', async () => {
+    const llmRequest = await runProcessor(
+      createContextWithModelInputContext({
+        events,
+        userContent: {role: 'user', parts: [{text: 'Never sent'}]},
+        modelInputContext: [transientContext],
+      }),
+    );
+
+    expect(
+      llmRequest.contents.map((content) => content.parts?.[0]?.text),
+    ).toEqual(['Today is Tuesday.', 'Earlier message', 'Current message']);
+  });
+
+  it('inserts at the front when the invocation has no user content', async () => {
+    const llmRequest = await runProcessor(
+      createContextWithModelInputContext({
+        events,
+        modelInputContext: [transientContext],
+      }),
+    );
+
+    expect(llmRequest.contents[0].parts?.[0]?.text).toBe('Today is Tuesday.');
+  });
+
+  it('copies the context so the caller array is not aliased', async () => {
+    const caller: Content = {
+      role: 'user',
+      parts: [{text: 'Today is Tuesday.'}],
+    };
+    const llmRequest = await runProcessor(
+      createContextWithModelInputContext({
+        events,
+        userContent,
+        modelInputContext: [caller],
+      }),
+    );
+
+    const inserted = llmRequest.contents[1];
+    expect(inserted).not.toBe(caller);
+    inserted.parts![0].text = 'Mutated';
+    expect(caller.parts![0].text).toBe('Today is Tuesday.');
+  });
+
+  it('does nothing for an empty context', async () => {
+    const llmRequest = await runProcessor(
+      createContextWithModelInputContext({
+        events,
+        userContent,
+        modelInputContext: [],
+      }),
+    );
+
+    expect(
+      llmRequest.contents.map((content) => content.parts?.[0]?.text),
+    ).toEqual(['Earlier message', 'Current message']);
+  });
+
+  it('does nothing when the run config carries no context', async () => {
+    const llmRequest = await runProcessor(
+      createContextWithModelInputContext({events, userContent}),
+    );
+
+    expect(
+      llmRequest.contents.map((content) => content.parts?.[0]?.text),
+    ).toEqual(['Earlier message', 'Current message']);
+  });
+});
