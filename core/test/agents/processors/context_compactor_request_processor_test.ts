@@ -7,6 +7,7 @@
 import {
   BaseContextCompactor,
   BaseLlm,
+  BaseLlmConnection,
   BaseSummarizer,
   CompactedEvent,
   ContextCompactorRequestProcessor,
@@ -91,6 +92,10 @@ class StubLlm extends BaseLlm {
   // eslint-disable-next-line require-yield -- BaseLlm mandates the generator; this stub emits nothing.
   async *generateContentAsync(): AsyncGenerator<LlmResponse, void, void> {
     return;
+  }
+
+  connect(): Promise<BaseLlmConnection> {
+    return Promise.reject(new Error('StubLlm does not connect.'));
   }
 }
 
@@ -204,7 +209,9 @@ describe('ContextCompactorRequestProcessor app-level compaction', () => {
     );
     const summarize = vi
       .spyOn(LlmSummarizer.prototype, 'summarize')
-      .mockResolvedValue(new StubSummarizer().summarize(compactableEvents()));
+      .mockResolvedValue(
+        await new StubSummarizer().summarize(compactableEvents()),
+      );
 
     await runProcessor(new ContextCompactorRequestProcessor([]), context);
 
