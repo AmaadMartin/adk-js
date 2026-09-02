@@ -44,12 +44,24 @@ export function removeClientFunctionCallId(content: Content): void {
 }
 
 /**
+ * Options that tune how the contents of an LLM request are built.
+ */
+export interface GetContentsOptions {
+  /**
+   * Keep `adk-` prefixed function call/response ids in the request. Set for a
+   * provider that pairs a tool call with its result by id.
+   */
+  preserveFunctionCallIds?: boolean;
+}
+
+/**
  * Get the contents for the LLM request.
  *
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
  * @param currentIsolationScope: The isolation scope of the current node, if any.
+ * @param options: Options that tune how the contents are built.
  *
  * @returns A list of processed contents.
  */
@@ -58,6 +70,7 @@ export function getContents(
   agentName: string,
   currentBranch?: string,
   currentIsolationScope?: string,
+  options: GetContentsOptions = {},
 ): Content[] {
   const filteredEvents: Event[] = [];
 
@@ -86,10 +99,150 @@ export function getContents(
   const contents = [];
   for (const event of resultEvents) {
     const content = cloneDeep(event.content!);
-    removeClientFunctionCallId(content);
+    if (!options.preserveFunctionCallIds) {
+      removeClientFunctionCallId(content);
+    }
     contents.push(content);
   }
   return contents;
+}
+
+/**
+ * Re-injects function-call events that compaction removed.
+ *
+ * Compaction can summarize away a `functionCall` while a matching
+ * `functionResponse` survives outside the compacted range. The clearest case is
+ * a long-running tool call: the call is compacted along with its intermediate
+ * placeholder response, then the real result arrives on resume. That surviving
+ * response would be orphaned, which makes prompt assembly throw in
+ * `rearrangeEventsForLatestFunctionResponse`.
+ *
+ * The whole call event is re-injected verbatim rather than trimmed to the
+ * resumed call, because a parallel call carries its thought signature on the
+ * first part only. Sibling responses that compaction removed come back too, so
+ * a sibling is not surfaced as a phantom pending call.
+ *
+ * @param events: The post-compaction events being assembled into contents.
+ * @param sourceEvents: The pre-compaction events to recover missing calls from.
+ *
+ * @returns `events` with the recoverable call events re-injected, or `events`
+ *     itself when there is nothing to recover.
+ */
+export function recoverCompactedFunctionCalls(
+  events: Event[],
+  sourceEvents: Event[],
+): Event[] {
+  const callIdsPresent = new Set<string>();
+  const responseIdsPresent = new Set<string>();
+  for (const event of events) {
+    for (const functionCall of getFunctionCalls(event)) {
+      if (functionCall.id) {
+        callIdsPresent.add(functionCall.id);
+      }
+    }
+    for (const functionResponse of getFunctionResponses(event)) {
+      if (functionResponse.id) {
+        responseIdsPresent.add(functionResponse.id);
+      }
+    }
+  }
+
+  const orphanedIds = new Set(
+    [...responseIdsPresent].filter((id) => !callIdsPresent.has(id)),
+  );
+  if (orphanedIds.size === 0) {
+    return events;
+  }
+
+  const callEventById = new Map<string, Event>();
+  for (const event of sourceEvents) {
+    for (const functionCall of getFunctionCalls(event)) {
+      if (
+        functionCall.id &&
+        orphanedIds.has(functionCall.id) &&
+        !callEventById.has(functionCall.id)
+      ) {
+        callEventById.set(functionCall.id, event);
+      }
+    }
+  }
+  if (callEventById.size === 0) {
+    return events;
+  }
+
+  // Keep the highest-timestamp response per id so a sibling that completed
+  // before being compacted contributes its real result, not its stale
+  // placeholder; ties fall back to source order.
+  const responseEventById = new Map<string, Event>();
+  for (const event of sourceEvents) {
+    for (const functionResponse of getFunctionResponses(event)) {
+      if (!functionResponse.id) {
+        continue;
+      }
+      const existing = responseEventById.get(functionResponse.id);
+      if (!existing || event.timestamp >= existing.timestamp) {
+        responseEventById.set(functionResponse.id, event);
+      }
+    }
+  }
+
+  const result: Event[] = [];
+  const reinjectedIds = new Set<string>();
+  for (const event of events) {
+    for (const functionResponse of getFunctionResponses(event)) {
+      const responseId = functionResponse.id;
+      if (!responseId || reinjectedIds.has(responseId)) {
+        continue;
+      }
+      const callEvent = callEventById.get(responseId);
+      if (!callEvent) {
+        continue;
+      }
+      result.push(callEvent);
+      const siblingIds = getFunctionCalls(callEvent)
+        .map((functionCall) => functionCall.id)
+        .filter((id): id is string => !!id);
+      for (const siblingId of siblingIds) {
+        reinjectedIds.add(siblingId);
+      }
+      for (const siblingId of siblingIds) {
+        if (responseIdsPresent.has(siblingId)) {
+          continue;
+        }
+        const siblingResponse = responseEventById.get(siblingId);
+        if (siblingResponse) {
+          result.push(siblingResponse);
+        }
+      }
+    }
+    result.push(event);
+  }
+  return result;
+}
+
+/**
+ * Whether a live event is a model media event carrying inline data (audio,
+ * video, or image).
+ *
+ * Such events are deliberately not persisted to the session to avoid storing
+ * large raw blobs. Media referenced via `fileData` (e.g. saved as artifacts)
+ * and all non-media events (transcriptions, tool calls, usage) are persisted
+ * as in `runAsync`.
+ */
+export function isLiveModelMediaEventWithInlineData(event: Event): boolean {
+  const parts = event.content?.parts;
+  if (!parts?.length) {
+    return false;
+  }
+  return parts.some((part) => {
+    const mimeType = part.inlineData?.mimeType?.toLowerCase();
+    return (
+      mimeType !== undefined &&
+      (mimeType.startsWith('audio/') ||
+        mimeType.startsWith('video/') ||
+        mimeType.startsWith('image/'))
+    );
+  });
 }
 
 /**
@@ -165,6 +318,8 @@ function isRequestInputEvent(event: Event): boolean {
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
+ * @param currentIsolationScope: The isolation scope of the current node, if any.
+ * @param options: Options that tune how the contents are built.
  *
  * @returns A list of contents for the current turn only, preserving context
  *     needed for proper tool execution while excluding conversation history.
@@ -174,6 +329,7 @@ export function getCurrentTurnContents(
   agentName: string,
   currentBranch?: string,
   currentIsolationScope?: string,
+  options: GetContentsOptions = {},
 ): Content[] {
   // Find the latest event that starts the current turn and process from there.
   for (let i = events.length - 1; i >= 0; i--) {
@@ -189,6 +345,7 @@ export function getCurrentTurnContents(
         agentName,
         currentBranch,
         currentIsolationScope,
+        options,
       );
     }
   }
