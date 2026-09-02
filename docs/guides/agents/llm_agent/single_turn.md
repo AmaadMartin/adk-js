@@ -119,3 +119,9 @@ const researcher = new LlmAgent({
 
 The tool description ends with a warning that tells the model not to call the
 tool in parallel with any other tool.
+
+A task tool also defers its function response. A task node that pauses, to wait
+for human input, produces no output, and no function response is emitted for
+that call. The parent model therefore never reads an empty result as a finished
+task. The recorded actions are preserved, and the real response arrives when the
+node resumes. A task that produces output is answered as usual.

@@ -89,6 +89,13 @@ it before the nested run starts. Arguments that violate the schema throw out of
 the tool call, which the agent loop reports back to the model as a tool error,
 so the model can correct the call. Nothing reaches the wrapped agent.
 
+The declared parameters are the schema normalised for the API variant, by the
+same builder every other tool's declaration goes through. A nullable property is
+never declared as required, on any variant. On the Gemini Developer API the
+keywords that surface rejects are dropped too, `default` and `nullable` among
+them; Vertex AI keeps them. The tool's own name and the wrapped agent's
+description always win over anything the schema carries.
+
 Validation uses the schema in the form you supplied it. A Zod refinement is
 enforced even though the genai schema sent to the model cannot express it.
 
@@ -162,19 +169,67 @@ JSON. An empty result, and a result reporting an error, append nothing.
 
 ## Releasing the sub-runner
 
-`AgentTool` awaits `Runner.closeToolsets()` when the nested run ends — after a
-normal run, after an abort, and after the wrapped agent throws. That call
-releases the toolsets held by the runner's agent and their sub-agents, so an MCP
-session the wrapped agent opened does not outlive the tool call.
+`AgentTool` awaits `Runner.close()` when the nested run ends — after a normal
+run, after an abort, and after the wrapped agent throws. That call releases the
+toolsets held by the runner's agent and their sub-agents, so an MCP session the
+wrapped agent opened does not outlive the tool call. It then closes the
+sub-runner's own plugins.
 
-It releases nothing else. The session service and the plugins belong to the
-caller, which is still using them. `Runner.close()` is the wider call: it
-releases the toolsets and then the plugins, so use that one for a runner you own
-rather than borrow from.
+The plugins borrowed from the caller are exempted. `AgentTool` calls
+`PluginManager.setSkipClosingPlugins(true)` on the sub-runner before the run, so
+the caller's plugins stay open and usable. With `includePlugins: false` the
+sub-runner borrows nothing, and `close()` closes whatever plugins it holds.
 
-Both methods are public, so you can call either on a runner of your own. Both
-are safe to call more than once: a runner is reusable across runs, and each call
-closes the toolsets again.
+`Runner.close()` and `Runner.closeToolsets()` are both public, so you can call
+either on a runner of your own. Both are safe to call more than once: a runner
+is reusable across runs, and each call closes the toolsets again.
+
+## Building from an agent config file
+
+An agent config file cannot hold an agent object, so `AgentToolArgsConfig` names
+one instead. `AgentTool.fromConfig` resolves that name and builds the tool.
+
+```ts
+import {AgentTool} from '@google/adk';
+
+const tool = await AgentTool.fromConfig(
+  {
+    agent: {code: './agents/search_agent.js#searchAgent'},
+    skipSummarization: true,
+  },
+  '/path/to/root_agent.yaml',
+);
+```
+
+`agent.code` is a fully-qualified name of the form
+`<module specifier>#<export>`. The export name is optional and defaults to
+`default`. A relative specifier resolves against the directory of the config
+file you pass as the second argument. A bare specifier resolves the way Node
+resolves an installed package.
+
+The import runs the named module's top-level code, so trust the name as far as
+you trust the config file it came from. A Node built-in is refused, so a config
+file cannot reach `node:child_process`.
+
+`skipSummarization` defaults to `false` and `includePlugins` defaults to `true`,
+as they do on the constructor.
+
+### Failure modes
+
+Every rejection is a `ToolExecutionError` with `errorType` `BAD_REQUEST`, and no
+message echoes a declared value back.
+
+- `agent` is missing, or is not an object.
+- `agent` sets both `code` and `configPath`, or neither.
+- `agent.code` is not a string, or names a value that is not an agent instance.
+  A class and a factory function are both reference mistakes.
+- `skipSummarization` or `includePlugins` is not a boolean.
+- `agent.configPath` names a config file. adk-js core has no agent-config
+  loader, so a config-file reference is rejected rather than ignored. Name the
+  agent instance with `agent.code`.
+
+`agent.code` that names a module or an export which does not resolve throws
+`InputValidationError` instead, with the underlying failure as its `cause`.
 
 ## Declaring parameters as JSON Schema
 
