@@ -973,7 +973,6 @@ describe('resolveAgentLocation', () => {
       expect(resolveAgentLocation(path.join(agentDir, entryFile))).toEqual({
         name: 'weather',
         parentDir: agentsDir,
-        dir: agentDir,
       });
     },
   );
@@ -982,7 +981,6 @@ describe('resolveAgentLocation', () => {
     expect(resolveAgentLocation(path.join(agentsDir, 'weather.ts'))).toEqual({
       name: 'weather',
       parentDir: agentsDir,
-      dir: agentsDir,
     });
   });
 
@@ -990,7 +988,6 @@ describe('resolveAgentLocation', () => {
     expect(resolveAgentLocation(path.join(agentsDir, 'agent_two.ts'))).toEqual({
       name: 'agent_two',
       parentDir: agentsDir,
-      dir: agentsDir,
     });
   });
 
@@ -1000,7 +997,6 @@ describe('resolveAgentLocation', () => {
     expect(resolveAgentLocation('agent.ts')).toEqual({
       name: path.basename(process.cwd()),
       parentDir: path.dirname(process.cwd()),
-      dir: process.cwd(),
     });
   });
 });

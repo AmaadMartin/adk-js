@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {getBooleanEnvVar} from '@google/adk';
 import dotenv from 'dotenv';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import {isEnvEnabled} from './env_utils.js';
 import {AdkLogger} from './logger.js';
 
 const logger = new AdkLogger({label: 'Envs', colorize: {all: true}});
@@ -43,7 +43,7 @@ function walkToRootUntilFound(folder: string, filename: string): string {
 
   for (;;) {
     const candidate = path.join(current, filename);
-    if (isFile(candidate)) {
+    if (fs.statSync(candidate, {throwIfNoEntry: false})?.isFile()) {
       return candidate;
     }
 
@@ -52,14 +52,6 @@ function walkToRootUntilFound(folder: string, filename: string): string {
       return '';
     }
     current = parent;
-  }
-}
-
-function isFile(candidate: string): boolean {
-  try {
-    return fs.statSync(candidate).isFile();
-  } catch {
-    return false;
   }
 }
 
@@ -80,7 +72,7 @@ export function loadDotenvForAgent(
   agentParentDir: string,
   filename = '.env',
 ): void {
-  if (isEnvEnabled(DISABLE_LOAD_DOTENV_ENV_VAR)) {
+  if (getBooleanEnvVar(DISABLE_LOAD_DOTENV_ENV_VAR)) {
     logger.debug(
       `Skipping ${filename} loading because ${DISABLE_LOAD_DOTENV_ENV_VAR} is enabled.`,
     );

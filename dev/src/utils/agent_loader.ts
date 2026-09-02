@@ -44,8 +44,6 @@ export interface AgentLocation {
   name: string;
   /** Absolute path of the directory that contains the agent. */
   parentDir: string;
-  /** Absolute path of the directory holding the agent file. */
-  dir: string;
 }
 
 /**
@@ -64,8 +62,8 @@ export function resolveAgentLocation(agentPath: string): AgentLocation {
   const baseName = path.basename(absolutePath, path.extname(absolutePath));
 
   return DIRECTORY_ENTRY_NAMES.includes(baseName)
-    ? {name: path.basename(dir), parentDir: path.dirname(dir), dir}
-    : {name: baseName, parentDir: dir, dir};
+    ? {name: path.basename(dir), parentDir: path.dirname(dir)}
+    : {name: baseName, parentDir: dir};
 }
 
 /**
