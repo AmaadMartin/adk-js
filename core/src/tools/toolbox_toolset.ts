@@ -52,8 +52,6 @@ export interface ToolboxToolsetOptions {
   boundParams?: Record<string, unknown>;
   /** Headers sent with every request to the server. */
   additionalHeaders?: Record<string, ToolboxHeaderValue>;
-  /** Protocol version, or versions, to negotiate with the server. */
-  protocol?: string | string[];
   /** Selects which of the loaded tools the agent sees. */
   toolFilter?: ToolPredicate | string[];
   /** Prepended to every tool name as `${prefix}_${name}`. */
@@ -164,7 +162,6 @@ export class ToolboxToolset extends BaseToolset {
         this.serverUrl,
         null,
         this.options.additionalHeaders,
-        this.options.protocol,
       );
     });
     return this.clientPromise;

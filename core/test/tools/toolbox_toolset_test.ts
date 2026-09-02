@@ -27,7 +27,6 @@ interface LoadCall {
 interface ClientCall {
   url: string;
   headers: unknown;
-  protocol: unknown;
 }
 
 const sdk = vi.hoisted(() => {
@@ -63,13 +62,8 @@ const sdk = vi.hoisted(() => {
   }
 
   class FakeToolboxClient {
-    constructor(
-      url: string,
-      _session: unknown,
-      headers: unknown,
-      protocol: unknown,
-    ) {
-      state.clientCalls.push({url, headers, protocol});
+    constructor(url: string, _session: unknown, headers: unknown) {
+      state.clientCalls.push({url, headers});
     }
 
     async loadToolset(
@@ -138,18 +132,15 @@ beforeEach(() => {
 });
 
 describe('ToolboxToolset client', () => {
-  it('builds one client from the server url, headers and protocol', async () => {
+  it('builds one client from the server url and headers', async () => {
     const headers = {'X-Api-Key': () => 'secret'};
     const toolset = new ToolboxToolset(SERVER_URL, {
       additionalHeaders: headers,
-      protocol: '2025-06-18',
     });
 
     await toolset.getTools();
 
-    expect(sdk.state.clientCalls).toEqual([
-      {url: SERVER_URL, headers, protocol: '2025-06-18'},
-    ]);
+    expect(sdk.state.clientCalls).toEqual([{url: SERVER_URL, headers}]);
   });
 
   it('loads nothing until getTools is called', () => {
