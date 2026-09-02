@@ -86,6 +86,11 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 - [BasePlanner](planners/planner/index.md) - Applying an agent's planner to the model request, and splitting the reply into a plan and an answer.
 
+### Runner
+
+- [Resuming an invocation](runner/invocation_resume/index.md) - How the runner
+  decides which invocation a message belongs to, and how to resume one.
+
 ### Sessions
 
 - [DatabaseSessionService](sessions/database_session_service/index.md) - Storing sessions in SQL, rejecting stale writes, and reading user state.

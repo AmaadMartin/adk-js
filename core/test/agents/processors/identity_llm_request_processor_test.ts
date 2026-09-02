@@ -57,6 +57,16 @@ async function runAgentOnce(agent: LlmAgent): Promise<void> {
   }
 }
 
+/**
+ * Runs an agent on an invocation context of its own, for a mode the runner
+ * refuses as a root. The agent builds its request the same way either way.
+ */
+async function runAgentOffRoot(agent: LlmAgent): Promise<void> {
+  for await (const _ of agent.runAsync(createMockInvocationContext(agent))) {
+    // intentionally empty
+  }
+}
+
 class MockRootAgent extends BaseAgent {
   constructor(name: string, subAgents: BaseAgent[] = []) {
     super({name, subAgents});
@@ -367,7 +377,7 @@ describe('identity instruction in the LlmAgent request chain', () => {
       instruction: 'Reply with one of: bug, feature, question.',
     });
 
-    await runAgentOnce(agent);
+    await runAgentOffRoot(agent);
 
     expect(model.lastRequest?.config?.systemInstruction).toBe(
       'Reply with one of: bug, feature, question.',
