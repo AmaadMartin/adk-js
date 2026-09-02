@@ -9,7 +9,9 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
+import {timeoutErrorName} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
+import {getLogger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
 import {
@@ -20,12 +22,93 @@ import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
 import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
 
+export {snakeToLowerCamel} from '../../utils/case_utils.js';
+
+const logger = getLogger();
+
+/**
+ * Per-phase budgets, in milliseconds, for one REST API call. Mirrors the
+ * `httpx.Timeout` adk-python configures on its default client, so an API is
+ * given the same amount of time by either SDK.
+ */
+export interface RequestTimeout {
+  /** Opening the connection. */
+  connectMs: number;
+  /** Waiting for a connection from the pool. */
+  poolMs: number;
+  /** Waiting for response bytes. */
+  readMs: number;
+  /** Sending the request body. */
+  writeMs: number;
+}
+
+/**
+ * Connection setup stays short so an unreachable peer fails fast instead of
+ * occupying the invocation; the transfer budgets stay generous, because a
+ * legitimate API can be slow. The values match adk-python's `_DEFAULT_TIMEOUT`.
+ */
+export const DEFAULT_REQUEST_TIMEOUT: RequestTimeout = {
+  connectMs: 10_000,
+  poolMs: 10_000,
+  readMs: 600_000,
+  writeMs: 600_000,
+};
+
+/** Options accepted by {@link RestApiTool} and {@link createRestApiTool}. */
+export interface RestApiToolOptions {
+  /** Keeps the operation's property names instead of camelCasing them. */
+  preservePropertyNames?: boolean;
+  /** Supplies extra request headers for each call. */
+  headerProvider?: (context: ReadonlyContext) => Record<string, string>;
+  /** Names the slot the tool's credential is stored under. */
+  credentialKey?: string;
+  /** Overrides part of {@link DEFAULT_REQUEST_TIMEOUT}. */
+  timeout?: Partial<RequestTimeout>;
+}
+
+/**
+ * Merges timeout overrides over {@link DEFAULT_REQUEST_TIMEOUT}.
+ *
+ * @throws {Error} If a supplied budget is not a finite number above zero.
+ */
+export function resolveRequestTimeout(
+  overrides: Partial<RequestTimeout> = {},
+): RequestTimeout {
+  const timeout = {...DEFAULT_REQUEST_TIMEOUT, ...overrides};
+  for (const [phase, budget] of Object.entries(timeout)) {
+    if (!Number.isFinite(budget) || budget <= 0) {
+      throw new Error(
+        `Invalid request timeout '${phase}': ${budget}. Expected a finite ` +
+          `number of milliseconds greater than zero.`,
+      );
+    }
+  }
+  return timeout;
+}
+
+/**
+ * Collapses the four phase budgets into the single deadline `fetch` accepts.
+ *
+ * `fetch` aborts a whole request rather than one phase of it, so the phases
+ * that run in sequence are summed: a call waits for a pooled connection, then
+ * opens it, then transfers. Reading and writing overlap, so the larger of the
+ * two is taken.
+ */
+export function requestDeadlineMs(timeout: RequestTimeout): number {
+  return (
+    timeout.poolMs +
+    timeout.connectMs +
+    Math.max(timeout.readMs, timeout.writeMs)
+  );
+}
+
 @experimental
 export class RestApiTool extends BaseTool {
   private operationParser: OperationParser;
 
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
+  private readonly timeout: RequestTimeout;
 
   constructor(
     name: string,
@@ -34,17 +117,14 @@ export class RestApiTool extends BaseTool {
     private readonly operation: OpenAPIV3.OperationObject,
     private authScheme?: OpenAPIV3.SecuritySchemeObject,
     private authCredential?: AuthCredential,
-    options: {
-      preservePropertyNames?: boolean;
-      headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-      credentialKey?: string;
-    } = {},
+    options: RestApiToolOptions = {},
   ) {
     super({name, description});
     this.authScheme = authScheme;
     this.authCredential = authCredential;
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
+    this.timeout = resolveRequestTimeout(options.timeout);
     this.operationParser = new OperationParser(operation, options);
   }
 
@@ -136,6 +216,7 @@ export class RestApiTool extends BaseTool {
         headers,
         // eslint-disable-next-line no-undef
         body: body as BodyInit,
+        signal: AbortSignal.timeout(requestDeadlineMs(this.timeout)),
       });
 
       const contentType = response.headers.get('content-type');
@@ -144,7 +225,23 @@ export class RestApiTool extends BaseTool {
       } else {
         return await response.text();
       }
-    } catch (error) {
+    } catch (error: unknown) {
+      const timeoutName = timeoutErrorName(error);
+      if (timeoutName !== undefined) {
+        // An apiKey scheme can put a secret in the query string, so only the
+        // path is logged. adk-python logs a URL without a query string too.
+        logger.warn(
+          `API call timed out for tool ${this.name}: ${method} ` +
+            `${url.split('?')[0]}`,
+        );
+        return {
+          error:
+            `Tool ${this.name} execution failed. Analyze this execution error` +
+            ' and your inputs. Retry with adjustments if applicable. But' +
+            " make sure don't retry more than 3 times. Execution Error:" +
+            ` Request timed out (${timeoutName}).`,
+        };
+      }
       return {
         error: `Failed to execute API call: ${(error as Error).message}`,
       };
@@ -181,6 +278,41 @@ function encodePathParamValue(name: string, value: string): string {
   return encodeURIComponent(value);
 }
 
+/**
+ * Encodes one query value the way adk-python's transport does: a null becomes
+ * the empty string and everything else its own string form. Nothing is
+ * JSON-encoded, so an object a model passed against the schema is stringified
+ * rather than serialized.
+ */
+function queryValueToString(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+/**
+ * Adds one query parameter, matching what adk-python sends.
+ *
+ * A null or undefined parameter is omitted, because a model routinely sends
+ * one for an optional parameter it has no value for and `?cursor=null` is a
+ * value the server reads. `false`, `0` and `''` are values the model chose, so
+ * they survive. An array repeats the key once per element.
+ */
+function appendQueryParam(
+  queryParams: URLSearchParams,
+  name: string,
+  value: unknown,
+): void {
+  if (value === null || value === undefined) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const element of value) {
+      queryParams.append(name, queryValueToString(element));
+    }
+    return;
+  }
+  queryParams.append(name, queryValueToString(value));
+}
+
 export function prepareRequestParams(
   endpoint: OperationEndpoint,
   parameters: ApiParameter[],
@@ -207,7 +339,7 @@ export function prepareRequestParams(
         String(argValue),
       );
     } else if (location === 'query') {
-      queryParams.append(originalName, String(argValue));
+      appendQueryParam(queryParams, originalName, argValue);
     } else if (location === 'header') {
       headers[originalName] = String(argValue);
     } else if (location === 'body') {
@@ -312,11 +444,7 @@ export function createRestApiTool(
     operation: OpenAPIV3.OperationObject;
     authScheme?: OpenAPIV3.SecuritySchemeObject;
   },
-  options: {
-    preservePropertyNames?: boolean;
-    headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-    credentialKey?: string;
-  } = {},
+  options: RestApiToolOptions = {},
 ): RestApiTool {
   return new RestApiTool(
     parsed.name,
