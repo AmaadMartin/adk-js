@@ -20,7 +20,7 @@ import {
   StreamingMode,
   ToolExecutionError,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import {Content, Type} from '@google/genai';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it, vi} from 'vitest';
 
@@ -535,8 +535,11 @@ interface NestedRun {
 async function runNested(
   args: Record<string, unknown>,
   parentRunConfig?: RunConfig,
+  agent: LlmAgent = new LlmAgent({
+    name: 'sub-agent',
+    description: 'a sub agent',
+  }),
 ): Promise<NestedRun> {
-  const agent = new LlmAgent({name: 'sub-agent', description: 'a sub agent'});
   const tool = new AgentTool({agent});
   const session = createSession({
     id: 'parent-session',
@@ -663,6 +666,27 @@ describe('AgentTool prompt text without an input schema', () => {
     const nested = await runNested({request: ''});
 
     expect(nested.text).toBe('');
+  });
+});
+
+describe('AgentTool prompt text with an input schema', () => {
+  it('leaves the schema branch serializing the arguments as they arrive', async () => {
+    const agent = new LlmAgent({
+      name: 'sub-agent',
+      description: 'a sub agent',
+      inputSchema: {
+        type: Type.OBJECT,
+        properties: {product: {type: Type.STRING}, brand: {type: Type.STRING}},
+      },
+    });
+
+    const nested = await runNested(
+      {product: 'shoes', brand: 'Nike'},
+      undefined,
+      agent,
+    );
+
+    expect(nested.text).toBe('{"product":"shoes","brand":"Nike"}');
   });
 });
 
