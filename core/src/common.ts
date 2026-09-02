@@ -88,6 +88,10 @@ export type {
   LoadArtifactRequest,
   SaveArtifactRequest,
 } from './artifacts/base_artifact_service.js';
+export type {
+  GetAuthenticatedUrlRequest,
+  GetSignedUrlRequest,
+} from './artifacts/gcs_artifact_service.js';
 export {InMemoryArtifactService} from './artifacts/in_memory_artifact_service.js';
 export type {
   SessionArtifactService,
