@@ -5,8 +5,11 @@
  */
 
 import {getClientLabels} from '../utils/client_labels.js';
+import {logger} from '../utils/logger.js';
+import {geminiOutputSchemaAndTools} from '../utils/output_schema_utils.js';
 
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {LlmCapabilities} from './capabilities.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
 
@@ -15,6 +18,16 @@ import {LlmResponse} from './llm_response.js';
  * Defined once and shared by all BaseLlm instances.
  */
 const BASE_MODEL_SYMBOL = Symbol.for('google.adk.baseModel');
+
+/**
+ * The subclasses already told to migrate off the name-based fallback, so the
+ * notice is logged once per class rather than once per access.
+ *
+ * Keyed on the constructor rather than on its name: a minifier collapses
+ * unrelated names, and a weak reference lets a class that goes out of scope be
+ * collected.
+ */
+const warnedNameBasedModels = new WeakSet<object>();
 
 /**
  * Type guard to check if an object is an instance of BaseLlm.
@@ -52,6 +65,77 @@ export abstract class BaseLlm {
   }
 
   /**
+   * The capabilities of this model instance.
+   *
+   * Subclasses override this to declare what they support, so that callers can
+   * ask the model instead of deriving support from its name, backend variant,
+   * or type. A model that does not override it falls back to name-based
+   * detection, which reproduces the behavior that predates this property.
+   *
+   * Build on what the parent reports when subclassing a shipped model, so that
+   * capabilities the override does not name keep the parent's value:
+   *
+   * ```ts
+   * class MyGemini extends Gemini {
+   *   override get capabilities(): LlmCapabilities {
+   *     return {...super.capabilities, outputSchemaAndTools: true};
+   *   }
+   * }
+   * ```
+   *
+   * Declare every capability outright when subclassing `BaseLlm` directly,
+   * rather than spreading `super.capabilities`, which would route through the
+   * deprecated name-based fallback below:
+   *
+   * ```ts
+   * class MyModel extends BaseLlm {
+   *   override get capabilities(): LlmCapabilities {
+   *     return {outputSchemaAndTools: true};
+   *   }
+   * }
+   * ```
+   *
+   * An override stays a plain getter and never caches: a capability may depend
+   * on state that changes after construction, such as an environment variable.
+   *
+   * @return A fresh snapshot of the resolved capabilities.
+   */
+  get capabilities(): LlmCapabilities {
+    return {outputSchemaAndTools: this.legacyOutputSchemaAndTools()};
+  }
+
+  /**
+   * Name-based fallback for models that do not report the capability.
+   *
+   * The warning fires only when the fallback grants the capability, because
+   * those are the only models whose behavior changes once it is removed.
+   * `Gemini` declares {@link capabilities} outright and never reaches it.
+   *
+   * @deprecated It exists so that a model defined outside ADK keeps resolving
+   * the way it did before {@link capabilities}, when support was inferred from
+   * the model name rather than declared by the model. It is removed once such
+   * models declare the capability explicitly.
+   *
+   * @return True if the model name grants an output schema alongside tools.
+   */
+  private legacyOutputSchemaAndTools(): boolean {
+    if (!geminiOutputSchemaAndTools(this.model)) {
+      return false;
+    }
+    if (!warnedNameBasedModels.has(this.constructor)) {
+      warnedNameBasedModels.add(this.constructor);
+      // `constructor.name` names the class in the message; it is not a type
+      // check, so the ban on identifying types by class name does not apply.
+      logger.warn(
+        `${this.constructor.name} relies on name-based detection of ` +
+          'outputSchemaAndTools. Override BaseLlm.capabilities to declare it ' +
+          'explicitly; this fallback will be removed in a future release.',
+      );
+    }
+    return true;
+  }
+
+  /**
    * List of supported models in regex for LlmRegistry.
    */
   static readonly supportedModels: Array<string | RegExp> = [];
@@ -59,24 +143,38 @@ export abstract class BaseLlm {
   /**
    * Generates one content from the given contents and tools.
    *
-   * @param llmRequest  LlmRequest, the request to send to the LLM.
-   * @param stream whether to do streaming call.
-   * For non-streaming call, it will only yield one Content.
+   * Subclasses that support unidirectional generation override this. The base
+   * implementation throws on first iteration.
+   *
+   * @param _llmRequest LlmRequest, the request to send to the LLM; unused by
+   * the base implementation.
+   * @param _stream whether to do streaming call. For non-streaming call, it
+   * will only yield one Content.
+   * @param _abortSignal Aborts an in-flight call.
    * @return A generator of LlmResponse.
    */
-  abstract generateContentAsync(
-    llmRequest: LlmRequest,
-    stream?: boolean,
-    abortSignal?: AbortSignal,
-  ): AsyncGenerator<LlmResponse, void>;
+  // eslint-disable-next-line require-yield -- the base implementation always throws; there is nothing to emit.
+  async *generateContentAsync(
+    _llmRequest: LlmRequest,
+    _stream?: boolean,
+    _abortSignal?: AbortSignal,
+  ): AsyncGenerator<LlmResponse, void> {
+    throw new Error(`Async generation is not supported for ${this.model}.`);
+  }
 
   /**
    * Creates a live connection to the LLM.
    *
-   * @param llmRequest LlmRequest, the request to send to the LLM.
+   * Subclasses that support bidirectional streaming override this. The base
+   * implementation rejects.
+   *
+   * @param _llmRequest LlmRequest, the request to send to the LLM; unused by
+   * the base implementation.
    * @return A live connection to the LLM.
    */
-  abstract connect(llmRequest: LlmRequest): Promise<BaseLlmConnection>;
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error(`Live connection is not supported for ${this.model}.`);
+  }
 
   protected get trackingHeaders(): Record<string, string> {
     const labels = getClientLabels();
