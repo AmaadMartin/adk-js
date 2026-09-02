@@ -201,6 +201,12 @@ export type {
   InferenceRequest,
   InferenceResult,
 } from './evaluation/base_eval_service.js';
+export {evalModel} from './evaluation/common.js';
+export type {
+  EvalDumpOptions,
+  EvalModel,
+  EvalModelOptions,
+} from './evaluation/common.js';
 export {
   DEFAULT_LIVE_TIMEOUT_SECONDS,
   MISSING_EVAL_DEPENDENCIES_MESSAGE,
