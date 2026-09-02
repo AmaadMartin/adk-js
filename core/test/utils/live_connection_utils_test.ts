@@ -971,6 +971,82 @@ describe('LiveResponseAggregator', () => {
     ]);
   });
 
+  it('should keep the interrupted flag on a text flush caused by turnComplete', () => {
+    const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
+
+    Array.from(
+      aggregator.processMessage(
+        liveServerMessage({
+          serverContent: {modelTurn: {parts: [{text: 'Hello'}]}},
+        }),
+      ),
+    );
+
+    const res = Array.from(
+      aggregator.processMessage(
+        liveServerMessage({
+          serverContent: {turnComplete: true, interrupted: true},
+        }),
+      ),
+    );
+
+    expect(res).toEqual([
+      {
+        content: {role: 'model', parts: [{text: 'Hello'}]},
+        partial: false,
+        interrupted: true,
+        modelVersion: 'gemini-2.5-flash',
+      },
+      {
+        turnComplete: true,
+        interrupted: true,
+        modelVersion: 'gemini-2.5-flash',
+      },
+      {
+        interrupted: true,
+        modelVersion: 'gemini-2.5-flash',
+      },
+    ]);
+  });
+
+  it('should clear the grounding the turnComplete response itself carried', () => {
+    const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
+    const groundingMetadata: GroundingMetadata = {
+      retrievalQueries: ['query1'],
+      groundingChunks: [{web: {uri: 'https://example.com'}}],
+    };
+
+    Array.from(
+      aggregator.processMessage(
+        liveServerMessage({serverContent: {groundingMetadata}}),
+      ),
+    );
+    const res1 = Array.from(
+      aggregator.processMessage(
+        liveServerMessage({serverContent: {turnComplete: true}}),
+      ),
+    );
+    expect(res1).toEqual([
+      {
+        turnComplete: true,
+        groundingMetadata,
+        modelVersion: 'gemini-2.5-flash',
+      },
+    ]);
+
+    const res2 = Array.from(
+      aggregator.processMessage(
+        liveServerMessage({serverContent: {turnComplete: true}}),
+      ),
+    );
+    expect(res2).toEqual([
+      {
+        turnComplete: true,
+        modelVersion: 'gemini-2.5-flash',
+      },
+    ]);
+  });
+
   it('should attach the accumulated grounding to an interrupt with no pending text', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
 
