@@ -147,8 +147,16 @@ export class RestApiTool extends BaseTool {
     }
 
     // The default headers are last: a default never replaces a header the
-    // request already carries.
-    addMissingHeaders(headers, this.defaultHeaders);
+    // request already carries. `Headers` supplies the case-insensitive name
+    // comparison; the request keeps the header names its caller chose.
+    const present = new Headers(headers);
+    for (const [name, value] of Object.entries(this.defaultHeaders)) {
+      if (present.has(name)) {
+        continue;
+      }
+      present.set(name, value);
+      headers[name] = value;
+    }
 
     try {
       const response = await globalThis.fetch(url, {
@@ -199,24 +207,6 @@ function encodePathParamValue(name: string, value: string): string {
     );
   }
   return encodeURIComponent(value);
-}
-
-/**
- * Adds the headers the request does not carry yet, and leaves the ones it
- * does. Names are compared without case, because `fetch` sends both spellings
- * when a record holds two of one header name.
- */
-function addMissingHeaders(
-  headers: Record<string, string>,
-  additions: Record<string, string> = {},
-): void {
-  const present = new Set(Object.keys(headers).map((key) => key.toLowerCase()));
-  for (const [key, value] of Object.entries(additions)) {
-    if (!present.has(key.toLowerCase())) {
-      headers[key] = value;
-      present.add(key.toLowerCase());
-    }
-  }
 }
 
 export function prepareRequestParams(

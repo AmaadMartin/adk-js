@@ -11,9 +11,6 @@ import {
   GoogleApiToOpenApiConverter,
   convertDiscoveryDocument,
 } from '@google/adk';
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -938,55 +935,6 @@ describe('GoogleApiToOpenApiConverter', () => {
       await converter.convert();
 
       expect(loadCertsMock).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('saveOpenApiSpec', () => {
-    let outputDir: string;
-
-    beforeEach(async () => {
-      outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-openapi-'));
-    });
-
-    afterEach(async () => {
-      await fs.rm(outputDir, {recursive: true, force: true});
-    });
-
-    it('writes the converted document as indented JSON', async () => {
-      const outputPath = path.join(outputDir, 'calendar_openapi.json');
-      const converter = new GoogleApiToOpenApiConverter('calendar', 'v3');
-      const spec = await converter.convert();
-
-      await converter.saveOpenApiSpec(outputPath);
-
-      const written = await fs.readFile(outputPath, 'utf-8');
-      expect(JSON.parse(written)).toEqual(spec);
-      expect(written).toBe(JSON.stringify(spec, null, 2));
-    });
-
-    it('converts on demand when saving before converting', async () => {
-      const outputPath = path.join(outputDir, 'lazy.json');
-
-      await new GoogleApiToOpenApiConverter('calendar', 'v3').saveOpenApiSpec(
-        outputPath,
-      );
-
-      const written = JSON.parse(await fs.readFile(outputPath, 'utf-8'));
-      expect(written.info.title).toBe('Google Calendar API');
-      expect(Object.keys(written.paths).length).toBeGreaterThan(0);
-    });
-
-    it('writes the document convert returned, not a fresh conversion', async () => {
-      const outputPath = path.join(outputDir, 'held.json');
-      const converter = new GoogleApiToOpenApiConverter('calendar', 'v3');
-      const spec = await converter.convert();
-      spec.info.title = 'Edited in place';
-
-      await converter.saveOpenApiSpec(outputPath);
-
-      const written = JSON.parse(await fs.readFile(outputPath, 'utf-8'));
-      expect(written.info.title).toBe('Edited in place');
-      expect(requestMock).toHaveBeenCalledTimes(1);
     });
   });
 });

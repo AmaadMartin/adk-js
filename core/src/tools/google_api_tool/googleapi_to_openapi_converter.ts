@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import * as fs from 'node:fs/promises';
 import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
@@ -519,13 +518,12 @@ export function convertDiscoveryDocument(
 /**
  * Converts a Google API Discovery document to an OpenAPI 3.0 document.
  *
- * The document is fetched once, on the first `convert()` or `saveOpenApiSpec()`.
+ * The document is fetched once, on the first `convert()`.
  *
  * @example
  * ```ts
  * const converter = new GoogleApiToOpenApiConverter('calendar', 'v3');
  * const spec = await converter.convert();
- * await converter.saveOpenApiSpec('calendar_openapi.json');
  * ```
  *
  * Set `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` to present the SecureConnect
@@ -537,7 +535,6 @@ export class GoogleApiToOpenApiConverter {
   private readonly discoveryUrl?: string;
   private readonly useClientCert: boolean;
   private googleApiSpec?: DiscoveryDocument;
-  private openApiSpec?: OpenAPIV3.Document;
 
   /**
    * @param apiName The Discovery API id, e.g. `calendar`.
@@ -560,24 +557,9 @@ export class GoogleApiToOpenApiConverter {
   async convert(): Promise<OpenAPIV3.Document> {
     const doc = this.googleApiSpec ?? (await this.fetchDocument());
     this.googleApiSpec = doc;
-    this.openApiSpec = convertDiscoveryDocument(
-      doc,
-      this.apiName,
-      this.apiVersion,
-      {useClientCert: this.useClientCert},
-    );
-    return this.openApiSpec;
-  }
-
-  /**
-   * Writes the OpenAPI document to `outputPath` as JSON, indented by two
-   * spaces. It converts first when {@link convert} has not run yet.
-   */
-  @experimental
-  async saveOpenApiSpec(outputPath: string): Promise<void> {
-    const spec = this.openApiSpec ?? (await this.convert());
-    await fs.writeFile(outputPath, JSON.stringify(spec, null, 2), 'utf-8');
-    logger.debug(`OpenAPI specification saved to ${outputPath}`);
+    return convertDiscoveryDocument(doc, this.apiName, this.apiVersion, {
+      useClientCert: this.useClientCert,
+    });
   }
 
   private async fetchDocument(): Promise<DiscoveryDocument> {

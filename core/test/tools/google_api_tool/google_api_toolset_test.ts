@@ -11,7 +11,6 @@ import {
   createSession,
   GoogleApiTool,
   GoogleApiToolset,
-  googleOidcAuthScheme,
   InvocationContext,
   PluginManager,
   ReadonlyContext,
@@ -19,7 +18,11 @@ import {
   ServiceAccount,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
+// Not re-exported from the package root: the scheme builder is an
+// implementation detail of the toolset, matching adk-python's private
+// `_load_toolset_with_oidc_auth`.
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {googleOidcAuthScheme} from '../../../src/tools/google_api_tool/google_api_toolset.js';
 import {CALENDAR_DISCOVERY_DOCUMENT} from './discovery_fixtures.js';
 import {capturedRequest, respondWith} from './https_transport_fake.js';
 
