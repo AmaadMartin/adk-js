@@ -66,7 +66,9 @@ export class GoogleSearchTool extends BuiltInTool {
     bypassMultiToolsLimit = false,
     model,
   }: GoogleSearchToolParams = {}) {
-    super({name: 'google_search', description: 'Google Search Tool'});
+    // The model runs this tool itself, so it reads neither the name nor the
+    // description. Both match adk-python.
+    super({name: 'google_search', description: 'google_search'});
 
     this.bypassMultiToolsLimit = bypassMultiToolsLimit;
     this.model = model;
@@ -99,7 +101,11 @@ export class GoogleSearchTool extends BuiltInTool {
       return;
     }
 
-    if (isGeminiModel(model) || modelCheckDisabled) {
+    if (
+      isGeminiModel(model) ||
+      modelCheckDisabled ||
+      llmRequest.isManagedAgent
+    ) {
       llmRequest.config.tools.push({
         googleSearch: {},
       });

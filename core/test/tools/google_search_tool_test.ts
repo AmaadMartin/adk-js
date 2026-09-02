@@ -20,13 +20,18 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 
 const MODEL_ID_CHECK_ENV_VAR = 'ADK_DISABLE_GEMINI_MODEL_ID_CHECK';
 
-function makeRequest(model?: string, tools: Tool[] = []): LlmRequest {
+function makeRequest(
+  model?: string,
+  tools: Tool[] = [],
+  isManagedAgent?: boolean,
+): LlmRequest {
   return {
     model,
     config: {tools},
     contents: [],
     toolsDict: {},
     liveConnectConfig: {},
+    isManagedAgent,
   };
 }
 
@@ -166,6 +171,61 @@ describe('GoogleSearchTool', () => {
         ).rejects.toThrow(
           'Google search tool is not supported for model internal-model-v1',
         );
+      });
+    });
+
+    describe('managed-agent requests', () => {
+      it('adds googleSearch for a managed-agent request with no model', async () => {
+        const tool = new GoogleSearchTool();
+        const req = makeRequest(undefined, [], true);
+
+        await tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: makeToolContext(),
+        });
+
+        expect(req.config!.tools).toEqual([{googleSearch: {}}]);
+      });
+
+      it('adds googleSearch for a managed-agent request with a non-Gemini model', async () => {
+        const tool = new GoogleSearchTool();
+        const req = makeRequest('claude-3-sonnet', [], true);
+
+        await tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: makeToolContext(),
+        });
+
+        expect(req.config!.tools).toEqual([{googleSearch: {}}]);
+      });
+
+      it('appends googleSearch after the tools already on a managed-agent request', async () => {
+        const tool = new GoogleSearchTool();
+        const existingTool: Tool = {functionDeclarations: [{name: 'get_time'}]};
+        const req = makeRequest(undefined, [existingTool], true);
+
+        await tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: makeToolContext(),
+        });
+
+        expect(req.config!.tools).toEqual([existingTool, {googleSearch: {}}]);
+      });
+
+      it('still throws for a non-Gemini model when the request is not managed', async () => {
+        const tool = new GoogleSearchTool();
+        const req = makeRequest('claude-3-sonnet', [], false);
+
+        await expect(
+          tool.processLlmRequest({
+            llmRequest: req,
+            toolContext: makeToolContext(),
+          }),
+        ).rejects.toThrow(
+          'Google search tool is not supported for model claude-3-sonnet',
+        );
+
+        expect(req.config!.tools).toEqual([]);
       });
     });
 
@@ -346,6 +406,13 @@ describe('GoogleSearchTool', () => {
         {googleSearchRetrieval: {}},
       ]);
     });
+  });
+
+  it('describes itself as google_search', () => {
+    const tool = new GoogleSearchTool();
+
+    expect(tool.name).toBe('google_search');
+    expect(tool.description).toBe('google_search');
   });
 
   it('exposes the constructor defaults', () => {
