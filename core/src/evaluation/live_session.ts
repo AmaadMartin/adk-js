@@ -51,6 +51,22 @@ const TURN_ENDING_FUNCTION_CALLS: ReadonlySet<string> = new Set([
   TASK_COMPLETED_FUNCTION_CALL_NAME,
 ]);
 
+/**
+ * Whether an event opens a tool round the agent still owes an answer to.
+ *
+ * An event carrying only turn-ending calls does not: the agent handed off, so
+ * the `turnComplete` after it ends the turn. One ordinary call is enough to
+ * open the round, even alongside a turn-ending one.
+ *
+ * @param event The event the driver just received.
+ * @returns Whether the turn must survive the next `turnComplete`.
+ */
+export function opensToolRound(event: Event): boolean {
+  return getFunctionCalls(event).some(
+    (call) => !TURN_ENDING_FUNCTION_CALLS.has(call.name ?? ''),
+  );
+}
+
 /** WebSocket close code the Live API reports for a normal closure. */
 const WEBSOCKET_NORMAL_CLOSURE_CODE = 1000;
 
@@ -357,59 +373,47 @@ export class EvalLiveSession {
    * on the way through. adk-js's `Runner.runLive` refuses a workflow root, so
    * this driver runs the node itself and therefore appends the events too. The
    * session ends up holding the same events either way.
+   *
+   * A normal WebSocket closure ends the stream rather than failing the eval
+   * case. {@link close} applies that policy for both drivers, so it is not
+   * repeated here.
    */
   private async consumeNodeEvents(workflow: Workflow): Promise<void> {
     const callbackContextByAuthor = await this.recordNodeAppDetails(workflow);
     const invocationContext = this.newLiveInvocationContext(undefined);
 
     let inFunctionCallLoop = false;
-    try {
-      for await (const event of runNodeAsInvocation(
-        workflow,
-        invocationContext,
-      )) {
-        event.invocationId = this.invocationId;
-        const callbackContext = callbackContextByAuthor.get(event.author);
-        if (callbackContext !== undefined) {
-          await this.runner.pluginManager.runAfterModelCallback({
-            callbackContext,
-            llmResponse: event,
-          });
-        }
-        this.eventQueue.push(event);
-        if (!event.partial) {
-          await this.runner.sessionService.appendEvent({
-            session: this.session,
-            event,
-          });
-        }
+    for await (const event of runNodeAsInvocation(
+      workflow,
+      invocationContext,
+    )) {
+      event.invocationId = this.invocationId;
+      const callbackContext = callbackContextByAuthor.get(event.author);
+      if (callbackContext !== undefined) {
+        await this.runner.pluginManager.runAfterModelCallback({
+          callbackContext,
+          llmResponse: event,
+        });
+      }
+      this.eventQueue.push(event);
+      if (!event.partial) {
+        await this.runner.sessionService.appendEvent({
+          session: this.session,
+          event,
+        });
+      }
 
-        // A call that ends the agent and hands off does not open a tool round,
-        // so an event carrying only those must leave the guard alone. An event
-        // that also carries an ordinary call still arms it.
-        if (
-          getFunctionCalls(event).some(
-            (call) => !TURN_ENDING_FUNCTION_CALLS.has(call.name ?? ''),
-          )
-        ) {
-          inFunctionCallLoop = true;
-        }
+      if (opensToolRound(event)) {
+        inFunctionCallLoop = true;
+      }
 
-        if (event.turnComplete && event.author !== USER_AUTHOR) {
-          if (inFunctionCallLoop) {
-            inFunctionCallLoop = false;
-          } else {
-            this.turnSignal.resolve();
-          }
+      if (event.turnComplete && event.author !== USER_AUTHOR) {
+        if (inFunctionCallLoop) {
+          inFunctionCallLoop = false;
+        } else {
+          this.turnSignal.resolve();
         }
       }
-    } catch (error: unknown) {
-      // A clean close ends the stream. Keep the transcript collected so far
-      // rather than failing the eval case over it.
-      if (!isNormalClosure(error)) {
-        throw error;
-      }
-      logger.debug('Ignored WebSocket normal closure:', error);
     }
   }
 
@@ -461,7 +465,7 @@ export class EvalLiveSession {
    *
    * @param agent The agent whose request is recorded. It is the agent
    *     `invocationContext` runs, passed explicitly because the context types
-   *     its own as any `BaseAgent`.
+   *     its own agent as a plain `BaseAgent`.
    * @param invocationContext The context the request is built under.
    * @returns The callback context, which the driver reuses for every
    *     `afterModelCallback`.

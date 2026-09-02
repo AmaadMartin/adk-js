@@ -10,6 +10,7 @@ import {
   BaseTool,
   Context,
   createEvent,
+  EdgeItem,
   Event,
   getLogger,
   InMemoryArtifactService,
@@ -21,6 +22,7 @@ import {
   LlmResponse,
   Logger,
   RunAsyncToolRequest,
+  RunnableNode,
   Runner,
   SequentialAgent,
   Session,
@@ -38,10 +40,11 @@ import {
   isNormalClosure,
   LIVE_RUN_CONFIG,
   LIVE_SHUTDOWN_TIMEOUT_SECONDS,
+  opensToolRound,
   requireLiveEvalRoot,
 } from '../../src/evaluation/live_session.js';
 
-import {FakeLiveLlm} from './test_helpers.js';
+import {FakeLiveConnection, FakeLiveLlm} from './test_helpers.js';
 
 const APP_NAME = 'live_eval_app';
 const USER_ID = 'live_eval_user';
@@ -92,7 +95,11 @@ class RecordingPlugin extends BasePlugin {
     llmResponse: LlmResponse;
   }> = [];
 
-  constructor() {
+  /**
+   * @param failForAgent Agent whose recording throws, so the driver's
+   *     skip-and-warn path runs. Every other agent is recorded as usual.
+   */
+  constructor(private readonly failForAgent?: string) {
     super('recording_plugin');
   }
 
@@ -100,6 +107,9 @@ class RecordingPlugin extends BasePlugin {
     callbackContext: Context;
     llmRequest: LlmRequest;
   }): Promise<LlmResponse | undefined> {
+    if (params.callbackContext.agentName === this.failForAgent) {
+      throw new Error(`cannot record ${this.failForAgent}`);
+    }
     this.beforeCalls.push(params);
     return;
   }
@@ -660,5 +670,482 @@ describe('EvalLiveSession', () => {
     } finally {
       setLogger(previousLogger);
     }
+  });
+});
+
+const WORKFLOW_NAME = 'eval_workflow';
+const RECORD_FAILURE_PREFIX = 'Failed to record app details for agent';
+const NODE_AGENT_NAME = 'node_agent';
+const OTHER_AGENT_NAME = 'other_agent';
+const OTHER_INSTRUCTION = 'Answer in two words.';
+
+/** A tool the node agent can run, so a scripted function call resolves. */
+class NamedTool extends BaseTool {
+  constructor(name: string) {
+    super({name, description: `Runs ${name}.`});
+  }
+
+  override _getDeclaration(): FunctionDeclaration {
+    return {name: this.name, description: this.description};
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return {done: true};
+  }
+}
+
+/** One agent of the workflow graph, and the script its own model replays. */
+interface NodeAgentSpec {
+  name: string;
+  script: Array<LlmResponse | Error>;
+  instruction?: string;
+  toolNames?: string[];
+}
+
+interface WorkflowHarness {
+  runner: Runner;
+  session: Session;
+  plugin: RecordingPlugin;
+  /** The connection each agent's model serves, by agent name. */
+  connections: Map<string, FakeLiveConnection>;
+}
+
+/**
+ * Builds a runner whose root is a workflow. Every agent is a graph node fanned
+ * out from `START`, so each drives its own connection concurrently.
+ */
+async function createWorkflowHarness(options: {
+  agents: NodeAgentSpec[];
+  extraNodes?: RunnableNode[];
+  plugin?: RecordingPlugin;
+}): Promise<WorkflowHarness> {
+  const sessionService = new InMemorySessionService();
+  const session = await sessionService.createSession({
+    appName: APP_NAME,
+    userId: USER_ID,
+  });
+  const connections = new Map<string, FakeLiveConnection>();
+  const nodes: RunnableNode[] = options.agents.map((spec) => {
+    const llm = new FakeLiveLlm();
+    llm.connection.emit(...spec.script);
+    connections.set(spec.name, llm.connection);
+    return new LlmAgent({
+      name: spec.name,
+      model: llm,
+      instruction: spec.instruction ?? INSTRUCTION,
+      tools: (spec.toolNames ?? []).map((name) => new NamedTool(name)),
+    });
+  });
+  // Chained rather than fanned out: a fan-out leaves two terminal nodes both
+  // producing output, which a workflow rejects.
+  const chain: RunnableNode[] = [...nodes, ...(options.extraNodes ?? [])];
+  const workflow = new Workflow({
+    name: WORKFLOW_NAME,
+    edges: chain.map(
+      (node, index): EdgeItem => [
+        index === 0 ? 'START' : chain[index - 1],
+        node,
+      ],
+    ),
+  });
+  const plugin = options.plugin ?? new RecordingPlugin();
+  const runner = new Runner({
+    appName: APP_NAME,
+    agent: workflow,
+    plugins: [plugin],
+    sessionService,
+    artifactService: new InMemoryArtifactService(),
+  });
+  return {runner, session, plugin, connections};
+}
+
+/** The connection of the named agent, failing the test when there is none. */
+function connectionOf(
+  harness: WorkflowHarness,
+  agentName: string,
+): FakeLiveConnection {
+  const connection = harness.connections.get(agentName);
+  if (connection === undefined) {
+    expect.fail(`the harness built no connection for ${agentName}`);
+  }
+  return connection;
+}
+
+/** A model response carrying one function call. */
+function callingResponse(...names: string[]): LlmResponse {
+  return {
+    content: {
+      role: 'model',
+      parts: names.map((name) => ({functionCall: {name, args: {}}})),
+    },
+  };
+}
+
+/** Only the warnings about a failed app-details recording. */
+function recordingFailures(recordingLogger: RecordingLogger): string[] {
+  return recordingLogger.warnings.filter((warning) =>
+    warning.startsWith(RECORD_FAILURE_PREFIX),
+  );
+}
+
+/** The names of the agents the driver recorded app details for. */
+function recordedAgentNames(harness: WorkflowHarness): string[] {
+  return harness.plugin.beforeCalls
+    .map((call) => call.callbackContext.agentName)
+    .sort();
+}
+
+describe('opensToolRound', () => {
+  const eventCalling = (...names: string[]): Event =>
+    createEvent({
+      author: NODE_AGENT_NAME,
+      invocationId: 'inv',
+      content: callingResponse(...names).content,
+    });
+
+  it.each(['finish_task', 'transfer_to_agent', 'task_completed'])(
+    'reports that %s opens no tool round',
+    (name) => {
+      expect(opensToolRound(eventCalling(name))).toBe(false);
+    },
+  );
+
+  it('reports that every turn-ending call together opens no tool round', () => {
+    expect(
+      opensToolRound(
+        eventCalling('finish_task', 'transfer_to_agent', 'task_completed'),
+      ),
+    ).toBe(false);
+  });
+
+  it('reports that an ordinary call opens a tool round', () => {
+    expect(opensToolRound(eventCalling('get_weather'))).toBe(true);
+  });
+
+  it('reports that an ordinary call alongside a handoff opens one', () => {
+    expect(opensToolRound(eventCalling('finish_task', 'get_weather'))).toBe(
+      true,
+    );
+  });
+
+  it('reports that an event with no call opens none', () => {
+    expect(opensToolRound(createEvent({author: NODE_AGENT_NAME}))).toBe(false);
+  });
+
+  it('treats a call with no name as an ordinary one', () => {
+    const event = createEvent({
+      author: NODE_AGENT_NAME,
+      content: {role: 'model', parts: [{functionCall: {args: {}}}]},
+    });
+
+    // Nothing says it hands off, so the turn stays open for its answer.
+    expect(opensToolRound(event)).toBe(true);
+  });
+});
+
+describe('EvalLiveSession with a workflow root', () => {
+  it('drives the workflow instead of refusing it', async () => {
+    const harness = await createWorkflowHarness({
+      agents: [{name: NODE_AGENT_NAME, script: [TEXT_REPLY, TURN_COMPLETE]}],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    liveSession.start();
+    await liveSession.turnComplete;
+    await liveSession.close();
+
+    const events = liveSession.eventQueue.drain();
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.map((event) => event.content?.parts?.[0]?.text)).toContain(
+      'sunny',
+    );
+    for (const event of events) {
+      expect(event.invocationId).toBe(liveSession.currentInvocationId);
+    }
+    expect(liveSession.isFinished).toBe(true);
+  });
+
+  it('keeps the turn open across a tool round', async () => {
+    const harness = await createWorkflowHarness({
+      agents: [
+        {
+          name: NODE_AGENT_NAME,
+          script: [callingResponse('get_weather'), TURN_COMPLETE],
+          toolNames: ['get_weather'],
+        },
+      ],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+    const settled = watchTurn(liveSession);
+
+    liveSession.start();
+    await drainPendingWork();
+
+    expect(settled()).toBe(false);
+    connectionOf(harness, NODE_AGENT_NAME).emit(TEXT_REPLY, TURN_COMPLETE);
+    await liveSession.turnComplete;
+    await liveSession.close();
+    expect(settled()).toBe(true);
+  });
+
+  it('lets the turn-complete after a finish_task call end the turn', async () => {
+    const harness = await createWorkflowHarness({
+      agents: [
+        {
+          name: NODE_AGENT_NAME,
+          script: [callingResponse('finish_task'), TURN_COMPLETE],
+          toolNames: ['finish_task'],
+        },
+      ],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+    const settled = watchTurn(liveSession);
+
+    liveSession.start();
+    await drainPendingWork();
+
+    // The call handed off; the turn-complete after it is the real end of turn.
+    expect(settled()).toBe(true);
+    await liveSession.close();
+  });
+
+  it('keeps the turn open when a handoff call rides with an ordinary one', async () => {
+    const harness = await createWorkflowHarness({
+      agents: [
+        {
+          name: NODE_AGENT_NAME,
+          script: [
+            callingResponse('finish_task', 'get_weather'),
+            TURN_COMPLETE,
+          ],
+          toolNames: ['finish_task', 'get_weather'],
+        },
+      ],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+    const settled = watchTurn(liveSession);
+
+    liveSession.start();
+    await drainPendingWork();
+
+    // `get_weather` still owes an answer, so this turn-complete is not the end.
+    expect(settled()).toBe(false);
+    connectionOf(harness, NODE_AGENT_NAME).emit(TEXT_REPLY, TURN_COMPLETE);
+    await liveSession.turnComplete;
+    await liveSession.close();
+    expect(settled()).toBe(true);
+  });
+
+  it('tolerates a normal closure', async () => {
+    const closure = Object.assign(new Error('closed'), {code: 1000});
+    const harness = await createWorkflowHarness({
+      agents: [{name: NODE_AGENT_NAME, script: [TEXT_REPLY, closure]}],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    liveSession.start();
+
+    await expect(liveSession.close()).resolves.toBeUndefined();
+    await expect(liveSession.turnComplete).resolves.toBeUndefined();
+    expect(liveSession.isFinished).toBe(true);
+  });
+
+  it('reports an abnormal closure', async () => {
+    const closure = Object.assign(new Error('dropped'), {code: 1011});
+    const harness = await createWorkflowHarness({
+      agents: [{name: NODE_AGENT_NAME, script: [closure]}],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    liveSession.start();
+
+    await expect(liveSession.close()).rejects.toThrow('dropped');
+  });
+
+  it("fires afterModelCallback with the event author's own context", async () => {
+    const harness = await createWorkflowHarness({
+      agents: [
+        {name: NODE_AGENT_NAME, script: [TEXT_REPLY, TURN_COMPLETE]},
+        {name: OTHER_AGENT_NAME, script: [TEXT_REPLY, TURN_COMPLETE]},
+      ],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    liveSession.start();
+    await liveSession.turnComplete;
+    await liveSession.close();
+
+    const events = liveSession.eventQueue.drain();
+    const callsFor = (name: string) =>
+      harness.plugin.afterCalls.filter(
+        (call) => call.callbackContext.agentName === name,
+      ).length;
+    const eventsFrom = (name: string) =>
+      events.filter((event) => event.author === name).length;
+    // Each agent's events carry that agent's context, not the first one's.
+    expect(eventsFrom(NODE_AGENT_NAME)).toBeGreaterThan(0);
+    expect(eventsFrom(OTHER_AGENT_NAME)).toBeGreaterThan(0);
+    expect(callsFor(NODE_AGENT_NAME)).toBe(eventsFrom(NODE_AGENT_NAME));
+    expect(callsFor(OTHER_AGENT_NAME)).toBe(eventsFrom(OTHER_AGENT_NAME));
+    // The context recorded for the author is reused, not rebuilt per event.
+    expect(harness.plugin.afterCalls[0]?.callbackContext).toBe(
+      harness.plugin.beforeCalls.find(
+        (call) => call.callbackContext.agentName === NODE_AGENT_NAME,
+      )?.callbackContext,
+    );
+  });
+
+  it('fires no afterModelCallback for an unrecorded author', async () => {
+    const recordingLogger = new RecordingLogger();
+    const previousLogger = getLogger();
+    setLogger(recordingLogger);
+    const plugin = new RecordingPlugin(NODE_AGENT_NAME);
+    const harness = await createWorkflowHarness({
+      agents: [
+        {name: NODE_AGENT_NAME, script: [TEXT_REPLY, TURN_COMPLETE]},
+        {name: OTHER_AGENT_NAME, script: [TEXT_REPLY, TURN_COMPLETE]},
+      ],
+      plugin,
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    try {
+      liveSession.start();
+      await liveSession.turnComplete;
+      await liveSession.close();
+    } finally {
+      setLogger(previousLogger);
+    }
+
+    // Recording the first agent failed, so the run continued with the second.
+    expect(recordedAgentNames(harness)).toEqual([OTHER_AGENT_NAME]);
+    expect(recordingFailures(recordingLogger)).toHaveLength(1);
+    expect(recordingFailures(recordingLogger)[0]).toContain(
+      `${RECORD_FAILURE_PREFIX} ${NODE_AGENT_NAME}.`,
+    );
+    expect(recordingFailures(recordingLogger)[0]).toContain(
+      `cannot record ${NODE_AGENT_NAME}`,
+    );
+    const events = liveSession.eventQueue.drain();
+    expect(events.some((event) => event.author === NODE_AGENT_NAME)).toBe(true);
+    expect(
+      harness.plugin.afterCalls.every(
+        (call) => call.callbackContext.agentName === OTHER_AGENT_NAME,
+      ),
+    ).toBe(true);
+  });
+
+  it('offers only the non-partial events to the session service', async () => {
+    const harness = await createWorkflowHarness({
+      agents: [
+        {
+          name: NODE_AGENT_NAME,
+          script: [
+            {content: {role: 'model', parts: [{text: 'sun'}]}, partial: true},
+            TEXT_REPLY,
+            TURN_COMPLETE,
+          ],
+        },
+      ],
+    });
+    const appended: Event[] = [];
+    const originalAppend = harness.runner.sessionService.appendEvent.bind(
+      harness.runner.sessionService,
+    );
+    vi.spyOn(harness.runner.sessionService, 'appendEvent').mockImplementation(
+      async (request) => {
+        appended.push(request.event);
+        return originalAppend(request);
+      },
+    );
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    liveSession.start();
+    await liveSession.turnComplete;
+    await liveSession.close();
+
+    const texts = appended.map((event) => event.content?.parts?.[0]?.text);
+    expect(texts).toContain('sunny');
+    expect(texts).not.toContain('sun');
+  });
+
+  it('records app details for each agent in the graph', async () => {
+    const harness = await createWorkflowHarness({
+      agents: [
+        {name: NODE_AGENT_NAME, script: [TEXT_REPLY, TURN_COMPLETE]},
+        {
+          name: OTHER_AGENT_NAME,
+          script: [TEXT_REPLY, TURN_COMPLETE],
+          instruction: OTHER_INSTRUCTION,
+        },
+      ],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    liveSession.start();
+    await liveSession.turnComplete;
+    await liveSession.close();
+
+    expect(recordedAgentNames(harness)).toEqual(
+      [NODE_AGENT_NAME, OTHER_AGENT_NAME].sort(),
+    );
+    const other = harness.plugin.beforeCalls.find(
+      (call) => call.callbackContext.agentName === OTHER_AGENT_NAME,
+    );
+    expect(
+      JSON.stringify(other?.llmRequest.config?.systemInstruction),
+    ).toContain(OTHER_INSTRUCTION);
+  });
+
+  it('records nothing for a workflow with no graph', async () => {
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: APP_NAME,
+      userId: USER_ID,
+    });
+    const plugin = new RecordingPlugin();
+    const runner = new Runner({
+      appName: APP_NAME,
+      agent: new Workflow({
+        name: WORKFLOW_NAME,
+        dynamicEntry: () => 'done',
+      }),
+      plugins: [plugin],
+      sessionService,
+    });
+    const liveSession = new EvalLiveSession(runner, session);
+
+    liveSession.start();
+    await liveSession.close();
+
+    expect(plugin.beforeCalls).toEqual([]);
+    expect(plugin.afterCalls).toEqual([]);
+  });
+
+  it('skips a graph node that is not an agent', async () => {
+    const recordingLogger = new RecordingLogger();
+    const previousLogger = getLogger();
+    setLogger(recordingLogger);
+    const harness = await createWorkflowHarness({
+      agents: [{name: NODE_AGENT_NAME, script: [TEXT_REPLY, TURN_COMPLETE]}],
+      extraNodes: [
+        function summarize() {
+          return 'summary';
+        },
+      ],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    try {
+      liveSession.start();
+      await liveSession.turnComplete;
+      await liveSession.close();
+    } finally {
+      setLogger(previousLogger);
+    }
+
+    expect(recordedAgentNames(harness)).toEqual([NODE_AGENT_NAME]);
+    // Skipped because it is not an agent, not because recording it failed.
+    expect(recordingFailures(recordingLogger)).toEqual([]);
   });
 });
