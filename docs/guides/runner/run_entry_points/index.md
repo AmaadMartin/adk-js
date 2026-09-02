@@ -76,13 +76,3 @@ An agent that throws an `Error` reports that same `Error` to the caller. An
 agent that terminates with something that is not an `Error` — a cancellation
 token, a bare string — reports an `Error` whose `cause` is the thrown value,
 so a caller cannot mistake it for its own control flow.
-
-## A related diagnostic
-
-An app whose agents can transfer between each other, and which sets no
-`App.contextCacheConfig`, logs one warning when the first `Runner` is built for
-it. Every transfer swaps the system instruction and the tool set, so the
-request prefix changes and the whole prompt is re-sent uncached. The warning
-fires once per app name. Set `contextCacheConfig` on the `App` to give each
-agent its own cache, or ignore the warning if the app is small enough that the
-re-sends do not matter.

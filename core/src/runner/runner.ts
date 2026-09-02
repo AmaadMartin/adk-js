@@ -18,7 +18,6 @@ import {
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
-import {canTransferBetweenAgents} from '../agents/transfer_utils.js';
 import {App} from '../apps/app.js';
 import {runSlidingWindowCompaction} from '../apps/compaction.js';
 import {EventsCompactionConfig} from '../apps/events_compaction_config.js';
@@ -183,37 +182,6 @@ function asRunFailure(thrown: unknown): Error {
   return new Error(`Agent run terminated by ${String(thrown)}.`, {
     cause: thrown,
   });
-}
-
-/** App names already warned about an uncached transfer, so each warns once. */
-const uncachedTransferApps = new Set<string>();
-
-/**
- * Warns once per app when agent transfer runs with no context cache.
- *
- * Every transfer swaps the system instruction and the tool set, so the request
- * prefix changes and the whole prompt is re-sent uncached. Ported from
- * `google/adk-python` `runners.py::Runner._warn_uncached_agent_transfer`.
- */
-function warnUncachedAgentTransfer(
-  appName: string,
-  contextCacheConfig: ContextCacheConfig | undefined,
-  root: RunnableRoot,
-): void {
-  if (contextCacheConfig || uncachedTransferApps.has(appName)) {
-    return;
-  }
-  if (!canTransferBetweenAgents(root)) {
-    return;
-  }
-  uncachedTransferApps.add(appName);
-  logger.warn(
-    `App "${appName}" can transfer between agents but has no ` +
-      'contextCacheConfig. Every transfer swaps the system instruction and ' +
-      'the tool set, so the request prefix changes and the whole prompt is ' +
-      're-sent uncached after each transfer. Set contextCacheConfig on the ' +
-      'app to give each agent its own cache.',
-  );
 }
 
 /**
