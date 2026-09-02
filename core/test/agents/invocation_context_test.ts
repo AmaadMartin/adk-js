@@ -11,6 +11,7 @@ import {
   BaseAgent,
   BaseAgentConfig,
   Event,
+  InMemoryCredentialService,
   InvocationContext,
   InvocationContextParams,
   LlmCallsLimitExceededError,
@@ -1984,5 +1985,34 @@ describe('drainInvocationEvents', () => {
     // producer that would wait on it again.
     await expect(enqueued).resolves.toBeUndefined();
     expect(queue.isClosed).toBe(true);
+  });
+});
+
+describe('InvocationContext credential service', () => {
+  const credentialService = new InMemoryCredentialService();
+
+  function makeContext(): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'invocation-1',
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+  }
+
+  it('keeps the credential service it was constructed with', () => {
+    // The field was declared and accepted but never assigned, so every tool
+    // that reads it — `AgentTool` forwards it to its nested runner — saw
+    // undefined however the runner was configured.
+    expect(makeContext().credentialService).toBe(credentialService);
+  });
+
+  it('carries the credential service into a sub-agent branch', () => {
+    const child = new InvocationContext({
+      ...makeContext(),
+      branch: 'parent.child',
+    });
+
+    expect(child.credentialService).toBe(credentialService);
   });
 });

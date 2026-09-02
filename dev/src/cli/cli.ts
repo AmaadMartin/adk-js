@@ -14,7 +14,8 @@ import {
   ApiServerOptions,
   createApiServer,
 } from '../server/api_server_factory.js';
-import {FileModuleType} from '../utils/agent_loader.js';
+import {FileModuleType, resolveAgentLocation} from '../utils/agent_loader.js';
+import {loadDotenvForAgent} from '../utils/envs.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {toMessage} from '../utils/value_utils.js';
@@ -481,6 +482,11 @@ export function createProgram(): Command {
         }
         applyFeatureOverrides(command);
         setAdkCoreLogLevel(getLogLevelFromOptions(options));
+
+        // Before the services: the agent's `.env` may hold the DATABASE_URL
+        // that decides which session service the run gets.
+        const location = resolveAgentLocation(agentPath);
+        loadDotenvForAgent(location.name, location.parentDir);
 
         const services = resolveServices({
           baseDir: path.dirname(getAbsolutePath(agentPath)),

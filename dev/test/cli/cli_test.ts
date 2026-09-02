@@ -8,6 +8,7 @@ import {
   DatabaseSessionService,
   FeatureName,
   FileArtifactService,
+  getSessionServiceFromUri,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
@@ -37,6 +38,11 @@ import {maybePromptForTelemetryConsent} from '../../src/cli/cli_telemetry.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {loadDotenvForAgent} from '../../src/utils/envs.js';
+
+vi.mock('../../src/utils/envs.js', () => ({
+  loadDotenvForAgent: vi.fn(),
+}));
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -77,10 +83,14 @@ vi.mock('../../src/version', () => ({
 }));
 
 vi.mock('@google/adk', async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = await importOriginal<typeof import('@google/adk')>();
   return {
     ...(actual as object),
     setLogLevel: vi.fn(),
+    // The storage tests below assert on the services this builds, so the mock
+    // keeps the real behaviour. Only the ordering test replaces it, for one
+    // call.
+    getSessionServiceFromUri: vi.fn(actual.getSessionServiceFromUri),
   };
 });
 
@@ -363,6 +373,43 @@ describe('CLI Entrypoint', () => {
 
       expect(runAgent).toHaveBeenCalledWith(
         expect.objectContaining({savedSessionFile: 'resume.json'}),
+      );
+    });
+
+    it("loads the agent's .env before building the session service", async () => {
+      // The `.env` may hold the DATABASE_URL the session service is built
+      // from, so a load after the service is a load too late.
+      const order: string[] = [];
+      vi.mocked(loadDotenvForAgent).mockImplementationOnce(() => {
+        order.push('dotenv');
+      });
+      vi.mocked(getSessionServiceFromUri).mockImplementationOnce(() => {
+        order.push('session-service');
+        return new InMemorySessionService();
+      });
+      // The URI is what makes the run build a session service at all.
+      process.env['DATABASE_URL'] = 'memory://';
+
+      await parse(['run', 'agent.ts']);
+      delete process.env['DATABASE_URL'];
+
+      expect(order).toEqual(['dotenv', 'session-service']);
+    });
+
+    it("loads the .env of the agent's own directory", async () => {
+      const agentPath = path.resolve(
+        path.sep,
+        'tmp',
+        'agents',
+        'weather',
+        'agent.ts',
+      );
+
+      await parse(['run', agentPath]);
+
+      expect(loadDotenvForAgent).toHaveBeenCalledWith(
+        'weather',
+        path.resolve(path.sep, 'tmp', 'agents'),
       );
     });
   });
