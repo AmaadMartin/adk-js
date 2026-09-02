@@ -224,9 +224,11 @@ describe('ToolboxToolset against a Toolbox server', () => {
       'search_flights',
       'book_hotel',
     ]);
-    expect(requests.map((request) => request.path)).toEqual([
-      '/mcp/flight-tools',
+    // The two loads run concurrently, so they can reach the server in either
+    // order; only the returned tool order is fixed.
+    expect(requests.map((request) => request.path).sort()).toEqual([
       '/mcp/',
+      '/mcp/flight-tools',
     ]);
     await toolset.close();
   });

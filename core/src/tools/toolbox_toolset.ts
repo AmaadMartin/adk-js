@@ -181,23 +181,23 @@ export class ToolboxToolset extends BaseToolset {
     const {toolsetName, authTokenGetters, boundParams} = this.options;
     const toolNames = this.options.toolNames ?? [];
 
-    const loaded: ToolboxTool[] = [];
     // No named tools and no toolset name means "load everything", which the
     // server answers as its default toolset.
-    if (toolsetName !== undefined || toolNames.length === 0) {
-      loaded.push(
-        ...(await client.loadToolset(
-          toolsetName,
-          authTokenGetters,
-          boundParams,
-        )),
-      );
-    }
-    for (const name of toolNames) {
-      loaded.push(await client.loadTool(name, authTokenGetters, boundParams));
-    }
+    const loadsToolset = toolsetName !== undefined || toolNames.length === 0;
+    const [toolsetTools, namedTools] = await Promise.all([
+      loadsToolset
+        ? client.loadToolset(toolsetName, authTokenGetters, boundParams)
+        : [],
+      Promise.all(
+        toolNames.map((name) =>
+          client.loadTool(name, authTokenGetters, boundParams),
+        ),
+      ),
+    ]);
 
-    const tools = loaded.map((tool) => toFunctionTool(tool, this.prefix));
+    const tools = [...toolsetTools, ...namedTools].map((tool) =>
+      toFunctionTool(tool, this.prefix),
+    );
     return selectTools(tools, this.toolFilter, context);
   }
 
