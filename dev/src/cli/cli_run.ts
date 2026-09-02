@@ -34,9 +34,6 @@ import {
   loadFileData,
   saveToFile,
 } from '../utils/file_utils.js';
-import {AdkLogger} from '../utils/logger.js';
-
-const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
 
 const HOW_TO_ANSWER: Record<UserInputKind, string> = {
   input: 'Type your reply at the next prompt to continue.',
@@ -352,7 +349,6 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   // Model resolution is lazy, so the override still reaches an agent that was
   // already constructed by the load above.
   if (options.defaultLlmModel) {
-    logger.debug(`Overriding default model to ${options.defaultLlmModel}`);
     LlmAgent.setDefaultModel(options.defaultLlmModel);
   }
 
