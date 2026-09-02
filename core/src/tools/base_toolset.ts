@@ -159,14 +159,14 @@ export abstract class BaseToolset {
    * Returns the auth config for this toolset, or `undefined` when it needs no
    * authentication.
    *
-   * ADK populates the `exchangedAuthCredential` field of the returned config
-   * with a ready-to-use credential before it calls `getTools()` or runs any
-   * tool the toolset returned. A toolset can therefore use that credential for
-   * both tool listing and tool calling. When a tool call needs a different
-   * credential, the tool calls `toolContext.requestCredential` instead.
-   *
    * A toolset that supports authentication overrides this method and returns
    * an `AuthConfig` built from its own auth scheme and credential.
+   *
+   * NOTE: nothing in adk-js reads this value yet, so the toolset must obtain
+   * its own credential. Do not rely on the framework to fill
+   * `exchangedAuthCredential`. In adk-python the LLM flow exchanges the
+   * credential and fills that field before it lists or runs the tools; the
+   * port of that flow is separate work.
    */
   getAuthConfig(): AuthConfig | undefined {
     return undefined;
