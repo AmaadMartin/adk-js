@@ -62,18 +62,6 @@ describe('appendInstructions with a string array', () => {
     );
     warn.mockRestore();
   });
-
-  it('throws a TypeError for input that is neither a string array nor a Content', () => {
-    const llmRequest = createLlmRequest();
-
-    // The parameter type already rejects a mixed array, so only an untyped
-    // JavaScript caller reaches this guard. The cast reproduces that caller.
-    const fromUntypedCaller = ['ok', 42] as unknown as string[];
-
-    expect(() => appendInstructions(llmRequest, fromUntypedCaller)).toThrow(
-      new TypeError('instructions must be string[] or Content, got object.'),
-    );
-  });
 });
 
 describe('appendInstructions with a Content', () => {

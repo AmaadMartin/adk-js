@@ -6,8 +6,8 @@
 
 import {Content, ContentUnion, createUserContent} from '@google/genai';
 
-import {isContent} from '../models/llm_request.js';
 import {State} from '../sessions/state.js';
+import {isContent} from '../utils/content_utils.js';
 import type {WorkflowInstructionScope} from './invocation_context.js';
 import {ReadonlyContext} from './readonly_context.js';
 
@@ -61,9 +61,6 @@ export function labelDynamicInstruction(instruction: string): string {
  *     content built from it.
  */
 export function staticInstructionContent(value: ContentUnion): Content {
-  if (typeof value === 'string' || Array.isArray(value)) {
-    return createUserContent(value);
-  }
   return isContent(value) ? value : createUserContent(value);
 }
 
