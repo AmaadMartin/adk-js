@@ -63,11 +63,17 @@ export class GeminiLlmConnection implements BaseLlmConnection {
    * responses.
    *
    * @param content The content to send to the model.
+   * @param options.partial If true, the content is a partial turn update that
+   *     does not complete the current model turn.
    */
-  async sendContent(content: Content): Promise<void> {
+  async sendContent(
+    content: Content,
+    options?: {partial?: boolean},
+  ): Promise<void> {
     if (!content.parts) {
       throw new Error('Content must have parts.');
     }
+    const partial = options?.partial ?? false;
     if (content.parts[0].functionResponse) {
       // All parts have to be function responses.
       const functionResponses = content.parts
@@ -80,13 +86,20 @@ export class GeminiLlmConnection implements BaseLlmConnection {
     } else {
       logger.debug('Sending LLM new content', content);
       const isGemini3x = isGemini3xFlashLive(this.modelVersion);
-      if (isGemini3x && content.parts.length === 1 && content.parts[0].text) {
+      // `sendRealtimeInput` always completes the turn, so a partial update
+      // has to go through `sendClientContent`.
+      if (
+        !partial &&
+        isGemini3x &&
+        content.parts.length === 1 &&
+        content.parts[0].text
+      ) {
         logger.debug('Using sendRealtimeInput for Gemini 3.x text input');
         this.geminiSession.sendRealtimeInput({text: content.parts[0].text});
       } else {
         this.geminiSession.sendClientContent({
           turns: [content],
-          turnComplete: true,
+          turnComplete: !partial,
         });
       }
     }
@@ -130,6 +143,14 @@ export class GeminiLlmConnection implements BaseLlmConnection {
    */
   async sendActivityEnd(): Promise<void> {
     this.geminiSession.sendRealtimeInput({activityEnd: {}});
+  }
+
+  /**
+   * Signals the end of the audio input stream to the model.
+   */
+  async sendAudioStreamEnd(): Promise<void> {
+    logger.debug('Sending LLM audio stream end signal.');
+    this.geminiSession.sendRealtimeInput({audioStreamEnd: true});
   }
 
   /**
