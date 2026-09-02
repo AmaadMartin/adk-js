@@ -5,14 +5,55 @@
  */
 
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
-import {Event} from '../../src/events/event.js';
+import {LlmAgent} from '../../src/agents/llm_agent.js';
+import {createEvent, Event} from '../../src/events/event.js';
+import {BaseLlm} from '../../src/models/base_llm.js';
+import type {BaseLlmConnection} from '../../src/models/base_llm_connection.js';
+import type {LlmRequest} from '../../src/models/llm_request.js';
+import type {LlmResponse} from '../../src/models/llm_response.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
+import {FunctionTool} from '../../src/tools/function_tool.js';
 import {node} from '../../src/workflow/node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
+
+/** Calls the reporting tool once, then answers. */
+class ProgressReportingLlm extends BaseLlm {
+  static override readonly supportedModels = [/progress-reporting/];
+  private calledTool = false;
+
+  constructor() {
+    super({model: 'progress-reporting'});
+  }
+
+  override async *generateContentAsync(
+    _llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {
+    if (this.calledTool) {
+      yield {
+        content: {role: 'model', parts: [{text: 'all done'}]},
+      } as LlmResponse;
+      return;
+    }
+    this.calledTool = true;
+    yield {
+      content: {
+        role: 'model',
+        parts: [
+          {functionCall: {id: 'fc-1', name: 'report_progress', args: {}}},
+        ],
+      },
+    } as LlmResponse;
+  }
+
+  override connect(): Promise<BaseLlmConnection> {
+    throw new Error('not supported');
+  }
+}
 
 async function runToCompletion(
   root: ConstructorParameters<typeof Runner>[0]['agent'],
@@ -118,4 +159,55 @@ describe('Runner with a workflow as its root', () => {
         }),
     ).toThrow(/expected a BaseAgent, a Workflow, or a node-like value/);
   });
+});
+
+describe('Runner event queue merge', () => {
+  it('streams the events a tool pushes onto the invocation queue', async () => {
+    const llm = new ProgressReportingLlm();
+    const agent = new LlmAgent({
+      name: 'reporter',
+      model: llm,
+      tools: [
+        new FunctionTool({
+          name: 'report_progress',
+          description: 'Reports progress while it works.',
+          parameters: z.object({}),
+          execute: async (_args, toolContext) => {
+            const queue = toolContext?.invocationContext.eventQueue;
+            for (const step of ['step one', 'step two']) {
+              queue?.push(
+                createEvent({
+                  invocationId: toolContext!.invocationContext.invocationId,
+                  author: 'report_progress',
+                  content: {role: 'model', parts: [{text: step}]},
+                }),
+              );
+            }
+            return {result: 'finished'};
+          },
+        }),
+      ],
+    });
+
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: 'app',
+      userId: 'u',
+    });
+    const runner = new Runner({appName: 'app', agent, sessionService});
+    const texts: string[] = [];
+    for await (const event of runner.runAsync({
+      userId: 'u',
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'go'}]},
+    })) {
+      for (const part of event.content?.parts ?? []) {
+        if (part.text) {
+          texts.push(part.text);
+        }
+      }
+    }
+
+    expect(texts).toEqual(['step one', 'step two', 'all done']);
+  }, 30000);
 });

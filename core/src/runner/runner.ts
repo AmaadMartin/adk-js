@@ -41,6 +41,7 @@ import {
   findUserMessageForInvocation,
   resolveInvocationIdFromFr,
 } from '../sessions/invocation_utils.js';
+import {rewindSession} from '../sessions/rewind_utils.js';
 import {CompositeSessionKey, Session} from '../sessions/session.js';
 import {
   runAsyncGeneratorWithOtelContext,
@@ -175,6 +176,12 @@ export function isRunner(obj: unknown): obj is Runner {
  *   console.log(event);
  * }
  * ```
+ *
+ * adk-python also offers a synchronous `run()`, which drains the async
+ * generator from a background thread. Node has no equivalent: blocking the main
+ * thread stops the very work being driven, and a worker thread cannot hold the
+ * live agents, model clients and services this runner owns. `runAsync` is
+ * already consumable with `for await`, so there is nothing to add.
  */
 export class Runner {
   readonly [RUNNER_SIGNATURE_SYMBOL] = true;
@@ -824,6 +831,33 @@ export class Runner {
       );
     }
     return resolved;
+  }
+
+  /**
+   * Rewinds the session to before an invocation, undoing the state it wrote
+   * and restoring the artifacts it changed.
+   *
+   * The rewind is recorded as an event on the session. Readers that rebuild
+   * contents do not yet honour it; that belongs to those modules.
+   *
+   * @param params.rewindBeforeInvocationId The invocation to rewind before.
+   * @throws {SessionNotFoundError} When the session is missing and
+   *     {@link autoCreateSession} is not set.
+   * @throws {Error} When no event in the session belongs to the invocation.
+   */
+  async rewindAsync(params: {
+    userId: string;
+    sessionId: string;
+    rewindBeforeInvocationId: string;
+  }): Promise<void> {
+    const session = await this.getOrCreateSession(params);
+    await rewindSession({
+      sessionService: this.sessionService,
+      session,
+      rewindBeforeInvocationId: params.rewindBeforeInvocationId,
+      artifactService: this.artifactService,
+      appName: this.appName,
+    });
   }
 
   /**
