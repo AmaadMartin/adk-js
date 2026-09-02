@@ -30,18 +30,6 @@ export interface SearchMemoryResponse {
 }
 
 /**
- * Creates a {@link SearchMemoryResponse}, defaulting `memories` to an empty
- * list.
- *
- * A response built without matches carries an empty array, never `undefined`.
- */
-export function createSearchMemoryResponse(
-  init: Partial<SearchMemoryResponse> = {},
-): SearchMemoryResponse {
-  return {memories: init.memories ?? []};
-}
-
-/**
  * The parameters for `searchMemory`.
  */
 export interface SearchMemoryRequest {

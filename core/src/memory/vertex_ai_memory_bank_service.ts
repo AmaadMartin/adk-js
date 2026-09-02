@@ -24,7 +24,6 @@ import {
   AddEventsToMemoryRequest,
   AddMemoryRequest,
   BaseMemoryService,
-  createSearchMemoryResponse,
   SearchMemoryRequest,
   SearchMemoryResponse,
 } from './base_memory_service.js';
@@ -226,7 +225,7 @@ export class VertexAiMemoryBankService extends BaseMemoryService {
       }
     }
 
-    return createSearchMemoryResponse({memories: memoryEvents});
+    return {memories: memoryEvents};
   }
 
   private async addEventsToMemoryFromEvents(request: {

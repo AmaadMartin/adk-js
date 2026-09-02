@@ -9,7 +9,6 @@ import {
   AddMemoryRequest,
   BaseMemoryService,
   createEvent,
-  createSearchMemoryResponse,
   DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE,
   EVENT_DELTAS_UNSUPPORTED_MESSAGE,
   InMemoryMemoryService,
@@ -23,7 +22,7 @@ class MinimalMemoryService extends BaseMemoryService {
   async addSessionToMemory(): Promise<void> {}
 
   async searchMemory(): Promise<SearchMemoryResponse> {
-    return createSearchMemoryResponse();
+    return {memories: []};
   }
 }
 
@@ -164,25 +163,5 @@ describe('BaseMemoryService', () => {
         }),
       ).rejects.toThrow(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE);
     });
-  });
-});
-
-describe('createSearchMemoryResponse', () => {
-  it('defaults memories to an empty list', () => {
-    expect(createSearchMemoryResponse()).toEqual({memories: []});
-  });
-
-  it('defaults memories to an empty list when memories is undefined', () => {
-    expect(createSearchMemoryResponse({memories: undefined})).toEqual({
-      memories: [],
-    });
-  });
-
-  it('keeps the entries it is given', () => {
-    const memories = [ENTRY];
-
-    const response = createSearchMemoryResponse({memories});
-
-    expect(response.memories).toBe(memories);
   });
 });

@@ -9,7 +9,6 @@ import {Session} from '../sessions/session.js';
 
 import {
   BaseMemoryService,
-  createSearchMemoryResponse,
   SearchMemoryRequest,
   SearchMemoryResponse,
 } from './base_memory_service.js';
@@ -50,11 +49,11 @@ export class InMemoryMemoryService extends BaseMemoryService {
   async searchMemory(req: SearchMemoryRequest): Promise<SearchMemoryResponse> {
     const userKey = getUserKey(req.appName, req.userId);
     if (!this.sessionEvents[userKey]) {
-      return createSearchMemoryResponse();
+      return Promise.resolve({memories: []});
     }
 
     const wordsInQuery = req.query.toLowerCase().split(/\s+/);
-    const response = createSearchMemoryResponse();
+    const response: SearchMemoryResponse = {memories: []};
 
     for (const sessionEvents of Object.values(this.sessionEvents[userKey])) {
       for (const event of sessionEvents) {
