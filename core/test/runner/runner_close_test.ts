@@ -127,8 +127,22 @@ describe('Runner.close', () => {
     expect(toolset.closeCount).toBe(1);
   });
 
-  it('defaults the plugin close timeout to five seconds', () => {
-    expect(createRunner({}).pluginCloseTimeoutSeconds).toBe(5);
+  it('defaults the plugin close timeout to five seconds', async () => {
+    vi.useFakeTimers();
+    const runner = createRunner({
+      plugins: [new CountingPlugin('stuck', 'hang')],
+    });
+
+    const settled = runner.close().catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const error = await settled;
+
+    expect((error as AggregateError).errors[0].message).toBe(
+      "Closing plugin 'stuck' timed out after 5s.",
+    );
   });
 
   it('gives each plugin the configured close timeout', async () => {
@@ -138,7 +152,6 @@ describe('Runner.close', () => {
       pluginCloseTimeoutSeconds: 10,
     });
 
-    expect(runner.pluginCloseTimeoutSeconds).toBe(10);
     const settled = runner.close().catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(9999);
     expect(vi.getTimerCount()).toBe(1);
