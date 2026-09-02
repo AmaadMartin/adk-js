@@ -191,7 +191,7 @@ describe('GeminiLlmConnection', () => {
       });
     });
 
-    it('should use sendRealtimeInput with audio for Native Audio model audio', async () => {
+    it('should use sendRealtimeInput with media for Native Audio model audio', async () => {
       const connection = new GeminiLlmConnection(
         mockSession,
         'gemini-2.5-flash-preview-native-audio',
@@ -201,7 +201,7 @@ describe('GeminiLlmConnection', () => {
       await connection.sendRealtime(blob);
 
       expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
-        audio: blob,
+        media: blob,
       });
     });
 
@@ -277,7 +277,7 @@ describe('GeminiLlmConnection', () => {
 
       const usageMetadata = {
         promptTokenCount: 10,
-        candidatesTokenCount: 20,
+        responseTokenCount: 20,
         totalTokenCount: 30,
       };
       messageQueue.push(liveServerMessage({usageMetadata}));
@@ -285,7 +285,11 @@ describe('GeminiLlmConnection', () => {
 
       const res = await generator.next();
       expect(res.value).toEqual({
-        usageMetadata,
+        usageMetadata: {
+          promptTokenCount: 10,
+          candidatesTokenCount: 20,
+          totalTokenCount: 30,
+        },
         modelVersion: 'gemini-2.5-flash',
       });
       expect((await generator.next()).done).toBe(true);
@@ -331,17 +335,10 @@ describe('GeminiLlmConnection', () => {
         partial: true,
       });
 
+      // The ' world!' part is folded into the flushed full text, so the
+      // accumulated text is the next response, including groundingMetadata.
       const res2 = await generator.next();
       expect(res2.value).toEqual({
-        content: {parts: [{text: ' world!'}]},
-        modelVersion: 'gemini-2.5-flash',
-        partial: true,
-        interrupted: false,
-      });
-
-      // After turnComplete, it should flush the accumulated text first, including groundingMetadata
-      const res3 = await generator.next();
-      expect(res3.value).toEqual({
         content: {
           role: 'model',
           parts: [{text: 'Hello world!'}],
@@ -352,8 +349,8 @@ describe('GeminiLlmConnection', () => {
       });
 
       // Then it yields the turnComplete status with interrupted and groundingMetadata
-      const res4 = await generator.next();
-      expect(res4.value).toEqual({
+      const res3 = await generator.next();
+      expect(res3.value).toEqual({
         turnComplete: true,
         modelVersion: 'gemini-2.5-flash',
         interrupted: false,
@@ -902,6 +899,7 @@ describe('GeminiLlmConnection', () => {
           parts: [{text: 'Hello'}],
         },
         partial: false,
+        interrupted: true,
         modelVersion: 'gemini-2.5-flash',
       });
 

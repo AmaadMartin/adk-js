@@ -14,7 +14,7 @@ describe('LiveResponseAggregator', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
     const usageMetadata = {
       promptTokenCount: 10,
-      candidatesTokenCount: 20,
+      responseTokenCount: 20,
       totalTokenCount: 30,
     };
 
@@ -25,7 +25,11 @@ describe('LiveResponseAggregator', () => {
 
     expect(results).toEqual([
       {
-        usageMetadata,
+        usageMetadata: {
+          promptTokenCount: 10,
+          candidatesTokenCount: 20,
+          totalTokenCount: 30,
+        },
         modelVersion: 'gemini-2.5-flash',
       },
     ]);
@@ -67,13 +71,9 @@ describe('LiveResponseAggregator', () => {
       }),
     );
     const res2 = Array.from(gen2);
+    // The ' world!' part is folded into the flushed full text, so it is not
+    // yielded again as a partial response.
     expect(res2).toEqual([
-      {
-        content: {parts: [{text: ' world!'}]},
-        modelVersion: 'gemini-2.5-flash',
-        partial: true,
-        interrupted: false,
-      },
       {
         content: {
           role: 'model',
