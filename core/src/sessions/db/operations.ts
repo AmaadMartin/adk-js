@@ -367,8 +367,9 @@ export async function detectDatabaseSchemaVersion(
   if (hasLegacyEventsTable) {
     logger.warn(
       'The database uses the legacy v0 session schema, which serializes ' +
-        'event actions with Python pickle. This SDK cannot read it. Migrate ' +
-        'the database with the adk-python `adk migrate session` command.',
+        'event actions with Python pickle. This SDK opens it for reading ' +
+        'only. Migrate it with the adk-python `adk migrate session` command ' +
+        'to write to it.',
     );
     return SCHEMA_VERSION_0_PICKLE;
   }
