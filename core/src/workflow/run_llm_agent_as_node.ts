@@ -49,6 +49,7 @@ export async function* runLlmAgentAsNode(
   nodeInput: unknown,
 ): AsyncGenerator<Event, void, void> {
   const isTaskMode = agent.mode === 'task';
+  const isSingleTurnMode = agent.mode === 'single_turn';
 
   if (!isTaskMode && !agent.includeContentsExplicit) {
     agent.includeContents = 'none';
@@ -58,7 +59,14 @@ export async function* runLlmAgentAsNode(
     await appendNodeInputAsUserTurn(ctx, nodeInput);
   }
 
-  let agentIc = withWorkflowInstructionScope(ctx.getInvocationContext(), {
+  const invocationContext = ctx.getInvocationContext();
+  // A node running under a live connection drives the agent's live flow, so
+  // the agent answers over the connection instead of one turn at a time. A
+  // `single_turn` agent stays non-live: it consumes only its node input.
+  const isLive =
+    invocationContext.liveRequestQueue !== undefined && !isSingleTurnMode;
+
+  let agentIc = withWorkflowInstructionScope(invocationContext, {
     input: nodeInput,
     outputsByNode: collectPredecessorOutputs(ctx),
   });
@@ -70,14 +78,23 @@ export async function* runLlmAgentAsNode(
     if (nodeInput != null) {
       agentIc = agentIc.clone({userContent: toUserContent(nodeInput)});
     }
-    yield* runTaskMode(ctx, agentIc, agent);
+    yield* runTaskMode(ctx, agentIc, agent, isLive);
     return;
   }
 
-  for await (const event of agent.runAsync(agentIc)) {
+  for await (const event of runAgent(agent, agentIc, isLive)) {
     maybeSetOutput(agent, event);
     yield event;
   }
+}
+
+/** Runs the agent on the live flow when the invocation carries a connection. */
+function runAgent(
+  agent: LlmAgent,
+  agentIc: InvocationContext,
+  isLive: boolean,
+): AsyncGenerator<Event, void, void> {
+  return isLive ? agent.runLive(agentIc) : agent.runAsync(agentIc);
 }
 
 /**
@@ -123,11 +140,12 @@ async function* runTaskMode(
   ctx: NodeContext,
   agentIc: InvocationContext,
   agent: LlmAgent,
+  isLive: boolean,
 ): AsyncGenerator<Event, void, void> {
   const finishTool = agent.finishTaskTool;
   let pendingArgs: Record<string, unknown> | undefined;
 
-  for await (const event of agent.runAsync(agentIc)) {
+  for await (const event of runAgent(agent, agentIc, isLive)) {
     const finishCall = getFunctionCalls(event).find(
       (fc) => fc.name === FINISH_TASK_TOOL_NAME,
     );

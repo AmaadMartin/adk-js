@@ -7,6 +7,10 @@
 import {Modality} from '@google/genai';
 
 import {Context} from '../agents/context.js';
+import {
+  TASK_COMPLETED_FUNCTION_CALL_NAME,
+  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
+} from '../agents/framework_function_calls.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
@@ -22,12 +26,30 @@ import {
 import {getFunctionCalls} from '../models/llm_response.js';
 import {Runner} from '../runner/runner.js';
 import {Session} from '../sessions/session.js';
+import {FINISH_TASK_TOOL_NAME} from '../tools/finish_task_tool.js';
 import {asRecord} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
-import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
+import {
+  runNodeAsInvocation,
+  type RunnableRoot,
+} from '../workflow/run_node_as_invocation.js';
+import {isWorkflow, Workflow} from '../workflow/workflow.js';
 
 /** Author of the events the user contributed to a session. */
 const USER_AUTHOR = 'user';
+
+/**
+ * Function calls that end the agent and hand off, rather than opening a tool
+ * round the agent still owes an answer to.
+ *
+ * The `turnComplete` that follows one of these is a real end of turn, so the
+ * node driver must not treat the call as a reason to keep the turn open.
+ */
+const TURN_ENDING_FUNCTION_CALLS: ReadonlySet<string> = new Set([
+  FINISH_TASK_TOOL_NAME,
+  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
+  TASK_COMPLETED_FUNCTION_CALL_NAME,
+]);
 
 /** WebSocket close code the Live API reports for a normal closure. */
 const WEBSOCKET_NORMAL_CLOSURE_CODE = 1000;
@@ -77,22 +99,26 @@ export function isNormalClosure(error: unknown): boolean {
 }
 
 /**
- * Returns the root as the `LlmAgent` a live eval run needs.
+ * Returns the root as one of the two shapes a live eval run can drive.
+ *
+ * An `LlmAgent` runs through its own live flow. A `Workflow` runs as a node,
+ * which drives the agents in its graph over the same connection. Any other
+ * `BaseAgent` — a `SequentialAgent`, a custom agent — has no live path in
+ * adk-js and is refused.
  *
  * @param root The root under evaluation.
- * @returns The same root, typed as an `LlmAgent`.
- * @throws {InputValidationError} If the root is not an `LlmAgent`. adk-js
- *     drives a live run through the `LlmAgent` live flow, so a workflow root
- *     has no live path at all.
+ * @returns The same root, narrowed to the shape that names its driver.
+ * @throws {InputValidationError} If the root is neither an `LlmAgent` nor a
+ *     `Workflow`.
  */
-export function requireLiveEvalAgent(root: RunnableRoot): LlmAgent {
-  if (!isLlmAgent(root)) {
-    throw new InputValidationError(
-      `Live evaluation requires an LlmAgent root; '${root.name}' cannot be ` +
-        'driven by the live flow.',
-    );
+export function requireLiveEvalRoot(root: RunnableRoot): LlmAgent | Workflow {
+  if (isLlmAgent(root) || isWorkflow(root)) {
+    return root;
   }
-  return root;
+  throw new InputValidationError(
+    `Live evaluation requires an LlmAgent or a Workflow root; '${root.name}' ` +
+      'cannot be driven live.',
+  );
 }
 
 /**
@@ -154,7 +180,7 @@ export class EvalLiveSession {
   readonly liveRequestQueue = new LiveRequestQueue();
   readonly eventQueue = new LiveEventQueue();
 
-  private readonly agent: LlmAgent;
+  private readonly root: LlmAgent | Workflow;
   private readonly abortController = new AbortController();
   private consumePromise?: Promise<void>;
   private invocationId = createNewEventId();
@@ -164,13 +190,15 @@ export class EvalLiveSession {
   /**
    * @param runner The runner whose services and plugins the run uses.
    * @param session The session the conversation is recorded in.
-   * @throws {InputValidationError} If the runner's root is not an `LlmAgent`.
+   * @throws {InputValidationError} If the runner's root is neither an
+   *     `LlmAgent` nor a `Workflow`. The root is classified here, so an
+   *     unsupported one is refused before anything is started.
    */
   constructor(
     private readonly runner: Runner,
     private readonly session: Session,
   ) {
-    this.agent = requireLiveEvalAgent(runner.agent);
+    this.root = requireLiveEvalRoot(runner.agent);
   }
 
   /** Id every event of the turn in flight is stamped with. */
@@ -262,41 +290,10 @@ export class EvalLiveSession {
 
   private async consumeEvents(): Promise<void> {
     try {
-      const invocationContext = this.newLiveInvocationContext();
-      const callbackContext = await this.recordAppDetails(invocationContext);
-
-      let inFunctionCallLoop = false;
-      for await (const event of this.agent.runLive(invocationContext)) {
-        event.invocationId = this.invocationId;
-        await this.runner.pluginManager.runAfterModelCallback({
-          callbackContext,
-          llmResponse: event,
-        });
-        this.eventQueue.push(event);
-        if (!event.partial) {
-          await this.runner.sessionService.appendEvent({
-            session: this.session,
-            event,
-          });
-        }
-
-        // The agent's live flow runs the tools itself and sends their results
-        // straight back over the connection, so the driver only has to notice
-        // that a tool round is open. adk-python's driver runs them a second
-        // time; adk-js does not, because that would call every tool twice.
-        if (getFunctionCalls(event).length > 0) {
-          inFunctionCallLoop = true;
-        }
-
-        if (event.turnComplete && event.author !== USER_AUTHOR) {
-          // A `turnComplete` that closes a tool-call round is not the end of
-          // the turn: the model still has to answer with the tool's result.
-          if (inFunctionCallLoop) {
-            inFunctionCallLoop = false;
-          } else {
-            this.turnSignal.resolve();
-          }
-        }
+      if (isWorkflow(this.root)) {
+        await this.consumeNodeEvents(this.root);
+      } else {
+        await this.consumeAgentEvents(this.root);
       }
     } finally {
       this.finished = true;
@@ -306,7 +303,126 @@ export class EvalLiveSession {
     }
   }
 
-  private newLiveInvocationContext(): InvocationContext {
+  /** Drives an `LlmAgent` root through its own live flow. */
+  private async consumeAgentEvents(agent: LlmAgent): Promise<void> {
+    const invocationContext = this.newLiveInvocationContext(agent);
+    const callbackContext = await this.recordAppDetails(
+      agent,
+      invocationContext,
+    );
+
+    let inFunctionCallLoop = false;
+    for await (const event of agent.runLive(invocationContext)) {
+      event.invocationId = this.invocationId;
+      await this.runner.pluginManager.runAfterModelCallback({
+        callbackContext,
+        llmResponse: event,
+      });
+      this.eventQueue.push(event);
+      if (!event.partial) {
+        await this.runner.sessionService.appendEvent({
+          session: this.session,
+          event,
+        });
+      }
+
+      // The agent's live flow runs the tools itself and sends their results
+      // straight back over the connection, so the driver only has to notice
+      // that a tool round is open. adk-python's driver runs them a second
+      // time; adk-js does not, because that would call every tool twice.
+      if (getFunctionCalls(event).length > 0) {
+        inFunctionCallLoop = true;
+      }
+
+      if (event.turnComplete && event.author !== USER_AUTHOR) {
+        // A `turnComplete` that closes a tool-call round is not the end of
+        // the turn: the model still has to answer with the tool's result.
+        if (inFunctionCallLoop) {
+          inFunctionCallLoop = false;
+        } else {
+          this.turnSignal.resolve();
+        }
+      }
+    }
+  }
+
+  /**
+   * Drives a `Workflow` root as a node, over the same live connection.
+   *
+   * A workflow serves several agents on one stream, so each agent's request is
+   * recorded up front and `afterModelCallback` fires with the context of the
+   * agent that authored the event.
+   *
+   * adk-python drives this through `Runner.run_live`, which appends each event
+   * on the way through. adk-js's `Runner.runLive` refuses a workflow root, so
+   * this driver runs the node itself and therefore appends the events too. The
+   * session ends up holding the same events either way.
+   */
+  private async consumeNodeEvents(workflow: Workflow): Promise<void> {
+    const callbackContextByAuthor = await this.recordNodeAppDetails(workflow);
+    const invocationContext = this.newLiveInvocationContext(undefined);
+
+    let inFunctionCallLoop = false;
+    try {
+      for await (const event of runNodeAsInvocation(
+        workflow,
+        invocationContext,
+      )) {
+        event.invocationId = this.invocationId;
+        const callbackContext = callbackContextByAuthor.get(event.author);
+        if (callbackContext !== undefined) {
+          await this.runner.pluginManager.runAfterModelCallback({
+            callbackContext,
+            llmResponse: event,
+          });
+        }
+        this.eventQueue.push(event);
+        if (!event.partial) {
+          await this.runner.sessionService.appendEvent({
+            session: this.session,
+            event,
+          });
+        }
+
+        // A call that ends the agent and hands off does not open a tool round,
+        // so an event carrying only those must leave the guard alone. An event
+        // that also carries an ordinary call still arms it.
+        if (
+          getFunctionCalls(event).some(
+            (call) => !TURN_ENDING_FUNCTION_CALLS.has(call.name ?? ''),
+          )
+        ) {
+          inFunctionCallLoop = true;
+        }
+
+        if (event.turnComplete && event.author !== USER_AUTHOR) {
+          if (inFunctionCallLoop) {
+            inFunctionCallLoop = false;
+          } else {
+            this.turnSignal.resolve();
+          }
+        }
+      }
+    } catch (error: unknown) {
+      // A clean close ends the stream. Keep the transcript collected so far
+      // rather than failing the eval case over it.
+      if (!isNormalClosure(error)) {
+        throw error;
+      }
+      logger.debug('Ignored WebSocket normal closure:', error);
+    }
+  }
+
+  /**
+   * Builds the invocation context one live driver runs under.
+   *
+   * @param agent The agent the context runs, or `undefined` for a workflow
+   *     root: a workflow is a node, not an agent, so no agent is in play at
+   *     that level.
+   */
+  private newLiveInvocationContext(
+    agent: LlmAgent | undefined,
+  ): InvocationContext {
     const {runner, session} = this;
     return new InvocationContext({
       artifactService: runner.artifactService
@@ -324,7 +440,7 @@ export class EvalLiveSession {
       // event is then re-stamped with the id of the turn that was in flight
       // when it arrived, which is what groups the transcript into invocations.
       invocationId: createNewEventId(),
-      agent: this.agent,
+      agent,
       session,
       // A deep copy, so a processor that edits the run config — including a
       // nested field a shallow copy would still share — cannot edit the config
@@ -343,19 +459,70 @@ export class EvalLiveSession {
    * `LlmAgent` builds that request privately on the live path, so it is rebuilt
    * here from the agent's public request processors and tools.
    *
+   * @param agent The agent whose request is recorded. It is the agent
+   *     `invocationContext` runs, passed explicitly because the context types
+   *     its own as any `BaseAgent`.
+   * @param invocationContext The context the request is built under.
    * @returns The callback context, which the driver reuses for every
    *     `afterModelCallback`.
    */
   private async recordAppDetails(
+    agent: LlmAgent,
     invocationContext: InvocationContext,
   ): Promise<Context> {
-    const llmRequest = await buildLiveLlmRequest(this.agent, invocationContext);
+    const llmRequest = await buildLiveLlmRequest(agent, invocationContext);
     const callbackContext = new Context({invocationContext});
     await this.runner.pluginManager.runBeforeModelCallback({
       callbackContext,
       llmRequest,
     });
     return callbackContext;
+  }
+
+  /**
+   * Records one live request per agent in the workflow's graph, keyed by the
+   * agent's name — which is the author of the events it produces.
+   *
+   * Only the top-level `graph.nodes` agents are recorded. An agent nested in a
+   * sub-workflow or behind a wrapper node is not, so its events fire no
+   * `afterModelCallback`, matching adk-python.
+   *
+   * A workflow driven by a `dynamicEntry` has no graph and records nothing. A
+   * failure on one agent is logged and skipped, so it never aborts the run.
+   *
+   * @param workflow The workflow root under evaluation.
+   * @returns The callback context for each recorded agent, keyed by the
+   *     agent's name. The key type admits `undefined` because that is what an
+   *     event's author is typed as, and an authorless event matches nothing.
+   */
+  private async recordNodeAppDetails(
+    workflow: Workflow,
+  ): Promise<Map<string | undefined, Context>> {
+    const contextByAuthor = new Map<string | undefined, Context>();
+    const graph = workflow.graph;
+    if (graph === undefined) {
+      return contextByAuthor;
+    }
+
+    const baseContext = this.newLiveInvocationContext(undefined);
+    for (const node of graph.nodes) {
+      if (!isLlmAgent(node)) {
+        continue;
+      }
+      try {
+        const invocationContext = baseContext.clone({agent: node});
+        contextByAuthor.set(
+          node.name,
+          await this.recordAppDetails(node, invocationContext),
+        );
+      } catch (error: unknown) {
+        logger.warn(
+          `Failed to record app details for agent ${node.name}.`,
+          error,
+        );
+      }
+    }
+    return contextByAuthor;
   }
 }
 

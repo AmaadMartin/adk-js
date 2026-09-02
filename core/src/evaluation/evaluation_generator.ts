@@ -49,7 +49,7 @@ import {EvalSet} from './eval_set.js';
 import {
   EvalLiveSession,
   LiveEventQueue,
-  requireLiveEvalAgent,
+  requireLiveEvalRoot,
 } from './live_session.js';
 import {RequestIntercepterPlugin} from './request_intercepter_plugin.js';
 import {EnsureRetryOptionsPlugin} from './retry_options_utils.js';
@@ -979,8 +979,9 @@ export async function* generateInferencesForSingleUserInvocationLive(params: {
  * simulator sees a normalized copy of the conversation so far, so it reads the
  * model's words as text even when the model answered in audio.
  *
- * @param params.rootAgent The agent under evaluation. Must be an `LlmAgent`:
- *     no other adk-js root has a live flow.
+ * @param params.rootAgent The root under evaluation. An `LlmAgent` runs
+ *     through its own live flow; a `Workflow` runs as a node, which drives the
+ *     agents in its graph over the same connection.
  * @param params.userSimulator The simulator playing the user.
  * @param params.resetFunc Clears agent-owned state; called once before the run.
  * @param params.initialSession The session the conversation runs in.
@@ -993,7 +994,8 @@ export async function* generateInferencesForSingleUserInvocationLive(params: {
  *     `DEFAULT_LIVE_TIMEOUT_SECONDS`.
  * @param params.app The app the agent belongs to, when there is one.
  * @returns One invocation per turn of the conversation.
- * @throws {InputValidationError} If `rootAgent` is not an `LlmAgent`.
+ * @throws {InputValidationError} If `rootAgent` is neither an `LlmAgent` nor a
+ *     `Workflow`.
  */
 export async function generateInferencesFromRootAgentLive(
   params: EvalRunParams & {
@@ -1001,9 +1003,9 @@ export async function generateInferencesFromRootAgentLive(
     liveTimeoutSeconds?: number;
   },
 ): Promise<Invocation[]> {
-  // Refused before any service or connection is built, so an unsupported root
-  // costs nothing.
-  requireLiveEvalAgent(params.rootAgent);
+  // Classified before any service or connection is built, so an unsupported
+  // root costs nothing.
+  requireLiveEvalRoot(params.rootAgent);
 
   const {runner, session, requestIntercepter} = await prepareEvalRun(params);
   const liveSession = new EvalLiveSession(runner, session);
