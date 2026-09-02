@@ -28,7 +28,7 @@ import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {
-  EXPRESS_MODE_UNSUPPORTED_MESSAGE,
+  createExpressModeApiClient,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
 
@@ -198,19 +198,25 @@ export class VertexAiSessionService extends BaseSessionService {
     // sessions is primarily for testing to inject a mock client.
     if (options.sessions) {
       this.sessions = options.sessions;
-    } else {
-      if (!this.projectId || !this.location) {
-        throw new Error(
-          this.expressModeApiKey
-            ? EXPRESS_MODE_UNSUPPORTED_MESSAGE
-            : 'Project ID and Location are required.',
-        );
-      }
+    } else if (this.projectId && this.location) {
       const client = new Client({
         project: this.projectId,
         location: this.location,
       });
       this.sessions = client.agentEnginesInternal.sessions;
+    } else if (this.expressModeApiKey) {
+      this.sessions = new Sessions(
+        // `@google-cloud/vertexai` bundles its own nested copy of
+        // `@google/genai` (1.52.0) while the repo root resolves 2.9.0, so the
+        // two `ApiClient` classes are nominally distinct (their private fields
+        // make them structurally incompatible) but interchangeable at runtime.
+        // The cast is confined to this one boundary.
+        createExpressModeApiClient(
+          this.expressModeApiKey,
+        ) as unknown as ConstructorParameters<typeof Sessions>[0],
+      );
+    } else {
+      throw new Error('Project ID and Location are required.');
     }
   }
 

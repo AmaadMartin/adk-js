@@ -238,10 +238,8 @@ describe('VertexAiSessionService', () => {
       ['an expressModeApiKey option', {expressModeApiKey: 'test-api-key'}],
       ['an API key from the environment', {}],
       ['an API key and only a project', {projectId: 'test-project'}],
-    ])('throws for %s instead of dropping the key', (_, options) => {
-      expect(() => new VertexAiSessionService(options)).toThrow(
-        'Vertex AI Express Mode',
-      );
+    ])('builds an API key client for %s', (_, options) => {
+      expect(() => new VertexAiSessionService(options)).not.toThrow();
       expect(clientConstructor).not.toHaveBeenCalled();
     });
 

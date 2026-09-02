@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  ApiClient,
+  NodeAuth,
+  NodeDownloader,
+  NodeUploader,
+} from '@google/genai/vertex_internal';
 import {isEnterpriseModeEnabled} from './env_aware_utils.js';
 
 export const EXPRESS_MODE_UNSUPPORTED_MESSAGE =
@@ -41,4 +47,24 @@ export function getExpressModeApiKey(
   }
 
   return undefined;
+}
+
+/**
+ * Builds a Vertex AI API client that authenticates with an Express Mode API
+ * key instead of Application Default Credentials.
+ *
+ * `NodeAuth` returns early when an API key is set and never constructs
+ * `GoogleAuth`, so the client needs no credentials on the machine.
+ *
+ * @param apiKey The Express Mode API key.
+ * @returns A client that signs requests with `apiKey`.
+ */
+export function createExpressModeApiClient(apiKey: string): ApiClient {
+  return new ApiClient({
+    auth: new NodeAuth({apiKey}),
+    uploader: new NodeUploader(),
+    downloader: new NodeDownloader(),
+    vertexai: true,
+    apiKey,
+  });
 }
