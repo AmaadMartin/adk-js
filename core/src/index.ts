@@ -33,6 +33,10 @@ export type {
   CodeInterpreterFile,
 } from './code_executors/code_interpreter_extension_client.js';
 export {
+  ContainerCodeExecutor,
+  type ContainerCodeExecutorOptions,
+} from './code_executors/container_code_executor.js';
+export {
   UnsafeLocalCodeExecutor,
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
