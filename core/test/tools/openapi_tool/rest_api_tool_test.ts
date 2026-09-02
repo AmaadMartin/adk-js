@@ -309,6 +309,33 @@ describe('RestApiTool', () => {
     });
   });
 
+  it('should report the argument schema of its operation', () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      {
+        operationId: 'test_tool',
+        parameters: [
+          {
+            name: 'userId',
+            in: 'query',
+            required: true,
+            schema: {type: 'string'},
+          },
+        ],
+        responses: {},
+      },
+    );
+
+    expect(tool.getJsonSchema()).toEqual({
+      type: 'object',
+      properties: {user_id: {type: 'string'}},
+      required: ['user_id'],
+      title: 'test_tool_Arguments',
+    });
+  });
+
   it('should extract query parameters from path', async () => {
     const endpoint = {
       baseUrl: 'http://api.example.com',
