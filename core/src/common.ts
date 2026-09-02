@@ -218,12 +218,16 @@ export type {
   InferenceRequest,
   InferenceResult,
 } from './evaluation/base_eval_service.js';
+export {DEFAULT_LIVE_TIMEOUT_SECONDS} from './evaluation/constants.js';
+export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
 export type {
+  EvalCase,
   IntermediateData,
   IntermediateDataType,
   Invocation,
   InvocationEvent,
   InvocationEvents,
+  SessionInput,
 } from './evaluation/eval_case.js';
 export {EvalStatus} from './evaluation/eval_metrics.js';
 export type {
@@ -239,12 +243,35 @@ export type {
   RubricContent,
   RubricScore,
 } from './evaluation/eval_rubrics.js';
+export type {EvalSet} from './evaluation/eval_set.js';
 export {EvalConstants} from './evaluation/evaluation_constants.js';
+export {
+  convertEventsToEvalInvocations,
+  generateInferencesFromAgentModule,
+  generateInferencesFromRootAgent,
+  generateInferencesFromRootAgentLive,
+  generateResponses,
+  generateResponsesFromSession,
+  normalizeLiveTranscriptions,
+} from './evaluation/evaluation_generator.js';
+export type {
+  EvalCaseResponses,
+  EvalRow,
+} from './evaluation/evaluation_generator.js';
 export type {
   EvaluationResult,
   Evaluator,
   PerInvocationResult,
 } from './evaluation/evaluator.js';
+export {
+  CONSUME_TIMEOUT_MS,
+  EvalLiveSession,
+  LIVE_RUN_CONFIG,
+  LiveEventQueue,
+  WEBSOCKET_NORMAL_CLOSURE_CODE,
+  isNormalLiveClosure,
+  recordLlmRequestForAgent,
+} from './evaluation/live_session.js';
 export {
   EvalCriterion,
   ResponseEvaluator,
@@ -258,6 +285,19 @@ export type {
   EvaluateOptions,
   ToolUse,
 } from './evaluation/response_evaluator.js';
+export {
+  DEFAULT_HTTP_RETRY_ATTEMPTS,
+  EnsureRetryOptionsPlugin,
+  addDefaultRetryOptionsIfNotPresent,
+} from './evaluation/retry_options_utils.js';
+export {
+  UserSimulatorStatus,
+  validateNextUserMessage,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  NextUserMessage,
+  UserSimulator,
+} from './evaluation/simulation/user_simulator.js';
 export {
   ToolTrajectoryMatchType,
   TrajectoryEvaluator,

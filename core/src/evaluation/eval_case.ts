@@ -8,6 +8,7 @@ import type {
   Content,
   FunctionCall,
   FunctionResponse,
+  GroundingMetadata,
   Part,
 } from '@google/genai';
 import type {AppDetails} from './app_details.js';
@@ -43,6 +44,9 @@ export interface InvocationEvent {
 
   /** The content of the event. */
   content?: Content;
+
+  /** The grounding metadata the model attached to the event. */
+  groundingMetadata?: GroundingMetadata;
 }
 
 /**
@@ -56,7 +60,8 @@ export interface InvocationEvents {
 /**
  * The intermediate steps of an invocation, in either supported shape.
  *
- * Narrow it with `'invocationEvents' in value`.
+ * Recorded eval data uses {@link IntermediateData}; a run replayed from events
+ * uses {@link InvocationEvents}. Narrow it with {@link isInvocationEvents}.
  */
 export type IntermediateDataType = IntermediateData | InvocationEvents;
 
@@ -91,4 +96,67 @@ export interface Invocation {
 
   /** Details about the app that served this invocation. */
   appDetails?: AppDetails;
+}
+
+/** Values that initialize the session an eval case runs in. */
+export interface SessionInput {
+  appName: string;
+
+  userId: string;
+
+  /**
+   * A fixed session id for this eval case. Artifacts are keyed by
+   * `(appName, userId, sessionId)`, so pinning the id lets a case reach
+   * artifacts that were pre-loaded for that session. When unset, a random id
+   * is generated per case.
+   */
+  sessionId?: string;
+
+  /** The state the session starts from. Applied only when creating it. */
+  state?: Record<string, unknown>;
+}
+
+/** One evaluation case: a conversation plus the session it runs in. */
+export interface EvalCase {
+  /** Unique identifier for the eval case. */
+  evalId: string;
+
+  /** A static conversation between the user and the agent. */
+  conversation?: Invocation[];
+
+  sessionInput?: SessionInput;
+
+  /** Creation time in seconds since the epoch. */
+  creationTimestamp: number;
+
+  /** The expected session state at the end of the conversation. */
+  finalSessionState?: Record<string, unknown>;
+}
+
+/** Returns true when the intermediate data is a list of invocation events. */
+export function isInvocationEvents(
+  intermediateData: IntermediateDataType,
+): intermediateData is InvocationEvents {
+  return 'invocationEvents' in intermediateData;
+}
+
+/** Returns every tool call recorded in the given intermediate data. */
+export function getAllToolCalls(
+  intermediateData?: IntermediateDataType,
+): FunctionCall[] {
+  if (!intermediateData) {
+    return [];
+  }
+  if (!isInvocationEvents(intermediateData)) {
+    return intermediateData.toolUses ?? [];
+  }
+  const toolCalls: FunctionCall[] = [];
+  for (const event of intermediateData.invocationEvents) {
+    for (const part of event.content?.parts ?? []) {
+      if (part.functionCall) {
+        toolCalls.push(part.functionCall);
+      }
+    }
+  }
+  return toolCalls;
 }
