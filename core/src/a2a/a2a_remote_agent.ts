@@ -132,6 +132,22 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     }
   }
 
+  /**
+   * This agent reads its config on demand instead of assigning its fields, so
+   * {@link BaseAgent.clone} cannot find them on the instance.
+   */
+  protected override get unassignedConfigKeys(): readonly (keyof RemoteA2AAgentConfig)[] {
+    return [
+      'agentCard',
+      'client',
+      'clientFactory',
+      'messageSendConfig',
+      'beforeRequestCallbacks',
+      'afterRequestCallbacks',
+      'metadata',
+    ];
+  }
+
   private async init() {
     if (this.isInitialized) {
       return;

@@ -48,6 +48,31 @@ class MockAgent extends BaseAgent {
   }
 }
 
+interface LazyConfigAgentConfig extends BaseAgentConfig {
+  greeting?: string;
+}
+
+/** Reads its config on demand instead of assigning it, like RemoteA2AAgent. */
+class LazyConfigAgent extends BaseAgent<LazyConfigAgentConfig> {
+  protected override get unassignedConfigKeys(): readonly (keyof LazyConfigAgentConfig)[] {
+    return ['greeting'];
+  }
+
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: this.config.greeting ?? 'none'}]},
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
+}
+
 describe('BaseAgent', () => {
   describe('rootAgent', () => {
     it('should return the actual root agent for sub-agents', () => {
@@ -555,6 +580,33 @@ describe('BaseAgent', () => {
       expect(() =>
         agent.clone({nope: true} as Partial<BaseAgentConfig>),
       ).toThrow(/nonexistent fields in MockAgent: nope/);
+    });
+
+    it('accepts a key a subclass declares as unassigned, and the clone reads it', async () => {
+      const agent = new LazyConfigAgent({name: 'lazy'});
+
+      const clone = agent.clone({greeting: 'hello there'});
+      const events: Event[] = [];
+      for await (const event of clone.runAsync(
+        new InvocationContext({
+          invocationId: 'test',
+          agent: clone,
+          session: createSession({id: 'test-session', appName: 'test-app'}),
+          pluginManager: new PluginManager(),
+        }),
+      )) {
+        events.push(event);
+      }
+
+      expect(events[0].content?.parts?.[0].text).toBe('hello there');
+    });
+
+    it('still rejects a key a subclass did not declare as unassigned', () => {
+      const agent = new LazyConfigAgent({name: 'lazy'});
+
+      expect(() =>
+        agent.clone({greetng: 'typo'} as Partial<LazyConfigAgentConfig>),
+      ).toThrow(/nonexistent fields in LazyConfigAgent: greetng/);
     });
   });
 

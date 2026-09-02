@@ -249,13 +249,29 @@ export abstract class BaseAgent<
   }
 
   /**
+   * Config fields this agent declares but never assigns to the instance.
+   *
+   * {@link clone} reads the fields it accepts off the instance, so a subclass
+   * that keeps its whole config and reads `this.config.x` on demand must name
+   * `x` here. Without it, `clone({x})` rejects a field the subclass declares
+   * and TypeScript accepts. A subclass that assigns every config field it
+   * takes needs no override.
+   *
+   * @returns The declared config keys no constructor assigns.
+   */
+  protected get unassignedConfigKeys(): readonly string[] {
+    return [];
+  }
+
+  /**
    * Rejects override keys this agent cannot place, so a typo fails loudly
    * instead of returning an unchanged clone.
    *
    * TypeScript erases a subclass's config interface, so the allowed keys come
    * from the instance: every config field an agent accepts is assigned in a
-   * constructor, and the config it was built with covers anything a subclass
-   * takes without assigning. The check is therefore permissive — an internal
+   * constructor, the config it was built with covers the rest, and
+   * {@link unassignedConfigKeys} names the fields a subclass only reads back
+   * out of that config. The check is therefore permissive — an internal
    * instance field is accepted too. A false rejection would break working
    * code, while a false acceptance only fails to catch a typo.
    *
@@ -270,6 +286,7 @@ export abstract class BaseAgent<
     const allowed = new Set<string>([
       ...Object.keys(this.config),
       ...Object.keys(this),
+      ...this.unassignedConfigKeys,
     ]);
     const invalid = Object.keys(overrides).filter((key) => !allowed.has(key));
     if (invalid.length > 0) {
