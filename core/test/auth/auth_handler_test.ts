@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthConfig, AuthCredentialTypes, AuthHandler, State} from '@google/adk';
+import {
+  AuthConfig,
+  AuthCredentialTypes,
+  AuthHandler,
+  CustomAuthScheme,
+  State,
+} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
 vi.mock('../../src/auth/oauth2/oauth2_credential_exchanger.js', () => ({
@@ -115,6 +121,31 @@ describe('AuthHandler', () => {
         oauth2: {accessToken: 'mockAccessToken'},
       });
     });
+
+    it('stores exchangedCredential.credential for openIdConnect too', async () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'openIdConnect',
+          openIdConnectUrl: 'https://oidc.com/.well-known/openid-configuration',
+          authorizationEndpoint: 'https://oidc.com/auth',
+          tokenEndpoint: 'https://oidc.com/token',
+        },
+        exchangedAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {authCode: '123'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+      const state = new State();
+
+      await handler.parseAndStoreAuthResponse(state);
+
+      expect(state.get('temp:testKey')).toEqual({
+        authType: 'oauth2',
+        oauth2: {accessToken: 'mockAccessToken'},
+      });
+    });
   });
 
   describe('generateAuthRequest', () => {
@@ -153,6 +184,29 @@ describe('AuthHandler', () => {
       const request = handler.generateAuthRequest();
 
       expect(request).toBe(authConfig);
+    });
+
+    it('generates the auth URI for an openIdConnect scheme', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'openIdConnect',
+          openIdConnectUrl: 'https://oidc.com/.well-known/openid-configuration',
+          authorizationEndpoint: 'https://oidc.com/auth',
+          tokenEndpoint: 'https://oidc.com/token',
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+          oauth2: {clientId: 'id', clientSecret: 'secret'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      const request = handler.generateAuthRequest();
+
+      expect(request.exchangedAuthCredential?.oauth2?.authUri).toContain(
+        'https://oidc.com/auth?',
+      );
     });
 
     it('throws if rawAuthCredential is missing for oauth2', () => {
@@ -332,6 +386,23 @@ describe('AuthHandler', () => {
             },
           },
         },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'id'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      expect(() => handler.generateAuthUri()).toThrow(
+        'Authorization endpoint not configured in auth scheme.',
+      );
+    });
+
+    it('throws for a CustomAuthScheme, which carries no endpoint', () => {
+      const custom: CustomAuthScheme = {type: 'acmeVault'};
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: custom,
         rawAuthCredential: {
           authType: AuthCredentialTypes.OAUTH2,
           oauth2: {clientId: 'id'},

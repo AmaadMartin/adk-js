@@ -293,7 +293,7 @@ export class AgentRegistry {
                 type: 'gcpAuthProviderScheme',
                 name: authProvider,
                 continueUri: options?.continueUri,
-              } as GcpAuthProviderScheme as unknown as AuthScheme;
+              } as GcpAuthProviderScheme;
               break;
             }
           }

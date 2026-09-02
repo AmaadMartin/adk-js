@@ -8,7 +8,7 @@ import {logger} from '../../utils/logger.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {OAuth2Auth} from '../auth_credential.js';
 
-import {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
+import {AuthScheme, AuthSchemeType} from '../auth_schemes.js';
 import {validateDiscoveryUrl} from './oauth2_discovery.js';
 
 /**
@@ -16,13 +16,18 @@ import {validateDiscoveryUrl} from './oauth2_discovery.js';
  */
 export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
   if (
-    authScheme.type === 'openIdConnect' &&
-    (authScheme as OpenIdConnectWithConfig).tokenEndpoint
+    authScheme.type === AuthSchemeType.OPEN_ID_CONNECT &&
+    'tokenEndpoint' in authScheme &&
+    authScheme.tokenEndpoint
   ) {
-    return (authScheme as OpenIdConnectWithConfig).tokenEndpoint;
+    return authScheme.tokenEndpoint;
   }
 
-  if (authScheme.type === 'oauth2' && authScheme.flows) {
+  if (
+    authScheme.type === AuthSchemeType.OAUTH2 &&
+    'flows' in authScheme &&
+    authScheme.flows
+  ) {
     const flows = authScheme.flows;
     const flow =
       flows.authorizationCode ||
