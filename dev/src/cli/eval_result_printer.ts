@@ -91,18 +91,13 @@ function toInvocationRow(
  * has a value for, then every metric that was scored.
  */
 function columnsToKeep(rows: readonly InvocationRow[]): string[] {
-  const metricColumns = new Set<string>();
-  for (const row of rows) {
-    for (const column of Object.keys(row)) {
-      if (!INVOCATION_COLUMNS.includes(column)) {
-        metricColumns.add(column);
-      }
-    }
-  }
   const kept = INVOCATION_COLUMNS.filter((column) =>
     rows.some((row) => row[column] !== undefined),
   );
-  return [...kept, ...metricColumns];
+  const metricColumns = rows
+    .flatMap((row) => Object.keys(row))
+    .filter((column) => !INVOCATION_COLUMNS.includes(column));
+  return [...kept, ...new Set(metricColumns)];
 }
 
 /** Prints the pass and fail counts of a run, one line per eval set. */

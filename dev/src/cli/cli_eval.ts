@@ -164,7 +164,7 @@ function resolveRootAgent(
   agentPath: string,
 ): {rootAgent: BaseAgent; app?: App} {
   const app = isApp(loaded) ? loaded : undefined;
-  const rootAgent: unknown = app ? app.rootAgent : loaded;
+  const rootAgent = app ? app.rootAgent : loaded;
   if (!isBaseAgent(rootAgent)) {
     throw new Error(`\`${agentPath}\` does not export an agent to evaluate.`);
   }

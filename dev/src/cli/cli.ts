@@ -32,7 +32,6 @@ import {
 } from './cli_telemetry.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
-import {validateExclusive} from './exclusive_options.js';
 import {
   applyFeatureOverrides,
   DISABLE_FEATURES_OPTION,
@@ -96,6 +95,15 @@ function getBoolean(option?: string | boolean): boolean {
   }
 
   return false;
+}
+
+/**
+ * Reports whether the user supplied the option, rather than commander filling
+ * in its default. An explicit empty value still counts as supplied.
+ */
+function wasSupplied(command: Command, name: string): boolean {
+  const source = command.getOptionValueSource(name);
+  return source !== undefined && source !== 'default';
 }
 
 /**
@@ -458,7 +466,12 @@ export function createProgram(): Command {
       ) => {
         // Before anything is resolved or loaded: the two options name two
         // different sessions, so the run cannot honour both.
-        validateExclusive(command, 'replay', 'resume');
+        if (wasSupplied(command, 'replay') && wasSupplied(command, 'resume')) {
+          command.error(
+            `error: Options 'resume' and 'replay' cannot be set together.`,
+            {code: 'commander.conflictingOption'},
+          );
+        }
         applyFeatureOverrides(command);
         setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
