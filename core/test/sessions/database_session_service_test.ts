@@ -1236,6 +1236,13 @@ describe('isDatabaseConnectionString', () => {
     ).toBe(true);
   });
 
+  it('claims a driver-suffixed URI so the service explains the suffix', () => {
+    expect(
+      isDatabaseConnectionString('postgresql+asyncpg://user:pw@host:5432/db'),
+    ).toBe(true);
+    expect(isDatabaseConnectionString('oracle://host/db')).toBe(false);
+  });
+
   it('should reject invalid strings', () => {
     expect(isDatabaseConnectionString('')).toBe(false);
     expect(isDatabaseConnectionString(undefined)).toBe(false);
