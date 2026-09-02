@@ -58,34 +58,6 @@ export interface BaseAgentConfig extends BaseNodeConfig {
 }
 
 /**
- * The config keys every agent accepts, from {@link BaseAgentConfig} and the
- * {@link BaseNodeConfig} it extends.
- *
- * {@link BaseAgent.clone} checks an override key against this set plus the
- * instance's own keys, because TypeScript erases a subclass's config interface
- * and leaves no runtime field registry to check against. That check is
- * deliberately permissive: an internal instance field is accepted even though
- * it is not a config key. A false rejection would break working code, while a
- * false acceptance only fails to catch a typo.
- */
-const BASE_AGENT_CONFIG_KEYS: ReadonlySet<string> = new Set([
-  'name',
-  'description',
-  'parentAgent',
-  'subAgents',
-  'beforeAgentCallback',
-  'afterAgentCallback',
-  'rerunOnResume',
-  'waitForOutput',
-  'retryConfig',
-  'timeout',
-  'inputSchema',
-  'outputSchema',
-  'stateSchema',
-  'isolationScope',
-]);
-
-/**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all BaseAgent instances.
  */
@@ -277,22 +249,15 @@ export abstract class BaseAgent<
   }
 
   /**
-   * Config keys this agent accepts but never stores on the instance.
-   *
-   * {@link clone} cannot see a subclass's config interface, because TypeScript
-   * erases it, so it derives the allowed override keys from the instance
-   * instead. A subclass that consumes a config field without assigning it —
-   * `LlmAgent` folds `contextCompactors` into its request processors — has to
-   * name it here, or `clone()` rejects an override that the constructor would
-   * have honoured.
-   */
-  protected get configOnlyKeys(): readonly string[] {
-    return [];
-  }
-
-  /**
    * Rejects override keys this agent cannot place, so a typo fails loudly
    * instead of returning an unchanged clone.
+   *
+   * TypeScript erases a subclass's config interface, so the allowed keys come
+   * from the instance: every config field an agent accepts is assigned in a
+   * constructor, and the config it was built with covers anything a subclass
+   * takes without assigning. The check is therefore permissive — an internal
+   * instance field is accepted too. A false rejection would break working
+   * code, while a false acceptance only fails to catch a typo.
    *
    * @param overrides The overrides passed to {@link clone}.
    * @throws If an override names a field this agent does not have.
@@ -303,8 +268,6 @@ export abstract class BaseAgent<
     }
 
     const allowed = new Set<string>([
-      ...BASE_AGENT_CONFIG_KEYS,
-      ...this.configOnlyKeys,
       ...Object.keys(this.config),
       ...Object.keys(this),
     ]);
@@ -527,6 +490,29 @@ export abstract class BaseAgent<
   }
 
   /**
+   * Builds the event a lifecycle callback produces, from its content or from
+   * the state delta it wrote.
+   *
+   * @param invocationContext The invocation context of the agent.
+   * @param callbackContext The context the callbacks ran against.
+   * @param content The content a callback returned, if any.
+   * @return The event to yield.
+   */
+  private callbackEvent(
+    invocationContext: InvocationContext,
+    callbackContext: Context,
+    content?: Content,
+  ): Event {
+    return createEvent({
+      invocationId: invocationContext.invocationId,
+      author: this.name,
+      branch: invocationContext.branch,
+      content,
+      actions: callbackContext.eventActions,
+    });
+  }
+
+  /**
    * Runs the registered plugins' before-agent callbacks, then this agent's own.
    *
    * A plugin takes precedence: content from a plugin skips this agent's own
@@ -560,13 +546,11 @@ export abstract class BaseAgent<
     if (pluginContent) {
       invocationContext.endInvocation = true;
 
-      return createEvent({
-        invocationId: invocationContext.invocationId,
-        author: this.name,
-        branch: invocationContext.branch,
-        content: pluginContent,
-        actions: callbackContext.eventActions,
-      });
+      return this.callbackEvent(
+        invocationContext,
+        callbackContext,
+        pluginContent,
+      );
     }
 
     for (const callback of this.beforeAgentCallback) {
@@ -579,23 +563,12 @@ export abstract class BaseAgent<
       if (content) {
         invocationContext.endInvocation = true;
 
-        return createEvent({
-          invocationId: invocationContext.invocationId,
-          author: this.name,
-          branch: invocationContext.branch,
-          content,
-          actions: callbackContext.eventActions,
-        });
+        return this.callbackEvent(invocationContext, callbackContext, content);
       }
     }
 
     if (callbackContext.state.hasDelta()) {
-      return createEvent({
-        invocationId: invocationContext.invocationId,
-        author: this.name,
-        branch: invocationContext.branch,
-        actions: callbackContext.eventActions,
-      });
+      return this.callbackEvent(invocationContext, callbackContext);
     }
 
     return undefined;
@@ -630,13 +603,11 @@ export abstract class BaseAgent<
         callbackContext,
       });
     if (pluginContent) {
-      return createEvent({
-        invocationId: invocationContext.invocationId,
-        author: this.name,
-        branch: invocationContext.branch,
-        content: pluginContent,
-        actions: callbackContext.eventActions,
-      });
+      return this.callbackEvent(
+        invocationContext,
+        callbackContext,
+        pluginContent,
+      );
     }
 
     for (const callback of this.afterAgentCallback) {
@@ -647,23 +618,12 @@ export abstract class BaseAgent<
       }
 
       if (content) {
-        return createEvent({
-          invocationId: invocationContext.invocationId,
-          author: this.name,
-          branch: invocationContext.branch,
-          content,
-          actions: callbackContext.eventActions,
-        });
+        return this.callbackEvent(invocationContext, callbackContext, content);
       }
     }
 
     if (callbackContext.state.hasDelta()) {
-      return createEvent({
-        invocationId: invocationContext.invocationId,
-        author: this.name,
-        branch: invocationContext.branch,
-        actions: callbackContext.eventActions,
-      });
+      return this.callbackEvent(invocationContext, callbackContext);
     }
 
     return undefined;
