@@ -8,6 +8,7 @@ import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
+import {AuthToolArguments} from '../auth/auth_tool.js';
 import {
   createEvent,
   Event,
@@ -117,10 +118,7 @@ export function generateAuthEvent(
   )) {
     const requestCredentialFunctionCall: FunctionCall = {
       name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-      args: {
-        'function_call_id': functionCallId,
-        'auth_config': authConfig,
-      },
+      args: {functionCallId, authConfig} satisfies AuthToolArguments,
       id: generateClientFunctionCallId(),
     };
     longRunningToolIds.add(requestCredentialFunctionCall.id!);
