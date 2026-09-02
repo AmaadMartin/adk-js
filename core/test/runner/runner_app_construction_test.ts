@@ -18,8 +18,8 @@ import {logger} from '../../src/utils/logger.js';
 
 class MarkerPlugin extends BasePlugin {}
 
-function newAgent(name = 'root_agent'): LlmAgent {
-  return new LlmAgent({name, model: 'gemini-2.0-flash'});
+function newAgent(name = 'root_agent', subAgents: LlmAgent[] = []): LlmAgent {
+  return new LlmAgent({name, model: 'gemini-2.0-flash', subAgents});
 }
 
 function newWorkflow(name = 'wf'): Workflow {
@@ -221,5 +221,51 @@ describe('Runner construction', () => {
     expect(new Runner({app, sessionService}).resumabilityConfig).toEqual({
       isResumable: true,
     });
+  });
+});
+
+describe('Runner uncached transfer warning', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('warns when the agent tree can transfer', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    new Runner({
+      appName: 'transfer_app',
+      agent: newAgent('root', [newAgent('helper')]),
+      sessionService,
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      'App "transfer_app" can transfer between agents but has no context ' +
+        'cache. Every transfer swaps the system instruction and the tool ' +
+        'set, so the request prefix changes and the whole prompt is re-sent ' +
+        'uncached after each transfer.',
+    );
+  });
+
+  it('warns once per app name, not once per runner', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const build = () =>
+      new Runner({
+        appName: 'repeat_app',
+        agent: newAgent('root', [newAgent('helper')]),
+        sessionService,
+      });
+
+    build();
+    build();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays silent for an agent tree that cannot transfer', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    new Runner({appName: 'lone_app', agent: newAgent(), sessionService});
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });
