@@ -327,21 +327,14 @@ export class InvocationContext {
         .invocationCostManager ?? new InvocationCostManager();
     this.liveRequestQueue = params.liveRequestQueue;
     this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
-    // Read back from params for the same reason as the cost manager above: a
-    // child context must share the parent's maps so a sub-agent's checkpoint is
-    // recorded once for the whole invocation.
+    // A child context must share the parent's maps, so a sub-agent's
+    // checkpoint is recorded once for the whole invocation.
     this.agentStates = params.agentStates ?? {};
     this.endOfAgents = params.endOfAgents ?? {};
     this.resumabilityConfig = params.resumabilityConfig;
   }
 
-  /**
-   * Whether this invocation can be paused and resumed later.
-   *
-   * Recomputed on a child context from the `resumabilityConfig` the
-   * `{...parentContext}` spread carries over, rather than stored as an own
-   * field the spread would have to copy.
-   */
+  /** Whether this invocation can be paused and resumed later. */
   get isResumable(): boolean {
     return this.resumabilityConfig?.isResumable ?? false;
   }

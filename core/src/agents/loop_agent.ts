@@ -43,12 +43,8 @@ export type LoopAgentState = {
  * Reads a persisted record back into a {@link LoopAgentState}.
  *
  * Rejects a record it cannot read, rather than restarting the loop from a
- * checkpoint it half-understands. Mirrors the `extra='forbid'` validation
- * adk-python applies to the same snapshot.
- *
- * Both fields carry the same defaults as the pydantic model: an absent
- * `current_sub_agent` means "start at the first sub-agent", and an absent
- * `times_looped` means "no pass has completed".
+ * checkpoint it half-understands. The defaults and the rejected fields match
+ * the pydantic model adk-python validates the same snapshot against.
  *
  * @param raw The persisted record.
  * @return The parsed loop state.

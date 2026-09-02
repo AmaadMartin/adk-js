@@ -59,12 +59,6 @@ export interface BaseAgentConfig extends BaseNodeConfig {
 /**
  * The resumption checkpoint an agent records for the current invocation.
  *
- * The base state is the empty object, meaning "this agent started but has
- * nothing more specific to restore". A concrete agent describes its own state
- * shape — which sub-agent was running, how many times a loop has run — and it
- * is persisted verbatim on `EventActions.agentState`, so this is an open JSON
- * record rather than a closed shape.
- *
  * Declare a concrete state with `type`, not `interface`: a TypeScript
  * `interface` has no implicit index signature and so is not assignable to
  * `Record<string, unknown>`.
