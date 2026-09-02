@@ -9,13 +9,23 @@ import {
   AddMemoryRequest,
   BaseMemoryService,
   createEvent,
-  DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE,
-  EVENT_DELTAS_UNSUPPORTED_MESSAGE,
   InMemoryMemoryService,
   MemoryEntry,
   SearchMemoryResponse,
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
+
+/**
+ * The diagnostics the base class reports, copied from
+ * `adk-python`'s `base_memory_service.py` with the method names camelCased.
+ * Held here rather than imported so a reworded message fails the test.
+ */
+const EVENT_DELTAS_MESSAGE =
+  'This memory service does not support adding event deltas. ' +
+  'Call addSessionToMemory(session) to ingest the full session.';
+const DIRECT_WRITES_MESSAGE =
+  'This memory service does not support direct memory writes. ' +
+  'Call addEventsToMemory(...) or addSessionToMemory(session) instead.';
 
 /** A service that implements only the two abstract members. */
 class MinimalMemoryService extends BaseMemoryService {
@@ -70,13 +80,17 @@ describe('BaseMemoryService', () => {
           userId: 'alice',
           events: [newEvent()],
         }),
-      ).rejects.toThrow(EVENT_DELTAS_UNSUPPORTED_MESSAGE);
+      ).rejects.toThrow(new Error(EVENT_DELTAS_MESSAGE));
     });
 
-    it('names the whole-session alternative in the message', () => {
-      expect(EVENT_DELTAS_UNSUPPORTED_MESSAGE).toContain(
-        'addSessionToMemory(session)',
-      );
+    it('names the whole-session alternative in the message', async () => {
+      await expect(
+        service.addEventsToMemory({
+          appName: 'myApp',
+          userId: 'alice',
+          events: [newEvent()],
+        }),
+      ).rejects.toThrow('addSessionToMemory(session)');
     });
 
     it('rejects the same way when sessionId and customMetadata are set', async () => {
@@ -88,7 +102,7 @@ describe('BaseMemoryService', () => {
           sessionId: 'session-1',
           customMetadata: {ttl: '3600s'},
         }),
-      ).rejects.toThrow(EVENT_DELTAS_UNSUPPORTED_MESSAGE);
+      ).rejects.toThrow(new Error(EVENT_DELTAS_MESSAGE));
     });
   });
 
@@ -100,14 +114,16 @@ describe('BaseMemoryService', () => {
           userId: 'alice',
           memories: [ENTRY],
         }),
-      ).rejects.toThrow(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE);
+      ).rejects.toThrow(new Error(DIRECT_WRITES_MESSAGE));
     });
 
-    it('names both alternatives in the message', () => {
-      expect(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE).toContain(
+    it('names both alternatives in the message', async () => {
+      const request = {appName: 'myApp', userId: 'alice', memories: [ENTRY]};
+
+      await expect(service.addMemory(request)).rejects.toThrow(
         'addEventsToMemory(...)',
       );
-      expect(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE).toContain(
+      await expect(service.addMemory(request)).rejects.toThrow(
         'addSessionToMemory(session)',
       );
     });
@@ -151,7 +167,7 @@ describe('BaseMemoryService', () => {
           userId: 'alice',
           events: [newEvent()],
         }),
-      ).rejects.toThrow(EVENT_DELTAS_UNSUPPORTED_MESSAGE);
+      ).rejects.toThrow(new Error(EVENT_DELTAS_MESSAGE));
     });
 
     it('inherits the direct write rejection', async () => {
@@ -161,7 +177,7 @@ describe('BaseMemoryService', () => {
           userId: 'alice',
           memories: [ENTRY],
         }),
-      ).rejects.toThrow(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE);
+      ).rejects.toThrow(new Error(DIRECT_WRITES_MESSAGE));
     });
   });
 });

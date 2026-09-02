@@ -9,16 +9,6 @@ import {Session} from '../sessions/session.js';
 
 import {MemoryEntry} from './memory_entry.js';
 
-/** Reported when a memory service cannot ingest an event delta. */
-export const EVENT_DELTAS_UNSUPPORTED_MESSAGE =
-  'This memory service does not support adding event deltas. ' +
-  'Call addSessionToMemory(session) to ingest the full session.';
-
-/** Reported when a memory service cannot take a direct memory write. */
-export const DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE =
-  'This memory service does not support direct memory writes. ' +
-  'Call addEventsToMemory(...) or addSessionToMemory(session) instead.';
-
 /**
  * Represents the response from a memory search.
  */
@@ -124,7 +114,10 @@ export abstract class BaseMemoryService {
    * @return A promise that resolves when the events are added to the memory.
    */
   async addEventsToMemory(_request: AddEventsToMemoryRequest): Promise<void> {
-    throw new Error(EVENT_DELTAS_UNSUPPORTED_MESSAGE);
+    throw new Error(
+      'This memory service does not support adding event deltas. ' +
+        'Call addSessionToMemory(session) to ingest the full session.',
+    );
   }
 
   /**
@@ -140,7 +133,10 @@ export abstract class BaseMemoryService {
    * @return A promise that resolves when the memories are added.
    */
   async addMemory(_request: AddMemoryRequest): Promise<void> {
-    throw new Error(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE);
+    throw new Error(
+      'This memory service does not support direct memory writes. ' +
+        'Call addEventsToMemory(...) or addSessionToMemory(session) instead.',
+    );
   }
 
   /**
