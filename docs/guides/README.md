@@ -8,4 +8,4 @@ implementation. For the official ADK documentation, visit
 
 ### Tools
 
-- [BaseToolset](tools/toolset/index.md) - Listing tools at run time, name prefixing, the per-invocation cache, and the close/auth/config hooks.
+- [BaseToolset](tools/toolset/index.md) - Listing tools at run time, name prefixing, the per-invocation cache, and releasing resources.

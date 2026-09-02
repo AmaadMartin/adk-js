@@ -89,7 +89,8 @@ advertises, not the names the model will see.
 
 `getToolsWithPrefix` keys its cache on `context.invocationId`. A second call in
 the same invocation returns the identical array; a call in a new invocation
-lists again. A call with no context is cached under its own key.
+lists again. A call that passes no context is never cached, because nothing
+would bound how long its list stays current.
 
 Turn the cache off when your tool list changes within one invocation:
 
@@ -132,41 +133,3 @@ class ServerToolset extends BaseToolset {
   }
 }
 ```
-
-## Authentication
-
-`getAuthConfig()` declares the credential a toolset needs before ADK lists or
-calls its tools. The default returns `undefined`. Override it to return an
-`AuthConfig` built from your auth scheme and credential.
-
-```ts
-import {AuthConfig, BaseTool, BaseToolset} from '@google/adk';
-
-class PrivateApiToolset extends BaseToolset {
-  constructor() {
-    super([]);
-  }
-
-  async getTools(): Promise<BaseTool[]> {
-    return [];
-  }
-
-  override getAuthConfig(): AuthConfig | undefined {
-    return {
-      authScheme: {type: 'apiKey', name: 'x-api-key', in: 'header'},
-      credentialKey: 'private-api',
-    };
-  }
-}
-```
-
-Note the current limit: adk-js exposes the hook, but no flow reads it yet. A
-tool that needs a credential today requests its own through the tool context.
-
-## Building from a config file
-
-`static fromConfig(config, configAbsPath)` throws by default, naming the class:
-`fromConfig() not implemented for toolset: PrivateApiToolset`. Override it in a
-toolset that can be declared in a config file. adk-js has no config loader yet,
-so nothing calls it; the hook exists so a toolset ported from adk-python keeps
-the same surface.

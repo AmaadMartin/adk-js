@@ -5,7 +5,6 @@
  */
 
 import {
-  AuthConfig,
   BaseTool,
   BaseToolset,
   Context,
@@ -225,21 +224,25 @@ class RecordingToolset extends BaseToolset {
   }
 }
 
+/** A toolset whose tool list grows between listings. */
+class GrowingToolset extends BaseToolset {
+  constructor(private readonly tools: BaseTool[]) {
+    super([], 'custom');
+  }
+
+  add(tool: BaseTool): void {
+    this.tools.push(tool);
+  }
+
+  async getTools(): Promise<BaseTool[]> {
+    return [...this.tools];
+  }
+}
+
 class UncachedToolset extends RecordingToolset {
   constructor(tools: BaseTool[], prefix?: string) {
     super(tools, prefix);
     this.useInvocationCache = false;
-  }
-}
-
-const TOOLSET_AUTH_CONFIG: AuthConfig = {
-  authScheme: {type: 'apiKey', name: 'key', in: 'header'},
-  credentialKey: 'toolset-key',
-};
-
-class AuthenticatedToolset extends RecordingToolset {
-  override getAuthConfig(): AuthConfig | undefined {
-    return TOOLSET_AUTH_CONFIG;
   }
 }
 
@@ -487,7 +490,7 @@ describe('BaseToolset invocation cache', () => {
     expect(toolset.getToolsCalls).toBe(2);
   });
 
-  it('caches two context-less calls under the same key', async () => {
+  it('lists again for every context-less call', async () => {
     const toolset = new RecordingToolset(
       [new TaggedTool('tool1', 'a')],
       'custom',
@@ -496,8 +499,34 @@ describe('BaseToolset invocation cache', () => {
     const first = await toolset.getToolsWithPrefix();
     const second = await toolset.getToolsWithPrefix();
 
-    expect(second).toBe(first);
-    expect(toolset.getToolsCalls).toBe(1);
+    expect(second).not.toBe(first);
+    expect(toolset.getToolsCalls).toBe(2);
+  });
+
+  it('does not serve an invocation-scoped list to a context-less call', async () => {
+    const toolset = new RecordingToolset(
+      [new TaggedTool('tool1', 'a')],
+      'custom',
+    );
+
+    await toolset.getToolsWithPrefix(makeReadonlyContext('inv-1'));
+    await toolset.getToolsWithPrefix();
+
+    expect(toolset.getToolsCalls).toBe(2);
+  });
+
+  it('sees a changed tool list on a later context-less call', async () => {
+    const growing = new GrowingToolset([new TaggedTool('tool1', 'a')]);
+
+    const first = await growing.getToolsWithPrefix();
+    growing.add(new TaggedTool('tool2', 'b'));
+    const second = await growing.getToolsWithPrefix();
+
+    expect(first.map((tool) => tool.name)).toEqual(['custom_tool1']);
+    expect(second.map((tool) => tool.name)).toEqual([
+      'custom_tool1',
+      'custom_tool2',
+    ]);
   });
 
   it('recomputes every call when the subclass opts out', async () => {
@@ -562,24 +591,8 @@ describe('isBaseToolset', () => {
   });
 });
 
-describe('BaseToolset extension hooks', () => {
+describe('BaseToolset.close', () => {
   it('closes without throwing when the subclass does not override close', async () => {
     await expect(new RecordingToolset([]).close()).resolves.toBeUndefined();
-  });
-
-  it('throws from fromConfig, naming the subclass', () => {
-    expect(() => RecordingToolset.fromConfig({}, '/tmp/toolset.yaml')).toThrow(
-      'fromConfig() not implemented for toolset: RecordingToolset',
-    );
-  });
-
-  it('returns no auth config by default', () => {
-    expect(new RecordingToolset([]).getAuthConfig()).toBeUndefined();
-  });
-
-  it('returns the auth config an overriding subclass declares', () => {
-    expect(new AuthenticatedToolset([]).getAuthConfig()).toBe(
-      TOOLSET_AUTH_CONFIG,
-    );
   });
 });

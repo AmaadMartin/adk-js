@@ -5,7 +5,6 @@
  */
 
 import {ReadonlyContext} from '../agents/readonly_context.js';
-import type {AuthConfig} from '../auth/auth_tool.js';
 import {LlmRequest} from '../models/llm_request.js';
 
 import {Context} from '../agents/context.js';
@@ -20,14 +19,6 @@ export type ToolPredicate = (
   tool: BaseTool,
   readonlyContext: ReadonlyContext,
 ) => boolean;
-
-/**
- * The arguments a toolset is built from when it is declared in a config file.
- *
- * The shape is open because each toolset reads its own keys out of it.
- * Corresponds to `ToolArgsConfig` in adk-python.
- */
-export type ToolArgsConfig = Record<string, unknown>;
 
 /**
  * Returns a copy of `tool` that answers to `prefixedName`.
@@ -108,6 +99,10 @@ export abstract class BaseToolset {
    * no prefix configured the array `getTools` returned is passed straight
    * through.
    *
+   * A call that passes no context is never cached: it belongs to no
+   * invocation, so there is nothing to bound the cached list's lifetime and it
+   * would freeze for the life of the process.
+   *
    * Subclasses must not override this method; override `getTools` instead.
    * It corresponds to Python's `@final get_tools_with_prefix`.
    *
@@ -121,6 +116,7 @@ export abstract class BaseToolset {
     if (
       this.useInvocationCache &&
       this.cachedTools !== undefined &&
+      invocationId !== undefined &&
       this.cachedInvocationId === invocationId
     ) {
       return this.cachedTools;
@@ -132,8 +128,10 @@ export abstract class BaseToolset {
       ? tools.map((tool) => withPrefixedName(tool, `${prefix}_${tool.name}`))
       : tools;
 
-    this.cachedInvocationId = invocationId;
-    this.cachedTools = prefixedTools;
+    if (invocationId !== undefined) {
+      this.cachedInvocationId = invocationId;
+      this.cachedTools = prefixedTools;
+    }
     return prefixedTools;
   }
 
@@ -148,40 +146,6 @@ export abstract class BaseToolset {
    * @return A Promise that resolves when the toolset is closed.
    */
   async close(): Promise<void> {}
-
-  /**
-   * Creates a toolset from the arguments declared for it in a config file.
-   *
-   * A toolset that can be declared in a config file overrides this. The base
-   * implementation throws, naming the class that failed to provide it.
-   *
-   * @param _config The arguments declared for the toolset.
-   * @param _configAbsPath The absolute path of the config file they came from.
-   * @return The toolset instance.
-   */
-  static fromConfig(
-    _config: ToolArgsConfig,
-    _configAbsPath: string,
-  ): BaseToolset {
-    throw new Error(`fromConfig() not implemented for toolset: ${this.name}`);
-  }
-
-  /**
-   * Returns the credential ADK resolves before it lists or calls this
-   * toolset's tools, or `undefined` when the toolset needs none.
-   *
-   * A toolset that authenticates overrides this and returns an `AuthConfig`
-   * built from its auth scheme and credential. ADK populates the config's
-   * `exchangedAuthCredential` field before calling {@link getTools}, so the
-   * toolset can use the credential for listing as well as for calling. A tool
-   * that needs a different credential requests its own through the tool
-   * context.
-   *
-   * @return The toolset's auth config, or `undefined`.
-   */
-  getAuthConfig(): AuthConfig | undefined {
-    return undefined;
-  }
 
   /**
    * Returns whether the tool should be exposed to LLM.
