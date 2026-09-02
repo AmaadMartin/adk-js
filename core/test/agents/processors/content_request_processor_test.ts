@@ -67,9 +67,11 @@ function createMockInvocationContext(events: Event[]): InvocationContext {
     userId: 'test-user',
   } as unknown as Session;
 
+  // The processor resolves the model to read its id-pairing policy, so the
+  // fixture supplies a key rather than relying on the ambient environment.
   const agent = new LlmAgent({
     name: 'test_agent',
-    model: 'gemini-2.5-flash',
+    model: new Gemini({model: 'gemini-2.5-flash', apiKey: TEST_API_KEY}),
   });
 
   return new InvocationContext({
@@ -192,13 +194,23 @@ describe('ContentRequestProcessor', () => {
   });
 });
 
-/** A non-Gemini provider, which pairs a tool call with its result by id. */
+/** A provider that leaves the base id-pairing default alone. */
 class StubLlm extends BaseLlm {
   generateContentAsync(): AsyncGenerator<LlmResponse, void> {
     throw new Error('Not implemented');
   }
   connect(): Promise<BaseLlmConnection> {
     throw new Error('Not implemented');
+  }
+}
+
+/**
+ * A provider that pairs a tool call with its result by id, as `AnthropicLlm`
+ * and `LiteLlm` will when they land.
+ */
+class IdPairingLlm extends StubLlm {
+  override get pairsToolCallsById(): boolean {
+    return true;
   }
 }
 
@@ -303,26 +315,36 @@ describe('ContentRequestProcessor function call ids', () => {
     expect(contents[1].parts?.[0].functionResponse?.id).toBe('adk-1');
   });
 
-  // Stands in for adk-python's test_adk_function_call_ids_preserved_for_
-  // anthropic_model, ..._lite_llm_model and ..._openai_responses_model. None of
-  // those provider classes exists on this branch.
-  it('keeps the ids for a non-Gemini provider', async () => {
+  it('strips the ids for a provider that does not pair by id', async () => {
     const contents = await buildContents(
       toolEvents,
       new StubLlm({model: 'stub-provider'}),
+    );
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
+    expect(contents[1].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+
+  // Stands in for adk-python's test_adk_function_call_ids_preserved_for_
+  // anthropic_model, ..._lite_llm_model and ..._openai_responses_model. None of
+  // those provider classes exists on this branch.
+  it('keeps the ids for a provider that pairs by id', async () => {
+    const contents = await buildContents(
+      toolEvents,
+      new IdPairingLlm({model: 'id-pairing-provider'}),
     );
 
     expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
     expect(contents[1].parts?.[0].functionResponse?.id).toBe('adk-1');
   });
 
-  it('strips the ids when a routed set includes a plain Gemini model', async () => {
+  it('strips the ids when one routed model does not pair by id', async () => {
     const routed = new RoutedLlm({
       models: [
-        new Gemini({model: 'gemini-2.5-flash', apiKey: TEST_API_KEY}),
+        new IdPairingLlm({model: 'id-pairing-provider'}),
         new StubLlm({model: 'stub-provider'}),
       ],
-      router: () => 'stub-provider',
+      router: () => 'id-pairing-provider',
     });
 
     const contents = await buildContents(toolEvents, routed);
@@ -333,8 +355,11 @@ describe('ContentRequestProcessor function call ids', () => {
 
   it('keeps the ids when every routed model pairs by id', async () => {
     const routed = new RoutedLlm({
-      models: [new StubLlm({model: 'stub-a'}), new StubLlm({model: 'stub-b'})],
-      router: () => 'stub-a',
+      models: [
+        new IdPairingLlm({model: 'pairing-a'}),
+        new IdPairingLlm({model: 'pairing-b'}),
+      ],
+      router: () => 'pairing-a',
     });
 
     const contents = await buildContents(toolEvents, routed);
@@ -343,18 +368,18 @@ describe('ContentRequestProcessor function call ids', () => {
     expect(contents[1].parts?.[0].functionResponse?.id).toBe('adk-1');
   });
 
-  it('strips the ids when the agent resolves to no model', async () => {
-    const contents = await runProcessor(
-      createContextForAgent(toolEvents, new LlmAgent({name: 'test_agent'})),
-    );
-
-    expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
+  it('reports an agent that resolves to no model', async () => {
+    await expect(
+      runProcessor(
+        createContextForAgent(toolEvents, new LlmAgent({name: 'test_agent'})),
+      ),
+    ).rejects.toThrow('No model found for test_agent.');
   });
 
   it('keeps the ids on the current-turn-only path', async () => {
     const agent = new LlmAgent({
       name: 'test_agent',
-      model: new StubLlm({model: 'stub-provider'}),
+      model: new IdPairingLlm({model: 'id-pairing-provider'}),
       includeContents: 'none',
     });
 

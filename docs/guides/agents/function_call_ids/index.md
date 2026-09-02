@@ -21,12 +21,11 @@ the id there and the provider cannot tell which result answers which call: it
 errors, or the model repeats the call it already made.
 
 `BaseLlm.pairsToolCallsById` is how a model states which side it is on. It
-defaults to `true`, because every tool-calling protocol other than Gemini
-`generateContent` pairs by id. `Gemini` narrows it to `useInteractionsApi`, so a
-plain Gemini agent keeps today's behaviour and a Gemini agent on the
-Interactions API keeps its ids. `RoutedLlm` returns `true` only when every
-candidate agrees, because the router picks the serving model after the contents
-are already built.
+defaults to `false`, so a model strips the ids unless it says otherwise.
+`Gemini` returns `useInteractionsApi`, so a plain Gemini agent keeps today's
+behaviour and a Gemini agent on the Interactions API keeps its ids. `RoutedLlm`
+returns `true` only when every candidate agrees, because the router picks the
+serving model after the contents are already built.
 
 Compaction is the second half of the story. A compaction summary replaces a run
 of events with one text summary. It can swallow a `functionCall` whose
@@ -42,13 +41,16 @@ without configuring anything.
 
 ## Get started
 
-A model that pairs by id needs no extra wiring. Any `BaseLlm` subclass inherits
-the `true` default:
+A model that pairs by id overrides the getter. That is the whole opt-in:
 
 ```ts
 import {BaseLlm, BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
 
 class MyProviderLlm extends BaseLlm {
+  override get pairsToolCallsById(): boolean {
+    return true;
+  }
+
   async *generateContentAsync(
     llmRequest: LlmRequest,
     stream?: boolean,
@@ -60,10 +62,10 @@ class MyProviderLlm extends BaseLlm {
     throw new Error('Live is not supported by this provider.');
   }
 }
-
-const model = new MyProviderLlm({model: 'my-provider/some-model'});
-model.pairsToolCallsById; // true
 ```
+
+Leave the getter alone and the ids are stripped, which is what Gemini
+`generateContent` needs.
 
 A Gemini model reports the protocol it is configured for. Both constructors
 below read the API key from the environment:
@@ -74,16 +76,6 @@ import {Gemini} from '@google/adk';
 new Gemini({model: 'gemini-2.5-flash'}).pairsToolCallsById; // false
 new Gemini({model: 'gemini-2.5-flash', useInteractionsApi: true})
   .pairsToolCallsById; // true
-```
-
-Override the getter when a subclass serves a different protocol than its parent:
-
-```ts
-class MyGeminiProxy extends Gemini {
-  override get pairsToolCallsById(): boolean {
-    return true;
-  }
-}
 ```
 
 ## Guarantees
@@ -108,6 +100,7 @@ recovered. That is unchanged behaviour: building the request throws
 `No function call event found for function responses ids: <id>`. It means the
 call event was never in the session, not that compaction removed it.
 
-An agent that resolves to no model at all, or whose model cannot be built,
-falls back to stripping the ids. `ContentRequestProcessor` does not raise that
-error; the flow reports it when it calls the model.
+An agent that resolves to no model raises `No model found for <name>.` while the
+contents are built, because the processor reads the model to learn its
+id-pairing policy. The flow raises the same error a moment later when it calls
+the model.

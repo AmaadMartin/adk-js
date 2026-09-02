@@ -12,7 +12,6 @@ import {
   getCurrentTurnContents,
   isLiveModelMediaEventWithInlineData,
   mergeFunctionResponseEvents,
-  recoverCompactedFunctionCalls,
   removeClientFunctionCallId,
 } from '../../../src/agents/processors/content_processor_utils.js';
 
@@ -1249,9 +1248,7 @@ describe('getContents with preserveFunctionCallIds', () => {
   ];
 
   it('keeps the adk- ids when the option is set', () => {
-    const contents = getContents(events, 'agent', undefined, undefined, {
-      preserveFunctionCallIds: true,
-    });
+    const contents = getContents(events, 'agent', undefined, undefined, true);
 
     expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
     expect(contents[1].parts?.[0].functionResponse?.id).toBe('adk-1');
@@ -1265,9 +1262,7 @@ describe('getContents with preserveFunctionCallIds', () => {
   });
 
   it('strips the adk- ids when the option is explicitly false', () => {
-    const contents = getContents(events, 'agent', undefined, undefined, {
-      preserveFunctionCallIds: false,
-    });
+    const contents = getContents(events, 'agent', undefined, undefined, false);
 
     expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
     expect(contents[1].parts?.[0].functionResponse?.id).toBeUndefined();
@@ -1279,9 +1274,7 @@ describe('getContents with preserveFunctionCallIds', () => {
       createResponseEvent('adk-1', 'four'),
     ];
 
-    getContents(sourceEvents, 'agent', undefined, undefined, {
-      preserveFunctionCallIds: true,
-    });
+    getContents(sourceEvents, 'agent', undefined, undefined, true);
     getContents(sourceEvents, 'agent');
 
     expect(sourceEvents[0].content?.parts?.[0].functionCall?.id).toBe('adk-1');
@@ -1305,7 +1298,7 @@ describe('getContents with preserveFunctionCallIds', () => {
       'agent',
       undefined,
       undefined,
-      {preserveFunctionCallIds: true},
+      true,
     );
     const stripped = getCurrentTurnContents(turnEvents, 'agent');
 
@@ -1313,147 +1306,6 @@ describe('getContents with preserveFunctionCallIds', () => {
     expect(preserved[1].parts?.[0].functionResponse?.id).toBe('adk-1');
     expect(stripped[0].parts?.[0].functionCall?.id).toBeUndefined();
     expect(stripped[1].parts?.[0].functionResponse?.id).toBeUndefined();
-  });
-});
-
-describe('recoverCompactedFunctionCalls', () => {
-  it('re-injects a missing call right before the surviving response', () => {
-    const summary = createEvent({
-      author: 'user',
-      timestamp: 1500,
-      content: {role: 'user', parts: [{text: '[Previous Context Summary]'}]},
-    });
-    const callEvent = createCallEvent(['adk-1']);
-    const responseEvent = createResponseEvent('adk-1', 'four', 3000);
-
-    const recovered = recoverCompactedFunctionCalls(
-      [summary, responseEvent],
-      [callEvent, summary, responseEvent],
-    );
-
-    expect(recovered).toEqual([summary, callEvent, responseEvent]);
-  });
-
-  it('returns the same array when every response has its call', () => {
-    const callEvent = createCallEvent(['adk-1']);
-    const responseEvent = createResponseEvent('adk-1', 'four');
-    const events = [callEvent, responseEvent];
-
-    expect(recoverCompactedFunctionCalls(events, events)).toBe(events);
-  });
-
-  it('recovers the latest response of a compacted sibling', () => {
-    const parallelCall = createCallEvent(['adk-lr1', 'adk-lr2'], 1000);
-    const lr2Placeholder = createResponseEvent('adk-lr2', 'pending', 1100);
-    const lr2Result = createResponseEvent('adk-lr2', 'six', 1200);
-    const summary = createEvent({
-      author: 'user',
-      timestamp: 1500,
-      content: {role: 'user', parts: [{text: '[Previous Context Summary]'}]},
-    });
-    const lr1Result = createResponseEvent('adk-lr1', 'two', 3000);
-    const sourceEvents = [
-      parallelCall,
-      lr2Placeholder,
-      lr2Result,
-      summary,
-      lr1Result,
-    ];
-
-    const recovered = recoverCompactedFunctionCalls(
-      [summary, lr1Result],
-      sourceEvents,
-    );
-
-    expect(recovered).toEqual([summary, parallelCall, lr2Result, lr1Result]);
-  });
-
-  it('leaves an orphan alone when the source has no matching call', () => {
-    const responseEvent = createResponseEvent('adk-gone', 'four');
-    const events = [responseEvent];
-
-    expect(recoverCompactedFunctionCalls(events, events)).toBe(events);
-  });
-
-  it('ignores a call and a response that carry no id', () => {
-    const idlessCall = createEvent({
-      author: 'agent',
-      timestamp: 1000,
-      content: {
-        role: 'model',
-        parts: [{functionCall: {name: 'roll_die', args: {}}}],
-      },
-    });
-    const idlessResponse = createEvent({
-      author: 'user',
-      timestamp: 2000,
-      content: {
-        role: 'user',
-        parts: [{functionResponse: {name: 'roll_die', response: {}}}],
-      },
-    });
-    const events = [idlessCall, idlessResponse];
-
-    expect(recoverCompactedFunctionCalls(events, events)).toBe(events);
-  });
-
-  it('skips a source response with no id when picking the latest', () => {
-    const parallelCall = createCallEvent(['adk-lr1', 'adk-lr2'], 1000);
-    const idlessResponse = createEvent({
-      author: 'user',
-      timestamp: 1100,
-      content: {
-        role: 'user',
-        parts: [{functionResponse: {name: 'roll_die', response: {}}}],
-      },
-    });
-    const lr2Result = createResponseEvent('adk-lr2', 'six', 1200);
-    const lr1Result = createResponseEvent('adk-lr1', 'two', 3000);
-
-    const recovered = recoverCompactedFunctionCalls(
-      [lr1Result],
-      [parallelCall, idlessResponse, lr2Result, lr1Result],
-    );
-
-    expect(recovered).toEqual([parallelCall, lr2Result, lr1Result]);
-  });
-
-  it('leaves a sibling out when the source never answered it', () => {
-    const parallelCall = createCallEvent(['adk-lr1', 'adk-lr2'], 1000);
-    const lr1Result = createResponseEvent('adk-lr1', 'two', 3000);
-
-    const recovered = recoverCompactedFunctionCalls(
-      [lr1Result],
-      [parallelCall, lr1Result],
-    );
-
-    expect(recovered).toEqual([parallelCall, lr1Result]);
-  });
-
-  it('re-injects one call event once for two surviving responses', () => {
-    const parallelCall = createCallEvent(['adk-lr1', 'adk-lr2'], 1000);
-    const lr1Result = createResponseEvent('adk-lr1', 'two', 3000);
-    const lr2Result = createResponseEvent('adk-lr2', 'six', 3100);
-
-    const recovered = recoverCompactedFunctionCalls(
-      [lr1Result, lr2Result],
-      [parallelCall, lr1Result, lr2Result],
-    );
-
-    expect(recovered).toEqual([parallelCall, lr1Result, lr2Result]);
-  });
-
-  it('keeps the first source event that carries an orphaned call', () => {
-    const firstCall = createCallEvent(['adk-1'], 1000);
-    const laterCall = createCallEvent(['adk-1'], 1100);
-    const responseEvent = createResponseEvent('adk-1', 'four', 3000);
-
-    const recovered = recoverCompactedFunctionCalls(
-      [responseEvent],
-      [firstCall, laterCall, responseEvent],
-    );
-
-    expect(recovered[0]).toBe(firstCall);
   });
 });
 

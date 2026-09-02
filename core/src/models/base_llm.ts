@@ -59,14 +59,14 @@ export abstract class BaseLlm {
   /**
    * Whether the provider pairs a tool call with its result by id.
    *
+   * A provider that does so needs the `adk-` fallback ids to survive replay,
+   * because it matches a result to its call by id and by nothing else.
    * Anthropic's `tool_use`/`tool_result` blocks and the OpenAI-compatible
-   * `tool_call_id` field both match a result to its call by id, so the `adk-`
-   * fallback ids have to survive replay. Gemini's `generateContent` is the one
-   * supported protocol that rejects a client-supplied id, and narrows this
-   * itself.
+   * `tool_call_id` field both work that way. Override this to `true` in such a
+   * model.
    */
   get pairsToolCallsById(): boolean {
-    return true;
+    return false;
   }
 
   /**

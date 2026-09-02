@@ -4,17 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getActiveEvents} from '../../context/compaction_utils.js';
+import {
+  getActiveEvents,
+  recoverCompactedFunctionCalls,
+} from '../../context/compaction_utils.js';
 import {Event} from '../../events/event.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {InvocationContext} from '../invocation_context.js';
-import {isLlmAgent, LlmAgent} from '../llm_agent.js';
+import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 import {
   getContents,
-  GetContentsOptions,
   getCurrentTurnContents,
-  recoverCompactedFunctionCalls,
 } from './content_processor_utils.js';
 
 /**
@@ -49,9 +50,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       getActiveEvents(allEvents),
       allEvents,
     );
-    const options: GetContentsOptions = {
-      preserveFunctionCallIds: pairsToolCallsById(agent),
-    };
+    const preserveFunctionCallIds = agent.canonicalModel.pairsToolCallsById;
 
     if (agent.includeContents === 'default') {
       // Include full conversation history
@@ -60,7 +59,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
         agent.name,
         invocationContext.branch,
         invocationContext.isolationScope,
-        options,
+        preserveFunctionCallIds,
       );
     } else {
       // Include current turn context only (no conversation history).
@@ -69,30 +68,11 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
         agent.name,
         invocationContext.branch,
         invocationContext.isolationScope,
-        options,
+        preserveFunctionCallIds,
       );
     }
 
     return;
-  }
-}
-
-/**
- * Whether the agent's model pairs a tool call with its result by id.
- *
- * Resolving the model can throw: the agent may have no model anywhere in its
- * ancestry, or the provider may reject the credentials it was given. Neither is
- * this processor's error to raise — the flow reports it when it calls the
- * model. Fall back to stripping the ids, which is what Gemini
- * `generateContent`, the default protocol, requires. Mirrors the
- * `hasattr(agent, 'canonical_model')` guard in
- * `src/google/adk/flows/llm_flows/contents.py`.
- */
-function pairsToolCallsById(agent: LlmAgent): boolean {
-  try {
-    return agent.canonicalModel.pairsToolCallsById;
-  } catch {
-    return false;
   }
 }
 
