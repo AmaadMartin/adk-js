@@ -114,7 +114,7 @@ export async function* resolveToolsetAuth(
 }
 
 /**
- * Runs {@link resolveToolsetAuth} as part of request preprocessing.
+ * Resolves toolset credentials as part of request preprocessing.
  *
  * It is a request processor rather than a step of the flow because adk-js
  * lists an agent's tools from `ToolFilterRequestProcessor`. Ordering it

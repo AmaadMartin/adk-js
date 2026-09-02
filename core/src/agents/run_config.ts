@@ -31,7 +31,7 @@ export interface HistoryConfig {
   initialHistoryInClientContent?: boolean;
 }
 
-/** A {@link LiveConnectConfig} that also carries a {@link HistoryConfig}. */
+/** A `LiveConnectConfig` that also carries a {@link HistoryConfig}. */
 export interface LiveConnectConfigWithHistory extends LiveConnectConfig {
   historyConfig?: HistoryConfig;
 }

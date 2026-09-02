@@ -262,6 +262,33 @@ describe('AudioCacheManager.getCacheStats', () => {
     });
   });
 
+  it('counts a chunk that carries no data as zero bytes', () => {
+    const invocationContext = makeContext();
+    // A caller can seed the cache directly; cacheAudio would reject this blob.
+    invocationContext.outputRealtimeCache = [
+      {role: 'model', data: {mimeType: 'audio/pcm'}, timestamp: 1},
+    ];
+
+    expect(
+      new AudioCacheManager().getCacheStats(invocationContext).outputBytes,
+    ).toBe(0);
+  });
+
+  it('saves an empty artifact for a cache whose chunks carry no data', async () => {
+    const artifactService = makeArtifactService();
+    const invocationContext = makeContext(artifactService);
+    invocationContext.outputRealtimeCache = [
+      {role: 'model', data: {mimeType: 'audio/pcm'}, timestamp: 1},
+    ];
+
+    const events = await new AudioCacheManager().flushCaches(invocationContext);
+
+    expect(events).toHaveLength(1);
+    const filename = 'adk_live_audio_storage_output_audio_1000.pcm';
+    const saved = await artifactService.loadArtifact({filename});
+    expect(saved?.inlineData?.data).toBe('');
+  });
+
   it('counts the chunks and the decoded bytes of each cache', () => {
     const manager = new AudioCacheManager();
     const invocationContext = makeContext();

@@ -22,6 +22,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {
   TOOLSET_AUTH_CREDENTIAL_ID_PREFIX,
+  TOOLSET_AUTH_PREPROCESSOR,
   resolveToolsetAuth,
 } from '../../src/auth/toolset_auth.js';
 import {logger} from '../../src/utils/logger.js';
@@ -62,7 +63,12 @@ function makeContext(agent: LlmAgent, state: Record<string, unknown> = {}) {
   return new InvocationContext({
     invocationId: 'invocation-id',
     agent,
-    session: createSession({id: 'session-id', appName: 'app', userId: 'user', state}),
+    session: createSession({
+      id: 'session-id',
+      appName: 'app',
+      userId: 'user',
+      state,
+    }),
     pluginManager: new PluginManager(),
   });
 }
@@ -243,6 +249,43 @@ describe('resolveToolsetAuth', () => {
       expect.any(Error),
     );
     warn.mockRestore();
+  });
+});
+
+describe('ToolsetAuthPreprocessor', () => {
+  it('resolves the toolsets of the agent driving the invocation', async () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'fake-model',
+      tools: [new AuthenticatedToolset(makeAuthConfig())],
+    });
+    const invocationContext = makeContext(agent);
+
+    const events = await collect(
+      TOOLSET_AUTH_PREPROCESSOR.runAsync(invocationContext),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(invocationContext.endInvocation).toBe(true);
+  });
+
+  it('does nothing when the invocation is running a node rather than an agent', async () => {
+    const invocationContext = new InvocationContext({
+      invocationId: 'invocation-id',
+      session: createSession({
+        id: 'session-id',
+        appName: 'app',
+        userId: 'user',
+      }),
+      pluginManager: new PluginManager(),
+    });
+
+    const events = await collect(
+      TOOLSET_AUTH_PREPROCESSOR.runAsync(invocationContext),
+    );
+
+    expect(events).toEqual([]);
+    expect(invocationContext.endInvocation).toBe(false);
   });
 });
 

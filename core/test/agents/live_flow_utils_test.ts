@@ -186,9 +186,7 @@ describe('markLiveAsyncToolsNonBlocking', () => {
 
     markLiveAsyncToolsNonBlocking(llmRequest);
 
-    expect(declarationsOf(llmRequest)[0].behavior).toBe(
-      Behavior.NON_BLOCKING,
-    );
+    expect(declarationsOf(llmRequest)[0].behavior).toBe(Behavior.NON_BLOCKING);
   });
 
   it('marks a tool that declares a response scheduling', () => {
@@ -198,9 +196,7 @@ describe('markLiveAsyncToolsNonBlocking', () => {
 
     markLiveAsyncToolsNonBlocking(llmRequest);
 
-    expect(declarationsOf(llmRequest)[0].behavior).toBe(
-      Behavior.NON_BLOCKING,
-    );
+    expect(declarationsOf(llmRequest)[0].behavior).toBe(Behavior.NON_BLOCKING);
   });
 
   it('leaves a synchronous tool unmarked', () => {
@@ -299,6 +295,20 @@ describe('mergeEventStreams', () => {
     const second = await iterator.next();
     expect(textOf(second.value as Event)).toBe('late');
     expect((await iterator.next()).done).toBe(true);
+  });
+
+  it('hands over a screened event that arrives as the primary stream ends', async () => {
+    const screened = new AsyncQueue<Event>();
+    screened.push(
+      createEvent({author: 'agent', content: {parts: [{text: 'blocked'}]}}),
+    );
+    const merged: string[] = [];
+
+    for await (const event of mergeEventStreams(eventsOf(), screened)) {
+      merged.push(textOf(event)!);
+    }
+
+    expect(merged).toEqual(['blocked']);
   });
 
   it('keeps yielding the primary stream after the screened queue closes', async () => {
