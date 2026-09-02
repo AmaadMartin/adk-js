@@ -219,9 +219,11 @@ async function runCertProvider(
     args.push(WITH_PASSPHRASE_FLAG);
   }
 
-  // Bound here rather than at module load: several tests replace
-  // `node:child_process` with a partial mock, and promisifying an absent
-  // `execFile` throws while this module is still being evaluated.
+  // Bound here rather than at module load. Four tests under `dev/test/cli/`
+  // replace `node:child_process` with a mock that exports only `exec` and
+  // `spawn`, and promisifying an absent `execFile` throws while this module is
+  // still being evaluated. Hoisting this line fails cli_deploy_cloud_run_test
+  // and cli_deploy_agent_engine_test with "No 'execFile' export is defined".
   const execFileAsync = promisify(childProcess.execFile);
 
   try {

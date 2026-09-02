@@ -7,6 +7,7 @@
 import {AuthClient, GoogleAuth, JWTInput} from 'google-auth-library';
 import type {IncomingMessage} from 'node:http';
 import * as https from 'node:https';
+import {z} from 'zod';
 import {base64Decode} from '../../../utils/env_aware_utils.js';
 import {logger} from '../../../utils/logger.js';
 import {
@@ -77,78 +78,60 @@ interface HttpResponse {
   body: string;
 }
 
-/** Reports whether a parsed JSON value is a string-keyed object. */
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+const NON_OBJECT_MESSAGE = 'API Hub returned a non-object JSON response.';
 
-/** Validates the JSON object API Hub returned. */
-function jsonObject(value: unknown): Record<string, unknown> {
-  if (!isJsonObject(value)) {
-    throw new Error('API Hub returned a non-object JSON response.');
+/**
+ * The message each field raises when it holds the wrong type.
+ *
+ * adk-python's `_response_object`, `_string_list` and `_object_list` raise
+ * these strings verbatim, so they are part of the cross-SDK contract and
+ * replace zod's own wording.
+ */
+const FIELD_MESSAGES: Record<string, string> = {
+  apis: "API Hub field 'apis' must be a list of objects.",
+  contents: "API Hub field 'contents' must be a string.",
+  name: "API Hub field 'name' must be a string.",
+  specs: "API Hub field 'specs' must be a list of strings.",
+  versions: "API Hub field 'versions' must be a list of strings.",
+};
+
+const ApiSchema = z.object({
+  name: z.string().optional(),
+  versions: z.array(z.string()).optional(),
+});
+
+const ApiVersionSchema = z.object({
+  name: z.string().optional(),
+  specs: z.array(z.string()).optional(),
+});
+
+/**
+ * The `apis.list` response. Its members only have to be objects, which is what
+ * adk-python's `_object_list` requires; each one is then parsed with
+ * {@link ApiSchema}, so a bad field names itself rather than the list.
+ */
+const ApiListSchema = z.object({
+  apis: z.array(z.record(z.string(), z.unknown())).optional(),
+});
+
+const SpecContentsSchema = z.object({
+  contents: z.string().optional(),
+});
+
+/**
+ * Parses an API Hub payload, reporting the field that failed.
+ *
+ * A failure inside a field carries that field first in its path. A payload
+ * that is not an object at all carries an empty path.
+ */
+function parsePayload<T>(schema: z.ZodType<T>, payload: unknown): T {
+  const result = schema.safeParse(payload);
+  if (result.success) {
+    return result.data;
   }
-  return value;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((item) => typeof item === 'string')
-  );
-}
-
-/** Validates a JSON array whose members must all be strings. */
-function stringList(value: unknown, field: string): string[] {
-  if (!isStringArray(value)) {
-    throw new Error(`API Hub field '${field}' must be a list of strings.`);
-  }
-  return value;
-}
-
-function isObjectArray(
-  value: unknown,
-): value is Array<Record<string, unknown>> {
-  return Array.isArray(value) && value.every(isJsonObject);
-}
-
-/** Validates a JSON array whose members must all be string-keyed objects. */
-function objectList(
-  value: unknown,
-  field: string,
-): Array<Record<string, unknown>> {
-  if (!isObjectArray(value)) {
-    throw new Error(`API Hub field '${field}' must be a list of objects.`);
-  }
-  return value;
-}
-
-/** Validates an optional JSON string field. */
-function stringField(value: unknown, field: string): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== 'string') {
-    throw new Error(`API Hub field '${field}' must be a string.`);
-  }
-  return value;
-}
-
-/** Narrows a validated API Hub payload onto {@link ApiHubApi}. */
-function toApi(payload: Record<string, unknown>): ApiHubApi {
-  const versions = payload['versions'];
-  return {
-    name: stringField(payload['name'], 'name'),
-    versions:
-      versions === undefined ? undefined : stringList(versions, 'versions'),
-  };
-}
-
-/** Narrows a validated API Hub payload onto {@link ApiHubApiVersion}. */
-function toApiVersion(payload: Record<string, unknown>): ApiHubApiVersion {
-  const specs = payload['specs'];
-  return {
-    name: stringField(payload['name'], 'name'),
-    specs: specs === undefined ? undefined : stringList(specs, 'specs'),
-  };
+  const field = result.error.issues[0]?.path[0];
+  const message = typeof field === 'string' ? FIELD_MESSAGES[field] : undefined;
+  throw new Error(message ?? NON_OBJECT_MESSAGE);
 }
 
 /** Returns the segment that follows `keyword`, if the path has one. */
@@ -337,10 +320,13 @@ export class APIHubClient implements BaseAPIHubClient {
    * @returns The APIs, or an empty list when the project has none.
    */
   async listApis(project: string, location: string): Promise<ApiHubApi[]> {
-    const payload = await this.get(
-      `${APIHUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
+    const {apis} = parsePayload(
+      ApiListSchema,
+      await this.get(
+        `${APIHUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
+      ),
     );
-    return objectList(payload['apis'] ?? [], 'apis').map(toApi);
+    return (apis ?? []).map((api) => parsePayload(ApiSchema, api));
   }
 
   /**
@@ -349,7 +335,10 @@ export class APIHubClient implements BaseAPIHubClient {
    * @param apiResourceName `projects/p/locations/l/apis/a`.
    */
   async getApi(apiResourceName: string): Promise<ApiHubApi> {
-    return toApi(await this.get(`${APIHUB_ROOT_URL}/${apiResourceName}`));
+    return parsePayload(
+      ApiSchema,
+      await this.get(`${APIHUB_ROOT_URL}/${apiResourceName}`),
+    );
   }
 
   /**
@@ -358,7 +347,10 @@ export class APIHubClient implements BaseAPIHubClient {
    * @param apiVersionName `projects/p/locations/l/apis/a/versions/v`.
    */
   async getApiVersion(apiVersionName: string): Promise<ApiHubApiVersion> {
-    return toApiVersion(await this.get(`${APIHUB_ROOT_URL}/${apiVersionName}`));
+    return parsePayload(
+      ApiVersionSchema,
+      await this.get(`${APIHUB_ROOT_URL}/${apiVersionName}`),
+    );
   }
 
   /**
@@ -397,14 +389,14 @@ export class APIHubClient implements BaseAPIHubClient {
       apiSpecResourceName = specs[0];
     }
 
-    const payload = await this.get(
-      `${APIHUB_ROOT_URL}/${apiSpecResourceName}:contents`,
+    const {contents} = parsePayload(
+      SpecContentsSchema,
+      await this.get(`${APIHUB_ROOT_URL}/${apiSpecResourceName}:contents`),
     );
-    const contents = stringField(payload['contents'], 'contents');
     return contents ? base64Decode(contents) : '';
   }
 
-  private async get(url: string): Promise<Record<string, unknown>> {
+  private async get(url: string): Promise<unknown> {
     const headers = {
       'accept': 'application/json, text/plain, */*',
       'Authorization': `Bearer ${await this.getAccessToken()}`,
@@ -421,7 +413,7 @@ export class APIHubClient implements BaseAPIHubClient {
     if (status < 200 || status > 299) {
       throw new Error(`API Hub request failed with status ${status}: ${body}`);
     }
-    return jsonObject(JSON.parse(body));
+    return JSON.parse(body);
   }
 
   /**
