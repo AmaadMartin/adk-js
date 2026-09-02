@@ -26,7 +26,7 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 import {branchPathFromString} from '../workflow/branch_path.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
-import {BaseAgent} from './base_agent.js';
+import {BaseAgent, BaseAgentState} from './base_agent.js';
 import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
@@ -106,7 +106,7 @@ export interface InvocationContextParams {
  * agent with nothing more specific to restore records the empty object, which
  * still says "this agent started".
  */
-export type AgentState = Record<string, unknown>;
+export type AgentState = BaseAgentState;
 
 /**
  * The checkpoint {@link InvocationContext.setAgentState} records for one agent:
@@ -590,7 +590,10 @@ export class InvocationContext {
       if (event.actions?.endOfAgent) {
         this.endOfAgents[key] = true;
         delete this.agentStates[key];
-      } else if (agentState !== undefined) {
+        // Truthiness, not `!== undefined`: an event written by adk-python and
+        // read back carries an explicit `null` here, which means "not
+        // recorded".
+      } else if (agentState) {
         this.agentStates[key] = agentState;
         this.endOfAgents[key] = false;
       } else if (

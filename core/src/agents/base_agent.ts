@@ -57,6 +57,23 @@ export interface BaseAgentConfig extends BaseNodeConfig {
 }
 
 /**
+ * The resumption checkpoint an agent records for the current invocation.
+ *
+ * The base state is the empty object, meaning "this agent started but has
+ * nothing more specific to restore". A concrete agent describes its own state
+ * shape — which sub-agent was running, how many times a loop has run — and it
+ * is persisted verbatim on `EventActions.agentState`, so this is an open JSON
+ * record rather than a closed shape.
+ *
+ * Declare a concrete state with `type`, not `interface`: a TypeScript
+ * `interface` has no implicit index signature and so is not assignable to
+ * `Record<string, unknown>`.
+ *
+ * Mirrors adk-python `BaseAgentState`.
+ */
+export type BaseAgentState = Record<string, unknown>;
+
+/**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all BaseAgent instances.
  */
@@ -422,6 +439,28 @@ export abstract class BaseAgent<
     }
 
     return undefined;
+  }
+
+  /**
+   * Loads this agent's resumption checkpoint from the invocation context.
+   *
+   * `parse` narrows the persisted record into the agent's own state type. It
+   * is the analogue of adk-python validating the snapshot against a pydantic
+   * model, so it should throw on a snapshot it cannot read rather than guess.
+   *
+   * @param ctx The invocation context.
+   * @param parse Converts the persisted record into the agent's state type.
+   * @return The parsed state, or undefined when this agent has no checkpoint.
+   */
+  protected loadAgentState<T>(
+    ctx: InvocationContext,
+    parse: (raw: BaseAgentState) => T,
+  ): T | undefined {
+    const raw = ctx.agentStates[this.name];
+    if (raw === undefined) {
+      return undefined;
+    }
+    return parse(raw);
   }
 
   /**
