@@ -8,11 +8,10 @@ import {
   AuthScheme,
   AuthSchemeType,
   CustomAuthScheme,
-  ExtendedOAuth2,
   OAuthGrantType,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, expectTypeOf, it} from 'vitest';
 import {getOAuthGrantTypeFromFlow} from '../../src/auth/auth_schemes.js';
 
 interface AcmeVaultScheme extends CustomAuthScheme {
@@ -92,67 +91,37 @@ describe('auth_schemes', () => {
       ]);
     });
 
-    it('is usable as the discriminant of an OpenAPI scheme', () => {
-      const scheme: OpenAPIV3.ApiKeySecurityScheme = {
-        type: AuthSchemeType.API_KEY,
-        name: 'X-Api-Key',
-        in: 'header',
-      };
-
-      expect(scheme.type).toBe(AuthSchemeType.API_KEY);
+    // A compile-time claim: tsc fails this case, the runner cannot.
+    it('types each member as the discriminant of its OpenAPI scheme', () => {
+      expectTypeOf<AuthSchemeType.API_KEY>().toExtend<
+        OpenAPIV3.ApiKeySecurityScheme['type']
+      >();
+      expectTypeOf<AuthSchemeType.HTTP>().toExtend<
+        OpenAPIV3.HttpSecurityScheme['type']
+      >();
+      expectTypeOf<AuthSchemeType.OAUTH2>().toExtend<
+        OpenAPIV3.OAuth2SecurityScheme['type']
+      >();
+      expectTypeOf<AuthSchemeType.OPEN_ID_CONNECT>().toExtend<
+        OpenAPIV3.OpenIdSecurityScheme['type']
+      >();
     });
   });
 
   describe('CustomAuthScheme', () => {
-    it('widens an extending scheme to AuthScheme without a cast', () => {
-      const acme: AcmeVaultScheme = {type: 'acmeVault', vaultPath: 'secret/db'};
-      const scheme: AuthScheme = acme;
-
-      expect(scheme.type).toBe('acmeVault');
+    // Compile-time claims: tsc fails these cases, the runner cannot.
+    it('is a member of the AuthScheme union', () => {
+      expectTypeOf<CustomAuthScheme>().toExtend<AuthScheme>();
     });
 
-    it('keeps the fields the extending interface adds', () => {
-      const acme: AcmeVaultScheme = {type: 'acmeVault', vaultPath: 'secret/db'};
-      const scheme: AuthScheme = acme;
-
-      expect(JSON.parse(JSON.stringify(scheme))).toEqual({
-        type: 'acmeVault',
-        vaultPath: 'secret/db',
-      });
-    });
-  });
-
-  describe('ExtendedOAuth2', () => {
-    it('widens to AuthScheme and keeps the issuer URL', () => {
-      const oauth2: ExtendedOAuth2 = {
-        type: 'oauth2',
-        issuerUrl: 'https://issuer.example.com',
-        flows: {
-          authorizationCode: {
-            authorizationUrl: 'https://issuer.example.com/auth',
-            tokenUrl: 'https://issuer.example.com/token',
-            scopes: {},
-          },
-        },
-      };
-      const scheme: AuthScheme = oauth2;
-
-      expect(scheme.type).toBe('oauth2');
-      expect(oauth2.issuerUrl).toBe('https://issuer.example.com');
+    it('makes an extending scheme an AuthScheme without a cast', () => {
+      expectTypeOf<AcmeVaultScheme>().toExtend<AuthScheme>();
     });
 
-    it('leaves the issuer URL undefined when it is omitted', () => {
-      const oauth2: ExtendedOAuth2 = {
-        type: 'oauth2',
-        flows: {
-          clientCredentials: {
-            tokenUrl: 'https://issuer.example.com/token',
-            scopes: {},
-          },
-        },
-      };
-
-      expect(oauth2.issuerUrl).toBeUndefined();
+    it('leaves the fields the extending interface adds', () => {
+      expectTypeOf<AcmeVaultScheme>()
+        .toHaveProperty('vaultPath')
+        .toEqualTypeOf<string>();
     });
   });
 });

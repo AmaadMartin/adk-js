@@ -49,19 +49,6 @@ export enum AuthSchemeType {
 }
 
 /**
- * OAuth2 scheme that carries the issuer URL used to discover its endpoints.
- *
- * Pass {@link ExtendedOAuth2.issuerUrl} to
- * `OAuth2DiscoveryManager.discoverAuthServerMetadata` to read the authorization
- * and token endpoints from the issuer instead of declaring them by hand.
- * @experimental  (Experimental, subject to change)
- */
-export interface ExtendedOAuth2 extends OpenAPIV3.OAuth2SecurityScheme {
-  /** Issuer URL used to discover the authorization and token endpoints. */
-  issuerUrl?: string;
-}
-
-/**
  * AuthSchemes contains SecuritySchemes from OpenAPI 3.0, an extra flattened
  * OpenIdConnectWithConfig, and external schemes that extend CustomAuthScheme.
  */

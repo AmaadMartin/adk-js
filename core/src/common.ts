@@ -110,7 +110,6 @@ export {AuthSchemeType, OAuthGrantType} from './auth/auth_schemes.js';
 export type {
   AuthScheme,
   CustomAuthScheme,
-  ExtendedOAuth2,
   OpenIdConnectWithConfig,
 } from './auth/auth_schemes.js';
 export type {AuthConfig} from './auth/auth_tool.js';
