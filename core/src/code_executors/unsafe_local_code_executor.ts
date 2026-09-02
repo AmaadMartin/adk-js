@@ -135,16 +135,16 @@ async function writeScriptFile(
   return filePath;
 }
 
+/**
+ * The extension of the script file a language runs from. Python has none: its
+ * program is written to the child's stdin instead.
+ */
 function getExtensionForLanguage(
   language: CodeExecutionLanguage,
   shellCommandPath?: string,
 ): string | undefined {
   if (language === CodeExecutionLanguage.JAVASCRIPT) {
     return '.js';
-  }
-
-  if (language === CodeExecutionLanguage.PYTHON) {
-    return '.py';
   }
 
   if (language === CodeExecutionLanguage.POWERSHELL) {

@@ -642,6 +642,10 @@ describe('UnsafeLocalCodeExecutor', () => {
   });
 
   describe('python execution', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
     function runPython(code: string, args?: string[]) {
       return executor.executeCode({
         invocationContext,
@@ -755,7 +759,10 @@ describe('UnsafeLocalCodeExecutor', () => {
 
       expect(result.stderr).toContain('ZeroDivisionError');
       expect(result.stderr).not.toContain('unsafe_local_code_executor');
-      // Both frames of the executed code survive; only the wrapper's is gone.
+      // The wrapper runs the program from its own `-c` source, which python
+      // names `<string>`. That frame is the one the runner drops.
+      expect(result.stderr).not.toContain('File "<string>"');
+      // Both frames of the executed code survive.
       expect(result.stderr.match(/File "<code>"/g)).toHaveLength(2);
     });
 
@@ -767,9 +774,21 @@ describe('UnsafeLocalCodeExecutor', () => {
     });
 
     it('does not let the host locale pick the output encoding', async () => {
-      const result = await runPython('import sys\nprint(sys.stdout.encoding)');
+      // A host that asks python for ASCII: the child would otherwise die
+      // encoding its own output.
+      vi.stubEnv('LC_ALL', 'C');
+      vi.stubEnv('LANG', 'C');
+      vi.stubEnv('PYTHONUTF8', '0');
+      vi.stubEnv('PYTHONCOERCECLOCALE', '0');
 
-      expect(result.stdout.trim().toLowerCase()).toBe('utf-8');
+      const result = await runPython(
+        "import sys\nprint(sys.stdout.encoding)\nprint('café')",
+      );
+
+      const [encoding, text] = result.stdout.trimEnd().split('\n');
+      expect(encoding.toLowerCase()).toBe('utf-8');
+      expect(text).toBe('café');
+      expect(result.stderr).toBe('');
     });
 
     it('reads out output far larger than a pipe buffer', async () => {
@@ -906,6 +925,35 @@ describe('UnsafeLocalCodeExecutor', () => {
       await result;
     });
 
+    it('kills the child even when the group is already gone', async () => {
+      vi.spyOn(process, 'kill').mockImplementation(() => {
+        const error = new Error('kill ESRCH');
+        signalled.push('group:ESRCH');
+        throw error;
+      });
+      const {result, hasSpawned} = startExecution();
+      await hasSpawned;
+
+      await vi.advanceTimersByTimeAsync(timeoutSeconds * 1000);
+
+      expect(signalled).toEqual(['group:ESRCH', 'child:SIGTERM']);
+      child.emit('close', null, 'SIGTERM');
+      await result;
+    });
+
+    it('keeps what the code wrote before the timeout', async () => {
+      const {result, hasSpawned} = startExecution();
+      await hasSpawned;
+      child.stderr.emit('data', Buffer.from('partial error'));
+
+      await vi.advanceTimersByTimeAsync(timeoutSeconds * 1000);
+      child.emit('close', null, 'SIGTERM');
+
+      expect(await result).toMatchObject({
+        stderr: `partial error\nCode execution timed out after ${timeoutSeconds} seconds.`,
+      });
+    });
+
     it('gives up on pipes that never close', async () => {
       // A survivor of the group holds the read ends open, so the child reports
       // 'close' only once they are released.
@@ -921,6 +969,33 @@ describe('UnsafeLocalCodeExecutor', () => {
         stderr: `Code execution timed out after ${timeoutSeconds} seconds.`,
         exitCode: -9,
       });
+    });
+  });
+
+  describe('a python child that never reads its program', () => {
+    it('reports the failure rather than the broken pipe', async () => {
+      const stdin = new EventEmitter();
+      const child = Object.assign(createFakeChild(4324, []), {
+        stdin: Object.assign(stdin, {
+          write: () => stdin.emit('error', new Error('write EPIPE')),
+          end: () => undefined,
+        }),
+      });
+      spawnMock.mockImplementation(() => {
+        setImmediate(() => child.emit('close', 1, null));
+        return child;
+      });
+
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: "print('never read')",
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.stderr).toBe('Code execution exited with status 1.');
     });
   });
 
