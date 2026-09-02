@@ -37,7 +37,10 @@ import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
 import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
 import {BaseLlmConnection} from '../models/base_llm_connection.js';
-import {LlmRequest} from '../models/llm_request.js';
+import {
+  finalizeDynamicInstructions,
+  LlmRequest,
+} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
 
@@ -1332,6 +1335,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
+    finalizeDynamicInstructions(llmRequest);
   }
 
   private async runSendLoop(
@@ -1712,6 +1716,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
+    finalizeDynamicInstructions(llmRequest);
     // =========================================================================
     // Global runtime interruption
     // =========================================================================

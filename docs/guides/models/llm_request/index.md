@@ -91,6 +91,24 @@ and one user content whose parts are the text
 number the non-text parts in the order they appear, across both kinds, so an
 inline part followed by a file part yields `inline_data_0` then `file_data_1`.
 
+## Instructions contributed by a tool
+
+A tool sometimes needs to tell the model something, not only declare itself. It
+adds the text through `appendDynamicInstructions` while the request is being
+built. `LlmAgent` resolves the accumulator once every tool has run: it joins
+the entries with a blank line, appends the result to the system instruction,
+and empties the accumulator.
+
+`load_artifacts` and `load_mcp_resource` contribute this way. Both describe a
+resource set that only exists at request time, so neither can put its text in
+the agent instruction.
+
+Two properties follow from resolving after the tools rather than during them. A
+tool does not need to know where instructions end up, so the routing can change
+without touching the tool. And the resolution is idempotent, because the
+accumulator is empty afterwards, so a second resolution cannot duplicate the
+text.
+
 ## Context caching fields
 
 `LlmRequest` carries three fields a caching layer reads: `cacheConfig`,

@@ -16,8 +16,10 @@ import {
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
+  appendDynamicInstructions,
   appendInstructions,
   appendTools,
+  finalizeDynamicInstructions,
   findToolWithFunctionDeclarations,
   insertTransientUserContent,
   setOutputSchema,
@@ -828,5 +830,75 @@ describe('appendInstructions on a request without a config', () => {
     expect(() => appendInstructions(request, {})).toThrow(
       'instructions must be string[] or Content, got object.',
     );
+  });
+});
+
+describe('appendDynamicInstructions', () => {
+  it('accumulates entries across successive calls, in order', () => {
+    const request = createRequest();
+
+    appendDynamicInstructions(request, ['first', 'second']);
+    appendDynamicInstructions(request, ['third']);
+
+    expect(request.dynamicInstructions).toEqual(['first', 'second', 'third']);
+  });
+
+  it('is a no-op for an empty array', () => {
+    const request = createRequest();
+
+    appendDynamicInstructions(request, []);
+
+    expect(request.dynamicInstructions).toBeUndefined();
+  });
+
+  it('leaves the system instruction alone', () => {
+    const request = createRequest();
+    appendInstructions(request, ['Be brief.']);
+
+    appendDynamicInstructions(request, ['Prefer report.pdf.']);
+
+    expect(request.config?.systemInstruction).toBe('Be brief.');
+  });
+});
+
+describe('finalizeDynamicInstructions', () => {
+  it('joins the accumulated entries with a blank line', () => {
+    const request = createRequest();
+    appendDynamicInstructions(request, ['first', 'second']);
+
+    finalizeDynamicInstructions(request);
+
+    expect(request.config?.systemInstruction).toBe('first\n\nsecond');
+  });
+
+  it('appends after an instruction already set, separated by a blank line', () => {
+    const request = createRequest();
+    appendInstructions(request, ['Be brief.']);
+    appendDynamicInstructions(request, ['Prefer report.pdf.']);
+
+    finalizeDynamicInstructions(request);
+
+    expect(request.config?.systemInstruction).toBe(
+      'Be brief.\n\nPrefer report.pdf.',
+    );
+  });
+
+  it('clears the accumulator, so a second call adds nothing', () => {
+    const request = createRequest();
+    appendDynamicInstructions(request, ['Prefer report.pdf.']);
+
+    finalizeDynamicInstructions(request);
+    finalizeDynamicInstructions(request);
+
+    expect(request.config?.systemInstruction).toBe('Prefer report.pdf.');
+    expect(request.dynamicInstructions).toEqual([]);
+  });
+
+  it('is a no-op when nothing was accumulated', () => {
+    const request = createRequest();
+
+    finalizeDynamicInstructions(request);
+
+    expect(request.config?.systemInstruction).toBeUndefined();
   });
 });

@@ -8,7 +8,7 @@ import {FunctionDeclaration, Part, Type} from '@google/genai';
 
 import {Context} from '../agents/context.js';
 import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
-import {appendInstructions, LlmRequest} from '../models/llm_request.js';
+import {appendDynamicInstructions, LlmRequest} from '../models/llm_request.js';
 import {maybeBase64ToBytes} from '../utils/base64_utils.js';
 import {extractDocxText} from '../utils/document_text_utils.js';
 import {formatError} from '../utils/error_utils.js';
@@ -249,7 +249,7 @@ export class LoadArtifactsTool extends BaseTool {
       return;
     }
 
-    appendInstructions(llmRequest, [
+    appendDynamicInstructions(llmRequest, [
       `You have a list of artifacts:\n  ${JSON.stringify(
         artifactNames,
       )}\n\n  When the user asks questions about any of the artifacts, you should call the\n  \`load_artifacts\` function to load the artifact. Always call load_artifacts\n  before answering questions related to the artifacts, regardless of whether the\n  artifacts have been loaded before. Do not depend on prior answers about the\n  artifacts.`,

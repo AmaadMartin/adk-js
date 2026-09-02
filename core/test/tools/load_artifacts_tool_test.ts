@@ -141,6 +141,8 @@ function appendedArtifactPart(llmRequest: LlmRequest): Part {
   return addedContent.parts![1];
 }
 
+import {finalizeDynamicInstructions} from '../../src/models/llm_request.js';
+
 class StubToolContext {
   private artifactsByName: Record<string, Part>;
 
@@ -161,6 +163,41 @@ class StubToolContext {
     return this.artifactsByName[name];
   }
 }
+
+describe('LoadArtifactsTool dynamic instructions', () => {
+  it('contributes the artifact list as a dynamic instruction', async () => {
+    const toolContext = new StubToolContext({
+      'report.pdf': {text: 'body'},
+    }) as unknown as Context;
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.dynamicInstructions).toHaveLength(1);
+    expect(llmRequest.dynamicInstructions![0]).toContain('report.pdf');
+    expect(llmRequest.config?.systemInstruction).toBeUndefined();
+  });
+
+  it('reaches the system instruction once the instructions are resolved', async () => {
+    const toolContext = new StubToolContext({
+      'report.pdf': {text: 'body'},
+    }) as unknown as Context;
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+    finalizeDynamicInstructions(llmRequest);
+
+    expect(llmRequest.config?.systemInstruction).toContain('report.pdf');
+  });
+});
 
 describe('LoadArtifactsTool', () => {
   it('computes the correct declaration', () => {
@@ -792,6 +829,7 @@ describe('LoadArtifactsTool', () => {
     };
 
     await new LoadArtifactsTool().processLlmRequest({toolContext, llmRequest});
+    finalizeDynamicInstructions(llmRequest);
 
     expect(llmRequest.contents).toHaveLength(0);
     expect(llmRequest.config?.systemInstruction).toBeDefined();

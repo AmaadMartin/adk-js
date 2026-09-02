@@ -89,6 +89,14 @@ export interface LlmRequest {
    * that prefix sits at the front of the request. Internal request state.
    */
   staticInstructionPrefixEndIndex?: number;
+
+  /**
+   * Instructions contributed by tools while the request is being built. They
+   * are resolved into the system instruction once every tool has processed the
+   * request, so a tool does not have to know where instructions ultimately go.
+   * Internal request state.
+   */
+  dynamicInstructions?: string[];
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -265,6 +273,38 @@ export function appendInstructions(
   throw new TypeError(
     `instructions must be string[] or Content, got ${typeof instructions}.`,
   );
+}
+
+/**
+ * Appends instructions contributed by a tool, to be resolved once every tool
+ * has processed the request.
+ *
+ * @param instructions The instructions to accumulate.
+ */
+export function appendDynamicInstructions(
+  llmRequest: LlmRequest,
+  instructions: string[],
+): void {
+  if (!instructions.length) {
+    return;
+  }
+  if (!llmRequest.dynamicInstructions) {
+    llmRequest.dynamicInstructions = [];
+  }
+  llmRequest.dynamicInstructions.push(...instructions);
+}
+
+/**
+ * Resolves the accumulated dynamic instructions into the system instruction
+ * and clears them, so a second call adds nothing.
+ */
+export function finalizeDynamicInstructions(llmRequest: LlmRequest): void {
+  const instructions = llmRequest.dynamicInstructions;
+  if (!instructions?.length) {
+    return;
+  }
+  appendInstructions(llmRequest, [instructions.join('\n\n')]);
+  instructions.length = 0;
 }
 
 function hasFunctionDeclarations(tool: ToolUnion): tool is Tool {
