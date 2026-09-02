@@ -20,10 +20,6 @@ import {SingleFlow} from './single_flow.js';
  * type. The runner decides which agent stays active for the next user message.
  */
 export class AutoFlow extends SingleFlow {
-  /**
-   * @param contextCompactors - Compactors to evaluate before the contents are
-   *   assembled. When empty, no compaction processor is inserted.
-   */
   constructor(contextCompactors: BaseContextCompactor[] = []) {
     super(contextCompactors);
     this.requestProcessors.push(AGENT_TRANSFER_LLM_REQUEST_PROCESSOR);

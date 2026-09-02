@@ -533,9 +533,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       this.disallowTransferToPeers &&
       !this.subAgents?.length;
 
-    const flow = agentTransferDisabled
-      ? new SingleFlow(config.contextCompactors ?? [])
-      : new AutoFlow(config.contextCompactors ?? []);
+    const Flow = agentTransferDisabled ? SingleFlow : AutoFlow;
+    const flow = new Flow(config.contextCompactors);
 
     this.requestProcessors = config.requestProcessors ?? flow.requestProcessors;
     this.responseProcessors =
