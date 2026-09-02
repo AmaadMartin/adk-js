@@ -27,8 +27,18 @@ export interface JsonObject {
   [key: string]: JsonValue;
 }
 
-/** The roles an OpenAI-compatible chat message can carry. */
-export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
+/**
+ * The roles an OpenAI-compatible chat message can carry.
+ *
+ * `tool_responses` is the Gemma 4 spelling of `tool`. Its chat template does
+ * not recognise a tool result under any other role.
+ */
+export type MessageRole =
+  | 'system'
+  | 'user'
+  | 'assistant'
+  | 'tool'
+  | 'tool_responses';
 
 /** A plain-text block inside a multipart message content. */
 export interface TextContentObject {
@@ -191,6 +201,23 @@ export interface ModelResponseStream {
 /** The value of the `tool_choice` request field ADK sends. */
 export type ToolChoice = 'required' | 'none';
 
+/**
+ * One place in the request that LiteLLM marks as the end of a cacheable
+ * prefix.
+ *
+ * LiteLLM applies these itself and lets each provider decide what to do with
+ * them: a provider that caches by marked prefix honors them, and a provider
+ * that caches automatically has them dropped before the request leaves.
+ */
+export interface CacheControlInjectionPoint {
+  location: 'message';
+  /** Marks the message with this role. Mutually exclusive with `index`. */
+  role?: string;
+  /** Marks the message at this position. `-1` is the last message. */
+  index?: number;
+  control: {type: 'ephemeral'; ttl?: '1h'};
+}
+
 /** The generation parameters, under the names the wire protocol uses. */
 export interface GenerationParams {
   temperature?: number;
@@ -218,6 +245,7 @@ export interface CompletionArgs extends GenerationParams {
   stream_options?: {include_usage: boolean};
   extra_headers?: Record<string, string>;
   extra_body?: Record<string, unknown>;
+  cache_control_injection_points?: CacheControlInjectionPoint[];
   /** Request timeout in seconds, matching LiteLLM rather than `HttpOptions`. */
   timeout?: number;
   num_retries?: number;

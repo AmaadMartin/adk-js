@@ -5,7 +5,9 @@
  */
 
 import {
+  CacheControlInjectionPoint,
   CompletionArgs,
+  ContextCacheConfig,
   LiteLlm,
   LiteLlmClient,
   LLMRegistry,
@@ -454,6 +456,109 @@ describe('LiteLlm', () => {
       expect(client.args?.num_retries).toBeUndefined();
       expect(client.args?.extra_headers).toBeUndefined();
       expect(client.args?.extra_body).toBeUndefined();
+    });
+  });
+
+  describe('cache control injection points', () => {
+    const cacheConfig: ContextCacheConfig = {
+      cacheIntervals: 10,
+      ttlSeconds: 600,
+      minTokens: 0,
+    };
+
+    /** Runs one non-streaming call and returns the injection points sent. */
+    async function injectionPoints(
+      overrides: Partial<LlmRequest>,
+      additionalArgs?: Record<string, unknown>,
+    ): Promise<CacheControlInjectionPoint[] | undefined> {
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({
+        model: 'anthropic/claude-sonnet-4',
+        client,
+        additionalArgs,
+      });
+
+      await collect(model.generateContentAsync(request(overrides)));
+
+      return client.args?.cache_control_injection_points;
+    }
+
+    it('sends no points when the request carries no cache config', async () => {
+      expect(await injectionPoints({})).toBeUndefined();
+    });
+
+    it('marks the system instruction and the last message', async () => {
+      expect(await injectionPoints({cacheConfig})).toEqual([
+        {location: 'message', role: 'system', control: {type: 'ephemeral'}},
+        {location: 'message', index: -1, control: {type: 'ephemeral'}},
+      ]);
+    });
+
+    it.each([[300], [1800], [3599]])(
+      'asks for the default cache at a lifetime of %i seconds',
+      async (ttlSeconds) => {
+        const points = await injectionPoints({
+          cacheConfig: {...cacheConfig, ttlSeconds},
+        });
+
+        expect(points?.map((point) => point.control)).toEqual([
+          {type: 'ephemeral'},
+          {type: 'ephemeral'},
+        ]);
+      },
+    );
+
+    it.each([[3600], [86400]])(
+      'asks for the hour-long cache at a lifetime of %i seconds',
+      async (ttlSeconds) => {
+        const points = await injectionPoints({
+          cacheConfig: {...cacheConfig, ttlSeconds},
+        });
+
+        expect(points?.map((point) => point.control)).toEqual([
+          {type: 'ephemeral', ttl: '1h'},
+          {type: 'ephemeral', ttl: '1h'},
+        ]);
+      },
+    );
+
+    it('sends no points below the configured minimum token count', async () => {
+      expect(
+        await injectionPoints({
+          cacheConfig: {...cacheConfig, minTokens: 5000},
+          cacheableContentsTokenCount: 4999,
+        }),
+      ).toBeUndefined();
+    });
+
+    it('sends points at the configured minimum token count', async () => {
+      expect(
+        await injectionPoints({
+          cacheConfig: {...cacheConfig, minTokens: 5000},
+          cacheableContentsTokenCount: 5000,
+        }),
+      ).toHaveLength(2);
+    });
+
+    it('sends points on a first turn, whose size is unknown', async () => {
+      expect(
+        await injectionPoints({
+          cacheConfig: {...cacheConfig, minTokens: 1000000},
+        }),
+      ).toHaveLength(2);
+    });
+
+    it('leaves points a caller named through additionalArgs alone', async () => {
+      const callerPoints: CacheControlInjectionPoint[] = [
+        {location: 'message', index: 0, control: {type: 'ephemeral'}},
+      ];
+
+      expect(
+        await injectionPoints(
+          {cacheConfig},
+          {cache_control_injection_points: callerPoints},
+        ),
+      ).toEqual(callerPoints);
     });
   });
 

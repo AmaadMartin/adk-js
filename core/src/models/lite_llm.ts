@@ -11,6 +11,7 @@ import {
   Part,
 } from '@google/genai';
 
+import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import {logger} from '../utils/logger.js';
 
 import {BaseLlm} from './base_llm.js';
@@ -33,9 +34,14 @@ import {
   modelResponseToGenerateContentResponse,
   parseToolCallArguments,
 } from './lite_llm_response_converters.js';
-import {CompletionArgs, ToolCall} from './lite_llm_types.js';
+import {
+  CacheControlInjectionPoint,
+  CompletionArgs,
+  ToolCall,
+} from './lite_llm_types.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
+import {resolveCacheConfig, useOneHourTtl} from './prompt_cache.js';
 
 /**
  * Keys a caller may not set through `additionalArgs`: the class owns them, and
@@ -171,11 +177,7 @@ export class LiteLlm extends BaseLlm {
 
     const effectiveModel = llmRequest.model ?? this.model;
     const inputs = getCompletionInputs(llmRequest, effectiveModel);
-    const args = this.buildCompletionArgs(
-      effectiveModel,
-      inputs,
-      llmRequest.config?.httpOptions,
-    );
+    const args = this.buildCompletionArgs(effectiveModel, inputs, llmRequest);
 
     if (!stream) {
       const response = await this.client.completion(args, abortSignal);
@@ -196,7 +198,7 @@ export class LiteLlm extends BaseLlm {
   private buildCompletionArgs(
     model: string,
     inputs: CompletionInputs,
-    httpOptions?: HttpOptions,
+    llmRequest: LlmRequest,
   ): CompletionArgs {
     const args: CompletionArgs = {
       model,
@@ -209,22 +211,15 @@ export class LiteLlm extends BaseLlm {
     if (inputs.toolChoice !== undefined) {
       args.tool_choice = inputs.toolChoice;
     }
-    if (!httpOptions) {
-      return args;
-    }
+    applyHttpOptions(args, llmRequest.config?.httpOptions);
 
-    if (httpOptions.headers) {
-      args.extra_headers = {...args.extra_headers, ...httpOptions.headers};
-    }
-    if (httpOptions.timeout !== undefined) {
-      // HttpOptions.timeout is milliseconds; the wire field is seconds.
-      args.timeout = httpOptions.timeout / MILLISECONDS_PER_SECOND;
-    }
-    if (httpOptions.retryOptions?.attempts !== undefined) {
-      args.num_retries = httpOptions.retryOptions.attempts;
-    }
-    if (httpOptions.extraBody !== undefined) {
-      args.extra_body = httpOptions.extraBody;
+    // A caller who named their own injection points through `additionalArgs`
+    // has said more about their provider than the app-level config can, so
+    // leave those alone.
+    const cacheConfig = resolveCacheConfig(llmRequest);
+    if (cacheConfig && args.cache_control_injection_points === undefined) {
+      args.cache_control_injection_points =
+        cacheControlInjectionPoints(cacheConfig);
     }
     return args;
   }
@@ -443,4 +438,50 @@ export class LiteLlm extends BaseLlm {
       yield aggregatedToolCallResponse;
     }
   }
+}
+
+/** Copies the `HttpOptions` fields that have a chat-completions equivalent. */
+function applyHttpOptions(
+  args: CompletionArgs,
+  httpOptions?: HttpOptions,
+): void {
+  if (!httpOptions) {
+    return;
+  }
+  if (httpOptions.headers) {
+    args.extra_headers = {...args.extra_headers, ...httpOptions.headers};
+  }
+  if (httpOptions.timeout !== undefined) {
+    // HttpOptions.timeout is milliseconds; the wire field is seconds.
+    args.timeout = httpOptions.timeout / MILLISECONDS_PER_SECOND;
+  }
+  if (httpOptions.retryOptions?.attempts !== undefined) {
+    args.num_retries = httpOptions.retryOptions.attempts;
+  }
+  if (httpOptions.extraBody !== undefined) {
+    args.extra_body = httpOptions.extraBody;
+  }
+}
+
+/**
+ * Describes the prefix LiteLLM should mark as cacheable.
+ *
+ * The system instruction is one point, because it is the stable head of the
+ * prompt. The final message is the other, which caches the conversation so far
+ * and moves forward on its own as the conversation grows. Tool definitions get
+ * no point of their own, because LiteLLM's only tool-level location is
+ * specific to one provider.
+ */
+function cacheControlInjectionPoints(
+  cacheConfig: ContextCacheConfig,
+): CacheControlInjectionPoint[] {
+  const control: CacheControlInjectionPoint['control'] = useOneHourTtl(
+    cacheConfig,
+  )
+    ? {type: 'ephemeral', ttl: '1h'}
+    : {type: 'ephemeral'};
+  return [
+    {location: 'message', role: 'system', control},
+    {location: 'message', index: -1, control},
+  ];
 }

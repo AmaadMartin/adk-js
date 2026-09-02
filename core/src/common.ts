@@ -223,6 +223,7 @@ export type {
 } from './models/lite_llm_client.js';
 export type {
   AudioContentObject,
+  CacheControlInjectionPoint,
   ChatMessage,
   Choice,
   CompletionArgs,
