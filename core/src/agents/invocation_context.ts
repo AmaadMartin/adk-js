@@ -9,6 +9,7 @@ import {isEmpty} from 'lodash-es';
 
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import {AuthCredential} from '../auth/auth_credential.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {LlmCallsLimitExceededError} from '../errors/llm_calls_limit_exceeded_error.js';
 import {Event} from '../events/event.js';
@@ -93,6 +94,10 @@ export interface InvocationContextParams {
    * store its parent reads.
    */
   customMetadata?: Record<string, unknown>;
+  /**
+   * Credentials already resolved for this invocation, keyed by credential key.
+   */
+  credentialByKey?: Record<string, AuthCredential>;
   resumabilityConfig?: ResumabilityConfig;
   agentStates?: Record<string, AgentState>;
   endOfAgents?: Record<string, boolean>;
@@ -364,6 +369,17 @@ export class InvocationContext {
   readonly resumabilityConfig?: ResumabilityConfig;
 
   /**
+   * Credentials resolved during this invocation, keyed by the credential key
+   * of the auth config that produced them. Held here rather than in session
+   * state so a credential resolved for one invocation cannot leak into
+   * another. Read through `ReadonlyContext.getCredential`.
+   *
+   * Created with `Object.create(null)`, as `InMemoryCredentialService` creates
+   * its buckets: the credential key is attacker-influenced.
+   */
+  readonly credentialByKey: Record<string, AuthCredential>;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -386,6 +402,7 @@ export class InvocationContext {
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
     this.customMetadata = params.customMetadata ?? {};
+    this.credentialByKey = params.credentialByKey ?? Object.create(null);
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop

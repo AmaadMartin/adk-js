@@ -5,6 +5,8 @@
  */
 
 import {
+  AuthCredential,
+  AuthCredentialTypes,
   BaseAgent,
   Event,
   InvocationContext,
@@ -124,5 +126,53 @@ describe('ReadonlyContext', () => {
     const context = new ReadonlyContext(makeContext());
 
     expect(context.runConfig).toBeUndefined();
+  });
+
+  it('exposes a credential resolved for this invocation', () => {
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'test-api-key',
+    };
+
+    const context = new ReadonlyContext(
+      makeContext({credentialByKey: {'my-key': credential}}),
+    );
+
+    expect(context.getCredential('my-key')).toBe(credential);
+  });
+
+  it('reports an unresolved credential key as undefined', () => {
+    const context = new ReadonlyContext(makeContext());
+
+    expect(context.getCredential('missing-key')).toBeUndefined();
+  });
+
+  it('reports an inherited object key as an unresolved credential', () => {
+    const context = new ReadonlyContext(makeContext());
+
+    expect(context.getCredential('toString')).toBeUndefined();
+    expect(context.getCredential('constructor')).toBeUndefined();
+    expect(context.getCredential('__proto__')).toBeUndefined();
+  });
+
+  it('reports an inherited object key as unresolved when the caller supplied the map', () => {
+    const context = new ReadonlyContext(makeContext({credentialByKey: {}}));
+
+    expect(context.getCredential('toString')).toBeUndefined();
+    expect(context.getCredential('constructor')).toBeUndefined();
+    expect(context.getCredential('__proto__')).toBeUndefined();
+  });
+
+  it('sees credentials resolved after the readonly context was created', () => {
+    const invocationContext = makeContext();
+    const context = new ReadonlyContext(invocationContext);
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'test-api-key',
+    };
+
+    invocationContext.credentialByKey['late-key'] = credential;
+
+    expect(context.getCredential('late-key')).toBe(credential);
   });
 });

@@ -6,6 +6,7 @@
 
 import {Content} from '@google/genai';
 
+import {AuthCredential} from '../auth/auth_credential.js';
 import type {Session} from '../sessions/session.js';
 import {State} from '../sessions/state.js';
 
@@ -91,5 +92,16 @@ export class ReadonlyContext {
    */
   get runConfig(): RunConfig | undefined {
     return this.invocationContext.runConfig;
+  }
+
+  /**
+   * The credential resolved for `key` during this invocation, or `undefined`
+   * when none was.
+   */
+  getCredential(key: string): AuthCredential | undefined {
+    const credentials = this.invocationContext.credentialByKey;
+
+    // A caller may supply the map as a `{}` literal, so guard inherited keys.
+    return Object.hasOwn(credentials, key) ? credentials[key] : undefined;
   }
 }
