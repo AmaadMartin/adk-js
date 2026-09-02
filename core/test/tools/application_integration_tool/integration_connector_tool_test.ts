@@ -339,6 +339,63 @@ describe('IntegrationConnectorTool', () => {
     });
   });
 
+  describe('serialized auth options', () => {
+    const SERIALIZED_SCHEME = '{"type":"http","scheme":"bearer"}';
+    const SERIALIZED_CREDENTIAL = '{"authType":"http"}';
+
+    let delegated: ReturnType<typeof vi.fn>;
+    let restApiTool: RestApiTool;
+
+    beforeEach(() => {
+      restApiTool = createWrappedTool();
+      delegated = vi.fn().mockResolvedValue({ok: true});
+      restApiTool.runAsync = delegated;
+    });
+
+    it('constructs with both options in their serialized form', () => {
+      const {tool} = createTool({
+        restApiTool,
+        authScheme: SERIALIZED_SCHEME,
+        authCredential: SERIALIZED_CREDENTIAL,
+      });
+
+      expect(tool.name).toBe('list_issues');
+      // A stored scheme, serialized or not, makes the tool rebindable.
+      expect(tool.withAuthCredential(bearer('exchanged-token'))).not.toBe(tool);
+    });
+
+    it('rejects a serialized scheme and calls nothing', async () => {
+      const {tool} = createTool({restApiTool, authScheme: SERIALIZED_SCHEME});
+
+      await expect(
+        tool.runAsync({args: {}, toolContext: createContext()}),
+      ).rejects.toThrow(
+        "IntegrationConnectorTool 'list_issues' holds authScheme or " +
+          'authCredential in its serialized string form, which it cannot ' +
+          'authenticate with.',
+      );
+      // Calling the connector without the scheme would call it unauthenticated.
+      expect(delegated).not.toHaveBeenCalled();
+    });
+
+    it('rejects a serialized credential and calls nothing', async () => {
+      const {tool} = createTool({
+        restApiTool,
+        authScheme: BEARER_SCHEME,
+        authCredential: SERIALIZED_CREDENTIAL,
+      });
+
+      await expect(
+        tool.runAsync({args: {}, toolContext: createContext()}),
+      ).rejects.toThrow(
+        "IntegrationConnectorTool 'list_issues' holds authScheme or " +
+          'authCredential in its serialized string form, which it cannot ' +
+          'authenticate with.',
+      );
+      expect(delegated).not.toHaveBeenCalled();
+    });
+  });
+
   describe('_getDeclaration', () => {
     it('hides the injected fields and frees the connector-defaulted ones', async () => {
       const {tool} = createTool({
