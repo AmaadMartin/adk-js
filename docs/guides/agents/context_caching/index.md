@@ -24,17 +24,39 @@ The processor is inert unless the invocation carries a `ContextCacheConfig`. An
 agent with no config produces exactly the request it produced before, so
 enabling caching is opt-in and costs nothing when it is off.
 
-`adk-js` does not yet ship a model-side cache manager, and neither `App` nor
-`Runner` sets `contextCacheConfig` for you. Today the processor stages the
-request fields and a caller supplies the config on the invocation context.
+The policy belongs to the app. An `App` declares one `contextCacheConfig`, the
+`Runner` reads it, and every invocation the runner starts carries it — in
+`runAsync`, in `runLive`, and under evaluation. `adk-js` does not yet ship a
+model-side cache manager, so the processor stages the request fields and no
+model reads them.
 
 ## Get started
 
-There is nothing to switch on yet. `ContextCacheConfig` is staged on
-`InvocationContext.contextCacheConfig`, and `App` and `Runner` will surface it
-once the model-side cache manager lands. Until then no model reads the fields
-the processor writes, so setting the config changes no request the model
-answers.
+Declare the policy on the app that owns the agent.
+
+```typescript
+import {App, LlmAgent, Runner, InMemorySessionService} from '@google/adk';
+
+const app = new App({
+  name: 'weather_app',
+  rootAgent: new LlmAgent({
+    name: 'weather_agent',
+    model: 'gemini-flash-latest',
+    instruction: 'answer weather questions',
+  }),
+  contextCacheConfig: {
+    cacheIntervals: 5,
+    ttlSeconds: 600,
+    minTokens: 2048,
+  },
+});
+
+const runner = new Runner({app, sessionService: new InMemorySessionService()});
+```
+
+Every invocation this runner starts carries the policy, so
+`ContextCacheRequestProcessor` stages the cache fields on each request. No
+model reads them yet, so the request the model answers is unchanged.
 
 ## Configuration
 
