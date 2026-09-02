@@ -11,6 +11,7 @@ import {
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
   createEvent,
+  createSession,
   Event,
   EventActions,
   Gemini,
@@ -233,17 +234,15 @@ function createContextForAgent(
   events: Event[],
   agent: LlmAgent,
 ): InvocationContext {
-  const session = {
-    id: 'test-session',
-    events,
-    appName: 'test-app',
-    userId: 'test-user',
-  } as unknown as Session;
-
   return new InvocationContext({
     invocationId: 'test-invocation',
     agent: agent as BaseAgent,
-    session,
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+      events,
+    }),
     pluginManager: new PluginManager([]),
   });
 }
