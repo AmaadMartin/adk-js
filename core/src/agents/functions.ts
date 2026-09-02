@@ -212,6 +212,7 @@ async function callToolAsync(
           toolContext,
           toolContext.invocationContext,
         ),
+        invocationContext: toolContext.invocationContext,
       });
       return result;
     } finally {
@@ -672,6 +673,7 @@ export async function handleFunctionCallList({
         traceMergedToolCalls({
           responseEventId: mergedEvent.id,
           functionResponseEvent: mergedEvent,
+          invocationContext,
         });
       } finally {
         span.end();
