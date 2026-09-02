@@ -17,6 +17,7 @@ import {
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
+import {ToolArgsConfig} from './tool_configs.js';
 
 /**
  * The parameters for `runAsync`.
@@ -43,19 +44,21 @@ export interface BaseToolParams {
   isLongRunning?: boolean;
   /** Tool-specific metadata. The whole object must be JSON serializable. */
   customMetadata?: Record<string, unknown>;
-  /** Tool-wide default for when the model reacts to this tool's response. */
+
+  /**
+   * Controls when the model reacts to the tool's response (Live API only).
+   *
+   * Applied to the emitted `FunctionResponse` for asynchronous function
+   * calling:
+   * - `SILENT`: feeds the response back without triggering a model turn.
+   * - `WHEN_IDLE`: defers the reaction until the model is idle.
+   * - `INTERRUPT`: reacts immediately.
+   *
+   * Ignored by models that don't support asynchronous function calling.
+   * Leaving it unset preserves the default behavior.
+   */
   responseScheduling?: FunctionResponseScheduling;
 }
-
-/**
- * The declared args of one tool in a configuration file.
- *
- * Structural (`object`) rather than an index signature on purpose: a subclass
- * that narrows {@link BaseTool.fromConfig} to its own config interface must
- * stay assignable to this type, and a TypeScript interface is not assignable
- * to an index-signature type.
- */
-export type ToolArgsConfig = object;
 
 /**
  * A unique symbol to identify ADK agent classes.
@@ -113,7 +116,11 @@ export abstract class BaseTool {
    *
    * The whole object must be JSON serializable. Assignable after construction,
    * which is how a tool whose constructor does not forward it (`FunctionTool`,
-   * for one) gets one.
+   * for one) gets one, and how a toolset stamps metadata onto tool instances
+   * it does not construct itself (see `AgentRegistrySingleMCPToolset`).
+   *
+   * A value here can reach a telemetry span, so it must never carry
+   * credentials, tokens or user content.
    */
   customMetadata?: Record<string, unknown>;
 
@@ -137,7 +144,9 @@ export abstract class BaseTool {
    * resolves to a value is handled normally.
    *
    * Unlike {@link isLongRunning}, which shares the skip-on-empty behaviour,
-   * this does not add the call id to `event.longRunningToolIds`.
+   * this does not add the call id to `event.longRunningToolIds`, so it does
+   * not affect A2A task state, plugin logging or session metadata. A tool that
+   * always defers redeclares the field: `override defersResponse = true;`.
    */
   defersResponse = false;
 
@@ -180,7 +189,8 @@ export abstract class BaseTool {
    *   the same way.
    * @return The tool instance.
    * @throws {ToolExecutionError} If the config does not declare a non-empty
-   *   `name` and a `description`.
+   *   `name` and a `description`, or if an entry `BaseTool` reads holds a
+   *   value of the wrong type.
    */
   static async fromConfig(
     config: ToolArgsConfig,
@@ -294,6 +304,20 @@ export abstract class BaseTool {
   }
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const SCHEDULING_VALUES: readonly string[] = Object.values(
+  FunctionResponseScheduling,
+);
+
+function isResponseScheduling(
+  value: unknown,
+): value is FunctionResponseScheduling {
+  return typeof value === 'string' && SCHEDULING_VALUES.includes(value);
+}
+
 /**
  * The config is rejected without echoing it back: a tool's declared args can
  * carry credentials.
@@ -318,7 +342,8 @@ function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
     throw invalidToolConfig('the config must be a non-null object');
   }
   const entries: Record<string, unknown> = {...config};
-  const {name, description, isLongRunning} = entries;
+  const {name, description, isLongRunning, customMetadata, responseScheduling} =
+    entries;
   if (typeof name !== 'string' || name === '') {
     throw invalidToolConfig('`name` must be a non-empty string');
   }
@@ -328,5 +353,25 @@ function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
   if (isLongRunning !== undefined && typeof isLongRunning !== 'boolean') {
     throw invalidToolConfig('`isLongRunning` must be a boolean');
   }
-  return {...entries, name, description, isLongRunning};
+  // Shape only: the value is not walked to confirm that it is JSON
+  // serializable, which stays the caller's obligation.
+  if (customMetadata !== undefined && !isPlainObject(customMetadata)) {
+    throw invalidToolConfig('`customMetadata` must be an object');
+  }
+  if (
+    responseScheduling !== undefined &&
+    !isResponseScheduling(responseScheduling)
+  ) {
+    throw invalidToolConfig(
+      `\`responseScheduling\` must be one of ${SCHEDULING_VALUES.join(', ')}`,
+    );
+  }
+  return {
+    ...entries,
+    name,
+    description,
+    isLongRunning,
+    customMetadata,
+    responseScheduling,
+  };
 }

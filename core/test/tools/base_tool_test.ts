@@ -235,6 +235,43 @@ class LabelledTool extends BaseTool {
   }
 }
 
+/** A second plain tool, so `fromConfig` can be pinned to its receiver. */
+class OtherSimpleTool extends BaseTool {
+  override async runAsync(): Promise<unknown> {
+    return undefined;
+  }
+}
+
+/** A tool whose matching `FunctionResponse` is supplied by something else. */
+class DeferringTool extends BaseTool {
+  override defersResponse = true;
+
+  override async runAsync(): Promise<unknown> {
+    return null;
+  }
+}
+
+interface ConfigPathToolConfig {
+  name: string;
+}
+
+/** A tool whose own config seam reads the config file path. */
+class ConfigPathTool extends BaseTool {
+  static override async fromConfig(
+    config: ConfigPathToolConfig,
+    configAbsPath: string,
+  ): Promise<ConfigPathTool> {
+    return new ConfigPathTool({
+      name: config.name,
+      description: `loaded from ${configAbsPath}`,
+    });
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return undefined;
+  }
+}
+
 interface NarrowToolConfig {
   target: string;
 }
@@ -308,6 +345,62 @@ async function expectBadConfig(
   expect(error.errorType).toBe(ToolErrorType.BAD_REQUEST);
 }
 
+describe('BaseTool.customMetadata', () => {
+  it('is undefined when the constructor params omit it', () => {
+    const tool = new SimpleTool({name: 'plain_tool', description: 'A tool.'});
+
+    expect(tool.customMetadata).toBeUndefined();
+  });
+
+  it('is the metadata passed through BaseToolParams', () => {
+    const tool = new SimpleTool({
+      name: 'plain_tool',
+      description: 'A tool.',
+      customMetadata: {'my.vendor.key': 'v', nested: {a: 1}},
+    });
+
+    expect(tool.customMetadata).toEqual({
+      'my.vendor.key': 'v',
+      nested: {a: 1},
+    });
+  });
+
+  it('can be assigned after construction', () => {
+    const tool = new SimpleTool({name: 'plain_tool', description: 'A tool.'});
+
+    tool.customMetadata = {'my.vendor.key': 'v'};
+
+    expect(tool.customMetadata).toEqual({'my.vendor.key': 'v'});
+  });
+
+  it('keeps existing keys when a key is added after construction', () => {
+    const tool = new SimpleTool({
+      name: 'plain_tool',
+      description: 'A tool.',
+      customMetadata: {'my.vendor.key': 'v'},
+    });
+
+    tool.customMetadata = {...tool.customMetadata, 'my.vendor.id': 'abc-123'};
+
+    expect(tool.customMetadata).toEqual({
+      'my.vendor.key': 'v',
+      'my.vendor.id': 'abc-123',
+    });
+  });
+
+  it('leaves isLongRunning at its default when only metadata is supplied', () => {
+    const tool = new SimpleTool({
+      name: 'plain_tool',
+      description: 'A tool.',
+      customMetadata: {'my.vendor.key': 'v'},
+    });
+
+    expect(tool.isLongRunning).toBe(false);
+    expect(tool.name).toBe('plain_tool');
+    expect(tool.description).toBe('A tool.');
+  });
+});
+
 describe('BaseTool.defersResponse', () => {
   it('defaults to false', () => {
     const tool = new SimpleTool({name: 'simple', description: 'a tool'});
@@ -321,6 +414,34 @@ describe('BaseTool.defersResponse', () => {
     tool.defersResponse = true;
 
     expect(tool.defersResponse).toBe(true);
+  });
+
+  it('is true on a subclass that overrides it', () => {
+    const tool = new DeferringTool({
+      name: 'deferring_tool',
+      description: 'A tool.',
+    });
+
+    expect(tool.defersResponse).toBe(true);
+  });
+
+  it('does not mark a deferring tool as long running', () => {
+    const tool = new DeferringTool({
+      name: 'deferring_tool',
+      description: 'A tool.',
+    });
+
+    expect(tool.isLongRunning).toBe(false);
+  });
+
+  it('stays false on a tool constructed as long running', () => {
+    const tool = new SimpleTool({
+      name: 'long_running_tool',
+      description: 'A tool.',
+      isLongRunning: true,
+    });
+
+    expect(tool.defersResponse).toBe(false);
   });
 });
 
@@ -434,6 +555,121 @@ describe('BaseTool.fromConfig', () => {
       ),
       '`isLongRunning` must be a boolean',
     );
+  });
+
+  it('carries customMetadata through', async () => {
+    const tool = await SimpleTool.fromConfig({
+      name: 'plain_tool',
+      description: 'A tool.',
+      isLongRunning: true,
+      customMetadata: {'my.vendor.key': 'v'},
+    });
+
+    expect(tool.isLongRunning).toBe(true);
+    expect(tool.customMetadata).toEqual({'my.vendor.key': 'v'});
+  });
+
+  it('leaves customMetadata undefined when the config omits it', async () => {
+    const tool = await SimpleTool.fromConfig({
+      name: 'plain_tool',
+      description: 'A tool.',
+    });
+
+    expect(tool.customMetadata).toBeUndefined();
+  });
+
+  it('carries responseScheduling through', async () => {
+    const tool = await SimpleTool.fromConfig({
+      name: 'plain_tool',
+      description: 'A tool.',
+      responseScheduling: FunctionResponseScheduling.SILENT,
+    });
+
+    expect(tool.responseScheduling).toBe(FunctionResponseScheduling.SILENT);
+  });
+
+  it('leaves responseScheduling undefined when the config omits it', async () => {
+    const tool = await SimpleTool.fromConfig({
+      name: 'plain_tool',
+      description: 'A tool.',
+    });
+
+    expect(tool.responseScheduling).toBeUndefined();
+  });
+
+  it('rejects a responseScheduling outside the enum', async () => {
+    await expectBadConfig(
+      {
+        name: 'plain_tool',
+        description: 'A tool.',
+        responseScheduling: 'EVENTUALLY',
+      },
+      '`responseScheduling` must be one of SCHEDULING_UNSPECIFIED, SILENT, ' +
+        'WHEN_IDLE, INTERRUPT',
+    );
+  });
+
+  it('rejects an array customMetadata', async () => {
+    await expectBadConfig(
+      parseToolConfig(
+        '{"name": "plain_tool", "description": "A tool.", "customMetadata": ["a"]}',
+      ),
+      '`customMetadata` must be an object',
+    );
+  });
+
+  it('rejects a null customMetadata', async () => {
+    await expectBadConfig(
+      parseToolConfig(
+        '{"name": "plain_tool", "description": "A tool.", "customMetadata": null}',
+      ),
+      '`customMetadata` must be an object',
+    );
+  });
+
+  it('accepts an explicit undefined for an optional key', async () => {
+    const tool = await SimpleTool.fromConfig({
+      name: 'plain_tool',
+      description: 'A tool.',
+      isLongRunning: undefined,
+      customMetadata: undefined,
+    });
+
+    expect(tool.isLongRunning).toBe(false);
+    expect(tool.customMetadata).toBeUndefined();
+  });
+
+  it('keeps a key the base implementation does not read off the instance', async () => {
+    const tool = await SimpleTool.fromConfig({
+      name: 'plain_tool',
+      description: 'A tool.',
+      apiKeyEnvVar: 'MY_KEY',
+    });
+
+    expect(tool.name).toBe('plain_tool');
+    expect(Object.keys(tool)).not.toContain('apiKeyEnvVar');
+  });
+
+  it('returns an instance of the subclass it is called on', async () => {
+    const config = {name: 'plain_tool', description: 'A tool.'};
+
+    const plain = await SimpleTool.fromConfig(config);
+    const other = await OtherSimpleTool.fromConfig(config);
+
+    expect(plain).toBeInstanceOf(SimpleTool);
+    expect(other).toBeInstanceOf(OtherSimpleTool);
+    expect(other).not.toBeInstanceOf(SimpleTool);
+  });
+
+  it('uses a subclass override that reads the config file path', async () => {
+    const configAbsPath = '/abs/path/agent.yaml';
+
+    const tool = await ConfigPathTool.fromConfig(
+      {name: 'ignored'},
+      configAbsPath,
+    );
+
+    expect(tool.description).toBe(`loaded from ${configAbsPath}`);
   });
 
   it('does not echo the config back in the error message', async () => {

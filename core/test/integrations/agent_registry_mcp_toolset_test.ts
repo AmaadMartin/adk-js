@@ -107,6 +107,16 @@ describe('AgentRegistrySingleMCPToolset', () => {
         expect(tool.customMetadata).toBeUndefined();
       }
     });
+
+    it('leaves customMetadata undefined rather than empty when destinationResourceId is not set', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+      });
+      const tools = await toolset.getTools();
+      for (const tool of tools) {
+        expect(tool.customMetadata).toBeUndefined();
+      }
+    });
   });
 
   describe('getTools — toolFilter', () => {

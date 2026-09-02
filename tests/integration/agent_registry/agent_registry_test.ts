@@ -121,11 +121,8 @@ describe('AgentRegistry Integration E2E', () => {
     expect(tools).toHaveLength(1);
     expect(tools[0].name).toBe('Billing_Server_retrieve_billing_data');
 
-    const toolWrapper = tools[0] as unknown as {
-      customMetadata: Record<string, unknown>;
-    };
-    expect(toolWrapper.customMetadata).toBeDefined();
-    expect(toolWrapper.customMetadata[GCP_MCP_SERVER_DESTINATION_ID]).toBe(
+    expect(tools[0].customMetadata).toBeDefined();
+    expect(tools[0].customMetadata?.[GCP_MCP_SERVER_DESTINATION_ID]).toBe(
       'urn:mcp:gcp:billing-server',
     );
 

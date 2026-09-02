@@ -672,6 +672,9 @@ export async function handleFunctionCallList({
     // ('', 0, false) is a real result and still emits one, so long-running
     // tools that return such a value now produce a response event where they
     // previously produced none.
+    // A tool that defers its response supplies the matching FunctionResponse
+    // later by design, so it skips the same way without being marked long
+    // running.
     if (
       (tool.isLongRunning || tool.defersResponse) &&
       functionResponse == null

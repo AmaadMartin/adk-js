@@ -15,7 +15,12 @@ import {
   createSession,
   isFunctionTool,
 } from '@google/adk';
-import {Schema, Type, createUserContent} from '@google/genai';
+import {
+  FunctionResponseScheduling,
+  Schema,
+  Type,
+  createUserContent,
+} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -1251,6 +1256,31 @@ describe('FunctionTool', () => {
         error:
           'This tool call requires confirmation, please approve or reject.',
       });
+    });
+  });
+
+  describe('responseScheduling', () => {
+    it('forwards responseScheduling to the tool', () => {
+      const tool = new FunctionTool({
+        name: 'my_tool',
+        description: 'Does something.',
+        execute: async () => 'done',
+        responseScheduling: FunctionResponseScheduling.WHEN_IDLE,
+      });
+
+      expect(tool.responseScheduling).toBe(
+        FunctionResponseScheduling.WHEN_IDLE,
+      );
+    });
+
+    it('leaves responseScheduling undefined by default', () => {
+      const tool = new FunctionTool({
+        name: 'my_tool',
+        description: 'Does something.',
+        execute: async () => 'done',
+      });
+
+      expect(tool.responseScheduling).toBeUndefined();
     });
   });
 });
