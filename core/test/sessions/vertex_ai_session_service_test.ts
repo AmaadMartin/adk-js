@@ -8,6 +8,7 @@ import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
   AuthConfig,
   createEvent,
+  createSession,
   isCompactedEvent,
   State,
   VertexAiSessionService,
@@ -1849,13 +1850,11 @@ describe('VertexAiSessionService', () => {
     });
 
     it('appendEvent rejects a session whose id is invalid, before the append', async () => {
-      const session = {
+      const session = createSession({
         id: 'bad/id',
         appName: '12345',
         userId: 'testUser',
-        events: [],
-        lastUpdateTime: 0,
-      } as unknown as Session;
+      });
 
       await expect(
         service.appendEvent({
@@ -2026,13 +2025,11 @@ describe('VertexAiSessionService', () => {
     };
 
     it('sends a detached plain-JSON copy and leaves the event untouched', async () => {
-      const session = {
+      const session = createSession({
         id: 'auth-session',
         appName: '12345',
         userId: 'testUser',
-        events: [],
-        lastUpdateTime: 0,
-      } as unknown as Session;
+      });
       const event = createEvent({
         author: 'model',
         timestamp: 1620000000000,
