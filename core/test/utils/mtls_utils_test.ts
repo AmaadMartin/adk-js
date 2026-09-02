@@ -12,6 +12,7 @@ import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 import {
+  clientCertDispatcher,
   clientCertsToPresent,
   effectiveGoogleapisEndpoint,
   getApiEndpoint,
@@ -20,11 +21,17 @@ import {
   useClientCertEffective,
 } from '../../src/utils/mtls_utils.js';
 
-const {execFileMock, homedirMock, httpsRequestMock} = vi.hoisted(() => ({
-  execFileMock: vi.fn(),
-  homedirMock: vi.fn(),
-  httpsRequestMock: vi.fn<FakeHttpsRequest>(),
-}));
+const {execFileMock, homedirMock, httpsRequestMock, undiciAgentMock} =
+  vi.hoisted(() => ({
+    execFileMock: vi.fn(),
+    homedirMock: vi.fn(),
+    httpsRequestMock: vi.fn<FakeHttpsRequest>(),
+    undiciAgentMock: vi.fn(),
+  }));
+
+// The real `Agent` keeps its options private, so the certificate material it
+// was handed is asserted on the constructor call instead.
+vi.mock('undici', () => ({Agent: undiciAgentMock}));
 
 vi.mock('node:child_process', () => ({execFile: execFileMock}));
 
@@ -632,5 +639,30 @@ describe('getWithClientCert', () => {
 
     expect(error).toBeInstanceOf(Error);
     expect(error).toHaveProperty('message', 'socket hang up');
+  });
+});
+
+describe('clientCertDispatcher', () => {
+  const CERTS = {cert: CERT_PEM, key: KEY_PEM, passphrase: 'test-passphrase'};
+
+  beforeEach(() => {
+    undiciAgentMock.mockReset();
+  });
+
+  it('presents the certificate, the key and the passphrase', async () => {
+    const agent = {dispatch: () => true};
+    undiciAgentMock.mockReturnValue(agent);
+
+    await expect(clientCertDispatcher(CERTS)).resolves.toBe(agent);
+    expect(undiciAgentMock).toHaveBeenCalledWith({connect: CERTS});
+  });
+
+  it('presents a certificate that carries no passphrase', async () => {
+    undiciAgentMock.mockReturnValue({dispatch: () => true});
+    const certs = {cert: CERT_PEM, key: KEY_PEM};
+
+    await clientCertDispatcher(certs);
+
+    expect(undiciAgentMock).toHaveBeenCalledWith({connect: certs});
   });
 });
