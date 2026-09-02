@@ -1336,7 +1336,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         invocationContext.runConfig = runConfigForNewLiveSession(
           invocationContext.runConfig,
         );
-        yield* this.runLiveFlow(invocationContext, restartCount + 1);
+        // Re-enter the session, not `runLiveFlow`: its `finally` already
+        // wraps the whole run, so one teardown covers every restart.
+        yield* this.runLiveSession(invocationContext, restartCount + 1);
         return;
       }
 
@@ -1865,7 +1867,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     ) {
       const flushedEvents = await this.audioCacheManager.flushCaches(
         invocationContext,
-        {flushUserAudio: !llmResponse.interrupted},
+        !llmResponse.interrupted,
       );
       if (flushedEvents.length) {
         for (const event of flushedEvents) {

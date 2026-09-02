@@ -21,12 +21,12 @@ export enum LiveCloseCode {
   SERVICE_RESTART = 1012,
 }
 
-const LIVE_CONNECTION_CLOSED_ERROR_SYMBOL = Symbol.for(
-  'google.adk.liveConnectionClosedError',
-);
-
 /**
  * Type guard for {@link LiveConnectionClosedError}.
+ *
+ * Matches on `name` rather than `instanceof <subclass>` so it stays correct
+ * when errors cross a package boundary (two copies of adk-js in one runtime
+ * would fail an `instanceof` check between them).
  *
  * @param err The value to check.
  * @returns True when the value is a live connection close error.
@@ -34,12 +34,7 @@ const LIVE_CONNECTION_CLOSED_ERROR_SYMBOL = Symbol.for(
 export function isLiveConnectionClosedError(
   err: unknown,
 ): err is LiveConnectionClosedError {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    LIVE_CONNECTION_CLOSED_ERROR_SYMBOL in err &&
-    err[LIVE_CONNECTION_CLOSED_ERROR_SYMBOL] === true
-  );
+  return err instanceof Error && err.name === 'LiveConnectionClosedError';
 }
 
 /**
@@ -48,8 +43,6 @@ export function isLiveConnectionClosedError(
  * A teardown the caller started closes the stream quietly instead.
  */
 export class LiveConnectionClosedError extends Error {
-  readonly [LIVE_CONNECTION_CLOSED_ERROR_SYMBOL] = true;
-
   constructor(
     readonly code: LiveCloseCode | number,
     readonly reason?: string,

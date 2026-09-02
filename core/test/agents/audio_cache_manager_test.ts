@@ -189,9 +189,7 @@ describe('AudioCacheManager.flushCaches', () => {
     manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'input');
     manager.cacheAudio(invocationContext, {data: SECOND_CHUNK}, 'output');
 
-    const events = await manager.flushCaches(invocationContext, {
-      flushUserAudio: false,
-    });
+    const events = await manager.flushCaches(invocationContext, false);
 
     expect(events).toHaveLength(1);
     expect(events[0].content?.role).toBe('model');
