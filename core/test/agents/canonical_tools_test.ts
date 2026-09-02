@@ -10,11 +10,11 @@ import {
   LlmAgent,
   PluginManager,
   canonicalToolsFor,
-  clearCanonicalToolsCache,
   createSession,
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
+import {clearCanonicalToolsCache} from '../../src/agents/canonical_tools.js';
 import {ScriptedLlm} from '../workflow/test_helpers.js';
 
 function makeContext(

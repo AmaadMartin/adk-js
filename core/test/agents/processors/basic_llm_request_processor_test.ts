@@ -8,7 +8,6 @@ import {
   BaseAgent,
   BaseLlm,
   BaseLlmConnection,
-  ContextCacheConfig,
   createSession,
   FunctionTool,
   InvocationContext,
@@ -325,49 +324,5 @@ describe('BasicLlmRequestProcessor', () => {
     }
 
     expect(events).toHaveLength(0);
-  });
-});
-
-describe('BasicLlmRequestProcessor context cache config', () => {
-  const CACHE_CONFIG: ContextCacheConfig = {
-    cacheIntervals: 5,
-    ttlSeconds: 600,
-    minTokens: 1000,
-  };
-
-  function cachingContext(
-    contextCacheConfig?: ContextCacheConfig,
-  ): InvocationContext {
-    return new InvocationContext({
-      invocationId: 'test-invocation',
-      agent: new LlmAgent({
-        name: 'test_agent',
-        model: 'test-basic-processor-model',
-      }),
-      session: createSession({
-        id: 'test-session',
-        events: [],
-        appName: 'test-app',
-        userId: 'test-user',
-      }),
-      pluginManager: new PluginManager([]),
-      contextCacheConfig,
-    });
-  }
-
-  it('populates cacheConfig from the invocation', async () => {
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(cachingContext(CACHE_CONFIG), llmRequest);
-
-    expect(llmRequest.cacheConfig).toBe(CACHE_CONFIG);
-  });
-
-  it('leaves cacheConfig unset when the invocation has none', async () => {
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(cachingContext(undefined), llmRequest);
-
-    expect(llmRequest.cacheConfig).toBeUndefined();
   });
 });

@@ -37,15 +37,6 @@ export interface EventsCompactionConfig {
   eventRetentionSize?: number;
 }
 
-type NumericField = Exclude<keyof EventsCompactionConfig, 'summarizer'>;
-
-const NUMERIC_MINIMUMS: ReadonlyArray<readonly [NumericField, number]> = [
-  ['compactionInterval', 1],
-  ['overlapSize', 0],
-  ['tokenThreshold', 1],
-  ['eventRetentionSize', 0],
-];
-
 /**
  * Creates an {@link EventsCompactionConfig}, rejecting a configuration that
  * cannot trigger a compaction.
@@ -61,12 +52,10 @@ export function createEventsCompactionConfig(
 ): EventsCompactionConfig {
   const config: EventsCompactionConfig = {...params};
 
-  for (const [name, min] of NUMERIC_MINIMUMS) {
-    const value = config[name];
-    if (value !== undefined) {
-      requireAtLeast(name, value, min);
-    }
-  }
+  requireAtLeast('compactionInterval', config.compactionInterval, 1);
+  requireAtLeast('overlapSize', config.overlapSize, 0);
+  requireAtLeast('tokenThreshold', config.tokenThreshold, 1);
+  requireAtLeast('eventRetentionSize', config.eventRetentionSize, 0);
 
   const hasTokenThreshold = config.tokenThreshold !== undefined;
   const hasRetentionSize = config.eventRetentionSize !== undefined;

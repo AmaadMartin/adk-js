@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {EventsCompactionConfig} from '../../apps/events_compaction_config.js';
 import {BaseContextCompactor} from '../../context/base_context_compactor.js';
-import {BaseSummarizer} from '../../context/summarizers/base_summarizer.js';
 import {LlmSummarizer} from '../../context/summarizers/llm_summarizer.js';
 import {TokenBasedContextCompactor} from '../../context/token_based_context_compactor.js';
 import {Event} from '../../events/event.js';
@@ -84,8 +82,14 @@ export class ContextCompactorRequestProcessor implements BaseLlmRequestProcessor
 }
 
 /**
- * The compactors to evaluate: the agent's own, or the app-level policy when
- * the agent declared none.
+ * The compactors to evaluate: the agent's own, or one derived from the
+ * app-level policy when the agent declared none.
+ *
+ * Only the token trigger maps onto a compactor `adk-js` has, and a policy that
+ * configures the sliding window alone is rejected when the `App` is built. A
+ * policy set straight onto the invocation can still reach here without a token
+ * trigger, and a bare node has no model to summarize with; either way there is
+ * nothing to compact.
  *
  * @param declared The compactors the agent was built with.
  * @param ctx The current invocation.
@@ -95,53 +99,33 @@ function compactorsFor(
   declared: BaseContextCompactor[],
   ctx: InvocationContext,
 ): BaseContextCompactor[] {
-  if (declared.length > 0 || !ctx.eventsCompactionConfig) {
+  const config = ctx.eventsCompactionConfig;
+  if (declared.length > 0 || !config) {
     return declared;
   }
-  const derived = compactorFromConfig(ctx.eventsCompactionConfig, ctx);
-  return derived ? [derived] : [];
-}
 
-/**
- * The compactor an app-level policy asks for.
- *
- * Only the token trigger maps onto a compactor `adk-js` has. A policy that
- * configures the sliding window alone is rejected when the `App` is built, so
- * reaching that case here means the policy was set on the invocation directly.
- *
- * @param config The app-level compaction policy.
- * @param ctx The current invocation, which supplies the default summarizer.
- * @returns The compactor, or `undefined` when the policy asks for none.
- */
-function compactorFromConfig(
-  config: EventsCompactionConfig,
-  ctx: InvocationContext,
-): BaseContextCompactor | undefined {
   const {tokenThreshold, eventRetentionSize} = config;
-  if (tokenThreshold === undefined || eventRetentionSize === undefined) {
-    return undefined;
-  }
-  const summarizer = config.summarizer ?? defaultSummarizer(ctx);
-  if (!summarizer) {
-    return undefined;
-  }
-  return new TokenBasedContextCompactor({
-    tokenThreshold,
-    eventRetentionSize,
-    summarizer,
-  });
-}
-
-/**
- * Summarizes with the running agent's own model, as `adk-python` does when a
- * compaction policy names no summarizer.
- *
- * @param ctx The current invocation.
- * @returns The summarizer, or `undefined` when no model is in play.
- */
-function defaultSummarizer(ctx: InvocationContext): BaseSummarizer | undefined {
   const agent = ctx.agent;
-  return isLlmAgent(agent)
-    ? new LlmSummarizer({llm: agent.canonicalModel})
-    : undefined;
+  // Summarize with the running agent's own model, as `adk-python` does when a
+  // policy names no summarizer.
+  const summarizer =
+    config.summarizer ??
+    (isLlmAgent(agent)
+      ? new LlmSummarizer({llm: agent.canonicalModel})
+      : undefined);
+
+  if (
+    tokenThreshold === undefined ||
+    eventRetentionSize === undefined ||
+    !summarizer
+  ) {
+    return [];
+  }
+  return [
+    new TokenBasedContextCompactor({
+      tokenThreshold,
+      eventRetentionSize,
+      summarizer,
+    }),
+  ];
 }

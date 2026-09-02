@@ -8,7 +8,10 @@ import {
   AUTH_PREPROCESSOR,
   Event,
   InvocationContext,
+  LlmAgent,
+  PluginManager,
   createEvent,
+  createSession,
 } from '@google/adk';
 import {Mock, beforeEach, describe, expect, it, vi} from 'vitest';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
@@ -53,7 +56,6 @@ describe('AuthPreprocessor', () => {
     const invocationContext = {
       agent: {}, // Not an LlmAgent
       session: {events: []},
-      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -66,7 +68,6 @@ describe('AuthPreprocessor', () => {
     const invocationContext = {
       agent: {[LLM_AGENT_SYMBOL]: true},
       session: {events: []},
-      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -83,7 +84,6 @@ describe('AuthPreprocessor', () => {
           {author: 'system', content: {parts: [{text: 'hello'}]}} as Event,
         ],
       },
-      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -105,7 +105,6 @@ describe('AuthPreprocessor', () => {
           } as Event,
         ],
       },
-      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -183,7 +182,6 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
-      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -262,7 +260,6 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
-      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -341,7 +338,6 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
-      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -378,7 +374,6 @@ describe('AuthPreprocessor', () => {
           } as Event,
         ],
       },
-      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -470,7 +465,6 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
-      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -541,7 +535,6 @@ describe('AuthPreprocessor', () => {
           }),
         ],
       },
-      credentialByKey: {},
     } as unknown as InvocationContext;
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -611,7 +604,6 @@ describe('AuthPreprocessor', () => {
             }),
           ],
         },
-        credentialByKey: {},
       } as unknown as InvocationContext;
     }
 
@@ -679,7 +671,6 @@ describe('AuthPreprocessor', () => {
             }),
           ],
         },
-        credentialByKey: {},
       } as unknown as InvocationContext;
 
       const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
@@ -747,7 +738,6 @@ describe('AuthPreprocessor', () => {
             }),
           ],
         },
-        credentialByKey: {},
       } as unknown as InvocationContext;
     }
 
@@ -793,10 +783,14 @@ describe('AuthPreprocessor', () => {
     function toolsetAuthContext(
       authConfig: Record<string, unknown>,
     ): InvocationContext {
-      return {
-        agent: {[LLM_AGENT_SYMBOL]: true, name: 'agent'},
-        session: {
-          state: {},
+      return new InvocationContext({
+        invocationId: 'inv-toolset-auth',
+        agent: new LlmAgent({name: 'agent', model: 'gemini-2.0-flash'}),
+        session: createSession({
+          id: 's1',
+          appName: 'app',
+          userId: 'u',
+          lastUpdateTime: Date.now(),
           events: [
             createEvent({
               author: 'agent',
@@ -831,9 +825,9 @@ describe('AuthPreprocessor', () => {
               },
             }),
           ],
-        },
-        credentialByKey: Object.create(null),
-      } as unknown as InvocationContext;
+        }),
+        pluginManager: new PluginManager(),
+      });
     }
 
     it('stores a resolved toolset credential under its credential key', async () => {

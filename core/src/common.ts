@@ -13,12 +13,8 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
-export {
-  canonicalToolsFor,
-  clearCanonicalToolsCache,
-} from './agents/canonical_tools.js';
+export {canonicalToolsFor} from './agents/canonical_tools.js';
 export {Context} from './agents/context.js';
-export type {ContextCacheConfig} from './agents/context_cache_config.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,

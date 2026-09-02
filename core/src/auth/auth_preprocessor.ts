@@ -121,10 +121,10 @@ async function storeAuthAndCollectResumeTargets(
     // A toolset resumes no tool call, so its credential has to be reachable
     // some other way: the invocation carries it under the key the request
     // named, for `ReadonlyContext.getCredential` to read back.
-    // `bindCredentialResponse` refuses a config that names no credential key
-    // and one that carries no credential, so both are present here.
-    credentialByKey[authConfig.credentialKey] =
-      authConfig.exchangedAuthCredential!;
+    const credential = authConfig.exchangedAuthCredential;
+    if (credential) {
+      credentialByKey[authConfig.credentialKey] = credential;
+    }
   }
 
   return toolsToResume;

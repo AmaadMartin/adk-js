@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
 import {
   asRunnableRoot,
@@ -67,11 +66,6 @@ export interface AppOptions {
    * app that does not declare its own compactors.
    */
   eventsCompactionConfig?: EventsCompactionConfig;
-  /**
-   * How this app caches request context. Context caching is enabled for every
-   * LLM agent under the app while this is set.
-   */
-  contextCacheConfig?: ContextCacheConfig;
 }
 
 /**
@@ -93,7 +87,6 @@ export class App {
   readonly plugins: BasePlugin[];
   readonly resumabilityConfig?: ResumabilityConfig;
   readonly eventsCompactionConfig?: EventsCompactionConfig;
-  readonly contextCacheConfig?: ContextCacheConfig;
 
   constructor(options: AppOptions) {
     validateAppName(options.name);
@@ -112,7 +105,6 @@ export class App {
       requireSupportedCompactionTrigger(options.eventsCompactionConfig);
     }
     this.eventsCompactionConfig = options.eventsCompactionConfig;
-    this.contextCacheConfig = options.contextCacheConfig;
   }
 }
 

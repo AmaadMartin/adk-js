@@ -21,7 +21,6 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
-import {ContextCacheConfig} from './context_cache_config.js';
 import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
@@ -91,8 +90,6 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
-  /** Context cache configuration for this invocation. */
-  contextCacheConfig?: ContextCacheConfig;
   /**
    * Credentials already resolved for this invocation, keyed by credential key.
    */
@@ -312,12 +309,6 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
-   * Context cache configuration for this invocation. Context caching is
-   * enabled for the invocation only while this is set.
-   */
-  readonly contextCacheConfig?: ContextCacheConfig;
-
-  /**
    * Credentials resolved during this invocation, keyed by the credential key
    * of the auth config that produced them. Held here rather than in session
    * state so a credential resolved for one invocation cannot leak into
@@ -373,7 +364,6 @@ export class InvocationContext {
     this.workflowInstructionScope = params.workflowInstructionScope;
     this.isolationScope = params.isolationScope;
     this.nodePath = params.nodePath;
-    this.contextCacheConfig = params.contextCacheConfig;
     this.credentialByKey = params.credentialByKey ?? Object.create(null);
     this.eventsCompactionConfig = params.eventsCompactionConfig;
     this.tokenCompactionChecked = params.tokenCompactionChecked ?? false;
