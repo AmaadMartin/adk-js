@@ -292,8 +292,13 @@ describe('LlmAgent live flow', () => {
           {interrupted: true},
         ],
       ]);
-      const runner = makeRunner(new LlmAgent({name: 'agent', model: llm}));
+      const agent = new LlmAgent({name: 'agent', model: llm});
+      const processor = new ContextCapturingProcessor();
+      agent.requestProcessors.push(processor);
+      const runner = makeRunner(agent);
       const queue = new LiveRequestQueue();
+      // The user is still speaking, so their audio must survive the flush.
+      queue.sendRealtime({data: AUDIO_CHUNK, mimeType: 'audio/pcm'});
       queue.close();
 
       await drain(runner, queue, {saveLiveBlob: true});
@@ -303,6 +308,7 @@ describe('LlmAgent live flow', () => {
         1,
       );
       expect(keys.filter((key) => key.includes('input_audio'))).toEqual([]);
+      expect(processor.invocationContext?.inputRealtimeCache).toHaveLength(1);
     });
   });
 
