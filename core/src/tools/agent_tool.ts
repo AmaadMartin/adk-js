@@ -212,8 +212,8 @@ export class AgentTool extends BaseTool {
         .filter((text) => text)
         .join('\n');
 
-      // TODO - b/425992518: In case of output schema, the output should be
-      // validated. Consider similar logic to one we have in Python ADK.
+      // With an output schema the merged text is parsed, but it is not yet
+      // validated against that schema.
       return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
     } finally {
       // The runner is local to this call, so nothing else holds what it holds:
