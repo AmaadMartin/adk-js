@@ -29,6 +29,7 @@ import {
   RunAsyncToolRequest,
   Runner,
   Session,
+  SingleFlow,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
@@ -43,6 +44,8 @@ import {
 } from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/agent_transfer_llm_request_processor.js';
+import {responseProcessor as CODE_EXECUTION_RESPONSE_PROCESSOR} from '../../src/agents/processors/code_execution_request_processor.js';
 import {logger} from '../../src/utils/logger.js';
 
 class MockLlmConnection implements BaseLlmConnection {
@@ -1026,6 +1029,51 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+
+  it('takes its default pipeline from SingleFlow when transfer is disabled', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    expect(agent.requestProcessors).toEqual(new SingleFlow().requestProcessors);
+  });
+
+  it('appends the agent transfer processor when transfer is enabled', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      subAgents: [new LlmAgent({name: 'sub_agent'})],
+    });
+
+    expect(agent.requestProcessors).toEqual([
+      ...new SingleFlow().requestProcessors,
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    ]);
+  });
+
+  it('takes its default response pipeline from SingleFlow', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    expect(agent.responseProcessors).toEqual(
+      new SingleFlow().responseProcessors,
+    );
+    expect(agent.responseProcessors).toContain(
+      CODE_EXECUTION_RESPONSE_PROCESSOR,
+    );
+  });
+
+  it('keeps a caller-supplied pipeline exactly as given', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+      requestProcessors: [AUTH_PREPROCESSOR],
+      contextCompactors: [{shouldCompact: () => true, compact: () => {}}],
+    });
+
+    expect(agent.requestProcessors).toEqual([AUTH_PREPROCESSOR]);
   });
 });
 
