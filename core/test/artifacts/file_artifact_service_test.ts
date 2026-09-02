@@ -185,4 +185,58 @@ describe('FileArtifactService', () => {
       });
     });
   });
+
+  describe('session-less listArtifactKeys', () => {
+    it('returns only the user namespace', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await service.saveArtifact({
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+          filename: 'user:notes.txt',
+          artifact: {text: 'user-scoped'},
+        });
+        await service.saveArtifact({
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+          filename: 'session.txt',
+          artifact: {text: 'session-scoped'},
+        });
+
+        const keys = await service.listArtifactKeys({
+          appName: 'test-app',
+          userId: 'test-user',
+        });
+
+        expect(keys).toEqual(['user:notes.txt']);
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+  });
+
+  it('rejects an artifact that carries no payload', async () => {
+    rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+    const service = new FileArtifactService(rootDir);
+
+    try {
+      await expect(
+        service.saveArtifact({
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+          filename: 'empty.txt',
+          artifact: {},
+        }),
+      ).rejects.toThrow(
+        'Artifact must have either inlineData or text content.',
+      );
+    } finally {
+      await fs.rm(rootDir, {recursive: true, force: true});
+    }
+  });
 });

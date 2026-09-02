@@ -253,14 +253,16 @@ export class FileArtifactService implements BaseArtifactService {
     const userRoot = getUserRoot(this.rootDir, userId);
 
     // Session artifacts
-    const sessionRoot = getSessionArtifactsDir(userRoot, sessionId);
-    for await (const artifactDir of iterateArtifactDirs(sessionRoot)) {
-      const metadata = await getLatestMetadata(artifactDir);
-      if (metadata?.fileName) {
-        filenames.add(metadata.fileName);
-      } else {
-        const rel = path.relative(sessionRoot, artifactDir);
-        filenames.add(asPosixPath(rel));
+    if (sessionId !== undefined) {
+      const sessionRoot = getSessionArtifactsDir(userRoot, sessionId);
+      for await (const artifactDir of iterateArtifactDirs(sessionRoot)) {
+        const metadata = await getLatestMetadata(artifactDir);
+        if (metadata?.fileName) {
+          filenames.add(metadata.fileName);
+        } else {
+          const rel = path.relative(sessionRoot, artifactDir);
+          filenames.add(asPosixPath(rel));
+        }
       }
     }
 

@@ -181,19 +181,32 @@ export class GcsArtifactService implements BaseArtifactService {
     }
   }
 
-  async listArtifactKeys(request: ListArtifactKeysRequest): Promise<string[]> {
-    const sessionPrefix = `${request.appName}/${request.userId}/${request.sessionId}/`;
-    const usernamePrefix = `${request.appName}/${request.userId}/user/`;
+  async listArtifactKeys({
+    appName,
+    userId,
+    sessionId,
+  }: ListArtifactKeysRequest): Promise<string[]> {
     const bucket = await this.getBucket();
-    const [[sessionFiles], [userSessionFiles]] = await Promise.all([
-      bucket.getFiles({prefix: sessionPrefix}),
-      bucket.getFiles({prefix: usernamePrefix}),
-    ]);
+    const listings = [
+      listArtifactKeysUnderPrefix(
+        bucket,
+        `${appName}/${userId}/user/`,
+        'user:',
+      ),
+    ];
 
-    return [
-      ...extractArtifactKeys(sessionFiles, sessionPrefix),
-      ...extractArtifactKeys(userSessionFiles, usernamePrefix, 'user:'),
-    ].sort((a, b) => a.localeCompare(b));
+    if (sessionId !== undefined) {
+      listings.push(
+        listArtifactKeysUnderPrefix(
+          bucket,
+          `${appName}/${userId}/${sessionId}/`,
+        ),
+      );
+    }
+
+    const keys = await Promise.all(listings);
+
+    return keys.flat().sort((a, b) => a.localeCompare(b));
   }
 
   async deleteArtifact(request: DeleteArtifactRequest): Promise<void> {
@@ -307,6 +320,24 @@ function getFileName({
     : `${appName}/${userId}/${sessionId}/${cleanFilename}`;
 
   return version !== undefined ? `${prefix}/${version}` : prefix;
+}
+
+/**
+ * Lists the artifact keys stored under one object-name prefix.
+ *
+ * @param bucket The bucket to list.
+ * @param fileNamePrefix The object-name prefix to list under.
+ * @param keyPrefix The namespace prefix to restore on each returned key.
+ * @return The artifact keys found under the prefix.
+ */
+async function listArtifactKeysUnderPrefix(
+  bucket: Bucket,
+  fileNamePrefix: string,
+  keyPrefix?: string,
+): Promise<string[]> {
+  const [files] = await bucket.getFiles({prefix: fileNamePrefix});
+
+  return extractArtifactKeys(files, fileNamePrefix, keyPrefix);
 }
 
 function extractArtifactKeys(
