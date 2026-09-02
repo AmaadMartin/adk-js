@@ -86,6 +86,10 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 - [BasePlanner](planners/planner/index.md) - Applying an agent's planner to the model request, and splitting the reply into a plan and an answer.
 
+### Plugins
+
+- [Plugin agent callbacks](plugins/agent_callbacks/index.md) - The agent lifecycle hooks a plugin gets, their precedence over an agent's own callbacks, and the agent error notification.
+
 ### Runner
 
 - [Resuming an invocation](runner/invocation_resume/index.md) - How the runner
