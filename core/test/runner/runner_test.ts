@@ -1627,6 +1627,26 @@ describe('Runner runConfig.customMetadata', () => {
     }
   });
 
+  it('stamps the metadata on a before-run plugin early exit', async () => {
+    const plugin = new MockPlugin();
+    plugin.enableBeforeRunCallback = true;
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new MockLlmAgent('test_agent'),
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+      plugins: [plugin],
+    });
+
+    const events = await run(runner, {customMetadata: {tenant: 'acme'}});
+
+    const earlyExit = events.find((event) => event.author === 'model');
+    expect(earlyExit?.content?.parts?.[0]?.text).toBe(
+      MockPlugin.BEFORE_RUN_CALLBACK_MSG,
+    );
+    expect(earlyExit?.customMetadata).toEqual({tenant: 'acme'});
+  });
+
   it('lets the runAsync customMetadata param win on the user event', async () => {
     const runner = createRunnerFor(new MockLlmAgent('test_agent'));
 

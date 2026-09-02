@@ -7,6 +7,7 @@
 import {
   AsyncQueue,
   BaseLlm,
+  BasePlugin,
   BaseLlmConnection,
   BaseTool,
   Event,
@@ -1114,6 +1115,19 @@ describe('Runner.runLive', () => {
   });
 });
 
+/** Ends the run before the agent starts, so the early-exit path is exercised. */
+class EarlyExitPlugin extends BasePlugin {
+  static readonly EARLY_EXIT_MSG = 'Early exit from EarlyExitPlugin';
+
+  constructor() {
+    super('early_exit_plugin');
+  }
+
+  override async beforeRunCallback(): Promise<Content> {
+    return {role: 'model', parts: [{text: EarlyExitPlugin.EARLY_EXIT_MSG}]};
+  }
+}
+
 describe('Runner.runLive with run-level RunConfig fields', () => {
   let sessionService: InMemorySessionService;
   let artifactService: InMemoryArtifactService;
@@ -1157,6 +1171,36 @@ describe('Runner.runLive with run-level RunConfig fields', () => {
     for (const event of events) {
       expect(event.customMetadata).toEqual({tenant: 'acme'});
     }
+  });
+
+  it('stamps customMetadata on a before-run plugin early exit', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      plugins: [new EarlyExitPlugin()],
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    const events: Event[] = [];
+    for await (const event of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {customMetadata: {tenant: 'acme'}},
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content?.parts?.[0]?.text).toBe(
+      EarlyExitPlugin.EARLY_EXIT_MSG,
+    );
+    expect(events[0].customMetadata).toEqual({tenant: 'acme'});
   });
 
   it('forwards getSessionConfig to the session lookup', async () => {
