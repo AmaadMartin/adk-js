@@ -930,6 +930,8 @@ describe('DatabaseSessionService construction', () => {
   }
 
   it('rejects an absent source', () => {
+    // The cast reaches the runtime path a plain JavaScript caller takes; the
+    // TypeScript signature already forbids it.
     expect(
       () => new DatabaseSessionService(undefined as unknown as string),
     ).toThrow(EXACTLY_ONE_SOURCE);
