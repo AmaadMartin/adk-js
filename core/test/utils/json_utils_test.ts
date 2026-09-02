@@ -92,13 +92,13 @@ describe('toJsonSerializable', () => {
     expect(toJsonSerializable(selfReferential)).toBe('[Circular]');
   });
 
-  it('converts array entries and reports their indexed paths', () => {
-    const paths: string[] = [];
-    const result = toJsonSerializable({items: [1, () => 2]}, (path) =>
-      paths.push(path),
-    );
+  it('converts array entries and replaces an unserializable one', () => {
+    let replacements = 0;
+    const result = toJsonSerializable({items: [1, () => 2]}, () => {
+      replacements++;
+    });
     expect(result).toEqual({items: [1, expect.stringContaining('Function')]});
-    expect(paths).toEqual(['items.1']);
+    expect(replacements).toBe(1);
   });
 
   it('omits an undefined property, matching JSON.stringify', () => {
@@ -114,28 +114,30 @@ describe('toJsonSerializable', () => {
     expect(() => JSON.stringify(toJsonSerializable(cycle))).not.toThrow();
   });
 
-  it('reports the dotted path of every replaced value', () => {
-    const paths: string[] = [];
-    toJsonSerializable({cb: () => 1, nested: {cb: () => 2, ok: 3}}, (path) =>
-      paths.push(path),
-    );
-    expect(paths).toEqual(['cb', 'nested.cb']);
+  it('reports once for every replaced value, however deeply nested', () => {
+    let replacements = 0;
+    toJsonSerializable({cb: () => 1, nested: {cb: () => 2, ok: 3}}, () => {
+      replacements++;
+    });
+    expect(replacements).toBe(2);
   });
 
-  it('reports an empty path for a replaced top-level value', () => {
-    const paths: string[] = [];
+  it('reports a replaced top-level value', () => {
+    let replacements = 0;
     toJsonSerializable(
       () => 1,
-      (path) => paths.push(path),
+      () => {
+        replacements++;
+      },
     );
-    expect(paths).toEqual(['']);
+    expect(replacements).toBe(1);
   });
 
   it('does not report anything for a fully serializable value', () => {
-    const paths: string[] = [];
-    toJsonSerializable({a: 1, b: {c: [true, null]}}, (path) =>
-      paths.push(path),
-    );
-    expect(paths).toEqual([]);
+    let replacements = 0;
+    toJsonSerializable({a: 1, b: {c: [true, null]}}, () => {
+      replacements++;
+    });
+    expect(replacements).toBe(0);
   });
 });

@@ -88,8 +88,9 @@ export interface EventActions {
    * The route key(s) emitted by a routing node, used by the graph to select the
    * matching outgoing edge(s). Mirrors Python `EventActions.route`.
    *
-   * The workflow engine reads {@link Event.route}; {@link createEvent} keeps
-   * the two in sync so a route set by either side survives the wire.
+   * This is the copy that crosses the wire. The workflow engine reads
+   * {@link Event.route}, which `transformToCamelCaseEvent` fills from this
+   * field when it rehydrates an event.
    */
   route?: Route;
 
@@ -248,52 +249,48 @@ export function mergeEventActions(
 }
 
 /**
- * Returns actions whose `stateDelta` and `agentState` are safe to hand to
- * `JSON.stringify`.
+ * Returns a copy of the actions whose `stateDelta` and `agentState` are safe
+ * to hand to `JSON.stringify`.
  *
  * A tool can write anything into session state, including a callback or a
  * bigint. Persisting such an event used to throw or drop the offending key
  * along with its siblings. Mirrors the reference's `_serialize_state_delta`
- * and `_serialize_agent_state` wrap serializers: the value is sanitized, a
- * warning names the keys that changed, and the event still persists.
+ * and `_serialize_agent_state` wrap serializers: the value is sanitized, one
+ * warning per field is logged, and the event still persists.
  *
  * @param actions The actions about to be persisted.
- * @returns `actions` itself when nothing needs sanitizing, otherwise a shallow
- *   copy holding the sanitized fields. Never throws.
+ * @returns A shallow copy holding the sanitized fields. Never throws.
  */
 export function serializeEventActions(actions: EventActions): EventActions {
-  const stateDelta = sanitizeState(actions.stateDelta, 'stateDelta');
-  const agentState =
-    actions.agentState === undefined
-      ? undefined
-      : sanitizeState(actions.agentState, 'agentState');
-
-  if (stateDelta === actions.stateDelta && agentState === actions.agentState) {
-    return actions;
-  }
-  return {...actions, stateDelta, agentState};
+  return {
+    ...actions,
+    stateDelta: sanitizeState(actions.stateDelta, 'stateDelta'),
+    agentState:
+      actions.agentState === undefined
+        ? undefined
+        : sanitizeState(actions.agentState, 'agentState'),
+  };
 }
 
 function sanitizeState(
   state: Record<string, unknown>,
   field: string,
 ): Record<string, unknown> {
-  const replacedKeys: string[] = [];
+  let replaced = false;
   const sanitized: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(state)) {
-    sanitized[key] = toJsonSerializable(value, (path) =>
-      replacedKeys.push(path === '' ? key : `${key}.${path}`),
-    );
+    sanitized[key] = toJsonSerializable(value, () => {
+      replaced = true;
+    });
   }
 
-  if (replacedKeys.length === 0) {
-    return state;
+  if (replaced) {
+    logger.warn(
+      `Failed to serialize \`${field}\`; some values are not JSON-serializable ` +
+        `(e.g. functions) and will be replaced with a string representation ` +
+        `in the persisted event.`,
+    );
   }
-  logger.warn(
-    `Failed to serialize \`${field}\`; some values are not JSON-serializable ` +
-      `(e.g. functions) and will be replaced with a string representation in ` +
-      `the persisted event. Replaced: ${replacedKeys.join(', ')}.`,
-  );
   return sanitized;
 }

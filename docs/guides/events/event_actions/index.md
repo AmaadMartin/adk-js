@@ -63,25 +63,24 @@ written: `invoice_id` stays `invoice_id`, and `invoiceId` stays `invoiceId`.
 ## Routes live in two places
 
 The workflow engine reads `event.route`. `google/adk-python` stores the route
-on `actions.route`, and only that copy crosses the wire. `createEvent` sets
-both from whichever one you supply, so a route survives a round trip through
-either side:
+on `actions.route`, and only that copy crosses the wire. `createEvent` copies
+the route you supply onto `actions.route`, so a route you emit reaches the
+other SDK:
 
 ```ts
 import {createEvent} from '@google/adk';
 
 const emitted = createEvent({author: 'router', route: 'approved'});
 // emitted.actions.route is 'approved'
-
-const rehydrated = createEvent({
-  author: 'router',
-  actions: {route: 'approved'},
-});
-// rehydrated.route is 'approved'
 ```
 
-The top-level `route` wins when you supply both. A route key is a string, a
-number or a boolean, and an array of keys fires every matching branch.
+`DatabaseSessionService` fills the other direction: when it reads a stored
+event whose route sits only on `actions.route`, it copies the route onto
+`event.route`. A route written by a Python runner therefore reaches the engine
+unchanged.
+
+A route key is a string, a number or a boolean, and an array of keys fires
+every matching branch.
 
 ## Session state that JSON cannot represent
 
@@ -106,8 +105,7 @@ const safe = serializeEventActions(actions);
 ```
 
 It applies to `stateDelta` and `agentState`, the two fields that hold values
-your own code chose. It never throws, it never changes its argument, and it
-returns that argument unchanged when nothing needs replacing.
+your own code chose. It never throws and it never changes its argument.
 
 | Value                      | Stand-in                                         |
 | -------------------------- | ------------------------------------------------ |
@@ -117,12 +115,12 @@ returns that argument unchanged when nothing needs replacing.
 | a reference back to itself | `[Circular]`                                     |
 
 A `Date` keeps its ISO string, because a `Date` serializes already. Each field
-that needed a replacement writes one warning naming the keys that changed:
+that needed a replacement writes one warning:
 
 ```
 Failed to serialize `stateDelta`; some values are not JSON-serializable
 (e.g. functions) and will be replaced with a string representation in the
-persisted event. Replaced: onDone.
+persisted event.
 ```
 
 `DatabaseSessionService` calls this before it writes an event, so application

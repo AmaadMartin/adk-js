@@ -170,7 +170,13 @@ export interface CreateEventParams extends Omit<Partial<Event>, 'actions'> {
  */
 export function createEvent(params: CreateEventParams = {}): Event {
   const actions = createEventActions(params.actions);
-  const event: Event = {
+  // `actions.route` is the copy that crosses the wire. Mirrors the `route`
+  // convenience kwarg in `google/adk-python` `event.py`.
+  if (params.route !== undefined) {
+    actions.route = params.route;
+  }
+
+  return {
     ...params,
     [EVENT_SIGNATURE_SYMBOL]: true,
     id: params.id || createNewEventId(),
@@ -181,16 +187,6 @@ export function createEvent(params: CreateEventParams = {}): Event {
     branch: params.branch,
     timestamp: params.timestamp || Date.now(),
   };
-
-  // The workflow engine reads `event.route`, while `google/adk-python` stores
-  // the route on `actions.route` and only that copy crosses the wire. Keep
-  // both set so a route survives a round trip through either side.
-  const route = params.route ?? actions.route;
-  if (route !== undefined) {
-    event.route = route;
-    actions.route = route;
-  }
-  return event;
 }
 
 /**
@@ -433,7 +429,14 @@ const PRESERVE_KEYS_SNAKE_CASE = [
 export function transformToCamelCaseEvent(
   event: Record<string, unknown>,
 ): Event {
-  return toCamelCase(event, PRESERVE_KEYS_SNAKE_CASE) as Event;
+  const restored = toCamelCase(event, PRESERVE_KEYS_SNAKE_CASE) as Event;
+  // `google/adk-python` keeps the route on `actions.route`, the only copy that
+  // crosses the wire, while the workflow engine reads `event.route`. Promote it
+  // here so a session written by a Python runner routes the same way.
+  if (restored.route === undefined && restored.actions?.route !== undefined) {
+    restored.route = restored.actions.route;
+  }
+  return restored;
 }
 
 /**

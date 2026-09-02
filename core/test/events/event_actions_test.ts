@@ -396,12 +396,15 @@ describe('serializeEventActions', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns the same object when everything is serializable', () => {
+  it('copies serializable fields through unchanged and stays quiet', () => {
     const actions = createEventActions({
       stateDelta: {a: 1, b: [1, 2]},
       agentState: {step: 'two'},
     });
-    expect(serializeEventActions(actions)).toBe(actions);
+    const serialized = serializeEventActions(actions);
+    expect(serialized).not.toBe(actions);
+    expect(serialized.stateDelta).toEqual({a: 1, b: [1, 2]});
+    expect(serialized.agentState).toEqual({step: 'two'});
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
@@ -426,18 +429,20 @@ describe('serializeEventActions', () => {
     );
   });
 
-  it('warns once naming stateDelta and the replaced key', () => {
+  it('warns once naming stateDelta', () => {
     serializeEventActions(createEventActions({stateDelta: {cb: () => 1}}));
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy.mock.calls[0][0]).toContain('`stateDelta`');
-    expect(warnSpy.mock.calls[0][0]).toContain('Replaced: cb.');
   });
 
-  it('reports a nested replaced key with its dotted path', () => {
-    serializeEventActions(
+  it('warns once for a replacement nested below the top level', () => {
+    const serialized = serializeEventActions(
       createEventActions({stateDelta: {outer: {cb: () => 1}}}),
     );
-    expect(warnSpy.mock.calls[0][0]).toContain('Replaced: outer.cb.');
+    expect(serialized.stateDelta['outer']).toEqual({
+      cb: expect.stringContaining('Function'),
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
   });
 
   it('replaces a function in agentState and keeps its siblings', () => {

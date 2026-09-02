@@ -420,34 +420,31 @@ describe('Event Utils', () => {
     });
   });
 
-  describe('createEvent route sync', () => {
-    it('mirrors a top-level route onto actions.route', () => {
+  describe('createEvent route', () => {
+    it('copies a top-level route onto actions.route', () => {
       const event = createEvent({route: 'next'});
       expect(event.route).toBe('next');
       expect(event.actions.route).toBe('next');
     });
 
-    it('mirrors actions.route onto the top-level route', () => {
-      const event = createEvent({actions: {route: 'next'}});
-      expect(event.route).toBe('next');
-      expect(event.actions.route).toBe('next');
-    });
-
-    it('prefers the top-level route when both are supplied', () => {
+    it('overrides actions.route with the top-level route', () => {
       const event = createEvent({route: 'top', actions: {route: 'nested'}});
-      expect(event.route).toBe('top');
       expect(event.actions.route).toBe('top');
     });
 
-    it('mirrors a falsy route key rather than treating it as unset', () => {
+    it('copies a falsy route key rather than treating it as unset', () => {
       const event = createEvent({route: false});
-      expect(event.route).toBe(false);
       expect(event.actions.route).toBe(false);
     });
 
-    it('mirrors a multi-route array', () => {
+    it('copies a multi-route array', () => {
       const event = createEvent({route: ['a', 'b']});
       expect(event.actions.route).toEqual(['a', 'b']);
+    });
+
+    it('keeps actions.route when no top-level route is supplied', () => {
+      const event = createEvent({actions: {route: 'nested'}});
+      expect(event.actions.route).toBe('nested');
     });
 
     it('leaves both undefined when neither is supplied', () => {
@@ -487,13 +484,44 @@ describe('Event Utils', () => {
       });
     });
 
-    it('restores a route written by a Python runner onto the top-level field', () => {
+    it('promotes a route written by a Python runner onto the top-level field', () => {
       const restored = transformToCamelCaseEvent({
         id: '123',
         invocation_id: 'inv1',
         actions: {state_delta: {}, route: 'approved'},
       });
-      expect(createEvent(restored).route).toBe('approved');
+      expect(restored.route).toBe('approved');
+      expect(restored.actions.route).toBe('approved');
+    });
+
+    it('promotes a falsy route key rather than treating it as unset', () => {
+      const restored = transformToCamelCaseEvent({
+        id: '123',
+        actions: {state_delta: {}, route: false},
+      });
+      expect(restored.route).toBe(false);
+    });
+
+    it('keeps an existing top-level route when actions carries another', () => {
+      const restored = transformToCamelCaseEvent({
+        id: '123',
+        route: 'top',
+        actions: {state_delta: {}, route: 'nested'},
+      });
+      expect(restored.route).toBe('top');
+    });
+
+    it('leaves the top-level route unset when actions carries none', () => {
+      const restored = transformToCamelCaseEvent({
+        id: '123',
+        actions: {state_delta: {}},
+      });
+      expect(restored.route).toBeUndefined();
+    });
+
+    it('leaves the top-level route unset for a payload with no actions', () => {
+      const restored = transformToCamelCaseEvent({id: '123'});
+      expect(restored.route).toBeUndefined();
     });
   });
 
