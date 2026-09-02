@@ -155,6 +155,47 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export type {
+  ConversationScenario,
+  ConversationScenarios,
+} from './evaluation/conversation_scenarios.js';
+export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
+export type {
+  EvalCase,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+  SessionInput,
+} from './evaluation/eval_case.js';
+export {
+  BASE_CRITERION_TYPE,
+  isBaseCriterion,
+} from './evaluation/eval_metrics.js';
+export type {BaseCriterion, CriterionType} from './evaluation/eval_metrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export {
+  EvalStatus,
+  Evaluator,
+  emptyEvaluationResult,
+  getEvalStatus,
+  getTextFromContent,
+  validateInvocationLengths,
+} from './evaluation/evaluator.js';
+export type {
+  EvaluationResult,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
