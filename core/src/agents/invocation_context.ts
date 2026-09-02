@@ -276,7 +276,12 @@ export class InvocationContext {
    * Credentials resolved during this invocation, keyed by the credential key
    * of the auth config that produced them. Held here rather than in session
    * state so a credential resolved for one invocation cannot leak into
-   * another.
+   * another. Read through `ReadonlyContext.getCredential`.
+   *
+   * Created with `Object.create(null)`, as `InMemoryCredentialService` creates
+   * its buckets: the credential key is attacker-influenced, and on a `{}`
+   * literal a key of `__proto__` reparents the map instead of creating an own
+   * property.
    */
   readonly credentialByKey: Record<string, AuthCredential>;
 
@@ -302,7 +307,7 @@ export class InvocationContext {
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
-    this.credentialByKey = params.credentialByKey ?? {};
+    this.credentialByKey = params.credentialByKey ?? Object.create(null);
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop

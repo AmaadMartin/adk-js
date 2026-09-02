@@ -147,6 +147,22 @@ describe('ReadonlyContext', () => {
     expect(context.getCredential('missing-key')).toBeUndefined();
   });
 
+  it('reports an inherited object key as an unresolved credential', () => {
+    const context = new ReadonlyContext(makeContext());
+
+    expect(context.getCredential('toString')).toBeUndefined();
+    expect(context.getCredential('constructor')).toBeUndefined();
+    expect(context.getCredential('__proto__')).toBeUndefined();
+  });
+
+  it('reports an inherited object key as unresolved when the caller supplied the map', () => {
+    const context = new ReadonlyContext(makeContext({credentialByKey: {}}));
+
+    expect(context.getCredential('toString')).toBeUndefined();
+    expect(context.getCredential('constructor')).toBeUndefined();
+    expect(context.getCredential('__proto__')).toBeUndefined();
+  });
+
   it('sees credentials resolved after the readonly context was created', () => {
     const invocationContext = makeContext();
     const context = new ReadonlyContext(invocationContext);

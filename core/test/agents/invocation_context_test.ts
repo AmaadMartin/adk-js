@@ -187,6 +187,17 @@ describe('InvocationContext resolved credentials', () => {
     expect(context.credentialByKey).toEqual({});
   });
 
+  it('gives a brand-new invocation a credential map with no prototype', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    expect(Object.getPrototypeOf(context.credentialByKey)).toBeNull();
+  });
+
   it('shares the credential map with child contexts', () => {
     const credential: AuthCredential = {
       authType: AuthCredentialTypes.API_KEY,
@@ -208,6 +219,24 @@ describe('InvocationContext resolved credentials', () => {
     root.credentialByKey['k'] = credential;
 
     expect(child.credentialByKey['k']).toBe(credential);
+  });
+
+  it('shares the credential map with a cloned context', () => {
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'test-api-key',
+    };
+    const root = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    const clone = root.clone({agent: new LoopAgent({name: 'sub'})});
+    root.credentialByKey['k'] = credential;
+
+    expect(clone.credentialByKey['k']).toBe(credential);
   });
 
   it('keeps a credential passed in at construction', () => {
