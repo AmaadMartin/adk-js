@@ -8,11 +8,7 @@ import {logger} from '../../utils/logger.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {OAuth2Auth} from '../auth_credential.js';
 
-import {
-  AuthScheme,
-  AuthSchemeType,
-  OpenIdConnectWithConfig,
-} from '../auth_schemes.js';
+import {AuthScheme, AuthSchemeType} from '../auth_schemes.js';
 import {validateDiscoveryUrl} from './oauth2_discovery.js';
 
 /**
@@ -21,9 +17,10 @@ import {validateDiscoveryUrl} from './oauth2_discovery.js';
 export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
   if (
     authScheme.type === AuthSchemeType.OPEN_ID_CONNECT &&
-    (authScheme as OpenIdConnectWithConfig).tokenEndpoint
+    'tokenEndpoint' in authScheme &&
+    authScheme.tokenEndpoint
   ) {
-    return (authScheme as OpenIdConnectWithConfig).tokenEndpoint;
+    return authScheme.tokenEndpoint;
   }
 
   if (

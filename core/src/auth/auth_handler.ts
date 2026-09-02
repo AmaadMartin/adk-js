@@ -30,7 +30,10 @@ export class AuthHandler {
     const credentialKey = 'temp:' + this.authConfig.credentialKey;
 
     const authSchemeType = this.authConfig.authScheme.type;
-    if (!['oauth2', 'openIdConnect'].includes(authSchemeType)) {
+    if (
+      authSchemeType !== AuthSchemeType.OAUTH2 &&
+      authSchemeType !== AuthSchemeType.OPEN_ID_CONNECT
+    ) {
       state.set(credentialKey, this.authConfig.exchangedAuthCredential);
 
       return;
@@ -49,7 +52,10 @@ export class AuthHandler {
   generateAuthRequest(): AuthConfig {
     const authSchemeType = this.authConfig.authScheme.type;
 
-    if (!['oauth2', 'openIdConnect'].includes(authSchemeType)) {
+    if (
+      authSchemeType !== AuthSchemeType.OAUTH2 &&
+      authSchemeType !== AuthSchemeType.OPEN_ID_CONNECT
+    ) {
       return this.authConfig;
     }
 
