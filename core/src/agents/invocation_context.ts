@@ -48,7 +48,11 @@ export interface RealtimeCacheEntry {
   /** The audio data chunk. */
   data: Blob;
 
-  /** Epoch seconds at which the audio chunk was received. */
+  /**
+   * Epoch milliseconds at which the audio chunk was received. The flushed
+   * event carries this value as its `timestamp`, and ADK measures every
+   * `Event.timestamp` in milliseconds.
+   */
   timestamp: number;
 }
 

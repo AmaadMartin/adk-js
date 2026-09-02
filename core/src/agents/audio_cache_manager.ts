@@ -14,9 +14,6 @@ import {
   requireAgent,
 } from './invocation_context.js';
 
-/** Number of milliseconds in a second. */
-const MILLISECONDS_PER_SECOND = 1000;
-
 /** MIME type used when a cached audio chunk does not declare one. */
 const DEFAULT_AUDIO_MIME_TYPE = 'audio/pcm';
 
@@ -63,7 +60,7 @@ export class AudioCacheManager {
     cache.push({
       role: cacheType === 'input' ? 'user' : 'model',
       data: audioBlob,
-      timestamp: Date.now() / MILLISECONDS_PER_SECOND,
+      timestamp: Date.now(),
     });
 
     logger.debug(
@@ -135,9 +132,7 @@ export class AudioCacheManager {
 
     const mimeType = cache[0].data.mimeType ?? DEFAULT_AUDIO_MIME_TYPE;
     // The filename records when the recording started, not when it was saved.
-    const timestampMs = Math.floor(
-      cache[0].timestamp * MILLISECONDS_PER_SECOND,
-    );
+    const timestampMs = Math.floor(cache[0].timestamp);
     const filename = `adk_live_audio_storage_${cacheType}_${timestampMs}.${mimeType.split('/').pop()}`;
 
     let revisionId: number;

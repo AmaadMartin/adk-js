@@ -7,6 +7,7 @@
 import {
   AudioCacheManager,
   InMemoryArtifactService,
+  InMemorySessionService,
   InvocationContext,
   LlmAgent,
   PluginManager,
@@ -160,7 +161,7 @@ describe('AudioCacheManager.flushCaches', () => {
       'output',
     );
     const timestampMs = Math.floor(
-      invocationContext.outputRealtimeCache![0].timestamp * 1000,
+      invocationContext.outputRealtimeCache![0].timestamp,
     );
 
     const events = await manager.flushCaches(invocationContext);
@@ -217,7 +218,7 @@ describe('AudioCacheManager.flushCaches', () => {
     const events = await new AudioCacheManager().flushCaches(invocationContext);
 
     expect(events).toHaveLength(1);
-    const filename = 'adk_live_audio_storage_output_audio_1000.pcm';
+    const filename = 'adk_live_audio_storage_output_audio_1.pcm';
     const saved = await artifactService.loadArtifact({filename});
     expect(saved?.inlineData?.data).toBe('');
   });
@@ -226,6 +227,36 @@ describe('AudioCacheManager.flushCaches', () => {
     const invocationContext = makeContext(makeArtifactService());
 
     expect(await manager.flushCaches(invocationContext)).toEqual([]);
+  });
+
+  it('timestamps the flushed event in epoch milliseconds', async () => {
+    const invocationContext = makeContext(makeArtifactService());
+    const before = Date.now();
+    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'output');
+
+    const events = await manager.flushCaches(invocationContext);
+
+    // An event timestamped in seconds lands in 1970 and drags
+    // `session.lastUpdateTime` back with it when the runner persists it.
+    expect(events[0].timestamp).toBeGreaterThanOrEqual(before);
+    expect(events[0].timestamp).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('keeps the session current when the flushed event is appended', async () => {
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+    const invocationContext = makeContext(makeArtifactService());
+    manager.cacheAudio(invocationContext, {data: FIRST_CHUNK}, 'output');
+    const events = await manager.flushCaches(invocationContext);
+    const createdAt = session.lastUpdateTime;
+
+    await sessionService.appendEvent({session, event: events[0]});
+
+    expect(session.lastUpdateTime).toBeGreaterThanOrEqual(createdAt);
   });
 
   it('keeps the audio and logs when the artifact save fails', async () => {
