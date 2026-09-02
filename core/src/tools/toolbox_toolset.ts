@@ -13,12 +13,6 @@ import {BaseTool} from './base_tool.js';
 import {BaseToolset, ToolPredicate} from './base_toolset.js';
 import {FunctionTool} from './function_tool.js';
 
-/** The optional peer dependency that backs {@link ToolboxToolset}. */
-const TOOLBOX_SDK = {
-  packageName: '@toolbox-sdk/core',
-  feature: 'ToolboxToolset',
-};
-
 /** Options for {@link ToolboxToolset}. */
 export interface ToolboxToolsetOptions {
   /** Name of a toolset defined on the server; all of its tools are loaded. */
@@ -139,7 +133,7 @@ export class ToolboxToolset extends BaseToolset {
   /** Resolves the client, creating it once per toolset. */
   private getClient(): Promise<ToolboxClient> {
     this.clientPromise ??= loadOptionalPeer(
-      TOOLBOX_SDK,
+      {packageName: '@toolbox-sdk/core', feature: 'ToolboxToolset'},
       () => import('@toolbox-sdk/core'),
     ).then(({ToolboxClient}) => new ToolboxClient(this.serverUrl));
     return this.clientPromise;
