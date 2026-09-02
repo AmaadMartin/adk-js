@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthScheme, OAuth2Auth} from '@google/adk';
+import {
+  AuthScheme,
+  CustomAuthScheme,
+  ExtendedOAuth2,
+  OAuth2Auth,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AuthorizationCodeParams,
@@ -67,6 +72,32 @@ describe('oauth2_utils', () => {
         flows: {},
       } as AuthScheme;
       expect(getTokenEndpoint(scheme)).toBeUndefined();
+    });
+
+    it('returns undefined for a CustomAuthScheme that carries no flows', () => {
+      const scheme: AuthScheme = {type: 'acmeVault'};
+      expect(getTokenEndpoint(scheme)).toBeUndefined();
+    });
+
+    it('returns undefined for a CustomAuthScheme whose type is oauth2', () => {
+      const custom: CustomAuthScheme = {type: 'oauth2'};
+      const scheme: AuthScheme = custom;
+      expect(getTokenEndpoint(scheme)).toBeUndefined();
+    });
+
+    it('returns tokenUrl from an ExtendedOAuth2 that also carries issuerUrl', () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://issuer.example.com',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://issuer.example.com/auth',
+            tokenUrl: 'https://issuer.example.com/token',
+            scopes: {},
+          },
+        },
+      };
+      expect(getTokenEndpoint(scheme)).toBe('https://issuer.example.com/token');
     });
   });
 

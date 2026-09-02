@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthConfig, AuthCredentialTypes, AuthHandler, State} from '@google/adk';
+import {
+  AuthConfig,
+  AuthCredentialTypes,
+  AuthHandler,
+  CustomAuthScheme,
+  State,
+} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
 vi.mock('../../src/auth/oauth2/oauth2_credential_exchanger.js', () => ({
@@ -332,6 +338,23 @@ describe('AuthHandler', () => {
             },
           },
         },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'id'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      expect(() => handler.generateAuthUri()).toThrow(
+        'Authorization endpoint not configured in auth scheme.',
+      );
+    });
+
+    it('throws for a CustomAuthScheme, which carries no endpoint', () => {
+      const custom: CustomAuthScheme = {type: 'acmeVault'};
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: custom,
         rawAuthCredential: {
           authType: AuthCredentialTypes.OAUTH2,
           oauth2: {clientId: 'id'},

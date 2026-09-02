@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OAuth2DiscoveryManager} from '@google/adk';
+import {ExtendedOAuth2, OAuth2DiscoveryManager} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 describe('OAuth2DiscoveryManager', () => {
@@ -122,6 +122,42 @@ describe('OAuth2DiscoveryManager', () => {
       const result = await manager.discoverAuthServerMetadata(issuerUrl);
 
       expect(result).toEqual(mockMetadata);
+    });
+
+    it('discovers metadata from the issuerUrl of an ExtendedOAuth2 scheme', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://issuer.example.com',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://issuer.example.com/auth',
+            tokenUrl: 'https://issuer.example.com/token',
+            scopes: {},
+          },
+        },
+      };
+      const mockMetadata = {
+        issuer: 'https://issuer.example.com',
+        authorization_endpoint: 'https://issuer.example.com/auth',
+        token_endpoint: 'https://issuer.example.com/token',
+      };
+
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => mockMetadata,
+      } as Response);
+
+      if (scheme.issuerUrl === undefined) {
+        expect.fail('issuerUrl must be set for this test');
+      }
+      const result = await manager.discoverAuthServerMetadata(scheme.issuerUrl);
+
+      expect(result).toEqual(mockMetadata);
+      expect(fetch).toHaveBeenNthCalledWith(
+        1,
+        'https://issuer.example.com/.well-known/oauth-authorization-server',
+        expect.anything(),
+      );
     });
 
     it('logs warning and returns undefined if issuer does not match', async () => {
