@@ -39,6 +39,12 @@ const POWERSHELL_BASE_ARGS = [
 const CMD_BASE_ARGS = ['/D', '/c'] as const;
 
 /**
+ * The deadline this executor applies when it carries no `timeoutSeconds`. An
+ * unbounded local run would pin a host process indefinitely.
+ */
+const DEFAULT_TIMEOUT_SECONDS = 30;
+
+/**
  * Whether `commandPath` names Windows PowerShell (`powershell`) or PowerShell
  * 7+ (`pwsh`). `path.win32` splits on both separators on every platform.
  */
@@ -138,14 +144,13 @@ function getExtensionForLanguage(
  * Use with caution and only for trusted code.
  */
 export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
-  private readonly timeoutSeconds: number;
   private readonly nodeCommandPath: string;
   private readonly pythonCommandPath: string;
   private readonly shellCommandPath: string;
 
   constructor(options: UnsafeLocalCodeExecutorOptions = {}) {
     super();
-    this.timeoutSeconds = options.timeoutSeconds ?? 30;
+    this.timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
     this.nodeCommandPath = options.commandPath ?? process.execPath;
     this.pythonCommandPath =
       options.pythonCommandPath ?? (IS_WINDOWS ? 'python' : 'python3');
@@ -225,6 +230,8 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         }
       }
 
+      const timeoutSeconds = this.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
+
       const executionResult = await new Promise<{
         stdout: string;
         stderr: string;
@@ -248,7 +255,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           child.kill('SIGKILL');
           child.stdout?.destroy();
           child.stderr?.destroy();
-        }, this.timeoutSeconds * 1000);
+        }, timeoutSeconds * 1000);
 
         if (child.stdout) {
           child.stdout.on('data', (data) => {
@@ -272,7 +279,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           // terminating signal the way POSIX does, so a killed child can close
           // with signal `null` there.
           if (timedOut || signal === 'SIGKILL' || signal === 'SIGTERM') {
-            stderr += `\nCode execution timed out after ${this.timeoutSeconds} seconds.`;
+            stderr += `\nCode execution timed out after ${timeoutSeconds} seconds.`;
           } else if (exitCode !== 0 && exitCode !== null) {
             if (!stderr) {
               stderr = `Exit code ${exitCode}`;
