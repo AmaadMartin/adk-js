@@ -6,6 +6,10 @@
 
 import {isGemini2OrAbove, isGemini3xFlashLive} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {
+  isGemini35LiveTranslate,
+  isGemini3xLive,
+} from '../../src/utils/model_name.js';
 
 describe('isGemini2OrAbove', () => {
   describe('valid models', () => {
@@ -78,5 +82,46 @@ describe('isGemini3xFlashLive', () => {
     expect(isGemini3xFlashLive('gemini-3.0-flash')).toBe(false);
     expect(isGemini3xFlashLive(undefined)).toBe(false);
     expect(isGemini3xFlashLive('')).toBe(false);
+  });
+});
+
+describe('isGemini3xLive', () => {
+  it('should return true for Gemini 3.x Live models', () => {
+    expect(isGemini3xLive('gemini-3.1-flash-live-preview')).toBe(true);
+    expect(isGemini3xLive('gemini-3.0-pro-live')).toBe(true);
+    expect(
+      isGemini3xLive(
+        'projects/my-project/locations/us-central1/publishers/google/models/gemini-3.1-flash-live-preview',
+      ),
+    ).toBe(true);
+  });
+
+  it('should return false for Live Translate and non-live models', () => {
+    expect(isGemini3xLive('gemini-3.5-live-translate-preview')).toBe(false);
+    expect(
+      isGemini3xLive('gemini-2.5-flash-native-audio-preview-12-2025'),
+    ).toBe(false);
+    expect(isGemini3xLive('gemini-3.1-flash')).toBe(false);
+    expect(isGemini3xLive(undefined)).toBe(false);
+  });
+});
+
+describe('isGemini35LiveTranslate', () => {
+  it('should return true for Gemini 3.5 Live Translate models', () => {
+    expect(isGemini35LiveTranslate('gemini-3.5-live-translate-preview')).toBe(
+      true,
+    );
+    expect(
+      isGemini35LiveTranslate(
+        'projects/my-project/locations/us-central1/publishers/google/models/gemini-3.5-live-translate-preview',
+      ),
+    ).toBe(true);
+  });
+
+  it('should return false for other models', () => {
+    expect(isGemini35LiveTranslate('gemini-3.1-flash-live-preview')).toBe(
+      false,
+    );
+    expect(isGemini35LiveTranslate(undefined)).toBe(false);
   });
 });
