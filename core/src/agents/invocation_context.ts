@@ -7,6 +7,7 @@
 import {Content} from '@google/genai';
 
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import {AuthCredential} from '../auth/auth_credential.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {Event} from '../events/event.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -64,6 +65,16 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  /**
+   * Free-form metadata accumulated by tools and services over one invocation.
+   * A clone reuses the same object, so a sub-agent's tool writes into the
+   * store its parent reads.
+   */
+  customMetadata?: Record<string, unknown>;
+  /**
+   * Credentials already resolved for this invocation, keyed by credential key.
+   */
+  credentialByKey?: Record<string, AuthCredential>;
 }
 
 /**
@@ -268,6 +279,30 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * Free-form metadata accumulated by tools and services during this
+   * invocation. Mirrors Python `InvocationContext._custom_metadata`. Starts
+   * empty and is written to as the invocation runs. Read through
+   * {@link ReadonlyContext.customMetadata}.
+   *
+   * The object is shared with every copy of this context: {@link clone} and
+   * `BaseAgent.createInvocationContext` carry it over by reference, so a
+   * sub-agent writes into the same record the parent reads. `adk-js` has no
+   * `RunConfig.customMetadata`, so unlike adk-python nothing seeds it.
+   */
+  readonly customMetadata: Record<string, unknown>;
+
+  /**
+   * Credentials resolved during this invocation, keyed by the credential key
+   * of the auth config that produced them. Held here rather than in session
+   * state so a credential resolved for one invocation cannot leak into
+   * another. Read through `ReadonlyContext.getCredential`.
+   *
+   * Created with `Object.create(null)`, as `InMemoryCredentialService` creates
+   * its buckets: the credential key is attacker-influenced.
+   */
+  readonly credentialByKey: Record<string, AuthCredential>;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -289,6 +324,8 @@ export class InvocationContext {
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
+    this.customMetadata = params.customMetadata ?? {};
+    this.credentialByKey = params.credentialByKey ?? Object.create(null);
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop
