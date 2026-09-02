@@ -60,7 +60,6 @@ import {
   generateInferencesForSingleUserInvocation,
   generateInferencesForSingleUserInvocationLive,
   getAppDetailsByInvocationId,
-  LiveEventQueue,
   processQueryWithSession,
   sendAudioToLive,
   toInstructionText,
@@ -1479,18 +1478,6 @@ describe('sendAudioToLive', () => {
   });
 });
 
-describe('LiveEventQueue', () => {
-  it('returns what was pushed and empties itself', () => {
-    const queue = new LiveEventQueue();
-    const event = buildEvent('agent', [{text: 'a'}], 'inv1');
-
-    queue.push(event);
-
-    expect(queue.drain()).toEqual([event]);
-    expect(queue.drain()).toEqual([]);
-  });
-});
-
 describe('generateInferencesForSingleUserInvocationLive', () => {
   let recordingLogger: RecordingLogger;
   let previousLogger: Logger;
@@ -1507,7 +1494,7 @@ describe('generateInferencesForSingleUserInvocationLive', () => {
 
   it('yields the user event first and sends a text turn unchanged', async () => {
     const liveRequestQueue = new LiveRequestQueue();
-    const eventQueue = new LiveEventQueue();
+    const eventQueue: Event[] = [];
     const userMessage: Content = {role: 'user', parts: [{text: 'User query'}]};
     const agentEvent = buildEvent('agent', [{text: 'Agent response'}], 'inv1');
 
@@ -1535,7 +1522,7 @@ describe('generateInferencesForSingleUserInvocationLive', () => {
 
   it('streams a message carrying audio while keeping its full content', async () => {
     const liveRequestQueue = new LiveRequestQueue();
-    const eventQueue = new LiveEventQueue();
+    const eventQueue: Event[] = [];
     const userMessage: Content = {
       role: 'user',
       parts: [
@@ -1572,7 +1559,7 @@ describe('generateInferencesForSingleUserInvocationLive', () => {
 
     const turn = generateInferencesForSingleUserInvocationLive({
       liveRequestQueue,
-      eventQueue: new LiveEventQueue(),
+      eventQueue: [],
       userMessage,
       currentInvocationId: 'inv1',
       turnComplete: Promise.resolve(),
@@ -1588,7 +1575,7 @@ describe('generateInferencesForSingleUserInvocationLive', () => {
 
   it('does not yield an event queued for another invocation', async () => {
     const liveRequestQueue = new LiveRequestQueue();
-    const eventQueue = new LiveEventQueue();
+    const eventQueue: Event[] = [];
     const mine = buildEvent('agent', [{text: 'mine'}], 'inv1');
     const theirs = buildEvent('agent', [{text: 'theirs'}], 'inv2');
 
@@ -1614,7 +1601,7 @@ describe('generateInferencesForSingleUserInvocationLive', () => {
 
   it('yields transcription events as they arrived', async () => {
     const liveRequestQueue = new LiveRequestQueue();
-    const eventQueue = new LiveEventQueue();
+    const eventQueue: Event[] = [];
     const partial = createEvent({
       author: 'agent',
       invocationId: 'inv1',
@@ -1651,7 +1638,7 @@ describe('generateInferencesForSingleUserInvocationLive', () => {
     const liveRequestQueue = new LiveRequestQueue();
     const turn = generateInferencesForSingleUserInvocationLive({
       liveRequestQueue,
-      eventQueue: new LiveEventQueue(),
+      eventQueue: [],
       userMessage: {role: 'user', parts: [{text: 'hi'}]},
       currentInvocationId: 'inv1',
       turnComplete: new Promise<void>(() => {}),
@@ -1668,7 +1655,7 @@ describe('generateInferencesForSingleUserInvocationLive', () => {
     const liveRequestQueue = new LiveRequestQueue();
     const turn = generateInferencesForSingleUserInvocationLive({
       liveRequestQueue,
-      eventQueue: new LiveEventQueue(),
+      eventQueue: [],
       userMessage: {role: 'user', parts: [{text: 'hi'}]},
       currentInvocationId: 'inv1',
       turnComplete: Promise.resolve(),

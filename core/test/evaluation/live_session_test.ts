@@ -7,7 +7,6 @@
 import {
   BaseAgent,
   BasePlugin,
-  BaseTool,
   Context,
   createEvent,
   Event,
@@ -21,9 +20,7 @@ import {
   LlmAgentConfig,
   LlmRequest,
   LlmResponse,
-  RunConfig,
   Runner,
-  RunnerConfig,
   SequentialAgent,
   Session,
   Workflow,
@@ -39,8 +36,6 @@ import {
   EvalLiveSession,
   isNormalLiveClosure,
   LIVE_RUN_CONFIG,
-  LiveEventQueue,
-  WORKFLOW_LIVE_UNSUPPORTED_ERROR,
 } from '../../src/evaluation/live_session.js';
 
 import {LongRunningFunctionTool} from '../../src/tools/long_running_tool.js';
@@ -78,13 +73,6 @@ class ScriptedLiveAgent extends LlmAgent {
   }
 }
 
-/** An agent whose tool resolution fails, so recording its request throws. */
-class UnlistableToolsAgent extends LlmAgent {
-  override async canonicalTools(): Promise<BaseTool[]> {
-    throw new Error(`cannot list the tools of ${this.name}`);
-  }
-}
-
 /**
  * A request processor that emits an event and narrows the allowed tools, so
  * the request replay is exercised the way a real preprocessing pass is.
@@ -103,41 +91,6 @@ class NarrowingRequestProcessor extends BaseLlmRequestProcessor {
       author: 'preprocessor',
       invocationId: invocationContext.invocationId,
     });
-  }
-}
-
-/** Replays a fixed event stream in place of `Runner.runLive`. */
-class ScriptedLiveRunner extends Runner {
-  /** The arguments `runLive` was called with, in call order. */
-  readonly runLiveCalls: Array<{
-    userId: string;
-    sessionId: string;
-    runConfig?: RunConfig;
-    abortSignal?: AbortSignal;
-  }> = [];
-
-  constructor(
-    config: RunnerConfig,
-    private readonly script: () => AsyncGenerator<Event>,
-  ) {
-    super(config);
-  }
-
-  override async *runLive(params: {
-    userId: string;
-    sessionId: string;
-    liveRequestQueue: LiveRequestQueue;
-    runConfig?: RunConfig;
-    abortSignal?: AbortSignal;
-    liveSessionResumptionHandle?: string;
-  }): AsyncGenerator<Event, void, undefined> {
-    this.runLiveCalls.push({
-      userId: params.userId,
-      sessionId: params.sessionId,
-      runConfig: params.runConfig,
-      abortSignal: params.abortSignal,
-    });
-    yield* this.script();
   }
 }
 
@@ -255,35 +208,6 @@ async function drainLiveRequests(
   return requests;
 }
 
-/** Builds a session driven by a stubbed `Runner.runLive`. */
-async function newNodeSession(params: {
-  script: () => AsyncGenerator<Event>;
-  root?: Workflow;
-  plugins?: BasePlugin[];
-}): Promise<{session: EvalLiveSession; runner: ScriptedLiveRunner}> {
-  const sessionService = new InMemorySessionService();
-  const session = await newSession(sessionService);
-  const root =
-    params.root ??
-    new Workflow({
-      name: 'stub_workflow',
-      edges: [['START', new LlmAgent({name: 'greeter', model: stubModel()})]],
-    });
-  const runner = new ScriptedLiveRunner(
-    {
-      appName: APP_NAME,
-      agent: root,
-      sessionService,
-      plugins: params.plugins,
-    },
-    params.script,
-  );
-  return {
-    session: new EvalLiveSession(runner, session, USER_ID, session.id),
-    runner,
-  };
-}
-
 /** Builds a session driven by an agent root's own live flow. */
 async function newAgentSession(params: {
   agent: BaseAgent;
@@ -347,215 +271,6 @@ describe('LIVE_RUN_CONFIG', () => {
   it('is accepted by the runner run config, which rejects BIDI', () => {
     expect(() => createRunConfig(LIVE_RUN_CONFIG)).not.toThrow();
     expect(LIVE_RUN_CONFIG.streamingMode).toBeUndefined();
-  });
-});
-
-describe('LiveEventQueue', () => {
-  it('returns what was pushed and empties itself', () => {
-    const queue = new LiveEventQueue();
-    const event = agentEvent({text: 'hi'});
-
-    queue.push(event);
-
-    expect(queue.drain()).toEqual([event]);
-    expect(queue.drain()).toEqual([]);
-  });
-});
-
-describe('EvalLiveSession node routing', () => {
-  it('drives a workflow root through Runner.runLive', async () => {
-    const event = agentEvent({text: 'Hi', turnComplete: true});
-    const {session, runner} = await newNodeSession({script: scriptOf(event)});
-
-    await session.consumeEvents();
-
-    expect(runner.runLiveCalls).toHaveLength(1);
-    expect(runner.runLiveCalls[0].userId).toBe(USER_ID);
-    expect(runner.runLiveCalls[0].runConfig).toBe(LIVE_RUN_CONFIG);
-    const queued = session.eventQueue.drain();
-    expect(queued).toHaveLength(1);
-    expect(queued[0].invocationId).toBe(session.currentInvocationId);
-    expect(session.isFinished).toBe(true);
-    await expect(session.turnComplete).resolves.toBeUndefined();
-  });
-
-  it('passes the session the harness owns to Runner.runLive', async () => {
-    const {session, runner} = await newNodeSession({
-      script: scriptOf(agentEvent({text: 'Hi', turnComplete: true})),
-    });
-
-    await session.consumeEvents();
-
-    expect(runner.runLiveCalls[0].sessionId).not.toBe('');
-    expect(runner.runLiveCalls[0].userId).toBe(USER_ID);
-  });
-
-  it('swallows the turn complete that accompanies a tool call', async () => {
-    const {session} = await newNodeSession({
-      script: scriptOf(
-        agentEvent({
-          author: 'dob_verifier_agent',
-          functionCall: {name: 'validate_date_of_birth'},
-        }),
-        agentEvent({author: 'dob_verifier_agent', turnComplete: true}),
-      ),
-    });
-
-    await session.consumeNodeEvents();
-
-    await expect(
-      Promise.race([session.turnComplete, Promise.resolve('pending')]),
-    ).resolves.toBe('pending');
-  });
-
-  it('releases the latch on the real turn complete after a tool call', async () => {
-    const {session} = await newNodeSession({
-      script: scriptOf(
-        agentEvent({
-          author: 'dob_verifier_agent',
-          functionCall: {name: 'validate_date_of_birth'},
-        }),
-        agentEvent({author: 'dob_verifier_agent', turnComplete: true}),
-        agentEvent({
-          author: 'dob_verifier_agent',
-          text: 'Your identity is verified.',
-          turnComplete: true,
-        }),
-      ),
-    });
-
-    await session.consumeNodeEvents();
-
-    await expect(session.turnComplete).resolves.toBeUndefined();
-  });
-
-  it.each(['finish_task', 'transfer_to_agent', 'task_completed'])(
-    'lets the next agent turn through after a %s call',
-    async (functionName) => {
-      const {session} = await newNodeSession({
-        script: scriptOf(
-          agentEvent({
-            author: 'greeter_agent',
-            functionCall: {name: functionName},
-          }),
-          agentEvent({
-            author: 'dob_verifier_agent',
-            text: 'What is your date of birth?',
-            turnComplete: true,
-          }),
-        ),
-      });
-
-      await session.consumeNodeEvents();
-
-      await expect(session.turnComplete).resolves.toBeUndefined();
-    },
-  );
-
-  it('ignores a turn complete the user authored', async () => {
-    const {session} = await newNodeSession({
-      script: scriptOf(agentEvent({author: 'user', turnComplete: true})),
-    });
-
-    await session.consumeNodeEvents();
-
-    await expect(
-      Promise.race([session.turnComplete, Promise.resolve('pending')]),
-    ).resolves.toBe('pending');
-  });
-
-  it.each(['code', 'status', 'closeCode'] as const)(
-    'tolerates a normal closure reported as `%s`',
-    async (field) => {
-      const {session} = await newNodeSession({
-        script: failingScript(closureError(field, 1000)),
-      });
-
-      await expect(session.consumeEvents()).resolves.toBeUndefined();
-      // The transcript collected before the close is kept.
-      expect(session.eventQueue.drain()).toHaveLength(1);
-      expect(session.isFinished).toBe(true);
-      await expect(session.turnComplete).resolves.toBeUndefined();
-    },
-  );
-
-  it.each(['code', 'status', 'closeCode'] as const)(
-    'propagates an abnormal closure reported as `%s`',
-    async (field) => {
-      const {session} = await newNodeSession({
-        script: failingScript(closureError(field, 1011)),
-      });
-
-      await expect(session.consumeEvents()).rejects.toThrow('closed with 1011');
-      // The teardown still runs, so no turn waiter is stranded.
-      expect(session.isFinished).toBe(true);
-      await expect(session.turnComplete).resolves.toBeUndefined();
-    },
-  );
-
-  it('fires afterModelCallback only for the authors it recorded', async () => {
-    const plugin = new CallbackRecorderPlugin('callback_recorder');
-    const greeter = new LlmAgent({name: 'greeter', model: stubModel()});
-    const greeterEvent = agentEvent({author: 'greeter', text: 'Hello'});
-    const strangerEvent = agentEvent({author: 'unrecorded_agent', text: 'Hi'});
-    const {session} = await newNodeSession({
-      script: scriptOf(greeterEvent, strangerEvent),
-      root: new Workflow({name: 'wf', edges: [['START', greeter]]}),
-      plugins: [plugin],
-    });
-
-    await session.consumeNodeEvents();
-
-    expect(plugin.afterModelCalls).toHaveLength(1);
-    expect(plugin.afterModelCalls[0].llmResponse).toBe(greeterEvent);
-  });
-});
-
-describe('EvalLiveSession.recordNodeAppDetails', () => {
-  it('records every agent of the graph', async () => {
-    const greeter = new LlmAgent({name: 'greeter', model: stubModel()});
-    const verifier = new LlmAgent({name: 'verifier', model: stubModel()});
-    const {session} = await newNodeSession({
-      script: scriptOf(),
-      root: new Workflow({
-        name: 'wf',
-        edges: [
-          ['START', greeter],
-          [greeter, verifier],
-        ],
-      }),
-    });
-
-    const recorded = await session.recordNodeAppDetails();
-
-    expect([...recorded.keys()]).toEqual(['greeter', 'verifier']);
-  });
-
-  it('records nothing when the root holds no graph', async () => {
-    const {session} = await newAgentSession({
-      agent: new LlmAgent({name: 'solo', model: stubModel()}),
-    });
-
-    expect(await session.recordNodeAppDetails()).toEqual(new Map());
-  });
-
-  it('skips an agent it cannot record and keeps the healthy one', async () => {
-    const bad = new UnlistableToolsAgent({name: 'bad', model: stubModel()});
-    const good = new LlmAgent({name: 'good', model: stubModel()});
-    const {session} = await newNodeSession({
-      script: scriptOf(),
-      root: new Workflow({
-        name: 'wf',
-        edges: [
-          ['START', bad],
-          [bad, good],
-        ],
-      }),
-    });
-
-    const recorded = await session.recordNodeAppDetails();
-
-    expect([...recorded.keys()]).toEqual(['good']);
   });
 });
 
@@ -641,7 +356,7 @@ describe('EvalLiveSession agent routing', () => {
 
     await session.consumeEvents();
 
-    const queued = session.eventQueue.drain();
+    const queued = session.eventQueue.splice(0);
     expect(queued.map((event) => event.invocationId)).toEqual([
       session.currentInvocationId,
       session.currentInvocationId,
@@ -764,41 +479,59 @@ describe('EvalLiveSession agent routing', () => {
     await session.consumeEvents();
 
     // The processor's own event belongs to a real run, not to the replay.
-    expect(session.eventQueue.drain()).toHaveLength(1);
+    expect(session.eventQueue.splice(0)).toHaveLength(1);
     expect(plugin.beforeModelCalls[0].llmRequest.config?.tools).toBeUndefined();
   });
 
-  it('arms the tool-call guard for a call the model left unnamed', async () => {
-    const {session} = await newNodeSession({
-      script: scriptOf(
-        createEvent({
-          author: 'agent',
-          invocationId: 'stream_invocation',
-          content: {parts: [{functionCall: {}}]},
-        }),
-        agentEvent({turnComplete: true}),
-      ),
+  it('swallows the turn complete that accompanies a tool call', async () => {
+    let reachedPause: (() => void) | undefined;
+    const atPause = new Promise<void>((resolve) => {
+      reachedPause = resolve;
     });
+    let resumeAgent: (() => void) | undefined;
+    const paused = new Promise<void>((resolve) => {
+      resumeAgent = resolve;
+    });
+    const agent = new ScriptedLiveAgent(
+      {
+        name: 'test_agent',
+        model: stubModel(),
+        tools: [
+          new FunctionTool({
+            name: 'get_weather',
+            description: 'Get weather details',
+            execute: () => ({temperature: 20}),
+          }),
+        ],
+      },
+      async function* () {
+        yield agentEvent({
+          author: 'test_agent',
+          functionCall: {name: 'get_weather', id: 'call-1'},
+        });
+        yield agentEvent({author: 'test_agent', turnComplete: true});
+        reachedPause?.();
+        await paused;
+        yield agentEvent({
+          author: 'test_agent',
+          text: 'It is 20 degrees.',
+          turnComplete: true,
+        });
+      },
+    );
+    const {session} = await newAgentSession({agent});
 
-    await session.consumeNodeEvents();
+    const consuming = session.consumeEvents();
+    await atPause;
 
+    // The tool call's own turn complete is not the end of the turn.
     await expect(
       Promise.race([session.turnComplete, Promise.resolve('pending')]),
     ).resolves.toBe('pending');
-  });
 
-  it('replays no callback for an event that names no author', async () => {
-    const plugin = new CallbackRecorderPlugin('callback_recorder');
-    const greeter = new LlmAgent({name: 'greeter', model: stubModel()});
-    const {session} = await newNodeSession({
-      script: scriptOf(createEvent({invocationId: 'stream_invocation'})),
-      root: new Workflow({name: 'wf', edges: [['START', greeter]]}),
-      plugins: [plugin],
-    });
-
-    await session.consumeNodeEvents();
-
-    expect(plugin.afterModelCalls).toHaveLength(0);
+    resumeAgent?.();
+    await consuming;
+    await expect(session.turnComplete).resolves.toBeUndefined();
   });
 
   it('sends nothing back when every call the model made is deferred', async () => {
@@ -973,7 +706,7 @@ describe('live evaluation of a workflow root', () => {
       InputValidationError,
     );
     expect(() => assertLiveRootSupported(newWorkflowRoot())).toThrow(
-      WORKFLOW_LIVE_UNSUPPORTED_ERROR,
+      'Live evaluation needs an agent root.',
     );
   });
 
@@ -983,12 +716,7 @@ describe('live evaluation of a workflow root', () => {
     ).not.toThrow();
   });
 
-  // The node driver in this file is exercised against `ScriptedLiveRunner`,
-  // which overrides `runLive`. This test pins what the REAL runner does today,
-  // so the stubbed suite is never mistaken for proof that a workflow can be
-  // evaluated live. It fails the day `Runner.runLive` accepts a workflow, which
-  // is the day `assertLiveRootSupported` should be deleted.
-  it('is what the real runner still rejects', async () => {
+  it('is refused by the session too, not just by the entry point', async () => {
     const sessionService = new InMemorySessionService();
     const stored = await newSession(sessionService);
     const runner = new Runner({
@@ -999,7 +727,7 @@ describe('live evaluation of a workflow root', () => {
     const session = new EvalLiveSession(runner, stored, USER_ID, stored.id);
 
     await expect(session.consumeEvents()).rejects.toThrow(
-      'runLive is only supported for agents.',
+      'Live evaluation needs an agent root.',
     );
   });
 });
@@ -1009,8 +737,18 @@ describe('EvalLiveSession lifecycle', () => {
     vi.useRealTimers();
   });
 
+  /** A session over an agent replaying `script`. */
+  async function newScriptedSession(script: () => AsyncGenerator<Event>) {
+    const agent = new ScriptedLiveAgent(
+      {name: 'test_agent', model: stubModel()},
+      script,
+    );
+    const {session, sessionService} = await newAgentSession({agent});
+    return {session, sessionService, agent};
+  }
+
   it('refuses to close a session that was never started', async () => {
-    const {session} = await newNodeSession({script: scriptOf()});
+    const {session} = await newScriptedSession(scriptOf());
 
     await expect(session.close()).rejects.toThrow(
       'closed before it was started',
@@ -1018,21 +756,21 @@ describe('EvalLiveSession lifecycle', () => {
   });
 
   it('starts one consumer however often start is called', async () => {
-    const {session, runner} = await newNodeSession({
-      script: scriptOf(agentEvent({text: 'Hi', turnComplete: true})),
-    });
+    const {session, agent} = await newScriptedSession(
+      scriptOf(agentEvent({text: 'Hi', turnComplete: true})),
+    );
 
     session.start();
     session.start();
     await session.close();
 
-    expect(runner.runLiveCalls).toHaveLength(1);
+    expect(agent.liveContexts).toHaveLength(1);
   });
 
   it('closes the request queue and waits for the consumer', async () => {
-    const {session} = await newNodeSession({
-      script: scriptOf(agentEvent({text: 'Hi', turnComplete: true})),
-    });
+    const {session} = await newScriptedSession(
+      scriptOf(agentEvent({text: 'Hi', turnComplete: true})),
+    );
 
     session.start();
     await session.close();
@@ -1042,19 +780,21 @@ describe('EvalLiveSession lifecycle', () => {
   });
 
   it('swallows a normal closure the consumer failed with', async () => {
-    const {session} = await newNodeSession({
-      script: failingScript(closureError('code', 1000)),
-    });
+    const {session} = await newScriptedSession(
+      failingScript(closureError('code', 1000)),
+    );
 
     session.start();
 
     await expect(session.close()).resolves.toBeUndefined();
+    // The transcript collected before the close is kept.
+    expect(session.eventQueue).toHaveLength(1);
   });
 
   it('propagates an abnormal closure the consumer failed with', async () => {
-    const {session} = await newNodeSession({
-      script: failingScript(closureError('code', 1011)),
-    });
+    const {session} = await newScriptedSession(
+      failingScript(closureError('code', 1011)),
+    );
 
     session.start();
 
@@ -1067,12 +807,12 @@ describe('EvalLiveSession lifecycle', () => {
     const stalled = new Promise<void>((resolve) => {
       releaseConsumer = resolve;
     });
-    const {session, runner} = await newNodeSession({
-      script: async function* () {
+    const {session, sessionService, agent} = await newScriptedSession(
+      async function* () {
         await stalled;
         yield agentEvent({text: 'late', turnComplete: true});
       },
-    });
+    );
 
     session.start();
     const closing = session.close();
@@ -1080,54 +820,17 @@ describe('EvalLiveSession lifecycle', () => {
 
     await expect(closing).resolves.toBeUndefined();
     expect(session.isFinished).toBe(false);
-    expect(runner.runLiveCalls[0].abortSignal?.aborted).toBe(true);
+    expect(agent.liveContexts[0].abortSignal?.aborted).toBe(true);
 
     // The abandoned consumer must not keep writing once `close` has returned.
     releaseConsumer?.();
     await vi.advanceTimersByTimeAsync(0);
-    expect(session.eventQueue.drain()).toEqual([]);
-  });
-
-  it('swallows a normal closure the agent driver raised', async () => {
-    const agent = new ScriptedLiveAgent(
-      {name: 'test_agent', model: stubModel()},
-      failingScript(closureError('code', 1000)),
-    );
-    const {session} = await newAgentSession({agent});
-
-    session.start();
-
-    await expect(session.close()).resolves.toBeUndefined();
-  });
-
-  it('stops an aborted agent consumer before it writes to the session', async () => {
-    vi.useFakeTimers();
-    let releaseConsumer: (() => void) | undefined;
-    const stalled = new Promise<void>((resolve) => {
-      releaseConsumer = resolve;
-    });
-    const agent = new ScriptedLiveAgent(
-      {name: 'test_agent', model: stubModel()},
-      async function* () {
-        await stalled;
-        yield agentEvent({text: 'late', turnComplete: true});
-      },
-    );
-    const {session, sessionService} = await newAgentSession({agent});
-
-    session.start();
-    const closing = session.close();
-    await vi.advanceTimersByTimeAsync(CONSUME_TIMEOUT_MS);
-    await expect(closing).resolves.toBeUndefined();
-
-    releaseConsumer?.();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(session.eventQueue.drain()).toEqual([]);
+    expect(session.eventQueue).toEqual([]);
     expect(sessionService.appended).toEqual([]);
   });
 
   it('re-arms the turn latch on every turn', async () => {
-    const {session} = await newNodeSession({script: scriptOf()});
+    const {session} = await newScriptedSession(scriptOf());
     const firstTurn = session.turnComplete;
 
     session.startTurn();

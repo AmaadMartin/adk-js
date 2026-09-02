@@ -26,10 +26,9 @@ import {Session} from '../sessions/session.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
-import {isWorkflow} from '../workflow/workflow.js';
 
 /** Author of the events the user contributed to a session. */
-const USER_AUTHOR = 'user';
+export const USER_AUTHOR = 'user';
 
 /** WebSocket close code reported for a normal, successful closure. */
 export const WEBSOCKET_NORMAL_CLOSURE_CODE = 1000;
@@ -38,25 +37,14 @@ export const WEBSOCKET_NORMAL_CLOSURE_CODE = 1000;
 export const CONSUME_TIMEOUT_MS = 30_000;
 
 /**
- * Calls that end the agent and hand off, instead of continuing the turn with a
- * tool response. Their `turnComplete` is real, so they must not arm the
- * tool-call guard in {@link EvalLiveSession.consumeNodeEvents}.
- */
-const TURN_ENDING_FUNCTION_CALLS: ReadonlySet<string> = new Set([
-  'finish_task',
-  'transfer_to_agent',
-  'task_completed',
-]);
-
-/**
- * Run config shared by every live driver of the eval system.
+ * Run config a live eval run drives the model under.
  *
  * Server-side voice-activity detection is off, so turn boundaries come from
  * the explicit activity markers the harness sends around each audio turn.
  *
  * adk-python also sets `StreamingMode.BIDI` here. adk-js rejects that value
- * (`createRunConfig` throws) because `Runner.runLive` *is* its bidirectional
- * path, so the field is omitted rather than translated.
+ * (`createRunConfig` throws) because `runLive` *is* its bidirectional path, so
+ * the field is omitted rather than translated.
  */
 export const LIVE_RUN_CONFIG: RunConfig = {
   responseModalities: [Modality.AUDIO],
@@ -68,60 +56,24 @@ export const LIVE_RUN_CONFIG: RunConfig = {
 /** Resolution of the timeout arm of the race in {@link EvalLiveSession.close}. */
 const CONSUME_TIMED_OUT = Symbol('consume-timed-out');
 
-/** Message logged when the consumer outlives {@link CONSUME_TIMEOUT_MS}. */
-const CONSUME_TIMEOUT_WARNING = 'Timed out waiting for runLive to finish.';
-
-/** Message of the error {@link EvalLiveSession.close} throws before `start`. */
-const CLOSED_BEFORE_STARTED_ERROR =
-  'The live session was closed before it was started.';
-
-/**
- * Message of the error a live eval of a non-agent root produces.
- *
- * The node driver routes such a root to `Runner.runLive`, which rejects it, so
- * the eval fails here with a message that explains why rather than deep inside
- * the runner after the turn loop has already run.
- */
-export const WORKFLOW_LIVE_UNSUPPORTED_ERROR =
-  'Live evaluation needs an agent root. `Runner.runLive` does not support a ' +
-  'workflow root yet, so a workflow can only be evaluated with ' +
-  '`generateInferencesFromRootAgent`.';
-
 /**
  * Rejects a root the live path cannot drive.
  *
- * Remove this guard once `Runner.runLive` accepts a non-agent root;
- * {@link EvalLiveSession.consumeNodeEvents} is already written for that day.
+ * `Runner.runLive` refuses a non-agent root, so a workflow would otherwise
+ * fail deep inside the runner once the turn loop had already run.
  *
  * @param root The root the caller asked to evaluate.
  * @throws {InputValidationError} If the root is not an agent.
  */
-export function assertLiveRootSupported(root: unknown): void {
+export function assertLiveRootSupported(
+  root: unknown,
+): asserts root is BaseAgent {
   if (!isBaseAgent(root)) {
-    throw new InputValidationError(WORKFLOW_LIVE_UNSUPPORTED_ERROR);
-  }
-}
-
-/**
- * Collects the events a live connection produces until the turn that asked for
- * them drains the queue.
- *
- * The live driver pushes events as they arrive, on its own schedule; the turn
- * generator takes whatever has arrived once the model reports the turn is
- * complete. This is the `asyncio.Queue` adk-python uses, in the form JS needs.
- */
-export class LiveEventQueue {
-  private events: Event[] = [];
-
-  push(event: Event): void {
-    this.events.push(event);
-  }
-
-  /** Returns every event queued so far and empties the queue. */
-  drain(): Event[] {
-    const drained = this.events;
-    this.events = [];
-    return drained;
+    throw new InputValidationError(
+      'Live evaluation needs an agent root. `Runner.runLive` does not ' +
+        'support a workflow root, so evaluate a workflow with ' +
+        '`generateInferencesFromRootAgent` instead.',
+    );
   }
 }
 
@@ -168,7 +120,7 @@ export function isNormalLiveClosure(error: unknown): boolean {
  * @param invocationContext The context the agent runs under.
  * @returns The request the agent would send.
  */
-export async function recordLlmRequestForAgent(
+async function recordLlmRequestForAgent(
   agent: LlmAgent,
   invocationContext: InvocationContext,
 ): Promise<LlmRequest> {
@@ -248,8 +200,8 @@ export class EvalLiveSession {
   /** The queue the live connection reads user turns and tool results from. */
   readonly liveRequestQueue = new LiveRequestQueue();
 
-  /** The queue the background consumer pushes model events onto. */
-  readonly eventQueue = new LiveEventQueue();
+  /** The events the background consumer has collected for the current turn. */
+  readonly eventQueue: Event[] = [];
 
   /** The invocation every event of the current turn is stamped with. */
   currentInvocationId = newInvocationContextId();
@@ -301,120 +253,18 @@ export class EvalLiveSession {
    *
    * Public so a test can drive it directly, as adk-python's tests drive
    * `_consume_events`.
+   *
+   * @throws {InputValidationError} If the runner's root is not an agent.
    */
   async consumeEvents(): Promise<void> {
     try {
       const root = this.runner.agent;
-      // `RunnableRoot` is an agent or a workflow, so "not an agent" is the
-      // workflow case, which `Runner.runLive` schedules.
-      if (!isBaseAgent(root)) {
-        return await this.consumeNodeEvents();
-      }
+      assertLiveRootSupported(root);
       await this.consumeAgentEvents(root);
     } finally {
       this.finished = true;
       this.releaseTurn();
     }
-  }
-
-  /**
-   * Drives a workflow root through `Runner.runLive`.
-   *
-   * `Runner.runLive` rejects a non-agent root today, so this throws
-   * {@link WORKFLOW_LIVE_UNSUPPORTED_ERROR} in the runner rather than driving
-   * anything. The routing is the behaviour being ported, and it starts working
-   * when the runner grows workflow live support; until then
-   * {@link assertLiveRootSupported} refuses such a root up front.
-   *
-   * Public so a test can drive it directly, as adk-python's tests drive
-   * `_consume_node_events`.
-   */
-  async consumeNodeEvents(): Promise<void> {
-    const callbackContextByAuthor = await this.recordNodeAppDetails();
-    let inFunctionCallLoop = false;
-
-    try {
-      for await (const event of this.runner.runLive({
-        userId: this.userId,
-        sessionId: this.sessionId,
-        liveRequestQueue: this.liveRequestQueue,
-        runConfig: LIVE_RUN_CONFIG,
-        abortSignal: this.abortController.signal,
-      })) {
-        if (this.abortController.signal.aborted) {
-          return;
-        }
-        event.invocationId = this.currentInvocationId;
-        const callbackContext = callbackContextByAuthor.get(event.author ?? '');
-        if (callbackContext !== undefined) {
-          await this.runner.pluginManager.runAfterModelCallback({
-            callbackContext,
-            llmResponse: event,
-          });
-        }
-        this.eventQueue.push(event);
-        if (
-          getFunctionCalls(event).some(
-            (functionCall) =>
-              !TURN_ENDING_FUNCTION_CALLS.has(functionCall.name ?? ''),
-          )
-        ) {
-          inFunctionCallLoop = true;
-        }
-        inFunctionCallLoop = this.settleTurn(event, inFunctionCallLoop);
-      }
-    } catch (error: unknown) {
-      if (!isNormalLiveClosure(error)) {
-        throw error;
-      }
-      // A clean session close ends the stream; keep the transcript collected
-      // so far instead of failing the eval case.
-      logger.debug('Ignored WebSocket normal closure exception:', error);
-    }
-  }
-
-  /**
-   * Records the request each agent of a workflow graph was shown.
-   *
-   * A workflow serves several agents over one live stream, so each agent's
-   * request is recorded up front and the events of that author replay
-   * `afterModelCallback` against the context returned here. One agent failing
-   * to record never aborts the run.
-   *
-   * Only top-level `graph.nodes` agents are recorded; agents nested in
-   * sub-workflows are not.
-   *
-   * @returns The callback context of each recorded agent, keyed by agent name.
-   */
-  async recordNodeAppDetails(): Promise<Map<string, Context>> {
-    const callbackContextByAuthor = new Map<string, Context>();
-    const root = this.runner.agent;
-    const graph = isWorkflow(root) ? root.graph : undefined;
-    if (graph === undefined) {
-      return callbackContextByAuthor;
-    }
-
-    for (const node of graph.nodes) {
-      if (!isLlmAgent(node)) {
-        continue;
-      }
-      try {
-        callbackContextByAuthor.set(
-          node.name,
-          await recordAppDetailsForAgent(
-            node,
-            this.newLiveInvocationContext(node),
-          ),
-        );
-      } catch (error: unknown) {
-        logger.warn(
-          `Failed to record app details for agent ${node.name}:`,
-          error,
-        );
-      }
-    }
-
-    return callbackContextByAuthor;
   }
 
   /**
@@ -427,7 +277,7 @@ export class EvalLiveSession {
     this.liveRequestQueue.close();
     const consumeTask = this.consumeTask;
     if (consumeTask === undefined) {
-      throw new Error(CLOSED_BEFORE_STARTED_ERROR);
+      throw new Error('The live session was closed before it was started.');
     }
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -437,7 +287,7 @@ export class EvalLiveSession {
 
     try {
       if ((await Promise.race([consumeTask, expiry])) === CONSUME_TIMED_OUT) {
-        logger.warn(CONSUME_TIMEOUT_WARNING);
+        logger.warn('Timed out waiting for the live run to finish.');
         this.abortController.abort();
       }
     } catch (error: unknown) {

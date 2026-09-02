@@ -156,7 +156,6 @@ export {
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
 export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
-export {DEFAULT_LIVE_TIMEOUT_SECONDS} from './evaluation/constants.js';
 export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
 export type {
   EvalCase,
@@ -181,17 +180,6 @@ export type {
   EvalCaseResponses,
   EvalRow,
 } from './evaluation/evaluation_generator.js';
-export {
-  CONSUME_TIMEOUT_MS,
-  EvalLiveSession,
-  LIVE_RUN_CONFIG,
-  LiveEventQueue,
-  WEBSOCKET_NORMAL_CLOSURE_CODE,
-  WORKFLOW_LIVE_UNSUPPORTED_ERROR,
-  assertLiveRootSupported,
-  isNormalLiveClosure,
-  recordLlmRequestForAgent,
-} from './evaluation/live_session.js';
 export {
   DEFAULT_HTTP_RETRY_ATTEMPTS,
   EnsureRetryOptionsPlugin,

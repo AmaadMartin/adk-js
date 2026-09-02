@@ -214,11 +214,9 @@ const invocations = await generateInferencesFromRootAgentLive({
 ```
 
 A live run is push-shaped: the model streams events whenever it likes. The eval
-loop is pull-shaped and asks for one turn at a time. `EvalLiveSession` bridges
-the two. It owns the live request queue, consumes the event stream on a
-background task, and releases a per-turn latch when the model reports the turn
-is complete. The function above drives it for you; construct one directly only
-if you are writing your own loop.
+loop is pull-shaped and asks for one turn at a time. The function bridges the
+two: it consumes the event stream on a background task and waits for a per-turn
+latch the model releases when it reports the turn complete.
 
 ### The run config
 
@@ -256,8 +254,7 @@ exception: they end the agent, so the `turnComplete` after them is real.
 ### Timeouts and closure
 
 A turn the model never completes fails after `liveTimeoutSeconds`, which
-defaults to `DEFAULT_LIVE_TIMEOUT_SECONDS`. The live session is closed either
-way.
+defaults to 300 seconds. The live session is closed either way.
 
 Closing the session closes the request queue and waits up to 30 seconds for the
 background consumer. After that it warns, aborts the run, and returns. An
@@ -266,17 +263,12 @@ session after the call returned. A WebSocket close code of 1000 is a normal end
 of stream: the transcript collected so far is kept and the eval case is not
 failed. Any other close code propagates.
 
-### Workflow roots are not supported yet
+### Workflow roots are not supported
 
 `generateInferencesFromRootAgentLive` needs an agent root. It rejects a
 `Workflow` with an `InputValidationError` before it opens a live session,
 because `Runner.runLive` does not accept a non-agent root. Evaluate a workflow
 with `generateInferencesFromRootAgent`, which does support one.
-
-`EvalLiveSession` already routes a workflow root through `Runner.runLive` and
-records each graph agent's request up front, so the path starts working when
-the runner grows workflow live support. The guard is what has to go on that
-day.
 
 ## Failure modes
 

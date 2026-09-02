@@ -53,13 +53,6 @@ export interface UserSimulator {
 }
 
 /**
- * Message of the error {@link validateNextUserMessage} throws. Matches
- * adk-python's `NextUserMessage` validator.
- */
-const USER_MESSAGE_IFF_SUCCESS_ERROR =
-  'A user_message should be provided if and only if the status is SUCCESS';
-
-/**
  * Checks the invariant a {@link NextUserMessage} must hold: a `userMessage` is
  * present if and only if the status is `SUCCESS`.
  *
@@ -74,6 +67,8 @@ export function validateNextUserMessage(next: NextUserMessage): void {
   const isSuccess = next.status === UserSimulatorStatus.SUCCESS;
   const hasMessage = next.userMessage !== undefined;
   if (isSuccess !== hasMessage) {
-    throw new Error(USER_MESSAGE_IFF_SUCCESS_ERROR);
+    throw new Error(
+      'A user_message should be provided if and only if the status is SUCCESS',
+    );
   }
 }

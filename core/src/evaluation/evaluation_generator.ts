@@ -42,7 +42,6 @@ import {
 } from '../workflow/run_node_as_invocation.js';
 
 import {AgentDetails, AppDetails} from './app_details.js';
-import {DEFAULT_LIVE_TIMEOUT_SECONDS} from './constants.js';
 import {
   EvalCase,
   Invocation,
@@ -53,7 +52,7 @@ import {EvalSet} from './eval_set.js';
 import {
   assertLiveRootSupported,
   EvalLiveSession,
-  LiveEventQueue,
+  USER_AUTHOR,
 } from './live_session.js';
 import {RequestIntercepterPlugin} from './request_intercepter_plugin.js';
 import {EnsureRetryOptionsPlugin} from './retry_options_utils.js';
@@ -61,16 +60,6 @@ import {
   UserSimulator,
   validateNextUserMessage,
 } from './simulation/user_simulator.js';
-
-/**
- * Re-exported from `live_session.js`, which owns it: the live session drives
- * the queue, and the module that defines the session cannot import the one
- * that consumes it.
- */
-export {LiveEventQueue} from './live_session.js';
-
-/** Author of the events the user contributed to a session. */
-const USER_AUTHOR = 'user';
 
 /** Author recorded for an event that names none. */
 const DEFAULT_AUTHOR = 'agent';
@@ -98,6 +87,9 @@ const DEFAULT_REPEAT_NUM = 3;
 
 const MILLIS_PER_SECOND = 1000;
 
+/** Seconds to wait for a model turn to complete in live mode. */
+const DEFAULT_LIVE_TIMEOUT_SECONDS = 300;
+
 /**
  * Row key holding the query an eval row grades. Supplied by the caller, in the
  * original (snake_case) eval-data format.
@@ -109,18 +101,6 @@ const ACTUAL_TOOL_USE_KEY = 'actual_tool_use';
 
 /** Row key {@link processQueryWithSession} writes the final text response to. */
 const RESPONSE_KEY = 'response';
-
-/** Message of the error a module with an uncallable `resetData` produces. */
-const RESET_DATA_NOT_CALLABLE_ERROR =
-  'agent.resetData must be callable when provided.';
-
-/** Message of the error an eval row without a string query produces. */
-const NON_STRING_QUERY_ERROR =
-  'Each evaluation entry must contain a string query.';
-
-/** Message of the error a live turn that never completes produces. */
-const LIVE_TURN_TIMEOUT_ERROR =
-  'Timed out waiting for model turn completion in live mode.';
 
 /**
  * One row of an eval dataset: the `query` the row grades, plus whatever fields
@@ -697,7 +677,9 @@ export async function generateInferencesFromAgentModule(params: {
 
   const resetCandidate = agentNamespace?.resetData;
   if (resetCandidate !== undefined && !isResetFunction(resetCandidate)) {
-    throw new InputValidationError(RESET_DATA_NOT_CALLABLE_ERROR);
+    throw new InputValidationError(
+      'agent.resetData must be callable when provided.',
+    );
   }
 
   let agentToEvaluate: RunnableRoot = rootCandidate;
@@ -781,7 +763,9 @@ export function processQueryWithSession(
   return rows.map((row) => {
     const query = row[QUERY_KEY];
     if (typeof query !== 'string') {
-      throw new InputValidationError(NON_STRING_QUERY_ERROR);
+      throw new InputValidationError(
+        'Each evaluation entry must contain a string query.',
+      );
     }
 
     const actualToolUses: RecordedToolUse[] = [];
@@ -927,8 +911,11 @@ async function waitForTurnComplete(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expiry = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
-      logger.warn(LIVE_TURN_TIMEOUT_ERROR);
-      reject(new Error(LIVE_TURN_TIMEOUT_ERROR));
+      const timeout = new Error(
+        'Timed out waiting for model turn completion in live mode.',
+      );
+      logger.warn(timeout.message);
+      reject(timeout);
     }, liveTimeoutSeconds * MILLIS_PER_SECOND);
   });
 
@@ -959,7 +946,7 @@ async function waitForTurnComplete(
  */
 export async function* generateInferencesForSingleUserInvocationLive(params: {
   liveRequestQueue: LiveRequestQueue;
-  eventQueue: LiveEventQueue;
+  eventQueue: Event[];
   userMessage: Content;
   currentInvocationId: string;
   turnComplete: Promise<void>;
@@ -986,7 +973,7 @@ export async function* generateInferencesForSingleUserInvocationLive(params: {
 
   // Transcription-bearing events are yielded raw;
   // `normalizeLiveTranscriptions` folds them into content later.
-  for (const event of params.eventQueue.drain()) {
+  for (const event of params.eventQueue.splice(0)) {
     if (event.invocationId === currentInvocationId) {
       yield event;
     }
