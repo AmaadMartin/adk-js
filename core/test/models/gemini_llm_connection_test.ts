@@ -277,7 +277,7 @@ describe('GeminiLlmConnection', () => {
 
       const usageMetadata = {
         promptTokenCount: 10,
-        candidatesTokenCount: 20,
+        responseTokenCount: 20,
         totalTokenCount: 30,
       };
       messageQueue.push(liveServerMessage({usageMetadata}));
@@ -285,7 +285,11 @@ describe('GeminiLlmConnection', () => {
 
       const res = await generator.next();
       expect(res.value).toEqual({
-        usageMetadata,
+        usageMetadata: {
+          promptTokenCount: 10,
+          candidatesTokenCount: 20,
+          totalTokenCount: 30,
+        },
         modelVersion: 'gemini-2.5-flash',
       });
       expect((await generator.next()).done).toBe(true);
@@ -902,6 +906,7 @@ describe('GeminiLlmConnection', () => {
           parts: [{text: 'Hello'}],
         },
         partial: false,
+        interrupted: true,
         modelVersion: 'gemini-2.5-flash',
       });
 

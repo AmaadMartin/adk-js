@@ -14,7 +14,7 @@ describe('LiveResponseAggregator', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
     const usageMetadata = {
       promptTokenCount: 10,
-      candidatesTokenCount: 20,
+      responseTokenCount: 20,
       totalTokenCount: 30,
     };
 
@@ -25,7 +25,11 @@ describe('LiveResponseAggregator', () => {
 
     expect(results).toEqual([
       {
-        usageMetadata,
+        usageMetadata: {
+          promptTokenCount: 10,
+          candidatesTokenCount: 20,
+          totalTokenCount: 30,
+        },
         modelVersion: 'gemini-2.5-flash',
       },
     ]);
