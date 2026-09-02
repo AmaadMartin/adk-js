@@ -24,8 +24,7 @@ import {logger} from '../utils/logger.js';
 import {AuthHandler} from './auth_handler.js';
 import {AuthConfig} from './auth_tool.js';
 import {bindCredentialResponse} from './credential_response_binding.js';
-
-const TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_';
+import {TOOLSET_AUTH_CREDENTIAL_ID_PREFIX} from './toolset_auth.js';
 
 interface RequestCredentialArgs {
   authConfig?: AuthConfig;

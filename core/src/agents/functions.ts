@@ -8,6 +8,7 @@ import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
+import {AuthConfig} from '../auth/auth_tool.js';
 import {
   createEvent,
   Event,
@@ -92,6 +93,71 @@ export function getLongRunningFunctionCalls(
   return longRunningToolIds;
 }
 
+/**
+ * Options for {@link buildAuthRequestEvent}.
+ */
+export interface BuildAuthRequestEventOptions {
+  /** The event author. Defaults to the agent driving the invocation. */
+  author?: string;
+  /** The content role. Left unset by default. */
+  role?: string;
+}
+
+/**
+ * Builds one event carrying an `adk_request_credential` function call per
+ * distinct auth request.
+ *
+ * Shared by tool-level auth, where a tool asks for a credential while it runs,
+ * and by toolset-level auth, which asks before tool listing. Requests that
+ * share a credential key collapse to a single call, because answering one
+ * answers them all; requests with no key are all kept.
+ *
+ * @param invocationContext The current invocation context.
+ * @param authRequests The auth configs to request, by function call id.
+ * @param options Overrides for the event author and the content role.
+ * @return The event to yield to the client.
+ */
+export function buildAuthRequestEvent(
+  invocationContext: InvocationContext,
+  authRequests: Record<string, AuthConfig>,
+  options: BuildAuthRequestEventOptions = {},
+): Event {
+  const parts: Part[] = [];
+  const longRunningToolIds = new Set<string>();
+  const seenKeys = new Set<string>();
+
+  for (const [functionCallId, authConfig] of Object.entries(authRequests)) {
+    const key = authConfig.credentialKey;
+    if (key) {
+      if (seenKeys.has(key)) {
+        continue;
+      }
+      seenKeys.add(key);
+    }
+    const requestCredentialFunctionCall: FunctionCall = {
+      name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+      args: {
+        'function_call_id': functionCallId,
+        'auth_config': authConfig,
+      },
+      id: generateClientFunctionCallId(),
+    };
+    longRunningToolIds.add(requestCredentialFunctionCall.id!);
+    parts.push({functionCall: requestCredentialFunctionCall});
+  }
+
+  return createEvent({
+    invocationId: invocationContext.invocationId,
+    author: options.author ?? toolEventAuthor(invocationContext),
+    branch: invocationContext.branch,
+    content: {
+      parts,
+      role: options.role,
+    },
+    longRunningToolIds: Array.from(longRunningToolIds),
+  });
+}
+
 // TODO - b/425992518: consider internalize as part of llm_agent's runtime.
 // The auth part of function calling is a bit hacky, need to to clarify.
 /**
@@ -110,33 +176,12 @@ export function generateAuthEvent(
   ) {
     return undefined;
   }
-  const parts: Part[] = [];
-  const longRunningToolIds = new Set<string>();
-  for (const [functionCallId, authConfig] of Object.entries(
-    functionResponseEvent.actions.requestedAuthConfigs,
-  )) {
-    const requestCredentialFunctionCall: FunctionCall = {
-      name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-      args: {
-        'function_call_id': functionCallId,
-        'auth_config': authConfig,
-      },
-      id: generateClientFunctionCallId(),
-    };
-    longRunningToolIds.add(requestCredentialFunctionCall.id!);
-    parts.push({functionCall: requestCredentialFunctionCall});
-  }
 
-  return createEvent({
-    invocationId: invocationContext.invocationId,
-    author: toolEventAuthor(invocationContext),
-    branch: invocationContext.branch,
-    content: {
-      parts: parts,
-      role: functionResponseEvent.content?.role ?? 'user',
-    },
-    longRunningToolIds: Array.from(longRunningToolIds),
-  });
+  return buildAuthRequestEvent(
+    invocationContext,
+    functionResponseEvent.actions.requestedAuthConfigs,
+    {role: functionResponseEvent.content?.role ?? 'user'},
+  );
 }
 
 /**
