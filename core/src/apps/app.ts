@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
 import {
   asRunnableRoot,
@@ -60,6 +61,11 @@ export interface AppOptions {
   rootAgent: RunnableRoot;
   plugins?: BasePlugin[];
   resumabilityConfig?: ResumabilityConfig;
+  /**
+   * Context caching configuration for every LLM agent in this app. Context
+   * caching is disabled while this is absent.
+   */
+  contextCacheConfig?: ContextCacheConfig;
 }
 
 /**
@@ -80,6 +86,7 @@ export class App {
   readonly rootAgent: RunnableRoot;
   readonly plugins: BasePlugin[];
   readonly resumabilityConfig?: ResumabilityConfig;
+  readonly contextCacheConfig?: ContextCacheConfig;
 
   constructor(options: AppOptions) {
     validateAppName(options.name);
@@ -94,5 +101,6 @@ export class App {
     this.rootAgent = asRunnableRoot(options.rootAgent);
     this.plugins = options.plugins ?? [];
     this.resumabilityConfig = options.resumabilityConfig;
+    this.contextCacheConfig = options.contextCacheConfig;
   }
 }
