@@ -14,6 +14,8 @@ import {
   UnsafeLocalCodeExecutor,
   createSession,
 } from '@google/adk';
+import {buildCodeExecutionResultPart} from '@google/adk/code_executors/code_execution_utils.js';
+import {Outcome} from '@google/genai';
 import {EventEmitter} from 'node:events';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -714,7 +716,7 @@ describe('UnsafeLocalCodeExecutor', () => {
       expect(normalize(result.stdout)).toBe('None\n');
     });
 
-    it('separates stdout from stderr, and clears a warning of a clean run', async () => {
+    it('separates stdout from stderr, and keeps a warning of a clean run', async () => {
       const result = await runPython(
         [
           'import sys',
@@ -725,9 +727,11 @@ describe('UnsafeLocalCodeExecutor', () => {
       );
 
       expect(result.stdout).toBe('to out');
-      // A non-empty stderr marks the result failed and drives the retry
-      // counter, so a warning must not be reported as a failure.
-      expect(result.stderr).toBe('');
+      expect(result.stderr).toBe('to err');
+      // The status, not the warning, is what says the run failed.
+      expect(buildCodeExecutionResultPart(result).codeExecutionResult).toEqual({
+        outcome: Outcome.OUTCOME_OK,
+      });
     });
 
     it('reports a silent non-zero exit as a failure', async () => {

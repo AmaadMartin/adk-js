@@ -212,6 +212,24 @@ export function buildExecutableCodePart(code: string): Part {
 }
 
 /**
+ * Whether an execution failed.
+ *
+ * An executor that reports the status the process exited with settles it, so a
+ * program that only wrote a warning is not read as a failure. The rest fall
+ * back to whether anything reached stderr.
+ *
+ * @param codeExecutionResult The code execution result.
+ * @return Whether the execution failed.
+ */
+export function executionFailed(
+  codeExecutionResult: CodeExecutionResult,
+): boolean {
+  return codeExecutionResult.exitCode != null
+    ? codeExecutionResult.exitCode !== 0
+    : !!codeExecutionResult.stderr;
+}
+
+/**
  * Builds the code execution result part from the code execution result.
  *
  * @param codeExecutionResult The code execution result.
@@ -220,7 +238,7 @@ export function buildExecutableCodePart(code: string): Part {
 export function buildCodeExecutionResultPart(
   codeExecutionResult: CodeExecutionResult,
 ): Part {
-  if (codeExecutionResult.stderr) {
+  if (executionFailed(codeExecutionResult)) {
     return {
       text: codeExecutionResult.stderr,
       codeExecutionResult: {

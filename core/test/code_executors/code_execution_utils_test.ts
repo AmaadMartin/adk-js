@@ -12,6 +12,7 @@ import {
   buildCodeExecutionResultPart,
   buildExecutableCodePart,
   convertCodeExecutionParts,
+  executionFailed,
   extractCodeAndTruncateContent,
   getEncodedFileContent,
 } from '../../src/code_executors/code_execution_utils.js';
@@ -120,6 +121,78 @@ describe('buildCodeExecutionResultPart', () => {
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_FAILED);
     expect(part.text).toBe('error occurred');
   });
+
+  it('reports a warning on a clean run as a success', () => {
+    const part = buildCodeExecutionResultPart({
+      stdout: '42',
+      stderr: 'DeprecationWarning: old api',
+      outputFiles: [],
+      exitCode: 0,
+    });
+    expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_OK);
+    expect(part.text).toContain('42');
+  });
+
+  it('reports a non-zero status as a failure', () => {
+    const part = buildCodeExecutionResultPart({
+      stdout: '',
+      stderr: 'NameError: x',
+      outputFiles: [],
+      exitCode: 1,
+    });
+    expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_FAILED);
+    expect(part.text).toBe('NameError: x');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executionFailed
+// ---------------------------------------------------------------------------
+describe('executionFailed', () => {
+  it('spends no retry on a program that warned and succeeded', () => {
+    expect(
+      executionFailed({
+        stdout: 'ok',
+        stderr: 'a warning',
+        outputFiles: [],
+        exitCode: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it('reports a failure the program described on stderr', () => {
+    expect(
+      executionFailed({
+        stdout: '',
+        stderr: 'boom',
+        outputFiles: [],
+        exitCode: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it('reports a failure the program said nothing about', () => {
+    expect(
+      executionFailed({stdout: '', stderr: '', outputFiles: [], exitCode: 3}),
+    ).toBe(true);
+  });
+
+  it.each([undefined, null])(
+    'falls back to stderr when the status is %s',
+    (exitCode) => {
+      expect(
+        executionFailed({
+          stdout: '',
+          stderr: 'boom',
+          outputFiles: [],
+          exitCode,
+        }),
+      ).toBe(true);
+      expect(
+        executionFailed({stdout: 'ok', stderr: '', outputFiles: [], exitCode}),
+      ).toBe(false);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------

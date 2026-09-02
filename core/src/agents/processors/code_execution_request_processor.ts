@@ -15,6 +15,7 @@ import {
   CodeExecutionLanguage,
   CodeExecutionResult,
   convertCodeExecutionParts,
+  executionFailed,
   extractCodeAndTruncateContent,
   File,
 } from '../../code_executors/code_execution_utils.js';
@@ -465,17 +466,6 @@ function getOrSetExecutionId(
   }
 
   return executionId;
-}
-
-/**
- * Whether an execution failed, for the purpose of the error-retry budget.
- *
- * An executor that reports the status the process exited with settles it; a
- * program that only wrote a warning then does not spend a retry. The rest fall
- * back to whether anything reached stderr.
- */
-export function executionFailed(result: CodeExecutionResult): boolean {
-  return result.exitCode != null ? result.exitCode !== 0 : !!result.stderr;
 }
 
 /**
