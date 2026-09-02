@@ -201,6 +201,10 @@ export {
 } from './errors/llm_calls_limit_exceeded_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {NotImplementedError} from './errors/not_implemented_error.js';
+export {
+  ResourceExhaustedError,
+  isResourceExhaustedError,
+} from './errors/resource_exhausted_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {StaleSessionError} from './errors/stale_session_error.js';
 export {

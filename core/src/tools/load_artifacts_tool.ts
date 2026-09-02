@@ -9,31 +9,21 @@ import {FunctionDeclaration, Part, Type} from '@google/genai';
 import {Context} from '../agents/context.js';
 import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {appendDynamicInstructions, LlmRequest} from '../models/llm_request.js';
-import {maybeBase64ToBytes} from '../utils/base64_utils.js';
-import {extractDocxText} from '../utils/document_text_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {getLogger} from '../utils/logger.js';
-import {
-  isGeminiInlineMimeTypeSupported,
-  isSpreadsheetMimeType,
-  isTextLikeMimeType,
-  normalizeMimeType,
-} from '../utils/mime_utils.js';
-import {spreadsheetToMarkdown} from '../utils/spreadsheet_utils.js';
+import {asSafePartForLlm} from '../utils/part_utils.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
   ToolProcessLlmRequest,
 } from './base_tool.js';
 
+// The conversion lives in `utils/part_utils.js`, where the Gemini model also
+// calls it. It stays exported here because that is where callers import it
+// from.
+export {asSafePartForLlm};
+
 const logger = getLogger();
-
-/** MIME type of a DOCX document. */
-const DOCX_MIME_TYPE =
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
-/** MIME type an upload carries when its real type is unknown. */
-const OCTET_STREAM_MIME_TYPE = 'application/octet-stream';
 
 /**
  * Narrows a model-supplied `artifact_names` value to a list of strings.
@@ -54,93 +44,8 @@ function parseArtifactNames(value: unknown): string[] | undefined {
   return names.length === value.length ? names : undefined;
 }
 
-/** Filename suffixes whose content is text whatever the MIME type says. */
-const TEXT_FILE_SUFFIXES = ['.csv', '.txt', '.json', '.xml'];
-
-/** Filename suffixes of a spreadsheet workbook. */
-const SPREADSHEET_FILE_SUFFIXES = ['.xlsx', '.xls'];
-
 /** Model-facing description of the tool's only parameter. */
 const ARTIFACT_NAMES_DESCRIPTION = 'The names of the artifacts to load.';
-
-/**
- * Converts an artifact into a `Part` that is safe to send to Gemini.
- *
- * An artifact Gemini accepts inline is returned unchanged. Anything else is
- * converted to text: a DOCX document to its extracted text, a text-like
- * payload to its decoded text, and any remaining binary payload to a short
- * placeholder naming the artifact and its size. The conversion never throws;
- * every failure degrades to a text part.
- *
- * A `processArtifact` callback can call this to fall back to the default
- * conversion for an artifact it does not want to handle itself.
- *
- * @param artifact The artifact to convert.
- * @param artifactName The name the artifact was loaded under.
- * @param enableSpreadsheetParsing Whether to render a spreadsheet workbook as
- *     a markdown table instead of a placeholder.
- * @return A part that is safe to send to Gemini.
- */
-export function asSafePartForLlm(
-  artifact: Part,
-  artifactName: string,
-  enableSpreadsheetParsing = false,
-): Part {
-  const inlineData = artifact.inlineData;
-  if (!inlineData) {
-    return artifact;
-  }
-
-  if (isGeminiInlineMimeTypeSupported(inlineData.mimeType)) {
-    return artifact;
-  }
-
-  const mimeType =
-    normalizeMimeType(inlineData.mimeType) || OCTET_STREAM_MIME_TYPE;
-  const data = inlineData.data;
-  if (!data) {
-    return {
-      text: `[Artifact: ${artifactName}, type: ${mimeType}. No inline data was provided.]`,
-    };
-  }
-
-  const bytes = maybeBase64ToBytes(data);
-  if (!bytes) {
-    return {text: data};
-  }
-
-  const loweredName = artifactName.toLowerCase();
-  const isDocx =
-    mimeType === DOCX_MIME_TYPE ||
-    mimeType === OCTET_STREAM_MIME_TYPE ||
-    loweredName.endsWith('.docx');
-  if (isDocx) {
-    const docxText = extractDocxText(bytes);
-    if (docxText !== undefined) {
-      return {text: docxText};
-    }
-  }
-
-  if (
-    isTextLikeMimeType(mimeType) ||
-    TEXT_FILE_SUFFIXES.some((suffix) => loweredName.endsWith(suffix))
-  ) {
-    return {text: bytes.toString('utf8')};
-  }
-
-  if (
-    enableSpreadsheetParsing &&
-    (isSpreadsheetMimeType(mimeType) ||
-      SPREADSHEET_FILE_SUFFIXES.some((suffix) => loweredName.endsWith(suffix)))
-  ) {
-    return {text: spreadsheetToMarkdown(bytes)};
-  }
-
-  const sizeKb = bytes.length / 1024;
-  return {
-    text: `[Binary artifact: ${artifactName}, type: ${mimeType}, size: ${sizeKb.toFixed(1)} KB. Content cannot be displayed inline.]`,
-  };
-}
 
 /**
  * Customizes or filters an artifact before it is added to the LLM request.
