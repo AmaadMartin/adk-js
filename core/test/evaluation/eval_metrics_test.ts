@@ -5,9 +5,9 @@
  */
 
 import {
-  BASE_CRITERION_TYPE,
   InputValidationError,
   isBaseCriterion,
+  parseBaseCriterion,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -33,22 +33,18 @@ describe('isBaseCriterion', () => {
   });
 });
 
-describe('BASE_CRITERION_TYPE', () => {
-  it('is named after the adk-python criterion class', () => {
-    expect(BASE_CRITERION_TYPE.name).toBe('BaseCriterion');
-  });
-
+describe('parseBaseCriterion', () => {
   it('returns the criterion unchanged, keeping its extra keys', () => {
     const raw = {threshold: 0.7, extra: 'kept'};
 
-    const parsed = BASE_CRITERION_TYPE.parse(raw);
+    const parsed = parseBaseCriterion(raw);
 
     expect(parsed).toBe(raw);
     expect(parsed).toEqual({threshold: 0.7, extra: 'kept'});
   });
 
   it('rejects a value that is not a criterion, naming the expected type', () => {
-    expect(() => BASE_CRITERION_TYPE.parse({})).toThrowError(
+    expect(() => parseBaseCriterion({})).toThrowError(
       new InputValidationError('Expected a criterion of type `BaseCriterion`.'),
     );
   });

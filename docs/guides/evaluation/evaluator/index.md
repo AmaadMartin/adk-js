@@ -41,7 +41,6 @@ import {
   Evaluator,
   getEvalStatus,
   getTextFromContent,
-  validateInvocationLengths,
   type EvaluationResult,
   type Invocation,
 } from '@google/adk';
@@ -55,8 +54,6 @@ class AnsweredEvaluator extends Evaluator {
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
   ): EvaluationResult {
-    validateInvocationLengths(actualInvocations, expectedInvocations);
-
     const perInvocationResults = actualInvocations.map((actualInvocation) => {
       const score = getTextFromContent(actualInvocation.finalResponse) ? 1 : 0;
       return {
@@ -90,10 +87,10 @@ result.overallScore; // 1
 result.overallEvalStatus === EvalStatus.PASSED; // true
 ```
 
-`validateInvocationLengths` throws an `InputValidationError` when both lists
-are present and their lengths differ, because the pairs would be truncated
-silently. It returns without complaint when `expectedInvocations` is absent:
-each metric decides for itself whether it needs golden invocations.
+`expectedInvocations` is absent unless the eval case carries golden data, so
+each metric decides for itself whether it needs it. When both lists are
+present, they must have the same length: pairing them by index would otherwise
+truncate one of them silently.
 
 ## Reporting rubric scores
 
@@ -179,19 +176,19 @@ that calls a judge model declares it `async`. The runner awaits either.
 ## Declaring the criterion type
 
 `criterionType` is a static member, so it binds per class and a subclass
-inherits it. It defaults to `BASE_CRITERION_TYPE`, which accepts any object
-carrying a finite numeric `threshold` and keeps every other key it carries.
+inherits it. A `CriterionType` is a function that validates the criterion an
+eval config supplied. It defaults to `parseBaseCriterion`, which accepts any
+object carrying a finite numeric `threshold` and keeps every other key.
 
 ```ts
-import {BASE_CRITERION_TYPE, Evaluator} from '@google/adk';
+import {Evaluator, parseBaseCriterion} from '@google/adk';
 
-Evaluator.criterionType === BASE_CRITERION_TYPE; // true
-Evaluator.criterionType.name; // 'BaseCriterion'
+Evaluator.criterionType === parseBaseCriterion; // true
 
-BASE_CRITERION_TYPE.parse({threshold: 0.7, matchType: 'EXACT'});
+Evaluator.criterionType({threshold: 0.7, matchType: 'EXACT'});
 // {threshold: 0.7, matchType: 'EXACT'}
 
-BASE_CRITERION_TYPE.parse({});
+Evaluator.criterionType({});
 // throws InputValidationError: Expected a criterion of type `BaseCriterion`.
 ```
 
@@ -221,16 +218,13 @@ function isMatchCriterion(raw: unknown): raw is MatchCriterion {
   );
 }
 
-const MATCH_CRITERION_TYPE: CriterionType<MatchCriterion> = {
-  name: 'MatchCriterion',
-  parse(raw: unknown): MatchCriterion {
-    if (!isMatchCriterion(raw)) {
-      throw new InputValidationError(
-        `Expected a criterion of type \`${this.name}\`.`,
-      );
-    }
-    return raw;
-  },
+const MATCH_CRITERION_TYPE: CriterionType<MatchCriterion> = (raw: unknown) => {
+  if (!isMatchCriterion(raw)) {
+    throw new InputValidationError(
+      'Expected a criterion of type `MatchCriterion`.',
+    );
+  }
+  return raw;
 };
 
 class MatchEvaluator extends Evaluator {
@@ -242,7 +236,7 @@ class MatchEvaluator extends Evaluator {
 }
 ```
 
-`parse` takes `unknown`, because an eval config is user-authored JSON or YAML.
-It narrows through a type guard rather than a cast, and it returns the value
-unchanged so that the extra keys a config carries survive. It never echoes the
-value back in the error message.
+A `CriterionType` takes `unknown`, because an eval config is user-authored JSON
+or YAML. It narrows through a type guard rather than a cast, and it returns the
+value unchanged so that the extra keys a config carries survive. It never
+echoes the value back in the error message.

@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Content} from '@google/genai';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import type {ConversationScenario} from './conversation_scenarios.js';
 import type {Invocation} from './eval_case.js';
 import type {CriterionType} from './eval_metrics.js';
-import {BASE_CRITERION_TYPE, EvalStatus} from './eval_metrics.js';
+import {EvalStatus, parseBaseCriterion} from './eval_metrics.js';
 import type {RubricScore} from './eval_rubrics.js';
 
 /**
@@ -62,7 +61,7 @@ export abstract class Evaluator {
    * its own criterion and validates the config-supplied criterion against it,
    * as `Evaluator.criterion_type` does in adk-python.
    */
-  static readonly criterionType: CriterionType = BASE_CRITERION_TYPE;
+  static readonly criterionType: CriterionType = parseBaseCriterion;
 
   /**
    * Scores the actual invocations, optionally against golden ones.
@@ -109,22 +108,4 @@ export function validateInvocationLengths(
         `got ${actualInvocations.length} and ${expectedInvocations.length}.`,
     );
   }
-}
-
-/** Returns the status of a score, which is absent when nothing was scored. */
-export function getEvalStatus(
-  score: number | undefined,
-  threshold: number,
-): EvalStatus {
-  if (score === undefined) {
-    return EvalStatus.NOT_EVALUATED;
-  }
-  return score >= threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
-}
-
-/** Joins the text parts of a content with newlines. */
-export function getTextFromContent(content?: Content): string {
-  return (content?.parts ?? [])
-    .flatMap((part) => (part.text ? [part.text] : []))
-    .join('\n');
 }

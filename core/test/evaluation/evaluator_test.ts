@@ -5,22 +5,19 @@
  */
 
 import {
-  BASE_CRITERION_TYPE,
   emptyEvaluationResult,
   EvalStatus,
   Evaluator,
-  getEvalStatus,
-  getTextFromContent,
   InputValidationError,
-  validateInvocationLengths,
+  parseBaseCriterion,
   type ConversationScenario,
   type CriterionType,
   type EvaluationResult,
   type Invocation,
   type PerInvocationResult,
-  type RubricScore,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {validateInvocationLengths} from '../../src/evaluation/evaluator.js';
 
 const INVOCATION: Invocation = {
   invocationId: '',
@@ -58,9 +55,14 @@ class RecordingEvaluator extends Evaluator {
   }
 }
 
-const STRICT_CRITERION_TYPE: CriterionType = {
-  name: 'StrictCriterion',
-  parse: (raw: unknown) => BASE_CRITERION_TYPE.parse(raw),
+const STRICT_CRITERION_TYPE: CriterionType = (raw: unknown) => {
+  const criterion = parseBaseCriterion(raw);
+  if (criterion.threshold < 1) {
+    throw new InputValidationError(
+      'Expected a criterion of type `StrictCriterion`.',
+    );
+  }
+  return criterion;
 };
 
 /** An evaluator that narrows the criterion its config may carry. */
@@ -110,15 +112,20 @@ describe('validateInvocationLengths', () => {
 
 describe('Evaluator', () => {
   it('binds criterionType to the base criterion by default', () => {
-    expect(Evaluator.criterionType).toBe(BASE_CRITERION_TYPE);
-    expect(Evaluator.criterionType.name).toBe('BaseCriterion');
-    expect(RecordingEvaluator.criterionType).toBe(BASE_CRITERION_TYPE);
+    expect(Evaluator.criterionType).toBe(parseBaseCriterion);
+    expect(RecordingEvaluator.criterionType).toBe(parseBaseCriterion);
+    expect(Evaluator.criterionType({threshold: 0.5})).toEqual({threshold: 0.5});
   });
 
   it('lets a subclass narrow criterionType without touching the base', () => {
     expect(StrictEvaluator.criterionType).toBe(STRICT_CRITERION_TYPE);
-    expect(StrictEvaluator.criterionType.name).toBe('StrictCriterion');
-    expect(Evaluator.criterionType).toBe(BASE_CRITERION_TYPE);
+    expect(() => StrictEvaluator.criterionType({threshold: 0.5})).toThrowError(
+      new InputValidationError(
+        'Expected a criterion of type `StrictCriterion`.',
+      ),
+    );
+    expect(Evaluator.criterionType).toBe(parseBaseCriterion);
+    expect(Evaluator.criterionType({threshold: 0.5})).toEqual({threshold: 0.5});
   });
 
   it('passes the conversation scenario as the third argument', () => {
@@ -166,7 +173,15 @@ describe('EvaluationResult', () => {
       perInvocationResults: [],
     };
 
-    expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+    expect(JSON.parse(JSON.stringify(result))).toEqual({
+      overallScore: 0.5,
+      overallEvalStatus: 2,
+      overallRubricScores: [
+        {rubricId: 'grammar', score: 1, rationale: 'Well formed.'},
+        {rubricId: 'grounded', score: 0, rationale: 'Cited nothing.'},
+      ],
+      perInvocationResults: [],
+    });
   });
 
   it('leaves the overall rubric scores unset on an empty result', () => {
@@ -188,50 +203,24 @@ describe('PerInvocationResult', () => {
       rubricScores: [{rubricId: 'grounded', score: 0}],
     };
 
-    expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+    expect(JSON.parse(JSON.stringify(result))).toEqual({
+      actualInvocation: INVOCATION,
+      expectedInvocation: INVOCATION,
+      score: 0.5,
+      evalStatus: 2,
+      rubricScores: [{rubricId: 'grounded', score: 0}],
+    });
   });
 
-  it('accepts a rubric score carrying only its rubric id', () => {
-    const rubricScore: RubricScore = {rubricId: 'grounded'};
-
-    expect(rubricScore.score).toBeUndefined();
-    expect(rubricScore.rationale).toBeUndefined();
-  });
-});
-
-describe('getEvalStatus', () => {
-  it('reports nothing evaluated for an absent score', () => {
-    expect(getEvalStatus(undefined, 0.5)).toBe(EvalStatus.NOT_EVALUATED);
-  });
-
-  it('passes a score equal to the threshold', () => {
-    expect(getEvalStatus(0.5, 0.5)).toBe(EvalStatus.PASSED);
-  });
-
-  it('fails a score below the threshold', () => {
-    expect(getEvalStatus(0.49, 0.5)).toBe(EvalStatus.FAILED);
-  });
-});
-
-describe('getTextFromContent', () => {
-  it('returns an empty string for absent content', () => {
-    expect(getTextFromContent(undefined)).toBe('');
-  });
-
-  it('returns an empty string when the content carries no parts', () => {
-    expect(getTextFromContent({})).toBe('');
-  });
-
-  it('joins only the text parts, with newlines', () => {
-    const content = {
-      parts: [
-        {text: 'first'},
-        {functionCall: {name: 'roll_die', args: {sides: 6}}},
-        {text: ''},
-        {text: 'second'},
-      ],
+  it('serializes a rubric score with no score as the id alone', () => {
+    const result: PerInvocationResult = {
+      actualInvocation: INVOCATION,
+      evalStatus: EvalStatus.NOT_EVALUATED,
+      rubricScores: [{rubricId: 'grounded'}],
     };
 
-    expect(getTextFromContent(content)).toBe('first\nsecond');
+    expect(JSON.parse(JSON.stringify(result)).rubricScores).toEqual([
+      {rubricId: 'grounded'},
+    ]);
   });
 });

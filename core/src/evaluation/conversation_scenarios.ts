@@ -20,8 +20,3 @@ export interface ConversationScenario {
   /** The persona the user simulator adopts. */
   userPersona?: UserPersona;
 }
-
-/** A container for a list of scenarios, for serialization. */
-export interface ConversationScenarios {
-  scenarios: ConversationScenario[];
-}

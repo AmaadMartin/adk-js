@@ -84,41 +84,6 @@ export interface Invocation {
   appDetails?: AppDetails;
 }
 
-/** Values that initialize the session an eval case runs in. */
-export interface SessionInput {
-  appName: string;
-
-  userId: string;
-
-  /**
-   * A fixed session id for this eval case. Artifacts are keyed by
-   * `(appName, userId, sessionId)`, so pinning the id lets a case reach
-   * artifacts that were pre-loaded for that session. When unset, a random id
-   * is generated per case.
-   */
-  sessionId?: string;
-
-  /** The state the session starts from. Applied only when creating it. */
-  state?: Record<string, unknown>;
-}
-
-/** One evaluation case: a conversation plus the session it runs in. */
-export interface EvalCase {
-  /** Unique identifier for the eval case. */
-  evalId: string;
-
-  /** A static conversation between the user and the agent. */
-  conversation?: Invocation[];
-
-  sessionInput?: SessionInput;
-
-  /** Creation time in seconds since the epoch. */
-  creationTimestamp: number;
-
-  /** The expected session state at the end of the conversation. */
-  finalSessionState?: Record<string, unknown>;
-}
-
 /** Returns true when the intermediate data is a list of invocation events. */
 export function isInvocationEvents(
   intermediateData: IntermediateDataType,

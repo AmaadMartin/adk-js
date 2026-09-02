@@ -24,24 +24,17 @@ export interface BaseCriterion {
 }
 
 /**
- * A runtime handle for a criterion shape.
+ * Validates a criterion read from an eval config.
  *
  * adk-python binds `Evaluator.criterion_type` to a pydantic model class and
- * calls `model_validate` on the criterion read from an eval config. A
- * TypeScript interface is erased at runtime, so the binding carries a name and
- * a validator in place of a class object.
+ * calls `model_validate` on the criterion. A TypeScript interface is erased at
+ * runtime, so the binding carries the validator itself.
+ *
+ * @throws {InputValidationError} When the value is not a valid `C`.
  */
-export interface CriterionType<C extends BaseCriterion = BaseCriterion> {
-  /** The name used in validation errors, matching the adk-python class. */
-  readonly name: string;
-
-  /**
-   * Validates a criterion read from an eval config.
-   *
-   * @throws {InputValidationError} When the value is not a valid `C`.
-   */
-  parse(raw: unknown): C;
-}
+export type CriterionType<C extends BaseCriterion = BaseCriterion> = (
+  raw: unknown,
+) => C;
 
 /** Whether a value carries the finite numeric threshold every criterion needs. */
 export function isBaseCriterion(raw: unknown): raw is BaseCriterion {
@@ -55,20 +48,18 @@ export function isBaseCriterion(raw: unknown): raw is BaseCriterion {
 }
 
 /**
- * The criterion type an evaluator accepts unless it narrows it.
+ * Validates a criterion that needs nothing beyond a threshold.
  *
- * `parse` returns the value unchanged, so the extra keys that adk-python's
+ * Returns the value unchanged, so the extra keys that adk-python's
  * `extra="allow"` config preserves survive here too.
+ *
+ * @throws {InputValidationError} When the value is not a `BaseCriterion`.
  */
-export const BASE_CRITERION_TYPE: CriterionType<BaseCriterion> = {
-  name: 'BaseCriterion',
-
-  parse(raw: unknown): BaseCriterion {
-    if (!isBaseCriterion(raw)) {
-      throw new InputValidationError(
-        `Expected a criterion of type \`${this.name}\`.`,
-      );
-    }
-    return raw;
-  },
-};
+export function parseBaseCriterion(raw: unknown): BaseCriterion {
+  if (!isBaseCriterion(raw)) {
+    throw new InputValidationError(
+      'Expected a criterion of type `BaseCriterion`.',
+    );
+  }
+  return raw;
+}
