@@ -4,9 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Blob, Content} from '@google/genai';
+import {Blob, Content, LiveClientRealtimeInput} from '@google/genai';
 
 import {LlmResponse} from './llm_response.js';
+
+/**
+ * Input accepted by {@link BaseLlmConnection.sendRealtime}.
+ *
+ * A `Blob` is a chunk of audio or a frame of video. A
+ * `LiveClientRealtimeInput` carries a control signal instead: the start of
+ * user activity, the end of user activity, or the end of the audio stream.
+ */
+export type RealtimeInput = Blob | LiveClientRealtimeInput;
 
 /**
  * The base class for a live model connection.
@@ -35,14 +44,15 @@ export interface BaseLlmConnection {
   sendContent(content: Content): Promise<void>;
 
   /**
-   * Sends a chunk of audio or a frame of video to the model in realtime.
+   * Sends a chunk of audio, a frame of video, or a realtime control signal to
+   * the model.
    *
-   * The model may not respond immediately upon receiving the blob. It will do
+   * The model may not respond immediately upon receiving a blob. It will do
    * voice activity detection and decide when to respond.
    *
-   * @param blob The blob to send to the model.
+   * @param input The blob or control signal to send to the model.
    */
-  sendRealtime(blob: Blob): Promise<void>;
+  sendRealtime(input: RealtimeInput): Promise<void>;
 
   /**
    * Optionally signals the start of user activity (e.g. user begins speaking)
