@@ -21,6 +21,7 @@ import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
+import {registerConformanceCommands} from './cli_conformance.js';
 import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
@@ -571,6 +572,8 @@ export function createProgram(): Command {
         forceRunAll: getBoolean(options['force']),
       });
     });
+
+  registerConformanceCommands(program);
 
   return program;
 }
