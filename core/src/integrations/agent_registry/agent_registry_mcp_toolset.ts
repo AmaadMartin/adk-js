@@ -44,7 +44,8 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
    * @param options.connectionParams - HTTP connection parameters for the MCP server.
    * @param options.toolFilter - Optional predicate or list of tool names to include.
    *   When omitted, all tools from the server are returned.
-   * @param options.prefix - Optional prefix prepended to each tool name (e.g. `myServer_toolName`).
+   * @param options.prefix - Optional prefix {@link BaseToolset.getToolsWithPrefix}
+   *   prepends to each tool name (e.g. `myServer_toolName`).
    * @param options.headerProvider - Optional async function called immediately before each
    *   {@link getTools} invocation to supply or refresh request headers (e.g. GCP auth tokens).
    * @param options.authScheme - Optional auth scheme forwarded to each resolved tool.
@@ -70,8 +71,10 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
   }
 
   /**
-   * Connects to the underlying MCP server, retrieves tool definitions, prefixes
-   * tool names, and injects destination telemetry metadata into each tool.
+   * Connects to the underlying MCP server, retrieves tool definitions, and
+   * injects destination telemetry metadata into each tool. Names come back as
+   * the server advertised them; {@link BaseToolset.getToolsWithPrefix} applies
+   * the prefix.
    *
    * The `headerProvider`, if configured, is invoked immediately before the
    * connection is established so that tokens are always fresh.
@@ -119,14 +122,7 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
 
     // Map tool definitions to MCPTools
     const tools = listResult.tools.map((tool) => {
-      const prefixedName = this.prefix
-        ? `${this.prefix}_${tool.name}`
-        : tool.name;
-      const mcpTool = new MCPTool(
-        {...tool, name: prefixedName},
-        sessionManager,
-        tool.name,
-      );
+      const mcpTool = new MCPTool(tool, sessionManager, tool.name);
 
       // Inject gcp.mcp.server.destination.id telemetry key for tracing tools execution
       const toolWithMetadata = mcpTool as unknown as {

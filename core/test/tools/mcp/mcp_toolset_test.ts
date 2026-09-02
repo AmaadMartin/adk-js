@@ -66,11 +66,18 @@ describe('MCPToolset', () => {
 
   it('discovers tools with prefix applied', async () => {
     const toolset = new MCPToolset(stdioParams, [], 'myprefix');
-    const tools = await toolset.getTools();
+    const tools = await toolset.getToolsWithPrefix();
 
     expect(tools).toHaveLength(2);
     expect(tools[0].name).toBe('myprefix_test-tool');
     expect(tools[1].name).toBe('myprefix_other-tool');
+  });
+
+  it('discovers unprefixed tools through getTools when a prefix is set', async () => {
+    const toolset = new MCPToolset(stdioParams, [], 'myprefix');
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['test-tool', 'other-tool']);
   });
 
   describe('toolFilter', () => {
@@ -89,13 +96,9 @@ describe('MCPToolset', () => {
       expect(tools[0].name).toBe('test-tool');
     });
 
-    it('string array filter with prefix matches prefixed names', async () => {
-      const toolset = new MCPToolset(
-        stdioParams,
-        ['myprefix_test-tool'],
-        'myprefix',
-      );
-      const tools = await toolset.getTools();
+    it('string array filter with prefix matches unprefixed names', async () => {
+      const toolset = new MCPToolset(stdioParams, ['test-tool'], 'myprefix');
+      const tools = await toolset.getToolsWithPrefix();
 
       expect(tools).toHaveLength(1);
       expect(tools[0].name).toBe('myprefix_test-tool');
