@@ -556,25 +556,21 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       TOOL_FILTER_REQUEST_PROCESSOR,
     ];
 
-    if (
-      !config.requestProcessors &&
-      config.contextCompactors &&
-      config.contextCompactors.length > 0
-    ) {
+    if (!config.requestProcessors) {
+      // Always in the pipeline: an agent that declares no compactors still
+      // honours the compaction policy its App declares, which only arrives
+      // per invocation. With neither, the processor does nothing.
+      const compactionProcessor = new ContextCompactorRequestProcessor(
+        config.contextCompactors ?? [],
+      );
       // Find where CONTENT_REQUEST_PROCESSOR is to place compaction immediately before it.
       const contentIndex = this.requestProcessors.indexOf(
         CONTENT_REQUEST_PROCESSOR,
       );
       if (contentIndex !== -1) {
-        this.requestProcessors.splice(
-          contentIndex,
-          0,
-          new ContextCompactorRequestProcessor(config.contextCompactors),
-        );
+        this.requestProcessors.splice(contentIndex, 0, compactionProcessor);
       } else {
-        this.requestProcessors.push(
-          new ContextCompactorRequestProcessor(config.contextCompactors),
-        );
+        this.requestProcessors.push(compactionProcessor);
       }
     }
 

@@ -6,6 +6,7 @@
 
 import {Content} from '@google/genai';
 
+import type {EventsCompactionConfig} from '../apps/events_compaction_config.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {Event} from '../events/event.js';
@@ -76,6 +77,8 @@ export interface InvocationContextParams {
   isolationScope?: string;
   /** The path of the workflow node this invocation runs, if any. */
   nodePath?: string;
+  /** The app-level compaction policy that applies to this invocation. */
+  eventsCompactionConfig?: EventsCompactionConfig;
   /** Whether token-threshold compaction already ran in this invocation. */
   tokenCompactionChecked?: boolean;
   /** Nesting depth of node-as-tool executions; used to bound recursion. */
@@ -301,6 +304,13 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * The compaction policy the `App` declared, applying to every agent under
+   * it. An agent that declares its own compactors uses those instead. Mirrors
+   * `events_compaction_config` in `google/adk-python`.
+   */
+  readonly eventsCompactionConfig?: EventsCompactionConfig;
+
+  /**
    * Whether token-threshold compaction already ran in this invocation. The
    * token compactor sets it once it has compacted, so a later model step in
    * the same invocation does not compact again. Mirrors
@@ -336,6 +346,7 @@ export class InvocationContext {
     this.workflowInstructionScope = params.workflowInstructionScope;
     this.isolationScope = params.isolationScope;
     this.nodePath = params.nodePath;
+    this.eventsCompactionConfig = params.eventsCompactionConfig;
     this.tokenCompactionChecked = params.tokenCompactionChecked ?? false;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;

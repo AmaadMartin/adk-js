@@ -83,6 +83,8 @@ export type {
   UserInputKind,
   UserInputRequest,
 } from './agents/user_input_request.js';
+export {createEventsCompactionConfig} from './apps/events_compaction_config.js';
+export type {EventsCompactionConfig} from './apps/events_compaction_config.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';
 export type {

@@ -19,6 +19,7 @@ import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
 import {App} from '../apps/app.js';
+import {EventsCompactionConfig} from '../apps/events_compaction_config.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
@@ -164,6 +165,11 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
   readonly resumabilityConfig?: ResumabilityConfig;
+  /**
+   * The compaction policy the `App` declared, carried onto every invocation
+   * this runner starts.
+   */
+  readonly eventsCompactionConfig?: EventsCompactionConfig;
 
   /**
    * Creates a new Runner instance.
@@ -191,6 +197,7 @@ export class Runner {
     this.credentialService = input.credentialService;
     this.resumabilityConfig =
       input.app?.resumabilityConfig ?? input.resumabilityConfig;
+    this.eventsCompactionConfig = input.app?.eventsCompactionConfig;
   }
 
   /**
@@ -324,6 +331,7 @@ export class Runner {
             userContent: newMessage,
             runConfig,
             a2aMetadata: runConfig.a2aMetadata,
+            eventsCompactionConfig: this.eventsCompactionConfig,
             pluginManager: this.pluginManager,
             abortSignal: params.abortSignal,
           });
@@ -712,6 +720,7 @@ export class Runner {
             session,
             runConfig,
             a2aMetadata: runConfig.a2aMetadata,
+            eventsCompactionConfig: this.eventsCompactionConfig,
             pluginManager: this.pluginManager,
             liveRequestQueue: params.liveRequestQueue,
             abortSignal: params.abortSignal,
