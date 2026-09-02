@@ -5,7 +5,12 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {VertexAiSessionService} from '@google/adk';
+import {
+  AuthConfig,
+  createEvent,
+  createSession,
+  VertexAiSessionService,
+} from '@google/adk';
 import {
   ApiClient,
   Auth,
@@ -169,5 +174,105 @@ describe('VertexAiSessionService session expiration over the wire', () => {
     expect(bodies).toEqual([
       {userId: 'user-1', expireTime: '2026-10-01T00:00:00Z'},
     ]);
+  });
+});
+
+/**
+ * Drives getSession and appendEvent through the real Agent Engine Sessions
+ * client, so the assertions are on the request the SDK puts on the wire rather
+ * than on the config object a mock would capture.
+ */
+describe('VertexAiSessionService request payloads over the wire', () => {
+  let server: http.Server;
+  let service: VertexAiSessionService;
+  let paths: string[];
+  let bodies: unknown[];
+
+  beforeAll(async () => {
+    server = http.createServer(async (request, response) => {
+      paths.push(request.url ?? '');
+      bodies.push(request.method === 'GET' ? undefined : await json(request));
+      response.writeHead(200, {'content-type': 'application/json'});
+      response.end(
+        JSON.stringify({
+          name: `reasoningEngines/${AGENT_ENGINE_ID}/sessions/session-123`,
+          userId: 'user-1',
+          updateTime: '2026-01-01T00:00:00Z',
+        }),
+      );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+
+    const apiClient = new ApiClient({
+      auth: unauthenticated,
+      uploader: new NodeUploader(),
+      downloader: new NodeDownloader(),
+      project: 'test-project',
+      location: 'us-central1',
+      vertexai: true,
+      httpOptions: {
+        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      },
+    });
+    service = new VertexAiSessionService({
+      agentEngineId: AGENT_ENGINE_ID,
+      sessions: createSessionsClient(apiClient),
+    });
+  });
+
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  beforeEach(() => {
+    paths = [];
+    bodies = [];
+  });
+
+  it('requests the short session id when given a full resource name', async () => {
+    const session = await service.getSession({
+      appName: AGENT_ENGINE_ID,
+      userId: 'user-1',
+      sessionId: `projects/test-project/locations/us-central1/reasoningEngines/${AGENT_ENGINE_ID}/sessions/session-123`,
+      config: {numRecentEvents: 0},
+    });
+
+    expect(session?.id).toBe('session-123');
+    expect(paths).toHaveLength(1);
+    expect(paths[0]).toContain(
+      `/reasoningEngines/${AGENT_ENGINE_ID}/sessions/session-123`,
+    );
+  });
+
+  it('sends requestedAuthConfigs as a plain object in the append body', async () => {
+    const session = createSession({
+      id: 'session-123',
+      appName: AGENT_ENGINE_ID,
+      userId: 'user-1',
+    });
+    const authConfig: AuthConfig = {
+      credentialKey: 'weather-api',
+      authScheme: {type: 'apiKey', in: 'header', name: 'x-api-key'},
+    };
+
+    await service.appendEvent({
+      session,
+      event: createEvent({
+        author: 'model',
+        timestamp: 1620000000000,
+        actions: {requestedAuthConfigs: {'call-1': authConfig}},
+      }),
+    });
+
+    expect(bodies).toHaveLength(1);
+    const body = bodies[0] as {
+      actions?: {requestedAuthConfigs?: Record<string, unknown>};
+    };
+    expect(body.actions?.requestedAuthConfigs).toEqual({
+      'call-1': {
+        credentialKey: 'weather-api',
+        authScheme: {type: 'apiKey', in: 'header', name: 'x-api-key'},
+      },
+    });
   });
 });
