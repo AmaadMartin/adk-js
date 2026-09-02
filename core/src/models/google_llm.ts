@@ -23,6 +23,7 @@ import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
 import {GeminiLlmConnection} from './gemini_llm_connection.js';
 import {generateContentViaInteractions} from './interactions_utils.js';
+import {LiveConnectionClosedError} from './live_connection_error.js';
 import {LlmRequest} from './llm_request.js';
 import {createLlmResponse, LlmResponse} from './llm_response.js';
 
@@ -328,6 +329,7 @@ export class Gemini extends BaseLlm {
 
     const modelVersion = llmRequest.model ?? this.model;
     const messageQueue = new AsyncQueue<LiveServerMessage>();
+    let localCloseRequested = false;
 
     const liveSession = await this.liveApiClient.live.connect({
       model: modelVersion,
@@ -339,12 +341,28 @@ export class Gemini extends BaseLlm {
         onerror: (error) => {
           messageQueue.error(error);
         },
-        onclose: () => {
-          messageQueue.close();
+        onclose: (event: CloseEvent) => {
+          // A close we asked for ends the stream. A close the server chose
+          // carries its code to the flow, which decides between a reconnect,
+          // a clean end, and a failure.
+          if (localCloseRequested) {
+            messageQueue.close();
+            return;
+          }
+          messageQueue.fail(
+            new LiveConnectionClosedError(event.code, event.reason),
+          );
         },
       },
     });
-    return new GeminiLlmConnection(liveSession, modelVersion, messageQueue);
+    return new GeminiLlmConnection(
+      liveSession,
+      modelVersion,
+      messageQueue,
+      () => {
+        localCloseRequested = true;
+      },
+    );
   }
 
   private preprocessRequest(llmRequest: LlmRequest): void {
