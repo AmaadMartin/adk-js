@@ -83,18 +83,13 @@ function agentInputSchema(agent: BaseAgent): SchemaLike | undefined {
  * run could leave a partial chunk as the answer — the nested run is always
  * unary.
  *
- * The caller's own config is never mutated: an override produces a copy.
+ * The caller's own config is never mutated: the overrides go on a copy. Both
+ * are applied unconditionally, because they are the values `createRunConfig`
+ * defaults to anyway when the caller left them unset.
  */
 function nestedRunConfig(callerConfig?: RunConfig): RunConfig | undefined {
   if (!callerConfig) {
     return undefined;
-  }
-  const streaming = callerConfig.streamingMode;
-  if (
-    !callerConfig.supportCfc &&
-    (streaming === undefined || streaming === StreamingMode.NONE)
-  ) {
-    return callerConfig;
   }
   return {
     ...callerConfig,
@@ -136,9 +131,7 @@ export class AgentTool extends BaseTool {
       declaration = {
         name: this.name,
         description: this.description,
-        // A copy, so a consumer that adjusts the declaration for one model
-        // variant does not mutate the wrapped agent's own schema.
-        parameters: {...this.agent.inputSchema},
+        parameters: this.agent.inputSchema,
       };
     } else {
       declaration = {

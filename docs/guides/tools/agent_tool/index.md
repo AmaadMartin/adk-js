@@ -1,31 +1,22 @@
 # AgentTool
 
-`AgentTool` wraps an agent so another agent can call it as a tool. Reach for it
-when one agent needs a second agent's answer inside its own turn, rather than
-handing the conversation over to it.
+`AgentTool` wraps an agent so another agent can call it as a tool. This guide
+covers the nested run it performs: the arguments it accepts, the run settings
+it inherits from the caller, and when it releases the sub-runner. For what
+`AgentTool` is for and how it compares to a sub-agent, see
+[adk.dev](https://adk.dev/).
 
 ## Introduction
 
-A sub-agent and an `AgentTool` both give one agent access to another, but they
-differ in who keeps control. Transferring to a sub-agent moves the conversation:
-the sub-agent answers the user directly and the parent stops. An `AgentTool`
-keeps the parent in charge. The wrapped agent runs to completion in a nested
-run, and only its final answer comes back, as the result of one function call
-the parent's model made.
-
-That nested run is a full run, driven by its own `Runner`. Three things follow
-from it, and they are what this guide is about. The nested run inherits the
-caller's `RunConfig`, so limits the caller set still apply. Its arguments are
-validated at the tool boundary when the wrapped agent declares an input schema.
-And the runner it uses is released when the run ends, so a toolset the wrapped
-agent holds does not stay open.
-
-`AgentTool` is exported from `@google/adk`.
+The wrapped agent does not join the caller's run. `AgentTool` builds a `Runner`
+for it and performs a separate nested run, then returns the last event's text
+as the tool result. Three consequences follow, and they are the subject of this
+guide. The nested run inherits the caller's `RunConfig`, so a limit the caller
+set still applies. Its arguments are validated at the tool boundary when the
+wrapped agent declares an input schema. And the sub-runner is released when the
+run ends, so a toolset the wrapped agent holds does not stay open.
 
 ## Get started
-
-The parent agent below has one tool: a summarizing agent. The parent's model
-decides when to call it.
 
 ```ts
 import {AgentTool, InMemorySessionService, LlmAgent, Runner} from '@google/adk';
