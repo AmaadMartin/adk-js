@@ -34,6 +34,12 @@ function splitSegment(segment: string): {name: string; runId?: string} {
   return {name: segment.slice(0, at), runId: segment.slice(at + 1)};
 }
 
+/** Splits the leaf segment; an absent or empty path has an empty leaf. */
+function leafOf(path?: string): {name: string; runId?: string} {
+  const segments = segmentsOf(path);
+  return splitSegment(segments[segments.length - 1] ?? '');
+}
+
 /**
  * Returns the leaf node's name, without its run id.
  *
@@ -41,11 +47,7 @@ function splitSegment(segment: string): {name: string; runId?: string} {
  * @returns The leaf name, or `''` when there is no path.
  */
 export function nodeNameFromPath(path?: string): string {
-  const segments = segmentsOf(path);
-  if (segments.length === 0) {
-    return '';
-  }
-  return splitSegment(segments[segments.length - 1]).name;
+  return leafOf(path).name;
 }
 
 /**
@@ -55,11 +57,7 @@ export function nodeNameFromPath(path?: string): string {
  * @returns The leaf run id, or `''` when the leaf carries none.
  */
 export function runIdFromPath(path?: string): string {
-  const segments = segmentsOf(path);
-  if (segments.length === 0) {
-    return '';
-  }
-  return splitSegment(segments[segments.length - 1]).runId ?? '';
+  return leafOf(path).runId ?? '';
 }
 
 /**

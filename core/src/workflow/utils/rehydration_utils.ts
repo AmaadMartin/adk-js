@@ -474,7 +474,7 @@ function directChildName(path: string, parentPath: string): string | undefined {
   if (rest.includes('.')) {
     return undefined; // a deeper descendant, not a direct child
   }
-  return rest.split('@')[0];
+  return nodeNameFromPath(rest);
 }
 
 /** Narrows an unknown value to a plain (non-array) record. */
