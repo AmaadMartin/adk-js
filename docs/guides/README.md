@@ -33,6 +33,9 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
 
 - [Anthropic Claude models](models/anthropic/index.md) - Driving an agent with
   Claude, through the Anthropic API or Vertex AI.
+- [Configuring the Gemini model](models/gemini_config/index.md) - Choosing
+  the endpoint, API version, client and retries, and handling an exhausted
+  quota.
 
 ### Tools
 

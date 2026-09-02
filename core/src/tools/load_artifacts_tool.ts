@@ -13,86 +13,18 @@ import type {LlmRequest} from '../models/llm_request.js';
 import {appendInstructions} from '../models/llm_request.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
+import {asSafePartForLlm} from '../utils/safe_part_utils.js';
 import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
 import {BaseTool} from './base_tool.js';
 
 /** Model-facing description of the tool's only parameter. */
 const ARTIFACT_NAMES_DESCRIPTION = 'The names of the artifacts to load.';
 
-const GEMINI_SUPPORTED_INLINE_MIME_PREFIXES = ['image/', 'audio/', 'video/'];
-const GEMINI_SUPPORTED_INLINE_MIME_TYPES = new Set(['application/pdf']);
-const TEXT_LIKE_MIME_TYPES = new Set([
-  'application/csv',
-  'application/json',
-  'application/xml',
-]);
-
-function normalizeMimeType(mimeType?: string): string | undefined {
-  if (!mimeType) {
-    return undefined;
-  }
-  return mimeType.split(';')[0].trim();
-}
-
-function isInlineMimeTypeSupported(mimeType?: string): boolean {
-  const normalized = normalizeMimeType(mimeType);
-  if (!normalized) {
-    return false;
-  }
-  return (
-    GEMINI_SUPPORTED_INLINE_MIME_PREFIXES.some((prefix) =>
-      normalized.startsWith(prefix),
-    ) || GEMINI_SUPPORTED_INLINE_MIME_TYPES.has(normalized)
-  );
-}
-
-/**
- * Converts an artifact into a `Part` that is safe to send to Gemini.
- *
- * A `processArtifact` callback can call this to fall back to the default
- * conversion for an artifact it does not want to handle itself.
- *
- * @param artifact The artifact to convert.
- * @param artifactName The name the artifact was loaded under.
- * @return A part that is safe to send to Gemini.
- */
-export function asSafePartForLlm(artifact: Part, artifactName: string): Part {
-  const inlineData = artifact.inlineData;
-  if (!inlineData) {
-    return artifact;
-  }
-
-  if (isInlineMimeTypeSupported(inlineData.mimeType)) {
-    return artifact;
-  }
-
-  const mimeType =
-    normalizeMimeType(inlineData.mimeType) || 'application/octet-stream';
-  const data = inlineData.data;
-  if (!data) {
-    return {
-      text: `[Artifact: ${artifactName}, type: ${mimeType}. No inline data was provided.]`,
-    };
-  }
-
-  const isTextLike =
-    mimeType.startsWith('text/') || TEXT_LIKE_MIME_TYPES.has(mimeType);
-
-  const decodedBuffer = Buffer.from(data, 'base64');
-  if (isTextLike) {
-    try {
-      const decoded = decodedBuffer.toString('utf8');
-      return {text: decoded};
-    } catch {
-      // Fallback
-    }
-  }
-
-  const sizeKb = decodedBuffer.length / 1024;
-  return {
-    text: `[Binary artifact: ${artifactName}, type: ${mimeType}, size: ${sizeKb.toFixed(1)} KB. Content cannot be displayed inline.]`,
-  };
-}
+// The conversion now lives in `../utils/safe_part_utils.js` so the Gemini
+// model can reuse it. It stays exported here because it is part of this
+// tool's public surface: a `processArtifact` callback calls it to fall back
+// to the default conversion for an artifact it does not want to handle.
+export {asSafePartForLlm};
 
 /**
  * Customizes or filters an artifact before it is added to the LLM request.

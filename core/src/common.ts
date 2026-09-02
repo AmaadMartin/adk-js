@@ -333,7 +333,11 @@ export {
 } from './models/cache_metadata.js';
 export type {CacheMetadata} from './models/cache_metadata.js';
 export type {LlmCapabilities} from './models/capabilities.js';
-export {Gemini, geminiInitParams} from './models/google_llm.js';
+export {
+  Gemini,
+  ResourceExhaustedError,
+  geminiInitParams,
+} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export type {LlmRequest} from './models/llm_request.js';
 export type {LlmResponse} from './models/llm_response.js';
