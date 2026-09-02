@@ -128,7 +128,3 @@ for await (const response of connection.receive()) {
   reportTelemetry(sessionId, response);
 }
 ```
-
-`connection.apiBackend` reports which Google backend the session talks to,
-`VERTEX_AI` or `GEMINI_API`. It matches the backend of the `Gemini` model that
-opened it.

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleLLMVariant, LlmResponse} from '@google/adk';
+import {LlmResponse} from '@google/adk';
 import {
   Blob,
   Content,
@@ -304,25 +304,6 @@ describe('GeminiLlmConnection', () => {
         turnComplete: true,
       });
       expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('apiBackend', () => {
-    it('should default to Vertex AI', () => {
-      const connection = new GeminiLlmConnection(mockSession);
-
-      expect(connection.apiBackend).toBe(GoogleLLMVariant.VERTEX_AI);
-    });
-
-    it('should expose the backend it was built with', () => {
-      const connection = new GeminiLlmConnection(
-        mockSession,
-        'gemini-2.5-flash',
-        undefined,
-        GoogleLLMVariant.GEMINI_API,
-      );
-
-      expect(connection.apiBackend).toBe(GoogleLLMVariant.GEMINI_API);
     });
   });
 

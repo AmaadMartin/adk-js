@@ -16,7 +16,6 @@ import {filterAudioParts} from '../utils/content_utils.js';
 import {LiveResponseAggregator} from '../utils/live_connection_utils.js';
 import {logger} from '../utils/logger.js';
 import {isGemini35LiveTranslate, isGemini3xLive} from '../utils/model_name.js';
-import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {
   BaseLlmConnection,
@@ -56,13 +55,7 @@ export class GeminiLlmConnection implements BaseLlmConnection {
     private readonly geminiSession: Session,
     private readonly modelVersion?: string,
     private readonly messageQueue?: AsyncIterable<LiveServerMessage>,
-    private readonly backend: GoogleLLMVariant = GoogleLLMVariant.VERTEX_AI,
   ) {}
-
-  /** The Google LLM backend this connection talks to. */
-  get apiBackend(): GoogleLLMVariant {
-    return this.backend;
-  }
 
   /**
    * Sends the conversation history to the gemini model.
