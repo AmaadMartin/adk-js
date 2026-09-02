@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {ContextCacheConfig, LlmRequest} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
+import type {ContextCacheConfig} from '../../src/agents/context_cache_config.js';
+import type {LlmRequest} from '../../src/models/llm_request.js';
 import {
   resolveCacheConfig,
   useOneHourTtl,
