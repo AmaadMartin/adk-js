@@ -266,6 +266,7 @@ export type {
   AppendEventRequest,
   CreateSessionRequest,
   DeleteSessionRequest,
+  GetOrCreateSessionRequest,
   GetSessionConfig,
   GetSessionRequest,
   ListSessionsRequest,

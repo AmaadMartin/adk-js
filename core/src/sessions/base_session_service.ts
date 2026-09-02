@@ -45,6 +45,14 @@ export interface GetSessionRequest extends CompositeSessionKey {
 }
 
 /**
+ * The parameters for `getOrCreateSession`.
+ */
+export interface GetOrCreateSessionRequest extends CreateSessionRequest {
+  /** Limits which events the lookup returns. Ignored when the session is created. */
+  config?: GetSessionConfig;
+}
+
+/**
  * The parameters for `listSessions`.
  */
 export interface ListSessionsRequest {
@@ -130,7 +138,7 @@ export abstract class BaseSessionService {
    * @return A promise that resolves to the session instance.
    */
   async getOrCreateSession(
-    request: CreateSessionRequest & {config?: GetSessionConfig},
+    request: GetOrCreateSessionRequest,
   ): Promise<Session> {
     if (!request.sessionId) {
       return this.createSession(request);
