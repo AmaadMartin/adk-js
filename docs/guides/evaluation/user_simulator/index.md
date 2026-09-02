@@ -8,26 +8,21 @@ simulator factory yourself.
 
 An eval case is driven turn by turn. Something must decide what the user says
 next and when the conversation ends, and that something is a `UserSimulator`.
-Two cases need two different answers. A case that ships a pre-authored
-`conversation` already knows every user turn, so it only needs those turns
-replayed. A case that describes a goal instead needs a model to improvise the
-turns.
+A case that ships a pre-authored `conversation` already knows every user turn,
+so it only needs those turns replayed. That is what the provider does: it
+returns a `StaticUserSimulator` over the case's own conversation.
 
-The provider makes that choice. A case carrying a `conversation` gets a
-`StaticUserSimulator` over it, whatever the configuration says: the turns are
-already written, so there is nothing to improvise. Any other case is routed by
-the `type` field of `BaseUserSimulatorConfig` to the simulator registered under
-that name.
-
-The registry is the extension point. A simulator ships its own config type and
-calls `registerUserSimulator` once from its own module, so the provider
-dispatches to it without knowing it exists. Registering a name twice replaces
-the earlier factory.
+adk-python also routes a case that describes a goal instead of a script to a
+model-backed simulator. adk-js has no `conversationScenario` field on
+`EvalCase` and no such simulator, so a case with no conversation is rejected
+with `InputValidationError` rather than guessed at. Porting
+`llm_backed_user_simulator` is what adds that route.
 
 `generateResponses` uses the provider when the caller passes no
 `createUserSimulator`, which is why an eval set of static conversations runs
 with no simulator argument at all. A `createUserSimulator` that you do pass
-wins over `userSimulatorConfig`.
+replaces the provider entirely, so it is also how you drive a case that has no
+static conversation today.
 
 ## Get started
 
@@ -61,22 +56,21 @@ const results = await generateResponses({
 
 Each entry of `results` holds one `Invocation` per replayed turn.
 
-## Registering a simulator
+## Driving a case yourself
 
-A simulator claims a `type` name and builds itself from the config and the
-eval case it was given.
+Pass `createUserSimulator` to replace the provider. This is the only way to run
+a case that carries no static conversation.
 
 ```typescript
 import {
-  BaseUserSimulatorConfig,
   Event,
   NextUserMessage,
   UserSimulator,
   UserSimulatorStatus,
-  registerUserSimulator,
+  generateResponses,
 } from '@google/adk';
 
-/** Asks the eval case's own opening question, then ends the conversation. */
+/** Asks one fixed question, then ends the conversation. */
 class OneShotSimulator implements UserSimulator {
   private asked = false;
 
@@ -94,36 +88,21 @@ class OneShotSimulator implements UserSimulator {
   }
 }
 
-/** Reads an extra field off a config without widening its type. */
-function opening(config: BaseUserSimulatorConfig): string {
-  return 'opening' in config && typeof config.opening === 'string'
-    ? config.opening
-    : 'hello';
-}
-
-registerUserSimulator(
-  'one_shot',
-  ({config}) => new OneShotSimulator(opening(config)),
-);
+await generateResponses({
+  evalSet,
+  agentModulePath: './weather_agent.js',
+  createUserSimulator: () => new OneShotSimulator('what is the weather?'),
+});
 ```
-
-Pass `userSimulatorConfig: {type: 'one_shot', opening: 'hello'}` to
-`generateResponses`, and every case without a static conversation runs on
-`OneShotSimulator`.
 
 ## Guarantees
 
 - One simulator per repeat. `generateResponses` calls `provide` once for every
   run of every case, because a simulator is stateful across the turns it
-  drives.
-- A static conversation always replays. The configuration cannot override it.
+  drives. Each repeat therefore replays the conversation from its first turn.
 - `StaticUserSimulator` never throws. Running past the last scripted turn
   returns `STOP_SIGNAL_DETECTED` with no message, which is how the generator
-  learns the conversation is over.
-
-## Failure modes
-
-| Condition                                                        | Error                                         |
-| ---------------------------------------------------------------- | --------------------------------------------- |
-| The case has no `conversation` and the config names no simulator | `InputValidationError`                        |
-| The config names a `type` nothing registered                     | `NotFoundError`, listing the registered names |
+  learns the conversation is over. An empty conversation stops on the first
+  call.
+- The simulator ignores the conversation history it is given. The script is
+  fixed, so the agent's replies cannot change what the user says next.

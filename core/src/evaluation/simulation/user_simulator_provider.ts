@@ -5,14 +5,9 @@
  */
 
 import {InputValidationError} from '../../errors/input_validation_error.js';
-import {NotFoundError} from '../../errors/not_found_error.js';
 import {EvalCase} from '../eval_case.js';
 import {StaticUserSimulator} from './static_user_simulator.js';
-import {
-  BaseUserSimulatorConfig,
-  UserSimulator,
-  userSimulatorRegistry,
-} from './user_simulator.js';
+import {UserSimulator} from './user_simulator.js';
 
 /**
  * Message of the error thrown for an eval case that carries no conversation
@@ -25,51 +20,24 @@ const NO_CONVERSATION_DATA_ERROR =
 /**
  * Supplies the simulator that plays the user for one eval case.
  *
- * An eval case that carries a static conversation replays it, whatever the
- * config says. Every other case is routed by `type` to the simulator
- * registered for it, so a new simulator needs no change here.
+ * Every eval case adk-js can express today carries a static conversation, so
+ * every case replays its own pre-authored turns. adk-python also routes a case
+ * that describes a goal to a model-backed simulator, but adk-js has no
+ * `conversationScenario` on `EvalCase` and no such simulator, so that case is
+ * rejected rather than guessed at.
  */
 export class UserSimulatorProvider {
-  private readonly userSimulatorConfig?: BaseUserSimulatorConfig;
-
-  /**
-   * @param options.userSimulatorConfig Selects the simulator for cases without
-   *     a static conversation.
-   */
-  constructor(options: {userSimulatorConfig?: BaseUserSimulatorConfig} = {}) {
-    this.userSimulatorConfig = options.userSimulatorConfig;
-  }
-
   /**
    * Returns a fresh simulator for `evalCase`.
    *
    * @param evalCase The case the simulator drives.
    * @returns A simulator, never shared with another case or another run.
-   * @throws {InputValidationError} If the case carries no static conversation
-   *     and the config names no simulator.
-   * @throws {NotFoundError} If the config names a simulator nothing
-   *     registered.
+   * @throws {InputValidationError} If the case carries no static conversation.
    */
   provide(evalCase: EvalCase): UserSimulator {
-    if (evalCase.conversation !== undefined) {
-      return new StaticUserSimulator(evalCase.conversation);
-    }
-
-    const config = this.userSimulatorConfig;
-    if (config?.type === undefined) {
+    if (evalCase.conversation === undefined) {
       throw new InputValidationError(NO_CONVERSATION_DATA_ERROR);
     }
-
-    const registry = userSimulatorRegistry();
-    const factory = registry.get(config.type);
-    if (factory === undefined) {
-      const registered = [...registry.keys()].sort();
-      throw new NotFoundError(
-        `No UserSimulator registered for config type \`${config.type}\`. ` +
-          'Register one via `registerUserSimulator()`. Currently ' +
-          `registered: [${registered.join(', ')}].`,
-      );
-    }
-    return factory({config, evalCase});
+    return new StaticUserSimulator(evalCase.conversation);
   }
 }

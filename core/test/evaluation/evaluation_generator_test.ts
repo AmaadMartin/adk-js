@@ -10,7 +10,6 @@ import {
   BaseLlm,
   BaseLlmConnection,
   BasePlugin,
-  BaseUserSimulatorConfig,
   Context,
   ContextCacheConfig,
   convertEventsToEvalInvocations,
@@ -44,7 +43,6 @@ import {
   NextUserMessage,
   normalizeLiveTranscriptions,
   PluginManager,
-  registerUserSimulator,
   Runner,
   Session,
   setLogger,
@@ -1425,64 +1423,61 @@ describe('generateResponses', () => {
     ).toEqual(['first turn', 'second turn']);
   });
 
-  it('hands the simulator config to the factory the provider dispatches to', async () => {
-    const seenConfigs: BaseUserSimulatorConfig[] = [];
-    registerUserSimulator('generate_responses_probe', ({config}) => {
-      seenConfigs.push(config);
-      return new ScriptedUserSimulator(['hello']);
+  it('replays the conversation from the start on every repeat', async () => {
+    const results = await generateResponses({
+      evalSet: {
+        evalSetId: 'test_set',
+        creationTimestamp: 0,
+        evalCases: [
+          {
+            evalId: 'case_0',
+            creationTimestamp: 0,
+            conversation: [
+              {userContent: {role: 'user', parts: [{text: 'first turn'}]}},
+              {userContent: {role: 'user', parts: [{text: 'second turn'}]}},
+            ],
+          },
+        ],
+      },
+      agentModulePath: fixtureModulePath('root_agent.ts'),
+      repeatNum: 2,
     });
-    const userSimulatorConfig: BaseUserSimulatorConfig = {
-      type: 'generate_responses_probe',
-    };
 
+    const turnsPerRepeat = results[0].responses.map((invocations) =>
+      invocations.map(
+        (invocation) => invocation.userContent.parts?.[0].text ?? '',
+      ),
+    );
+    expect(turnsPerRepeat).toEqual([
+      ['first turn', 'second turn'],
+      ['first turn', 'second turn'],
+    ]);
+  });
+
+  it('rejects a case with no conversation and no simulator argument', async () => {
+    await expect(
+      generateResponses({
+        evalSet: buildEvalSet(['case_0']),
+        agentModulePath: fixtureModulePath('root_agent.ts'),
+        repeatNum: 1,
+      }),
+    ).rejects.toThrow(
+      'Neither static invocations nor conversation scenario provided in ' +
+        'EvalCase. Provide exactly one.',
+    );
+  });
+
+  it('runs a case with no conversation when given a simulator factory', async () => {
     const results = await generateResponses({
       evalSet: buildEvalSet(['case_0']),
       agentModulePath: fixtureModulePath('root_agent.ts'),
       repeatNum: 1,
-      userSimulatorConfig,
-    });
-
-    expect(seenConfigs).toEqual([userSimulatorConfig]);
-    expect(results[0].responses[0][0].finalResponse?.parts?.[0].text).toBe(
-      'from the root agent',
-    );
-  });
-
-  it('builds a fresh simulator per repeat on the provider path', async () => {
-    const built: unknown[] = [];
-    registerUserSimulator('per_repeat_probe', () => {
-      const simulator = new ScriptedUserSimulator(['hello']);
-      built.push(simulator);
-      return simulator;
-    });
-
-    await generateResponses({
-      evalSet: buildEvalSet(['case_0', 'case_1']),
-      agentModulePath: fixtureModulePath('root_agent.ts'),
-      repeatNum: 2,
-      userSimulatorConfig: {type: 'per_repeat_probe'},
-    });
-
-    expect(built).toHaveLength(4);
-    expect(new Set(built).size).toBe(4);
-  });
-
-  it('prefers an explicit createUserSimulator over the config', async () => {
-    const seenConfigs: BaseUserSimulatorConfig[] = [];
-    registerUserSimulator('never_reached_probe', ({config}) => {
-      seenConfigs.push(config);
-      return new ScriptedUserSimulator(['from the registry']);
-    });
-
-    await generateResponses({
-      evalSet: buildEvalSet(['case_0']),
-      agentModulePath: fixtureModulePath('root_agent.ts'),
-      repeatNum: 1,
-      userSimulatorConfig: {type: 'never_reached_probe'},
       createUserSimulator: () => new ScriptedUserSimulator(['hello']),
     });
 
-    expect(seenConfigs).toEqual([]);
+    expect(results[0].responses[0][0].finalResponse?.parts?.[0].text).toBe(
+      'from the root agent',
+    );
   });
 });
 

@@ -54,7 +54,6 @@ import {
 import {RequestIntercepterPlugin} from './request_intercepter_plugin.js';
 import {EnsureRetryOptionsPlugin} from './retry_options_utils.js';
 import {
-  BaseUserSimulatorConfig,
   UserSimulator,
   validateNextUserMessage,
 } from './simulation/user_simulator.js';
@@ -466,21 +465,18 @@ export function buildEvalRunnerConfig(params: {
     };
   }
 
+  // Spreading `app` carries its whole configuration into the eval run, the way
+  // adk-python's `app.model_copy(update=...)` does.
+  //
   // The copy is named after the session, not after `app`: a `Runner` built
   // from an app takes its app name from `app.name`, and that is the name it
   // looks the session up under. adk-python's `Runner` prefers the explicit
   // `app_name` instead, and reaches the same session either way.
-  //
-  // Every other field is copied verbatim, so the app's configuration takes
-  // part in the eval run exactly as it does in production. A field added to
-  // `App` must be added here too, or evaluation silently drops it.
   const runnerApp = new App({
+    ...app,
     name: appName,
     rootAgent,
     plugins: [...app.plugins, ...internalEvalPlugins],
-    resumabilityConfig: app.resumabilityConfig,
-    eventsCompactionConfig: app.eventsCompactionConfig,
-    contextCacheConfig: app.contextCacheConfig,
   });
   return {app: runnerApp, appName, ...services};
 }
@@ -718,13 +714,11 @@ export async function generateInferencesFromAgentModule(params: {
  * @param params.agentModulePath The module to import the agent from.
  * @param params.repeatNum How many times each case runs. Defaults to 3.
  * @param params.agentName Evaluate this descendant instead of the root.
- * @param params.userSimulatorConfig Selects the simulator that plays the user.
- *     Ignored for eval cases that carry a static conversation, which replay
- *     their own turns.
  * @param params.createUserSimulator Builds the simulator that plays the user
  *     for one run of one case. It is called once per repeat, because a
  *     simulator is stateful across the turns of the conversation it drives.
- *     It overrides `userSimulatorConfig` when both are given.
+ *     Defaults to {@link UserSimulatorProvider}, which replays each case's
+ *     static conversation.
  * @returns One entry per eval case, holding the invocations of every repeat.
  */
 export async function generateResponses(params: {
@@ -732,17 +726,13 @@ export async function generateResponses(params: {
   agentModulePath: string;
   repeatNum?: number;
   agentName?: string;
-  userSimulatorConfig?: BaseUserSimulatorConfig;
   createUserSimulator?: (evalCase: EvalCase) => UserSimulator;
 }): Promise<EvalCaseResponses[]> {
   const repeatNum = params.repeatNum ?? DEFAULT_REPEAT_NUM;
   const results: EvalCaseResponses[] = [];
+  const provider = new UserSimulatorProvider();
   const createUserSimulator =
-    params.createUserSimulator ??
-    ((evalCase: EvalCase) =>
-      new UserSimulatorProvider({
-        userSimulatorConfig: params.userSimulatorConfig,
-      }).provide(evalCase));
+    params.createUserSimulator ?? ((evalCase) => provider.provide(evalCase));
 
   for (const evalCase of params.evalSet.evalCases) {
     const responses: Invocation[][] = [];

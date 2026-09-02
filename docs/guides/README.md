@@ -74,8 +74,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [TrajectoryEvaluator](evaluation/tool_trajectory/index.md) - Scoring the tool
   calls an agent made against a golden trajectory.
 - [Choosing the user simulator](evaluation/user_simulator/index.md) - Replaying
-  a static conversation, and routing every other eval case to a registered
-  simulator.
+  an eval case's static conversation, and driving a case that has none.
 
 ### Events
 

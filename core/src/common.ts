@@ -351,14 +351,11 @@ export {
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
 export {
   UserSimulatorStatus,
-  registerUserSimulator,
   validateNextUserMessage,
 } from './evaluation/simulation/user_simulator.js';
 export type {
-  BaseUserSimulatorConfig,
   NextUserMessage,
   UserSimulator,
-  UserSimulatorFactory,
 } from './evaluation/simulation/user_simulator.js';
 export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
 export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
