@@ -15,6 +15,7 @@
 
 import {requiresUserInput} from '../../agents/user_input_request.js';
 import {Event} from '../../events/event.js';
+import {nodeNameFromPath} from '../../utils/node_path_utils.js';
 import {RouteValue} from '../graph.js';
 import type {NodeContext, NodeResult} from '../node_context.js';
 import {
@@ -456,12 +457,6 @@ export function makeFastForwardResult(
     branch: prior.branch ?? parent.branch,
     interruptIds: [],
   };
-}
-
-/** Extracts the node name (leaf, without run id) from a dotted node path. */
-export function nodeNameFromPath(path: string): string {
-  const leaf = path.split(/[./]/).pop() ?? path;
-  return leaf.split('@')[0];
 }
 
 /**
