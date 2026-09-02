@@ -6,7 +6,7 @@
 
 import type {ExecuteCodeParams} from '@google/adk';
 import {BuiltInCodeExecutor, LlmRequest} from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const MODEL_ID_CHECK_ENV_VAR = 'ADK_DISABLE_GEMINI_MODEL_ID_CHECK';
 
@@ -14,25 +14,15 @@ function makeRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
   return {contents: [], toolsDict: {}, liveConnectConfig: {}, ...overrides};
 }
 
-function withModelIdCheckDisabled(value: string, body: () => void): void {
-  const originalValue = process.env[MODEL_ID_CHECK_ENV_VAR];
-  process.env[MODEL_ID_CHECK_ENV_VAR] = value;
-  try {
-    body();
-  } finally {
-    if (originalValue === undefined) {
-      delete process.env[MODEL_ID_CHECK_ENV_VAR];
-    } else {
-      process.env[MODEL_ID_CHECK_ENV_VAR] = originalValue;
-    }
-  }
-}
-
 describe('BuiltInCodeExecutor', () => {
   let executor: BuiltInCodeExecutor;
 
   beforeEach(() => {
     executor = new BuiltInCodeExecutor();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('executeCode should return dummy values', async () => {
@@ -89,31 +79,28 @@ describe('BuiltInCodeExecutor', () => {
   });
 
   it('accepts a non-Gemini model when the model-id check is disabled', () => {
+    vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, 'true');
     const llmRequest = makeRequest({model: 'internal-model-v1'});
 
-    withModelIdCheckDisabled('true', () => {
-      executor.processLlmRequest(llmRequest);
-    });
+    executor.processLlmRequest(llmRequest);
 
     expect(llmRequest.config?.tools).toEqual([{codeExecution: {}}]);
   });
 
   it('accepts an absent model when the model-id check is disabled', () => {
+    vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, 'true');
     const llmRequest = makeRequest();
 
-    withModelIdCheckDisabled('true', () => {
-      executor.processLlmRequest(llmRequest);
-    });
+    executor.processLlmRequest(llmRequest);
 
     expect(llmRequest.config?.tools).toEqual([{codeExecution: {}}]);
   });
 
   it('treats "1" as a disabled model-id check', () => {
+    vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, '1');
     const llmRequest = makeRequest({model: 'internal-model-v1'});
 
-    withModelIdCheckDisabled('1', () => {
-      executor.processLlmRequest(llmRequest);
-    });
+    executor.processLlmRequest(llmRequest);
 
     expect(llmRequest.config?.tools).toEqual([{codeExecution: {}}]);
   });
