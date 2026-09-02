@@ -8,8 +8,10 @@ import {
   CacheControlInjectionPoint,
   CompletionArgs,
   ContextCacheConfig,
+  getLogger,
   LiteLlm,
   LiteLlmClient,
+  LiteLlmParams,
   LLMRegistry,
   LlmRequest,
   LlmResponse,
@@ -17,7 +19,9 @@ import {
   ModelResponseStream,
 } from '@google/adk';
 import {FinishReason, FunctionCallingConfigMode} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
+
+import {getTrackingHeaders} from '../../src/utils/client_labels.js';
 
 /** A client that records what it was sent and replays canned responses. */
 class RecordingClient implements LiteLlmClient {
@@ -456,6 +460,87 @@ describe('LiteLlm', () => {
       expect(client.args?.num_retries).toBeUndefined();
       expect(client.args?.extra_headers).toBeUndefined();
       expect(client.args?.extra_body).toBeUndefined();
+    });
+  });
+
+  describe('tracking headers', () => {
+    /** Runs one non-streaming call and returns the headers sent. */
+    async function extraHeaders(
+      model: string,
+      params: Partial<LiteLlmParams> = {},
+      overrides: Partial<LlmRequest> = {},
+    ): Promise<Record<string, string> | undefined> {
+      const client = new RecordingClient(textResponse());
+      const litellm = new LiteLlm({model, client, ...params});
+
+      await collect(litellm.generateContentAsync(request(overrides)));
+
+      return client.args?.extra_headers;
+    }
+
+    it.each([['vertex_ai/test_model'], ['gemini/gemini-2.5-pro']])(
+      'attributes a call to %s to ADK',
+      async (model) => {
+        const headers = await extraHeaders(model);
+
+        expect(headers?.['x-goog-api-client']).toContain('google-adk/');
+        expect(headers?.['user-agent']).toBe(headers?.['x-goog-api-client']);
+      },
+    );
+
+    it('sends no tracking headers to another provider', async () => {
+      expect(await extraHeaders('openai/gpt-4o')).toBeUndefined();
+    });
+
+    it('keeps a constructor header alongside the tracking headers', async () => {
+      const headers = await extraHeaders('vertex_ai/test_model', {
+        headers: {custom: 'header'},
+      });
+
+      expect(headers?.['custom']).toBe('header');
+      expect(headers?.['x-goog-api-client']).toContain('google-adk/');
+    });
+
+    it('appends the ADK labels to a caller value without losing it', async () => {
+      const headers = await extraHeaders(
+        'vertex_ai/test_model',
+        {},
+        {
+          config: {
+            httpOptions: {headers: {'x-goog-api-client': 'my-client/1.0'}},
+          },
+        },
+      );
+
+      const parts = headers?.['x-goog-api-client']?.split(' ') ?? [];
+      expect(parts).toContain('my-client/1.0');
+      expect(parts.some((part) => part.startsWith('google-adk/'))).toBe(true);
+      expect(new Set(parts).size).toBe(parts.length);
+    });
+
+    it('does not duplicate a label the caller already carries', async () => {
+      const label = getTrackingHeaders()['x-goog-api-client'];
+      const headers = await extraHeaders(
+        'vertex_ai/test_model',
+        {},
+        {config: {httpOptions: {headers: {'x-goog-api-client': label}}}},
+      );
+
+      expect(headers?.['x-goog-api-client']).toBe(label);
+    });
+  });
+
+  describe('capabilities', () => {
+    it('pairs an output schema with tools on any provider', () => {
+      const warn = vi.spyOn(getLogger(), 'warn').mockImplementation(() => {});
+      const model = new LiteLlm({
+        model: 'openai/gpt-4o',
+        client: new RecordingClient(),
+      });
+
+      expect(model.capabilities.outputSchemaAndTools).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
     });
   });
 

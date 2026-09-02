@@ -12,12 +12,18 @@ import {
 } from '@google/genai';
 
 import {ContextCacheConfig} from '../agents/context_cache_config.js';
+import {mergeTrackingHeaders} from '../utils/client_labels.js';
 import {logger} from '../utils/logger.js';
 
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {LlmCapabilities} from './capabilities.js';
 import {FetchLiteLlmClient, LiteLlmClient} from './lite_llm_client.js';
-import {mapFinishReason} from './lite_llm_model_utils.js';
+import {
+  isLiteLlmGeminiModel,
+  isLiteLlmVertexModel,
+  mapFinishReason,
+} from './lite_llm_model_utils.js';
 import {
   appendFallbackUserContentIfMissing,
   buildRequestLog,
@@ -74,7 +80,10 @@ export interface LiteLlmParams {
    * which falls back to the `LITELLM_API_KEY` environment variable.
    */
   apiKey?: string;
-  /** Extra HTTP headers. Read by the built-in client only. */
+  /**
+   * Extra HTTP headers. The built-in client sends them on every request, and a
+   * Vertex AI or Gemini model merges them with ADK's tracking headers.
+   */
   headers?: Record<string, string>;
   /** The transport to send requests through. Defaults to the built-in one. */
   client?: LiteLlmClient;
@@ -124,6 +133,7 @@ interface StreamingToolCall {
 export class LiteLlm extends BaseLlm {
   private readonly client: LiteLlmClient;
   private readonly additionalArgs: Record<string, unknown>;
+  private readonly headers?: Record<string, string>;
 
   /**
    * Provider prefixes this class handles. See
@@ -159,11 +169,24 @@ export class LiteLlm extends BaseLlm {
   }: LiteLlmParams) {
     super({model});
     this.client = client ?? new FetchLiteLlmClient({apiBase, apiKey, headers});
+    this.headers = headers;
     const scrubbed = {...additionalArgs};
     for (const key of RESERVED_ARGUMENT_KEYS) {
       delete scrubbed[key];
     }
     this.additionalArgs = scrubbed;
+  }
+
+  /**
+   * LiteLLM reconciles tools and `response_format` per provider: a provider
+   * with native support gets both passed through, and the rest are converted
+   * to a JSON tool call with `tool_choice` enforcement. So the pairing works
+   * whatever the endpoint routes to.
+   *
+   * @return A fresh snapshot of the resolved capabilities.
+   */
+  override get capabilities(): LlmCapabilities {
+    return {outputSchemaAndTools: true};
   }
 
   override async *generateContentAsync(
@@ -220,6 +243,15 @@ export class LiteLlm extends BaseLlm {
     if (cacheConfig && args.cache_control_injection_points === undefined) {
       args.cache_control_injection_points =
         cacheControlInjectionPoints(cacheConfig);
+    }
+
+    // Vertex AI and Gemini endpoints attribute the call to ADK. Every other
+    // provider is sent nothing.
+    if (isLiteLlmVertexModel(model) || isLiteLlmGeminiModel(model)) {
+      args.extra_headers = mergeTrackingHeaders({
+        ...this.headers,
+        ...args.extra_headers,
+      });
     }
     return args;
   }
