@@ -130,12 +130,7 @@ export class GcsArtifactService implements BaseArtifactService {
     const versions = await this.listVersions(request);
     const version = versions.length > 0 ? Math.max(...versions) + 1 : 0;
     const bucket = await this.getBucket();
-    const file = bucket.file(
-      getObjectName({
-        ...request,
-        version,
-      }),
-    );
+    const file = bucket.file(`${getObjectPrefix(request)}/${version}`);
 
     const customMetadata: Record<string, unknown> = {
       ...request.customMetadata,
@@ -271,16 +266,9 @@ export class GcsArtifactService implements BaseArtifactService {
     const bucket = await this.getBucket();
 
     await Promise.all(
-      versions.map((version) => {
-        const file = bucket.file(
-          getObjectName({
-            ...request,
-            version,
-          }),
-        );
-
-        return file.delete();
-      }),
+      versions.map((version) =>
+        bucket.file(`${getObjectPrefix(request)}/${version}`).delete(),
+      ),
     );
 
     return;
@@ -319,7 +307,7 @@ export class GcsArtifactService implements BaseArtifactService {
         return undefined;
       }
 
-      const objectName = getObjectName({...request, version});
+      const objectName = `${getObjectPrefix(request)}/${version}`;
       const bucket = await this.getBucket();
       const metadata = await readMetadata(bucket.file(objectName));
       if (!metadata) {
@@ -420,7 +408,7 @@ export class GcsArtifactService implements BaseArtifactService {
       return undefined;
     }
 
-    const objectName = getObjectName({...coords, version});
+    const objectName = `${getObjectPrefix(coords)}/${version}`;
     const bucket = await this.getBucket();
     const metadata = await readMetadata(bucket.file(objectName));
     if (!metadata) {
@@ -577,19 +565,6 @@ function parseVersion(objectName: string, prefix: string): number | undefined {
     return undefined;
   }
   return Number.parseInt(suffix, 10);
-}
-
-/**
- * Builds the object name of one artifact version.
- *
- * @param coords The artifact, including the version.
- * @return The object name.
- * @throws InputValidationError When an identifier is unsafe, or a
- *     session-scoped artifact has no session.
- */
-function getObjectName(coords: ArtifactCoordinates): string {
-  const prefix = getObjectPrefix(coords);
-  return coords.version !== undefined ? `${prefix}/${coords.version}` : prefix;
 }
 
 /**
