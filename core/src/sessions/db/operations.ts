@@ -87,6 +87,36 @@ const DRIVER_LOADERS: Record<string, () => Promise<unknown>> = {
   [SQLITE_BACKEND]: loadSqliteDriver,
 };
 
+/**
+ * The part of a raw sqlite connection the pragma hook uses.
+ *
+ * knex hands the driver's own connection object to `pool.afterCreate`, and
+ * `sqlite3` exposes `run` for a statement that returns no rows.
+ */
+interface SqliteRawConnection {
+  run(sql: string, callback: (error: Error | null) => void): void;
+}
+
+/**
+ * Turns foreign key enforcement on for one pooled sqlite connection.
+ *
+ * sqlite reads `PRAGMA foreign_keys` per connection and defaults it to off, so
+ * a pool that opens a second connection would enforce nothing on it.
+ * adk-python applies the same pragma from SQLAlchemy's `connect` event, for
+ * the same reason.
+ *
+ * @param connection The connection knex has just opened.
+ * @param done The callback knex waits on before it hands the connection out.
+ */
+export function enableSqliteForeignKeys(
+  connection: SqliteRawConnection,
+  done: (error: Error | null, connection: SqliteRawConnection) => void,
+): void {
+  connection.run('PRAGMA foreign_keys = ON', (error) =>
+    done(error, connection),
+  );
+}
+
 /** Why a connection URI is not one this service can open. */
 export enum DatabaseUriProblem {
   /** The string carries no URI scheme at all. */
@@ -206,6 +236,9 @@ async function deriveConnectionOptionsFromUri(
       entities: ENTITIES,
       dbName: isMemory ? ':memory:' : uri.substring(SQLITE_URI_PREFIX.length),
       driver,
+      // knex reaches every connection it opens through this hook, while the
+      // `pool` option below stays free for the caller to replace.
+      driverOptions: {pool: {afterCreate: enableSqliteForeignKeys}},
       // Every connection to a SQLite in-memory database opens a separate,
       // empty database, so a pool wider than one connection loses the schema
       // and the rows written through its siblings.

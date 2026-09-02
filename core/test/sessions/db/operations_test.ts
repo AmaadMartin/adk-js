@@ -6,9 +6,13 @@
 
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
+import {mkdtemp, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   detectDatabaseSchemaVersion,
+  enableSqliteForeignKeys,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
   getOrCreateRow,
@@ -189,6 +193,20 @@ describe('operations', () => {
       expect(options.pool).toBeUndefined();
     });
 
+    it('installs the foreign-key hook on every sqlite connection', async () => {
+      const options = await getConnectionOptionsFromUri('sqlite:///tmp/a.db');
+      expect(options.driverOptions).toEqual({
+        pool: {afterCreate: enableSqliteForeignKeys},
+      });
+    });
+
+    it('installs no driver hook for a non-sqlite backend', async () => {
+      const options = await getConnectionOptionsFromUri(
+        'postgres://user:pass@localhost:5432/db',
+      );
+      expect(options.driverOptions).toBeUndefined();
+    });
+
     it('reports a string that is not a URI at all', async () => {
       await expect(
         getConnectionOptionsFromUri('definitely not a url'),
@@ -309,6 +327,75 @@ describe('operations', () => {
       await expect(detectDatabaseSchemaVersion(orm)).resolves.toBe(
         SCHEMA_VERSION_1_JSON,
       );
+    });
+  });
+
+  describe('enableSqliteForeignKeys', () => {
+    it('runs the pragma and hands the connection back to the pool', () => {
+      const statements: string[] = [];
+      const connection = {
+        run(sql: string, callback: (error: Error | null) => void) {
+          statements.push(sql);
+          callback(null);
+        },
+      };
+
+      let reported: Error | null = new Error('the hook never called back');
+      let handedBack: unknown;
+      enableSqliteForeignKeys(connection, (error, opened) => {
+        reported = error;
+        handedBack = opened;
+      });
+
+      expect(statements).toEqual(['PRAGMA foreign_keys = ON']);
+      expect(reported).toBeNull();
+      expect(handedBack).toBe(connection);
+    });
+
+    it('reports a pragma failure to the pool', () => {
+      const failure = new Error('disk I/O error');
+      const statements: string[] = [];
+      const connection = {
+        run(sql: string, callback: (error: Error | null) => void) {
+          statements.push(sql);
+          callback(failure);
+        },
+      };
+
+      let reported: Error | null = null;
+      enableSqliteForeignKeys(connection, (error) => {
+        reported = error;
+      });
+
+      expect(statements).toEqual(['PRAGMA foreign_keys = ON']);
+      expect(reported).toBe(failure);
+    });
+
+    it('keeps foreign keys on for every connection of a wider pool', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'adk-sqlite-pragma-'));
+      const options = await getConnectionOptionsFromUri(
+        `sqlite://${join(directory, 'sessions.db')}`,
+        {pool: {min: 0, max: 4}},
+      );
+      const orm = await MikroORM.init(options);
+
+      try {
+        const connection = orm.em.getConnection();
+        // More work than the pool is wide, so knex opens every connection it
+        // is allowed to and each one has to answer for itself.
+        const reads: Array<Promise<Array<{foreign_keys: number}>>> = Array.from(
+          {length: 8},
+          () => connection.execute('pragma foreign_keys', [], 'all'),
+        );
+        const results = await Promise.all(reads);
+
+        expect(results.map((rows) => rows[0].foreign_keys)).toEqual(
+          Array.from({length: 8}, () => 1),
+        );
+      } finally {
+        await orm.close();
+        await rm(directory, {recursive: true, force: true});
+      }
     });
   });
 
