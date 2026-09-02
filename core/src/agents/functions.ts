@@ -605,7 +605,12 @@ export async function handleFunctionCallList({
     // ('', 0, false) is a real result and still emits one, so long-running
     // tools that return such a value now produce a response event where they
     // previously produced none.
-    if (tool.isLongRunning && functionResponse == null) {
+    // A tool that defers its response is treated the same way: it runs to
+    // completion here, but another orchestrator produces its response later.
+    if (
+      (tool.isLongRunning || tool.isDeferringResponse) &&
+      functionResponse == null
+    ) {
       // The tool's response will arrive later, but any actions it recorded on
       // the tool context (state/artifact deltas, auth or confirmation
       // requests, transfer, escalation, skipSummarization) must not be lost.

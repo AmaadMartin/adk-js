@@ -17,6 +17,7 @@ import {
   LlmAgent,
   LongRunningFunctionTool,
   PluginManager,
+  RunAsyncToolRequest,
   Session,
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
@@ -1226,5 +1227,103 @@ describe('findMatchingFunctionCall', () => {
     });
     expect(findMatchingFunctionCall([callEvent])).toBeUndefined();
     expect(findMatchingFunctionCall([])).toBeUndefined();
+  });
+});
+
+/**
+ * A tool that defers its response, the way an ADK-internal delegation tool
+ * does: it runs to completion, and another orchestrator answers the call.
+ */
+class DeferringTool extends BaseTool {
+  constructor(
+    name: string,
+    private readonly response: unknown,
+    private readonly mutate?: (toolContext: Context) => void,
+  ) {
+    super({name, description: 'defers its response'});
+    this.defersResponse = true;
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    this.mutate?.(toolContext);
+    return this.response;
+  }
+}
+
+describe('a tool that defers its response', () => {
+  let invocationContext: InvocationContext;
+
+  beforeEach(() => {
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_defer',
+      session: {} as Session,
+      agent: new LlmAgent({name: 'test_agent', model: 'test_model'}),
+      pluginManager: new PluginManager([]),
+    });
+  });
+
+  it('emits no event when it returns nothing', async () => {
+    const tool = new DeferringTool('deferringTool', undefined);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(tool)],
+      toolsDict: {deferringTool: tool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('still emits an actions-only event when it recorded actions', async () => {
+    const tool = new DeferringTool(
+      'deferringTool',
+      undefined,
+      (toolContext) => {
+        toolContext.state.set('jobStarted', true);
+      },
+    );
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(tool)],
+      toolsDict: {deferringTool: tool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content).toBeUndefined();
+    expect(event?.actions.stateDelta).toEqual({jobStarted: true});
+  });
+
+  it('emits a normal function response when it returns a value', async () => {
+    const tool = new DeferringTool('deferringTool', {result: 'answered'});
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(tool)],
+      toolsDict: {deferringTool: tool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toStrictEqual(
+      {result: 'answered'},
+    );
+  });
+
+  it('is not collected as a long-running call', () => {
+    const tool = new DeferringTool('deferringTool', undefined);
+
+    const longRunningIds = getLongRunningFunctionCalls(
+      [{name: 'deferringTool', id: 'call-1'}],
+      {deferringTool: tool},
+    );
+
+    expect(tool.isDeferringResponse).toBe(true);
+    expect(longRunningIds.has('call-1')).toBe(false);
   });
 });

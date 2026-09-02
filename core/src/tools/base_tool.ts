@@ -87,6 +87,29 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
+   * Internal to ADK — set it only from a tool that ships with the framework.
+   *
+   * When true, the framework skips the automatic `FunctionResponse` build for
+   * a `runAsync` that returned nothing, because another orchestrator produces
+   * the matching response later in the conversation. A `runAsync` that returns
+   * a value is answered normally, as for any other tool.
+   *
+   * Compare with {@link isLongRunning}, which skips on empty in the same way
+   * but also marks the call long-running on the emitted event
+   * (`event.longRunningToolIds`), and so changes A2A conversion, plugin
+   * logging and interrupt tracking. This marker changes none of those.
+   */
+  protected defersResponse = false;
+
+  /**
+   * Whether this tool defers its response — {@link defersResponse} read from
+   * outside the class, which the function-call handler needs.
+   */
+  get isDeferringResponse(): boolean {
+    return this.defersResponse;
+  }
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
