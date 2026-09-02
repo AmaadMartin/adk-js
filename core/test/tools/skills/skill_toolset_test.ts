@@ -69,6 +69,18 @@ describe('skill_toolset', () => {
       ]);
     });
 
+    it('exposes its tools unprefixed through getToolsWithPrefix', async () => {
+      const toolset = new SkillToolset([mockSkill]);
+      const tools = await toolset.getToolsWithPrefix();
+      expect(toolset.prefix).toBeUndefined();
+      expect(tools.map((t) => t.name)).toEqual([
+        'list_skills',
+        'load_skill',
+        'load_skill_resource',
+        'run_skill_script',
+      ]);
+    });
+
     it('returns default tools only when no skills activated', async () => {
       const toolset = new SkillToolset([mockSkill]);
       const context = createMockContext();

@@ -12,6 +12,7 @@ import {
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  BaseToolset,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
@@ -1427,5 +1428,59 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+describe('LlmAgent canonicalTools with a prefixed toolset', () => {
+  class SingleToolToolset extends BaseToolset {
+    constructor(
+      private readonly tool: BaseTool,
+      prefix?: string,
+    ) {
+      super([], prefix);
+    }
+
+    async getTools(): Promise<BaseTool[]> {
+      return [this.tool];
+    }
+  }
+
+  function makeForecastTool(): FunctionTool<undefined> {
+    return new FunctionTool({
+      name: 'forecast',
+      description: 'Returns the forecast',
+      execute: async () => 'sunny',
+    });
+  }
+
+  it('exposes the prefixed tool name and declaration', async () => {
+    const agent = new LlmAgent({
+      name: 'weather_agent',
+      model: 'gemini-2.0-flash',
+      tools: [new SingleToolToolset(makeForecastTool(), 'weather')],
+    });
+
+    const tools = await agent.canonicalTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['weather_forecast']);
+    expect(tools[0]._getDeclaration()?.name).toBe('weather_forecast');
+  });
+
+  it('keeps two toolsets exposing the same tool name apart', async () => {
+    const agent = new LlmAgent({
+      name: 'two_toolsets',
+      model: 'gemini-2.0-flash',
+      tools: [
+        new SingleToolToolset(makeForecastTool(), 'weather'),
+        new SingleToolToolset(makeForecastTool(), 'marine'),
+      ],
+    });
+
+    const tools = await agent.canonicalTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'weather_forecast',
+      'marine_forecast',
+    ]);
   });
 });
