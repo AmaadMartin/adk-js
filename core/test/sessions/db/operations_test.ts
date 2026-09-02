@@ -11,6 +11,7 @@ import {
   detectDatabaseSchemaVersion,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
+  getOrCreateRow,
   validateDatabaseSchemaVersion,
 } from '../../../src/sessions/db/operations.js';
 import {
@@ -188,6 +189,42 @@ describe('operations', () => {
       expect(options.pool).toBeUndefined();
     });
 
+    it('reports a string that is not a URI at all', async () => {
+      await expect(
+        getConnectionOptionsFromUri('definitely not a url'),
+      ).rejects.toThrow('Invalid database URL format or argument');
+    });
+
+    it('names the driver a SQLAlchemy-style sqlite scheme carries', async () => {
+      await expect(
+        getConnectionOptionsFromUri('sqlite+aiosqlite:///sessions.db'),
+      ).rejects.toThrow(/'aiosqlite' driver.*'sqlite:\/\/' URL instead/s);
+    });
+
+    it('keeps the password out of every rejection message', async () => {
+      const password = 'sup3rs3cret';
+      await expect(
+        getConnectionOptionsFromUri(`oracle://user:${password}@host/db`),
+      ).rejects.toThrow(
+        expect.objectContaining({
+          message: expect.not.stringContaining(password),
+        }),
+      );
+      await expect(
+        getConnectionOptionsFromUri(`postgresql+asyncpg://u:${password}@h/db`),
+      ).rejects.toThrow(
+        expect.objectContaining({
+          message: expect.not.stringContaining(password),
+        }),
+      );
+    });
+
+    it('still reports an unsupported backend as unsupported', async () => {
+      await expect(
+        getConnectionOptionsFromUri('oracle://user:pw@host/db'),
+      ).rejects.toThrow('Unsupported database URI');
+    });
+
     it('merges caller overrides over the derived options', async () => {
       const options = await getConnectionOptionsFromUri('sqlite://:memory:', {
         pool: {min: 2, max: 4},
@@ -272,6 +309,118 @@ describe('operations', () => {
       await expect(detectDatabaseSchemaVersion(orm)).resolves.toBe(
         SCHEMA_VERSION_1_JSON,
       );
+    });
+  });
+
+  describe('getOrCreateRow', () => {
+    let orm: MikroORM;
+
+    afterEach(async () => {
+      await orm.close();
+    });
+
+    async function initPreparedOrm(): Promise<MikroORM> {
+      const prepared = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+        pool: {min: 1, max: 1},
+        allowGlobalContext: true,
+      });
+      await ensureDatabaseCreated(prepared);
+      return prepared;
+    }
+
+    it('returns the row that is already stored', async () => {
+      orm = await initPreparedOrm();
+      const seeder = orm.em.fork();
+      await seeder
+        .persist(
+          seeder.create(StorageAppState, {
+            appName: 'app',
+            state: {'seeded': true},
+            updateTime: new Date(),
+          }),
+        )
+        .flush();
+
+      const row = await getOrCreateRow(
+        orm.em.fork(),
+        StorageAppState,
+        {appName: 'app'},
+        {appName: 'app', state: {}, updateTime: new Date()},
+      );
+
+      expect(row.state).toEqual({'seeded': true});
+    });
+
+    it('inserts the row when it is absent', async () => {
+      orm = await initPreparedOrm();
+
+      const row = await getOrCreateRow(
+        orm.em.fork(),
+        StorageAppState,
+        {appName: 'app'},
+        {appName: 'app', state: {'fresh': true}, updateTime: new Date()},
+      );
+
+      expect(row.state).toEqual({'fresh': true});
+      expect(await orm.em.fork().count(StorageAppState, {appName: 'app'})).toBe(
+        1,
+      );
+    });
+
+    it('returns the winner row when a concurrent caller inserts first', async () => {
+      orm = await initPreparedOrm();
+      const defaults = {appName: 'app', state: {}, updateTime: new Date()};
+
+      const rows = await Promise.all([
+        getOrCreateRow(
+          orm.em.fork(),
+          StorageAppState,
+          {appName: 'app'},
+          defaults,
+        ),
+        getOrCreateRow(
+          orm.em.fork(),
+          StorageAppState,
+          {appName: 'app'},
+          defaults,
+        ),
+      ]);
+
+      expect(rows.map((row) => row.appName)).toEqual(['app', 'app']);
+      expect(await orm.em.fork().count(StorageAppState, {appName: 'app'})).toBe(
+        1,
+      );
+    });
+
+    it('rethrows an insert failure that left no row behind', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+        pool: {min: 1, max: 1},
+        allowGlobalContext: true,
+      });
+      // A constraint the entity does not know about: the insert fails, the
+      // read that follows it succeeds and still finds nothing, so the failure
+      // is not a lost race.
+      await orm.em
+        .getConnection()
+        .execute(
+          'create table app_states (app_name text primary key, state text ' +
+            "not null check (state <> '{}'), update_time datetime)",
+        );
+
+      await expect(
+        getOrCreateRow(
+          orm.em.fork(),
+          StorageAppState,
+          {appName: 'app'},
+          {appName: 'app', state: {}, updateTime: new Date()},
+        ),
+      ).rejects.toThrow(/CHECK constraint failed/);
     });
   });
 
