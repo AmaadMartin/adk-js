@@ -25,8 +25,8 @@ import {genaiSchemaToJsonSchema} from '../utils/genai_schema_to_json.js';
 import {
   isJsonObject,
   JsonObject,
-  safeJsonSerialize,
   toJsonObject,
+  toJsonText,
   toJsonValue,
 } from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
@@ -353,7 +353,7 @@ function toToolCalls(parts: Part[]): ToolCall[] {
       id: functionCall.id ?? '',
       function: {
         name: functionCall.name,
-        arguments: safeJsonSerialize(functionCall.args),
+        arguments: toJsonText(functionCall.args),
       },
     };
     // LiteLLM's Gemini prompt conversion reads provider_specific_fields, while
@@ -433,7 +433,7 @@ export function contentToMessageParam(
     toolMessages.push({
       role: 'tool',
       tool_call_id: functionResponse.id ?? '',
-      content: safeJsonSerialize(functionResponse.response),
+      content: toJsonText(functionResponse.response),
     });
     // A tool message carries text only, so attached media follows it as its
     // own message.

@@ -8,28 +8,28 @@ import {describe, expect, it} from 'vitest';
 
 import {
   isJsonObject,
-  safeJsonSerialize,
   toJsonObject,
+  toJsonText,
   toJsonValue,
 } from '../../src/utils/json_utils.js';
 
-describe('safeJsonSerialize', () => {
+describe('toJsonText', () => {
   it('serializes a plain value', () => {
-    expect(safeJsonSerialize({a: 1})).toBe('{"a":1}');
+    expect(toJsonText({a: 1})).toBe('{"a":1}');
   });
 
   it('falls back to the string form for a circular structure', () => {
     const circular: Record<string, unknown> = {};
     circular['self'] = circular;
-    expect(safeJsonSerialize(circular)).toBe('[object Object]');
+    expect(toJsonText(circular)).toBe('[object Object]');
   });
 
   it('falls back to the string form for a bigint', () => {
-    expect(safeJsonSerialize(7n)).toBe('7');
+    expect(toJsonText(7n)).toBe('7');
   });
 
   it('falls back to the string form for undefined', () => {
-    expect(safeJsonSerialize(undefined)).toBe('undefined');
+    expect(toJsonText(undefined)).toBe('undefined');
   });
 });
 

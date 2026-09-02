@@ -56,7 +56,7 @@ export function toJsonObject(value: object): JsonObject {
  * Serializes a value to JSON, falling back to its string form when JSON cannot
  * represent it (a circular structure, a `BigInt`).
  */
-export function safeJsonSerialize(value: unknown): string {
+export function toJsonText(value: unknown): string {
   try {
     return JSON.stringify(value) ?? String(value);
   } catch {
