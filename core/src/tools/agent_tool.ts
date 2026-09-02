@@ -6,12 +6,19 @@
 
 import {Content, FunctionDeclaration, Type} from '@google/genai';
 
-import {BaseAgent} from '../agents/base_agent.js';
+import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
+import {RunConfig, StreamingMode} from '../agents/run_config.js';
+import {
+  ToolErrorType,
+  ToolExecutionError,
+} from '../errors/tool_execution_error.js';
 import {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
+import {stableJsonStringify} from '../utils/json_utils.js';
+import {resolveFullyQualifiedName} from '../utils/module_utils.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
@@ -32,6 +39,110 @@ export interface AgentToolConfig {
    * Whether to skip summarization of the agent output.
    */
   skipSummarization?: boolean;
+}
+
+/**
+ * A reference to an agent named in a configuration file. Exactly one field is
+ * set.
+ */
+export interface AgentRefConfig {
+  /** Fully-qualified name of an agent instance defined in code. */
+  code?: string;
+
+  /** Path to the agent's own config file, relative to the referring file. */
+  configPath?: string;
+}
+
+/**
+ * The declarative configuration of an {@link AgentTool}, as a configuration
+ * file declares it.
+ *
+ * Named for its contents rather than for the tool because
+ * {@link AgentToolConfig} already names the constructor parameter object,
+ * which holds a live agent. Python spells the same pair `ToolArgsConfig` and
+ * `AgentToolConfig`.
+ */
+export interface AgentToolArgsConfig {
+  /** The agent to wrap. */
+  agent: AgentRefConfig;
+
+  /** Whether to skip summarization of the agent output. */
+  skipSummarization?: boolean;
+}
+
+/**
+ * Derives the run config of the nested run from the caller's.
+ *
+ * The wrapped agent runs as part of the caller's invocation, so it obeys the
+ * caller's run settings. Two of them are the caller's alone and are dropped:
+ *
+ * - `supportCfc` describes how the caller's own model executes. Handing it to
+ *   another agent replaces that agent's code executor, and the nested
+ *   {@link Runner} then refuses any model that is not a Gemini 2 one.
+ * - A streaming mode makes the nested run emit partial events. Only the last
+ *   event's content becomes the tool result, so a caller streaming without
+ *   aggregation would leave a partial chunk as the whole answer.
+ *
+ * Everything else, `maxLlmCalls` included, is forwarded untouched. The call
+ * count is per-invocation, so the caller's ceiling bounds the nested run
+ * rather than being shared with the caller's own.
+ *
+ * @param parent The caller's run config, if it set one.
+ * @return The caller's own config when no override applies, so the caller's
+ *   object is forwarded rather than copied. Never the mutated caller's object.
+ */
+function nestedRunConfig(parent?: RunConfig): RunConfig | undefined {
+  if (parent === undefined) {
+    return undefined;
+  }
+  let nested = parent;
+  if (nested.supportCfc) {
+    nested = {...nested, supportCfc: false};
+  }
+  if ((nested.streamingMode ?? StreamingMode.NONE) !== StreamingMode.NONE) {
+    nested = {...nested, streamingMode: StreamingMode.NONE};
+  }
+  return nested;
+}
+
+/**
+ * Returns the prompt text for an agent that declares no input schema.
+ *
+ * A `request` argument is the prompt itself, empty string included. Anything
+ * else is the whole argument object, serialized with its keys sorted so that
+ * two calls differing only in key order produce identical text.
+ */
+function promptTextFromArgs(args: Record<string, unknown>): string {
+  const request = args['request'];
+  return typeof request === 'string' ? request : stableJsonStringify(args);
+}
+
+/** Resolves the agent a configuration file references. */
+async function resolveAgentReference(
+  ref: AgentRefConfig,
+  configAbsPath: string,
+): Promise<BaseAgent> {
+  if ((ref.code === undefined) === (ref.configPath === undefined)) {
+    throw new ToolExecutionError(
+      'An agent reference must set exactly one of `code` and `configPath`.',
+      ToolErrorType.BAD_REQUEST,
+    );
+  }
+  if (ref.code === undefined) {
+    throw new ToolExecutionError(
+      'A `configPath` agent reference is not supported: adk-js has no agent ' +
+        'config loader. Reference the agent in code with `code` instead.',
+      ToolErrorType.BAD_REQUEST,
+    );
+  }
+  const resolved = await resolveFullyQualifiedName(ref.code, configAbsPath);
+  if (!isBaseAgent(resolved)) {
+    throw new ToolExecutionError(
+      `Agent reference \`${ref.code}\` does not resolve to an agent.`,
+      ToolErrorType.BAD_REQUEST,
+    );
+  }
+  return resolved;
 }
 
 /**
@@ -78,6 +189,34 @@ export class AgentTool extends BaseTool {
     });
     this.agent = config.agent;
     this.skipSummarization = config.skipSummarization || false;
+  }
+
+  /**
+   * Builds a tool from the declarative configuration of a config file.
+   *
+   * The method is asynchronous because JavaScript loads a module
+   * asynchronously. The adk-python counterpart is synchronous only because
+   * `importlib` is.
+   *
+   * @param config The tool's declared configuration.
+   * @param configAbsPath Absolute path of the config file the declaration came
+   *   from. A relative module specifier resolves against its directory.
+   * @return The configured tool.
+   * @throws {ToolExecutionError} When the agent reference does not set exactly
+   *   one of `code` and `configPath`, names a `configPath`, or resolves to a
+   *   value that is not an agent.
+   * @throws {InputValidationError} When `code` names a module or an export
+   *   that does not resolve.
+   */
+  static async fromConfig(
+    config: AgentToolArgsConfig,
+    configAbsPath: string,
+  ): Promise<AgentTool> {
+    const agent = await resolveAgentReference(config.agent, configAbsPath);
+    return new AgentTool({
+      agent,
+      skipSummarization: config.skipSummarization,
+    });
   }
 
   override _getDeclaration(): FunctionDeclaration {
@@ -139,7 +278,7 @@ export class AgentTool extends BaseTool {
           // logic to one we have in Python ADK.
           text: hasInputSchema
             ? JSON.stringify(args)
-            : (args['request'] as string),
+            : promptTextFromArgs(args),
         },
       ],
     };
@@ -174,6 +313,7 @@ export class AgentTool extends BaseTool {
       sessionId: session.id,
       newMessage: content,
       abortSignal: toolContext.abortSignal,
+      runConfig: nestedRunConfig(toolContext.invocationContext.runConfig),
     })) {
       if (toolContext.abortSignal?.aborted) {
         return;
