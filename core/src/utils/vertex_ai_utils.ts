@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {HttpOptions} from '@google/genai';
 import {
   ApiClient,
   NodeAuth,
@@ -13,9 +12,6 @@ import {
 } from '@google/genai/vertex_internal';
 
 import {isEnterpriseModeEnabled} from './env_aware_utils.js';
-
-/** The OAuth scope Application Default Credentials are requested with. */
-const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
 export const EXPRESS_MODE_UNSUPPORTED_MESSAGE =
   'Vertex AI Express Mode (expressModeApiKey / GOOGLE_API_KEY) is not ' +
@@ -54,41 +50,20 @@ export function getExpressModeApiKey(
   return undefined;
 }
 
-/** The credentials and endpoint a Vertex AI API client is built from. */
-export interface VertexAiApiClientOptions {
-  /** Express Mode API key. Replaces Application Default Credentials. */
-  apiKey?: string;
-  /** The project id, for Application Default Credentials. */
-  project?: string;
-  /** The location, for Application Default Credentials. */
-  location?: string;
-  /** Endpoint, API version and header overrides. */
-  httpOptions?: HttpOptions;
-}
-
 /**
- * Builds a Vertex AI API client.
+ * Builds a Vertex AI API client that authenticates with an Express Mode key.
  *
- * With `apiKey` set the client authenticates in Express Mode: `NodeAuth`
- * returns the key header directly and never constructs `GoogleAuth`, so no
- * Application Default Credentials are needed. Without it the client falls back
- * to Application Default Credentials for `project` and `location`.
+ * `NodeAuth` returns the key header directly and never constructs
+ * `GoogleAuth`, so no Application Default Credentials are needed. The
+ * `@google-cloud/vertexai` `Client` cannot send a key, which is why Express
+ * Mode builds its client here instead.
  */
-export function createVertexAiApiClient(
-  options: VertexAiApiClientOptions,
-): ApiClient {
+export function createExpressModeApiClient(apiKey: string): ApiClient {
   return new ApiClient({
-    auth: options.apiKey
-      ? new NodeAuth({apiKey: options.apiKey})
-      : new NodeAuth({
-          googleAuthOptions: {scopes: [CLOUD_PLATFORM_SCOPE]},
-        }),
+    auth: new NodeAuth({apiKey}),
     uploader: new NodeUploader(),
     downloader: new NodeDownloader(),
     vertexai: true,
-    apiKey: options.apiKey,
-    project: options.project,
-    location: options.location,
-    httpOptions: options.httpOptions,
+    apiKey,
   });
 }

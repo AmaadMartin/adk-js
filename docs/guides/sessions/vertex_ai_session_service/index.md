@@ -83,17 +83,16 @@ another engine's session.
 
 ## Session expiration and extra configuration
 
-`createSession` takes `ttl` or `expireTime`, and rejects both together. Any
-other Agent Engine session-config field goes in `sessionConfig`, which is
-forwarded verbatim. The typed fields win on a collision, so `sessionConfig`
-cannot replace a validated `sessionId`.
+`createSession` takes `ttl` or `expireTime`, and rejects both together. It also
+takes the `displayName` and `labels` the Agent Engine session resource carries.
 
 ```ts
 await sessionService.createSession({
   appName: '1234567890',
   userId: 'user-1',
   ttl: '7200s',
-  sessionConfig: {displayName: 'Support chat'},
+  displayName: 'Support chat',
+  labels: {team: 'search'},
 });
 ```
 
@@ -127,22 +126,3 @@ in the environment. adk-python prefers the key there.
 `getUserState` always rejects. The Agent Engine API does not expose user state
 independently of a session, so read it by enumerating sessions with
 `listSessions` and calling `getSession` on each result.
-
-## Reaching a different endpoint
-
-Override `apiClientHttpOptionsOverride` to set a base URL, an API version, or
-extra headers on the underlying API client.
-
-```ts
-import {VertexAiSessionService} from '@google/adk';
-import {HttpOptions} from '@google/genai';
-
-class StagingSessionService extends VertexAiSessionService {
-  protected override apiClientHttpOptionsOverride(): HttpOptions {
-    return {apiVersion: 'v1'};
-  }
-}
-```
-
-The method runs during base construction, so an override must not read fields
-the subclass initializes: they are still undefined at that point.

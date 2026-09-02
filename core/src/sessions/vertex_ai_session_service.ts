@@ -10,6 +10,7 @@ import {
   EventActions as ApiEventActions,
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
+  CreateAgentEngineSessionConfig,
   EventMetadata,
   Session as VertexAiSession,
   SessionEvent as VertexAiSessionEvent,
@@ -18,7 +19,6 @@ import {
   Content,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
-  HttpOptions,
 } from '@google/genai';
 import {ApiClient} from '@google/genai/vertex_internal';
 import {isCompactedEvent} from '../events/compacted_event.js';
@@ -30,7 +30,7 @@ import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {
-  createVertexAiApiClient,
+  createExpressModeApiClient,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
 
@@ -70,13 +70,6 @@ const WORKFLOW_CUSTOM_METADATA_KEY = '_workflow';
 /** The session IDs the Agent Engine sessions API accepts in a resource name. */
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
-/** Rejection message for {@link VertexAiSessionService.getUserState}. */
-const GET_USER_STATE_UNSUPPORTED_MESSAGE =
-  'VertexAiSessionService does not support getUserState. The Vertex AI ' +
-  'Agent Engine API does not expose user state independently of a session. ' +
-  'To read user state, enumerate sessions via listSessions and call ' +
-  'getSession on each result.';
-
 /**
  * Checks if the given URI is a Vertex AI session service URI.
  */
@@ -85,18 +78,33 @@ export function isVertexAiConnectionString(uri?: string): boolean {
 }
 
 /**
- * Returns the trailing ID of a session resource name, or `sessionId` unchanged.
+ * Returns the short session ID to put in a request path.
  *
- * A caller who stored the name the API returned
- * (`projects/p/locations/l/reasoningEngines/123/sessions/abc`) can pass it back
- * where a short ID is expected. Interpolating it into the request path would
- * produce `reasoningEngines/123/sessions/projects/p/...` and a 404.
+ * Extraction runs before validation, because a caller who stored the resource
+ * name the API returned
+ * (`projects/p/locations/l/reasoningEngines/123/sessions/abc`) may pass it back
+ * where a short ID is expected, and validating first would reject every such
+ * name.
  *
  * @throws if the name carries a different reasoning engine than the service is
- *     configured for, which would otherwise silently read another engine's
- *     session.
+ *     configured for, or if the ID would escape its URL path segment.
  */
-export function extractShortSessionId(
+export function normalizeSessionId(
+  sessionId: string,
+  expectedEngineId?: string,
+): string {
+  const shortId = extractShortSessionId(sessionId, expectedEngineId);
+  validateSessionId(shortId);
+  return shortId;
+}
+
+/**
+ * Returns the trailing ID of a session resource name, or `sessionId` unchanged.
+ *
+ * Interpolating a full resource name into the request path would produce
+ * `reasoningEngines/123/sessions/projects/p/...` and a 404.
+ */
+function extractShortSessionId(
   sessionId: string,
   expectedEngineId?: string,
 ): string {
@@ -183,15 +191,10 @@ export interface VertexAiCreateSessionRequest extends CreateSessionRequest {
   ttl?: string;
   /** Absolute RFC 3339 UTC expiration, e.g. `'2025-10-01T00:00:00Z'`. */
   expireTime?: string;
-  /**
-   * Additional Agent Engine session-config fields, forwarded verbatim.
-   *
-   * The Python service takes these as `**kwargs`. An index signature would be
-   * the direct translation but turns off type checking for every consumer of
-   * this type, so the escape hatch is an explicit field instead. The typed
-   * fields win on collision, so this cannot replace a validated `sessionId`.
-   */
-  sessionConfig?: Record<string, unknown>;
+  /** Human-readable name for the session. */
+  displayName?: CreateAgentEngineSessionConfig['displayName'];
+  /** User-defined labels, for organizing sessions. */
+  labels?: CreateAgentEngineSessionConfig['labels'];
 }
 
 /**
@@ -220,42 +223,21 @@ export class VertexAiSessionService extends BaseSessionService {
     this.sessions = options.sessions ?? this.createSessionsClient();
   }
 
-  /**
-   * HTTP options for the Agent Engine API client, for subclasses that need to
-   * reach a non-default endpoint or set an API version.
-   *
-   * Called from the constructor, so an override must not read fields the
-   * subclass initializes — base construction runs first and they are still
-   * undefined at that point.
-   */
-  protected apiClientHttpOptionsOverride(): HttpOptions | undefined {
-    return undefined;
-  }
-
   private createSessionsClient(): Sessions {
-    const httpOptions = this.apiClientHttpOptionsOverride();
     // A project and location keep authenticating with Application Default
     // Credentials even when GOOGLE_API_KEY is set in the environment, rather
     // than silently switching those callers to API-key auth. adk-python
     // prefers the key here.
     if (this.projectId && this.location) {
-      // `Client` sets the SDK's own user agent, so it stays the default path.
-      // It takes no HttpOptions (only an `apiEndpoint`), so an override has to
-      // build the API client directly instead.
-      return httpOptions
-        ? createAgentEngineSessions(
-            createVertexAiApiClient({
-              project: this.projectId,
-              location: this.location,
-              httpOptions,
-            }),
-          )
-        : new Client({project: this.projectId, location: this.location})
-            .agentEnginesInternal.sessions;
+      const client = new Client({
+        project: this.projectId,
+        location: this.location,
+      });
+      return client.agentEnginesInternal.sessions;
     }
     if (this.expressModeApiKey) {
       return createAgentEngineSessions(
-        createVertexAiApiClient({apiKey: this.expressModeApiKey, httpOptions}),
+        createExpressModeApiClient(this.expressModeApiKey),
       );
     }
     throw new Error('Project ID and Location are required.');
@@ -291,7 +273,8 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
     ttl,
     expireTime,
-    sessionConfig,
+    displayName,
+    labels,
   }: VertexAiCreateSessionRequest): Promise<Session> {
     // The API rejects both together; fail before the RPC.
     if (ttl != null && expireTime != null) {
@@ -302,19 +285,19 @@ export class VertexAiSessionService extends BaseSessionService {
 
     const reasoningEngineId = this.getReasoningEngineId(appName);
     if (sessionId) {
-      sessionId = extractShortSessionId(sessionId, reasoningEngineId);
-      validateSessionId(sessionId);
+      sessionId = normalizeSessionId(sessionId, reasoningEngineId);
     }
     const filteredState = state ? trimTempState(state) : undefined;
     let apiResponse = await this.sessions.createInternal({
       name: `reasoningEngines/${reasoningEngineId}`,
       userId: userId,
       config: {
-        ...sessionConfig,
         ...(filteredState ? {sessionState: filteredState} : {}),
         ...(sessionId ? {sessionId} : {}),
         ...(ttl != null ? {ttl} : {}),
         ...(expireTime != null ? {expireTime} : {}),
+        ...(displayName != null ? {displayName} : {}),
+        ...(labels != null ? {labels} : {}),
       },
     });
 
@@ -360,8 +343,7 @@ export class VertexAiSessionService extends BaseSessionService {
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    sessionId = extractShortSessionId(sessionId, reasoningEngineId);
-    validateSessionId(sessionId);
+    sessionId = normalizeSessionId(sessionId, reasoningEngineId);
     const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`;
 
     try {
@@ -523,8 +505,7 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    sessionId = extractShortSessionId(sessionId, reasoningEngineId);
-    validateSessionId(sessionId);
+    sessionId = normalizeSessionId(sessionId, reasoningEngineId);
 
     // A session may only be deleted by the user it belongs to. getSession
     // already enforces this and throws when the stored session's userId does
@@ -559,7 +540,12 @@ export class VertexAiSessionService extends BaseSessionService {
     appName: string;
     userId: string;
   }): Promise<Record<string, unknown>> {
-    throw new Error(GET_USER_STATE_UNSUPPORTED_MESSAGE);
+    throw new Error(
+      'VertexAiSessionService does not support getUserState. The Vertex AI ' +
+        'Agent Engine API does not expose user state independently of a ' +
+        'session. To read user state, enumerate sessions via listSessions ' +
+        'and call getSession on each result.',
+    );
   }
 
   override async appendEvent({

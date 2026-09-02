@@ -12,7 +12,7 @@ import {
   VertexAiSessionService,
 } from '@google/adk';
 import {createSession, Session} from '@google/adk/sessions/session.js';
-import {ApiError, HttpOptions} from '@google/genai';
+import {ApiError} from '@google/genai';
 import {ApiClient} from '@google/genai/vertex_internal';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -34,9 +34,8 @@ vi.mock('nodejs-vertexai', () => ({
 const clientConstructor = vi.hoisted(() => vi.fn());
 const sessionsConstructor = vi.hoisted(() => vi.fn());
 
-// The service builds the Agent Engine `Sessions` client itself whenever it
-// cannot use the ADC `Client`: in express mode, and when a subclass overrides
-// the HTTP options. Capture the ApiClient it is handed.
+// Express mode cannot use the ADC `Client`, so the service builds the Agent
+// Engine `Sessions` client itself. Capture the ApiClient it is handed.
 vi.mock('@google-cloud/vertexai/build/src/genai/sessions.js', () => ({
   Sessions: class {
     constructor(apiClient: unknown) {
@@ -65,8 +64,8 @@ afterEach(() => {
 });
 
 import {
-  extractShortSessionId,
   isVertexAiConnectionString,
+  normalizeSessionId,
   quoteFilterLiteral,
   validateSessionId,
 } from '@google/adk/sessions/vertex_ai_session_service.js';
@@ -85,17 +84,17 @@ describe('isVertexAiConnectionString', () => {
   });
 });
 
-describe('extractShortSessionId', () => {
+describe('normalizeSessionId', () => {
   it.each(['123', 'session-123_abc'])(
     'returns the short id %s unchanged',
     (sessionId) => {
-      expect(extractShortSessionId(sessionId)).toBe(sessionId);
+      expect(normalizeSessionId(sessionId)).toBe(sessionId);
     },
   );
 
   it('extracts the short id from a full resource name', () => {
     expect(
-      extractShortSessionId(
+      normalizeSessionId(
         'projects/p/locations/l/reasoningEngines/123/sessions/session-123',
       ),
     ).toBe('session-123');
@@ -103,7 +102,7 @@ describe('extractShortSessionId', () => {
 
   it('extracts the short id when the engine matches the expected one', () => {
     expect(
-      extractShortSessionId(
+      normalizeSessionId(
         'projects/p/locations/l/reasoningEngines/123/sessions/session-123',
         '123',
       ),
@@ -112,19 +111,22 @@ describe('extractShortSessionId', () => {
 
   it('throws when the resource name carries another reasoning engine', () => {
     expect(() =>
-      extractShortSessionId(
+      normalizeSessionId(
         'projects/p/locations/l/reasoningEngines/999/sessions/session-123',
         '123',
       ),
     ).toThrow(/Session resource name mismatch/);
   });
 
-  it('returns a slashed string whose penultimate segment is not sessions', () => {
-    expect(extractShortSessionId('a/b', '123')).toBe('a/b');
+  it('rejects a slashed string whose penultimate segment is not sessions', () => {
+    // Nothing is extracted from it, so validation sees the whole string.
+    expect(() => normalizeSessionId('a/b', '123')).toThrow(
+      /Invalid session_id/,
+    );
   });
 
   it('extracts the short id from a name that names no reasoning engine', () => {
-    expect(extractShortSessionId('sessions/session-123', '123')).toBe(
+    expect(normalizeSessionId('sessions/session-123', '123')).toBe(
       'session-123',
     );
   });
@@ -282,53 +284,6 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(clientConstructor).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('apiClientHttpOptionsOverride', () => {
-    class CustomEndpointSessionService extends VertexAiSessionService {
-      protected override apiClientHttpOptionsOverride(): HttpOptions {
-        // 'v1beta1' is the Vertex default, so it would not prove anything.
-        return {apiVersion: 'v1', baseUrl: 'https://endpoint.invalid'};
-      }
-    }
-
-    it('reaches the api client a subclass override configures', () => {
-      new CustomEndpointSessionService({
-        projectId: 'test-project',
-        location: 'us-central1',
-      });
-
-      expect(clientConstructor).not.toHaveBeenCalled();
-      expect(sessionsConstructor).toHaveBeenCalledTimes(1);
-      const apiClient = sessionsConstructor.mock.calls[0][0] as ApiClient;
-      expect(apiClient.getApiVersion()).toBe('v1');
-      expect(apiClient.getBaseUrl()).toBe('https://endpoint.invalid');
-      expect(apiClient.getProject()).toBe('test-project');
-    });
-
-    it('reaches the api client of an express mode service', () => {
-      vi.stubEnv('GOOGLE_GENAI_USE_VERTEXAI', 'true');
-
-      new CustomEndpointSessionService({expressModeApiKey: 'test-api-key'});
-
-      const apiClient = sessionsConstructor.mock.calls[0][0] as ApiClient;
-      expect(apiClient.getApiVersion()).toBe('v1');
-      expect(apiClient.getBaseUrl()).toBe('https://endpoint.invalid');
-      expect(apiClient.getApiKey()).toBe('test-api-key');
-    });
-
-    it('leaves the default construction path alone when not overridden', () => {
-      new VertexAiSessionService({
-        projectId: 'test-project',
-        location: 'us-central1',
-      });
-
-      expect(clientConstructor).toHaveBeenCalledWith({
-        project: 'test-project',
-        location: 'us-central1',
-      });
-      expect(sessionsConstructor).not.toHaveBeenCalled();
     });
   });
 
@@ -669,34 +624,27 @@ describe('VertexAiSessionService', () => {
       expect(mockClient.createInternal).not.toHaveBeenCalled();
     });
 
-    it('forwards extra session config the SDK typing does not model', async () => {
+    it('forwards displayName and labels to the create config', async () => {
       await service.createSession({
         appName: '12345',
         userId: 'testUser',
-        sessionConfig: {displayName: 'x', labels: {team: 'search'}},
+        displayName: 'Support chat',
+        labels: {team: 'search'},
       });
 
       expect(mockClient.createInternal).toHaveBeenCalledWith({
         name: 'reasoningEngines/12345',
         userId: 'testUser',
-        config: {displayName: 'x', labels: {team: 'search'}},
+        config: {displayName: 'Support chat', labels: {team: 'search'}},
       });
     });
 
-    it('lets the typed fields win over extra session config', async () => {
-      await service.createSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'typed-id',
-        ttl: '7200s',
-        sessionConfig: {ttl: '1s', sessionId: 'smuggled/id'},
-      });
+    it('omits displayName and labels when they are not given', async () => {
+      await service.createSession({appName: '12345', userId: 'testUser'});
 
-      expect(mockClient.createInternal).toHaveBeenCalledWith({
-        name: 'reasoningEngines/12345',
-        userId: 'testUser',
-        config: {ttl: '7200s', sessionId: 'typed-id'},
-      });
+      expect(mockClient.createInternal).toHaveBeenCalledWith(
+        expect.objectContaining({config: {}}),
+      );
     });
   });
 
@@ -1050,6 +998,26 @@ describe('VertexAiSessionService', () => {
       expect(response.sessions).toHaveLength(2);
       expect(response.sessions[0].id).toBe('test-list-1');
       expect(response.sessions[1].id).toBe('malformed_name');
+    });
+
+    it('parses an id out of a resource name and out of a bare name', async () => {
+      // Pins the parsing above without depending on the order sessions come
+      // back in, so a change to the sort cannot silence it.
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'projects/p/locations/l/sessions/test-list-1',
+            userId: 'testUser',
+          },
+          {name: 'malformed_name', userId: 'testUser'},
+        ],
+      });
+
+      const response = await service.listSessions({appName: '12345'});
+
+      expect(new Set(response.sessions.map((s) => s.id))).toEqual(
+        new Set(['test-list-1', 'malformed_name']),
+      );
     });
 
     it('escapes double quotes in userId to prevent AIP-160 filter injection', async () => {
