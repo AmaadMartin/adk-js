@@ -16,6 +16,7 @@ import {
 } from '../telemetry/tracing.js';
 import {BaseNode, BaseNodeConfig} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
+import type {AgentOrigin} from './agent_origin.js';
 import {Context} from './context.js';
 import {InvocationContext} from './invocation_context.js';
 
@@ -53,6 +54,7 @@ export interface BaseAgentConfig extends BaseNodeConfig {
   subAgents?: BaseAgent[];
   beforeAgentCallback?: BeforeAgentCallback;
   afterAgentCallback?: AfterAgentCallback;
+  adkOrigin?: AgentOrigin;
 }
 
 /**
@@ -171,6 +173,16 @@ export abstract class BaseAgent<
    */
   readonly afterAgentCallback: SingleAgentCallback[];
 
+  /**
+   * Where this agent was loaded from, when a loader recorded it.
+   *
+   * Set by tooling that loads agents out of a directory (see the dev
+   * `AgentLoader`); read by `Runner` to report an app-name mismatch. It is a
+   * plain property rather than a symbol or a `WeakMap` entry so it survives two
+   * copies of the package in one runtime.
+   */
+  adkOrigin?: AgentOrigin;
+
   constructor(config: BaseAgentConfig) {
     // An agent name is stricter than a node name (a JS identifier, and never
     // "user"), so it is validated here and handed to BaseNode already checked.
@@ -185,6 +197,7 @@ export abstract class BaseAgent<
       config.beforeAgentCallback,
     );
     this.afterAgentCallback = getCannonicalCallback(config.afterAgentCallback);
+    this.adkOrigin = config.adkOrigin;
 
     this.setParentAgentForSubAgents();
   }
