@@ -16,7 +16,12 @@ import {
   InvocationContext,
   LlmAgent,
   LlmAgentConfig,
+  LoopAgent,
+  ParallelAgent,
   PluginManager,
+  RemoteA2AAgent,
+  RoutedAgent,
+  SequentialAgent,
   Session,
   TruncatingContextCompactor,
   createEvent,
@@ -785,6 +790,103 @@ describe('BaseAgent', () => {
 
       expect(root.findSubAgent('search')).toBe(first);
       warn.mockRestore();
+    });
+  });
+
+  describe('clone accepts every declared config key', () => {
+    // clone() derives the keys it accepts from the agent's instance fields, so
+    // a subclass that stores its config another way loses them. Every agent
+    // class is checked here, because auditing only the class that broke is how
+    // the last one was missed. Keep each list in step with its config
+    // interface.
+    const BASE_KEYS = [
+      'description',
+      'subAgents',
+      'beforeAgentCallback',
+      'afterAgentCallback',
+    ];
+
+    const rejectedKeys = (agent: BaseAgent, keys: string[]): string[] =>
+      keys.filter((key) => {
+        const overrides: Partial<BaseAgentConfig> = {[key]: undefined};
+        try {
+          agent.clone(overrides);
+          return false;
+        } catch (error: unknown) {
+          return (
+            error instanceof Error &&
+            error.message.includes('Cannot update nonexistent fields')
+          );
+        }
+      });
+
+    it('on RemoteA2AAgent, built with only an agent card', () => {
+      const agent = new RemoteA2AAgent({
+        name: 'remote',
+        agentCard: 'https://example.com/card.json',
+      });
+
+      expect(
+        rejectedKeys(agent, [
+          'agentCard',
+          'client',
+          'clientFactory',
+          'messageSendConfig',
+          'beforeRequestCallbacks',
+          'afterRequestCallbacks',
+          'metadata',
+          ...BASE_KEYS,
+        ]),
+      ).toEqual([]);
+    });
+
+    it('on LlmAgent, built with only a name', () => {
+      expect(
+        rejectedKeys(new LlmAgent({name: 'agent'}), [
+          'model',
+          'instruction',
+          'globalInstruction',
+          'tools',
+          'generateContentConfig',
+          'disallowTransferToParent',
+          'disallowTransferToPeers',
+          'includeContents',
+          'mode',
+          'inputSchema',
+          'outputSchema',
+          'outputKey',
+          'beforeModelCallback',
+          'afterModelCallback',
+          'beforeToolCallback',
+          'afterToolCallback',
+          'requestProcessors',
+          'responseProcessors',
+          'contextCompactors',
+          'codeExecutor',
+          ...BASE_KEYS,
+        ]),
+      ).toEqual([]);
+    });
+
+    it('on the workflow agents', () => {
+      expect(
+        rejectedKeys(new LoopAgent({name: 'loop'}), [
+          'maxIterations',
+          ...BASE_KEYS,
+        ]),
+      ).toEqual([]);
+      expect(
+        rejectedKeys(
+          new RoutedAgent({name: 'routed', agents: [], router: () => ''}),
+          ['agents', 'router', ...BASE_KEYS],
+        ),
+      ).toEqual([]);
+      expect(
+        rejectedKeys(new ParallelAgent({name: 'parallel'}), BASE_KEYS),
+      ).toEqual([]);
+      expect(
+        rejectedKeys(new SequentialAgent({name: 'sequential'}), BASE_KEYS),
+      ).toEqual([]);
     });
   });
 
