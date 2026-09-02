@@ -43,7 +43,6 @@ export type {
   APIHubClientOptions,
   ApiHubApi,
   ApiHubApiVersion,
-  ApiHubResourceNames,
   BaseAPIHubClient,
 } from './tools/apihub_tool/clients/apihub_client.js';
 export {

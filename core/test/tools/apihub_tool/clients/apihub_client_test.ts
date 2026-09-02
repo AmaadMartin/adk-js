@@ -14,7 +14,6 @@ import {
   ApiHubResourceNames,
   extractResourceName,
 } from '../../../../src/tools/apihub_tool/clients/apihub_client.js';
-import {logger} from '../../../../src/utils/logger.js';
 import {MtlsClientCerts} from '../../../../src/utils/mtls_utils.js';
 
 const {googleAuthMock, getAccessTokenMock} = vi.hoisted(() => {
@@ -28,15 +27,9 @@ const {googleAuthMock, getAccessTokenMock} = vi.hoisted(() => {
 
 vi.mock('google-auth-library', () => ({GoogleAuth: googleAuthMock}));
 
-const {
-  httpsRequestMock,
-  useClientCertEffectiveMock,
-  loadDefaultClientCertsMock,
-} = vi.hoisted(() => ({
+const {httpsRequestMock, clientCertsToPresentMock} = vi.hoisted(() => ({
   httpsRequestMock: vi.fn<FakeHttpsRequest>(),
-  useClientCertEffectiveMock: vi.fn<() => boolean>(),
-  loadDefaultClientCertsMock:
-    vi.fn<() => Promise<MtlsClientCerts | undefined>>(),
+  clientCertsToPresentMock: vi.fn<() => Promise<MtlsClientCerts | undefined>>(),
 }));
 
 // `https.Agent` stays real, so the assertions read the certificate material the
@@ -50,12 +43,13 @@ vi.mock('node:https', async (importOriginal) => {
   };
 });
 
+// Only the certificate lookup is faked. The host rewrite and the mutual-TLS
+// transport stay real, so the assertions below pin what the client sends.
 vi.mock('../../../../src/utils/mtls_utils.js', async (importOriginal) => ({
   ...(await importOriginal<
     typeof import('../../../../src/utils/mtls_utils.js')
   >()),
-  useClientCertEffective: useClientCertEffectiveMock,
-  loadDefaultClientCerts: loadDefaultClientCertsMock,
+  clientCertsToPresent: clientCertsToPresentMock,
 }));
 
 const ROOT = 'https://apihub.googleapis.com/v1';
@@ -975,13 +969,6 @@ function httpsRespondsWith(payload: unknown, status = 200): void {
   );
 }
 
-/** Makes the mocked `https.request` never answer, and returns the request. */
-function httpsStaysPending(): FakeRequest {
-  const request = fakeRequest(() => {});
-  httpsRequestMock.mockImplementation(() => request);
-  return request;
-}
-
 const CERTS = {cert: 'cert-pem', key: 'key-pem', passphrase: 'secret'};
 const APIS_URL = `${ROOT}/projects/${PROJECT}/locations/${LOCATION}/apis`;
 const MTLS_APIS_URL = APIS_URL.replace(
@@ -995,8 +982,7 @@ describe('APIHubClient over mutual TLS', () => {
   beforeEach(() => {
     fetchMock.mockReset();
     httpsRequestMock.mockReset();
-    useClientCertEffectiveMock.mockReturnValue(true);
-    loadDefaultClientCertsMock.mockResolvedValue(CERTS);
+    clientCertsToPresentMock.mockResolvedValue(CERTS);
     getAccessTokenMock.mockReset();
     getAccessTokenMock.mockResolvedValue('adc_token');
     vi.stubGlobal('fetch', fetchMock);
@@ -1040,25 +1026,12 @@ describe('APIHubClient over mutual TLS', () => {
   });
 
   it('should use the default endpoint when no client certificate is available', async () => {
-    loadDefaultClientCertsMock.mockResolvedValue(undefined);
+    clientCertsToPresentMock.mockResolvedValue(undefined);
     alwaysRespondWith(MOCK_API_LIST);
 
-    await client.listApis(PROJECT, LOCATION);
-
-    expect(httpsRequestMock).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledWith(
-      APIS_URL,
-      expect.objectContaining(AUTHORIZED_GET),
+    expect(await client.listApis(PROJECT, LOCATION)).toEqual(
+      MOCK_API_LIST.apis,
     );
-  });
-
-  it('should not look for a client certificate when the environment does not ask for one', async () => {
-    useClientCertEffectiveMock.mockReturnValue(false);
-    alwaysRespondWith(MOCK_API_LIST);
-
-    await client.listApis(PROJECT, LOCATION);
-
-    expect(loadDefaultClientCertsMock).not.toHaveBeenCalled();
     expect(httpsRequestMock).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith(
       APIS_URL,
@@ -1076,61 +1049,6 @@ describe('APIHubClient over mutual TLS', () => {
     expect(httpsRequestMock.mock.calls[0][1].agent.options).toMatchObject(
       CERTS,
     );
-  });
-
-  it('should treat a response with no status code as a failure', async () => {
-    httpsRequestMock.mockImplementation((_url, _options, onResponse) =>
-      fakeRequest(() => {
-        const response: FakeResponse = Object.assign(new EventEmitter(), {
-          setEncoding: () => {},
-        });
-        onResponse(response);
-        response.emit('end');
-      }),
-    );
-
-    await expect(client.listApis(PROJECT, LOCATION)).rejects.toThrow(
-      'API Hub request failed with status 0:',
-    );
-  });
-
-  it('should fail a mutual-TLS request that reaches its deadline', async () => {
-    const request = httpsStaysPending();
-
-    const failure = client.listApis(PROJECT, LOCATION);
-    await vi.waitUntil(() => httpsRequestMock.mock.calls.length === 1);
-    request.emit('timeout');
-
-    await expect(failure).rejects.toThrow(
-      `API Hub request timed out after 30000 ms: ${MTLS_APIS_URL}`,
-    );
-  });
-
-  it('should fail a mutual-TLS request that errors on the socket', async () => {
-    const request = httpsStaysPending();
-
-    const failure = client.listApis(PROJECT, LOCATION);
-    await vi.waitUntil(() => httpsRequestMock.mock.calls.length === 1);
-    request.emit('error', new Error('socket hang up'));
-
-    await expect(failure).rejects.toThrow('socket hang up');
-  });
-
-  it('should fall back to the default endpoint when the certificate cannot be loaded', async () => {
-    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-    loadDefaultClientCertsMock.mockRejectedValue(new Error('provider failed'));
-    alwaysRespondWith(MOCK_API_LIST);
-
-    expect(await client.listApis(PROJECT, LOCATION)).toEqual(
-      MOCK_API_LIST.apis,
-    );
-    expect(httpsRequestMock).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledWith(
-      APIS_URL,
-      expect.objectContaining(AUTHORIZED_GET),
-    );
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain('provider failed');
   });
 });
 

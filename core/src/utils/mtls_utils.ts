@@ -6,9 +6,12 @@
 
 import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs/promises';
+import {IncomingMessage} from 'node:http';
+import * as https from 'node:https';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
+import {formatError} from './error_utils.js';
 import {logger} from './logger.js';
 
 /**
@@ -49,7 +52,7 @@ export function getApiEndpoint(
  * @param url The absolute URL to inspect. A string that is not a URL reads as
  *     no match.
  */
-export function isNonMtlsGoogleapisEndpoint(url: string): boolean {
+function isNonMtlsGoogleapisEndpoint(url: string): boolean {
   const host = hostnameOf(url);
   return (
     host.endsWith(GOOGLEAPIS_SUFFIX) && !host.includes(MTLS_GOOGLEAPIS_SUFFIX)
@@ -286,4 +289,80 @@ export async function loadDefaultClientCerts(
 
   const passphrase = PASSPHRASE_PATTERN.exec(output)?.[1]?.trim();
   return passphrase ? {cert, key, passphrase} : {cert, key};
+}
+
+/**
+ * Loads the client certificate to present, when the environment asks for one.
+ *
+ * A machine with no certificate, and a certificate that cannot be loaded, both
+ * resolve to `undefined`: the caller then connects without one, because a
+ * mutual-TLS host rejects a connection that presents nothing.
+ */
+export async function clientCertsToPresent(): Promise<
+  MtlsClientCerts | undefined
+> {
+  if (!useClientCertEffective()) {
+    return undefined;
+  }
+  try {
+    return await loadDefaultClientCerts();
+  } catch (error: unknown) {
+    logger.warn(
+      'Connecting without a client certificate, because it could not be ' +
+        `loaded: ${formatError(error)}`,
+    );
+    return undefined;
+  }
+}
+
+/** The status and the body of one response, decoded as text. */
+export interface TextResponse {
+  status: number;
+  body: string;
+}
+
+/**
+ * Sends one GET that presents a client certificate.
+ *
+ * `globalThis.fetch` cannot present a client certificate in Node, which is why
+ * this transport is `node:https`.
+ *
+ * @param url The absolute URL to request.
+ * @param headers The request headers.
+ * @param certs The certificate material to present.
+ * @param timeoutMs How long the request may take before it is destroyed.
+ */
+export function getWithClientCert(
+  url: string,
+  headers: Record<string, string>,
+  certs: MtlsClientCerts,
+  timeoutMs: number,
+): Promise<TextResponse> {
+  return new Promise((resolve, reject) => {
+    const collect = (response: IncomingMessage) => {
+      let body = '';
+      response.setEncoding('utf-8');
+      response.on('data', (chunk: string) => {
+        body += chunk;
+      });
+      response.on('error', reject);
+      response.on('end', () => {
+        resolve({status: response.statusCode ?? 0, body});
+      });
+    };
+
+    const request = https.request(
+      url,
+      {headers, timeout: timeoutMs, agent: new https.Agent(certs)},
+      collect,
+    );
+    // A timeout only fires the event; the request stays open until destroyed.
+    request.on('timeout', () => {
+      request.destroy(
+        new Error(`Request timed out after ${timeoutMs} ms: ${url}`),
+      );
+    });
+    request.on('error', reject);
+    request.end();
+  });
 }

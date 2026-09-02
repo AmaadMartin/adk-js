@@ -5,16 +5,12 @@
  */
 
 import {GoogleAuth, JWTInput} from 'google-auth-library';
-import {IncomingMessage} from 'node:http';
-import * as https from 'node:https';
 import {base64Decode} from '../../../utils/env_aware_utils.js';
-import {formatError} from '../../../utils/error_utils.js';
-import {logger} from '../../../utils/logger.js';
 import {
-  MtlsClientCerts,
+  TextResponse,
+  clientCertsToPresent,
   effectiveGoogleapisEndpoint,
-  loadDefaultClientCerts,
-  useClientCertEffective,
+  getWithClientCert,
 } from '../../../utils/mtls_utils.js';
 
 const APIHUB_ROOT_URL = 'https://apihub.googleapis.com/v1';
@@ -83,31 +79,9 @@ interface ApiHubSpecContents {
   contents?: string;
 }
 
-/** The status and body of one API Hub response, on either transport. */
-interface ApiHubResponse {
-  status: number;
-  body: string;
-}
-
 /** Reports whether a value is a JSON object. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Validates that an API Hub response body is a JSON object.
- *
- * The declared fields of a response are a view over untrusted input, so the
- * client validates each field where it reads it. This is the outer check the
- * views themselves rest on.
- *
- * @throws If the body decoded to an array, a string, a number, a boolean or
- *     `null`.
- */
-function requireJsonObject(payload: unknown): void {
-  if (!isRecord(payload)) {
-    throw new Error('API Hub returned a non-object JSON response.');
-  }
 }
 
 /**
@@ -124,103 +98,17 @@ function requireStringList(value: unknown, field: string): void {
   }
 }
 
-/**
- * Validates an API Hub field that must be an array of JSON objects.
- *
- * @throws If the field holds anything else.
- */
-function requireObjectList(value: unknown, field: string): void {
-  if (!Array.isArray(value) || !value.every(isRecord)) {
-    throw new Error(`API Hub field '${field}' must be a list of objects.`);
-  }
-}
-
-/**
- * Validates an API Hub field that must be a string when it is present.
- *
- * @throws If the field is present and holds anything else.
- */
-function requireOptionalString(value: unknown, field: string): void {
-  if (value !== undefined && typeof value !== 'string') {
-    throw new Error(`API Hub field '${field}' must be a string.`);
-  }
-}
-
-/**
- * Loads the client certificate to present, when the environment asks for one.
- *
- * A machine with no certificate, and a certificate that cannot be loaded, both
- * resolve to `undefined`: the caller then connects without one, because a
- * mutual-TLS host rejects a connection that presents nothing.
- */
-async function clientCertsToPresent(): Promise<MtlsClientCerts | undefined> {
-  if (!useClientCertEffective()) {
-    return undefined;
-  }
-  try {
-    return await loadDefaultClientCerts();
-  } catch (error: unknown) {
-    logger.warn(
-      'Calling API Hub without a client certificate, because it could not ' +
-        `be loaded: ${formatError(error)}`,
-    );
-    return undefined;
-  }
-}
-
 /** One authenticated GET over `globalThis.fetch`. */
 async function getWithFetch(
   url: string,
   headers: Record<string, string>,
-): Promise<ApiHubResponse> {
+): Promise<TextResponse> {
   const response = await fetch(url, {
     method: 'GET',
     headers,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   return {status: response.status, body: await response.text()};
-}
-
-/**
- * One authenticated GET that presents a client certificate.
- *
- * `globalThis.fetch` cannot present a client certificate in Node, which is why
- * this transport is `node:https`.
- */
-function getWithClientCert(
-  url: string,
-  headers: Record<string, string>,
-  certs: MtlsClientCerts,
-): Promise<ApiHubResponse> {
-  return new Promise((resolve, reject) => {
-    const collect = (response: IncomingMessage) => {
-      let body = '';
-      response.setEncoding('utf-8');
-      response.on('data', (chunk: string) => {
-        body += chunk;
-      });
-      response.on('error', reject);
-      response.on('end', () => {
-        resolve({status: response.statusCode ?? 0, body});
-      });
-    };
-
-    const request = https.request(
-      url,
-      {headers, timeout: REQUEST_TIMEOUT_MS, agent: new https.Agent(certs)},
-      collect,
-    );
-    // A timeout only fires the event; the request stays open until destroyed.
-    request.on('timeout', () => {
-      request.destroy(
-        new Error(
-          `API Hub request timed out after ${REQUEST_TIMEOUT_MS} ms: ${url}`,
-        ),
-      );
-    });
-    request.on('error', reject);
-    request.end();
-  });
 }
 
 /** Returns the segment that follows `keyword`, if the path has one. */
@@ -317,16 +205,16 @@ export function extractResourceName(urlOrPath: string): ApiHubResourceNames {
  * the failure only.
  */
 function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
-  let credentials: JWTInput;
+  let parsed: unknown;
   try {
-    credentials = JSON.parse(serviceAccountJson) as JWTInput;
+    parsed = JSON.parse(serviceAccountJson);
   } catch {
     throw new Error('Invalid service account JSON: the key is not valid JSON.');
   }
-  if (!isRecord(credentials)) {
+  if (!isRecord(parsed)) {
     throw new Error('Service account JSON must contain an object.');
   }
-  return credentials;
+  return parsed as JWTInput;
 }
 
 /** Reads APIs, API versions and API specs from the API Hub service. */
@@ -356,7 +244,9 @@ export class APIHubClient implements BaseAPIHubClient {
       `${APIHUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
     );
     const apis = list.apis ?? [];
-    requireObjectList(apis, 'apis');
+    if (!Array.isArray(apis) || !apis.every(isRecord)) {
+      throw new Error("API Hub field 'apis' must be a list of objects.");
+    }
     return apis;
   }
 
@@ -423,7 +313,9 @@ export class APIHubClient implements BaseAPIHubClient {
     const {contents} = await this.get<ApiHubSpecContents>(
       `${APIHUB_ROOT_URL}/${apiSpecResourceName}:contents`,
     );
-    requireOptionalString(contents, 'contents');
+    if (contents !== undefined && typeof contents !== 'string') {
+      throw new Error("API Hub field 'contents' must be a string.");
+    }
     return contents ? base64Decode(contents) : '';
   }
 
@@ -447,15 +339,18 @@ export class APIHubClient implements BaseAPIHubClient {
           effectiveGoogleapisEndpoint(url),
           headers,
           certs,
+          REQUEST_TIMEOUT_MS,
         )
       : await getWithFetch(url, headers);
 
     if (status < 200 || status >= 300) {
       throw new Error(`API Hub request failed with status ${status}: ${body}`);
     }
-    const payload = JSON.parse(body) as T;
-    requireJsonObject(payload);
-    return payload;
+    const payload: unknown = JSON.parse(body);
+    if (!isRecord(payload)) {
+      throw new Error('API Hub returned a non-object JSON response.');
+    }
+    return payload as T;
   }
 
   private async getAccessToken(): Promise<string> {
