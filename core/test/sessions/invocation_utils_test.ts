@@ -110,6 +110,13 @@ describe('validateNewMessage', () => {
 
     expect(() => validateNewMessage(message, undefined)).not.toThrow();
   });
+
+  it('accepts resume inputs with no message to check against', () => {
+    expect(() => validateNewMessage(undefined, {'fc-1': {}})).not.toThrow();
+    expect(() =>
+      validateNewMessage({role: 'user'}, {'fc-1': {}}),
+    ).not.toThrow();
+  });
 });
 
 describe('resolveInvocationIdFromFunctionResponses', () => {
