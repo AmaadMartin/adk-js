@@ -103,3 +103,31 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     };
   }
 }
+
+/**
+ * Drains `source` into `queue`, closing it when the source ends and failing it
+ * with whatever the source threw.
+ *
+ * Lets several producers share one queue: {@link AsyncQueue} hands over every
+ * buffered item before the end or the error, so nothing a source produced is
+ * lost, and a consumer parked on the queue is released even when one source
+ * never produces again.
+ *
+ * @param source The generator to drain.
+ * @param queue The queue to drain it into.
+ * @return A promise that settles when the source ends. It never rejects: the
+ *     error reaches the consumer through the queue.
+ */
+export async function pumpInto<T>(
+  source: AsyncGenerator<T, void, void>,
+  queue: AsyncQueue<T>,
+): Promise<void> {
+  try {
+    for await (const item of source) {
+      queue.push(item);
+    }
+    queue.close();
+  } catch (error: unknown) {
+    queue.fail(error);
+  }
+}

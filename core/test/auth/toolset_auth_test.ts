@@ -226,7 +226,7 @@ describe('resolveToolsetAuth', () => {
 
   it('warns and asks for a credential when the lookup throws', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-    const state = {} as Record<string, unknown>;
+    const state: Record<string, unknown> = {};
     Object.defineProperty(state, `temp:${CREDENTIAL_KEY}`, {
       enumerable: true,
       get() {

@@ -14,9 +14,6 @@ import {
   requireAgent,
 } from './invocation_context.js';
 
-/** Number of milliseconds in a second. */
-const MILLISECONDS_PER_SECOND = 1000;
-
 /** MIME type used when a cached audio chunk does not declare one. */
 const DEFAULT_AUDIO_MIME_TYPE = 'audio/pcm';
 
@@ -27,149 +24,143 @@ export type AudioCacheType = 'input' | 'output';
 type AudioCacheArtifactType = 'input_audio' | 'output_audio';
 
 /**
- * Caches a live session's audio and flushes it to the artifact service.
+ * Caches one audio chunk of a live session.
  *
  * The user's audio and the model's audio are cached separately as the session
- * runs. A control event ends the turn and flushes each cache: its chunks are
- * joined into one artifact, and the returned {@link Event} carries a
- * `fileData` reference to it for the session.
+ * runs, on the invocation context. {@link flushAudioCaches} writes each cache
+ * out when a control event ends the turn.
+ *
+ * @param invocationContext The current invocation context.
+ * @param audioBlob The audio chunk.
+ * @param cacheType Whether the chunk is the user's audio (`'input'`) or the
+ *     model's (`'output'`).
+ * @throws {Error} If the blob carries no data.
  */
-export class AudioCacheManager {
-  /**
-   * Caches one audio chunk.
-   *
-   * @param invocationContext The current invocation context.
-   * @param audioBlob The audio chunk.
-   * @param cacheType Whether the chunk is the user's audio (`'input'`) or the
-   *     model's (`'output'`).
-   * @throws {Error} If the blob carries no data.
-   */
-  cacheAudio(
-    invocationContext: InvocationContext,
-    audioBlob: Blob,
-    cacheType: AudioCacheType,
-  ): void {
-    if (audioBlob.data === undefined) {
-      throw new Error('Audio blobs must contain byte data.');
-    }
+export function cacheAudio(
+  invocationContext: InvocationContext,
+  audioBlob: Blob,
+  cacheType: AudioCacheType,
+): void {
+  if (audioBlob.data === undefined) {
+    throw new Error('Audio blobs must contain byte data.');
+  }
 
-    let cache: RealtimeCacheEntry[];
-    if (cacheType === 'input') {
-      cache = invocationContext.inputRealtimeCache ??= [];
-    } else {
-      cache = invocationContext.outputRealtimeCache ??= [];
-    }
+  let cache: RealtimeCacheEntry[];
+  if (cacheType === 'input') {
+    cache = invocationContext.inputRealtimeCache ??= [];
+  } else {
+    cache = invocationContext.outputRealtimeCache ??= [];
+  }
 
-    cache.push({
-      role: cacheType === 'input' ? 'user' : 'model',
-      data: audioBlob,
-      timestamp: Date.now() / MILLISECONDS_PER_SECOND,
+  cache.push({
+    role: cacheType === 'input' ? 'user' : 'model',
+    data: audioBlob,
+    timestamp: Date.now(),
+  });
+
+  logger.debug(
+    `Cached ${cacheType} audio chunk; cache holds ${cache.length} chunk(s).`,
+  );
+}
+
+/**
+ * Flushes the audio caches to the artifact service.
+ *
+ * Each cache's chunks are joined into one artifact, and the returned
+ * {@link Event} carries a `fileData` reference to it for the session. A cache
+ * is cleared only when its artifact was saved, so a failed save keeps the
+ * audio for the next flush.
+ *
+ * @param invocationContext The invocation context holding the caches.
+ * @param flushUserAudio Whether to flush the user's audio cache. The model's
+ *     audio is always flushed: an interruption ends the model's turn while the
+ *     user keeps speaking, and a completed turn ends both.
+ * @return The events created from the flushed caches, user audio first.
+ */
+export async function flushAudioCaches(
+  invocationContext: InvocationContext,
+  flushUserAudio = true,
+): Promise<Event[]> {
+  const flushedEvents: Event[] = [];
+
+  if (flushUserAudio && invocationContext.inputRealtimeCache?.length) {
+    const audioEvent = await flushCacheToServices(
+      invocationContext,
+      invocationContext.inputRealtimeCache,
+      'input_audio',
+    );
+    if (audioEvent) {
+      flushedEvents.push(audioEvent);
+      invocationContext.inputRealtimeCache = [];
+    }
+  }
+
+  if (invocationContext.outputRealtimeCache?.length) {
+    const audioEvent = await flushCacheToServices(
+      invocationContext,
+      invocationContext.outputRealtimeCache,
+      'output_audio',
+    );
+    if (audioEvent) {
+      flushedEvents.push(audioEvent);
+      invocationContext.outputRealtimeCache = [];
+    }
+  }
+
+  return flushedEvents;
+}
+
+/**
+ * Saves one non-empty cache as a single artifact and builds the session event
+ * that references it.
+ *
+ * @return The created event, or `undefined` when there is no artifact service
+ *     or the save failed. The caller keeps the cache in both cases.
+ */
+async function flushCacheToServices(
+  invocationContext: InvocationContext,
+  cache: RealtimeCacheEntry[],
+  cacheType: AudioCacheArtifactType,
+): Promise<Event | undefined> {
+  if (!invocationContext.artifactService) {
+    logger.debug('Skipping audio cache flush: no artifact service.');
+    return undefined;
+  }
+
+  const mimeType = cache[0].data.mimeType ?? DEFAULT_AUDIO_MIME_TYPE;
+  // The filename records when the recording started, not when it was saved.
+  const timestampMs = Math.floor(cache[0].timestamp);
+  const filename = `adk_live_audio_storage_${cacheType}_${timestampMs}.${mimeType.split('/').pop()}`;
+
+  let revisionId: number;
+  try {
+    revisionId = await invocationContext.artifactService.saveArtifact({
+      filename,
+      artifact: {inlineData: {data: concatAudioChunks(cache), mimeType}},
     });
-
-    logger.debug(
-      `Cached ${cacheType} audio chunk; cache holds ${cache.length} chunk(s).`,
-    );
+  } catch (error: unknown) {
+    logger.error(`Failed to flush the ${cacheType} cache:`, error);
+    return undefined;
   }
 
-  /**
-   * Flushes the audio caches to the artifact service.
-   *
-   * A cache is cleared only when its artifact was saved, so a failed save
-   * keeps the audio for the next flush.
-   *
-   * @param invocationContext The invocation context holding the caches.
-   * @param flushUserAudio Whether to flush the user's audio cache. The model's
-   *     audio is always flushed: an interruption ends the model's turn while
-   *     the user keeps speaking, and a completed turn ends both.
-   * @return The events created from the flushed caches, user audio first.
-   */
-  async flushCaches(
-    invocationContext: InvocationContext,
-    flushUserAudio = true,
-  ): Promise<Event[]> {
-    const flushedEvents: Event[] = [];
-
-    if (flushUserAudio && invocationContext.inputRealtimeCache?.length) {
-      const audioEvent = await this.flushCacheToServices(
-        invocationContext,
-        invocationContext.inputRealtimeCache,
-        'input_audio',
-      );
-      if (audioEvent) {
-        flushedEvents.push(audioEvent);
-        invocationContext.inputRealtimeCache = [];
-      }
-    }
-
-    if (invocationContext.outputRealtimeCache?.length) {
-      const audioEvent = await this.flushCacheToServices(
-        invocationContext,
-        invocationContext.outputRealtimeCache,
-        'output_audio',
-      );
-      if (audioEvent) {
-        flushedEvents.push(audioEvent);
-        invocationContext.outputRealtimeCache = [];
-      }
-    }
-
-    return flushedEvents;
-  }
-
-  /**
-   * Saves one non-empty cache as a single artifact and builds the session
-   * event that references it.
-   *
-   * @return The created event, or `undefined` when there is no artifact
-   *     service or the save failed. The caller keeps the cache in both cases.
-   */
-  private async flushCacheToServices(
-    invocationContext: InvocationContext,
-    cache: RealtimeCacheEntry[],
-    cacheType: AudioCacheArtifactType,
-  ): Promise<Event | undefined> {
-    if (!invocationContext.artifactService) {
-      logger.debug('Skipping audio cache flush: no artifact service.');
-      return undefined;
-    }
-
-    const mimeType = cache[0].data.mimeType ?? DEFAULT_AUDIO_MIME_TYPE;
-    // The filename records when the recording started, not when it was saved.
-    const timestampMs = Math.floor(
-      cache[0].timestamp * MILLISECONDS_PER_SECOND,
-    );
-    const filename = `adk_live_audio_storage_${cacheType}_${timestampMs}.${mimeType.split('/').pop()}`;
-
-    let revisionId: number;
-    try {
-      revisionId = await invocationContext.artifactService.saveArtifact({
-        filename,
-        artifact: {inlineData: {data: concatAudioChunks(cache), mimeType}},
-      });
-    } catch (error: unknown) {
-      logger.error(`Failed to flush the ${cacheType} cache:`, error);
-      return undefined;
-    }
-
-    const role = cache[0].role;
-    return createEvent({
-      invocationId: invocationContext.invocationId,
-      // A model event is authored by the agent rather than by the raw role.
-      author: role === 'model' ? requireAgent(invocationContext).name : role,
-      content: {
-        role,
-        parts: [
-          {
-            fileData: {
-              fileUri: `artifact://${invocationContext.appName}/${invocationContext.userId}/${invocationContext.session.id}/_adk_live/${filename}#${revisionId}`,
-              mimeType,
-            },
+  const role = cache[0].role;
+  return createEvent({
+    invocationId: invocationContext.invocationId,
+    // A model event is authored by the agent rather than by the raw role.
+    author: role === 'model' ? requireAgent(invocationContext).name : role,
+    content: {
+      role,
+      parts: [
+        {
+          fileData: {
+            fileUri: `artifact://${invocationContext.appName}/${invocationContext.userId}/${invocationContext.session.id}/_adk_live/${filename}#${revisionId}`,
+            mimeType,
           },
-        ],
-      },
-      timestamp: cache[0].timestamp,
-    });
-  }
+        },
+      ],
+    },
+    timestamp: cache[0].timestamp,
+  });
 }
 
 /**

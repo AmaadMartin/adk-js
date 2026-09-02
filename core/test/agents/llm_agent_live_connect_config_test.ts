@@ -55,11 +55,11 @@ class ScriptedGemini extends Gemini {
 
 /** Turns off transparent resumption before the flow reaches the connect. */
 class TransparentOffProcessor extends BaseLlmRequestProcessor {
-  // eslint-disable-next-line require-yield -- it only mutates the request.
   override async *runAsync(
     _invocationContext: InvocationContext,
     llmRequest: LlmRequest,
   ): AsyncGenerator<Event, void, void> {
+    yield* [];
     llmRequest.liveConnectConfig.sessionResumption = {transparent: false};
   }
 }

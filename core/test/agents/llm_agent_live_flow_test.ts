@@ -57,10 +57,10 @@ class ProtectedToolset extends BaseToolset {
 class ContextCapturingProcessor extends BaseLlmRequestProcessor {
   invocationContext?: InvocationContext;
 
-  // eslint-disable-next-line require-yield -- it only records the context.
   override async *runAsync(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    yield* [];
     this.invocationContext = invocationContext;
   }
 }
@@ -75,10 +75,10 @@ class BackgroundTaskProcessor extends BaseLlmRequestProcessor {
       }),
   );
 
-  // eslint-disable-next-line require-yield -- it only records the context.
   override async *runAsync(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    yield* [];
     this.invocationContext = invocationContext;
     invocationContext.activeStreamingTools = {
       worker: new ActiveStreamingTool({task: this.task}),

@@ -78,12 +78,12 @@ export class ScriptedLiveLlm extends BaseLlm {
     super({model});
   }
 
-  // eslint-disable-next-line require-yield -- the live tests never call it.
   override async *generateContentAsync(): AsyncGenerator<
     LlmResponse,
     void,
     void
   > {
+    yield* [];
     throw new Error('generateContentAsync is not used by the live tests.');
   }
 

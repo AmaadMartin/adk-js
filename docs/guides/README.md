@@ -10,3 +10,4 @@ implementation. For the official ADK documentation, visit
 
 - [The live flow](agents/live_flow/index.md) - Driving an LlmAgent over a bidirectional connection: model callbacks, audio artifacts, toolset credentials and session restarts.
 - [Recovering from a model error](agents/model_error_callback/index.md) - Substituting a response for a failed model call, and how it orders against the plugins.
+- [Grounding metadata from a search tool](agents/grounding_metadata/index.md) - Carrying a search tool's citations onto the agent's own response.
