@@ -714,13 +714,20 @@ describe('VertexAiSessionService', () => {
 
   describe('listSessions', () => {
     it('returns list of sessions parsing name extracts', async () => {
+      // The timestamps only pin the order the default sort produces; the
+      // assertions below are about parsing the id out of the resource name.
       mockClient.listInternal.mockResolvedValue({
         sessions: [
           {
             name: 'projects/p/locations/l/sessions/test-list-1',
             userId: 'testUser',
+            updateTime: '2026-01-01T00:00:00Z',
           },
-          {name: 'malformed_name', userId: 'testUser'},
+          {
+            name: 'malformed_name',
+            userId: 'testUser',
+            updateTime: '2026-01-02T00:00:00Z',
+          },
         ],
       });
 
