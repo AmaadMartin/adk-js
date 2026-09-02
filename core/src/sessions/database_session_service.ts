@@ -39,6 +39,7 @@ import {
   detectDatabaseSchemaVersion,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
+  getOrCreateRow,
   validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
@@ -313,25 +314,18 @@ export class DatabaseSessionService extends BaseSessionService {
       throw new AlreadyExistsError(`Session with id ${id} already exists.`);
     }
 
-    let appStateModel = await em.findOne(StorageAppState, {appName});
-    if (!appStateModel) {
-      appStateModel = em.create(StorageAppState, {
-        appName,
-        state: {},
-        updateTime: now,
-      });
-      em.persist(appStateModel);
-    }
-
-    let userStateModel = await em.findOne(StorageUserState, {appName, userId});
-    if (!userStateModel) {
-      userStateModel = em.create(StorageUserState, {
-        appName,
-        userId,
-        state: {},
-      });
-      em.persist(userStateModel);
-    }
+    const appStateModel = await getOrCreateRow(
+      em,
+      StorageAppState,
+      {appName},
+      {appName, state: {}, updateTime: now},
+    );
+    const userStateModel = await getOrCreateRow(
+      em,
+      StorageUserState,
+      {appName, userId},
+      {appName, userId, state: {}, updateTime: now},
+    );
 
     const delta = extractStateDelta(state ?? {});
     applyScopedDelta(appStateModel, delta.app);

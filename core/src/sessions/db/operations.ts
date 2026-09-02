@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {MikroORM, Options as MikroORMOptions} from '@mikro-orm/core';
+import {
+  EntityManager,
+  EntityName,
+  FilterQuery,
+  MikroORM,
+  Options as MikroORMOptions,
+  RequiredEntityData,
+} from '@mikro-orm/core';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
@@ -104,6 +111,49 @@ async function deriveConnectionOptionsFromUri(
     clientUrl: uri,
     driver,
   } as MikroORMOptions;
+}
+
+/**
+ * Returns a stored row, inserting it when it is absent.
+ *
+ * Two callers can both miss the row and both insert it, and the loser's
+ * insert then fails on the primary key. The winner's row is the correct
+ * answer, so this reads it back instead of surfacing the driver's constraint
+ * error. Dialects report a duplicate key differently, so the row's presence is
+ * the evidence rather than the error class. An insert that failed for any
+ * other reason still leaves no row, and its error propagates unchanged.
+ *
+ * The insert runs on its own fork of `em`. MikroORM flushes every pending
+ * entity in one transaction, so a shared unit of work would abort the
+ * caller's other pending writes along with the losing insert.
+ *
+ * @param em The entity manager the returned row is managed by.
+ * @param entity The entity to read or insert.
+ * @param where The filter identifying the row.
+ * @param defaults The data to insert when the row is absent.
+ */
+export async function getOrCreateRow<T extends object>(
+  em: EntityManager,
+  entity: EntityName<T>,
+  where: FilterQuery<T>,
+  defaults: RequiredEntityData<T>,
+): Promise<T> {
+  const existing = await em.findOne(entity, where);
+  if (existing) {
+    return existing;
+  }
+
+  const inserter = em.fork();
+  try {
+    await inserter.persist(inserter.create(entity, defaults)).flush();
+  } catch (error: unknown) {
+    const winner = await em.findOne(entity, where);
+    if (!winner) {
+      throw error;
+    }
+    return winner;
+  }
+  return em.findOneOrFail(entity, where);
 }
 
 /**

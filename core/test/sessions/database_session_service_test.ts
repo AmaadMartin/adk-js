@@ -21,7 +21,11 @@ import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
-import {ENTITIES} from '../../src/sessions/db/schema.js';
+import {
+  ENTITIES,
+  StorageAppState,
+  StorageUserState,
+} from '../../src/sessions/db/schema.js';
 
 /** Opens a service that records every statement MikroORM sends. */
 async function createLoggingService(): Promise<{
@@ -1772,5 +1776,60 @@ describe('DatabaseSessionService temp state', () => {
     expect(
       reloaded?.events[0].actions?.stateDelta?.[State.TEMP_PREFIX + 'draft'],
     ).toBeUndefined();
+  });
+});
+
+describe('DatabaseSessionService concurrent state rows', () => {
+  let orm: MikroORM;
+  let service: DatabaseSessionService;
+
+  beforeEach(async () => {
+    orm = await MikroORM.init({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      pool: {min: 1, max: 1},
+      allowGlobalContext: true,
+    });
+    service = new DatabaseSessionService(orm);
+    await service.init();
+  });
+
+  afterEach(async () => {
+    await orm.close();
+  });
+
+  it('creates one app state row for two concurrent sessions', async () => {
+    const created = await Promise.all([
+      service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+      service.createSession({appName: 'app', userId: 'u2', sessionId: 's2'}),
+    ]);
+
+    expect(created.map((session) => session.id)).toEqual(['s1', 's2']);
+    expect(await orm.em.fork().count(StorageAppState, {appName: 'app'})).toBe(
+      1,
+    );
+  });
+
+  it('creates one user state row for two concurrent sessions', async () => {
+    const created = await Promise.all([
+      service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+      service.createSession({appName: 'app', userId: 'u1', sessionId: 's2'}),
+    ]);
+
+    expect(created.map((session) => session.id)).toEqual(['s1', 's2']);
+    expect(
+      await orm.em
+        .fork()
+        .count(StorageUserState, {appName: 'app', userId: 'u1'}),
+    ).toBe(1);
+  });
+
+  it('surfaces a state row failure that is not a lost race', async () => {
+    await orm.em.getConnection().execute('drop table app_states');
+
+    await expect(
+      service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
+    ).rejects.toThrow(/app_states/);
   });
 });
