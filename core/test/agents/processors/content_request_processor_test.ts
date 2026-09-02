@@ -11,8 +11,10 @@ import {
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
   createEvent,
+  createSession,
   Event,
   EventActions,
+  Gemini,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -253,6 +255,56 @@ describe('ContentRequestProcessor — previous interaction id', () => {
       'question two',
       'question three',
     ]);
+  });
+
+  it('shortens a chained request when the agent runs its own processors', async () => {
+    const agent = new LlmAgent({
+      name: 'chat_agent',
+      model: new Gemini({
+        model: 'gemini-2.5-flash',
+        apiKey: 'unused-in-this-test',
+        useInteractionsApi: true,
+      }),
+    });
+    const events = [
+      createEvent({
+        invocationId: 'inv1',
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'question one'}]},
+      }),
+      createEvent({
+        invocationId: 'inv1',
+        author: 'chat_agent',
+        interactionId: 'interaction-1',
+        content: {role: 'model', parts: [{text: 'answer one'}]},
+      }),
+      createEvent({
+        invocationId: 'inv2',
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'question two'}]},
+      }),
+    ];
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv2',
+      agent: agent as BaseAgent,
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+        events,
+      }),
+      pluginManager: new PluginManager([]),
+    });
+    const llmRequest = emptyRequest();
+
+    for (const processor of agent.requestProcessors) {
+      for await (const _ of processor.runAsync(invocationContext, llmRequest)) {
+        // These request processors emit no events for this agent.
+      }
+    }
+
+    expect(llmRequest.previousInteractionId).toBe('interaction-1');
+    expect(requestTexts(llmRequest)).toEqual(['question two']);
   });
 });
 
