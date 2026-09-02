@@ -6,6 +6,7 @@
 
 import {Content} from '@google/genai';
 
+import {AuthCredential} from '../auth/auth_credential.js';
 import {State} from '../sessions/state.js';
 
 import {InvocationContext, requireAgent} from './invocation_context.js';
@@ -66,5 +67,18 @@ export class ReadonlyContext {
    */
   get a2aMetadata(): Record<string, unknown> | undefined {
     return this.invocationContext.a2aMetadata;
+  }
+
+  /**
+   * A credential ADK resolved for this invocation.
+   *
+   * A toolset reads the credential its `getAuthConfig()` asked for here, from
+   * inside `getTools()`, under that config's `credentialKey`.
+   *
+   * @param key The credential key to look up.
+   * @returns The resolved credential, or undefined when none was stored.
+   */
+  getCredential(key: string): AuthCredential | undefined {
+    return this.invocationContext.credentialByKey[key];
   }
 }

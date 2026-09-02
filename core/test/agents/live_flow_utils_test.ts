@@ -29,6 +29,7 @@ import {describe, expect, it, vi} from 'vitest';
 import {
   markLiveAsyncToolsNonBlocking,
   pumpEventsInto,
+  runConfigForNewLiveSession,
   stopBackgroundToolTasks,
 } from '../../src/agents/live_flow_utils.js';
 import {logger} from '../../src/utils/logger.js';
@@ -307,5 +308,38 @@ describe('pumpEventsInto', () => {
     const iterator = queue[Symbol.asyncIterator]();
     expect(textOf((await iterator.next()).value as Event)).toBe('one');
     await expect(iterator.next()).rejects.toThrow('receive loop failed');
+  });
+});
+
+describe('runConfigForNewLiveSession', () => {
+  it('drops the handle and keeps the rest of the resumption config', () => {
+    const runConfig = {
+      saveLiveBlob: true,
+      sessionResumption: {handle: 'stored', transparent: false},
+    };
+
+    expect(runConfigForNewLiveSession(runConfig)).toEqual({
+      saveLiveBlob: true,
+      sessionResumption: {transparent: false},
+    });
+  });
+
+  it('leaves the caller config untouched', () => {
+    const sessionResumption = {handle: 'stored'};
+    const runConfig = {sessionResumption};
+
+    runConfigForNewLiveSession(runConfig);
+
+    expect(sessionResumption).toEqual({handle: 'stored'});
+  });
+
+  it('returns the config unchanged when it carries no resumption config', () => {
+    const runConfig = {saveLiveBlob: true};
+
+    expect(runConfigForNewLiveSession(runConfig)).toBe(runConfig);
+  });
+
+  it('returns undefined when there is no run config', () => {
+    expect(runConfigForNewLiveSession(undefined)).toBeUndefined();
   });
 });

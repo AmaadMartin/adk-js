@@ -16,8 +16,6 @@ import {
   LlmAgent,
   LlmRequest,
   Runner,
-  Session,
-  createEvent,
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 
@@ -68,27 +66,15 @@ class TransparentOffProcessor extends BaseLlmRequestProcessor {
 
 describe('LlmAgent live connect config', () => {
   let sessionService: InMemorySessionService;
-  let session: Session;
 
   beforeEach(async () => {
     sessionService = new InMemorySessionService();
-    session = await sessionService.createSession({
+    await sessionService.createSession({
       appName: APP_NAME,
       userId: USER_ID,
       sessionId: SESSION_ID,
     });
   });
-
-  async function seedHistory(): Promise<void> {
-    await sessionService.appendEvent({
-      session,
-      event: createEvent({
-        invocationId: 'seed',
-        author: 'user',
-        content: {role: 'user', parts: [{text: 'hello'}]},
-      }),
-    });
-  }
 
   async function runLive(
     llm: ScriptedGemini | ScriptedLiveLlm,
@@ -113,77 +99,6 @@ describe('LlmAgent live connect config', () => {
     }
     return events;
   }
-
-  describe('historyConfig.initialHistoryInClientContent', () => {
-    it('is set on the Gemini API backend when history is replayed', async () => {
-      await seedHistory();
-      const llm = new ScriptedGemini({vertexai: false});
-
-      await runLive(llm);
-
-      expect(llm.requestsSeen[0].liveConnectConfig.historyConfig).toEqual({
-        initialHistoryInClientContent: true,
-      });
-    });
-
-    it('is set on the Vertex AI backend when history is replayed', async () => {
-      await seedHistory();
-      const llm = new ScriptedGemini({vertexai: true});
-
-      await runLive(llm);
-
-      expect(llm.requestsSeen[0].liveConnectConfig.historyConfig).toEqual({
-        initialHistoryInClientContent: true,
-      });
-    });
-
-    it('keeps an explicit false from the run config', async () => {
-      await seedHistory();
-      const llm = new ScriptedGemini({vertexai: false});
-      const runner = new Runner({
-        appName: APP_NAME,
-        agent: new LlmAgent({name: 'agent', model: llm}),
-        sessionService,
-        artifactService: new InMemoryArtifactService(),
-      });
-      const queue = new LiveRequestQueue();
-      queue.close();
-
-      for await (const _ of runner.runLive({
-        userId: USER_ID,
-        sessionId: SESSION_ID,
-        liveRequestQueue: queue,
-        runConfig: {historyConfig: {initialHistoryInClientContent: false}},
-      })) {
-        // drain
-      }
-
-      expect(llm.requestsSeen[0].liveConnectConfig.historyConfig).toEqual({
-        initialHistoryInClientContent: false,
-      });
-    });
-
-    it('is left unset when the session is resumed', async () => {
-      await seedHistory();
-      const llm = new ScriptedGemini({vertexai: false});
-
-      await runLive(llm, {liveSessionResumptionHandle: 'handle-1'});
-
-      expect(
-        llm.requestsSeen[0].liveConnectConfig.historyConfig,
-      ).toBeUndefined();
-    });
-
-    it('is left unset when there is no history to replay', async () => {
-      const llm = new ScriptedGemini({vertexai: false});
-
-      await runLive(llm);
-
-      expect(
-        llm.requestsSeen[0].liveConnectConfig.historyConfig,
-      ).toBeUndefined();
-    });
-  });
 
   describe('sessionResumption.transparent', () => {
     it('is set for a Vertex AI backed Gemini', async () => {

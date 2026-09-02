@@ -35,6 +35,10 @@ import {Example} from '../examples/example.js';
 import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
 import {BaseLlmConnection} from '../models/base_llm_connection.js';
 import {isGemini} from '../models/google_llm.js';
+import {
+  isLiveConnectionClosedError,
+  LiveCloseCode,
+} from '../models/live_connection_error.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
@@ -75,6 +79,7 @@ import {InvocationContext, requireAgent} from './invocation_context.js';
 import {
   markLiveAsyncToolsNonBlocking,
   pumpEventsInto,
+  runConfigForNewLiveSession,
   stopBackgroundToolTasks,
 } from './live_flow_utils.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
@@ -146,10 +151,17 @@ class LiveReconnectSignal extends Error {
  */
 function isRecoverableLiveError(err: unknown): boolean {
   if (err instanceof LiveReconnectSignal) return true;
+  // A close the server chose is recoverable whichever code it carries: with a
+  // handle the session resumes, and without one the caller decides.
+  if (isLiveConnectionClosedError(err)) return true;
   if (!(err instanceof Error)) return false;
   const code = (err as {code?: unknown}).code;
   // Standard WebSocket close codes treated as transient by the Python flow.
-  if (code === 1006 || code === 1011 || code === 1012) {
+  if (
+    code === LiveCloseCode.ABNORMAL ||
+    code === LiveCloseCode.INTERNAL ||
+    code === LiveCloseCode.SERVICE_RESTART
+  ) {
     return true;
   }
   const message = err.message ?? '';
@@ -219,28 +231,28 @@ function applyLiveSessionResumption(
 }
 
 /**
- * Tells the Live server that the history about to be replayed already holds
- * the model's past answers, so the server does not answer those turns again.
+ * Seeds the first connection from a handle the caller stored in the run
+ * config, so the run resumes that session instead of replaying its history.
  *
- * Only applies when history is replayed, i.e. on a fresh connection with
- * contents. A value the caller already chose is left alone.
+ * The config is copied by value: the flow rewrites the handle on every attempt
+ * and must not write back into the caller's run config. A handle the server
+ * issues later supersedes the seeded one.
  */
-function applyLiveHistoryConfig(
+function seedLiveSessionResumption(
   invocationContext: InvocationContext,
   llmRequest: LlmRequest,
 ): void {
-  if (
-    llmRequest.contents.length === 0 ||
-    invocationContext.liveSessionResumptionHandle
-  ) {
-    return;
+  const configured = invocationContext.runConfig?.sessionResumption;
+  if (configured) {
+    llmRequest.liveConnectConfig.sessionResumption = {
+      ...configured,
+      ...llmRequest.liveConnectConfig.sessionResumption,
+    };
   }
-  const liveConfig = llmRequest.liveConnectConfig;
-  liveConfig.historyConfig = {
-    ...invocationContext.runConfig?.historyConfig,
-    ...liveConfig.historyConfig,
-  };
-  liveConfig.historyConfig.initialHistoryInClientContent ??= true;
+  const handle = llmRequest.liveConnectConfig.sessionResumption?.handle;
+  if (handle && !invocationContext.liveSessionResumptionHandle) {
+    invocationContext.liveSessionResumptionHandle = handle;
+  }
 }
 
 /** What the live send loop needs to drain the queue into the connection. */
@@ -314,6 +326,31 @@ export type SingleAfterModelCallback = (params: {
 export type AfterModelCallback =
   | SingleAfterModelCallback
   | SingleAfterModelCallback[];
+
+/**
+ * A callback that runs when the model call fails.
+ *
+ * @param params.context The current callback context.
+ * @param params.request The model request that failed.
+ * @param params.error The error the model call raised.
+ * @returns The response to use in place of the failure. When present, the
+ *     agent reports it instead of the error.
+ */
+export type SingleOnModelErrorCallback = (params: {
+  context: Context;
+  request: LlmRequest;
+  error: Error;
+}) => LlmResponse | undefined | Promise<LlmResponse | undefined>;
+
+/**
+ * A single callback or a list of callbacks.
+ *
+ * When a list of callbacks is provided, the callbacks will be called in the
+ * order they are listed until a callback returns a response.
+ */
+export type OnModelErrorCallback =
+  | SingleOnModelErrorCallback
+  | SingleOnModelErrorCallback[];
 
 /**
  * A callback that runs before a tool is called.
@@ -478,6 +515,14 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   afterModelCallback?: AfterModelCallback;
 
   /**
+   * Callbacks to be called when the model call fails.
+   *
+   * The first callback that returns a response supplies the agent's answer for
+   * that turn, so the caller sees a reply instead of an error.
+   */
+  onModelErrorCallback?: OnModelErrorCallback;
+
+  /**
    * Callbacks to be called before calling the tool.
    */
   beforeToolCallback?: BeforeToolCallback;
@@ -593,6 +638,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   private readonly audioCacheManager = new AudioCacheManager();
   beforeModelCallback?: BeforeModelCallback;
   afterModelCallback?: AfterModelCallback;
+  onModelErrorCallback?: OnModelErrorCallback;
   beforeToolCallback?: BeforeToolCallback;
   afterToolCallback?: AfterToolCallback;
   requestProcessors: BaseLlmRequestProcessor[];
@@ -630,6 +676,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.outputKey = config.outputKey;
     this.beforeModelCallback = config.beforeModelCallback;
     this.afterModelCallback = config.afterModelCallback;
+    this.onModelErrorCallback = config.onModelErrorCallback;
     this.beforeToolCallback = config.beforeToolCallback;
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
@@ -846,6 +893,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    */
   get canonicalAfterModelCallbacks(): SingleAfterModelCallback[] {
     return LlmAgent.normalizeCallbackArray(this.afterModelCallback);
+  }
+
+  /**
+   * The resolved onModelErrorCallback field as a list of
+   * SingleOnModelErrorCallback.
+   *
+   * This method is only for use by Agent Development Kit.
+   */
+  get canonicalOnModelErrorCallbacks(): SingleOnModelErrorCallback[] {
+    return LlmAgent.normalizeCallbackArray(this.onModelErrorCallback);
   }
 
   /**
@@ -1115,6 +1172,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // Apply live-only request config from the run config.
     // =========================================================================
     applyLiveRunConfig(invocationContext.runConfig, llmRequest);
+    seedLiveSessionResumption(invocationContext, llmRequest);
 
     const llm = this.canonicalModel;
     let reconnectAttempts = 0;
@@ -1128,7 +1186,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
 
       applyLiveSessionResumption(invocationContext, llmRequest, llm);
-      applyLiveHistoryConfig(invocationContext, llmRequest);
 
       let connection: BaseLlmConnection;
       try {
@@ -1203,6 +1260,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
       let reconnectMode: LiveReconnectMode | undefined;
       let fatalError: unknown;
+      let closedNormally = false;
       try {
         for await (const event of screenedEvents) {
           yield event;
@@ -1224,6 +1282,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
             'Live connection closed; will reconnect with session handle.',
             err,
           );
+        } else if (
+          isLiveConnectionClosedError(err) &&
+          err.code === LiveCloseCode.NORMAL
+        ) {
+          // The model ended the session on purpose and no handle can resume
+          // it, so the live nodes finish normally instead of erroring.
+          closedNormally = true;
+          logger.info('Live session closed normally.', err);
         } else {
           fatalError = err;
         }
@@ -1238,6 +1304,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
       if (fatalError) {
         throw fatalError;
+      }
+
+      if (closedNormally) {
+        return;
       }
 
       if (invocationContext.abortSignal?.aborted) {
@@ -1259,9 +1329,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           );
         }
         // A new session holds none of the old one's state, so the handle goes
-        // and preprocess rebuilds the history from the session's events.
+        // and preprocess rebuilds the history from the session's events. The
+        // run config drops its handle too, or the new session reseeds the old
+        // one on its way in.
         invocationContext.liveSessionResumptionHandle = undefined;
-        yield* this.runLiveFlow(invocationContext, restartCount + 1);
+        invocationContext.runConfig = runConfigForNewLiveSession(
+          invocationContext.runConfig,
+        );
+        // Re-enter the session, not `runLiveFlow`: its `finally` already
+        // wraps the whole run, so one teardown covers every restart.
+        yield* this.runLiveSession(invocationContext, restartCount + 1);
         return;
       }
 
@@ -1623,11 +1700,15 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           if (subAgent) {
             const previousAgent = invocationContext.agent;
             invocationContext.agent = subAgent;
-            // Child agent starts its own live session; do not carry over
-            // the parent's resumption handle.
+            // Child agent starts its own live session; do not carry over the
+            // parent's resumption handle, from the invocation or from the run
+            // config the child would otherwise reseed from.
             const previousHandle =
               invocationContext.liveSessionResumptionHandle;
+            const previousRunConfig = invocationContext.runConfig;
             invocationContext.liveSessionResumptionHandle = undefined;
+            invocationContext.runConfig =
+              runConfigForNewLiveSession(previousRunConfig);
             try {
               for await (const subEvent of subAgent.runLive(
                 invocationContext,
@@ -1637,6 +1718,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
             } finally {
               invocationContext.agent = previousAgent;
               invocationContext.liveSessionResumptionHandle = previousHandle;
+              invocationContext.runConfig = previousRunConfig;
             }
           }
           return;
@@ -1785,7 +1867,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     ) {
       const flushedEvents = await this.audioCacheManager.flushCaches(
         invocationContext,
-        {flushUserAudio: !llmResponse.interrupted},
+        !llmResponse.interrupted,
       );
       if (flushedEvents.length) {
         for (const event of flushedEvents) {
@@ -2340,6 +2422,41 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     return undefined;
   }
 
+  /**
+   * Asks the plugins, then this agent's callbacks, for a response that stands
+   * in for a failed model call.
+   *
+   * @returns The first response offered, or undefined when none is.
+   */
+  private async handleOnModelError(
+    invocationContext: InvocationContext,
+    callbackContext: Context,
+    llmRequest: LlmRequest,
+    error: Error,
+  ): Promise<LlmResponse | undefined> {
+    const pluginResponse =
+      await invocationContext.pluginManager.runOnModelErrorCallback({
+        callbackContext,
+        llmRequest,
+        error,
+      });
+    if (pluginResponse) {
+      return pluginResponse;
+    }
+
+    for (const callback of this.canonicalOnModelErrorCallbacks) {
+      const callbackResponse = await callback({
+        context: callbackContext,
+        request: llmRequest,
+        error,
+      });
+      if (callbackResponse) {
+        return callbackResponse;
+      }
+    }
+    return undefined;
+  }
+
   protected async *runAndHandleError<T extends LlmResponse | Event>(
     responseGenerator: AsyncGenerator<T, void, void>,
     invocationContext: InvocationContext,
@@ -2364,13 +2481,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
       // Wrapped LLM should throw Error-typed errors
       if (modelError instanceof Error) {
-        // Try plugins to recover from the error
-        const onModelErrorCallbackResponse =
-          await invocationContext.pluginManager.runOnModelErrorCallback({
-            callbackContext: callbackContext,
-            llmRequest: llmRequest,
-            error: modelError as Error,
-          });
+        const onModelErrorCallbackResponse = await this.handleOnModelError(
+          invocationContext,
+          callbackContext,
+          llmRequest,
+          modelError,
+        );
 
         if (onModelErrorCallbackResponse) {
           yield onModelErrorCallbackResponse as T;

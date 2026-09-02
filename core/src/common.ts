@@ -7,10 +7,7 @@
 export {ActiveStreamingTool} from './agents/active_streaming_tool.js';
 export type {ActiveStreamingToolParams} from './agents/active_streaming_tool.js';
 export {AudioCacheManager} from './agents/audio_cache_manager.js';
-export type {
-  AudioCacheType,
-  FlushCachesOptions,
-} from './agents/audio_cache_manager.js';
+export type {AudioCacheType} from './agents/audio_cache_manager.js';
 export {BaseAgent, isBaseAgent} from './agents/base_agent.js';
 export type {
   AfterAgentCallback,
@@ -45,10 +42,12 @@ export type {
   InstructionProvider,
   LlmAgentConfig,
   LlmAgentSchema,
+  OnModelErrorCallback,
   SingleAfterModelCallback,
   SingleAfterToolCallback,
   SingleBeforeModelCallback,
   SingleBeforeToolCallback,
+  SingleOnModelErrorCallback,
   ToolUnion,
 } from './agents/llm_agent.js';
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
@@ -72,11 +71,7 @@ export {ReadonlyContext} from './agents/readonly_context.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
 export {StreamingMode} from './agents/run_config.js';
-export type {
-  HistoryConfig,
-  LiveConnectConfigWithHistory,
-  RunConfig,
-} from './agents/run_config.js';
+export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
 export {
@@ -226,6 +221,11 @@ export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
+export {
+  LiveCloseCode,
+  LiveConnectionClosedError,
+  isLiveConnectionClosedError,
+} from './models/live_connection_error.js';
 export type {LlmRequest} from './models/llm_request.js';
 export type {LlmResponse} from './models/llm_response.js';
 export {LLMRegistry} from './models/registry.js';

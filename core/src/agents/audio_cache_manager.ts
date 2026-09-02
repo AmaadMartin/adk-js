@@ -26,16 +26,6 @@ export type AudioCacheType = 'input' | 'output';
 /** Identifies a flushed cache in the artifact filename. */
 type AudioCacheArtifactType = 'input_audio' | 'output_audio';
 
-/** Which caches {@link AudioCacheManager.flushCaches} flushes. */
-export interface FlushCachesOptions {
-  /**
-   * Whether to flush the input (user) audio cache. Defaults to `true`. The
-   * model's audio is always flushed: an interruption ends the model's turn
-   * while the user keeps speaking, and a completed turn ends both.
-   */
-  flushUserAudio?: boolean;
-}
-
 /**
  * Caches a live session's audio and flushes it to the artifact service.
  *
@@ -88,14 +78,15 @@ export class AudioCacheManager {
    * keeps the audio for the next flush.
    *
    * @param invocationContext The invocation context holding the caches.
-   * @param options Which caches to flush.
+   * @param flushUserAudio Whether to flush the user's audio cache. The model's
+   *     audio is always flushed: an interruption ends the model's turn while
+   *     the user keeps speaking, and a completed turn ends both.
    * @return The events created from the flushed caches, user audio first.
    */
   async flushCaches(
     invocationContext: InvocationContext,
-    options: FlushCachesOptions = {},
+    flushUserAudio = true,
   ): Promise<Event[]> {
-    const flushUserAudio = options.flushUserAudio ?? true;
     const flushedEvents: Event[] = [];
 
     if (flushUserAudio && invocationContext.inputRealtimeCache?.length) {

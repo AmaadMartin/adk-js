@@ -7,34 +7,14 @@
 import {
   AudioTranscriptionConfig,
   ContextWindowCompressionConfig,
-  LiveConnectConfig,
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
+  SessionResumptionConfig,
   SpeechConfig,
 } from '@google/genai';
 
 import {logger} from '../utils/logger.js';
-
-/**
- * How the Live API treats the conversation history a client replays on a fresh
- * connection.
- *
- * Declared here rather than imported because `@google/genai` 2.9.0 does not
- * export it. Replace this with the SDK type once the dependency is raised.
- */
-export interface HistoryConfig {
-  /**
-   * Whether the replayed history already contains the model's past responses.
-   * When true, the Live server does not answer those turns again.
-   */
-  initialHistoryInClientContent?: boolean;
-}
-
-/** A `LiveConnectConfig` that also carries a {@link HistoryConfig}. */
-export interface LiveConnectConfigWithHistory extends LiveConnectConfig {
-  historyConfig?: HistoryConfig;
-}
 
 /**
  * The streaming mode for the run config.
@@ -78,10 +58,13 @@ export interface RunConfig {
   saveLiveBlob?: boolean;
 
   /**
-   * History settings for a live connection. Copied onto the connect config
-   * when the flow replays conversation history on a fresh connection.
+   * Session resumption settings for a live connection.
+   *
+   * A `handle` here makes the first connection resume the session it names,
+   * so the flow does not replay the conversation history. The flow copies the
+   * config by value and never writes a later server handle back here.
    */
-  historyConfig?: HistoryConfig;
+  sessionResumption?: SessionResumptionConfig;
 
   /**
    * Whether to support CFC (Compositional Function Calling). Only applicable

@@ -14,6 +14,10 @@ import {
 } from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {GeminiLlmConnection} from '../../src/models/gemini_llm_connection.js';
+import {
+  LiveCloseCode,
+  LiveConnectionClosedError,
+} from '../../src/models/live_connection_error.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {liveServerMessage} from '../utils/live_server_message_test_utils.js';
 
@@ -252,6 +256,54 @@ describe('GeminiLlmConnection', () => {
       );
       await connection.close();
       expect(mockSession.close).toHaveBeenCalled();
+    });
+
+    it('tells its owner before it tears the session down', async () => {
+      const order: string[] = [];
+      mockSession.close = vi.fn(() => order.push('session'));
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+        messageQueue,
+        () => order.push('owner'),
+      );
+
+      await connection.close();
+
+      expect(order).toEqual(['owner', 'session']);
+    });
+  });
+
+  describe('receive on a dropped connection', () => {
+    it('flushes the pending tool call before it rethrows', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+        messageQueue,
+      );
+      messageQueue.push(
+        liveServerMessage({
+          toolCall: {functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}]},
+        }),
+      );
+      messageQueue.fail(
+        new LiveConnectionClosedError(LiveCloseCode.ABNORMAL, 'dropped'),
+      );
+
+      const generator = connection.receive();
+
+      const flushed = await generator.next();
+      if (flushed.done) {
+        expect.fail('expected the buffered tool call before the error');
+      }
+      expect(flushed.value.content).toEqual({
+        role: 'model',
+        parts: [{functionCall: {name: 'tool_a', args: {x: 1}, id: '1'}}],
+      });
+
+      await expect(generator.next()).rejects.toThrow(
+        'live connection closed (1006): dropped',
+      );
     });
   });
 

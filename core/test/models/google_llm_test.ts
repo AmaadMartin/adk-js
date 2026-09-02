@@ -5,6 +5,7 @@
  */
 
 import {
+  BaseLlmConnection,
   Gemini,
   GeminiParams,
   LlmRequest,
@@ -54,6 +55,20 @@ class TestGemini extends Gemini {
   }
   getTrackingHeaders(): Record<string, string> {
     return this.trackingHeaders;
+  }
+}
+
+/** Node has no `CloseEvent` global, so the tests build the socket's event. */
+class TestCloseEvent extends Event implements CloseEvent {
+  readonly wasClean: boolean;
+
+  constructor(
+    readonly code: number,
+    readonly reason: string,
+    wasClean = false,
+  ) {
+    super('close');
+    this.wasClean = wasClean;
   }
 }
 
@@ -735,6 +750,70 @@ describe('GoogleLlm', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('connect close handling', () => {
+    function liveRequest(): LlmRequest {
+      return {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        config: {},
+        toolsDict: {},
+      };
+    }
+
+    /** Replays the close event the socket hands to the connect callbacks. */
+    function closeSocket(llm: TestGemini, event: CloseEvent): void {
+      const params = vi.mocked(llm.liveApiClient.live.connect).mock.calls[0][0];
+      const onclose = params.callbacks?.onclose;
+      if (!onclose) {
+        expect.fail('connect was called without an onclose callback');
+      }
+      onclose(event);
+    }
+
+    async function drain(
+      connection: BaseLlmConnection,
+    ): Promise<LlmResponse[]> {
+      const responses: LlmResponse[] = [];
+      for await (const response of connection.receive()) {
+        responses.push(response);
+      }
+      return responses;
+    }
+
+    it('fails the response stream when the server drops the connection', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const connection = await llm.connect(liveRequest());
+
+      closeSocket(llm, new TestCloseEvent(1006, 'gone'));
+
+      await expect(drain(connection)).rejects.toThrow(
+        'live connection closed (1006): gone',
+      );
+    });
+
+    it('reports the close code the server sent', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const connection = await llm.connect(liveRequest());
+
+      closeSocket(llm, new TestCloseEvent(1000, 'done'));
+
+      await expect(drain(connection)).rejects.toThrow(
+        'live connection closed (1000): done',
+      );
+    });
+
+    it('ends the response stream when the caller closed the connection', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const connection = await llm.connect(liveRequest());
+
+      await connection.close();
+      closeSocket(llm, new TestCloseEvent(1006, 'local teardown'));
+
+      await expect(drain(connection)).resolves.toEqual([]);
     });
   });
 

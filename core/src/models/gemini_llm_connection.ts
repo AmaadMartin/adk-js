@@ -21,10 +21,18 @@ import {LlmResponse} from './llm_response.js';
 
 /** The Gemini model connection. */
 export class GeminiLlmConnection implements BaseLlmConnection {
+  /**
+   * @param geminiSession The live session this connection drives.
+   * @param modelVersion The model the session was opened against.
+   * @param messageQueue The queue the session's messages arrive on.
+   * @param onCloseRequested Called by {@link close} before the session is torn
+   *     down, so the owner can tell a teardown it asked for from a drop.
+   */
   constructor(
     private readonly geminiSession: Session,
     private readonly modelVersion?: string,
     private readonly messageQueue?: AsyncIterable<LiveServerMessage>,
+    private readonly onCloseRequested?: () => void,
   ) {}
 
   /**
@@ -150,16 +158,27 @@ export class GeminiLlmConnection implements BaseLlmConnection {
 
     const aggregator = new LiveResponseAggregator(this.modelVersion);
 
-    for await (const message of this.messageQueue) {
-      logger.debug('Got LLM Live message:', message);
+    // A dropped connection still has to flush what the aggregator already
+    // parsed, or the caller loses a pending tool call.
+    let failure: {error: unknown} | undefined;
+    try {
+      for await (const message of this.messageQueue) {
+        logger.debug('Got LLM Live message:', message);
 
-      for (const response of aggregator.processMessage(message)) {
-        yield response;
+        for (const response of aggregator.processMessage(message)) {
+          yield response;
+        }
       }
+    } catch (error: unknown) {
+      failure = {error};
     }
 
     for (const response of aggregator.close()) {
       yield response;
+    }
+
+    if (failure) {
+      throw failure.error;
     }
   }
 
@@ -167,6 +186,7 @@ export class GeminiLlmConnection implements BaseLlmConnection {
    * Closes the llm server connection.
    */
   async close(): Promise<void> {
+    this.onCloseRequested?.();
     this.geminiSession.close();
   }
 }
