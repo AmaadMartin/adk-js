@@ -37,14 +37,8 @@ function isRelative(specifier: string): boolean {
  * drive letter in `C:\dir\mod.js` as a URL scheme. A bare specifier passes
  * through, so an installed package resolves the way Node normally resolves it.
  */
-function toImportSpecifier(specifier: string, baseFilePath?: string): string {
+function toImportSpecifier(specifier: string, baseFilePath: string): string {
   if (isRelative(specifier)) {
-    if (baseFilePath === undefined) {
-      throw new Error(
-        `Relative specifier "${specifier}" needs the path of the file it ` +
-          `came from.`,
-      );
-    }
     return new URL(specifier, pathToFileURL(baseFilePath)).href;
   }
   return isAbsolute(specifier) ? pathToFileURL(specifier).href : specifier;
@@ -73,8 +67,8 @@ function invalidName(name: string, cause: unknown): InputValidationError {
  *
  * @param name The fully-qualified name to resolve.
  * @param baseFilePath Absolute path of the file the name came from. A relative
- *   specifier resolves against its directory and needs it. Bare and absolute
- *   specifiers ignore it.
+ *   specifier resolves against its directory. Bare and absolute specifiers
+ *   ignore it.
  * @return The exported value.
  * @throws {InputValidationError} When the specifier names a built-in, the
  *   module fails to load, or the module has no such export. The underlying
@@ -82,7 +76,7 @@ function invalidName(name: string, cause: unknown): InputValidationError {
  */
 export async function resolveFullyQualifiedName(
   name: string,
-  baseFilePath?: string,
+  baseFilePath: string,
 ): Promise<unknown> {
   const [specifier, exportName] = splitQualifiedName(name);
   if (isBuiltin(specifier)) {

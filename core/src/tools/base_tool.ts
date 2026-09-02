@@ -34,9 +34,6 @@ export interface BaseToolParams {
   name: string;
   description: string;
   isLongRunning?: boolean;
-
-  /** See {@link BaseTool.defersResponse}. Framework-internal. */
-  defersResponse?: boolean;
 }
 
 /**
@@ -91,7 +88,8 @@ export abstract class BaseTool {
 
   /**
    * Framework-internal, and not public API — external code must leave this
-   * false.
+   * false. It is deliberately not a constructor option: only a tool ADK ships
+   * assigns it, in its own constructor.
    *
    * When true, the framework builds no `FunctionResponse` for a call whose
    * `runAsync` resolves to nothing, because another orchestrator answers the
@@ -102,7 +100,7 @@ export abstract class BaseTool {
    * conversion, plugin logging and interrupt tracking. This marker records
    * nothing.
    */
-  readonly defersResponse: boolean;
+  defersResponse = false;
 
   /**
    * Base constructor for a tool.
@@ -113,7 +111,6 @@ export abstract class BaseTool {
     this.name = params.name;
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
-    this.defersResponse = params.defersResponse ?? false;
   }
 
   /**

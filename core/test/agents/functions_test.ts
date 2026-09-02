@@ -121,9 +121,9 @@ function callFor(tool: BaseTool): FunctionCall {
 }
 
 /**
- * A tool another orchestrator answers for. `defersResponse` is a `BaseTool`
- * option rather than a `FunctionTool` one, because only framework code sets
- * it.
+ * A tool another orchestrator answers for. `defersResponse` is assigned in the
+ * constructor rather than passed in, because it is not a tool option: only a
+ * tool ADK ships sets it.
  */
 class DeferringTool extends BaseTool {
   constructor(
@@ -133,8 +133,8 @@ class DeferringTool extends BaseTool {
     super({
       name,
       description: 'delegates the call and is answered later',
-      defersResponse: true,
     });
+    this.defersResponse = true;
   }
 
   override async runAsync({

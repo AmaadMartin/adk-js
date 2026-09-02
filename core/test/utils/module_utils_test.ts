@@ -29,19 +29,23 @@ describe('resolveFullyQualifiedName', () => {
   it('resolves a named export by identity', async () => {
     const resolved = await resolveFullyQualifiedName(
       `${FIXTURE_PATH}#weatherAgent`,
+      CONFIG_PATH,
     );
 
     expect(resolved).toBe(weatherAgent);
   });
 
   it('resolves the default export when the name has no separator', async () => {
-    const resolved = await resolveFullyQualifiedName(FIXTURE_PATH);
+    const resolved = await resolveFullyQualifiedName(FIXTURE_PATH, CONFIG_PATH);
 
     expect(resolved).toBe(weatherAgent);
   });
 
   it('resolves the default export when nothing follows the separator', async () => {
-    const resolved = await resolveFullyQualifiedName(`${FIXTURE_PATH}#`);
+    const resolved = await resolveFullyQualifiedName(
+      `${FIXTURE_PATH}#`,
+      CONFIG_PATH,
+    );
 
     expect(resolved).toBe(weatherAgent);
   });
@@ -67,25 +71,15 @@ describe('resolveFullyQualifiedName', () => {
   it('resolves a bare specifier through normal package resolution', async () => {
     const resolved = await resolveFullyQualifiedName(
       '@google/genai#createUserContent',
+      CONFIG_PATH,
     );
 
     expect(resolved).toBe(createUserContent);
   });
 
-  it('rejects a relative specifier when no base file is given', async () => {
-    const resolving = resolveFullyQualifiedName(
-      './config_agents.ts#notAnAgent',
-    );
-
-    await expect(resolving).rejects.toThrow(InputValidationError);
-    await expect(resolving).rejects.toMatchObject({
-      cause: {message: expect.stringContaining('needs the path of the file')},
-    });
-  });
-
   it('reports a module that cannot be loaded, keeping the cause', async () => {
     const name = '/no/such/module.ts#weatherAgent';
-    const resolving = resolveFullyQualifiedName(name);
+    const resolving = resolveFullyQualifiedName(name, CONFIG_PATH);
 
     await expect(resolving).rejects.toThrow(InputValidationError);
     await expect(resolving).rejects.toMatchObject({
@@ -96,7 +90,7 @@ describe('resolveFullyQualifiedName', () => {
 
   it('reports a missing export instead of returning undefined', async () => {
     const name = `${FIXTURE_PATH}#noSuchExport`;
-    const resolving = resolveFullyQualifiedName(name);
+    const resolving = resolveFullyQualifiedName(name, CONFIG_PATH);
 
     await expect(resolving).rejects.toThrow(InputValidationError);
     await expect(resolving).rejects.toMatchObject({
@@ -108,7 +102,10 @@ describe('resolveFullyQualifiedName', () => {
   });
 
   it('refuses a namespaced Node built-in', async () => {
-    const resolving = resolveFullyQualifiedName('node:child_process#execSync');
+    const resolving = resolveFullyQualifiedName(
+      'node:child_process#execSync',
+      CONFIG_PATH,
+    );
 
     await expect(resolving).rejects.toThrow(InputValidationError);
     await expect(resolving).rejects.toMatchObject({
@@ -117,7 +114,7 @@ describe('resolveFullyQualifiedName', () => {
   });
 
   it('refuses a bare Node built-in', async () => {
-    const resolving = resolveFullyQualifiedName('fs#readFileSync');
+    const resolving = resolveFullyQualifiedName('fs#readFileSync', CONFIG_PATH);
 
     await expect(resolving).rejects.toThrow(InputValidationError);
     await expect(resolving).rejects.toMatchObject({

@@ -18,30 +18,26 @@ class TestTool extends BaseTool {
   }
 }
 
+/** A tool ADK ships that another orchestrator answers for. */
+class DeferringTestTool extends TestTool {
+  constructor() {
+    super({name: 'deferring', description: 'answered by another orchestrator'});
+    this.defersResponse = true;
+  }
+}
+
 describe('BaseTool.defersResponse', () => {
-  it('is false when the tool does not ask to defer', () => {
+  it('is false for a tool that does not set it', () => {
     const tool = new TestTool({name: 'plain', description: 'a plain tool'});
 
     expect(tool.defersResponse).toBe(false);
   });
 
-  it('is true when the tool asks to defer', () => {
-    const tool = new TestTool({
-      name: 'deferring',
-      description: 'a tool answered by another orchestrator',
-      defersResponse: true,
-    });
-
-    expect(tool.defersResponse).toBe(true);
+  it('is true for a tool that sets it in its constructor', () => {
+    expect(new DeferringTestTool().defersResponse).toBe(true);
   });
 
   it('is independent of isLongRunning', () => {
-    const tool = new TestTool({
-      name: 'deferring',
-      description: 'a tool answered by another orchestrator',
-      defersResponse: true,
-    });
-
-    expect(tool.isLongRunning).toBe(false);
+    expect(new DeferringTestTool().isLongRunning).toBe(false);
   });
 });
