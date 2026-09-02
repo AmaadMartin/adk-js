@@ -35,6 +35,10 @@ import {Example} from '../examples/example.js';
 import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
 import {BaseLlmConnection} from '../models/base_llm_connection.js';
 import {isGemini} from '../models/google_llm.js';
+import {
+  isLiveConnectionClosedError,
+  LiveCloseCode,
+} from '../models/live_connection_error.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
@@ -75,6 +79,7 @@ import {InvocationContext, requireAgent} from './invocation_context.js';
 import {
   markLiveAsyncToolsNonBlocking,
   pumpEventsInto,
+  runConfigForNewLiveSession,
   stopBackgroundToolTasks,
 } from './live_flow_utils.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
@@ -146,10 +151,17 @@ class LiveReconnectSignal extends Error {
  */
 function isRecoverableLiveError(err: unknown): boolean {
   if (err instanceof LiveReconnectSignal) return true;
+  // A close the server chose is recoverable whichever code it carries: with a
+  // handle the session resumes, and without one the caller decides.
+  if (isLiveConnectionClosedError(err)) return true;
   if (!(err instanceof Error)) return false;
   const code = (err as {code?: unknown}).code;
   // Standard WebSocket close codes treated as transient by the Python flow.
-  if (code === 1006 || code === 1011 || code === 1012) {
+  if (
+    code === LiveCloseCode.ABNORMAL ||
+    code === LiveCloseCode.INTERNAL ||
+    code === LiveCloseCode.SERVICE_RESTART
+  ) {
     return true;
   }
   const message = err.message ?? '';
@@ -215,6 +227,31 @@ function applyLiveSessionResumption(
     sessionResumption.transparent === undefined
   ) {
     sessionResumption.transparent = true;
+  }
+}
+
+/**
+ * Seeds the first connection from a handle the caller stored in the run
+ * config, so the run resumes that session instead of replaying its history.
+ *
+ * The config is copied by value: the flow rewrites the handle on every attempt
+ * and must not write back into the caller's run config. A handle the server
+ * issues later supersedes the seeded one.
+ */
+function seedLiveSessionResumption(
+  invocationContext: InvocationContext,
+  llmRequest: LlmRequest,
+): void {
+  const configured = invocationContext.runConfig?.sessionResumption;
+  if (configured) {
+    llmRequest.liveConnectConfig.sessionResumption = {
+      ...configured,
+      ...llmRequest.liveConnectConfig.sessionResumption,
+    };
+  }
+  const handle = llmRequest.liveConnectConfig.sessionResumption?.handle;
+  if (handle && !invocationContext.liveSessionResumptionHandle) {
+    invocationContext.liveSessionResumptionHandle = handle;
   }
 }
 
@@ -1115,6 +1152,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // Apply live-only request config from the run config.
     // =========================================================================
     applyLiveRunConfig(invocationContext.runConfig, llmRequest);
+    seedLiveSessionResumption(invocationContext, llmRequest);
 
     const llm = this.canonicalModel;
     let reconnectAttempts = 0;
@@ -1203,6 +1241,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
       let reconnectMode: LiveReconnectMode | undefined;
       let fatalError: unknown;
+      let closedNormally = false;
       try {
         for await (const event of screenedEvents) {
           yield event;
@@ -1224,6 +1263,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
             'Live connection closed; will reconnect with session handle.',
             err,
           );
+        } else if (
+          isLiveConnectionClosedError(err) &&
+          err.code === LiveCloseCode.NORMAL
+        ) {
+          // The model ended the session on purpose and no handle can resume
+          // it, so the live nodes finish normally instead of erroring.
+          closedNormally = true;
+          logger.info('Live session closed normally.', err);
         } else {
           fatalError = err;
         }
@@ -1238,6 +1285,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
       if (fatalError) {
         throw fatalError;
+      }
+
+      if (closedNormally) {
+        return;
       }
 
       if (invocationContext.abortSignal?.aborted) {
@@ -1259,8 +1310,13 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           );
         }
         // A new session holds none of the old one's state, so the handle goes
-        // and preprocess rebuilds the history from the session's events.
+        // and preprocess rebuilds the history from the session's events. The
+        // run config drops its handle too, or the new session reseeds the old
+        // one on its way in.
         invocationContext.liveSessionResumptionHandle = undefined;
+        invocationContext.runConfig = runConfigForNewLiveSession(
+          invocationContext.runConfig,
+        );
         yield* this.runLiveFlow(invocationContext, restartCount + 1);
         return;
       }
@@ -1623,11 +1679,15 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           if (subAgent) {
             const previousAgent = invocationContext.agent;
             invocationContext.agent = subAgent;
-            // Child agent starts its own live session; do not carry over
-            // the parent's resumption handle.
+            // Child agent starts its own live session; do not carry over the
+            // parent's resumption handle, from the invocation or from the run
+            // config the child would otherwise reseed from.
             const previousHandle =
               invocationContext.liveSessionResumptionHandle;
+            const previousRunConfig = invocationContext.runConfig;
             invocationContext.liveSessionResumptionHandle = undefined;
+            invocationContext.runConfig =
+              runConfigForNewLiveSession(previousRunConfig);
             try {
               for await (const subEvent of subAgent.runLive(
                 invocationContext,
@@ -1637,6 +1697,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
             } finally {
               invocationContext.agent = previousAgent;
               invocationContext.liveSessionResumptionHandle = previousHandle;
+              invocationContext.runConfig = previousRunConfig;
             }
           }
           return;

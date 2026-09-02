@@ -11,6 +11,7 @@ import {
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
+  SessionResumptionConfig,
   SpeechConfig,
 } from '@google/genai';
 
@@ -82,6 +83,15 @@ export interface RunConfig {
    * when the flow replays conversation history on a fresh connection.
    */
   historyConfig?: HistoryConfig;
+
+  /**
+   * Session resumption settings for a live connection.
+   *
+   * A `handle` here makes the first connection resume the session it names,
+   * so the flow does not replay the conversation history. The flow copies the
+   * config by value and never writes a later server handle back here.
+   */
+  sessionResumption?: SessionResumptionConfig;
 
   /**
    * Whether to support CFC (Compositional Function Calling). Only applicable

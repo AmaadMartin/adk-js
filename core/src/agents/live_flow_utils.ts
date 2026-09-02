@@ -12,12 +12,34 @@ import {AsyncQueue} from '../utils/async_queue.js';
 import {logger} from '../utils/logger.js';
 import {Task} from '../utils/task.js';
 import {InvocationContext} from './invocation_context.js';
+import {RunConfig} from './run_config.js';
 
 /**
  * How long a live run waits for a background tool task to honor cancellation
  * before it gives up on that task.
  */
 const TOOL_SHUTDOWN_TIMEOUT_MS = 1000;
+
+/**
+ * Copies a run config for a live session that starts from nothing.
+ *
+ * The session resumption handle names the session being left behind, so an
+ * agent transfer and a restart both drop it while keeping every other field
+ * the caller set. The copy protects the caller's own config from the flow.
+ *
+ * @param runConfig The run config the current session is using.
+ * @returns A copy with no resumption handle, or the original when it has none.
+ */
+export function runConfigForNewLiveSession(
+  runConfig: RunConfig | undefined,
+): RunConfig | undefined {
+  if (!runConfig?.sessionResumption) {
+    return runConfig;
+  }
+  const sessionResumption = {...runConfig.sessionResumption};
+  delete sessionResumption.handle;
+  return {...runConfig, sessionResumption};
+}
 
 /**
  * Cancels the streaming tool tasks the current live run started.

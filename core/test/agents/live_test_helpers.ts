@@ -13,6 +13,9 @@ import {
 } from '@google/adk';
 import {Blob, Content} from '@google/genai';
 
+/** One entry of a connection script: a response, or the failure that ends it. */
+export type ScriptedLiveEntry = LlmResponse | Error;
+
 /** A live connection that replays a script and records what was sent to it. */
 export class ScriptedLiveConnection implements BaseLlmConnection {
   readonly historyCalls: Content[][] = [];
@@ -21,9 +24,15 @@ export class ScriptedLiveConnection implements BaseLlmConnection {
   closed = false;
   private readonly queue = new AsyncQueue<LlmResponse>();
 
-  constructor(responses: LlmResponse[]) {
+  constructor(responses: ScriptedLiveEntry[]) {
     for (const response of responses) {
-      this.queue.push(response);
+      if (response instanceof Error) {
+        // The queue delivers the responses buffered ahead of the failure
+        // first, the way a connection that drops mid-turn does.
+        this.queue.fail(response);
+      } else {
+        this.queue.push(response);
+      }
     }
   }
 
@@ -63,7 +72,7 @@ export class ScriptedLiveLlm extends BaseLlm {
   readonly requestsSeen: LlmRequest[] = [];
 
   constructor(
-    private readonly scripts: LlmResponse[][],
+    private readonly scripts: ScriptedLiveEntry[][],
     model = 'scripted-live-llm',
   ) {
     super({model});
