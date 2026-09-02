@@ -14,11 +14,11 @@ import {
   setLogLevel as setAdkCoreLogLevel,
 } from '@google/adk';
 import {Argument, Command, Option} from 'commander';
-import dotenv from 'dotenv';
 import * as path from 'node:path';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
+import {loadDotenvFromCwd} from '../utils/env_utils.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
@@ -28,7 +28,7 @@ import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
 import {getServiceRegistry, loadServicesModule} from './service_registry.js';
 
-dotenv.config({quiet: true});
+loadDotenvFromCwd();
 
 const LOG_LEVEL_MAP: Record<string, LogLevel> = {
   'debug': LogLevel.DEBUG,
