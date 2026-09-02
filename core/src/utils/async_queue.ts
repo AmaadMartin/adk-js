@@ -19,6 +19,9 @@
  *    queue, so a later `close()` can't discard the error.
  *  - {@link push} after close/fail is ignored (the producer has already
  *    signalled completion).
+ *  - A producer that must not outrun its consumer passes a `highWaterMark` and
+ *    awaits {@link whenDrained} after each push. The queue itself never drops
+ *    or rejects a value; the bound only applies back pressure.
  */
 export class AsyncQueue<T> implements AsyncIterable<T> {
   private queue: T[] = [];
@@ -26,8 +29,18 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     resolve: (value: IteratorResult<T>) => void;
     reject: (reason?: unknown) => void;
   }> = [];
+  private drainWaiters: Array<() => void> = [];
   private closed = false;
   private failure?: {error: unknown};
+  private readonly highWaterMark: number;
+
+  /**
+   * @param options.highWaterMark The buffer size at which {@link whenDrained}
+   *     starts to block. Unbounded by default.
+   */
+  constructor(options?: {highWaterMark?: number}) {
+    this.highWaterMark = options?.highWaterMark ?? Number.POSITIVE_INFINITY;
+  }
 
   /** Whether the queue has been closed or failed. */
   get isClosed(): boolean {
@@ -65,6 +78,31 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     while (this.resolvers.length > 0) {
       this.resolvers.shift()!.reject(error);
     }
+    this.releaseDrainWaiters();
+  }
+
+  /**
+   * Resolves once the buffer is below the high water mark, so a producer can
+   * await it after {@link push} instead of buffering without limit.
+   *
+   * Resolves immediately when the queue is unbounded, below the mark, or
+   * closed. {@link close} and {@link fail} release every waiter, so a producer
+   * is never left waiting on a consumer that has gone away.
+   */
+  whenDrained(): Promise<void> {
+    if (this.closed || this.queue.length < this.highWaterMark) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.drainWaiters.push(resolve);
+    });
+  }
+
+  private releaseDrainWaiters() {
+    if (!this.closed && this.queue.length >= this.highWaterMark) return;
+    while (this.drainWaiters.length > 0) {
+      this.drainWaiters.shift()!();
+    }
   }
 
   /** @deprecated Alias for {@link fail}; kept for existing callers. */
@@ -82,13 +120,16 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     while (this.resolvers.length > 0) {
       this.resolvers.shift()!.resolve({value: undefined as never, done: true});
     }
+    this.releaseDrainWaiters();
   }
 
   [Symbol.asyncIterator](): AsyncIterator<T> {
     return {
       next: (): Promise<IteratorResult<T>> => {
         if (this.queue.length > 0) {
-          return Promise.resolve({value: this.queue.shift()!, done: false});
+          const value = this.queue.shift()!;
+          this.releaseDrainWaiters();
+          return Promise.resolve({value, done: false});
         }
         if (this.failure) {
           return Promise.reject(this.failure.error);
