@@ -203,4 +203,85 @@ describe('Runner session resolution', () => {
     expect(createRunner().autoCreateSession).toBe(false);
     expect(createRunner(true).autoCreateSession).toBe(true);
   });
+
+  it('yields nothing for an already-aborted run rather than reporting the session', async () => {
+    const runner = createRunner();
+
+    const events = await drain(
+      runner.runAsync({
+        userId: USER_ID,
+        sessionId: MISSING_SESSION_ID,
+        newMessage: MESSAGE,
+        abortSignal: AbortSignal.abort(),
+      }),
+    );
+
+    expect(events).toEqual([]);
+  });
+
+  it('stops when the run is aborted while the session loads', async () => {
+    const existing = await sessionService.createSession({
+      appName: APP_NAME,
+      userId: USER_ID,
+    });
+    const controller = new AbortController();
+    const load = sessionService.getSession.bind(sessionService);
+    vi.spyOn(sessionService, 'getSession').mockImplementation(async (req) => {
+      controller.abort();
+      return load(req);
+    });
+    const runner = createRunner();
+
+    const events = await drain(
+      runner.runAsync({
+        userId: USER_ID,
+        sessionId: existing.id,
+        newMessage: MESSAGE,
+        abortSignal: controller.signal,
+      }),
+    );
+
+    expect(events).toEqual([]);
+    const reloaded = await load({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: existing.id,
+    });
+    expect(reloaded?.events).toEqual([]);
+  });
+
+  it('creates no session for an already-aborted run', async () => {
+    const createSpy = vi.spyOn(sessionService, 'createSession');
+    const runner = createRunner(true);
+
+    await drain(
+      runner.runAsync({
+        userId: USER_ID,
+        sessionId: MISSING_SESSION_ID,
+        newMessage: MESSAGE,
+        abortSignal: AbortSignal.abort(),
+      }),
+    );
+
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  it('creates no live session for an already-aborted run', async () => {
+    const createSpy = vi.spyOn(sessionService, 'createSession');
+    const runner = createRunner(true);
+    const queue = new LiveRequestQueue();
+    queue.close();
+
+    const events = await drain(
+      runner.runLive({
+        userId: USER_ID,
+        sessionId: MISSING_SESSION_ID,
+        liveRequestQueue: queue,
+        abortSignal: AbortSignal.abort(),
+      }),
+    );
+
+    expect(events).toEqual([]);
+    expect(createSpy).not.toHaveBeenCalled();
+  });
 });
