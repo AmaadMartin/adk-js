@@ -7,6 +7,7 @@
 import {Content, createPartFromText, Modality, Part} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
+import {AgentOrigin, getAgentOrigin} from '../agents/agent_origin.js';
 import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
 import {reservedFunctionCallName} from '../agents/framework_function_calls.js';
 import {findMatchingFunctionCall} from '../agents/functions.js';
@@ -28,6 +29,7 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
+import {SessionNotFoundError} from '../errors/session_not_found_error.js';
 import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -108,11 +110,47 @@ export interface RunnerConfig {
   resumabilityConfig?: ResumabilityConfig;
 
   /**
+   * Whether to create the session when a run is given a session id that does
+   * not exist. Defaults to `false`, which reports the missing session as a
+   * `SessionNotFoundError` instead.
+   */
+  autoCreateSession?: boolean;
+
+  /**
    * How long, in seconds, each plugin gets to finish its `close()` when
    * {@link Runner.close} runs. Defaults to 5. A value of zero or less waits
    * indefinitely.
    */
   pluginCloseTimeoutSeconds?: number;
+}
+
+/**
+ * Describes an app name that disagrees with where the root agent was loaded
+ * from, or `undefined` when the two agree.
+ *
+ * The mismatch is the usual reason a session lookup fails, because the app
+ * name scopes the lookup. An origin app name starting with `__` marks a
+ * built-in agent, which implies no app name.
+ *
+ * Ported from `google/adk-python` `runners.py::Runner._enforce_app_name_alignment`.
+ */
+function formatAppNameMismatch(
+  appName: string,
+  origin: AgentOrigin,
+): string | undefined {
+  const originAppName = origin.appName;
+  if (!appName || !originAppName || originAppName.startsWith('__')) {
+    return undefined;
+  }
+  if (originAppName === appName) {
+    return undefined;
+  }
+  return (
+    `The runner is configured with app name "${appName}", but the root agent ` +
+    `was loaded from "${origin.dir ?? originAppName}", which implies app ` +
+    `name "${originAppName}". Ensure the runner appName matches that ` +
+    `directory or pass appName explicitly when constructing the runner.`
+  );
 }
 
 /**
@@ -174,8 +212,16 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
   readonly resumabilityConfig?: ResumabilityConfig;
+  /** Whether a missing session is created instead of reported as an error. */
+  readonly autoCreateSession: boolean;
   /** How long each plugin gets to close, in seconds. */
   readonly pluginCloseTimeoutSeconds: number;
+
+  /**
+   * The sentence describing an app name that disagrees with the root agent's
+   * recorded origin, or `undefined` when they agree.
+   */
+  private readonly appNameMismatch?: string;
 
   private closed = false;
 
@@ -210,6 +256,90 @@ export class Runner {
     this.credentialService = input.credentialService;
     this.resumabilityConfig =
       input.app?.resumabilityConfig ?? input.resumabilityConfig;
+    this.autoCreateSession = input.autoCreateSession ?? false;
+    this.appNameMismatch = formatAppNameMismatch(
+      this.appName,
+      isBaseAgent(this.agent) ? this.inferAgentOrigin(this.agent) : {},
+    );
+    if (this.appNameMismatch) {
+      logger.warn(this.appNameMismatch);
+    }
+  }
+
+  /**
+   * Returns where the root agent was loaded from.
+   *
+   * Override it to supply an origin the loaders did not record, which is also
+   * how a test drives the app-name alignment warning without a filesystem. The
+   * constructor calls it, so an override must not read a field the subclass
+   * assigns, because that assignment has not run yet.
+   *
+   * @param agent The root agent.
+   * @returns Its recorded origin, or an empty origin when none was recorded.
+   */
+  protected inferAgentOrigin(agent: BaseAgent): AgentOrigin {
+    return getAgentOrigin(agent) ?? {};
+  }
+
+  /**
+   * Resolves the session a run was pointed at.
+   *
+   * A session id that does not exist is an error, because it is usually a typo
+   * rather than a request for a new conversation. Set
+   * {@link RunnerConfig.autoCreateSession} where the caller owns the id and
+   * means the runner to create it.
+   *
+   * @param userId The user the session belongs to.
+   * @param sessionId The session to resolve.
+   * @returns The existing session, or the one this call created.
+   * @throws {SessionNotFoundError} When the session is missing and
+   *     `autoCreateSession` is off.
+   */
+  private async getOrCreateSession(
+    userId: string,
+    sessionId: string,
+  ): Promise<Session> {
+    const session = await this.sessionService.getSession({
+      appName: this.appName,
+      userId,
+      sessionId,
+    });
+    if (session) {
+      return session;
+    }
+    if (!this.appName) {
+      throw new Error(
+        `Session lookup failed: appName must be provided in runner constructor (or via app.name)`,
+      );
+    }
+    if (!this.autoCreateSession) {
+      throw new SessionNotFoundError(this.sessionNotFoundMessage(sessionId));
+    }
+    return this.sessionService.createSession({
+      appName: this.appName,
+      userId,
+      sessionId,
+    });
+  }
+
+  /**
+   * Explains a missing session, adding the app-name mismatch when there is one.
+   *
+   * Ported from `google/adk-python`
+   * `runners.py::Runner._format_session_not_found_message`, with the two
+   * option names adapted to the TypeScript surface a JavaScript caller can act
+   * on.
+   */
+  private sessionNotFoundMessage(sessionId: string): string {
+    const notFound = `Session not found: ${sessionId}`;
+    if (!this.appNameMismatch) {
+      return notFound;
+    }
+    return (
+      `${notFound}. ${this.appNameMismatch} The mismatch prevents the runner ` +
+      `from locating the session. To automatically create a session when ` +
+      `missing, set autoCreateSession: true when constructing the runner.`
+    );
   }
 
   /**
@@ -291,23 +421,10 @@ export class Runner {
         ctx,
         this,
         async function* () {
-          const session = await this.sessionService.getSession({
-            appName: this.appName,
-            userId,
-            sessionId,
-          });
+          const session = await this.getOrCreateSession(userId, sessionId);
 
           if (params.abortSignal?.aborted) {
             return;
-          }
-
-          if (!session) {
-            if (!this.appName) {
-              throw new Error(
-                `Session lookup failed: appName must be provided in runner constructor (or via app.name)`,
-              );
-            }
-            throw new Error(`Session not found: ${sessionId}`);
           }
 
           if (runConfig.supportCfc && isLlmAgent(this.agent)) {
@@ -729,11 +846,10 @@ export class Runner {
         ctx,
         this,
         async function* () {
-          const session = await this.sessionService.getOrCreateSession({
-            appName: this.appName,
-            userId: params.userId,
-            sessionId: params.sessionId,
-          });
+          const session = await this.getOrCreateSession(
+            params.userId,
+            params.sessionId,
+          );
 
           if (params.abortSignal?.aborted) {
             return;
