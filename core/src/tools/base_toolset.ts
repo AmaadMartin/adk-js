@@ -47,7 +47,9 @@ export abstract class BaseToolset {
   readonly [BASE_TOOLSET_SIGNATURE_SYMBOL] = true;
 
   constructor(
-    readonly toolFilter: ToolPredicate | string[],
+    // Mutable, so a subclass can offer a setter for it. adk-python's
+    // `BaseToolset.tool_filter` is a plain attribute for the same reason.
+    public toolFilter: ToolPredicate | string[],
     readonly prefix?: string,
   ) {}
 
