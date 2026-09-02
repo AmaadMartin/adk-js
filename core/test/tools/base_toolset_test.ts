@@ -13,11 +13,13 @@ import {
   FunctionTool,
   InvocationContext,
   isBaseTool,
+  isBaseToolset,
   LlmRequest,
   PluginManager,
   ReadonlyContext,
   ToolPredicate,
 } from '@google/adk';
+import {FunctionDeclaration} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 class DummyTool extends BaseTool {
@@ -182,6 +184,27 @@ class TaggedTool extends BaseTool {
 
   async runAsync(): Promise<unknown> {
     return `ran ${this.tag}`;
+  }
+}
+
+/**
+ * A tool whose declaration comes from a stored object rather than from
+ * `this.name`, the way `MCPTool` reports the definition its server advertised.
+ */
+class CatalogTool extends BaseTool {
+  readonly declaration: FunctionDeclaration;
+
+  constructor(name: string) {
+    super({name, description: `Catalog ${name}`});
+    this.declaration = {name, description: `Catalog ${name}`};
+  }
+
+  override _getDeclaration(): FunctionDeclaration {
+    return this.declaration;
+  }
+
+  async runAsync(): Promise<unknown> {
+    return 'catalogued';
   }
 }
 
@@ -381,6 +404,16 @@ describe('BaseToolset.getToolsWithPrefix', () => {
     expect(second.name).toBe('custom_tool1');
   });
 
+  it('prefixes a declaration that does not derive from the tool name', async () => {
+    const original = new CatalogTool('search');
+    const toolset = new RecordingToolset([original], 'custom');
+
+    const [copy] = await toolset.getToolsWithPrefix();
+
+    expect(copy._getDeclaration()?.name).toBe('custom_search');
+    expect(original.declaration.name).toBe('search');
+  });
+
   it('leaves the original declaration unprefixed', async () => {
     const original = new TaggedTool('tool1', 'a');
     const toolset = new RecordingToolset([original], 'custom');
@@ -479,6 +512,53 @@ describe('BaseToolset invocation cache', () => {
 
     expect(second).not.toBe(first);
     expect(toolset.getToolsCalls).toBe(2);
+  });
+});
+
+describe('BaseToolset.processLlmRequest', () => {
+  it('leaves the request untouched by default', async () => {
+    const toolset = new RecordingToolset([]);
+    const llmRequest = makeLlmRequest();
+    const toolContext = new Context({
+      invocationContext: makeInvocationContext('inv-1'),
+    });
+
+    await toolset.processLlmRequest(toolContext, llmRequest);
+
+    expect(llmRequest).toEqual(makeLlmRequest());
+  });
+
+  it('runs the subclass override', async () => {
+    class AnnotatingToolset extends RecordingToolset {
+      override async processLlmRequest(
+        toolContext: Context,
+        llmRequest: LlmRequest,
+      ): Promise<void> {
+        llmRequest.contents.push({role: 'user', parts: [{text: 'annotated'}]});
+      }
+    }
+    const toolset = new AnnotatingToolset([]);
+    const llmRequest = makeLlmRequest();
+    const toolContext = new Context({
+      invocationContext: makeInvocationContext('inv-1'),
+    });
+
+    await toolset.processLlmRequest(toolContext, llmRequest);
+
+    expect(llmRequest.contents).toEqual([
+      {role: 'user', parts: [{text: 'annotated'}]},
+    ]);
+  });
+});
+
+describe('isBaseToolset', () => {
+  it('recognises a toolset', () => {
+    expect(isBaseToolset(new RecordingToolset([]))).toBe(true);
+  });
+
+  it('rejects a plain object and a tool', () => {
+    expect(isBaseToolset({})).toBe(false);
+    expect(isBaseToolset(new TaggedTool('tool1', 'a'))).toBe(false);
   });
 });
 
