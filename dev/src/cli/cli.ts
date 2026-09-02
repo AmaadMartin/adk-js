@@ -177,8 +177,7 @@ const URL_PREFIX_OPTION = new Option(
   '--url_prefix <string>',
   'Optional. URL path prefix when the application is mounted behind a ' +
     "reverse proxy or API gateway (e.g. '/api/v1', '/adk'). Routes stay at " +
-    'the root; the prefix is applied to the redirects the server generates. ' +
-    "Must start with '/' if provided.",
+    'the root; the prefix is applied to the redirects the server generates.',
 );
 const AUTO_CREATE_SESSION_OPTION = new Option(
   '--auto_create_session [boolean]',
