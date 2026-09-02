@@ -416,43 +416,6 @@ export class InvocationContext {
   }
 
   /**
-   * Rebuilds the agent states of this invocation from its own history, when the
-   * invocation is resumable.
-   *
-   * A history event that carries state information sets the state and the
-   * end-of-agent flag of the agent that authored it. An agent that already
-   * produced content without recording a state is seeded with an empty state,
-   * so it is known to have started.
-   */
-  populateInvocationAgentStates(): void {
-    if (!this.isResumable) {
-      return;
-    }
-    for (const event of this.session.events) {
-      if (event.invocationId !== this.invocationId) {
-        continue;
-      }
-      const key = event.nodeInfo?.path ?? event.author;
-      if (!key) {
-        continue;
-      }
-      // Truthiness, not `!== undefined`: an event written by adk-python and
-      // read back carries an explicit `null` here, which means "not recorded".
-      if (event.actions.endOfAgent) {
-        this.setAgentState(key, {endOfAgent: true});
-      } else if (event.actions.agentState) {
-        this.setAgentState(key, {agentState: event.actions.agentState});
-      } else if (
-        event.author !== 'user' &&
-        event.content &&
-        this.agentStates[key] === undefined
-      ) {
-        this.setAgentState(key, {agentState: {}});
-      }
-    }
-  }
-
-  /**
    * Whether the invocation must pause right after this event.
    *
    * A paused invocation can be resumed later; an ended invocation cannot.

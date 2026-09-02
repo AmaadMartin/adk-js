@@ -21,6 +21,10 @@ import {
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
+// `resetDeprecationWarnings` is test-only and deliberately not public API, so
+// this is the one import here that cannot go through `@google/adk`.
+import {resetDeprecationWarnings} from '../../src/utils/deprecated.js';
+
 class MockSubAgent extends BaseAgent {
   private eventsToYield: Event[];
 
@@ -224,171 +228,25 @@ describe('LoopAgent', () => {
     expect(yieldedEvents.length).toBe(0);
   });
 
-  it('should loop through sub-agents and yield events in live mode', async () => {
-    const event1 = createEvent({
-      author: 'sub1',
-      content: {role: 'model', parts: [{text: 'hello'}]},
-    });
-    const event2 = createEvent({
-      author: 'sub2',
-      content: {role: 'model', parts: [{text: 'world'}]},
-    });
-
-    const sub1 = new MockSubAgent({name: 'sub1'}, [event1]);
-    const sub2 = new MockSubAgent({name: 'sub2'}, [event2]);
-
-    const loopAgent = new LoopAgent({
-      name: 'loop',
-      subAgents: [sub1, sub2],
-      maxIterations: 1,
-    });
-
+  it('rejects runLive, which the loop agent does not support', async () => {
+    const sub = new MockSubAgent({name: 'sub'}, []);
+    const loopAgent = new LoopAgent({name: 'loop', subAgents: [sub]});
     const parentContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: loopAgent,
-      session: {
+      session: createSession({
         id: 'test-session',
         appName: 'test-app',
         userId: 'test-user',
-        state: {},
-        events: [],
-        lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
     });
 
-    const yieldedEvents: Event[] = [];
-    for await (const event of loopAgent.runLive(parentContext)) {
-      yieldedEvents.push(event);
-    }
+    const events = loopAgent.runLive(parentContext);
 
-    expect(yieldedEvents.length).toBe(2);
-    expect(yieldedEvents[0].author).toBe('sub1');
-    expect(yieldedEvents[1].author).toBe('sub2');
-  });
-
-  it('should stop after maxIterations in live mode', async () => {
-    const event = createEvent({
-      author: 'sub',
-      content: {role: 'model', parts: [{text: 'hello'}]},
-    });
-
-    const sub = new MockSubAgent({name: 'sub'}, [event]);
-
-    const loopAgent = new LoopAgent({
-      name: 'loop',
-      subAgents: [sub],
-      maxIterations: 2,
-    });
-
-    const parentContext = new InvocationContext({
-      invocationId: 'test-invocation',
-      agent: loopAgent,
-      session: {
-        id: 'test-session',
-        appName: 'test-app',
-        userId: 'test-user',
-        state: {},
-        events: [],
-        lastUpdateTime: Date.now(),
-      } as unknown as Session,
-      pluginManager: new PluginManager(),
-    });
-
-    const yieldedEvents: Event[] = [];
-    for await (const event of loopAgent.runLive(parentContext)) {
-      yieldedEvents.push(event);
-    }
-
-    expect(yieldedEvents.length).toBe(2);
-  });
-
-  it('should stop on escalation in live mode', async () => {
-    const event1 = createEvent({
-      author: 'sub1',
-      content: {role: 'model', parts: [{text: 'hello'}]},
-    });
-    const event2 = createEvent({
-      author: 'sub2',
-      content: {role: 'model', parts: [{text: 'world'}]},
-      actions: createEventActions({escalate: true}),
-    });
-    const event3 = createEvent({
-      author: 'sub1',
-      content: {role: 'model', parts: [{text: 'should not reach'}]},
-    });
-
-    const sub1 = new MockSubAgent({name: 'sub1'}, [event1, event3]);
-    const sub2 = new MockSubAgent({name: 'sub2'}, [event2]);
-
-    const loopAgent = new LoopAgent({
-      name: 'loop',
-      subAgents: [sub1, sub2],
-      maxIterations: 5,
-    });
-
-    const parentContext = new InvocationContext({
-      invocationId: 'test-invocation',
-      agent: loopAgent,
-      session: {
-        id: 'test-session',
-        appName: 'test-app',
-        userId: 'test-user',
-        state: {},
-        events: [],
-        lastUpdateTime: Date.now(),
-      } as unknown as Session,
-      pluginManager: new PluginManager(),
-    });
-
-    const yieldedEvents: Event[] = [];
-    for await (const event of loopAgent.runLive(parentContext)) {
-      yieldedEvents.push(event);
-    }
-
-    expect(yieldedEvents.length).toBe(3);
-    expect(yieldedEvents[2].actions?.escalate).toBe(true);
-  });
-
-  it('should stop on abort signal in live mode', async () => {
-    const event = createEvent({
-      author: 'sub',
-      content: {role: 'model', parts: [{text: 'hello'}]},
-    });
-
-    const sub = new MockSubAgent({name: 'sub'}, [event]);
-
-    const loopAgent = new LoopAgent({
-      name: 'loop',
-      subAgents: [sub],
-      maxIterations: 5,
-    });
-
-    const controller = new AbortController();
-
-    const parentContext = new InvocationContext({
-      invocationId: 'test-invocation',
-      agent: loopAgent,
-      session: {
-        id: 'test-session',
-        appName: 'test-app',
-        userId: 'test-user',
-        state: {},
-        events: [],
-        lastUpdateTime: Date.now(),
-      } as unknown as Session,
-      pluginManager: new PluginManager(),
-      abortSignal: controller.signal,
-    });
-
-    controller.abort();
-
-    const yieldedEvents: Event[] = [];
-    for await (const event of loopAgent.runLive(parentContext)) {
-      yieldedEvents.push(event);
-    }
-
-    expect(yieldedEvents.length).toBe(0);
+    await expect(events.next()).rejects.toThrowError(
+      'This is not supported yet for LoopAgent.',
+    );
   });
 });
 
@@ -793,31 +651,82 @@ describe('LoopAgent agent state and resumption', () => {
     expect(context.endOfAgents['loop']).toBe(false);
   });
 
-  it('rejects a checkpoint it cannot read', async () => {
+  it('emits only the end-of-agent event when the loop already ran out of passes', async () => {
+    const sub = new GreetingAgent({name: 'sub'});
+    const loop = new LoopAgent({
+      name: 'loop',
+      subAgents: [sub],
+      maxIterations: 2,
+    });
+    const context = makeLoopContext({agent: loop, isResumable: true});
+    context.setAgentState('loop', {
+      agentState: {current_sub_agent: '', times_looped: 2},
+    });
+
+    const events = await collectLoopEvents(loop, context);
+
+    expect(events.map(simplify)).toEqual([['loop', 'END_OF_AGENT']]);
+  });
+
+  it.each([
+    [
+      {current_sub_agent: 1, times_looped: 0},
+      'Invalid LoopAgent state: "current_sub_agent" must be a string, got number.',
+    ],
+    [
+      {current_sub_agent: 'sub', times_looped: 'x'},
+      'Invalid LoopAgent state: "times_looped" must be an integer, got x.',
+    ],
+    [
+      {current_sub_agent: 'sub', times_looped: 1.5},
+      'Invalid LoopAgent state: "times_looped" must be an integer, got 1.5.',
+    ],
+    [
+      {current_sub_agent: 'sub', times_looped: Number.NaN},
+      'Invalid LoopAgent state: "times_looped" must be an integer, got NaN.',
+    ],
+    [
+      {current_sub_agent: 'sub', times_looped: 0, extra: true},
+      'Invalid LoopAgent state: unexpected field "extra".',
+    ],
+  ])('rejects the checkpoint %j', async (agentState, message) => {
     const sub = new GreetingAgent({name: 'sub'});
     const loop = new LoopAgent({name: 'loop', subAgents: [sub]});
+    const context = makeLoopContext({agent: loop, isResumable: true});
+    context.setAgentState('loop', {agentState});
 
-    const cases: Array<[Record<string, unknown>, RegExp]> = [
-      [
-        {current_sub_agent: 1, times_looped: 0},
-        /current_sub_agent must be a string/,
-      ],
-      [
-        {current_sub_agent: 'sub', times_looped: 'x'},
-        /times_looped must be a number/,
-      ],
-      [
-        {current_sub_agent: 'sub', times_looped: 0, extra: true},
-        /unknown field\(s\): extra/,
-      ],
-    ];
+    await expect(collectLoopEvents(loop, context)).rejects.toThrowError(
+      message,
+    );
+  });
 
-    for (const [agentState, message] of cases) {
-      const context = makeLoopContext({agent: loop, isResumable: true});
-      context.setAgentState('loop', {agentState});
-      await expect(collectLoopEvents(loop, context)).rejects.toThrowError(
-        message,
-      );
-    }
+  it('defaults both checkpoint fields when the record omits them', async () => {
+    const sub = new GreetingAgent({name: 'sub'});
+    const loop = new LoopAgent({
+      name: 'loop',
+      subAgents: [sub],
+      maxIterations: 1,
+    });
+    const context = makeLoopContext({agent: loop, isResumable: true});
+    context.setAgentState('loop', {agentState: {}});
+
+    const events = await collectLoopEvents(loop, context);
+
+    expect(events.map(simplify)).toEqual([
+      ['sub', 'Hello, async sub!'],
+      ['loop', 'END_OF_AGENT'],
+    ]);
+  });
+});
+
+describe('LoopAgent deprecation', () => {
+  it('warns that a Workflow cannot yet be an LlmAgent sub-agent', () => {
+    resetDeprecationWarnings();
+    const warn = vi.spyOn(getLogger(), 'warn').mockImplementation(() => {});
+
+    new LoopAgent({name: 'loop'});
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('sub-agent'));
+    warn.mockRestore();
   });
 });

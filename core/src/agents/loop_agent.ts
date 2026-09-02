@@ -46,30 +46,30 @@ export type LoopAgentState = {
  * checkpoint it half-understands. Mirrors the `extra='forbid'` validation
  * adk-python applies to the same snapshot.
  *
+ * Both fields carry the same defaults as the pydantic model: an absent
+ * `current_sub_agent` means "start at the first sub-agent", and an absent
+ * `times_looped` means "no pass has completed".
+ *
  * @param raw The persisted record.
  * @return The parsed loop state.
- * @throws If a field is missing, has the wrong type, or is not part of the
- *     state.
+ * @throws If a field has the wrong type, or is not part of the state.
  */
 function parseLoopAgentState(raw: BaseAgentState): LoopAgentState {
-  const currentSubAgent = raw['current_sub_agent'];
-  const timesLooped = raw['times_looped'];
+  for (const key of Object.keys(raw)) {
+    if (key !== 'current_sub_agent' && key !== 'times_looped') {
+      throw new Error(`Invalid LoopAgent state: unexpected field "${key}".`);
+    }
+  }
+  const currentSubAgent = raw['current_sub_agent'] ?? '';
   if (typeof currentSubAgent !== 'string') {
     throw new Error(
-      `LoopAgentState.current_sub_agent must be a string, got ${typeof currentSubAgent}.`,
+      `Invalid LoopAgent state: "current_sub_agent" must be a string, got ${typeof currentSubAgent}.`,
     );
   }
-  if (typeof timesLooped !== 'number') {
+  const timesLooped = raw['times_looped'] ?? 0;
+  if (typeof timesLooped !== 'number' || !Number.isInteger(timesLooped)) {
     throw new Error(
-      `LoopAgentState.times_looped must be a number, got ${typeof timesLooped}.`,
-    );
-  }
-  const unknownKeys = Object.keys(raw).filter(
-    (key) => key !== 'current_sub_agent' && key !== 'times_looped',
-  );
-  if (unknownKeys.length > 0) {
-    throw new Error(
-      `LoopAgentState has unknown field(s): ${unknownKeys.join(', ')}.`,
+      `Invalid LoopAgent state: "times_looped" must be an integer, got ${String(timesLooped)}.`,
     );
   }
   return {current_sub_agent: currentSubAgent, times_looped: timesLooped};
@@ -229,23 +229,10 @@ export class LoopAgent extends BaseAgent<LoopAgentConfig> {
     }
   }
 
+  // eslint-disable-next-line require-yield -- BaseAgent mandates the AsyncGenerator return type and this body only throws.
   protected async *runLiveImpl(
-    context: InvocationContext,
+    _context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    for (let iteration = 0; iteration < this.maxIterations; iteration++) {
-      for (const subAgent of this.subAgents) {
-        for await (const event of subAgent.runLive(context)) {
-          if (context.abortSignal?.aborted) {
-            return;
-          }
-
-          yield event;
-
-          if (event.actions?.escalate) {
-            return;
-          }
-        }
-      }
-    }
+    throw new Error('This is not supported yet for LoopAgent.');
   }
 }

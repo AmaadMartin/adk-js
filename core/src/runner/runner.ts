@@ -326,10 +326,7 @@ export class Runner {
             a2aMetadata: runConfig.a2aMetadata,
             pluginManager: this.pluginManager,
             abortSignal: params.abortSignal,
-            resumabilityConfig: this.resumabilityConfig,
           });
-
-          invocationContext.populateInvocationAgentStates();
 
           // =========================================================================
           // Preprocess plugins on user message
@@ -719,7 +716,6 @@ export class Runner {
             liveRequestQueue: params.liveRequestQueue,
             abortSignal: params.abortSignal,
             liveSessionResumptionHandle: params.liveSessionResumptionHandle,
-            resumabilityConfig: this.resumabilityConfig,
           });
 
           invocationContext.agent = this.determineAgentForResumption(
