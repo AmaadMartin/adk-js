@@ -20,14 +20,10 @@ import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {InMemoryArtifactService} from '../artifacts/in_memory_artifact_service.js';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {NotFoundError} from '../errors/not_found_error.js';
-import {
-  createEvent,
-  Event,
-  getFunctionCalls,
-  isFinalResponse,
-} from '../events/event.js';
+import {createEvent, Event, isFinalResponse} from '../events/event.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
+import {getFunctionCalls} from '../models/llm_response.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
 import {Runner, RunnerConfig} from '../runner/runner.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';

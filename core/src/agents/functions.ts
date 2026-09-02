@@ -12,12 +12,12 @@ import {
   createEvent,
   Event,
   generateClientFunctionCallId,
-  getFunctionCalls,
 } from '../events/event.js';
 import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../events/event_actions.js';
+import {getFunctionCalls} from '../models/llm_response.js';
 import {isAgentTool} from '../tools/agent_tool_signature.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';

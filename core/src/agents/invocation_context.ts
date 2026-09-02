@@ -11,13 +11,14 @@ import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {LlmCallsLimitExceededError} from '../errors/llm_calls_limit_exceeded_error.js';
-import {Event, getFunctionCalls} from '../events/event.js';
+import {Event} from '../events/event.js';
 import {
   filterSessionEvents,
   findMatchingFunctionCall,
   SessionEventFilterOptions,
 } from '../events/event_filters.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
+import {getFunctionCalls} from '../models/llm_response.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';

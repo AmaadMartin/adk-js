@@ -5,11 +5,11 @@
  */
 
 import {isCompactedEvent} from '../events/compacted_event.js';
+import {Event} from '../events/event.js';
 import {
-  Event,
   getFunctionCalls,
   getFunctionResponses,
-} from '../events/event.js';
+} from '../models/llm_response.js';
 
 /**
  * Filters the events to return only the active events since the latest compaction.

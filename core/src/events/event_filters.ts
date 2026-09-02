@@ -4,9 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  getFunctionCalls,
+  getFunctionResponses,
+} from '../models/llm_response.js';
 import {branchPathFromString} from '../workflow/branch_path.js';
 
-import {Event, getFunctionCalls, getFunctionResponses} from './event.js';
+import {Event} from './event.js';
 
 /** The invocation an event selection is made from. */
 export interface SessionEventFilterScope {

@@ -6,11 +6,11 @@
 
 import {FunctionCall} from '@google/genai';
 import {isEqual} from 'lodash-es';
+import {Event} from '../../events/event.js';
 import {
-  Event,
   getFunctionCalls,
   getFunctionResponses,
-} from '../../events/event.js';
+} from '../../models/llm_response.js';
 import {BaseTool} from '../../tools/base_tool.js';
 import {
   IntentMismatchError,

@@ -269,8 +269,6 @@ export type {CompactedEvent} from './events/compacted_event.js';
 export {
   createEvent,
   generateClientFunctionCallId,
-  getFunctionCalls,
-  getFunctionResponses,
   hasThoughts,
   hasTrailingCodeExecutionResult,
   isFinalResponse,
@@ -360,7 +358,11 @@ export type {
   RealtimeInput,
   SendContentOptions,
 } from './models/base_llm_connection.js';
-export type {CacheMetadata} from './models/cache_metadata.js';
+export type {
+  ActiveCacheMetadata,
+  CacheMetadata,
+  FingerprintCacheMetadata,
+} from './models/cache_metadata.js';
 export type {LlmCapabilities} from './models/capabilities.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
@@ -399,6 +401,11 @@ export type {
   VideoContentObject,
 } from './models/lite_llm_types.js';
 export type {LlmRequest} from './models/llm_request.js';
+export {
+  InteractionStatus,
+  getFunctionCalls,
+  getFunctionResponses,
+} from './models/llm_response.js';
 export type {LlmResponse} from './models/llm_response.js';
 export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';

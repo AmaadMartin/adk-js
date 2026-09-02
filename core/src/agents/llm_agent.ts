@@ -24,12 +24,14 @@ import {
   createEvent,
   createNewEventId,
   Event,
-  getFunctionCalls,
-  getFunctionResponses,
   isFinalResponse,
   populateClientFunctionCallId,
 } from '../events/event.js';
 import {isDefaultEventActions} from '../events/event_actions.js';
+import {
+  getFunctionCalls,
+  getFunctionResponses,
+} from '../models/llm_response.js';
 
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';

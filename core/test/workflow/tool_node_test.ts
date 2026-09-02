@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {getFunctionResponses} from '../../src/events/event.js';
+import {getFunctionResponses} from '../../src/models/llm_response.js';
 import {BasePlugin} from '../../src/plugins/base_plugin.js';
 import {BaseTool, RunAsyncToolRequest} from '../../src/tools/base_tool.js';
 import {ToolNode} from '../../src/workflow/nodes/tool_node.js';
