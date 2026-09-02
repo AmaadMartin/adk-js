@@ -98,6 +98,16 @@ const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
 const TRANSFER_AGENT_DELAY_MS = 1000;
 
 /**
+ * Delay before a live run returns after the model calls `task_completed`.
+ * Gives the server-side model a moment to flush any pending audio for the
+ * final turn before teardown. Mirrors `DEFAULT_TASK_COMPLETION_DELAY` (1.0s)
+ * in the Python ADK live flow. It shares the transfer delay's value today but
+ * is tuned independently, because the two events end a run for different
+ * reasons.
+ */
+const TASK_COMPLETION_DELAY_MS = 1000;
+
+/**
  * Sentinel thrown from `runReceiveLoop` to break out of the receive iterator
  * and signal `runLiveFlow` to reconnect using the stored resumption handle.
  * Used when the server sends `goAway` or any other recoverable terminal.
@@ -1306,7 +1316,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           (r) => r.name === 'task_completed',
         );
         if (taskCompleted) {
-          await sleep(TRANSFER_AGENT_DELAY_MS);
+          await sleep(TASK_COMPLETION_DELAY_MS);
           return;
         }
 
