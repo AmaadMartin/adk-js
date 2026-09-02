@@ -70,32 +70,6 @@ function toFunctionTool(tool: ToolboxTool, prefix?: string): BaseTool {
 }
 
 /**
- * Applies `filter` to `tools`. A predicate needs a {@link ReadonlyContext} to
- * be evaluated; without one every tool is returned and a warning is logged,
- * which is how `MCPToolset` handles the same case.
- */
-function selectTools(
-  tools: BaseTool[],
-  filter: ToolPredicate | string[],
-  context?: ReadonlyContext,
-): BaseTool[] {
-  if (Array.isArray(filter)) {
-    return filter.length === 0
-      ? tools
-      : tools.filter((tool) => filter.includes(tool.name));
-  }
-  if (!context) {
-    logger.warn(
-      'ToolboxToolset: a ToolPredicate toolFilter was provided but ' +
-        'getTools() was called without a ReadonlyContext. The filter will ' +
-        'not be applied.',
-    );
-    return tools;
-  }
-  return tools.filter((tool) => filter(tool, context));
-}
-
-/**
  * A toolset backed by an MCP Toolbox for Databases server.
  *
  * Each tool published by the server becomes a {@link FunctionTool}, so an
@@ -198,7 +172,14 @@ export class ToolboxToolset extends BaseToolset {
     const tools = [...toolsetTools, ...namedTools].map((tool) =>
       toFunctionTool(tool, this.prefix),
     );
-    return selectTools(tools, this.toolFilter, context);
+    if (!context && typeof this.toolFilter === 'function') {
+      logger.warn(
+        'ToolboxToolset: a ToolPredicate toolFilter was provided but ' +
+          'getTools() was called without a ReadonlyContext. The filter will ' +
+          'not be applied.',
+      );
+    }
+    return tools.filter((tool) => this.isToolSelected(tool, context));
   }
 
   /**
