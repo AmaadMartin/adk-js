@@ -15,6 +15,7 @@
 
 import {requiresUserInput} from '../../agents/user_input_request.js';
 import {Event} from '../../events/event.js';
+import {nodeNameFromPath} from '../../utils/node_path_utils.js';
 import {RouteValue} from '../graph.js';
 import type {NodeContext, NodeResult} from '../node_context.js';
 import {
@@ -458,12 +459,6 @@ export function makeFastForwardResult(
   };
 }
 
-/** Extracts the node name (leaf, without run id) from a dotted node path. */
-export function nodeNameFromPath(path: string): string {
-  const leaf = path.split(/[./]/).pop() ?? path;
-  return leaf.split('@')[0];
-}
-
 /**
  * Returns the child node name if `path` is a DIRECT child of `parentPath`
  * (e.g. `parent.child` -> `child`, `parent.child@2` -> `child`), or `undefined`
@@ -479,7 +474,7 @@ function directChildName(path: string, parentPath: string): string | undefined {
   if (rest.includes('.')) {
     return undefined; // a deeper descendant, not a direct child
   }
-  return rest.split('@')[0];
+  return nodeNameFromPath(rest);
 }
 
 /** Narrows an unknown value to a plain (non-array) record. */

@@ -4,9 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import {Content, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {filterAudioParts, isAudioPart} from '../../src/utils/content_utils.js';
+import {
+  filterAudioParts,
+  isAudioPart,
+  isContent,
+  toUserContent,
+} from '../../src/utils/content_utils.js';
 
 describe('isAudioPart', () => {
   it('should return true for inline audio data', () => {
@@ -85,5 +90,43 @@ describe('filterAudioParts', () => {
 
     expect(content.parts).toBe(parts);
     expect(content.parts).toHaveLength(2);
+  });
+});
+
+describe('isContent', () => {
+  it('is true for objects with a parts array', () => {
+    expect(isContent({parts: []})).toBe(true);
+    expect(isContent({role: 'model', parts: [{text: 'x'}]})).toBe(true);
+  });
+
+  it('is false without a parts array', () => {
+    expect(isContent({role: 'model'})).toBe(false);
+    expect(isContent({parts: 'x'})).toBe(false);
+    expect(isContent('x')).toBe(false);
+    expect(isContent(null)).toBe(false);
+  });
+});
+
+describe('toUserContent', () => {
+  it('returns the same object for a Content', () => {
+    const content: Content = {role: 'model', parts: [{text: 'hi'}]};
+    expect(toUserContent(content)).toBe(content);
+  });
+
+  it('wraps a string as user content', () => {
+    expect(toUserContent('hello')).toEqual({
+      role: 'user',
+      parts: [{text: 'hello'}],
+    });
+  });
+
+  it('wraps a single part', () => {
+    const part: Part = {text: 'part'};
+    expect(toUserContent(part)).toEqual({role: 'user', parts: [part]});
+  });
+
+  it('wraps a part list preserving order', () => {
+    const parts: Part[] = [{text: 'a'}, {text: 'b'}];
+    expect(toUserContent(parts)).toEqual({role: 'user', parts});
   });
 });

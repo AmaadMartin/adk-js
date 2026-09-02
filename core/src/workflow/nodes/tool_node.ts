@@ -9,7 +9,8 @@ import {handleFunctionCallList} from '../../agents/functions.js';
 import {Event} from '../../events/event.js';
 import {getFunctionResponses} from '../../models/llm_response.js';
 import {BaseTool} from '../../tools/base_tool.js';
-import {BaseNode, BaseNodeConfig, isContent} from '../base_node.js';
+import {isContent} from '../../utils/content_utils.js';
+import {BaseNode, BaseNodeConfig} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
 
 /** Options for a {@link ToolNode}. */

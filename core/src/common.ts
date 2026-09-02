@@ -362,11 +362,16 @@ export type {CompactedEvent} from './events/compacted_event.js';
 export {
   createEvent,
   generateClientFunctionCallId,
+  getEventNodeName,
+  getNodeInfoName,
+  getNodeRunId,
+  getParentNodeRunId,
   hasThoughts,
   hasTrailingCodeExecutionResult,
   isFinalResponse,
   populateClientFunctionCallId,
   pruneThoughts,
+  setEventMessage,
   stringifyContent,
 } from './events/event.js';
 export type {

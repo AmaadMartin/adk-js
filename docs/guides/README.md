@@ -76,6 +76,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Events
 
+- [Event and NodeInfo](events/event/index.md) - Building events, the message
+  alias, and reading node identity out of a node path.
 - [EventActions](events/event_actions/index.md) - The side-effects attached to an event: routes, transfers, structured model output, and the two guards that keep them persistable.
 
 ### Examples
