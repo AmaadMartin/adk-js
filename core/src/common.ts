@@ -284,7 +284,7 @@ export type {
   ToolProcessLlmRequest,
 } from './tools/base_tool.js';
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
-export type {ToolPredicate} from './tools/base_toolset.js';
+export type {ToolArgsConfig, ToolPredicate} from './tools/base_toolset.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
