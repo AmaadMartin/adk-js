@@ -15,7 +15,10 @@ import {
   setIdProvider,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
+import {
+  deleteScopedStateKeys,
+  isInMemoryConnectionString,
+} from '../../src/sessions/in_memory_session_service.js';
 
 describe('isInMemoryConnectionString', () => {
   it('returns true for memory://', () => {
@@ -27,6 +30,30 @@ describe('isInMemoryConnectionString', () => {
     expect(isInMemoryConnectionString('memory:/')).toBe(false);
     expect(isInMemoryConnectionString('')).toBe(false);
     expect(isInMemoryConnectionString(undefined)).toBe(false);
+  });
+});
+
+describe('deleteScopedStateKeys', () => {
+  it('deletes the app: and user: keys and keeps the rest', () => {
+    const state: Record<string, unknown> = {
+      [`${State.APP_PREFIX}theme`]: 'dark',
+      [`${State.USER_PREFIX}lang`]: 'en',
+      k: 'v',
+    };
+
+    deleteScopedStateKeys(state, {...state});
+
+    expect(state).toEqual({k: 'v'});
+  });
+
+  it('keeps a scoped key that the delta does not carry', () => {
+    const state: Record<string, unknown> = {
+      [`${State.APP_PREFIX}theme`]: 'dark',
+    };
+
+    deleteScopedStateKeys(state, {k: 'v'});
+
+    expect(state).toEqual({[`${State.APP_PREFIX}theme`]: 'dark'});
   });
 });
 
@@ -828,6 +855,107 @@ describe('InMemorySessionService', () => {
 
       const session2 = await service.createSession({appName, userId});
       expect(session2.state).toHaveProperty(`${State.USER_PREFIX}key`, 'value');
+    });
+
+    it('keeps app:/user: keys on the caller session and still merges them on read', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      const stateDelta = {
+        [`${State.APP_PREFIX}theme`]: 'dark',
+        [`${State.USER_PREFIX}lang`]: 'en',
+        k: 'v',
+      };
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({stateDelta}),
+        }),
+      });
+
+      expect(session.state).toEqual(stateDelta);
+      const retrievedSession = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      expect(retrievedSession?.state).toEqual(stateDelta);
+    });
+
+    it('does not store a partial event', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      const before = session.lastUpdateTime;
+      const timestamp = before + 1000;
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp,
+          partial: true,
+          actions: createEventActions({
+            stateDelta: {[`${State.APP_PREFIX}theme`]: 'dark', k: 'v'},
+          }),
+        }),
+      });
+
+      const retrievedSession = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      expect(retrievedSession?.events).toHaveLength(0);
+      expect(retrievedSession?.state).not.toHaveProperty('k');
+      // `appendEvent` returns early for a partial event, so it writes neither
+      // the timestamp nor the app-scoped store. The
+      // `appendEvent with a partial event` suite below covers that rule.
+      expect(retrievedSession?.lastUpdateTime).toBe(before);
+
+      const session2 = await service.createSession({appName, userId});
+      expect(session2.state).not.toHaveProperty(`${State.APP_PREFIX}theme`);
+    });
+
+    it('replaces a stored event appended twice under the same id', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      const event = createEvent({timestamp: Date.now()});
+
+      await service.appendEvent({session, event});
+      await service.appendEvent({session, event});
+
+      const retrievedSession = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      expect(retrievedSession?.events).toHaveLength(1);
+    });
+
+    it('accumulates session state across successive events', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+
+      for (const stateDelta of [{a: 1}, {b: 2}]) {
+        await service.appendEvent({
+          session,
+          event: createEvent({
+            timestamp: Date.now(),
+            actions: createEventActions({stateDelta}),
+          }),
+        });
+      }
+
+      const retrievedSession = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      expect(retrievedSession?.state).toEqual({a: 1, b: 2});
     });
 
     it('handles non-existent app/user/session gracefully', async () => {
