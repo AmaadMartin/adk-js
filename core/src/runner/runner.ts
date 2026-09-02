@@ -20,7 +20,7 @@ import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
 import {canTransferBetweenAgents} from '../agents/transfer_utils.js';
-import {App, createUnvalidatedApp} from '../apps/app.js';
+import {App} from '../apps/app.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
@@ -50,7 +50,6 @@ import {
   tracer,
 } from '../telemetry/tracing.js';
 import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
-import {AsyncQueue} from '../utils/async_queue.js';
 import {logger} from '../utils/logger.js';
 import {isGemini2OrAbove} from '../utils/model_name.js';
 import type {RunnableNode} from '../workflow/graph.js';
@@ -85,16 +84,6 @@ export interface RunnerConfig {
    * `Runner.agent` is typed `BaseNode`.
    */
   agent?: RunnableNode;
-
-  /**
-   * The node to run, when the root is a graph rather than an agent.
-   *
-   * `agent` accepts a node too, so this is the same root under the name
-   * adk-python gives it. It differs in one way, and that is why it exists: a
-   * `node` root with no `appName` names the app after itself, as adk-python's
-   * does. Mutually exclusive with `app` and `agent`.
-   */
-  node?: RunnableNode;
 
   /**
    * An optional list of plugins to apply globally across all agents.
@@ -138,7 +127,7 @@ export interface RunnerConfig {
 /**
  * Validates a runner's configuration and normalizes it to an {@link App}.
  *
- * Exactly one of `app`, `agent` and `node` is accepted. A bare agent or node is
+ * Exactly one of `app` and `agent` is accepted. A bare agent or node is
  * wrapped, so the rest of the runner has one shape to read from. Ported from
  * `google/adk-python` `runners.py::Runner._resolve_app`.
  *
@@ -147,16 +136,16 @@ export interface RunnerConfig {
  * name at all here: a missing `appName` is reported when the session lookup
  * fails, which is this repository's shipped contract.
  *
- * @throws {Error} If more than one root is given, if none is, or if `plugins`
- *   accompanies `app`.
+ * @throws {Error} If both `app` and `agent` are given, if neither is, or if
+ *   `plugins` accompanies `app`.
  */
 function resolveApp(input: RunnerConfig): App {
-  const {app, agent, node, plugins} = input;
-  const roots = describeRoots(input);
-  if (roots.length > 1) {
+  const {app, agent, plugins} = input;
+  if (app && agent) {
     throw new Error(
-      `Only one of app, agent, or node may be provided, but got: ` +
-        `${roots.join(', ')}. Pass exactly one to Runner().`,
+      `Only one of app or agent may be provided, but got: ` +
+        `app=${typeName(app)}, agent=${typeName(agent)}. ` +
+        'Pass exactly one to Runner().',
     );
   }
 
@@ -177,39 +166,22 @@ function resolveApp(input: RunnerConfig): App {
     return app;
   }
 
-  const rootInput = agent ?? node;
-  if (!rootInput) {
+  if (!agent) {
     throw new Error(
-      'One of app, agent, or node must be provided. Got none. ' +
+      'One of app or agent must be provided. Got none. ' +
         'Pass exactly one to Runner().',
     );
   }
 
-  const root = asRunnableRoot(rootInput);
+  const root = asRunnableRoot(agent);
   // A node root names the app when the caller did not, mirroring adk-python.
   // An agent root does not: adk-js reports a missing app name at session
   // lookup, and naming the app after the agent would hide that.
-  const fallbackName = node || !isBaseAgent(root) ? root.name : '';
-  return createUnvalidatedApp({
-    name: input.appName ?? fallbackName,
-    rootAgent: root,
-    plugins,
-  });
-}
-
-/** Lists the roots a configuration supplied, for a diagnostic that reports them. */
-function describeRoots(input: RunnerConfig): string[] {
-  const roots: string[] = [];
-  if (input.app) {
-    roots.push(`app=${typeName(input.app)}`);
-  }
-  if (input.agent) {
-    roots.push(`agent=${typeName(input.agent)}`);
-  }
-  if (input.node) {
-    roots.push(`node=${typeName(input.node)}`);
-  }
-  return roots;
+  const fallbackName = isBaseAgent(root) ? '' : root.name;
+  return new App(
+    {name: input.appName ?? fallbackName, rootAgent: root, plugins},
+    true,
+  );
 }
 
 /** Names a value's class, for a diagnostic that reports what was passed. */
@@ -224,26 +196,6 @@ function typeName(value: object): string {
  * than once per runner: a dev server builds a runner per request.
  */
 const UNCACHED_TRANSFER_APPS = new Set<string>();
-
-/**
- * Drives `source` into `events` as fast as it produces, then ends the queue.
- *
- * A failure ends the queue too, so a consumer sees the events that preceded it
- * and then the error.
- */
-async function drainInto(
-  source: AsyncGenerator<Event, void, undefined>,
-  events: AsyncQueue<Event>,
-): Promise<void> {
-  try {
-    for await (const event of source) {
-      events.push(event);
-    }
-    events.close();
-  } catch (error) {
-    events.fail(error);
-  }
-}
 
 /**
  * Defaults a root `LlmAgent` to chat mode, and refuses a root in any other
@@ -305,35 +257,34 @@ function coordinatesTaskSubAgent(root: BaseAgent): boolean {
 }
 
 /**
- * Collects the agents that reported the end of their run within an invocation.
+ * Whether `agentName` reported the end of its run within an invocation.
  *
- * An agent is keyed by its node path when it ran as a workflow node, and by its
- * author name otherwise. A later `agentState` reopens the agent: it
- * checkpointed again, so the earlier end no longer stands. Derived from the
- * session rather than tracked on the invocation, because the runner only needs
- * the membership test. Mirrors `google/adk-python`
+ * Read backwards for the agent's own latest word: `endOfAgent` means it
+ * finished, and an `agentState` after that means it checkpointed again, so the
+ * earlier end no longer stands. Truthiness, not a presence test, because an
+ * event adk-python wrote carries an explicit `null` there meaning "not
+ * recorded". Derived from the session rather than tracked on the invocation,
+ * because the runner only asks this one question. Mirrors `google/adk-python`
  * `invocation_context.py::populate_invocation_agent_states`.
  */
-function endedAgentsForInvocation(
+function hasAgentEnded(
   session: Session,
   invocationId: string,
-): Set<string> {
-  const ended = new Set<string>();
-  for (const event of session.events) {
-    const key = event.nodeInfo?.path || event.author;
-    if (event.invocationId !== invocationId || !key) {
+  agentName: string,
+): boolean {
+  for (let i = session.events.length - 1; i >= 0; i--) {
+    const event = session.events[i];
+    if (event.invocationId !== invocationId || event.author !== agentName) {
       continue;
     }
     if (event.actions.endOfAgent) {
-      ended.add(key);
-    } else if (event.actions.agentState) {
-      // Truthiness, not a presence test. An event adk-python wrote and adk-js
-      // reads back carries an explicit `null` here, meaning "not recorded";
-      // the reference compares against `None` for the same reason.
-      ended.delete(key);
+      return true;
+    }
+    if (event.actions.agentState) {
+      return false;
     }
   }
-  return ended;
+  return false;
 }
 
 /**
@@ -593,53 +544,6 @@ export class Runner {
   }
 
   /**
-   * Runs the agent, letting the invocation get ahead of a slow caller.
-   *
-   * {@link runAsync} produces an event only when the caller pulls one, so an
-   * invocation runs at the speed of the `for await` that drains it. This
-   * method buffers into a queue instead, so once the caller has asked for the
-   * first event the agent keeps working while the caller is busy with it. A
-   * failure is reported only after the events produced before it.
-   *
-   * Like any async generator, this one does nothing until the first `next()`.
-   *
-   * That decoupling is what this ports. adk-python's `run` is a *synchronous*
-   * generator driven from a background thread; JavaScript has no synchronous
-   * generator that can await, so this one is still async. A caller who does
-   * not need the decoupling should use {@link runAsync}.
-   *
-   * A caller that stops iterating early leaves the invocation running to
-   * completion in the background, as adk-python does; the queue closes, so the
-   * events it produces after that are dropped rather than buffered.
-   *
-   * @param params.userId The user ID of the session.
-   * @param params.sessionId The session ID of the session.
-   * @param params.invocationId An invocation to resume.
-   * @param params.newMessage A new message to append to the session.
-   * @param params.stateDelta An optional state delta to apply to the session.
-   * @param params.runConfig The run config for the agent.
-   * @yields The events generated by the agent.
-   */
-  async *run(params: {
-    userId: string;
-    sessionId: string;
-    invocationId?: string;
-    newMessage?: Content;
-    stateDelta?: Record<string, unknown>;
-    runConfig?: RunConfig;
-    customMetadata?: Record<string, unknown>;
-  }): AsyncGenerator<Event, void, undefined> {
-    const events = new AsyncQueue<Event>();
-    void drainInto(this.runAsync(params), events);
-
-    try {
-      yield* events;
-    } finally {
-      events.close();
-    }
-  }
-
-  /**
    * Runs the agent with the given message, and returns an async generator of
    * events.
    *
@@ -886,10 +790,11 @@ export class Runner {
           if (
             isResumedInvocation &&
             invocationContext.agent &&
-            endedAgentsForInvocation(
+            hasAgentEnded(
               session,
               invocationContext.invocationId,
-            ).has(invocationContext.agent.name)
+              invocationContext.agent.name,
+            )
           ) {
             return;
           }

@@ -41,15 +41,15 @@ describe('Runner construction', () => {
     const app = new App({name: 'app', rootAgent: newAgent('other')});
 
     expect(() => new Runner({app, agent, sessionService})).toThrow(
-      'Only one of app, agent, or node may be provided, but got: app=App, ' +
+      'Only one of app or agent may be provided, but got: app=App, ' +
         'agent=LlmAgent. Pass exactly one to Runner().',
     );
   });
 
   it('rejects a configuration with neither app nor agent', () => {
     expect(() => new Runner({sessionService})).toThrow(
-      'One of app, agent, or node must be provided. Got none. Pass exactly ' +
-        'one to Runner().',
+      'One of app or agent must be provided. Got none. Pass exactly one to ' +
+        'Runner().',
     );
   });
 
@@ -159,56 +159,6 @@ describe('Runner construction', () => {
     expect(() => new App({name: '2legacy app', rootAgent: newAgent()})).toThrow(
       /Invalid app name '2legacy app'/,
     );
-  });
-
-  it('rejects agent and node together, naming both', () => {
-    expect(
-      () =>
-        new Runner({agent: newAgent(), node: newWorkflow(), sessionService}),
-    ).toThrow(
-      'Only one of app, agent, or node may be provided, but got: ' +
-        'agent=LlmAgent, node=Workflow. Pass exactly one to Runner().',
-    );
-  });
-
-  it('rejects app and node together, naming both', () => {
-    const app = new App({name: 'app', rootAgent: newAgent()});
-
-    expect(
-      () => new Runner({app, node: newWorkflow(), sessionService}),
-    ).toThrow(
-      'Only one of app, agent, or node may be provided, but got: app=App, ' +
-        'node=Workflow. Pass exactly one to Runner().',
-    );
-  });
-
-  it('names the app after a node root given no appName', () => {
-    const workflow = newWorkflow('billing');
-
-    const runner = new Runner({node: workflow, sessionService});
-
-    expect(runner.appName).toBe('billing');
-    expect(runner.app.name).toBe('billing');
-    expect(runner.agent).toBe(workflow);
-  });
-
-  it('names the app after a node root that is an agent', () => {
-    // `node` asks for adk-python's node semantics, under which the root names
-    // the app whether or not it happens to be an agent.
-    const runner = new Runner({node: newAgent('triage'), sessionService});
-
-    expect(runner.appName).toBe('triage');
-  });
-
-  it('prefers an explicit appName over the name a node root implies', () => {
-    const runner = new Runner({
-      node: newWorkflow('billing'),
-      appName: 'invoices',
-      sessionService,
-    });
-
-    expect(runner.appName).toBe('invoices');
-    expect(runner.app.rootAgent.name).toBe('billing');
   });
 
   it('carries the app resumability config onto the runner', () => {
