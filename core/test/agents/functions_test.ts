@@ -5,6 +5,7 @@
  */
 import {
   AgentTool,
+  AuthConfig,
   BasePlugin,
   BaseTool,
   Context,
@@ -815,6 +816,13 @@ describe('handleFunctionCallList', () => {
   });
 });
 
+function authConfigFor(credentialKey: string): AuthConfig {
+  return {
+    authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+    credentialKey,
+  };
+}
+
 describe('generateAuthEvent', () => {
   let invocationContext: InvocationContext;
   let pluginManager: PluginManager;
@@ -849,14 +857,11 @@ describe('generateAuthEvent', () => {
   });
 
   it('should return auth event if requestedAuthConfigs is present', () => {
+    const authConfig1 = authConfigFor('key_1');
+    const authConfig2 = authConfigFor('key_2');
     const functionResponseEvent = createEvent({
       actions: createEventActions({
-        requestedAuthConfigs: {
-          // @ts-expect-error - testing string assignments
-          'call_1': 'auth_config_1',
-          // @ts-expect-error - testing string assignments
-          'call_2': 'auth_config_2',
-        },
+        requestedAuthConfigs: {'call_1': authConfig1, 'call_2': authConfig2},
       }),
       content: {role: 'model', parts: []},
     });
@@ -873,14 +878,14 @@ describe('generateAuthEvent', () => {
     );
     expect(call1).toBeDefined();
     expect(call1!.functionCall!.name).toBe('adk_request_credential');
-    expect(call1!.functionCall!.args!['auth_config']).toBe('auth_config_1');
+    expect(call1!.functionCall!.args!['auth_config']).toBe(authConfig1);
 
     const call2 = parts.find(
       (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
     );
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
-    expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+    expect(call2!.functionCall!.args!['auth_config']).toBe(authConfig2);
   });
 
   it('should default the role to user for a content-less event', () => {

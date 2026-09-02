@@ -41,6 +41,10 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [TrajectoryEvaluator](evaluation/tool_trajectory/index.md) - Scoring the tool
   calls an agent made against a golden trajectory.
 
+### Events
+
+- [EventActions](events/event_actions/index.md) - The side-effects attached to an event: routes, transfers, structured model output, and the two guards that keep them persistable.
+
 ### Examples
 
 - [VertexAiExampleStore](examples/vertex_ai_example_store/index.md) - Reading

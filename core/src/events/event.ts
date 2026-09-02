@@ -169,13 +169,20 @@ export interface CreateEventParams extends Omit<Partial<Event>, 'actions'> {
  * @returns The event.
  */
 export function createEvent(params: CreateEventParams = {}): Event {
+  const actions = createEventActions(params.actions);
+  // `actions.route` is the copy that crosses the wire. Mirrors the `route`
+  // convenience kwarg in `google/adk-python` `event.py`.
+  if (params.route !== undefined) {
+    actions.route = params.route;
+  }
+
   return {
     ...params,
     [EVENT_SIGNATURE_SYMBOL]: true,
     id: params.id || createNewEventId(),
     invocationId: params.invocationId || '',
     author: params.author,
-    actions: createEventActions(params.actions),
+    actions,
     longRunningToolIds: params.longRunningToolIds || [],
     branch: params.branch,
     timestamp: params.timestamp || Date.now(),
@@ -387,6 +394,8 @@ const PRESERVE_KEYS_CAMEL_CASE = [
   // declaration and the call arguments, whose keys must reach the host exactly
   // as the server and the model spelled them.
   'actions.renderUiWidgets.payload',
+  // Arbitrary structured model output: its keys are the model's, not ours.
+  'actions.setModelResponse',
 ];
 
 /**
@@ -412,6 +421,8 @@ const PRESERVE_KEYS_SNAKE_CASE = [
   'route',
   'actions.agent_state',
   'actions.render_ui_widgets.payload',
+  // See the camelCase list above.
+  'actions.set_model_response',
 ];
 
 /**
@@ -423,7 +434,14 @@ const PRESERVE_KEYS_SNAKE_CASE = [
 export function transformToCamelCaseEvent(
   event: Record<string, unknown>,
 ): Event {
-  return toCamelCase(event, PRESERVE_KEYS_SNAKE_CASE) as Event;
+  const restored = toCamelCase(event, PRESERVE_KEYS_SNAKE_CASE) as Event;
+  // `google/adk-python` keeps the route on `actions.route`, the only copy that
+  // crosses the wire, while the workflow engine reads `event.route`. Promote it
+  // here so a session written by a Python runner routes the same way.
+  if (restored.route === undefined && restored.actions?.route !== undefined) {
+    restored.route = restored.actions.route;
+  }
+  return restored;
 }
 
 /**
