@@ -48,10 +48,7 @@ class ReplyAgent extends BaseAgent {
     });
   }
 
-  // eslint-disable-next-line require-yield -- BaseAgent declares runLiveImpl abstract, and a replay run never drives it.
-  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-    return;
-  }
+  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {}
 }
 
 describe('adk run --replay with an App', () => {
