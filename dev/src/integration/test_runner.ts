@@ -11,7 +11,6 @@ import {
   Runner,
   Session,
 } from '@google/adk';
-import {Content} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 import * as assert from 'node:assert';
 import {AgentRegistry} from './agent_registry.js';
@@ -22,8 +21,8 @@ import {
   FilteredEventActions,
   FilteredPart,
   TestInfo,
-  UserMessage,
 } from './test_types.js';
+import {userMessageToContent} from './user_message_utils.js';
 
 const SKIPPED_TESTS = [
   {
@@ -40,6 +39,15 @@ const SKIPPED_TESTS = [
     reason: 'Suspected broken test. Need to re-evaluate.',
   },
 ];
+
+/**
+ * The session identity of a conformance run. The recorder writes it into
+ * `generated-session.yaml` and the replay reproduces it, so both sides have to
+ * agree.
+ */
+export const CONFORMANCE_APP_NAME = 'test-runner';
+export const CONFORMANCE_USER_ID = 'test-user';
+export const CONFORMANCE_SESSION_ID = 'test-session';
 
 export class TestRunner {
   constructor(private agentRegistry: AgentRegistry) {}
@@ -75,15 +83,15 @@ export class TestRunner {
       agent,
       sessionService,
       plugins: [replayPlugin],
-      appName: 'test-runner',
+      appName: CONFORMANCE_APP_NAME,
     });
 
-    const userId = 'test-user';
-    const sessionId = 'test-session';
+    const userId = CONFORMANCE_USER_ID;
+    const sessionId = CONFORMANCE_SESSION_ID;
 
     // Create the session explicitly
     await sessionService.createSession({
-      appName: 'test-runner',
+      appName: CONFORMANCE_APP_NAME,
       userId,
       sessionId,
     });
@@ -108,7 +116,7 @@ export class TestRunner {
     }
 
     const session = await sessionService.getSession({
-      appName: 'test-runner',
+      appName: CONFORMANCE_APP_NAME,
       userId,
       sessionId,
     });
@@ -135,19 +143,6 @@ function injectDummyLlm(agent: BaseAgent) {
       injectDummyLlm(sub);
     }
   }
-}
-
-function userMessageToContent(msg: UserMessage): Content {
-  if (msg.content) {
-    const content = msg.content;
-    content.role = 'user';
-    return content;
-  }
-  if (msg.text) {
-    return {role: 'user', parts: [{text: msg.text}]};
-  }
-
-  throw new Error('Either Content text or content field is required');
 }
 
 function validateSession(actual: Session, expected: Session) {

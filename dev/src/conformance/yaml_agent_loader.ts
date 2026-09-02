@@ -9,7 +9,28 @@ import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import {AgentRegistry} from '../integration/agent_registry.js';
 import {AgentToolArgs, YamlAgentConfig} from '../integration/agent_types.js';
+import {IntegrationRegistry} from '../integration/integration_registry.js';
+import {registerConformanceIntegrations} from './conformance_integrations.js';
+
+/**
+ * Builds the registry the conformance commands resolve `spec.agent` through:
+ * every agent config under `agentsDir`, plus the conformance integrations the
+ * configs name.
+ */
+export async function loadAgentRegistry(
+  agentsDir: string,
+): Promise<AgentRegistry> {
+  const integrationRegistry = new IntegrationRegistry();
+  registerConformanceIntegrations(integrationRegistry);
+
+  const agentRegistry = new AgentRegistry(integrationRegistry);
+  for (const [name, config] of await batchLoadYamlAgentConfig(agentsDir)) {
+    agentRegistry.registerAgentConfig(name, config);
+  }
+  return agentRegistry;
+}
 
 /**
  * batchLoadYamlAgentConfig will recursively search the directory given
