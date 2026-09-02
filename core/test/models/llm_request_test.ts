@@ -15,7 +15,7 @@ import {
   createSession,
 } from '@google/adk';
 import {Content, FunctionDeclaration, Schema, Type} from '@google/genai';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   MISSING_OUTPUT_SCHEMA_MESSAGE,
@@ -23,7 +23,6 @@ import {
   findToolWithFunctionDeclarations,
   setOutputSchema,
 } from '../../src/models/llm_request.js';
-import {logger} from '../../src/utils/logger.js';
 
 function createRequest(contents: Content[] = []): LlmRequest {
   return {contents, toolsDict: {}, liveConnectConfig: {}, config: {}};
@@ -306,10 +305,6 @@ describe('setOutputSchema', () => {
     properties: {answer: {type: Type.STRING}},
   };
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('sets the schema and forces the JSON mime type', () => {
     const request = createRequest();
 
@@ -328,84 +323,31 @@ describe('setOutputSchema', () => {
     expect(request.config?.responseMimeType).toBe('application/json');
   });
 
-  it('accepts the deprecated baseModel alias', () => {
-    const request = createRequest();
-    vi.spyOn(logger, 'warn').mockImplementation(() => {});
-
-    setOutputSchema(request, undefined, {baseModel: SCHEMA});
-
-    expect(request.config?.responseSchema).toBe(SCHEMA);
-    expect(request.config?.responseMimeType).toBe('application/json');
-  });
-
-  it('warns once when the baseModel alias is used', () => {
-    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-
-    setOutputSchema(createRequest(), undefined, {baseModel: SCHEMA});
-
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain('baseModel');
-  });
-
-  it('does not warn when outputSchema is supplied', () => {
-    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-
-    setOutputSchema(createRequest(), SCHEMA);
-
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it('prefers outputSchema when both are supplied', () => {
-    const request = createRequest();
-    const legacy: Schema = {type: Type.STRING};
-    vi.spyOn(logger, 'warn').mockImplementation(() => {});
-
-    setOutputSchema(request, SCHEMA, {baseModel: legacy});
-
-    expect(request.config?.responseSchema).toBe(SCHEMA);
-  });
-
-  it('throws and leaves the request untouched when neither is supplied', () => {
+  it('throws and leaves the request untouched for an undefined schema', () => {
     const request = createRequest();
 
     expect(() => {
-      setOutputSchema(request);
+      setOutputSchema(request, undefined);
     }).toThrowError(MISSING_OUTPUT_SCHEMA_MESSAGE);
     expect(request.config?.responseSchema).toBeUndefined();
     expect(request.config?.responseMimeType).toBeUndefined();
   });
 
-  it('throws when both arguments are explicitly undefined', () => {
+  it('throws and leaves the request untouched for a null schema', () => {
     const request = createRequest();
 
     expect(() => {
-      setOutputSchema(request, undefined, {baseModel: undefined});
-    }).toThrowError(MISSING_OUTPUT_SCHEMA_MESSAGE);
-  });
-
-  it('throws when the only schema is null', () => {
-    const request = createRequest();
-
-    expect(() => {
-      setOutputSchema(request, null, {baseModel: null});
+      setOutputSchema(request, null);
     }).toThrowError(MISSING_OUTPUT_SCHEMA_MESSAGE);
     expect(request.config?.responseSchema).toBeUndefined();
-  });
-
-  it('falls back to baseModel when outputSchema is null', () => {
-    const request = createRequest();
-    vi.spyOn(logger, 'warn').mockImplementation(() => {});
-
-    setOutputSchema(request, null, {baseModel: SCHEMA});
-
-    expect(request.config?.responseSchema).toBe(SCHEMA);
+    expect(request.config?.responseMimeType).toBeUndefined();
   });
 
   it('does not create the config when it throws', () => {
     const request = createBareRequest();
 
     expect(() => {
-      setOutputSchema(request);
+      setOutputSchema(request, undefined);
     }).toThrowError(MISSING_OUTPUT_SCHEMA_MESSAGE);
     expect(request.config).toBeUndefined();
   });
