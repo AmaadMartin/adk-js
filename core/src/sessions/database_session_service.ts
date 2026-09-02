@@ -18,7 +18,6 @@ import {StaleSessionError} from '../errors/stale_session_error.js';
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {KeyedMutex} from '../utils/keyed_mutex.js';
-import {redactUriPassword} from '../utils/redact_uri.js';
 import {
   AppendEventRequest,
   applyTempState,
@@ -36,10 +35,12 @@ import {
   trimTempDeltaState,
 } from './base_session_service.js';
 import {
+  assertSupportedDatabaseUri,
   detectDatabaseSchemaVersion,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
   getOrCreateRow,
+  namesSupportedDatabaseBackend,
   validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
@@ -98,22 +99,15 @@ const NEWEST_SESSION_FIRST = {
 /**
  * Checks if a URI is a database connection URI.
  *
+ * A URI whose scheme also names a driver, such as `postgresql+asyncpg://`,
+ * counts: the backend is one this service owns, so the service is the right
+ * place for the caller to be told what is wrong with the scheme.
+ *
  * @param uri The URI to check.
  * @returns True if the URI is a database connection URI, false otherwise.
  */
 export function isDatabaseConnectionString(uri?: string): boolean {
-  if (!uri) {
-    return false;
-  }
-
-  return (
-    uri.startsWith('postgres://') ||
-    uri.startsWith('postgresql://') ||
-    uri.startsWith('mysql://') ||
-    uri.startsWith('mariadb://') ||
-    uri.startsWith('mssql://') ||
-    uri.startsWith('sqlite://')
-  );
+  return uri !== undefined && namesSupportedDatabaseBackend(uri);
 }
 
 /** Narrows a constructor argument to an already-built MikroORM instance. */
@@ -208,11 +202,7 @@ export class DatabaseSessionService extends BaseSessionService {
   ) {
     super();
     if (typeof source === 'string') {
-      if (!isDatabaseConnectionString(source)) {
-        throw new Error(
-          `Unsupported database URI: ${redactUriPassword(source)}`,
-        );
-      }
+      assertSupportedDatabaseUri(source);
       this.connectionString = source;
       this.optionOverrides = overrides;
       this.ownsOrm = true;

@@ -25,6 +25,7 @@ import {
   StorageMetadata,
 } from './schema.js';
 
+const SQLITE_BACKEND = 'sqlite';
 const SQLITE_URI_PREFIX = 'sqlite://';
 const SQLITE_MEMORY_URI = 'sqlite://:memory:';
 
@@ -34,6 +35,144 @@ function driverPeer(packageName: string, scheme: string) {
     packageName,
     feature: `DatabaseSessionService with a "${scheme}" connection string`,
   };
+}
+
+async function loadPostgresDriver(): Promise<unknown> {
+  const {PostgreSqlDriver} = await loadOptionalPeer(
+    driverPeer('@mikro-orm/postgresql', 'postgres'),
+    () => import('@mikro-orm/postgresql'),
+  );
+  return PostgreSqlDriver;
+}
+
+async function loadMySqlDriver(): Promise<unknown> {
+  const {MySqlDriver} = await loadOptionalPeer(
+    driverPeer('@mikro-orm/mysql', 'mysql'),
+    () => import('@mikro-orm/mysql'),
+  );
+  return MySqlDriver;
+}
+
+async function loadMariaDbDriver(): Promise<unknown> {
+  const {MariaDbDriver} = await loadOptionalPeer(
+    driverPeer('@mikro-orm/mariadb', 'mariadb'),
+    () => import('@mikro-orm/mariadb'),
+  );
+  return MariaDbDriver;
+}
+
+async function loadMsSqlDriver(): Promise<unknown> {
+  const {MsSqlDriver} = await loadOptionalPeer(
+    driverPeer('@mikro-orm/mssql', 'mssql'),
+    () => import('@mikro-orm/mssql'),
+  );
+  return MsSqlDriver;
+}
+
+async function loadSqliteDriver(): Promise<unknown> {
+  const {SqliteDriver} = await loadOptionalPeer(
+    driverPeer('@mikro-orm/sqlite', 'sqlite'),
+    () => import('@mikro-orm/sqlite'),
+  );
+  return SqliteDriver;
+}
+
+/** The MikroORM driver each supported URI backend loads. */
+const DRIVER_LOADERS: Record<string, () => Promise<unknown>> = {
+  postgres: loadPostgresDriver,
+  postgresql: loadPostgresDriver,
+  mysql: loadMySqlDriver,
+  mariadb: loadMariaDbDriver,
+  mssql: loadMsSqlDriver,
+  [SQLITE_BACKEND]: loadSqliteDriver,
+};
+
+/** Why a connection URI is not one this service can open. */
+export enum DatabaseUriProblem {
+  /** The string carries no URI scheme at all. */
+  NOT_A_URI = 'NOT_A_URI',
+  /** The scheme names a backend with no driver here, such as `oracle`. */
+  UNSUPPORTED_BACKEND = 'UNSUPPORTED_BACKEND',
+  /** The scheme names a driver as well, the way SQLAlchemy URLs do. */
+  DRIVER_IN_SCHEME = 'DRIVER_IN_SCHEME',
+}
+
+/**
+ * Splits the scheme of a connection URI into its backend and driver parts.
+ *
+ * `postgresql+asyncpg://host/db` yields `postgresql` and `asyncpg`. A string
+ * carrying no `://` yields an empty backend, which no loader answers to.
+ */
+function schemeOf(uri: string): {backend: string; driver?: string} {
+  const schemeEnd = uri.indexOf('://');
+  if (schemeEnd <= 0) {
+    return {backend: ''};
+  }
+  const [backend, driver] = uri.slice(0, schemeEnd).split('+');
+  return {backend, driver};
+}
+
+/**
+ * Reports whether a URI names a database backend this service supports.
+ *
+ * A driver-suffixed scheme counts. Routing such a URI here is what lets the
+ * caller hear about the suffix, instead of hearing that the URI belongs to no
+ * session service at all.
+ *
+ * @param uri The database connection URI.
+ */
+export function namesSupportedDatabaseBackend(uri: string): boolean {
+  return Object.hasOwn(DRIVER_LOADERS, schemeOf(uri).backend);
+}
+
+/** Returns the problem with a URI, or undefined when it is one we can open. */
+function classifyDatabaseUri(uri: string): DatabaseUriProblem | undefined {
+  const {backend, driver} = schemeOf(uri);
+  if (!backend) {
+    return DatabaseUriProblem.NOT_A_URI;
+  }
+  if (!Object.hasOwn(DRIVER_LOADERS, backend)) {
+    return DatabaseUriProblem.UNSUPPORTED_BACKEND;
+  }
+  if (driver) {
+    return DatabaseUriProblem.DRIVER_IN_SCHEME;
+  }
+  return undefined;
+}
+
+/** Builds the message for a rejected URI, with its password masked. */
+function describeDatabaseUriProblem(
+  uri: string,
+  problem: DatabaseUriProblem,
+): string {
+  const redacted = redactUriPassword(uri);
+  switch (problem) {
+    case DatabaseUriProblem.NOT_A_URI:
+      return `Invalid database URL format or argument '${redacted}'.`;
+    case DatabaseUriProblem.UNSUPPORTED_BACKEND:
+      return `Unsupported database URI: ${redacted}`;
+    case DatabaseUriProblem.DRIVER_IN_SCHEME: {
+      const {backend, driver} = schemeOf(uri);
+      return (
+        `Database URL '${redacted}' names the '${driver}' driver in its ` +
+        `scheme. adk-js selects its own driver, so use a '${backend}://' ` +
+        'URL instead.'
+      );
+    }
+  }
+}
+
+/**
+ * Throws unless the URI is one this service can open.
+ *
+ * @param uri The database connection URI.
+ * @throws Error naming what is wrong with the URI, its password masked.
+ */
+export function assertSupportedDatabaseUri(uri: string): void {
+  const problem = classifyDatabaseUri(uri);
+  if (problem !== undefined) {
+    throw new Error(describeDatabaseUriProblem(uri, problem));
+  }
 }
 
 /**
@@ -57,43 +196,11 @@ export async function getConnectionOptionsFromUri(
 async function deriveConnectionOptionsFromUri(
   uri: string,
 ): Promise<MikroORMOptions> {
-  let driver: unknown;
+  assertSupportedDatabaseUri(uri);
+  const {backend} = schemeOf(uri);
+  const driver = await DRIVER_LOADERS[backend]();
 
-  if (uri.startsWith('postgres://') || uri.startsWith('postgresql://')) {
-    const {PostgreSqlDriver} = await loadOptionalPeer(
-      driverPeer('@mikro-orm/postgresql', 'postgres'),
-      () => import('@mikro-orm/postgresql'),
-    );
-    driver = PostgreSqlDriver;
-  } else if (uri.startsWith('mysql://')) {
-    const {MySqlDriver} = await loadOptionalPeer(
-      driverPeer('@mikro-orm/mysql', 'mysql'),
-      () => import('@mikro-orm/mysql'),
-    );
-    driver = MySqlDriver;
-  } else if (uri.startsWith('mariadb://')) {
-    const {MariaDbDriver} = await loadOptionalPeer(
-      driverPeer('@mikro-orm/mariadb', 'mariadb'),
-      () => import('@mikro-orm/mariadb'),
-    );
-    driver = MariaDbDriver;
-  } else if (uri.startsWith('sqlite://')) {
-    const {SqliteDriver} = await loadOptionalPeer(
-      driverPeer('@mikro-orm/sqlite', 'sqlite'),
-      () => import('@mikro-orm/sqlite'),
-    );
-    driver = SqliteDriver;
-  } else if (uri.startsWith('mssql://')) {
-    const {MsSqlDriver} = await loadOptionalPeer(
-      driverPeer('@mikro-orm/mssql', 'mssql'),
-      () => import('@mikro-orm/mssql'),
-    );
-    driver = MsSqlDriver;
-  } else {
-    throw new Error(`Unsupported database URI: ${redactUriPassword(uri)}`);
-  }
-
-  if (uri.startsWith(SQLITE_URI_PREFIX)) {
+  if (backend === SQLITE_BACKEND) {
     const isMemory = uri === SQLITE_MEMORY_URI;
     return {
       entities: ENTITIES,

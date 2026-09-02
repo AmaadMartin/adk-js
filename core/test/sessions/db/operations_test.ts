@@ -189,6 +189,42 @@ describe('operations', () => {
       expect(options.pool).toBeUndefined();
     });
 
+    it('reports a string that is not a URI at all', async () => {
+      await expect(
+        getConnectionOptionsFromUri('definitely not a url'),
+      ).rejects.toThrow('Invalid database URL format or argument');
+    });
+
+    it('names the driver a SQLAlchemy-style sqlite scheme carries', async () => {
+      await expect(
+        getConnectionOptionsFromUri('sqlite+aiosqlite:///sessions.db'),
+      ).rejects.toThrow(/'aiosqlite' driver.*'sqlite:\/\/' URL instead/s);
+    });
+
+    it('keeps the password out of every rejection message', async () => {
+      const password = 'sup3rs3cret';
+      await expect(
+        getConnectionOptionsFromUri(`oracle://user:${password}@host/db`),
+      ).rejects.toThrow(
+        expect.objectContaining({
+          message: expect.not.stringContaining(password),
+        }),
+      );
+      await expect(
+        getConnectionOptionsFromUri(`postgresql+asyncpg://u:${password}@h/db`),
+      ).rejects.toThrow(
+        expect.objectContaining({
+          message: expect.not.stringContaining(password),
+        }),
+      );
+    });
+
+    it('still reports an unsupported backend as unsupported', async () => {
+      await expect(
+        getConnectionOptionsFromUri('oracle://user:pw@host/db'),
+      ).rejects.toThrow('Unsupported database URI');
+    });
+
     it('merges caller overrides over the derived options', async () => {
       const options = await getConnectionOptionsFromUri('sqlite://:memory:', {
         pool: {min: 2, max: 4},

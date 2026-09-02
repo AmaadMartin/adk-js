@@ -1630,7 +1630,36 @@ describe('DatabaseSessionService lifecycle', () => {
 describe('DatabaseSessionService connection validation', () => {
   it('rejects an unusable connection string from the constructor', () => {
     expect(() => new DatabaseSessionService('definitely not a url')).toThrow(
-      'Unsupported database URI',
+      'Invalid database URL format or argument',
+    );
+  });
+
+  it('names the driver a SQLAlchemy-style scheme carries', () => {
+    expect(
+      () => new DatabaseSessionService('postgresql+asyncpg://user:pw@host/db'),
+    ).toThrow(/'asyncpg' driver/);
+    expect(
+      () => new DatabaseSessionService('postgresql+asyncpg://user:pw@host/db'),
+    ).toThrow(/'postgresql:\/\/' URL instead/);
+  });
+
+  it('keeps the password out of a driver-suffix rejection', () => {
+    const password = 'sup3rs3cr3tpassphrase';
+    try {
+      new DatabaseSessionService(`mysql+aiomysql://user:${password}@host/db`);
+      expect.fail('the constructor accepted a driver-suffixed URI');
+    } catch (error: unknown) {
+      expect(String(error)).not.toContain(password);
+      expect(String(error)).toContain('aiomysql');
+    }
+  });
+
+  it('routes a driver-suffixed URI to this service', () => {
+    expect(isDatabaseConnectionString('postgresql+asyncpg://host/db')).toBe(
+      true,
+    );
+    expect(isDatabaseConnectionString('sqlite+aiosqlite:///sessions.db')).toBe(
+      true,
     );
   });
 
