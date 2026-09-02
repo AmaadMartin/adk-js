@@ -46,12 +46,31 @@ export function isBaseToolset(obj: unknown): obj is BaseToolset {
 export abstract class BaseToolset {
   readonly [BASE_TOOLSET_SIGNATURE_SYMBOL] = true;
 
+  private currentToolFilter: ToolPredicate | string[];
+
   constructor(
-    // Mutable, so a subclass can offer a setter for it. adk-python's
-    // `BaseToolset.tool_filter` is a plain attribute for the same reason.
-    public toolFilter: ToolPredicate | string[],
+    toolFilter: ToolPredicate | string[],
     readonly prefix?: string,
-  ) {}
+  ) {
+    this.currentToolFilter = toolFilter;
+  }
+
+  /** Selects which of a toolset's tools it exposes. */
+  get toolFilter(): ToolPredicate | string[] {
+    return this.currentToolFilter;
+  }
+
+  /**
+   * Replaces the tool filter.
+   *
+   * It is not public, because only a subclass that re-reads `toolFilter` on
+   * every `getTools()` call can honour a change. A toolset that hands the
+   * filter to an inner toolset once, as `APIHubToolset` does, would accept the
+   * new filter and ignore it.
+   */
+  protected replaceToolFilter(toolFilter: ToolPredicate | string[]): void {
+    this.currentToolFilter = toolFilter;
+  }
 
   /**
    * Returns the tools that should be exposed to LLM.

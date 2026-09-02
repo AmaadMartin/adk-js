@@ -19,43 +19,25 @@ import {GoogleApiTool} from './google_api_tool.js';
 import {GoogleApiToOpenApiConverter} from './googleapi_to_openapi_converter.js';
 
 /**
- * Google's OAuth2 authorization endpoint.
+ * The OpenID Connect scheme every generated tool authenticates with, less the
+ * scopes the Discovery document decides.
  *
- * It is the `v2` endpoint, which differs from the one the Discovery converter
- * writes into the document's own `oauth2` scheme. Both are deliberate.
+ * `authorizationEndpoint` is the `v2` endpoint, which differs from the one the
+ * Discovery converter writes into the document's own `oauth2` scheme. Both are
+ * deliberate.
  */
-const AUTHORIZATION_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
-
-/** Google's OAuth2 token endpoint. */
-const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
-
-/** Google's OAuth2 token revocation endpoint. */
-const REVOCATION_ENDPOINT = 'https://oauth2.googleapis.com/revoke';
-
-/** The client authentication methods Google's token endpoint accepts. */
-const TOKEN_ENDPOINT_AUTH_METHODS_SUPPORTED = [
-  'client_secret_post',
-  'client_secret_basic',
-];
-
-/** The OAuth2 grant types the toolset drives. */
-const GRANT_TYPES_SUPPORTED = ['authorization_code'];
-
-/**
- * Narrows the converted document's `oauth2` security scheme.
- *
- * A Discovery document with no `auth.oauth2` block has no such scheme, because
- * the converter emits it only when the block is present.
- */
-function oauth2Scheme(
-  spec: OpenAPIV3.Document,
-): OpenAPIV3.OAuth2SecurityScheme | undefined {
-  const scheme = spec.components?.securitySchemes?.['oauth2'];
-  if (!scheme || '$ref' in scheme || scheme.type !== 'oauth2') {
-    return undefined;
-  }
-  return scheme;
-}
+const GOOGLE_OIDC_SCHEME: Omit<OpenIdConnectWithConfig, 'scopes'> = {
+  type: 'openIdConnect',
+  openIdConnectUrl: '',
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
+  tokenEndpointAuthMethodsSupported: [
+    'client_secret_post',
+    'client_secret_basic',
+  ],
+  grantTypesSupported: ['authorization_code'],
+};
 
 /**
  * Returns the scopes the toolset requests: the document's first Discovery
@@ -69,7 +51,11 @@ function authScopes(
   spec: OpenAPIV3.Document,
   additionalScopes?: string[],
 ): string[] {
-  const discoveryScopes = oauth2Scheme(spec)?.flows.authorizationCode?.scopes;
+  const scheme = spec.components?.securitySchemes?.['oauth2'];
+  const discoveryScopes =
+    scheme && !('$ref' in scheme) && scheme.type === 'oauth2'
+      ? scheme.flows.authorizationCode?.scopes
+      : undefined;
   const defaultScope = discoveryScopes && Object.keys(discoveryScopes)[0];
   return [
     ...new Set([
@@ -77,20 +63,6 @@ function authScopes(
       ...(additionalScopes ?? []),
     ]),
   ];
-}
-
-/** Builds the OpenID Connect scheme every generated tool authenticates with. */
-function googleOidcScheme(scopes: string[]): OpenIdConnectWithConfig {
-  return {
-    type: 'openIdConnect',
-    openIdConnectUrl: '',
-    authorizationEndpoint: AUTHORIZATION_ENDPOINT,
-    tokenEndpoint: TOKEN_ENDPOINT,
-    revocationEndpoint: REVOCATION_ENDPOINT,
-    tokenEndpointAuthMethodsSupported: TOKEN_ENDPOINT_AUTH_METHODS_SUPPORTED,
-    grantTypesSupported: GRANT_TYPES_SUPPORTED,
-    scopes,
-  };
 }
 
 /** Options for {@link GoogleApiToolset}. */
@@ -181,7 +153,7 @@ export class GoogleApiToolset extends BaseToolset {
   private readonly additionalScopes?: string[];
   private readonly discoveryUrl?: string;
   private openapiToolset?: OpenAPIToolset;
-  private prepared?: Promise<OpenAPIToolset>;
+  private prepared?: Promise<void>;
 
   constructor(options: GoogleApiToolsetOptions) {
     super(options.toolFilter ?? [], options.toolNamePrefix);
@@ -209,16 +181,15 @@ export class GoogleApiToolset extends BaseToolset {
   @experimental
   override async getTools(context?: ReadonlyContext): Promise<GoogleApiTool[]> {
     this.prepared ??= this.prepareToolset();
-    let openapiToolset: OpenAPIToolset;
     try {
-      openapiToolset = await this.prepared;
+      await this.prepared;
     } catch (e: unknown) {
       // Fetch again on the next call, as the Python SDK does.
       this.prepared = undefined;
       throw e;
     }
 
-    const restApiTools = await openapiToolset.getTools(context);
+    const restApiTools = (await this.openapiToolset?.getTools(context)) ?? [];
     return restApiTools
       .filter((tool) => this.isToolSelected(tool, context))
       .map(
@@ -238,7 +209,7 @@ export class GoogleApiToolset extends BaseToolset {
    */
   @experimental
   setToolFilter(toolFilter: ToolPredicate | string[]): void {
-    this.toolFilter = toolFilter;
+    this.replaceToolFilter(toolFilter);
   }
 
   /**
@@ -267,7 +238,7 @@ export class GoogleApiToolset extends BaseToolset {
     await this.openapiToolset?.close();
   }
 
-  private async prepareToolset(): Promise<OpenAPIToolset> {
+  private async prepareToolset(): Promise<void> {
     const spec = await new GoogleApiToOpenApiConverter(
       this.apiName,
       this.apiVersion,
@@ -278,9 +249,11 @@ export class GoogleApiToolset extends BaseToolset {
     this.openapiToolset = new OpenAPIToolset({
       specDict: spec,
       prefix: this.prefix,
-      authScheme: googleOidcScheme(authScopes(spec, this.additionalScopes)),
+      authScheme: {
+        ...GOOGLE_OIDC_SCHEME,
+        scopes: authScopes(spec, this.additionalScopes),
+      },
       sslVerify: certs ? await clientCertDispatcher(certs) : undefined,
     });
-    return this.openapiToolset;
   }
 }
