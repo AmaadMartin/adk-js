@@ -15,16 +15,17 @@ import {ToolConfirmation} from '../tools/tool_confirmation.js';
 /**
  * The compaction of a contiguous range of events. Mirrors Python
  * `EventCompaction`.
+ *
+ * Nothing in this SDK reads the timestamps, and no conversion happens on
+ * either side, so they carry whatever unit the writer used. Python's
+ * `EventCompaction` documents seconds; {@link Event.timestamp} here is in
+ * milliseconds. Read them in the unit the writer of the event used.
  */
 export interface EventCompaction {
-  /**
-   * The start timestamp of the compacted events, in the same unit as
-   * {@link Event.timestamp} (milliseconds since the epoch). Python records
-   * seconds here; neither side converts.
-   */
+  /** The start timestamp of the compacted events. */
   startTimestamp: number;
 
-  /** The end timestamp of the compacted events, in the same unit. */
+  /** The end timestamp of the compacted events. */
   endTimestamp: number;
 
   /** The summary that stands in for the compacted range. */
@@ -85,9 +86,9 @@ export interface EventActions {
    * The range of events this event compacts, and the summary that stands in
    * for them. Mirrors Python `EventActions.compaction`.
    *
-   * This SDK's own compaction pipeline uses `CompactedEvent` instead. The
-   * field is here so a compaction written by a Python runner survives the
-   * wire.
+   * This SDK's own compaction pipeline uses `CompactedEvent` instead, and
+   * nothing here reads this field. It is an opaque passthrough, so an event
+   * that carries a compaction survives a round trip through adk-js unchanged.
    */
   compaction?: EventCompaction;
 
@@ -125,13 +126,6 @@ const EVENT_ACTIONS_KEYS: Record<keyof EventActions, true> = {
   endOfAgent: true,
 };
 
-/** The keys an {@link EventCompaction} accepts. See {@link EVENT_ACTIONS_KEYS}. */
-const EVENT_COMPACTION_KEYS: Record<keyof EventCompaction, true> = {
-  startTimestamp: true,
-  endTimestamp: true,
-  compactedContent: true,
-};
-
 /**
  * Creates an {@link EventActions} object with default empty-dict values for
  * all dictionary fields.
@@ -143,13 +137,12 @@ const EVENT_COMPACTION_KEYS: Record<keyof EventCompaction, true> = {
  *   `compaction`) default to `undefined`.
  * @returns A fully populated {@link EventActions} object.
  * @throws {InputValidationError} When `state` carries a key that is not an
- *   {@link EventActions} field, or a malformed `compaction`.
+ *   {@link EventActions} field.
  */
 export function createEventActions(
   state: Partial<EventActions> = {},
 ): EventActions {
   validateActionKeys(state);
-  validateCompaction(state.compaction);
   return {
     stateDelta: {},
     artifactDelta: {},
@@ -167,76 +160,25 @@ export function createEventActions(
  * a call from plain JavaScript. Silently dropping such a key loses the action
  * it asked for.
  *
+ * It guards what callers build in this process, and only that. An event
+ * rehydrated from storage is cast by `transformToCamelCaseEvent`, so it never
+ * reaches this check.
+ *
+ * `Object.hasOwn` rather than `in`, or every `Object.prototype` member
+ * (`toString`, `constructor`) would pass as a declared field.
+ *
  * @throws {InputValidationError} Naming every offending key.
  */
 function validateActionKeys(state: Partial<EventActions>): void {
-  const unknownKeys = unknownKeysOf(state, EVENT_ACTIONS_KEYS);
+  const unknownKeys = Object.keys(state).filter(
+    (key) => !Object.hasOwn(EVENT_ACTIONS_KEYS, key),
+  );
   if (unknownKeys.length > 0) {
     throw new InputValidationError(
       `EventActions received unknown key(s): ${unknownKeys.join(', ')}. ` +
         'Fields are camelCase; see EventActions.',
     );
   }
-}
-
-/**
- * Rejects a `compaction` that is not a well-formed {@link EventCompaction}.
- *
- * @param compaction - The value supplied for `compaction`, which is untyped at
- *   runtime for the same reason {@link validateActionKeys} exists.
- * @throws {InputValidationError} Naming the field that is wrong.
- */
-function validateCompaction(compaction: unknown): void {
-  if (compaction === undefined) {
-    return;
-  }
-  if (!isRecord(compaction)) {
-    throw new InputValidationError(
-      'compaction must be an object with startTimestamp, endTimestamp and compactedContent.',
-    );
-  }
-  const unknownKeys = unknownKeysOf(compaction, EVENT_COMPACTION_KEYS);
-  if (unknownKeys.length > 0) {
-    throw new InputValidationError(
-      `compaction received unknown key(s): ${unknownKeys.join(', ')}.`,
-    );
-  }
-  if (!isFiniteNumber(compaction['startTimestamp'])) {
-    throw new InputValidationError(
-      'compaction.startTimestamp must be a finite number.',
-    );
-  }
-  if (!isFiniteNumber(compaction['endTimestamp'])) {
-    throw new InputValidationError(
-      'compaction.endTimestamp must be a finite number.',
-    );
-  }
-  if (!isRecord(compaction['compactedContent'])) {
-    throw new InputValidationError(
-      'compaction.compactedContent must be a Content object.',
-    );
-  }
-}
-
-/**
- * Returns the own keys of `value` that `allowedKeys` does not declare.
- *
- * Uses `Object.hasOwn` rather than `in`, or every `Object.prototype` member
- * (`toString`, `constructor`) would pass as a declared field.
- */
-function unknownKeysOf(
-  value: object,
-  allowedKeys: Record<string, true>,
-): string[] {
-  return Object.keys(value).filter((key) => !Object.hasOwn(allowedKeys, key));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
 }
 
 /**

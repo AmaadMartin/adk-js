@@ -68,8 +68,9 @@ converts snake_case to camelCase at the wire boundary, in
 `transformToCamelCaseEvent`, so a snake_case key that reaches
 `createEventActions` is a bug and the check reports it.
 
-The check runs on what you construct. An event rehydrated from storage is cast,
-not constructed, so a stored event is not validated.
+The check guards what you construct in the process, and only that. An event
+rehydrated from storage is cast by `transformToCamelCaseEvent`, never built by
+`createEventActions`, so a stored event carrying an unknown key still passes.
 
 ## Compaction
 
@@ -88,18 +89,10 @@ const compaction: EventCompaction = {
 const actions = createEventActions({compaction});
 ```
 
-`startTimestamp` and `endTimestamp` use the unit of `Event.timestamp`,
-milliseconds since the epoch. Python records seconds there, and neither side
-converts.
-
-`createEventActions` rejects a compaction that is not an object, that misses a
-field, that holds a non-finite timestamp, or that carries a key
-`EventCompaction` does not declare:
-
-```js
-createEventActions({compaction: {startTimestamp: 1000, endTimestamp: '2000'}});
-// InputValidationError: compaction.endTimestamp must be a finite number.
-```
+The timestamps carry whatever unit the writer used. Nothing in adk-js reads
+them and neither SDK converts them, so read them in the writer's unit:
+`google/adk-python` documents seconds, while `Event.timestamp` here is in
+milliseconds.
 
 The field survives `transformToSnakeCaseEvent` and `transformToCamelCaseEvent`
 in both directions, including the argument keys of a tool call inside the
@@ -107,5 +100,5 @@ summary: `args` and `response` payloads keep their spelling, while `Content`'s
 own keys convert.
 
 This SDK's own compaction pipeline uses `CompactedEvent` instead, and reads
-nothing from this field. `compaction` is here so a compaction written by a
-Python runner survives a round trip through adk-js.
+nothing from this field. `compaction` is an opaque passthrough, so an event
+that carries one survives a round trip through adk-js unchanged.

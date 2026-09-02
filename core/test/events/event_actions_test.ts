@@ -327,55 +327,6 @@ describe('createEventActions compaction', () => {
     const actions = createEventActions({compaction});
     expect(actions.compaction).toEqual(compaction);
   });
-
-  const malformed: Array<[string, unknown]> = [
-    ['a string', 'compacted'],
-    ['an array', []],
-    [
-      'a missing startTimestamp',
-      {endTimestamp: 2000, compactedContent: {role: 'model'}},
-    ],
-    [
-      'a non-numeric endTimestamp',
-      {startTimestamp: 1000, endTimestamp: '2000', compactedContent: {}},
-    ],
-    [
-      'a non-finite endTimestamp',
-      {startTimestamp: 1000, endTimestamp: Number.NaN, compactedContent: {}},
-    ],
-    ['a missing compactedContent', {startTimestamp: 1000, endTimestamp: 2000}],
-    [
-      'an array compactedContent',
-      {startTimestamp: 1000, endTimestamp: 2000, compactedContent: []},
-    ],
-    ['an unknown key', {...createTestCompaction(), compactedText: 'oops'}],
-  ];
-
-  it.each(malformed)('rejects a compaction with %s', (_label, compaction) => {
-    expect(() => createEventActions(untypedActions({compaction}))).toThrow(
-      InputValidationError,
-    );
-  });
-
-  it('names the offending compaction field in the message', () => {
-    expect(() =>
-      createEventActions(
-        untypedActions({
-          compaction: {...createTestCompaction(), endTimestamp: 'later'},
-        }),
-      ),
-    ).toThrow('compaction.endTimestamp must be a finite number.');
-  });
-
-  it('names the offending key inside a compaction', () => {
-    expect(() =>
-      createEventActions(
-        untypedActions({
-          compaction: {...createTestCompaction(), compactedText: 'oops'},
-        }),
-      ),
-    ).toThrow('compaction received unknown key(s): compactedText.');
-  });
 });
 
 describe('createEventActions unknown keys', () => {
