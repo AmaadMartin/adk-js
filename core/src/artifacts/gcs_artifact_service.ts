@@ -18,6 +18,7 @@ import {loadOptionalPeer} from '../utils/optional_peer.js';
 
 import {
   ArtifactScope,
+  isArtifactRef,
   isArtifactUri,
   parseArtifactUri,
   ParsedArtifactUri,
@@ -161,7 +162,7 @@ export class GcsArtifactService implements BaseArtifactService {
           'Artifact fileData must have a fileUri.',
         );
       }
-      if (isArtifactUri(fileUri)) {
+      if (isArtifactRef(request.artifact)) {
         referenceTarget(request, fileUri);
       }
       // Store the URI and mime_type (if any) as blob metadata; no content to upload.

@@ -5,10 +5,12 @@
  */
 
 import {InputValidationError} from '@google/adk';
+import {Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 import {
   ParsedArtifactUri,
+  isArtifactRef,
   isArtifactUri,
   parseArtifactUri,
   validateArtifactReferenceScope,
@@ -96,6 +98,36 @@ describe('isArtifactUri', () => {
     ['a scheme that merely starts the same way', 'artifacts://apps/a'],
   ])('rejects %s', (_name, uri) => {
     expect(isArtifactUri(uri)).toBe(false);
+  });
+});
+
+describe('isArtifactRef', () => {
+  it('accepts a part carrying an artifact URI', () => {
+    expect(
+      isArtifactRef({
+        fileData: {
+          fileUri:
+            'artifact://apps/a/users/u/sessions/s/artifacts/f/versions/1',
+          mimeType: 'text/plain',
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it.each<[string, Part]>([
+    ['a text part', {text: 'hello'}],
+    [
+      'an inline data part',
+      {inlineData: {data: 'MTIz', mimeType: 'text/plain'}},
+    ],
+    [
+      'an external file part',
+      {fileData: {fileUri: 'http://example.com', mimeType: 'text/plain'}},
+    ],
+    ['a file part without a URI', {fileData: {}}],
+    ['an empty part', {}],
+  ])('rejects %s', (_name, part) => {
+    expect(isArtifactRef(part)).toBe(false);
   });
 });
 

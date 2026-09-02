@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {FileData, Part} from '@google/genai';
+
 import {InputValidationError} from '../errors/input_validation_error.js';
 
 /** The result of parsing an artifact URI. */
@@ -14,6 +16,11 @@ export interface ParsedArtifactUri {
   sessionId?: string;
   filename: string;
   version: number;
+}
+
+/** An artifact that references another artifact. */
+export interface ArtifactRefPart extends Part {
+  fileData: FileData & {fileUri: string};
 }
 
 /** The app, user and session an artifact operation runs under. */
@@ -77,6 +84,17 @@ export function parseArtifactUri(uri: string): ParsedArtifactUri | undefined {
  */
 export function isArtifactUri(uri: string): boolean {
   return uri.startsWith(ARTIFACT_URI_SCHEME);
+}
+
+/**
+ * Reports whether an artifact references another artifact.
+ *
+ * @param artifact The artifact part to check.
+ * @return True when the part carries an `artifact://` file URI.
+ */
+export function isArtifactRef(artifact: Part): artifact is ArtifactRefPart {
+  const fileUri = artifact.fileData?.fileUri;
+  return fileUri !== undefined && isArtifactUri(fileUri);
 }
 
 /**
