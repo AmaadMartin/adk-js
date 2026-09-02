@@ -497,6 +497,30 @@ describe('extractGroundingMetadata', () => {
       extractGroundingMetadata({vertex_ai_grounding_metadata: 'nope'}),
     ).toBeUndefined();
   });
+
+  it.each([
+    ['webSearchQueries', {webSearchQueries: [1, 2]}],
+    ['imageSearchQueries', {imageSearchQueries: 'one'}],
+    ['retrievalQueries', {retrievalQueries: [{}]}],
+    ['googleMapsWidgetContextToken', {googleMapsWidgetContextToken: 7}],
+    ['groundingChunks', {groundingChunks: ['a']}],
+    ['groundingSupports', {groundingSupports: {}}],
+    ['sourceFlaggingUris', {sourceFlaggingUris: [null]}],
+    ['retrievalMetadata', {retrievalMetadata: []}],
+    ['searchEntryPoint', {searchEntryPoint: 'nope'}],
+  ])('drops a payload whose %s has the wrong shape', (_field, payload) => {
+    expect(
+      extractGroundingMetadata({vertex_ai_grounding_metadata: payload}),
+    ).toBeUndefined();
+  });
+
+  it('keeps a field the SDK type does not declare', () => {
+    expect(
+      extractGroundingMetadata({
+        vertex_ai_grounding_metadata: {webSearchQueries: ['a'], future: 1},
+      }),
+    ).toEqual({webSearchQueries: ['a'], future: 1});
+  });
 });
 
 describe('messageToGenerateContentResponse', () => {

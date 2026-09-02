@@ -10,7 +10,6 @@ import {
   FunctionCallingConfigMode,
   FunctionDeclaration,
   Part,
-  Schema,
 } from '@google/genai';
 
 import {base64Decode} from '../utils/env_aware_utils.js';
@@ -20,6 +19,7 @@ import {
   inferMimeTypeFromUri,
   mediaKindFromMimeType,
   normalizeMimeType,
+  UNKNOWN_MIME_TYPE,
 } from '../utils/file_extension_utils.js';
 import {genaiSchemaToJsonSchema} from '../utils/genai_schema_to_json.js';
 import {logger} from '../utils/logger.js';
@@ -75,9 +75,6 @@ const MISSING_TOOL_RESULT_MESSAGE =
 const FALLBACK_USER_TEXT =
   'Handle the requests as specified in the System Instruction.';
 
-/** The MIME type that names no format, which providers reject. */
-const UNKNOWN_MIME_TYPE = 'application/octet-stream';
-
 /** Options that select provider-specific request shaping. */
 export interface ProviderOptions {
   /** The provider name, for example `openai`. */
@@ -123,8 +120,8 @@ export function toJsonValue(value: unknown): JsonValue | undefined {
  * return undefined, because an object always survives the round trip.
  */
 export function toJsonObject(value: object): JsonObject {
-  const parsed: JsonObject = JSON.parse(JSON.stringify(value));
-  return parsed;
+  const parsed = toJsonValue(value);
+  return isJsonObject(parsed) ? parsed : {};
 }
 
 /**
@@ -678,7 +675,7 @@ export function toLiteLlmResponseFormat(
   // names and stringified bounds no provider understands. A schema already
   // written as plain JSON Schema is left alone.
   const jsonSchema = isGenaiDialect(schema)
-    ? toJsonObject(genaiSchemaToJsonSchema(schema as Schema))
+    ? toJsonObject(genaiSchemaToJsonSchema(schema))
     : schema;
 
   if (isLiteLlmGeminiModel(model)) {

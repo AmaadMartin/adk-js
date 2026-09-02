@@ -545,11 +545,7 @@ describe('LiteLlm', () => {
   });
 
   describe('cache control injection points', () => {
-    const cacheConfig: ContextCacheConfig = {
-      cacheIntervals: 10,
-      ttlSeconds: 600,
-      minTokens: 0,
-    };
+    const cacheConfig: ContextCacheConfig = {ttlSeconds: 600, minTokens: 0};
 
     /** Runs one non-streaming call and returns the injection points sent. */
     async function injectionPoints(
@@ -606,6 +602,44 @@ describe('LiteLlm', () => {
         ]);
       },
     );
+
+    it('ignores the prompt size when the request carries no config', async () => {
+      expect(
+        await injectionPoints({cacheableContentsTokenCount: 10_000}),
+      ).toBeUndefined();
+    });
+
+    it('treats a prompt size of zero as a size, not an absent one', async () => {
+      expect(
+        await injectionPoints({
+          cacheConfig: {...cacheConfig, minTokens: 1},
+          cacheableContentsTokenCount: 0,
+        }),
+      ).toBeUndefined();
+    });
+
+    it('asks for the default cache at a lifetime of one second', async () => {
+      const points = await injectionPoints({
+        cacheConfig: {...cacheConfig, ttlSeconds: 1},
+      });
+
+      expect(points?.[0].control).toEqual({type: 'ephemeral'});
+    });
+
+    it('leaves the cache fields it read on the request untouched', async () => {
+      const config = {...cacheConfig, minTokens: 5000};
+      const llmRequest = request({
+        cacheConfig: config,
+        cacheableContentsTokenCount: 10,
+      });
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({model: 'anthropic/claude-sonnet-4', client});
+
+      await collect(model.generateContentAsync(llmRequest));
+
+      expect(llmRequest.cacheConfig).toEqual(config);
+      expect(llmRequest.cacheableContentsTokenCount).toBe(10);
+    });
 
     it('sends no points below the configured minimum token count', async () => {
       expect(

@@ -149,7 +149,7 @@ const llmRequest: LlmRequest = {
   contents: [{role: 'user', parts: [{text: 'Summarize the document.'}]}],
   liveConnectConfig: {},
   toolsDict: {},
-  cacheConfig: {cacheIntervals: 10, ttlSeconds: 3600, minTokens: 0},
+  cacheConfig: {ttlSeconds: 3600, minTokens: 0},
 };
 
 let answer = '';

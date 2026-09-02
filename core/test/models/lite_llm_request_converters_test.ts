@@ -33,7 +33,11 @@ import {
   toLiteLlmResponseFormat,
   toLiteLlmRole,
 } from '../../src/models/lite_llm_request_converters.js';
-import {ChatMessage, JsonObject} from '../../src/models/lite_llm_types.js';
+import {
+  ChatMessage,
+  JsonObject,
+  JsonValue,
+} from '../../src/models/lite_llm_types.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
 
 const OPENAI: ProviderOptions = {provider: 'openai', model: 'openai/gpt-4o'};
@@ -42,6 +46,22 @@ const VERTEX_GEMINI: ProviderOptions = {
   provider: 'vertex_ai',
   model: 'vertex_ai/gemini-2.5-flash',
 };
+
+/** Narrows a JSON value to an object, failing the test when it is not one. */
+function asObject(value: JsonValue | undefined): JsonObject {
+  if (!isJsonObject(value)) {
+    return expect.fail(`expected an object, got ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+/** Narrows a JSON value to an array of objects, failing the test otherwise. */
+function asObjectArray(value: JsonValue | undefined): JsonObject[] {
+  if (!Array.isArray(value)) {
+    return expect.fail(`expected an array, got ${JSON.stringify(value)}`);
+  }
+  return value.map(asObject);
+}
 
 /** Encodes text the way `inlineData.data` carries it. */
 function base64(text: string): string {
@@ -798,6 +818,11 @@ describe('toJsonObject', () => {
   it('drops values JSON cannot represent', () => {
     expect(toJsonObject({a: undefined, b: () => 1, c: 1})).toEqual({c: 1});
   });
+
+  it('returns an empty object for a value that is not one', () => {
+    expect(toJsonObject([1, 2])).toEqual({});
+    expect(toJsonObject(new Date(0))).toEqual({});
+  });
 });
 
 describe('functionDeclarationToToolParam', () => {
@@ -919,16 +944,16 @@ describe('enforceStrictOpenAiSchema', () => {
     };
     enforceStrictOpenAiSchema(schema);
 
-    const properties = schema['properties'] as JsonObject;
-    expect((properties['nested'] as JsonObject)['required']).toEqual(['x']);
-    const list = properties['list'] as JsonObject;
-    expect((list['items'] as JsonObject)['additionalProperties']).toBe(false);
-    const choice = properties['choice'] as JsonObject;
+    const properties = asObject(schema['properties']);
+    expect(asObject(properties['nested'])['required']).toEqual(['x']);
+    const list = asObject(properties['list']);
+    expect(asObject(list['items'])['additionalProperties']).toBe(false);
+    const choice = asObject(properties['choice']);
     expect(choice['default']).toBeNull();
-    expect((choice['anyOf'] as JsonObject[])[0]['required']).toEqual(['z']);
-    expect(
-      ((schema['$defs'] as JsonObject)['Extra'] as JsonObject)['required'],
-    ).toEqual(['w']);
+    expect(asObjectArray(choice['anyOf'])[0]['required']).toEqual(['z']);
+    expect(asObject(asObject(schema['$defs'])['Extra'])['required']).toEqual([
+      'w',
+    ]);
   });
 
   it('strips the siblings of a $ref', () => {
@@ -937,7 +962,7 @@ describe('enforceStrictOpenAiSchema', () => {
       properties: {ref: {$ref: '#/$defs/Extra', description: 'dropped'}},
     };
     enforceStrictOpenAiSchema(schema);
-    expect((schema['properties'] as JsonObject)['ref']).toEqual({
+    expect(asObject(schema['properties'])['ref']).toEqual({
       $ref: '#/$defs/Extra',
     });
   });
@@ -995,7 +1020,7 @@ describe('toLiteLlmResponseFormat', () => {
 
   it('defaults the schema name when the schema has no title', () => {
     const format = toLiteLlmResponseFormat({type: 'object'}, 'azure/gpt-4o');
-    expect((format?.['json_schema'] as JsonObject)['name']).toBe('response');
+    expect(asObject(format?.['json_schema'])['name']).toBe('response');
   });
 
   it('uses the gemini response_schema shape', () => {

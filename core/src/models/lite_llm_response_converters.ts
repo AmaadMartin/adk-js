@@ -21,6 +21,8 @@ import {
 import {isJsonObject} from './lite_llm_request_converters.js';
 import {
   ChatMessage,
+  JsonObject,
+  JsonValue,
   MessageContent,
   ModelResponse,
   ModelResponseStream,
@@ -517,6 +519,45 @@ export function extractUsageMetadata(usage: Usage): LiteLlmUsageMetadata {
   return metadata;
 }
 
+/** Returns true when every member of `value` is a string. */
+function isStringArray(value: JsonValue): boolean {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === 'string')
+  );
+}
+
+/** Returns true when every member of `value` is a plain object. */
+function isObjectArray(value: JsonValue): boolean {
+  return Array.isArray(value) && value.every(isJsonObject);
+}
+
+/**
+ * The shape each field of {@link GroundingMetadata} must have. A provider is
+ * free to send fields the SDK does not declare, so an unlisted field passes.
+ */
+const GROUNDING_METADATA_FIELDS: Record<string, (value: JsonValue) => boolean> =
+  {
+    imageSearchQueries: isStringArray,
+    webSearchQueries: isStringArray,
+    retrievalQueries: isStringArray,
+    googleMapsWidgetContextToken: (value) => typeof value === 'string',
+    groundingChunks: isObjectArray,
+    groundingSupports: isObjectArray,
+    sourceFlaggingUris: isObjectArray,
+    retrievalMetadata: isJsonObject,
+    searchEntryPoint: isJsonObject,
+  };
+
+/** Reports whether a payload matches every field the SDK type declares. */
+function isGroundingMetadata(
+  value: JsonObject,
+): value is JsonObject & GroundingMetadata {
+  return Object.entries(GROUNDING_METADATA_FIELDS).every(([field, isValid]) => {
+    const fieldValue = value[field];
+    return fieldValue === undefined || isValid(fieldValue);
+  });
+}
+
 /**
  * Pulls Gemini grounding metadata off a response or stream chunk.
  *
@@ -533,10 +574,8 @@ export function extractGroundingMetadata(
   if (Array.isArray(raw)) {
     raw = raw.length > 0 ? raw[0] : undefined;
   }
-  if (isJsonObject(raw)) {
-    // Every field of `GroundingMetadata` is optional, so any plain object is a
-    // structurally valid value. The payload is not checked field by field.
-    return raw as GroundingMetadata;
+  if (isJsonObject(raw) && isGroundingMetadata(raw)) {
+    return raw;
   }
   logger.warn(
     'LiteLlm: vertex_ai_grounding_metadata did not match the' +

@@ -47,7 +47,6 @@ import {
 } from './lite_llm_types.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
-import {resolveCacheConfig, useOneHourTtl} from './prompt_cache.js';
 
 /**
  * Keys a caller may not set through `additionalArgs`: the class owns them, and
@@ -62,6 +61,13 @@ const TRUNCATED_TOOL_CALL_MESSAGE =
 
 /** Milliseconds per second, for the `HttpOptions.timeout` conversion. */
 const MILLISECONDS_PER_SECOND = 1000;
+
+/**
+ * The longest prefix cache a provider offers is an hour, and it costs more to
+ * write than the short-lived default. Only a configured lifetime of at least
+ * an hour is worth that price.
+ */
+const ONE_HOUR_TTL_SECONDS = 3600;
 
 /** Constructor parameters for {@link LiteLlm}. */
 export interface LiteLlmParams {
@@ -496,6 +502,38 @@ function applyHttpOptions(
 }
 
 /**
+ * Returns the cache config governing this request, or undefined to not cache.
+ *
+ * `minTokens` gates on the previous turn's measured prompt size. That size is
+ * unknown on the first turn, where marking a prefix costs nothing beyond
+ * writing the cache.
+ *
+ * @param llmRequest Request whose cache configuration is being resolved. It is
+ *   read, never modified.
+ */
+function resolveCacheConfig(
+  llmRequest: LlmRequest,
+): ContextCacheConfig | undefined {
+  const cacheConfig = llmRequest.cacheConfig;
+  if (!cacheConfig) {
+    return undefined;
+  }
+  const previousPromptTokens = llmRequest.cacheableContentsTokenCount;
+  if (
+    previousPromptTokens !== undefined &&
+    previousPromptTokens < cacheConfig.minTokens
+  ) {
+    logger.debug(
+      `Skipping cache breakpoints: the previous prompt of ` +
+        `${previousPromptTokens} tokens is below the configured minimum of ` +
+        `${cacheConfig.minTokens}.`,
+    );
+    return undefined;
+  }
+  return cacheConfig;
+}
+
+/**
  * Describes the prefix LiteLLM should mark as cacheable.
  *
  * The system instruction is one point, because it is the stable head of the
@@ -507,11 +545,10 @@ function applyHttpOptions(
 function cacheControlInjectionPoints(
   cacheConfig: ContextCacheConfig,
 ): CacheControlInjectionPoint[] {
-  const control: CacheControlInjectionPoint['control'] = useOneHourTtl(
-    cacheConfig,
-  )
-    ? {type: 'ephemeral', ttl: '1h'}
-    : {type: 'ephemeral'};
+  const control: CacheControlInjectionPoint['control'] =
+    cacheConfig.ttlSeconds >= ONE_HOUR_TTL_SECONDS
+      ? {type: 'ephemeral', ttl: '1h'}
+      : {type: 'ephemeral'};
   return [
     {location: 'message', role: 'system', control},
     {location: 'message', index: -1, control},

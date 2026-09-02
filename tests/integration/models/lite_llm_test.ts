@@ -5,8 +5,10 @@
  */
 
 import {
+  App,
   BaseTool,
   FunctionTool,
+  InMemoryRunner,
   LiteLlm,
   LlmAgent,
   LlmRequest,
@@ -373,7 +375,7 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
 
     await collectResponses(model, {
       ...textRequest('Summarize the document.'),
-      cacheConfig: {cacheIntervals: 10, ttlSeconds: 3600, minTokens: 0},
+      cacheConfig: {ttlSeconds: 3600, minTokens: 0},
     });
 
     expect(endpoint.requests[0]['cache_control_injection_points']).toEqual([
@@ -384,6 +386,52 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
       },
       {location: 'message', index: -1, control: {type: 'ephemeral', ttl: '1h'}},
     ]);
+  });
+
+  it('sends the injection points an App configured', async () => {
+    endpoint = await startEndpoint([textReply('Cached.')]);
+
+    const app = new App({
+      name: 'cached_app',
+      rootAgent: new LlmAgent({
+        name: 'cached_agent',
+        model: new LiteLlm({
+          model: 'anthropic/claude-sonnet-4',
+          apiBase: endpoint.apiBase,
+        }),
+        instruction: 'You are a helpful assistant.',
+      }),
+      contextCacheConfig: {ttlSeconds: 1800, minTokens: 0},
+    });
+    const runner = new InMemoryRunner({app, appName: app.name});
+    const session = await runner.sessionService.createSession({
+      appName: app.name,
+      userId: 'user',
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: 'user',
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'Summarize.'}]},
+    })) {
+      // Drain the run so the request reaches the endpoint.
+    }
+
+    expect(endpoint.requests[0]['cache_control_injection_points']).toEqual([
+      {location: 'message', role: 'system', control: {type: 'ephemeral'}},
+      {location: 'message', index: -1, control: {type: 'ephemeral'}},
+    ]);
+  });
+
+  it('sends no injection points when the App configures no cache', async () => {
+    endpoint = await startEndpoint([textReply('Hi.')]);
+
+    const text = await runAgent(agentFor(endpoint.apiBase), 'Say hello.');
+
+    expect(text).toBe('Hi.');
+    expect(endpoint.requests[0]).not.toHaveProperty(
+      'cache_control_injection_points',
+    );
   });
 
   it('sends the tracking headers as HTTP headers to a vertex model', async () => {
