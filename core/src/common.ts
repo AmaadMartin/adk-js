@@ -339,8 +339,8 @@ export {
 export type {IntentMismatchReason} from './tools/tool_confirmation.js';
 export {URL_CONTEXT, UrlContextTool} from './tools/url_context_tool.js';
 export {
-  isVertexAiSearchTool,
   VertexAiSearchTool,
+  isVertexAiSearchTool,
 } from './tools/vertex_ai_search_tool.js';
 export type {
   DataStoreParams,
