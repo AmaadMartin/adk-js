@@ -7,9 +7,12 @@
 import {FunctionDeclaration} from '@google/genai';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
+import {
+  FeatureName,
+  isFeatureEnabled,
+} from '../../features/feature_registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
-import {asJsonObject} from '../../utils/json_utils.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {ToolAuthHandler} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
@@ -17,6 +20,9 @@ import {RestApiTool} from '../openapi_tool/rest_api_tool.js';
 
 /** Body field carrying the end-user credential to the connector. */
 const DYNAMIC_AUTH_CONFIG_FIELD = 'dynamic_auth_config';
+
+/** Key the connector reads the end-user access token from. */
+const DYNAMIC_AUTH_TOKEN_KEY = 'oauth2_auth_code_flow.access_token';
 
 /**
  * Argument names this tool sets itself. They are hidden from the model so it
@@ -34,13 +40,16 @@ const EXCLUDE_FIELDS = [
 ];
 
 /**
- * Argument names the connector defaults, so the model may omit them.
- * `executeCustomQueryRequest` is the only builder that marks one required.
+ * Argument names the connector defaults, so the model may omit them. They stay
+ * in the declared properties and lose only their `required` status.
+ *
+ * `sortByColumns` is camelCase in adk-python's list and in the generated
+ * connector spec, so it is copied as it stands.
+ *
+ * `executeCustomQueryRequest` is the only builder here that marks one of these
+ * required, so the other names free nothing today and are kept for parity.
  */
-const OPTIONAL_FIELDS = ['page_size'];
-
-/** Key the connector reads the end-user access token from. */
-const DYNAMIC_AUTH_TOKEN_KEY = 'oauth2_auth_code_flow.access_token';
+const OPTIONAL_FIELDS = ['page_size', 'page_token', 'filter', 'sortByColumns'];
 
 /** Options accepted by {@link IntegrationConnectorTool}. */
 export interface IntegrationConnectorToolOptions {
@@ -105,19 +114,20 @@ export class IntegrationConnectorTool extends BaseTool {
 
   @experimental
   override _getDeclaration(): FunctionDeclaration {
-    const schema = this.options.restApiTool.getJsonSchema();
-    const properties = asJsonObject(schema['properties']);
-    if (properties) {
-      for (const field of EXCLUDE_FIELDS) {
-        delete properties[field];
-      }
-    }
-    const required = schema['required'];
-    if (Array.isArray(required)) {
-      schema['required'] = required.filter(
-        (field) =>
-          !OPTIONAL_FIELDS.includes(field) && !EXCLUDE_FIELDS.includes(field),
-      );
+    const raw = this.options.restApiTool.getJsonSchema();
+    const schema = {
+      ...raw,
+      type: 'object' as const,
+      properties: modelProperties(raw['properties']),
+      required: modelRequired(raw['required']),
+    };
+
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.name,
+        description: this.description,
+        parametersJsonSchema: schema,
+      };
     }
     return {
       name: this.name,
@@ -172,4 +182,79 @@ export class IntegrationConnectorTool extends BaseTool {
     );
     return options.restApiTool.runAsync({args: callArgs, toolContext});
   }
+
+  /** Renders the tool for string interpolation. Never renders a credential. */
+  override toString(): string {
+    const {connectionName, entity, operation, action} = this.options;
+    return (
+      `ApplicationIntegrationTool(name="${this.name}", ` +
+      `description="${this.description}", ` +
+      `connection_name="${connectionName}", entity="${entity}", ` +
+      `operation="${operation}", action="${action}")`
+    );
+  }
+
+  /**
+   * Renders the tool for `util.inspect` and a debugger. Never renders a
+   * credential.
+   *
+   * @returns The fields {@link toString} renders, plus the connection host,
+   *   the service directory and the name of the wrapped tool.
+   */
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    const {
+      connectionName,
+      connectionHost,
+      connectionServiceName,
+      entity,
+      operation,
+      action,
+      restApiTool,
+    } = this.options;
+    return (
+      `ApplicationIntegrationTool(name="${this.name}", ` +
+      `description="${this.description}", ` +
+      `connection_name="${connectionName}", ` +
+      `connection_host="${connectionHost}", ` +
+      `connection_service_name="${connectionServiceName}", ` +
+      `entity="${entity}", operation="${operation}", ` +
+      `action="${action}", rest_api_tool="${restApiTool.name}")`
+    );
+  }
+}
+
+/**
+ * Returns the schema properties the model may fill, given the `properties` a
+ * generated connector spec declared.
+ */
+function modelProperties(rawProperties: unknown): Record<string, unknown> {
+  if (typeof rawProperties !== 'object' || rawProperties === null) {
+    return {};
+  }
+  const kept: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(rawProperties)) {
+    if (!EXCLUDE_FIELDS.includes(name)) {
+      kept[name] = value;
+    }
+  }
+  return kept;
+}
+
+/**
+ * Returns the argument names the model must supply, given the `required` list
+ * a generated connector spec declared.
+ *
+ * `OperationParser` reports no list at all when the operation requires
+ * nothing, which reads here as an empty list.
+ */
+function modelRequired(rawRequired: unknown): string[] {
+  if (!Array.isArray(rawRequired)) {
+    return [];
+  }
+  return rawRequired.filter(
+    (field): field is string =>
+      typeof field === 'string' &&
+      !OPTIONAL_FIELDS.includes(field) &&
+      !EXCLUDE_FIELDS.includes(field),
+  );
 }

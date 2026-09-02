@@ -9,14 +9,50 @@ import {
   AuthCredentialTypes,
   Context,
   createSession,
+  FeatureName,
   IntegrationConnectorTool,
   IntegrationConnectorToolOptions,
   InvocationContext,
   PluginManager,
   RestApiTool,
+  withTemporaryFeatureOverride,
 } from '@google/adk';
+import {inspect} from 'node:util';
 import {OpenAPIV3} from 'openapi-types';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+
+/**
+ * The argument schema adk-python's reference test mocks its parser with. The
+ * property names are already snake-cased, as `OperationParser` emits them.
+ */
+const REFERENCE_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    user_id: {type: 'string', description: 'User ID'},
+    connection_name: {type: 'string'},
+    host: {type: 'string'},
+    service_name: {type: 'string'},
+    entity: {type: 'string'},
+    operation: {type: 'string'},
+    action: {type: 'string'},
+    page_size: {type: 'integer'},
+    filter: {type: 'string'},
+  },
+  required: ['user_id', 'page_size', 'filter', 'connection_name'],
+};
+
+/** A schema that marks every connector-defaulted argument required. */
+const ALL_OPTIONAL_FIELDS_REQUIRED_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    user_id: {type: 'string'},
+    page_size: {type: 'integer'},
+    page_token: {type: 'string'},
+    filter: {type: 'string'},
+    sortByColumns: {type: 'array', items: {type: 'string'}},
+  },
+  required: ['user_id', 'page_size', 'page_token', 'filter', 'sortByColumns'],
+};
 
 /**
  * The request schema of a generated `ExecuteConnection` operation, cut down to
@@ -56,6 +92,16 @@ const BEARER_SCHEME: OpenAPIV3.SecuritySchemeObject = {
   scheme: 'bearer',
 };
 
+const EXCLUDED_FIELDS = [
+  'connection_name',
+  'service_name',
+  'host',
+  'entity',
+  'operation',
+  'action',
+  'dynamic_auth_config',
+];
+
 function createWrappedTool(): RestApiTool {
   // The constructor, not `createRestApiTool`, because the parameters come from
   // the operation here and a caller-supplied list would replace them.
@@ -75,6 +121,19 @@ function createWrappedTool(): RestApiTool {
       responses: {},
     },
   );
+}
+
+/**
+ * A wrapped tool reporting `schema` as its argument schema.
+ *
+ * `getJsonSchema` is public, so a declaration test pins the exact schema the
+ * tool prunes without reaching into the parser. It is also the only way to
+ * declare `sortByColumns`, which a real `OperationParser` would snake-case.
+ */
+function createToolWithSchema(schema: Record<string, unknown>): RestApiTool {
+  const restApiTool = createWrappedTool();
+  restApiTool.getJsonSchema = vi.fn().mockReturnValue(schema);
+  return restApiTool;
 }
 
 function createTool(overrides: Partial<IntegrationConnectorToolOptions> = {}): {
@@ -103,15 +162,15 @@ function bearer(token: string): AuthCredential {
   };
 }
 
-/** Reads the dynamic auth config the delegated call carried on `callIndex`. */
-function sentDynamicAuthConfig(
+/** Reads the arguments the delegated call carried on `callIndex`. */
+function sentArgs(
   delegated: ReturnType<typeof vi.fn>,
   callIndex: number,
-): unknown {
+): Record<string, unknown> {
   const [{args}] = delegated.mock.calls[callIndex] as [
     {args: Record<string, unknown>},
   ];
-  return args['dynamic_auth_config'];
+  return args;
 }
 
 /** A tool context with empty session state. */
@@ -166,18 +225,12 @@ describe('IntegrationConnectorTool', () => {
       const {tool} = createTool({
         restApiTool,
         authScheme: BEARER_SCHEME,
-        authCredential: {
-          authType: AuthCredentialTypes.HTTP,
-          http: {scheme: 'bearer', credentials: {token: 'user-token'}},
-        },
+        authCredential: bearer('user-token'),
       });
 
       await tool.runAsync({args: {}, toolContext: createContext()});
 
-      const [{args}] = delegated.mock.calls[0] as [
-        {args: Record<string, unknown>},
-      ];
-      expect(args['dynamic_auth_config']).toEqual({
+      expect(sentArgs(delegated, 0)['dynamic_auth_config']).toEqual({
         'oauth2_auth_code_flow.access_token': 'user-token',
       });
     });
@@ -194,10 +247,8 @@ describe('IntegrationConnectorTool', () => {
 
       await tool.runAsync({args: {}, toolContext: createContext()});
 
-      const [{args}] = delegated.mock.calls[0] as [
-        {args: Record<string, unknown>},
-      ];
-      expect(args['dynamic_auth_config']).toEqual({
+      // The connector reads an empty object, not null, as "no token supplied".
+      expect(sentArgs(delegated, 0)['dynamic_auth_config']).toEqual({
         'oauth2_auth_code_flow.access_token': {},
       });
     });
@@ -207,10 +258,7 @@ describe('IntegrationConnectorTool', () => {
 
       await tool.runAsync({args: {}, toolContext: createContext()});
 
-      const [{args}] = delegated.mock.calls[0] as [
-        {args: Record<string, unknown>},
-      ];
-      expect(args).not.toHaveProperty('dynamic_auth_config');
+      expect(sentArgs(delegated, 0)).not.toHaveProperty('dynamic_auth_config');
     });
 
     it('returns the pending result and calls nothing while auth is pending', async () => {
@@ -236,10 +284,7 @@ describe('IntegrationConnectorTool', () => {
       const {tool} = createTool({
         restApiTool,
         authScheme: BEARER_SCHEME,
-        authCredential: {
-          authType: AuthCredentialTypes.HTTP,
-          http: {scheme: 'bearer', credentials: {token: 'user-token'}},
-        },
+        authCredential: bearer('user-token'),
       });
       const args = {page_size: 10};
 
@@ -248,6 +293,17 @@ describe('IntegrationConnectorTool', () => {
       // The caller's object is the one recorded on the function-call event, so
       // the access token must never reach it.
       expect(args).toEqual({page_size: 10});
+    });
+
+    it('passes a camelCase argument through untouched', async () => {
+      const {tool} = createTool({restApiTool});
+
+      await tool.runAsync({
+        args: {sortByColumns: ['a', 'b']},
+        toolContext: createContext(),
+      });
+
+      expect(sentArgs(delegated, 0)['sortByColumns']).toEqual(['a', 'b']);
     });
   });
 
@@ -269,10 +325,10 @@ describe('IntegrationConnectorTool', () => {
       expect(copy.description).toBe(tool.description);
       await copy.runAsync({args: {}, toolContext: createContext()});
       await tool.runAsync({args: {}, toolContext: createContext()});
-      expect(sentDynamicAuthConfig(delegated, 0)).toEqual({
+      expect(sentArgs(delegated, 0)['dynamic_auth_config']).toEqual({
         'oauth2_auth_code_flow.access_token': 'exchanged-token',
       });
-      expect(sentDynamicAuthConfig(delegated, 1)).toEqual({
+      expect(sentArgs(delegated, 1)['dynamic_auth_config']).toEqual({
         'oauth2_auth_code_flow.access_token': 'raw-token',
       });
     });
@@ -285,21 +341,98 @@ describe('IntegrationConnectorTool', () => {
   });
 
   describe('_getDeclaration', () => {
-    it('hides the injected fields and keeps timeout required', () => {
+    it('hides the injected fields and frees the connector-defaulted ones', async () => {
+      const {tool} = createTool({
+        restApiTool: createToolWithSchema(REFERENCE_SCHEMA),
+      });
+
+      const declaration = await withTemporaryFeatureOverride(
+        FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+        false,
+        () => tool._getDeclaration(),
+      );
+
+      expect(declaration.name).toBe('list_issues');
+      expect(declaration.description).toBe('Lists issues.');
+      const {properties = {}, required = []} = declaration.parameters ?? {};
+      for (const field of EXCLUDED_FIELDS) {
+        expect(properties).not.toHaveProperty(field);
+        expect(required).not.toContain(field);
+      }
+      expect(properties).toHaveProperty('user_id');
+      expect(properties).toHaveProperty('page_size');
+      expect(properties).toHaveProperty('filter');
+      expect(required).toEqual(['user_id']);
+    });
+
+    it('declares a raw JSON schema when JSON_SCHEMA_FOR_FUNC_DECL is on', async () => {
+      const {tool} = createTool({
+        restApiTool: createToolWithSchema(REFERENCE_SCHEMA),
+      });
+
+      const declaration = await withTemporaryFeatureOverride(
+        FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+        true,
+        () => tool._getDeclaration(),
+      );
+
+      expect(declaration.parameters).toBeUndefined();
+      expect(declaration.parametersJsonSchema).toEqual({
+        type: 'object',
+        properties: {
+          user_id: {type: 'string', description: 'User ID'},
+          page_size: {type: 'integer'},
+          filter: {type: 'string'},
+        },
+        required: ['user_id'],
+      });
+    });
+
+    it('frees every connector-defaulted argument the spec marked required', () => {
+      const {tool} = createTool({
+        restApiTool: createToolWithSchema(ALL_OPTIONAL_FIELDS_REQUIRED_SCHEMA),
+      });
+
+      const {properties = {}, required = []} =
+        tool._getDeclaration().parameters ?? {};
+
+      expect(required).toEqual(['user_id']);
+      for (const field of [
+        'page_size',
+        'page_token',
+        'filter',
+        'sortByColumns',
+      ]) {
+        expect(properties).toHaveProperty(field);
+      }
+    });
+
+    it('reads a spec that declares no properties and no required list', () => {
+      const {tool} = createTool({
+        restApiTool: createToolWithSchema({type: 'object'}),
+      });
+
+      const parameters = tool._getDeclaration().parameters;
+
+      expect(parameters?.properties).toEqual({});
+      expect(parameters?.required).toEqual([]);
+    });
+
+    it('reads a spec whose properties block is null', () => {
+      const {tool} = createTool({
+        restApiTool: createToolWithSchema({type: 'object', properties: null}),
+      });
+
+      expect(tool._getDeclaration().parameters?.properties).toEqual({});
+    });
+
+    it('prunes the schema a real wrapped tool reports', () => {
       const {tool} = createTool();
 
-      const declaration = tool._getDeclaration();
+      const {properties = {}, required = []} =
+        tool._getDeclaration().parameters ?? {};
 
-      const {properties = {}, required = []} = declaration.parameters ?? {};
-      for (const field of [
-        'connection_name',
-        'service_name',
-        'host',
-        'entity',
-        'operation',
-        'action',
-        'dynamic_auth_config',
-      ]) {
+      for (const field of EXCLUDED_FIELDS) {
         expect(properties).not.toHaveProperty(field);
         expect(required).not.toContain(field);
       }
@@ -328,6 +461,49 @@ describe('IntegrationConnectorTool', () => {
       expect(parameters?.properties).toEqual({});
       // `OperationParser` always reports `required`, empty when nothing is.
       expect(parameters?.required).toEqual([]);
+    });
+  });
+
+  describe('debug representations', () => {
+    it('renders the connection identity for string interpolation', () => {
+      const {tool} = createTool({action: 'ExecuteCustomQuery'});
+
+      expect(`${tool}`).toBe(
+        'ApplicationIntegrationTool(name="list_issues", ' +
+          'description="Lists issues.", ' +
+          'connection_name="projects/p/locations/l/connections/jira", ' +
+          'entity="Issues", operation="LIST_ENTITIES", ' +
+          'action="ExecuteCustomQuery")',
+      );
+    });
+
+    it('adds the host, the service directory and the wrapped tool for inspect', () => {
+      const {tool} = createTool({action: 'ExecuteCustomQuery'});
+
+      const rendered = inspect(tool);
+
+      expect(rendered).toContain('connection_host="jira.example.com"');
+      expect(rendered).toContain('connection_service_name="services/jira"');
+      expect(rendered).toContain('rest_api_tool="list_issues"');
+      expect(rendered).toContain(
+        'connection_name="projects/p/locations/l/connections/jira"',
+      );
+      expect(rendered).toContain('entity="Issues"');
+      expect(rendered).toContain('operation="LIST_ENTITIES"');
+      expect(rendered).toContain('action="ExecuteCustomQuery"');
+    });
+
+    it('renders no credential', () => {
+      const {tool} = createTool({
+        authScheme: BEARER_SCHEME,
+        authCredential: bearer('user-token'),
+        credentialKey: 'secret-slot',
+      });
+
+      for (const rendered of [`${tool}`, inspect(tool)]) {
+        expect(rendered).not.toContain('user-token');
+        expect(rendered).not.toContain('secret-slot');
+      }
     });
   });
 });
