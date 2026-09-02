@@ -9,6 +9,7 @@ import {afterEach, describe, expect, it} from 'vitest';
 import {Context} from '../../src/agents/context.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
 import {
+  isVertexAiSearchTool,
   VertexAiSearchTool,
   VertexAiSearchToolParams,
 } from '../../src/tools/vertex_ai_search_tool.js';
@@ -180,6 +181,21 @@ describe('VertexAiSearchTool', () => {
       await tool.processLlmRequest({toolContext, llmRequest});
 
       expect(llmRequest.config?.tools).toHaveLength(1);
+    });
+  });
+
+  describe('isVertexAiSearchTool', () => {
+    it('accepts a VertexAiSearchTool', () => {
+      const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
+      expect(isVertexAiSearchTool(tool)).toBe(true);
+    });
+
+    it('rejects a look-alike object', () => {
+      expect(isVertexAiSearchTool({name: 'vertex_ai_search'})).toBe(false);
+    });
+
+    it('rejects undefined', () => {
+      expect(isVertexAiSearchTool(undefined)).toBe(false);
     });
   });
 });

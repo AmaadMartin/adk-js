@@ -14,9 +14,26 @@ import {
 import {ToolProcessLlmRequest} from './base_tool.js';
 import {BuiltInTool} from './built_in_tool.js';
 
+const GOOGLE_SEARCH_TOOL_SIGNATURE_SYMBOL = Symbol.for(
+  'google.adk.googleSearchTool',
+);
+
 /**
- * Parameters for the {@link GoogleSearchTool} constructor.
+ * Type guard to check if an object is an instance of GoogleSearchTool.
+ * @param obj The object to check.
+ * @returns True if the object is an instance of GoogleSearchTool, false
+ *     otherwise.
  */
+export function isGoogleSearchTool(obj: unknown): obj is GoogleSearchTool {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    GOOGLE_SEARCH_TOOL_SIGNATURE_SYMBOL in obj &&
+    obj[GOOGLE_SEARCH_TOOL_SIGNATURE_SYMBOL] === true
+  );
+}
+
+/** Parameters for the {@link GoogleSearchTool} constructor. */
 export interface GoogleSearchToolParams {
   /**
    * Whether to bypass the multi-tools limitation, so that the tool can be used
@@ -39,6 +56,9 @@ export interface GoogleSearchToolParams {
  * perform local code execution.
  */
 export class GoogleSearchTool extends BuiltInTool {
+  /** A unique symbol to identify ADK Google Search tool class. */
+  readonly [GOOGLE_SEARCH_TOOL_SIGNATURE_SYMBOL] = true;
+
   readonly bypassMultiToolsLimit: boolean;
   readonly model?: string;
 

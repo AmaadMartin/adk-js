@@ -10,6 +10,7 @@ import {
   GOOGLE_SEARCH,
   GoogleSearchTool,
   InvocationContext,
+  isGoogleSearchTool,
   LlmAgent,
   LlmRequest,
   PluginManager,
@@ -382,5 +383,30 @@ describe('GoogleSearchTool', () => {
   it('builds GOOGLE_SEARCH with the constructor defaults', () => {
     expect(GOOGLE_SEARCH.bypassMultiToolsLimit).toBe(false);
     expect(GOOGLE_SEARCH.model).toBeUndefined();
+  });
+
+  describe('bypassMultiToolsLimit', () => {
+    it('defaults to false', () => {
+      expect(new GoogleSearchTool().bypassMultiToolsLimit).toBe(false);
+    });
+
+    it('is true when the caller asks for it', () => {
+      const tool = new GoogleSearchTool({bypassMultiToolsLimit: true});
+      expect(tool.bypassMultiToolsLimit).toBe(true);
+    });
+  });
+
+  describe('isGoogleSearchTool', () => {
+    it('accepts a GoogleSearchTool', () => {
+      expect(isGoogleSearchTool(new GoogleSearchTool())).toBe(true);
+    });
+
+    it('rejects a look-alike object', () => {
+      expect(isGoogleSearchTool({name: 'google_search'})).toBe(false);
+    });
+
+    it('rejects undefined', () => {
+      expect(isGoogleSearchTool(undefined)).toBe(false);
+    });
   });
 });
