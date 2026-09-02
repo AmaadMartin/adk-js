@@ -33,6 +33,7 @@ import {
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
   getOrCreateRow,
+  namesSupportedDatabaseBackend,
   validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
@@ -74,30 +75,6 @@ const NEWEST_SESSION_FIRST = {
  */
 const NEWEST_EVENT_FIRST = {timestamp: 'DESC', id: 'DESC'} as const;
 
-const EXACTLY_ONE_SOURCE_MESSAGE =
-  'Exactly one of a database URL, MikroORM options, or a MikroORM instance' +
-  ' must be provided.';
-
-const OPTIONS_WITH_INSTANCE_MESSAGE =
-  'Options cannot be applied to a MikroORM instance the caller already built.' +
-  ' Pass a connection string or an options object instead.';
-
-const LEGACY_READ_ONLY_MESSAGE =
-  'This database uses the legacy v0 session schema, which stores event' +
-  ' actions as a Python pickle. adk-js can read such a database but cannot' +
-  ' write to it. Migrate it with the adk-python `adk migrate session`' +
-  ' command first.';
-
-const LEGACY_CALLER_ORM_MESSAGE =
-  'This database uses the legacy v0 session schema. Reading it needs the' +
-  ' legacy entity set, which this service can only install on a connection it' +
-  ' opened itself. Construct it with a connection string or an options object' +
-  ' rather than a MikroORM instance.';
-
-const LEGACY_EMPTY_ACTIONS_MESSAGE =
-  'Event actions read from a legacy v0 database come back empty, because they' +
-  ' are stored as a Python pickle that adk-js cannot decode.';
-
 /**
  * Reports whether `source` is a MikroORM instance rather than its options.
  *
@@ -117,18 +94,7 @@ function isMikroOrmInstance(
  * @returns True if the URI is a database connection URI, false otherwise.
  */
 export function isDatabaseConnectionString(uri?: string): boolean {
-  if (!uri) {
-    return false;
-  }
-
-  return (
-    uri.startsWith('postgres://') ||
-    uri.startsWith('postgresql://') ||
-    uri.startsWith('mysql://') ||
-    uri.startsWith('mariadb://') ||
-    uri.startsWith('mssql://') ||
-    uri.startsWith('sqlite://')
-  );
+  return !!uri && namesSupportedDatabaseBackend(uri);
 }
 
 /**
@@ -157,7 +123,10 @@ export class DatabaseSessionService extends BaseSessionService {
     super();
 
     if (!source) {
-      throw new Error(EXACTLY_ONE_SOURCE_MESSAGE);
+      throw new Error(
+        'Exactly one of a database URL, MikroORM options, or a MikroORM' +
+          ' instance must be provided.',
+      );
     }
 
     if (typeof source === 'string') {
@@ -171,7 +140,11 @@ export class DatabaseSessionService extends BaseSessionService {
 
     if (isMikroOrmInstance(source)) {
       if (overrides) {
-        throw new Error(OPTIONS_WITH_INSTANCE_MESSAGE);
+        throw new Error(
+          'Options cannot be applied to a MikroORM instance the caller' +
+            ' already built. Pass a connection string or an options object' +
+            ' instead.',
+        );
       }
       this.orm = source;
       this.ownsOrm = false;
@@ -243,7 +216,12 @@ export class DatabaseSessionService extends BaseSessionService {
    */
   private async reopenWithLegacyEntities(): Promise<void> {
     if (!this.ownsOrm) {
-      throw new Error(LEGACY_CALLER_ORM_MESSAGE);
+      throw new Error(
+        'This database uses the legacy v0 session schema. Reading it needs' +
+          ' the legacy entity set, which this service can only install on a' +
+          ' connection it opened itself. Construct it with a connection' +
+          ' string or an options object rather than a MikroORM instance.',
+      );
     }
 
     const previous = this.orm!;
@@ -259,7 +237,12 @@ export class DatabaseSessionService extends BaseSessionService {
   /** Throws when the open database is one adk-js can only read. */
   private assertWritable(): void {
     if (this.legacySchema) {
-      throw new Error(LEGACY_READ_ONLY_MESSAGE);
+      throw new Error(
+        'This database uses the legacy v0 session schema, which stores event' +
+          ' actions as a Python pickle. adk-js can read such a database but' +
+          ' cannot write to it. Migrate it with the adk-python' +
+          ' `adk migrate session` command first.',
+      );
     }
   }
 
@@ -268,7 +251,12 @@ export class DatabaseSessionService extends BaseSessionService {
       return;
     }
     this.warnedAboutLegacyActions = true;
-    logger.warn(LEGACY_EMPTY_ACTIONS_MESSAGE);
+    logger.warn(
+      'Event actions read from a legacy v0 database come back empty, because' +
+        ' they are stored as a Python pickle that adk-js cannot decode.' +
+        ' Migrate the database with the adk-python `adk migrate session`' +
+        ' command.',
+    );
   }
 
   /** Reads a session's events, newest first, then restores their order. */
@@ -284,33 +272,28 @@ export class DatabaseSessionService extends BaseSessionService {
       return [];
     }
 
-    const limit = config?.numRecentEvents;
     const afterTimestamp = config?.afterTimestamp;
+    const where = {
+      appName,
+      userId,
+      sessionId,
+      ...(afterTimestamp === undefined
+        ? {}
+        : {timestamp: {$gte: new Date(afterTimestamp)}}),
+    };
+    const options = {
+      orderBy: NEWEST_EVENT_FIRST,
+      limit: config?.numRecentEvents,
+    };
 
     if (this.legacySchema) {
-      const where: FilterQuery<StorageEventV0> = {appName, userId, sessionId};
-      if (afterTimestamp !== undefined) {
-        where.timestamp = {$gte: new Date(afterTimestamp)};
-      }
-      const rows = await em.find(StorageEventV0, where, {
-        orderBy: NEWEST_EVENT_FIRST,
-        limit,
-      });
-      rows.reverse();
       this.warnAboutLegacyActionsOnce();
-      return rows.map(storageEventV0ToEvent);
+      const rows = await em.find(StorageEventV0, where, options);
+      return rows.reverse().map(storageEventV0ToEvent);
     }
 
-    const where: FilterQuery<StorageEvent> = {appName, userId, sessionId};
-    if (afterTimestamp !== undefined) {
-      where.timestamp = {$gte: new Date(afterTimestamp)};
-    }
-    const rows = await em.find(StorageEvent, where, {
-      orderBy: NEWEST_EVENT_FIRST,
-      limit,
-    });
-    rows.reverse();
-    return rows.map((row) => row.eventData);
+    const rows = await em.find(StorageEvent, where, options);
+    return rows.reverse().map((row) => row.eventData);
   }
 
   async createSession({

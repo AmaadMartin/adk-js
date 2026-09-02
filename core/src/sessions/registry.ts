@@ -10,7 +10,6 @@ import {
   DatabaseSessionService,
   isDatabaseConnectionString,
 } from './database_session_service.js';
-import {namesSupportedDatabaseBackend} from './db/operations.js';
 import {
   InMemorySessionService,
   isInMemoryConnectionString,
@@ -25,11 +24,10 @@ export function getSessionServiceFromUri(uri: string): BaseSessionService {
     return new InMemorySessionService();
   }
 
-  // A driver-suffixed URL such as `postgresql+asyncpg://` is not one adk-js
-  // accepts, but it does name a database backend. Routing it here lets the
-  // service explain the suffix, rather than reporting that no session service
-  // claims the URI.
-  if (isDatabaseConnectionString(uri) || namesSupportedDatabaseBackend(uri)) {
+  // This claims a driver-suffixed URL such as `postgresql+asyncpg://` too, so
+  // the service explains the suffix rather than the registry reporting that no
+  // session service takes the URI.
+  if (isDatabaseConnectionString(uri)) {
     return new DatabaseSessionService(uri);
   }
 

@@ -12,7 +12,6 @@ import {
   Options as MikroORMOptions,
   RequiredEntityData,
 } from '@mikro-orm/core';
-import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {
@@ -26,11 +25,6 @@ import {
   SCHEMA_VERSION_KEY,
   StorageMetadata,
 } from './schema.js';
-
-const SQLITE_BACKEND = 'sqlite';
-const SQLITE_SCHEME_PREFIX = 'sqlite://';
-const SQLITE_MEMORY_URI = 'sqlite://:memory:';
-const SQLITE_MEMORY_DB_NAME = ':memory:';
 
 /** Describes the optional driver peer backing a connection-string scheme. */
 function driverPeer(packageName: string, scheme: string) {
@@ -227,7 +221,7 @@ async function deriveConnectionOptionsFromUri(
   const {backend} = schemeOf(uri);
   const driver = await DRIVER_LOADERS[backend]();
 
-  if (backend !== SQLITE_BACKEND) {
+  if (backend !== 'sqlite') {
     return {
       entities: ENTITIES,
       clientUrl: uri,
@@ -236,12 +230,10 @@ async function deriveConnectionOptionsFromUri(
     } as MikroORMOptions;
   }
 
-  const isMemory = uri === SQLITE_MEMORY_URI;
+  const isMemory = uri === 'sqlite://:memory:';
   const options = {
     entities: ENTITIES,
-    dbName: isMemory
-      ? SQLITE_MEMORY_DB_NAME
-      : uri.substring(SQLITE_SCHEME_PREFIX.length),
+    dbName: isMemory ? ':memory:' : uri.substring('sqlite://'.length),
     driver,
     driverOptions: {pool: {afterCreate: enableSqliteForeignKeys}},
   } as MikroORMOptions;
@@ -359,12 +351,6 @@ export async function detectDatabaseSchemaVersion(
   );
 
   if (hasActions && !hasEventData) {
-    logger.warn(
-      'This database uses the legacy v0 session schema, which stores event' +
-        ' actions as a Python pickle. adk-js can read such a database but' +
-        ' cannot write to it. Migrate it with the adk-python' +
-        ' `adk migrate session` command.',
-    );
     return SCHEMA_VERSION_0_PICKLE;
   }
 

@@ -29,7 +29,6 @@ import {
   StorageMetadata,
 } from '../../../src/sessions/db/schema.js';
 import {ENTITIES_V0} from '../../../src/sessions/db/schema_v0.js';
-import {logger} from '../../../src/utils/logger.js';
 
 // Mock dynamic imports for drivers that might not be installed in dev
 vi.mock('@mikro-orm/postgresql', () => ({
@@ -507,15 +506,10 @@ describe('operations', () => {
         allowGlobalContext: true,
       });
       await orm.schema.createSchema();
-      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
 
       await expect(detectDatabaseSchemaVersion(orm)).resolves.toBe(
         SCHEMA_VERSION_0_PICKLE,
       );
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('adk migrate session'),
-      );
-      warn.mockRestore();
     });
   });
 
