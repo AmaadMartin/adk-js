@@ -79,6 +79,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Session state and its scopes](sessions/state/index.md) - Session state and
   the app:, user: and temp: prefixes that decide what is shared and what is
   stored.
+- [User state and temp state](sessions/user_and_temp_state/index.md) - Reading
+  `user:` state without a session id, and how `temp:` state stays readable for
+  one invocation without reaching storage.
 
 ### Tools
 

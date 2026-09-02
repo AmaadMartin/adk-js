@@ -33,6 +33,7 @@ import {
   mergeStates,
   ScopedStateDelta,
   trimTempDeltaState,
+  validateGetSessionConfig,
 } from './base_session_service.js';
 import {
   detectDatabaseSchemaVersion,
@@ -360,6 +361,8 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
+    validateGetSessionConfig(config);
+
     await this.init();
     const em = this.orm!.em.fork();
 
@@ -417,6 +420,20 @@ export class DatabaseSessionService extends BaseSessionService {
       lastUpdateTime: storageSession.updateTime.getTime(),
       storageUpdateMarker: updateMarkerOf(storageSession),
     });
+  }
+
+  override async getUserState({
+    appName,
+    userId,
+  }: GetUserStateRequest): Promise<Record<string, unknown>> {
+    await this.init();
+    const em = this.orm!.em.fork();
+
+    const userStateModel = await em.findOne(StorageUserState, {
+      appName,
+      userId,
+    });
+    return {...(userStateModel?.state ?? {})};
   }
 
   async listSessions({
@@ -533,18 +550,6 @@ export class DatabaseSessionService extends BaseSessionService {
 
     await em.nativeDelete(StorageSession, {appName, userId, id: sessionId});
     await em.nativeDelete(StorageEvent, {appName, userId, sessionId});
-  }
-
-  override async getUserState({
-    appName,
-    userId,
-  }: GetUserStateRequest): Promise<Record<string, unknown>> {
-    await this.init();
-    const storageUserState = await this.orm!.em.fork().findOne(
-      StorageUserState,
-      {appName, userId},
-    );
-    return {...storageUserState?.state};
   }
 
   override async appendEvent({

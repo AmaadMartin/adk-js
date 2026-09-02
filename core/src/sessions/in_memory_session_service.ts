@@ -23,6 +23,7 @@ import {
   ListSessionsResponse,
   mergeStates,
   upsertEvent,
+  validateGetSessionConfig,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
 
@@ -132,6 +133,8 @@ export class InMemorySessionService extends BaseSessionService {
     sessionId,
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
+    validateGetSessionConfig(config);
+
     if (
       !this.sessions[appName] ||
       !this.sessions[appName][userId] ||
@@ -171,6 +174,14 @@ export class InMemorySessionService extends BaseSessionService {
     );
 
     return copiedSession;
+  }
+
+  override async getUserState({
+    appName,
+    userId,
+  }: GetUserStateRequest): Promise<Record<string, unknown>> {
+    // A copy, so a caller cannot reach into the service's store.
+    return {...(this.userState[appName]?.[userId] ?? {})};
   }
 
   listSessions({
@@ -262,13 +273,6 @@ export class InMemorySessionService extends BaseSessionService {
     }
 
     delete this.sessions[appName][userId][sessionId];
-  }
-
-  override async getUserState({
-    appName,
-    userId,
-  }: GetUserStateRequest): Promise<Record<string, unknown>> {
-    return {...(this.userState[appName]?.[userId] ?? {})};
   }
 
   override async appendEvent({

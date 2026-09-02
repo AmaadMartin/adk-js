@@ -6,6 +6,8 @@
 
 import {cloneDeep} from 'lodash-es';
 
+import {InputValidationError} from '../errors/input_validation_error.js';
+import {NotImplementedError} from '../errors/not_implemented_error.js';
 import {Event} from '../events/event.js';
 
 import {CompositeSessionKey, Session} from './session.js';
@@ -16,7 +18,11 @@ import {carryDeltaStamps, shouldApplyDeltaWrite} from './state_write_order.js';
  * The configuration of getting a session.
  */
 export interface GetSessionConfig {
-  /** The number of recent events to retrieve. */
+  /**
+   * The number of recent events to retrieve. The filter is not applied when
+   * omitted; `0` returns no events; a negative value is rejected by
+   * {@link validateGetSessionConfig}.
+   */
   numRecentEvents?: number;
   /** Retrieve events after this timestamp. */
   afterTimestamp?: number;
@@ -45,6 +51,16 @@ export interface GetSessionRequest extends CompositeSessionKey {
 }
 
 /**
+ * The parameters for `getUserState`.
+ */
+export interface GetUserStateRequest {
+  /** The name of the application. */
+  appName: string;
+  /** The ID of the user. */
+  userId: string;
+}
+
+/**
  * The parameters for `listSessions`.
  */
 export interface ListSessionsRequest {
@@ -66,16 +82,6 @@ export interface ListSessionsRequest {
  * The parameters for `deleteSession`.
  */
 export type DeleteSessionRequest = CompositeSessionKey;
-
-/**
- * The parameters for `getUserState`.
- */
-export interface GetUserStateRequest {
-  /** The name of the application. */
-  appName: string;
-  /** The ID of the user. */
-  userId: string;
-}
 
 /**
  * The parameters for `appendEvent`.
@@ -182,21 +188,32 @@ export abstract class BaseSessionService {
    * can bootstrap context before the first turn instead of paying for a
    * `listSessions` sweep.
    *
-   * @param _request The request to get the user state.
+   * @param _request The app and user to read the state of. The default
+   *     implementation ignores it and throws.
    * @return A promise that resolves to the raw user-scoped key/value pairs.
-   * @throws Error when the implementation cannot read user state without a
-   *     session. Callers can fall back to `listSessions` plus `getSession`,
-   *     which expose the same values in the merged session state.
+   * @throws {NotImplementedError} When the concrete service cannot read user
+   *     state independently of a session. Callers can instead enumerate
+   *     sessions with `listSessions` and call `getSession` on each result to
+   *     reach the merged state.
    */
   async getUserState(
     _request: GetUserStateRequest,
   ): Promise<Record<string, unknown>> {
-    throw new Error(
+    throw new NotImplementedError(
       `${this.constructor.name} does not support getUserState. To read user ` +
         'state, enumerate sessions via listSessions and call getSession on ' +
         'each result to access the merged state.',
     );
   }
+
+  /**
+   * Flushes any buffered events.
+   *
+   * A service that buffers writes overrides this. The default does nothing.
+   *
+   * @return A promise that resolves when the buffered events are written.
+   */
+  async flush(): Promise<void> {}
 
   /**
    * Appends an event to a session.
@@ -209,7 +226,9 @@ export abstract class BaseSessionService {
       return event;
     }
 
-    applyTempState({session, event});
+    // Temp values have to reach the in-memory session before the delta is
+    // trimmed, so a later agent in the same invocation can read them.
+    applyTempDeltaState(session, event);
     event = trimTempDeltaState(event);
 
     if (event.actions?.stateDelta) {
@@ -299,15 +318,53 @@ function defineStateEntry(
  * invocation, so a later agent in the same turn can see it, but
  * `trimTempDeltaState` keeps it out of the persisted event. Call this before
  * trimming.
+ *
+ * This is the request-shaped spelling of {@link applyTempDeltaState}, which
+ * holds the implementation.
  */
 export function applyTempState({session, event}: AppendEventRequest): void {
-  if (!event.actions || !event.actions.stateDelta) {
+  applyTempDeltaState(session, event);
+}
+
+/**
+ * Applies the temporary state delta keys of an event to the in-memory session
+ * state.
+ *
+ * Temp state is ephemeral: it stays readable on `session.state` for the rest of
+ * the current invocation, and {@link trimTempDeltaState} keeps it out of the
+ * event that reaches storage. Call this before the trim, or there is nothing
+ * left to read.
+ */
+export function applyTempDeltaState(session: Session, event: Event): void {
+  if (!event.actions?.stateDelta) {
     return;
   }
   for (const [key, value] of Object.entries(event.actions.stateDelta)) {
-    if (key.startsWith(State.TEMP_PREFIX)) {
-      defineStateEntry(session.state, key, value);
+    if (!key.startsWith(State.TEMP_PREFIX)) {
+      continue;
     }
+    // Same rollback guard the committed keys get: a temp key written directly
+    // through a node's `ctx.state` must not be reverted by an older commit.
+    if (!shouldApplyDeltaWrite(session.state, event.actions.stateDelta, key)) {
+      continue;
+    }
+    // Plain assignment is safe: a `temp:`-prefixed key can never be the string
+    // `__proto__`, which is what `updateSessionState` needs `defineProperty`
+    // for.
+    session.state[key] = value;
+  }
+}
+
+/**
+ * Rejects a session configuration that cannot be satisfied.
+ *
+ * @throws {InputValidationError} When `numRecentEvents` is negative.
+ */
+export function validateGetSessionConfig(config?: GetSessionConfig): void {
+  if (config?.numRecentEvents !== undefined && config.numRecentEvents < 0) {
+    throw new InputValidationError(
+      'numRecentEvents must be greater than or equal to 0.',
+    );
   }
 }
 
