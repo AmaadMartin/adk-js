@@ -229,10 +229,23 @@ export class LoopAgent extends BaseAgent<LoopAgentConfig> {
     }
   }
 
-  // eslint-disable-next-line require-yield -- BaseAgent mandates the AsyncGenerator return type and this body only throws.
   protected async *runLiveImpl(
-    _context: InvocationContext,
+    context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    throw new Error('This is not supported yet for LoopAgent.');
+    for (let iteration = 0; iteration < this.maxIterations; iteration++) {
+      for (const subAgent of this.subAgents) {
+        for await (const event of subAgent.runLive(context)) {
+          if (context.abortSignal?.aborted) {
+            return;
+          }
+
+          yield event;
+
+          if (event.actions?.escalate) {
+            return;
+          }
+        }
+      }
+    }
   }
 }
