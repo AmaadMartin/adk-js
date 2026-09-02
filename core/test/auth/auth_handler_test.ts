@@ -115,6 +115,75 @@ describe('AuthHandler', () => {
         oauth2: {accessToken: 'mockAccessToken'},
       });
     });
+
+    it('returns the credential it stored for a non-oauth2 scheme', async () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+        exchangedAuthCredential: {
+          authType: AuthCredentialTypes.API_KEY,
+          apiKey: 'testToken',
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+      const state = new State();
+
+      const credential = await handler.parseAndStoreAuthResponse(state);
+
+      expect(credential).toEqual({authType: 'apiKey', apiKey: 'testToken'});
+    });
+
+    it('returns the exchanged credential for oauth2', async () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            authorizationCode: {
+              authorizationUrl: 'https://auth.com',
+              tokenUrl: 'https://token.com',
+              scopes: {},
+            },
+          },
+        },
+        exchangedAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {authCode: '123'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+      const state = new State();
+
+      const credential = await handler.parseAndStoreAuthResponse(state);
+
+      expect(credential).toEqual({
+        authType: 'oauth2',
+        oauth2: {accessToken: 'mockAccessToken'},
+      });
+    });
+
+    it('returns no credential for oauth2 without an exchanged credential', async () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            authorizationCode: {
+              authorizationUrl: 'https://auth.com',
+              tokenUrl: 'https://token.com',
+              scopes: {},
+            },
+          },
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+      const state = new State();
+
+      const credential = await handler.parseAndStoreAuthResponse(state);
+
+      expect(credential).toBeUndefined();
+      expect(state.get('temp:testKey')).toBeUndefined();
+    });
   });
 
   describe('generateAuthRequest', () => {
