@@ -151,4 +151,50 @@ describe('AsyncQueue — failure & lifecycle', () => {
     queue.fail(new Error('second'));
     await expect(drain(queue)).rejects.toThrow('first');
   });
+  it('resolves whenDrained immediately below the high water mark', async () => {
+    const queue = new AsyncQueue<number>({highWaterMark: 2});
+    queue.push(1);
+    await expect(queue.whenDrained()).resolves.toBeUndefined();
+  });
+
+  it('resolves whenDrained immediately when unbounded', async () => {
+    const queue = new AsyncQueue<number>();
+    queue.push(1);
+    queue.push(2);
+    await expect(queue.whenDrained()).resolves.toBeUndefined();
+  });
+
+  it('blocks whenDrained at the mark until the consumer drains', async () => {
+    const queue = new AsyncQueue<number>({highWaterMark: 2});
+    queue.push(1);
+    queue.push(2);
+
+    let drained = false;
+    const waiting = queue.whenDrained().then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+
+    const iterator = queue[Symbol.asyncIterator]();
+    await iterator.next();
+    await waiting;
+    expect(drained).toBe(true);
+  });
+
+  it('releases a waiting producer on close()', async () => {
+    const queue = new AsyncQueue<number>({highWaterMark: 1});
+    queue.push(1);
+    const waiting = queue.whenDrained();
+    queue.close();
+    await expect(waiting).resolves.toBeUndefined();
+  });
+
+  it('releases a waiting producer on fail()', async () => {
+    const queue = new AsyncQueue<number>({highWaterMark: 1});
+    queue.push(1);
+    const waiting = queue.whenDrained();
+    queue.fail(new Error('producer gone'));
+    await expect(waiting).resolves.toBeUndefined();
+  });
 });
