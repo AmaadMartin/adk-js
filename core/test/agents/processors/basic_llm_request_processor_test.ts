@@ -4,12 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Content, Blob as GenaiBlob, Schema} from '@google/genai';
+import {Modality, Type} from '@google/genai';
+import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
+import {BASIC_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/basic_llm_request_processor.js';
 import type {
   BaseLlmConnection,
   LlmRequest,
   LlmResponse,
   RunConfig,
-} from '@google/adk';
+} from '../../../src/index.js';
 import {
   BaseAgent,
   BaseLlm,
@@ -19,11 +23,7 @@ import {
   LlmAgent,
   LLMRegistry,
   PluginManager,
-} from '@google/adk';
-import type {Content, Blob as GenaiBlob, Schema} from '@google/genai';
-import {Modality, Type} from '@google/genai';
-import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
-import {BASIC_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/basic_llm_request_processor.js';
+} from '../../../src/index.js';
 
 const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 

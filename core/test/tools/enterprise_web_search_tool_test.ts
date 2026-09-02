@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {LlmRequest} from '@google/adk';
-import {ENTERPRISE_WEB_SEARCH, EnterpriseWebSearchTool} from '@google/adk';
 import type {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import type {LlmRequest} from '../../src/index.js';
+import {
+  ENTERPRISE_WEB_SEARCH,
+  EnterpriseWebSearchTool,
+} from '../../src/index.js';
 
 function makeRequest(model?: string, tools: Tool[] = []): LlmRequest {
   return {

@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FileContentEncoding} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {FileContentEncoding} from '../../src/index.js';
 import {getMimeTypeAndEncoding} from '../../src/utils/file_extension_utils.js';
 import {
   guessMimeType,

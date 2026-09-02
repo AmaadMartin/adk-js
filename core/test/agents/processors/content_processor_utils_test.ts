@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {CompactedEvent} from '@google/adk';
-import {createEvent} from '@google/adk';
 import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
@@ -14,6 +12,8 @@ import {
   mergeFunctionResponseEvents,
   removeClientFunctionCallId,
 } from '../../../src/agents/processors/content_processor_utils.js';
+import type {CompactedEvent} from '../../../src/index.js';
+import {createEvent} from '../../../src/index.js';
 
 describe('getContents', () => {
   it('should handle object responses in convertForeignEvent', () => {

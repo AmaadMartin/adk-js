@@ -4,24 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {
-  Event,
-  LlmRequest,
-  LlmResponse,
-  Session,
-  SessionArtifactService,
-} from '@google/adk';
-import {
-  BaseAgent,
-  CODE_EXECUTION_RESPONSE_PROCESSOR,
-  FileArtifactService,
-  InMemoryArtifactService,
-  InMemorySessionService,
-  InvocationContext,
-  LlmAgent,
-  PluginManager,
-  createSession,
-} from '@google/adk';
 import {Language} from '@google/genai';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -40,6 +22,24 @@ import type {
   File,
 } from '../../../src/code_executors/code_execution_utils.js';
 import {FileContentEncoding} from '../../../src/code_executors/code_execution_utils.js';
+import type {
+  Event,
+  LlmRequest,
+  LlmResponse,
+  Session,
+  SessionArtifactService,
+} from '../../../src/index.js';
+import {
+  BaseAgent,
+  CODE_EXECUTION_RESPONSE_PROCESSOR,
+  FileArtifactService,
+  InMemoryArtifactService,
+  InMemorySessionService,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
+  createSession,
+} from '../../../src/index.js';
 
 const APP_NAME = 'test-app';
 const USER_ID = 'test-user';

@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {ParsedOperation} from '@google/adk';
-import {OpenApiSpecParser} from '@google/adk';
 import type {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
+import type {ParsedOperation} from '../../../src/index.js';
+import {OpenApiSpecParser} from '../../../src/index.js';
 import {prepareRequestParams} from '../../../src/tools/openapi_tool/rest_api_tool.js';
 
 /**

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Content} from '@google/genai';
+import {beforeEach, describe, expect, it} from 'vitest';
 import type {
   BaseAgent,
   BaseTool,
@@ -12,10 +14,8 @@ import type {
   InvocationContext,
   LlmRequest,
   LlmResponse,
-} from '@google/adk';
-import {BasePlugin, PluginManager} from '@google/adk';
-import type {Content} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
+} from '../../src/index.js';
+import {BasePlugin, PluginManager} from '../../src/index.js';
 import {ContextCompactionTrigger} from '../../src/plugins/base_plugin.js';
 
 type PluginCallbackName = keyof BasePlugin;

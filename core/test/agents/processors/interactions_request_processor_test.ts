@@ -6,7 +6,13 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import type {BaseAgent, Event, EventActions, LlmRequest} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+import type {
+  BaseAgent,
+  Event,
+  EventActions,
+  LlmRequest,
+} from '../../../src/index.js';
 import {
   BaseLlm,
   createSession,
@@ -15,8 +21,7 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../../src/index.js';
 
 class MockLlm extends BaseLlm {
   constructor() {

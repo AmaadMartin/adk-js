@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import type {
   BaseLlmConnection,
   Context,
@@ -11,14 +12,13 @@ import type {
   LlmRequest,
   LlmResponse,
   ReadonlyContext,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   BaseLlm,
   GlobalInstructionPlugin,
   InMemoryRunner,
   LlmAgent,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 import {appendInstructions} from '../../src/models/llm_request.js';
 
 class MockLlm extends BaseLlm {

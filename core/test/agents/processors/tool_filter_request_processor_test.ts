@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {LlmRequest} from '@google/adk';
+import {describe, expect, it, onTestFinished, vi} from 'vitest';
+import {handleFunctionCallsAsync} from '../../../src/agents/functions.js';
+import {TOOL_FILTER_REQUEST_PROCESSOR} from '../../../src/agents/processors/tool_filter_request_processor.js';
+import {createEvent} from '../../../src/events/event.js';
+import type {LlmRequest} from '../../../src/index.js';
 import {
   BaseAgent,
   BasePlugin,
@@ -15,11 +19,7 @@ import {
   PluginManager,
   ReadonlyContext,
   createSession,
-} from '@google/adk';
-import {describe, expect, it, onTestFinished, vi} from 'vitest';
-import {handleFunctionCallsAsync} from '../../../src/agents/functions.js';
-import {TOOL_FILTER_REQUEST_PROCESSOR} from '../../../src/agents/processors/tool_filter_request_processor.js';
-import {createEvent} from '../../../src/events/event.js';
+} from '../../../src/index.js';
 import {logger} from '../../../src/utils/logger.js';
 
 class MockTool extends BaseTool {

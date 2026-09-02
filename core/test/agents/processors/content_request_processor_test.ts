@@ -4,13 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Content} from '@google/genai';
+import {describe, expect, it} from 'vitest';
+import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/instructions_llm_request_processor.js';
 import type {
   BaseAgent,
   CompactedEvent,
   Event,
   EventActions,
   LlmRequest,
-} from '@google/adk';
+} from '../../../src/index.js';
 import {
   CONTENT_REQUEST_PROCESSOR,
   createEvent,
@@ -19,10 +22,7 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
-} from '@google/adk';
-import type {Content} from '@google/genai';
-import {describe, expect, it} from 'vitest';
-import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/instructions_llm_request_processor.js';
+} from '../../../src/index.js';
 
 /** Text carried only by the invocation that gets rewound. */
 const REWOUND_TEXT = 'SECRET_REWOUND_CONTENT';

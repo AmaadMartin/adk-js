@@ -4,21 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {
-  BaseLlmConnection,
-  LlmRequest,
-  LlmResponse,
-  ReadonlyContext,
-} from '@google/adk';
-import {
-  BaseAgent,
-  BaseLlm,
-  createSession,
-  FunctionTool,
-  InvocationContext,
-  LlmAgent,
-  PluginManager,
-} from '@google/adk';
 import type {ContentUnion, Schema} from '@google/genai';
 import {Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -28,6 +13,21 @@ import {
   QUOTED_CONTENT_ELIDED,
 } from '../../../src/agents/instructions.js';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/instructions_llm_request_processor.js';
+import type {
+  BaseLlmConnection,
+  LlmRequest,
+  LlmResponse,
+  ReadonlyContext,
+} from '../../../src/index.js';
+import {
+  BaseAgent,
+  BaseLlm,
+  createSession,
+  FunctionTool,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
+} from '../../../src/index.js';
 
 const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 

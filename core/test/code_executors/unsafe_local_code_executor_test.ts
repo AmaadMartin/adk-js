@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {ExecuteCodeParams} from '@google/adk';
+import type {SpawnOptions} from 'node:child_process';
+import {EventEmitter} from 'node:events';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {ExecuteCodeParams} from '../../src/index.js';
 import {
   CodeExecutionLanguage,
   FileContentEncoding,
@@ -13,13 +19,7 @@ import {
   PluginManager,
   UnsafeLocalCodeExecutor,
   createSession,
-} from '@google/adk';
-import type {SpawnOptions} from 'node:child_process';
-import {EventEmitter} from 'node:events';
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 // Only `spawn` is mocked; it defaults to the real implementation (see
 // `beforeEach`) so the pre-existing tests still execute real scripts.

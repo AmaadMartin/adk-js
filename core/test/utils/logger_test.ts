@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Logger} from '@google/adk';
+import {Console} from 'node:console';
+import {readFile} from 'node:fs/promises';
+import {Writable} from 'node:stream';
+import {fileURLToPath} from 'node:url';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {Logger} from '../../src/index.js';
 import {
   formatLogArgs,
   getLogger,
   LogLevel,
   setLogger,
   setLogLevel,
-} from '@google/adk';
-import {Console} from 'node:console';
-import {readFile} from 'node:fs/promises';
-import {Writable} from 'node:stream';
-import {fileURLToPath} from 'node:url';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 import {resetLogger} from '../../src/utils/logger.js';
 
 /** Reads a module under `core/src/utils` as text. */

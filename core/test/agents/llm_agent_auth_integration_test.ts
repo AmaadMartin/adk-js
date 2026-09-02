@@ -4,21 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {
-  BaseLlmConnection,
-  Event,
-  LlmRequest,
-  LlmResponse,
-} from '@google/adk';
-import {
-  BaseLlm,
-  getFunctionCalls,
-  getFunctionResponses,
-  InMemorySessionService,
-  LlmAgent,
-  RestApiTool,
-  Runner,
-} from '@google/adk';
 import * as http from 'node:http';
 import type {OpenAPIV3} from 'openapi-types';
 import {
@@ -31,6 +16,21 @@ import {
   it,
   vi,
 } from 'vitest';
+import type {
+  BaseLlmConnection,
+  Event,
+  LlmRequest,
+  LlmResponse,
+} from '../../src/index.js';
+import {
+  BaseLlm,
+  getFunctionCalls,
+  getFunctionResponses,
+  InMemorySessionService,
+  LlmAgent,
+  RestApiTool,
+  Runner,
+} from '../../src/index.js';
 
 class MockLlm extends BaseLlm {
   responses: LlmResponse[] = [];

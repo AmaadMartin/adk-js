@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseTool, Session} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+import type {Context} from '../../src/agents/context.js';
+import type {BaseTool, Session} from '../../src/index.js';
 import {
   createEvent,
   createEventActions,
@@ -13,9 +15,7 @@ import {
   LlmAgent,
   PluginManager,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
-import type {Context} from '../../src/agents/context.js';
+} from '../../src/index.js';
 import type {
   BasePolicyEngine,
   PolicyCheckResult,

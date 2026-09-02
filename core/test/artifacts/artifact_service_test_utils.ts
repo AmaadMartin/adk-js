@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseArtifactService, CompositeSessionKey} from '@google/adk';
 import type {Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import type {
+  BaseArtifactService,
+  CompositeSessionKey,
+} from '../../src/index.js';
 
 /**
  * Legal-but-unusual artifact filenames that every backend must handle

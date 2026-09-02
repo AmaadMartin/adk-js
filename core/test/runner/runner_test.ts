@@ -5,6 +5,14 @@
  */
 
 import type {
+  Content,
+  FunctionCall,
+  FunctionResponse,
+  GenerateContentResponseUsageMetadata,
+} from '@google/genai';
+import type {MockInstance} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import type {
   AppendEventRequest,
   BaseCredentialService,
   BaseTool,
@@ -13,7 +21,7 @@ import type {
   InvocationContext,
   RunConfig,
   Session,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   App,
   BaseAgent,
@@ -28,15 +36,7 @@ import {
   isRoutableLlmAgent,
   LlmAgent,
   Runner,
-} from '@google/adk';
-import type {
-  Content,
-  FunctionCall,
-  FunctionResponse,
-  GenerateContentResponseUsageMetadata,
-} from '@google/genai';
-import type {MockInstance} from 'vitest';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 import {logger} from '../../src/utils/logger.js';
 
 const TEST_APP_ID = 'test_app_id';

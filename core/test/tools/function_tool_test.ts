@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Context} from '@google/adk';
-import {FunctionTool, isFunctionTool} from '@google/adk';
 import type {Schema} from '@google/genai';
 import {FunctionResponseScheduling, Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import type {Context} from '../../src/index.js';
+import {FunctionTool, isFunctionTool} from '../../src/index.js';
 
 describe('FunctionTool', () => {
   let emptyContext: Context;

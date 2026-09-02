@@ -4,18 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {LlmRequest} from '@google/adk';
+import type {Schema} from '@google/genai';
+import {Type} from '@google/genai';
+import {describe, expect, it} from 'vitest';
+import {IDENTITY_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/identity_llm_request_processor.js';
+import type {LlmRequest} from '../../../src/index.js';
 import {
   BaseAgent,
   InvocationContext,
   LlmAgent,
   PluginManager,
   createSession,
-} from '@google/adk';
-import type {Schema} from '@google/genai';
-import {Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
-import {IDENTITY_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/identity_llm_request_processor.js';
+} from '../../../src/index.js';
 
 /** Forces `disallowTransferToParent` and `disallowTransferToPeers` to true. */
 const OUTPUT_SCHEMA: Schema = {type: Type.OBJECT};

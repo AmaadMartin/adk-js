@@ -13,19 +13,19 @@ import type {
 } from '@a2a-js/sdk';
 import type {Client} from '@a2a-js/sdk/client';
 import {ClientFactory, DefaultAgentCardResolver} from '@a2a-js/sdk/client';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {
   Event as AdkEvent,
   InvocationContext,
   RemoteA2AAgentConfig,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   createEvent,
   createSession,
   RemoteA2AAgent,
   resetIdProvider,
   setIdProvider,
-} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 type A2AStreamEventData =
   | Message

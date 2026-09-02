@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {LlmRequest} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+import type {LlmRequest} from '../../../src/index.js';
 import {
   AgentTransferLlmRequestProcessor,
   BaseAgent,
@@ -13,8 +14,7 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../../src/index.js';
 
 const AGENT_TRANSFER_LLM_REQUEST_PROCESSOR =
   new AgentTransferLlmRequestProcessor();

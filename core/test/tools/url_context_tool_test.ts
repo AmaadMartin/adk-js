@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {LlmRequest} from '@google/adk';
-import {URL_CONTEXT, UrlContextTool} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {LlmRequest} from '../../src/index.js';
+import {URL_CONTEXT, UrlContextTool} from '../../src/index.js';
 
 const MODEL_ID_CHECK_ENV_VAR = 'ADK_DISABLE_GEMINI_MODEL_ID_CHECK';
 

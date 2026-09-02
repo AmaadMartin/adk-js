@@ -6,16 +6,6 @@
 
 import type {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import type {AppendAgentEngineSessionEventRequestParameters} from '@google-cloud/vertexai/build/src/genai/types.js';
-import type {CompactedEvent, EventActions, Session} from '@google/adk';
-import {
-  createEvent,
-  createEventActions,
-  createSession,
-  isCompactedEvent,
-  State,
-  VertexAiSessionService,
-  type Event,
-} from '@google/adk';
 import type {Content, Part} from '@google/genai';
 import {ApiError} from '@google/genai';
 import {
@@ -28,6 +18,16 @@ import {
   type MockInstance,
 } from 'vitest';
 import {createCompactedEvent} from '../../src/events/compacted_event.js';
+import type {CompactedEvent, EventActions, Session} from '../../src/index.js';
+import {
+  createEvent,
+  createEventActions,
+  createSession,
+  isCompactedEvent,
+  State,
+  VertexAiSessionService,
+  type Event,
+} from '../../src/index.js';
 import {
   isFastForwardable,
   reconstructNodeStates,

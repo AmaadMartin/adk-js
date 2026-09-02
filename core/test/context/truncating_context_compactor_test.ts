@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseAgent, Event, PluginManager} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+import type {BaseAgent, Event, PluginManager} from '../../src/index.js';
 import {
   createSession,
   InvocationContext,
   TruncatingContextCompactor,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 function createDummyEvent(id: string): Event {
   return {

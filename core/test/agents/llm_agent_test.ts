@@ -5,6 +5,25 @@
  */
 
 import type {
+  Content,
+  ContentUnion,
+  GenerateContentConfig,
+  Schema,
+} from '@google/genai';
+import {GenerateContentResponse, Type} from '@google/genai';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from 'vitest';
+import {z as z3} from 'zod/v3';
+import {z as z4} from 'zod/v4';
+import {CODE_EXECUTION_REQUEST_PROCESSOR} from '../../src/agents/processors/code_execution_processor.js';
+import type {
   AuthConfig,
   BaseLlmConnection,
   BasePlanner,
@@ -16,7 +35,7 @@ import type {
   RunAsyncToolRequest,
   Session,
   ToolProcessLlmRequest,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   AUTH_PREPROCESSOR,
   BaseLlm,
@@ -41,26 +60,7 @@ import {
   NL_PLANNING_RESPONSE_PROCESSOR,
   PluginManager,
   Runner,
-} from '@google/adk';
-import type {
-  Content,
-  ContentUnion,
-  GenerateContentConfig,
-  Schema,
-} from '@google/genai';
-import {GenerateContentResponse, Type} from '@google/genai';
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  onTestFinished,
-  vi,
-} from 'vitest';
-import {z as z3} from 'zod/v3';
-import {z as z4} from 'zod/v4';
-import {CODE_EXECUTION_REQUEST_PROCESSOR} from '../../src/agents/processors/code_execution_processor.js';
+} from '../../src/index.js';
 import * as metrics from '../../src/telemetry/metrics.js';
 import {logger} from '../../src/utils/logger.js';
 

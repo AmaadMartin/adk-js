@@ -10,7 +10,8 @@ import {node} from '../../src/workflow/node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 
 import type {AgentSkill} from '@a2a-js/sdk';
-import type {BaseTool, Example, NodeContext} from '@google/adk';
+import {z} from 'zod';
+import type {BaseTool, Example, NodeContext} from '../../src/index.js';
 import {
   BaseAgent,
   BaseExampleProvider,
@@ -23,8 +24,7 @@ import {
   LoopAgent,
   ParallelAgent,
   SequentialAgent,
-} from '@google/adk';
-import {z} from 'zod';
+} from '../../src/index.js';
 
 /** A few-shot example whose input is a single text part. */
 const EXAMPLE_ROLL_A_D6: Example = {

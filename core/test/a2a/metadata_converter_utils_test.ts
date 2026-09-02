@@ -5,8 +5,6 @@
  */
 
 import type {Message, Task} from '@a2a-js/sdk';
-import type {Event as AdkEvent} from '@google/adk';
-import {createEventActions} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {toAdkEvent} from '../../src/a2a/event_converter_utils.js';
 import {
@@ -15,6 +13,8 @@ import {
   getA2AEventMetadata,
   getAdkEventMetadata,
 } from '../../src/a2a/metadata_converter_utils.js';
+import type {Event as AdkEvent} from '../../src/index.js';
+import {createEventActions} from '../../src/index.js';
 
 describe('metadata_converter_utils', () => {
   describe('getAdkEventMetadata', () => {

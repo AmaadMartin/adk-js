@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Event, RunConfig} from '@google/adk';
+import type {Content, Schema} from '@google/genai';
+import {Type} from '@google/genai';
+import {describe, expect, it, vi} from 'vitest';
+import {z} from 'zod';
+import type {Event, RunConfig} from '../../src/index.js';
 import {
   AgentTool,
   Context,
@@ -19,11 +23,7 @@ import {
   SequentialAgent,
   State,
   StreamingMode,
-} from '@google/adk';
-import type {Content, Schema} from '@google/genai';
-import {Type} from '@google/genai';
-import {describe, expect, it, vi} from 'vitest';
-import {z} from 'zod';
+} from '../../src/index.js';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   const actual =

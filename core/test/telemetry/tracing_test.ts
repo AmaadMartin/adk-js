@@ -15,8 +15,8 @@ import type {
   LlmRequest,
   LlmResponse,
   Session,
-} from '@google/adk';
-import {BaseTool, createEventActions} from '@google/adk';
+} from '../../src/index.js';
+import {BaseTool, createEventActions} from '../../src/index.js';
 import {
   GCP_MCP_SERVER_DESTINATION_ID,
   traceAgentInvocation,

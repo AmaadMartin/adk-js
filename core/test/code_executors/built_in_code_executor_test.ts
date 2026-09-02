@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {ExecuteCodeParams, LlmRequest} from '@google/adk';
-import {BuiltInCodeExecutor} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {ExecuteCodeParams, LlmRequest} from '../../src/index.js';
+import {BuiltInCodeExecutor} from '../../src/index.js';
 
 const MODEL_ID_CHECK_ENV_VAR = 'ADK_DISABLE_GEMINI_MODEL_ID_CHECK';
 

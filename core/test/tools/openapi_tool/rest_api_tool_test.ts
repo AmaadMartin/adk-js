@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {ApiParameter, AuthCredential} from '@google/adk';
+import type {OpenAPIV3} from 'openapi-types';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import type {ApiParameter, AuthCredential} from '../../../src/index.js';
 import {
   AuthCredentialTypes,
   Context,
@@ -16,9 +18,7 @@ import {
   PluginManager,
   RestApiTool,
   ToolAuthHandler,
-} from '@google/adk';
-import type {OpenAPIV3} from 'openapi-types';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 import {
   applyCredential,
   createApiKeyScheme,

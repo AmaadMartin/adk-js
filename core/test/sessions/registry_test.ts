@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InMemorySessionService, getSessionServiceFromUri} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {
+  InMemorySessionService,
+  getSessionServiceFromUri,
+} from '../../src/index.js';
 
 describe('Registry', () => {
   describe('getSessionServiceFromUri', () => {

@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {InvocationContext, Skill} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+import type {InvocationContext, Skill} from '../../../src/index.js';
 import {
   Context,
   LoadSkillErrorCode,
   LoadSkillTool,
   SkillToolset,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../../src/index.js';
 
 describe('LoadSkillTool', () => {
   const mockSkill: Skill = {

@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {GeminiParams, LlmRequest, LlmResponse} from '@google/adk';
-import {
-  FunctionTool,
-  Gemini,
-  ResourceExhaustedError,
-  geminiInitParams,
-  version,
-} from '@google/adk';
 import type {
   FunctionDeclaration,
   GenerateContentConfig,
@@ -30,6 +22,14 @@ import {
   Modality,
 } from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {GeminiParams, LlmRequest, LlmResponse} from '../../src/index.js';
+import {
+  FunctionTool,
+  Gemini,
+  ResourceExhaustedError,
+  geminiInitParams,
+  version,
+} from '../../src/index.js';
 
 const TEST_PROJECT = 'test-project';
 const TEST_LOCATION = 'us-central1';

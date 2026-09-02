@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {ElicitationCallback, MCPConnectionParams} from '@google/adk';
-import {MCPSessionManager} from '@google/adk';
 import type {OAuthClientProvider} from '@modelcontextprotocol/sdk/client/auth.js';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {SSEClientTransport} from '@modelcontextprotocol/sdk/client/sse.js';
@@ -17,6 +15,11 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import type {
+  ElicitationCallback,
+  MCPConnectionParams,
+} from '../../../src/index.js';
+import {MCPSessionManager} from '../../../src/index.js';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {logger} from '../../../src/utils/logger.js';

@@ -5,12 +5,6 @@
  */
 
 import {
-  FileArtifactService,
-  GcsArtifactService,
-  InMemoryArtifactService,
-  getArtifactServiceFromUri,
-} from '@google/adk';
-import {
   afterEach,
   beforeEach,
   describe,
@@ -19,6 +13,12 @@ import {
   vi,
   type MockInstance,
 } from 'vitest';
+import {
+  FileArtifactService,
+  GcsArtifactService,
+  InMemoryArtifactService,
+  getArtifactServiceFromUri,
+} from '../../src/index.js';
 import {logger} from '../../src/utils/logger.js';
 
 const {StorageMock, bucketMock} = vi.hoisted(() => {

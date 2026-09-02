@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseTool} from '@google/adk';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import type {OpenAPIV3} from 'openapi-types';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import type {BaseTool} from '../../../src/index.js';
 import {
   AuthCredentialTypes,
   Context,
@@ -13,11 +17,7 @@ import {
   LlmAgent,
   OpenAPIToolset,
   PluginManager,
-} from '@google/adk';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import type {OpenAPIV3} from 'openapi-types';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 
 describe('OpenAPIToolset Integration', () => {
   let truanonSpec: string;

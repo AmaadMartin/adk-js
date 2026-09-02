@@ -13,6 +13,10 @@ import type {
   TextPart,
 } from '@a2a-js/sdk';
 import type {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
+import type {FunctionCall, FunctionResponse} from '@google/genai';
+import type {Mocked} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {toA2AParts} from '../../src/a2a/part_converter_utils.js';
 import type {
   Event as AdkEvent,
   BaseSessionService,
@@ -20,7 +24,7 @@ import type {
   IntentVerification,
   RunnerConfig,
   Session,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   A2AAgentExecutor,
   BaseAgent,
@@ -32,11 +36,7 @@ import {
   resetIdProvider,
   Runner,
   setIdProvider,
-} from '@google/adk';
-import type {FunctionCall, FunctionResponse} from '@google/genai';
-import type {Mocked} from 'vitest';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {toA2AParts} from '../../src/a2a/part_converter_utils.js';
+} from '../../src/index.js';
 
 // Mock the Runner to control its async generator
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {

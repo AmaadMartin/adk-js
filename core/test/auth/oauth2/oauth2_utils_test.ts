@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {AuthScheme, OAuth2Auth} from '@google/adk';
 import type {MockInstance} from 'vitest';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {
@@ -19,6 +18,7 @@ import {
   isTokenExpired,
   parseAuthorizationCode,
 } from '../../../src/auth/oauth2/oauth2_utils.js';
+import type {AuthScheme, OAuth2Auth} from '../../../src/index.js';
 // The logger singleton is internal (not part of the public API), so it is
 // imported by path.
 import {logger} from '../../../src/utils/logger.js';

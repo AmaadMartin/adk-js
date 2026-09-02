@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseAgentConfig, Event, Session} from '@google/adk';
+import {describe, expect, it, vi} from 'vitest';
+import type {BaseAgentConfig, Event, Session} from '../../src/index.js';
 import {
   AgentTransferLlmRequestProcessor,
   BaseAgent,
@@ -14,8 +15,7 @@ import {
   PluginManager,
   createEvent,
   createSession,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 import * as metrics from '../../src/telemetry/metrics.js';
 
 class MockAgent extends BaseAgent {

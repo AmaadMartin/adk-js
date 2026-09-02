@@ -4,9 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
-import {BaseLlm, RoutedLlm} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import type {
+  BaseLlmConnection,
+  LlmRequest,
+  LlmResponse,
+} from '../../src/index.js';
+import {BaseLlm, RoutedLlm} from '../../src/index.js';
 
 class MockLlm extends BaseLlm {
   receivedStream: boolean | undefined;

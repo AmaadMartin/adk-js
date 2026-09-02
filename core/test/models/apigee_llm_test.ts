@@ -17,8 +17,17 @@ import {
 import type {HttpOptions} from '@google/genai';
 import {GoogleGenAI} from '@google/genai';
 
-import type {ApigeeLlmParams, BaseLlmConnection, LlmRequest} from '@google/adk';
-import {ApigeeLlm, Gemini, GoogleLLMVariant, LLMRegistry} from '@google/adk';
+import type {
+  ApigeeLlmParams,
+  BaseLlmConnection,
+  LlmRequest,
+} from '../../src/index.js';
+import {
+  ApigeeLlm,
+  Gemini,
+  GoogleLLMVariant,
+  LLMRegistry,
+} from '../../src/index.js';
 
 const geminiModelString = 'apigee/gemini/gemini-1.5-flash';
 const vertexModelString = 'apigee/vertex_ai/model-id';

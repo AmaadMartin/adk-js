@@ -4,9 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
-import {BaseLlm, Claude, LlmAgent, LLMRegistry} from '@google/adk';
 import {beforeAll, describe, expect, it} from 'vitest';
+import type {
+  BaseLlmConnection,
+  LlmRequest,
+  LlmResponse,
+} from '../../src/index.js';
+import {BaseLlm, Claude, LlmAgent, LLMRegistry} from '../../src/index.js';
 
 import type {Blob, Content} from '@google/genai';
 import {createModelContent, GenerateContentResponse} from '@google/genai';

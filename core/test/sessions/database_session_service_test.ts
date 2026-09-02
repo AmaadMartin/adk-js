@@ -4,15 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Event} from '@google/adk';
-import {
-  createEvent,
-  createEventActions,
-  DatabaseSessionService,
-  resetIdProvider,
-  setIdProvider,
-  State,
-} from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {
@@ -23,6 +14,15 @@ import {
   it,
   onTestFinished,
 } from 'vitest';
+import type {Event} from '../../src/index.js';
+import {
+  createEvent,
+  createEventActions,
+  DatabaseSessionService,
+  resetIdProvider,
+  setIdProvider,
+  State,
+} from '../../src/index.js';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {ensureDatabaseCreated} from '../../src/sessions/db/operations.js';
 import {ENTITIES, StorageMetadata} from '../../src/sessions/db/schema.js';

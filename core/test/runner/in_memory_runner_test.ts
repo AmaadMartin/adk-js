@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseTool, Event, InvocationContext} from '@google/adk';
+import {describe, expect, it, vi} from 'vitest';
+import type {BaseTool, Event, InvocationContext} from '../../src/index.js';
 import {
   BaseAgent,
   BasePlugin,
@@ -12,8 +13,7 @@ import {
   createEvent,
   InMemoryRunner,
   LlmAgent,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 const TEST_USER_ID = 'test_user_id';
 const TEST_MESSAGE = 'Hello, agent!';

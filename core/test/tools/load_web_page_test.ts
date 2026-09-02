@@ -6,9 +6,9 @@
 
 import type {LookupAddress, LookupAllOptions} from 'node:dns';
 
-import {FunctionTool, LOAD_WEB_PAGE, loadWebPage} from '@google/adk';
 import type {Mock} from 'vitest';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {FunctionTool, LOAD_WEB_PAGE, loadWebPage} from '../../src/index.js';
 
 /**
  * `lookup` is overloaded and its last overload resolves to a single

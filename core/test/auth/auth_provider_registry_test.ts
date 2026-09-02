@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {AuthScheme, BaseAuthProvider} from '@google/adk';
-import {AuthProviderRegistry} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import type {AuthScheme, BaseAuthProvider} from '../../src/index.js';
+import {AuthProviderRegistry} from '../../src/index.js';
 
 class MockAuthProvider implements BaseAuthProvider {
   async getAuthCredential() {

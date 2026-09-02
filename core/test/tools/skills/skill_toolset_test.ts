@@ -4,17 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {describe, expect, it, vi} from 'vitest';
 import type {
   InvocationContext,
   LlmRequest,
   ReadonlyContext,
   Skill,
-} from '@google/adk';
-import {BaseTool, BaseToolset, Context, SkillToolset} from '@google/adk';
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
+import {
+  BaseTool,
+  BaseToolset,
+  Context,
+  SkillToolset,
+} from '../../../src/index.js';
 
 describe('skill_toolset', () => {
   const mockSkill: Skill = {

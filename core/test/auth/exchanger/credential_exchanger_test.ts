@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {AuthCredential, AuthScheme} from '@google/adk';
-import {AuthCredentialTypes} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import type {
   BaseCredentialExchanger,
   ExchangeResult,
 } from '../../../src/auth/exchanger/base_credential_exchanger.js';
 import {CredentialExchangerRegistry} from '../../../src/auth/exchanger/credential_exchanger_registry.js';
+import type {AuthCredential, AuthScheme} from '../../../src/index.js';
+import {AuthCredentialTypes} from '../../../src/index.js';
 
 class MockCredentialExchanger implements BaseCredentialExchanger {
   async exchange({

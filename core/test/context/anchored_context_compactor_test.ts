@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it, vi} from 'vitest';
+import {createCompactedEvent} from '../../src/events/compacted_event.js';
 import type {
   BaseAgent,
   BaseSummarizer,
   CompactedEvent,
   Event,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   AnchoredContextCompactor,
   InvocationContext,
@@ -18,9 +20,7 @@ import {
   createEventActions,
   createSession,
   isScratchpadEvent,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
-import {createCompactedEvent} from '../../src/events/compacted_event.js';
+} from '../../src/index.js';
 
 /** Text carried only by the invocation that gets rewound. */
 const REWOUND_TEXT = 'SECRET_REWOUND_CONTENT';

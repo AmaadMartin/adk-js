@@ -4,13 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {FunctionCall} from '@google/genai';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {z} from 'zod/v3';
+import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_confirmation_llm_request_processor.js';
 import type {
   BaseSessionService,
   BaseTool,
   Event,
   IntentMismatchError,
   RunConfig,
-} from '@google/adk';
+} from '../../../src/index.js';
 import {
   BaseAgent,
   FunctionTool,
@@ -24,11 +28,7 @@ import {
   createEventActions,
   createSession,
   isIntentMismatchError,
-} from '@google/adk';
-import type {FunctionCall} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {z} from 'zod/v3';
-import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_confirmation_llm_request_processor.js';
+} from '../../../src/index.js';
 // From source: `@google/adk` exports the a2a resume enum under this name, and
 // an explicit export shadows the star re-export of the tool-confirmation one.
 import type {IntentMismatchReason} from '../../../src/tools/tool_confirmation.js';

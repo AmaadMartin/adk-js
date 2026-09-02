@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseAgentConfig, Event, Session} from '@google/adk';
+import {afterEach, describe, expect, it} from 'vitest';
+import {newInvocationContextId} from '../../src/agents/invocation_context.js';
+import type {BaseAgentConfig, Event, Session} from '../../src/index.js';
 import {
   BaseAgent,
   InMemoryCredentialService,
@@ -17,9 +19,7 @@ import {
   createSession,
   resetIdProvider,
   setIdProvider,
-} from '@google/adk';
-import {afterEach, describe, expect, it} from 'vitest';
-import {newInvocationContextId} from '../../src/agents/invocation_context.js';
+} from '../../src/index.js';
 
 function makeSession(): Session {
   return createSession({

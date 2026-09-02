@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   IntentMismatchError,
   ToolConfirmation,
   isIntentMismatchError,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 describe('ToolConfirmation', () => {
   it('stores all provided fields', () => {

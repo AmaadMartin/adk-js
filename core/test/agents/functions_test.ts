@@ -3,27 +3,6 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import type {
-  Context,
-  Event,
-  Session,
-  SingleAfterToolCallback,
-  SingleBeforeToolCallback,
-} from '@google/adk';
-import {
-  BasePlugin,
-  BaseTool,
-  createEvent,
-  createEventActions,
-  functionsExportedForTestingOnly,
-  FunctionTool,
-  InvocationContext,
-  isToolNotFound,
-  LlmAgent,
-  LongRunningFunctionTool,
-  PluginManager,
-  ToolConfirmation,
-} from '@google/adk';
 import type {FunctionCall, FunctionResponse} from '@google/genai';
 import {
   createPartFromBase64,
@@ -39,6 +18,27 @@ import {
   generateClientFunctionCallId,
   mergeParallelFunctionResponseEvents,
 } from '../../src/agents/functions.js';
+import type {
+  Context,
+  Event,
+  Session,
+  SingleAfterToolCallback,
+  SingleBeforeToolCallback,
+} from '../../src/index.js';
+import {
+  BasePlugin,
+  BaseTool,
+  createEvent,
+  createEventActions,
+  functionsExportedForTestingOnly,
+  FunctionTool,
+  InvocationContext,
+  isToolNotFound,
+  LlmAgent,
+  LongRunningFunctionTool,
+  PluginManager,
+  ToolConfirmation,
+} from '../../src/index.js';
 import * as metrics from '../../src/telemetry/metrics.js';
 import {logger} from '../../src/utils/logger.js';
 

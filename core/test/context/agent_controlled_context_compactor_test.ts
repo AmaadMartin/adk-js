@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it, vi} from 'vitest';
 import type {
   BaseAgent,
   BaseSummarizer,
   CompactedEvent,
   Event,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   AgentControlledContextCompactor,
   createEvent,
@@ -18,8 +19,7 @@ import {
   getLogger,
   InvocationContext,
   PluginManager,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 class MockSummarizer implements BaseSummarizer {
   async summarize(events: Event[]): Promise<CompactedEvent> {

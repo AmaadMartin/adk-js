@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {
   CodeExecutionResult,
   ExecuteCodeParams,
@@ -13,7 +17,7 @@ import type {
   SessionArtifactService,
   SkillScriptResponse,
   SkillScriptResult,
-} from '@google/adk';
+} from '../../../src/index.js';
 import {
   BaseCodeExecutor,
   CodeExecutionLanguage,
@@ -24,11 +28,7 @@ import {
   RunSkillInlineScriptTool,
   ScopedArtifactService,
   SkillToolset,
-} from '@google/adk';
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 import {materializeScriptOutputs} from '../../../src/tools/skill/script_output_utils.js';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 

@@ -5,12 +5,12 @@
  */
 
 import type {Client} from '@google-cloud/vertexai';
-import type {CodeExecutionResult, InvocationContext} from '@google/adk';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {CodeExecutionResult, InvocationContext} from '../../src/index.js';
 import {
   AgentEngineSandboxCodeExecutor,
   CodeExecutionLanguage,
-} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 const TEST_PROJECT = 'test-project';
 const TEST_LOCATION = 'us-central1';

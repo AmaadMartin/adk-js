@@ -10,15 +10,15 @@ import type {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import type {A2AEvent} from '../../src/a2a/a2a_event.js';
+import {toA2AMessage, toAdkEvent} from '../../src/a2a/event_converter_utils.js';
 import {
   createEvent,
   createEventActions,
   resetIdProvider,
   setIdProvider,
-} from '@google/adk';
-import {afterEach, describe, expect, it, vi} from 'vitest';
-import type {A2AEvent} from '../../src/a2a/a2a_event.js';
-import {toA2AMessage, toAdkEvent} from '../../src/a2a/event_converter_utils.js';
+} from '../../src/index.js';
 import * as envAwareUtils from '../../src/utils/env_aware_utils.js';
 
 vi.mock('../../src/utils/env_aware_utils.js', async (importOriginal) => {

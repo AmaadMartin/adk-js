@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {OtelExportersConfig} from '@google/adk';
-import {getGcpExporters, getGcpResource} from '@google/adk';
 import type {Resource} from '@opentelemetry/resources';
 import {detectResources} from '@opentelemetry/resources';
 import {GoogleAuth} from 'google-auth-library';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {OtelExportersConfig} from '../../src/index.js';
+import {getGcpExporters, getGcpResource} from '../../src/index.js';
 
 vi.hoisted(() => {
   vi.resetModules();

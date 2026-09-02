@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {InvocationContext, LlmRequest, Skill} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+import type {InvocationContext, LlmRequest, Skill} from '../../../src/index.js';
 import {
   Context,
   LoadSkillResourceErrorCode,
   LoadSkillResourceTool,
   SkillToolset,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../../src/index.js';
 
 /** Shape of the error response `runAsync` returns when a call fails. */
 interface ToolErrorResponse {

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Context} from '@google/adk';
-import {createEventActions, requestInputTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import type {Context} from '../../src/index.js';
+import {createEventActions, requestInputTool} from '../../src/index.js';
 
 describe('requestInputTool', () => {
   it('computes the correct declaration', () => {

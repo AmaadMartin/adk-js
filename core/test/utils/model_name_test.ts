@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   isGemini2OrAbove,
   isGemini35LiveTranslate,
   isGemini3xFlashLive,
   isGemini3xLive,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 import {isGemini1Model, isGeminiModel} from '../../src/utils/model_name.js';
 
 describe('isGemini1Model', () => {

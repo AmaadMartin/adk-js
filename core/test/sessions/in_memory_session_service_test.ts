@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Session} from '@google/adk';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {Session} from '../../src/index.js';
 import {
   InMemorySessionService,
   State,
@@ -13,8 +14,7 @@ import {
   getLogger,
   resetIdProvider,
   setIdProvider,
-} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 import {
   deleteScopedStateKeys,
   isInMemoryConnectionString,

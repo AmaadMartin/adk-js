@@ -14,8 +14,8 @@ import type {
   LlmRequest,
   MemoryEntry,
   SearchMemoryResponse,
-} from '@google/adk';
-import {PRELOAD_MEMORY, PreloadMemoryTool} from '@google/adk';
+} from '../../src/index.js';
+import {PRELOAD_MEMORY, PreloadMemoryTool} from '../../src/index.js';
 
 // We mock the logger.warn since we test a failing case
 import {vi} from 'vitest';

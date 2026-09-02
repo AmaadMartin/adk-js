@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Content} from '@google/genai';
+import {Language, Outcome} from '@google/genai';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import type {
   BaseAgent,
   BaseLlmConnection,
@@ -12,7 +15,7 @@ import type {
   LlmRequest,
   LlmResponse,
   RunAsyncToolRequest,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   BaseLlm,
   BaseTool,
@@ -23,10 +26,7 @@ import {
   LlmAgent,
   Runner,
   toStructuredEvents,
-} from '@google/adk';
-import type {Content} from '@google/genai';
-import {Language, Outcome} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';

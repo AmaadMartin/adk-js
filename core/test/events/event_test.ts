@@ -4,7 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {AuthConfig} from '@google/adk';
+import {Outcome} from '@google/genai';
+import {afterEach, describe, expect, it} from 'vitest';
+import {
+  createNewEventId,
+  generateClientFunctionCallId,
+  isEvent,
+  mergeEventOverride,
+  populateClientFunctionCallId,
+  transformToCamelCaseEvent,
+  transformToSnakeCaseEvent,
+} from '../../src/events/event.js';
+import type {AuthConfig} from '../../src/index.js';
 import {
   createEvent,
   createEventActions,
@@ -17,18 +28,7 @@ import {
   resetIdProvider,
   setIdProvider,
   stringifyContent,
-} from '@google/adk';
-import {Outcome} from '@google/genai';
-import {afterEach, describe, expect, it} from 'vitest';
-import {
-  createNewEventId,
-  generateClientFunctionCallId,
-  isEvent,
-  mergeEventOverride,
-  populateClientFunctionCallId,
-  transformToCamelCaseEvent,
-  transformToSnakeCaseEvent,
-} from '../../src/events/event.js';
+} from '../../src/index.js';
 import {
   recordStateWrite,
   shouldApplyDeltaWrite,

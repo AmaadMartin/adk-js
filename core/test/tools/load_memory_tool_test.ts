@@ -12,7 +12,7 @@ import type {
   LlmRequest,
   MemoryEntry,
   SearchMemoryResponse,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   Context,
   createSession,
@@ -21,7 +21,7 @@ import {
   LOAD_MEMORY,
   LoadMemoryTool,
   PluginManager,
-} from '@google/adk';
+} from '../../src/index.js';
 
 import {createMemoryToolContext} from './test_helpers.js';
 

@@ -4,17 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Context, LlmRequest} from '@google/adk';
+import type {Blob, Part} from '@google/genai';
+import {Type} from '@google/genai';
+import {describe, expect, it, vi} from 'vitest';
+import type {Context, LlmRequest} from '../../src/index.js';
 import {
   FeatureName,
   getLogger,
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
   withTemporaryFeatureOverride,
-} from '@google/adk';
-import type {Blob, Part} from '@google/genai';
-import {Type} from '@google/genai';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 /** Builds a request whose last turn asks the tool to load `artifactNames`. */
 function requestLoading(artifactNames: string[]): LlmRequest {

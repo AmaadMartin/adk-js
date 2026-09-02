@@ -5,14 +5,14 @@
  */
 
 import type {DataPart, Task, TextPart} from '@a2a-js/sdk';
-import type {Event as AdkEvent, ExecutorContext} from '@google/adk';
-import {createEvent, createEventActions} from '@google/adk';
 import type {Content as GenAIContent} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
   getFinalTaskStatusUpdate,
   getUnansweredRequestEvent,
 } from '../../src/a2a/event_processor_utils.js';
+import type {Event as AdkEvent, ExecutorContext} from '../../src/index.js';
+import {createEvent, createEventActions} from '../../src/index.js';
 
 import {toA2AParts} from '../../src/a2a/part_converter_utils.js';
 

@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseAgentConfig, Event} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+import type {BaseAgentConfig, Event} from '../../src/index.js';
 import {
   BaseAgent,
   InvocationContext,
@@ -13,8 +14,7 @@ import {
   createEvent,
   createSession,
   isParallelAgent,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 class MockSubAgent extends BaseAgent {
   private eventsToYield: Event[];

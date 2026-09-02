@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {runInNewContext} from 'node:vm';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {
   CodeExecutionResult,
   ExecuteCodeParams,
@@ -14,7 +19,7 @@ import type {
   Skill,
   SkillScriptResponse,
   SkillScriptResult,
-} from '@google/adk';
+} from '../../../src/index.js';
 import {
   BaseCodeExecutor,
   CodeExecutionLanguage,
@@ -25,12 +30,7 @@ import {
   RunSkillScriptTool,
   ScopedArtifactService,
   SkillToolset,
-} from '@google/adk';
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-import {runInNewContext} from 'node:vm';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 import {materializeScriptOutputs} from '../../../src/tools/skill/script_output_utils.js';
 
 // Only the materialize step is spied on, so the tests below can assert both

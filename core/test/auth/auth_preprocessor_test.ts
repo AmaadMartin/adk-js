@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseAgent, Event} from '@google/adk';
+import type {Mock} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
+import type {BaseAgent, Event} from '../../src/index.js';
 import {
   AUTH_PREPROCESSOR,
   InvocationContext,
@@ -13,10 +16,7 @@ import {
   SequentialAgent,
   createEvent,
   createSession,
-} from '@google/adk';
-import type {Mock} from 'vitest';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
+} from '../../src/index.js';
 
 vi.mock('../../src/agents/functions.js', async (importOriginal) => {
   const actual = (await importOriginal()) as {

@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {InvocationContext} from '@google/adk';
-import {Context, MCPSessionManager, MCPTool} from '@google/adk';
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {RequestOptions} from '@modelcontextprotocol/sdk/shared/protocol.js';
 import {
@@ -14,6 +12,8 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
+import type {InvocationContext} from '../../../src/index.js';
+import {Context, MCPSessionManager, MCPTool} from '../../../src/index.js';
 
 /**
  * Stands in for `MCPSessionManager.withTimeout` on the duck-typed session

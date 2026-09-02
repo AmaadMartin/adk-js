@@ -5,21 +5,21 @@
  */
 
 import type {Client} from '@google-cloud/vertexai';
+import type {Content, Part} from '@google/genai';
+import {Language, Outcome, ToolType} from '@google/genai';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {
   Event,
   MemoryEntry,
   Session,
   VertexAiMemoryBankServiceOptions,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   createEvent,
   createSession,
   getLogger,
   VertexAiMemoryBankService,
-} from '@google/adk';
-import type {Content, Part} from '@google/genai';
-import {Language, Outcome, ToolType} from '@google/genai';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 const TEST_PROJECT = 'test-project';
 const TEST_LOCATION = 'us-central1';
