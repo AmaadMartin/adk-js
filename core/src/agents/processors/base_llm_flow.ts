@@ -10,18 +10,12 @@ import {
 } from './base_llm_processor.js';
 
 /**
- * The construction contract of adk-python's `BaseLlmFlow`: the base class
- * supplies two empty processor lists, and a subclass appends to them from its
- * own constructor after it calls `super()`.
- *
- * adk-python's class also owns the loop that runs the processors and calls the
- * model. adk-js keeps that loop in `LlmAgent.runOneStepAsync`, so this class
- * carries the composition only.
+ * The two processor lists a flow is built from, in the order they run. A
+ * subclass calls `super()` and then appends to them, which is how adk-python's
+ * `SingleFlow` and `AutoFlow` compose. adk-python's `BaseLlmFlow` also owns the
+ * loop that runs the processors; adk-js keeps that loop in `LlmAgent`.
  */
 export abstract class BaseLlmFlow {
-  /** The request processors, in the order they run. */
   readonly requestProcessors: BaseLlmRequestProcessor[] = [];
-
-  /** The response processors, in the order they run. */
   readonly responseProcessors: BaseLlmResponseProcessor[] = [];
 }

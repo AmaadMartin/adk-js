@@ -49,7 +49,6 @@ export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
 export type {LoopAgentConfig} from './agents/loop_agent.js';
 export {ParallelAgent, isParallelAgent} from './agents/parallel_agent.js';
 export {AgentTransferLlmRequestProcessor} from './agents/processors/agent_transfer_llm_request_processor.js';
-export {BaseLlmFlow} from './agents/processors/base_llm_flow.js';
 export {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,

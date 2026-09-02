@@ -7,7 +7,6 @@
 import {
   AUTH_PREPROCESSOR,
   BaseContextCompactor,
-  BaseLlmFlow,
   CONTENT_REQUEST_PROCESSOR,
   ContextCompactorRequestProcessor,
   INTERACTIONS_REQUEST_PROCESSOR,
@@ -15,6 +14,7 @@ import {
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/agent_transfer_llm_request_processor.js';
+import {BaseLlmFlow} from '../../../src/agents/processors/base_llm_flow.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/basic_llm_request_processor.js';
 import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
