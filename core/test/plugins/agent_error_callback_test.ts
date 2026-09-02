@@ -246,6 +246,18 @@ describe('onAgentErrorCallback', () => {
     expect(plugin.afterAgentCalled).toBe(true);
   });
 
+  it('does not fire when the consumer stops reading early', async () => {
+    const plugin = new ErrorTrackingPlugin('error_tracker');
+    const agent = new SuccessAgent({name: 'good_agent'});
+    const context = createContext(agent, [plugin]);
+
+    for await (const _ of agent.runAsync(context)) {
+      break;
+    }
+
+    expect(plugin.agentErrors).toHaveLength(0);
+  });
+
   it('does not fire when the invocation was aborted', async () => {
     const plugin = new ErrorTrackingPlugin('error_tracker');
     const controller = new AbortController();

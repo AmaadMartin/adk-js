@@ -9,6 +9,7 @@ import {
   BaseAgent,
   BaseAgentConfig,
   BasePlugin,
+  ContextCompactorRequestProcessor,
   Event,
   FunctionTool,
   InvocationContext,
@@ -16,6 +17,7 @@ import {
   LlmAgentConfig,
   PluginManager,
   Session,
+  TruncatingContextCompactor,
   createEvent,
   createSession,
 } from '@google/adk';
@@ -458,6 +460,21 @@ describe('BaseAgent', () => {
       expect(() =>
         agent.clone({zebra: 1, alpha: 2} as Partial<LlmAgentConfig>),
       ).toThrow(/nonexistent fields in LlmAgent: alpha, zebra/);
+    });
+
+    it('accepts a config field the subclass folds away instead of storing', () => {
+      const agent = new LlmAgent({name: 'original'});
+      const countCompactors = (a: LlmAgent) =>
+        a.requestProcessors.filter(
+          (p) => p instanceof ContextCompactorRequestProcessor,
+        ).length;
+      expect(countCompactors(agent)).toBe(0);
+
+      const clone = agent.clone({
+        contextCompactors: [new TruncatingContextCompactor({threshold: 5})],
+      });
+
+      expect(countCompactors(clone)).toBe(1);
     });
 
     it('accepts a field the agent was constructed without', () => {

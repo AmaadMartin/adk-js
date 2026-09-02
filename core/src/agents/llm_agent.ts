@@ -623,6 +623,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   /**
+   * `contextCompactors` is folded into {@link requestProcessors} rather than
+   * stored, so `clone()` has no instance field to recognize it by.
+   */
+  protected override get configOnlyKeys(): readonly string[] {
+    return ['contextCompactors'];
+  }
+
+  /**
    * The resolved BaseLlm instance.
    *
    * When not set, the agent will inherit the model from its ancestor.

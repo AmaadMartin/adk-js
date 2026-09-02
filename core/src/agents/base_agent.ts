@@ -277,6 +277,20 @@ export abstract class BaseAgent<
   }
 
   /**
+   * Config keys this agent accepts but never stores on the instance.
+   *
+   * {@link clone} cannot see a subclass's config interface, because TypeScript
+   * erases it, so it derives the allowed override keys from the instance
+   * instead. A subclass that consumes a config field without assigning it —
+   * `LlmAgent` folds `contextCompactors` into its request processors — has to
+   * name it here, or `clone()` rejects an override that the constructor would
+   * have honoured.
+   */
+  protected get configOnlyKeys(): readonly string[] {
+    return [];
+  }
+
+  /**
    * Rejects override keys this agent cannot place, so a typo fails loudly
    * instead of returning an unchanged clone.
    *
@@ -290,6 +304,7 @@ export abstract class BaseAgent<
 
     const allowed = new Set<string>([
       ...BASE_AGENT_CONFIG_KEYS,
+      ...this.configOnlyKeys,
       ...Object.keys(this.config),
       ...Object.keys(this),
     ]);
