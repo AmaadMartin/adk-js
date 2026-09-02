@@ -1829,8 +1829,7 @@ class TurnBasedLiveLlm extends BaseLlm {
     super({model: 'turn-based-live-llm'});
   }
 
-  // eslint-disable-next-line require-yield -- the async path is never taken.
-  async *generateContentAsync(): AsyncGenerator<LlmResponse, void> {
+  generateContentAsync(): AsyncGenerator<LlmResponse, void> {
     throw new Error('TurnBasedLiveLlm only serves the live path.');
   }
 

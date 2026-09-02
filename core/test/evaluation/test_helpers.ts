@@ -102,8 +102,7 @@ export class FakeLiveLlm extends BaseLlm {
     this.connection = new FakeLiveConnection(ignoreClose);
   }
 
-  // eslint-disable-next-line require-yield -- the async path is never taken.
-  async *generateContentAsync(): AsyncGenerator<LlmResponse, void> {
+  generateContentAsync(): AsyncGenerator<LlmResponse, void> {
     throw new Error('FakeLiveLlm only serves the live path.');
   }
 
