@@ -99,7 +99,8 @@ interface AgentCreationOptions {
   project: string;
   region: string;
   language: string;
-  agentType: AgentType;
+  /** Defaults to `AgentType.CODE`, as adk-python's `--type` does. */
+  agentType?: AgentType;
 }
 
 async function getGcpProject(): Promise<string> {
