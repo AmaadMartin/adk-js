@@ -30,27 +30,30 @@ export class ScriptedLlm extends BaseLlm {
 }
 
 /**
- * A live connection that replays a fixed script and records what was sent to
- * it, so a live eval run is deterministic and offline.
+ * A live connection the test feeds by hand, so a live eval run is offline and
+ * the moment each response arrives is under the test's control.
  */
-export class ScriptedLiveConnection implements BaseLlmConnection {
+export class FakeLiveConnection implements BaseLlmConnection {
   readonly contentCalls: Content[] = [];
   closed = false;
   private readonly responses = new AsyncQueue<LlmResponse | Error>();
 
   /**
-   * @param script The responses to replay. An `Error` is thrown to the reader
-   *     in its turn, standing in for a dropped connection.
    * @param ignoreClose Whether `close` leaves the response stream open, so the
    *     reader parks instead of finishing. Used to drive a shutdown timeout.
    */
-  constructor(
-    script: Array<LlmResponse | Error>,
-    private readonly ignoreClose = false,
-  ) {
-    for (const response of script) {
+  constructor(private readonly ignoreClose = false) {}
+
+  /** Delivers responses to the reader, in order. */
+  emit(...responses: Array<LlmResponse | Error>): void {
+    for (const response of responses) {
       this.responses.push(response);
     }
+  }
+
+  /** Ends the response stream, as a model that hung up would. */
+  endStream(): void {
+    this.responses.close();
   }
 
   async sendHistory(): Promise<void> {}
@@ -82,32 +85,29 @@ export class ScriptedLiveConnection implements BaseLlmConnection {
   }
 }
 
-/** A model that serves {@link ScriptedLiveConnection} on the live path. */
-export class ScriptedLiveLlm extends BaseLlm {
-  readonly connections: ScriptedLiveConnection[] = [];
+/**
+ * A model serving one {@link FakeLiveConnection} on the live path.
+ *
+ * The connection exists before the run starts, so a test can queue responses
+ * up front or release them turn by turn.
+ */
+export class FakeLiveLlm extends BaseLlm {
+  readonly connection: FakeLiveConnection;
 
   /**
-   * @param script The responses every connection replays.
-   * @param ignoreClose Whether a connection leaves its stream open on close.
+   * @param ignoreClose Whether the connection leaves its stream open on close.
    */
-  constructor(
-    private readonly script: Array<LlmResponse | Error>,
-    private readonly ignoreClose = false,
-  ) {
-    super({model: 'scripted-live-llm'});
+  constructor(ignoreClose = false) {
+    super({model: 'fake-live-llm'});
+    this.connection = new FakeLiveConnection(ignoreClose);
   }
 
   // eslint-disable-next-line require-yield -- the async path is never taken.
   async *generateContentAsync(): AsyncGenerator<LlmResponse, void> {
-    throw new Error('ScriptedLiveLlm only serves the live path.');
+    throw new Error('FakeLiveLlm only serves the live path.');
   }
 
   async connect(): Promise<BaseLlmConnection> {
-    const connection = new ScriptedLiveConnection(
-      this.script,
-      this.ignoreClose,
-    );
-    this.connections.push(connection);
-    return connection;
+    return this.connection;
   }
 }

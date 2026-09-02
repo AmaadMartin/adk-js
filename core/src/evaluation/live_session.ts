@@ -322,7 +322,10 @@ export class EvalLiveSession {
       sessionService: runner.sessionService,
       memoryService: runner.memoryService,
       credentialService: runner.credentialService,
-      invocationId: this.invocationId,
+      // The connection outlives every turn, so it gets an id of its own. Each
+      // event is then re-stamped with the id of the turn that was in flight
+      // when it arrived, which is what groups the transcript into invocations.
+      invocationId: createNewEventId(),
       agent: this.agent,
       session,
       // A copy, so a processor that edits the run config cannot edit the

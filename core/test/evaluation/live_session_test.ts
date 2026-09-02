@@ -5,15 +5,18 @@
  */
 
 import {
+  BaseLlmRequestProcessor,
   BasePlugin,
   BaseTool,
   Context,
+  createEvent,
   EvalLiveSession,
   Event,
   getLogger,
   InMemoryArtifactService,
   InMemorySessionService,
   InputValidationError,
+  InvocationContext,
   isNormalClosure,
   LIVE_RUN_CONFIG,
   LIVE_SHUTDOWN_TIMEOUT_SECONDS,
@@ -33,7 +36,7 @@ import {
 import {FunctionDeclaration, Modality} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {ScriptedLiveLlm} from './test_helpers.js';
+import {FakeLiveLlm} from './test_helpers.js';
 
 const APP_NAME = 'live_eval_app';
 const USER_ID = 'live_eval_user';
@@ -108,27 +111,37 @@ class RecordingPlugin extends BasePlugin {
 interface Harness {
   runner: Runner;
   session: Session;
-  llm: ScriptedLiveLlm;
+  llm: FakeLiveLlm;
   plugin: RecordingPlugin;
   tool: WeatherTool;
 }
 
+interface HarnessOptions {
+  withTool?: boolean;
+  ignoreClose?: boolean;
+  /** Omit the artifact service, as a runner built without one has none. */
+  withoutArtifactService?: boolean;
+  requestProcessors?: BaseLlmRequestProcessor[];
+}
+
 async function createHarness(
   script: Array<LlmResponse | Error>,
-  options: {withTool?: boolean; ignoreClose?: boolean} = {},
+  options: HarnessOptions = {},
 ): Promise<Harness> {
   const sessionService = new InMemorySessionService();
   const session = await sessionService.createSession({
     appName: APP_NAME,
     userId: USER_ID,
   });
-  const llm = new ScriptedLiveLlm(script, options.ignoreClose);
+  const llm = new FakeLiveLlm(options.ignoreClose);
+  llm.connection.emit(...script);
   const tool = new WeatherTool();
   const agent = new LlmAgent({
     name: AGENT_NAME,
     model: llm,
     instruction: INSTRUCTION,
     tools: options.withTool ? [tool] : [],
+    requestProcessors: options.requestProcessors,
   });
   const plugin = new RecordingPlugin();
   const runner = new Runner({
@@ -136,7 +149,9 @@ async function createHarness(
     agent,
     plugins: [plugin],
     sessionService,
-    artifactService: new InMemoryArtifactService(),
+    artifactService: options.withoutArtifactService
+      ? undefined
+      : new InMemoryArtifactService(),
   });
   return {runner, session, llm, plugin, tool};
 }
@@ -152,6 +167,50 @@ async function driveToCompletion(
   await liveSession.turnComplete;
   await liveSession.close();
   return {harness, liveSession, events: liveSession.eventQueue.drain()};
+}
+
+/**
+ * A processor that yields a metadata event and allows no tool through, so the
+ * driver's allowlist filter and its event drain are both exercised.
+ */
+class AllowNoToolsProcessor extends BaseLlmRequestProcessor {
+  async *runAsync(
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<Event, void, void> {
+    llmRequest.allowedTools = [];
+    yield createEvent({
+      invocationId: invocationContext.invocationId,
+      author: AGENT_NAME,
+    });
+  }
+}
+
+/** The tool declarations the recorded request carried. */
+function declaredToolNames(harness: Harness): Array<string | undefined> {
+  const call = harness.plugin.beforeCalls[0];
+  if (call === undefined) {
+    expect.fail('the driver fired no beforeModelCallback');
+  }
+  return (call.llmRequest.config?.tools ?? []).flatMap((tool) =>
+    'functionDeclarations' in tool
+      ? (tool.functionDeclarations ?? []).map((declaration) => declaration.name)
+      : [],
+  );
+}
+
+/** Reports whether the turn in flight has completed, without awaiting it. */
+function watchTurn(liveSession: EvalLiveSession): () => boolean {
+  let settled = false;
+  void liveSession.turnComplete.then(() => {
+    settled = true;
+  });
+  return () => settled;
+}
+
+/** Lets the driver work through everything the model has already sent. */
+async function drainPendingWork(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 20));
 }
 
 const TEXT_REPLY: LlmResponse = {
@@ -287,13 +346,34 @@ describe('EvalLiveSession', () => {
       withTool: true,
     });
 
-    const tools = harness.plugin.beforeCalls[0].llmRequest.config?.tools ?? [];
-    const declarations = tools.flatMap((tool) =>
-      'functionDeclarations' in tool ? (tool.functionDeclarations ?? []) : [],
-    );
-    expect(declarations.map((declaration) => declaration.name)).toEqual([
-      'get_weather',
-    ]);
+    expect(declaredToolNames(harness)).toEqual(['get_weather']);
+  });
+
+  it('leaves out a tool the request processors disallowed', async () => {
+    const harness = await createHarness([TEXT_REPLY, TURN_COMPLETE], {
+      withTool: true,
+      requestProcessors: [new AllowNoToolsProcessor()],
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    liveSession.start();
+    await liveSession.turnComplete;
+    await liveSession.close();
+
+    expect(declaredToolNames(harness)).toEqual([]);
+  });
+
+  it('runs without an artifact service', async () => {
+    const harness = await createHarness([TEXT_REPLY, TURN_COMPLETE], {
+      withoutArtifactService: true,
+    });
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    liveSession.start();
+    await liveSession.turnComplete;
+    await liveSession.close();
+
+    expect(harness.plugin.beforeCalls).toHaveLength(1);
   });
 
   it('fires afterModelCallback once per event it saw', async () => {
@@ -308,39 +388,51 @@ describe('EvalLiveSession', () => {
     );
   });
 
-  it('stamps the current invocation id onto every event', async () => {
+  it('stamps the turn id onto every event, over the connection id', async () => {
     const {liveSession, events} = await driveToCompletion([
       TEXT_REPLY,
       TURN_COMPLETE,
     ]);
 
+    // The invocation context the flow runs under carries an id of its own, so
+    // an unstamped event would not carry the turn's id.
     expect(events.length).toBeGreaterThan(0);
     for (const event of events) {
       expect(event.invocationId).toBe(liveSession.currentInvocationId);
     }
   });
 
-  it('appends the non-partial events to the session and skips partials', async () => {
-    const {harness} = await driveToCompletion([
+  it('offers only the non-partial events to the session service', async () => {
+    const harness = await createHarness([
       {content: {role: 'model', parts: [{text: 'sun'}]}, partial: true},
       TEXT_REPLY,
       TURN_COMPLETE,
     ]);
-
-    const stored = await harness.runner.sessionService.getSession({
-      appName: APP_NAME,
-      userId: USER_ID,
-      sessionId: harness.session.id,
-    });
-    const texts = (stored?.events ?? []).map(
-      (event) => event.content?.parts?.[0]?.text,
+    // `InMemorySessionService` drops a partial event itself, so the driver's
+    // own guard is only visible in what it offers the service.
+    const appended: Event[] = [];
+    const originalAppend = harness.runner.sessionService.appendEvent.bind(
+      harness.runner.sessionService,
     );
+    vi.spyOn(harness.runner.sessionService, 'appendEvent').mockImplementation(
+      async (request) => {
+        appended.push(request.event);
+        return originalAppend(request);
+      },
+    );
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+
+    liveSession.start();
+    await liveSession.turnComplete;
+    await liveSession.close();
+
+    const texts = appended.map((event) => event.content?.parts?.[0]?.text);
     expect(texts).toContain('sunny');
     expect(texts).not.toContain('sun');
   });
 
   it('keeps the turn open across a tool round', async () => {
-    const {harness, events} = await driveToCompletion(
+    const harness = await createHarness(
       [
         {
           content: {
@@ -349,16 +441,20 @@ describe('EvalLiveSession', () => {
           },
         },
         TURN_COMPLETE,
-        TEXT_REPLY,
-        TURN_COMPLETE,
       ],
       {withTool: true},
     );
+    const liveSession = new EvalLiveSession(harness.runner, harness.session);
+    const settled = watchTurn(liveSession);
 
-    // The turn resolved on the second `turnComplete`, so the reply that
-    // followed the tool round is part of the same turn.
-    const texts = events.map((event) => event.content?.parts?.[0]?.text);
-    expect(texts).toContain('sunny');
+    liveSession.start();
+    await drainPendingWork();
+
+    // The model closed the tool round, not the turn: it still owes an answer.
+    expect(settled()).toBe(false);
+    harness.llm.connection.emit(TEXT_REPLY, TURN_COMPLETE);
+    await liveSession.turnComplete;
+    await liveSession.close();
     // The agent's own live flow runs the tool; the driver must not run it again.
     expect(harness.tool.calls).toBe(1);
   });
@@ -366,21 +462,18 @@ describe('EvalLiveSession', () => {
   it('ignores a turnComplete the user authored', async () => {
     const harness = await createHarness([
       {content: {role: 'user', parts: [{text: 'echo'}]}, turnComplete: true},
-      TEXT_REPLY,
-      TURN_COMPLETE,
     ]);
     const liveSession = new EvalLiveSession(harness.runner, harness.session);
+    const settled = watchTurn(liveSession);
 
     liveSession.start();
+    await drainPendingWork();
+
+    expect(settled()).toBe(false);
+    harness.llm.connection.emit(TURN_COMPLETE);
     await liveSession.turnComplete;
     await liveSession.close();
-
-    // Had the user-authored event resolved the turn, the model reply queued
-    // after it would still be in flight.
-    const texts = liveSession.eventQueue
-      .drain()
-      .map((event) => event.content?.parts?.[0]?.text);
-    expect(texts).toContain('sunny');
+    expect(settled()).toBe(true);
   });
 
   it('gives each turn a fresh id and a fresh promise', async () => {
