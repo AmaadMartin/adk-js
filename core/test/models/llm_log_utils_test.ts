@@ -40,8 +40,10 @@ function section(log: string, heading: string): string {
   const block = blocks.find((candidate) =>
     candidate.trimStart().startsWith(`${heading}:`),
   );
-  expect(block, `no "${heading}" section in log`).toBeDefined();
-  return block!;
+  if (block === undefined) {
+    return expect.fail(`no "${heading}" section in log`);
+  }
+  return block;
 }
 
 describe('buildFunctionDeclarationLog', () => {

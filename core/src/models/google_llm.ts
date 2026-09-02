@@ -167,8 +167,8 @@ export class Gemini extends BaseLlm {
     }
     this.preprocessRequest(llmRequest);
     this.maybeAppendUserContent(llmRequest);
-    const model = resolveModelName(llmRequest.model, this.model);
-    if (!model) {
+    const model = llmRequest.model ?? this.model;
+    if (!model.trim()) {
       throw new Error('Gemini requests require a model name.');
     }
     logger.info(
@@ -304,8 +304,8 @@ export class Gemini extends BaseLlm {
    * @returns BaseLlmConnection, the connection to the Gemini model.
    */
   override async connect(llmRequest: LlmRequest): Promise<BaseLlmConnection> {
-    const modelVersion = resolveModelName(llmRequest.model, this.model);
-    if (!modelVersion) {
+    const modelVersion = llmRequest.model ?? this.model;
+    if (!modelVersion.trim()) {
       throw new Error('Live Gemini requests require a model name.');
     }
 
@@ -418,20 +418,6 @@ function withoutDisplayName<T extends Blob | FileData>(dataObj: T): T {
     return dataObj;
   }
   return {...dataObj, displayName: undefined};
-}
-
-/**
- * Picks the model name to send: the request's own, else the instance default.
- *
- * Returns undefined when the resolved name is blank, so each caller can raise
- * the error that fits its path.
- */
-function resolveModelName(
-  requestModel: string | undefined,
-  fallbackModel: string,
-): string | undefined {
-  const model = requestModel ?? fallbackModel;
-  return model.trim() === '' ? undefined : model;
 }
 
 export function geminiInitParams({
