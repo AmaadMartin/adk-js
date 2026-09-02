@@ -6,9 +6,13 @@
 
 import {
   BaseAgent,
+  BaseLlm,
+  BaseLlmConnection,
+  InMemoryRunner,
   InvocationContext,
   LlmAgent,
   LlmRequest,
+  LlmResponse,
   PluginManager,
   createSession,
 } from '@google/adk';
@@ -18,6 +22,40 @@ import {IDENTITY_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/ide
 
 /** Forces `disallowTransferToParent` and `disallowTransferToPeers` to true. */
 const OUTPUT_SCHEMA: Schema = {type: Type.OBJECT};
+
+class RecordingLlm extends BaseLlm {
+  lastRequest?: LlmRequest;
+
+  constructor() {
+    super({model: 'recording-llm'});
+  }
+
+  async *generateContentAsync(
+    request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    this.lastRequest = request;
+    yield {content: {parts: [{text: 'done'}]}};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('Method not implemented.');
+  }
+}
+
+async function runAgentOnce(agent: LlmAgent): Promise<void> {
+  const runner = new InMemoryRunner({agent});
+  const session = await runner.sessionService.createSession({
+    appName: runner.appName,
+    userId: 'test_user',
+  });
+  for await (const _ of runner.runAsync({
+    userId: 'test_user',
+    sessionId: session.id,
+    newMessage: {role: 'user', parts: [{text: 'Hi'}]},
+  })) {
+    // intentionally empty
+  }
+}
 
 class MockRootAgent extends BaseAgent {
   constructor(name: string, subAgents: BaseAgent[] = []) {
@@ -297,6 +335,42 @@ describe('IdentityLlmRequestProcessor', () => {
 
     expect(llmRequest.config?.systemInstruction).toBe(
       'You are an agent. Your internal name is "agent".',
+    );
+  });
+});
+
+describe('identity instruction in the LlmAgent request chain', () => {
+  it('puts the preamble ahead of the agent instruction', async () => {
+    const model = new RecordingLlm();
+    const agent = new LlmAgent({
+      name: 'weather_agent',
+      model,
+      description: 'Answers questions about the weather.',
+      instruction: 'Be concise.',
+    });
+
+    await runAgentOnce(agent);
+
+    expect(model.lastRequest?.config?.systemInstruction).toBe(
+      'You are an agent. Your internal name is "weather_agent". ' +
+        'The description about you is "Answers questions about the weather.".' +
+        '\n\nBe concise.',
+    );
+  });
+
+  it('sends only the agent instruction for a single_turn agent', async () => {
+    const model = new RecordingLlm();
+    const agent = new LlmAgent({
+      name: 'classifier',
+      model,
+      mode: 'single_turn',
+      instruction: 'Reply with one of: bug, feature, question.',
+    });
+
+    await runAgentOnce(agent);
+
+    expect(model.lastRequest?.config?.systemInstruction).toBe(
+      'Reply with one of: bug, feature, question.',
     );
   });
 });
