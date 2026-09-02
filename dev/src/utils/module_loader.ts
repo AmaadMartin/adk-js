@@ -9,7 +9,7 @@ import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 import {linkProjectNodeModules} from './agent_loader.js';
-import {createTempDir, removeFolder} from './file_utils.js';
+import {createTempDir, removeFolder, saveToFile} from './file_utils.js';
 
 const TYPESCRIPT_EXTENSIONS = new Set(['.ts', '.mts', '.cts']);
 
@@ -34,6 +34,12 @@ export async function importUserModule(
   try {
     const outFile = path.join(outputDir, `${path.parse(filePath).name}.mjs`);
     await linkProjectNodeModules(outputDir, path.dirname(filePath));
+
+    // Node reads the nearest package.json above the compiled file. Without one
+    // here it climbs out of the temp directory, and whatever package.json sits
+    // above the system temp root then decides how the file resolves a package.
+    await saveToFile(path.join(outputDir, 'package.json'), {type: 'module'});
+
     await esbuild.build({
       entryPoints: [filePath],
       outfile: outFile,

@@ -13,7 +13,10 @@ import {importUserModule} from '../../src/utils/module_loader.js';
 /** The directories the loader compiled into, in the order it created them. */
 const workDirs = vi.hoisted(() => [] as string[]);
 
-// Only the record of the directory is added; the real one is still created.
+/** The files the loader wrote into those directories, as path and contents. */
+const writes = vi.hoisted(() => [] as Array<[string, unknown]>);
+
+// Only the record of the work is added; the real work still happens.
 vi.mock('../../src/utils/file_utils.js', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../src/utils/file_utils.js')>();
@@ -23,6 +26,10 @@ vi.mock('../../src/utils/file_utils.js', async (importOriginal) => {
       const dir = await actual.createTempDir(prefix);
       workDirs.push(dir);
       return dir;
+    },
+    async saveToFile(filePath: string, data: unknown) {
+      writes.push([filePath, data]);
+      await actual.saveToFile(filePath, data);
     },
   };
 });
@@ -39,6 +46,7 @@ describe('importUserModule', () => {
 
   beforeEach(async () => {
     workDirs.length = 0;
+    writes.length = 0;
     moduleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-modules-'));
   });
 
@@ -73,6 +81,19 @@ describe('importUserModule', () => {
     const exports = await importUserModule(filePath);
 
     expect(exports['value']).toBe('n=42');
+  });
+
+  it('gives the compiled module a package boundary of its own', async () => {
+    const filePath = await writeModule(
+      'bounded.ts',
+      'export const value: number = 1;\n',
+    );
+
+    await importUserModule(filePath);
+
+    expect(writes).toEqual([
+      [path.join(workDirs[0], 'package.json'), {type: 'module'}],
+    ]);
   });
 
   it('removes the directory it compiled into', async () => {
