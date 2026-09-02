@@ -47,13 +47,6 @@ class FakeLlm {
   }
 }
 
-/** A model that adds nothing on top of BaseLlm, so the defaults apply. */
-class BareLlm extends BaseLlm {
-  constructor() {
-    super({model: 'bare-model'});
-  }
-}
-
 const IMPLEMENTED_RESPONSE: LlmResponse = {
   content: {role: 'model', parts: [{text: 'hi'}]},
 };
@@ -66,16 +59,20 @@ const IMPLEMENTED_CONNECTION = {
   close: async () => {},
 } satisfies BaseLlmConnection;
 
-/** A model that implements both transports, so neither default applies. */
-class ImplementedLlm extends BaseLlm {
+/** A model that does not connect, so the BaseLlm default applies. */
+class BareLlm extends BaseLlm {
   constructor() {
-    super({model: 'implemented-model'});
+    super({model: 'bare-model'});
   }
   override async *generateContentAsync(
     _llmRequest: LlmRequest,
   ): AsyncGenerator<LlmResponse, void> {
     yield IMPLEMENTED_RESPONSE;
   }
+}
+
+/** A model that connects, so the BaseLlm default does not apply. */
+class ImplementedLlm extends BareLlm {
   override async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
     return IMPLEMENTED_CONNECTION;
   }
@@ -113,37 +110,23 @@ describe('BaseLlm', () => {
   });
 });
 
-describe('BaseLlm defaults for unimplemented transports', () => {
+describe('BaseLlm default connect', () => {
   const request: LlmRequest = {
     contents: [{role: 'user', parts: [{text: 'Hello'}]}],
     liveConnectConfig: {},
     toolsDict: {},
   };
 
-  it('rejects connect, naming the model that does not support it', async () => {
+  it('rejects, naming the model that does not support it', async () => {
     await expect(new BareLlm().connect(request)).rejects.toThrow(
       'Live connection is not supported for bare-model.',
     );
   });
 
-  it('throws from generateContentAsync only once it is iterated', async () => {
-    const generator = new BareLlm().generateContentAsync(request);
-
-    await expect(generator.next()).rejects.toThrow(
-      'Async generation is not supported for bare-model.',
+  it('gives way to a subclass implementation', async () => {
+    await expect(new ImplementedLlm().connect(request)).resolves.toBe(
+      IMPLEMENTED_CONNECTION,
     );
-  });
-
-  it('keeps a subclass implementation of either transport', async () => {
-    const llm = new ImplementedLlm();
-
-    const responses: LlmResponse[] = [];
-    for await (const response of llm.generateContentAsync(request)) {
-      responses.push(response);
-    }
-
-    expect(responses).toEqual([IMPLEMENTED_RESPONSE]);
-    await expect(llm.connect(request)).resolves.toBe(IMPLEMENTED_CONNECTION);
   });
 });
 

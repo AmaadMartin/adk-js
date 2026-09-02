@@ -143,24 +143,16 @@ export abstract class BaseLlm {
   /**
    * Generates one content from the given contents and tools.
    *
-   * Subclasses that support unidirectional generation override this. The base
-   * implementation throws on first iteration.
-   *
-   * @param _llmRequest LlmRequest, the request to send to the LLM; unused by
-   * the base implementation.
-   * @param _stream whether to do streaming call. For non-streaming call, it
-   * will only yield one Content.
-   * @param _abortSignal Aborts an in-flight call.
+   * @param llmRequest  LlmRequest, the request to send to the LLM.
+   * @param stream whether to do streaming call.
+   * For non-streaming call, it will only yield one Content.
    * @return A generator of LlmResponse.
    */
-  // eslint-disable-next-line require-yield -- the base implementation always throws; there is nothing to emit.
-  async *generateContentAsync(
-    _llmRequest: LlmRequest,
-    _stream?: boolean,
-    _abortSignal?: AbortSignal,
-  ): AsyncGenerator<LlmResponse, void> {
-    throw new Error(`Async generation is not supported for ${this.model}.`);
-  }
+  abstract generateContentAsync(
+    llmRequest: LlmRequest,
+    stream?: boolean,
+    abortSignal?: AbortSignal,
+  ): AsyncGenerator<LlmResponse, void>;
 
   /**
    * Creates a live connection to the LLM.

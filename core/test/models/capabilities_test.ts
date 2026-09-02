@@ -10,6 +10,8 @@ import {
   Gemini,
   getLogger,
   LlmCapabilities,
+  LlmRequest,
+  LlmResponse,
   Logger,
 } from '@google/adk';
 import {
@@ -29,10 +31,15 @@ const DEPRECATED_ENTERPRISE_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 /** A model id the name-based fallback grants once Vertex AI is on. */
 const GRANTED_MODEL = 'gemini-2.5-pro';
 
-/** A model that adds nothing on top of BaseLlm. */
+/** A model that adds nothing on top of BaseLlm but the required generation. */
 class BareLlm extends BaseLlm {
   constructor(model = 'bare-model') {
     super({model});
+  }
+  override async *generateContentAsync(
+    _llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {
+    yield {};
   }
 }
 
