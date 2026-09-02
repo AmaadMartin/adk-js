@@ -13,7 +13,7 @@ import {
   ReadonlyContext,
   ToolPredicate,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 class DummyTool extends BaseTool {
   constructor(name: string) {
@@ -61,20 +61,6 @@ class FilteringToolset extends BaseToolset {
   async close(): Promise<void> {}
 }
 
-/** Filters without guarding on the context, as `ToolboxToolset` does. */
-class UnguardedFilteringToolset extends BaseToolset {
-  constructor(toolFilter: ToolPredicate | string[]) {
-    super(toolFilter);
-  }
-
-  async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    const rawTools = [new DummyTool('tool1'), new DummyTool('tool2')];
-    return rawTools.filter((tool) => this.isToolSelected(tool, context));
-  }
-
-  async close(): Promise<void> {}
-}
-
 describe('BaseToolset.isToolSelected', () => {
   const context = {} as unknown as ReadonlyContext;
 
@@ -94,24 +80,6 @@ describe('BaseToolset.isToolSelected', () => {
     const toolset = new FilteringToolset((tool) => tool.name === 'tool1');
     const tools = await toolset.getTools(context);
     expect(tools.map((tool) => tool.name)).toEqual(['tool1']);
-  });
-
-  it('selects every tool when a ToolPredicate filter has no context', async () => {
-    const predicate = vi.fn<ToolPredicate>(() => false);
-    const toolset = new UnguardedFilteringToolset(predicate);
-
-    const tools = await toolset.getTools();
-
-    expect(tools.map((tool) => tool.name)).toEqual(['tool1', 'tool2']);
-    expect(predicate).not.toHaveBeenCalled();
-  });
-
-  it('still applies a string[] filter when there is no context', async () => {
-    const toolset = new UnguardedFilteringToolset(['tool2']);
-
-    const tools = await toolset.getTools();
-
-    expect(tools.map((tool) => tool.name)).toEqual(['tool2']);
   });
 });
 

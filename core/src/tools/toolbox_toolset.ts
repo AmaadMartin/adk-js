@@ -108,15 +108,23 @@ export class ToolboxToolset extends BaseToolset {
       this.toolsetName ? client.loadToolset(this.toolsetName) : [],
       Promise.all(this.toolNames.map((name) => client.loadTool(name))),
     ]);
-    if (typeof this.toolFilter === 'function' && !context) {
+    const tools = [...toolsetTools, ...namedTools].map((tool) =>
+      toFunctionTool(tool, this.prefix),
+    );
+    if (context) {
+      return tools.filter((tool) => this.isToolSelected(tool, context));
+    }
+    const filter = this.toolFilter;
+    if (typeof filter === 'function') {
       logger.warn(
         'ToolboxToolset: toolFilter is a predicate, but getTools() received ' +
           'no ReadonlyContext. The filter was not applied.',
       );
+      return tools;
     }
-    return [...toolsetTools, ...namedTools]
-      .map((tool) => toFunctionTool(tool, this.prefix))
-      .filter((tool) => this.isToolSelected(tool, context));
+    return filter.length === 0
+      ? tools
+      : tools.filter((tool) => filter.includes(tool.name));
   }
 
   /**
