@@ -10,8 +10,17 @@
  *
  * The data model, the config helpers and the eval-set migration utilities in
  * this directory stand alone. Running an eval additionally needs an eval
- * service, which this build of `@google/adk` does not ship. Installing a
- * runtime is how that service is supplied.
+ * service, which this build of `@google/adk` does not ship.
+ *
+ * `LocalEvalService` is the implementation that will call
+ * {@link setEvalRuntime}, once it is ported. It owns the metric evaluator
+ * registry and the user simulator, which is why {@link EvalServiceParams}
+ * carries the eval config whole rather than the metrics alone.
+ *
+ * The runtime is installed process-wide, and deliberately so: adk-python
+ * resolves the same service through a lazy module import, and a test author
+ * calling `AgentEvaluator.evaluate` should not have to thread a factory
+ * through every call.
  */
 
 import {BaseAgent} from '../agents/base_agent.js';

@@ -131,7 +131,6 @@ function scoredOnce(score: number | undefined, threshold: number) {
 describe('AgentEvaluator.evaluateEvalSet', () => {
   let runtime: StubEvalRuntime;
   let infoSpy: ReturnType<typeof vi.spyOn>;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
 
   /** Installs a runtime whose eval service yields the given results. */
   function install(evalCaseResults: EvalCaseResult[]): StubEvalRuntime {
@@ -143,7 +142,7 @@ describe('AgentEvaluator.evaluateEvalSet', () => {
   beforeEach(() => {
     install(scoredOnce(1, 0.8));
     infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => {});
-    warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    vi.spyOn(logger, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -460,56 +459,21 @@ describe('AgentEvaluator.evaluateEvalSet', () => {
     expect(evalSetResultsManager.saved[0].evalCaseResults).toHaveLength(1);
   });
 
-  it('maps the deprecated criteria onto the same metrics as a config', async () => {
+  it('forwards the whole eval config to the runtime', async () => {
+    const evalConfig = {
+      ...createEvalConfig(0.8),
+      customMetrics: {[MATCH_METRIC]: {codeConfig: {name: './score.js'}}},
+      userSimulatorConfig: {turns: 3},
+    };
+
     await AgentEvaluator.evaluateEvalSet({
       agentModule: createAgentModule(),
       evalSet: createEvalSet(),
-      criteria: {[MATCH_METRIC]: 0.8},
+      evalConfig,
       numRuns: 1,
     });
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('`criteria` is deprecated'),
-    );
-    expect(runtime.params?.evalConfig).toEqual({
-      criteria: {[MATCH_METRIC]: {threshold: 0.8}},
-    });
-  });
-
-  it('lets the deprecated criteria win over a config passed alongside it', async () => {
-    await AgentEvaluator.evaluateEvalSet({
-      agentModule: createAgentModule(),
-      evalSet: createEvalSet(),
-      criteria: {[MATCH_METRIC]: 0.5},
-      evalConfig: createEvalConfig(0.9),
-      numRuns: 1,
-    });
-
-    expect(runtime.params?.evalConfig).toEqual({
-      criteria: {[MATCH_METRIC]: {threshold: 0.5}},
-    });
-  });
-
-  it('keeps the config when an empty criteria map is passed', async () => {
-    await AgentEvaluator.evaluateEvalSet({
-      agentModule: createAgentModule(),
-      evalSet: createEvalSet(),
-      criteria: {},
-      evalConfig: createEvalConfig(0.8),
-      numRuns: 1,
-    });
-
-    expect(runtime.params?.evalConfig).toEqual(createEvalConfig(0.8));
-    expect(warnSpy).not.toHaveBeenCalled();
-  });
-
-  it('rejects a run configured with neither criteria nor a config', async () => {
-    await expect(
-      AgentEvaluator.evaluateEvalSet({
-        agentModule: createAgentModule(),
-        evalSet: createEvalSet(),
-      }),
-    ).rejects.toThrowError('`evalConfig` is required.');
+    expect(runtime.params?.evalConfig).toBe(evalConfig);
   });
 
   it('reports the missing runtime only after the options are validated', async () => {
@@ -519,8 +483,12 @@ describe('AgentEvaluator.evaluateEvalSet', () => {
       AgentEvaluator.evaluateEvalSet({
         agentModule: createAgentModule(),
         evalSet: createEvalSet(),
+        evalConfig: createEvalConfig(0.8),
+        evalSetResultsManager: new RecordingEvalSetResultsManager(),
       }),
-    ).rejects.toThrowError('`evalConfig` is required.');
+    ).rejects.toThrowError(
+      'app_name is required when eval_set_results_manager is provided.',
+    );
     await expect(
       AgentEvaluator.evaluateEvalSet({
         agentModule: createAgentModule(),

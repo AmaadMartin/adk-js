@@ -62,21 +62,26 @@ export function describeAgentModule(agentModule: AgentModuleRef): string {
   return typeof agentModule === 'string' ? agentModule : ANONYMOUS_MODULE_LABEL;
 }
 
-/** Returns true when the module can be expected to expose an agent. */
-function exposesAgent(
-  agentModule: AgentModuleRef,
-  moduleExports: AgentModuleExports,
-): boolean {
-  if (moduleExports.agent !== undefined) {
-    return true;
+/**
+ * Imports a module specifier.
+ *
+ * @throws {InputValidationError} When the module neither exposes an `agent`
+ *   member nor is itself named `agent`, so it names no agent module.
+ */
+async function importAgentModule(
+  specifier: string,
+): Promise<AgentModuleExports> {
+  const moduleExports: AgentModuleExports = await import(specifier);
+  if (
+    moduleExports.agent === undefined &&
+    !AGENT_MODULE_SPECIFIER.test(specifier)
+  ) {
+    throw new InputValidationError(
+      `Module ${specifier} does not have a member named \`agent\` or the ` +
+        'name should end with `agent`.',
+    );
   }
-  if (typeof agentModule === 'string') {
-    return AGENT_MODULE_SPECIFIER.test(agentModule);
-  }
-  return (
-    moduleExports.rootAgent !== undefined ||
-    typeof moduleExports.getAgentAsync === 'function'
-  );
+  return moduleExports;
 }
 
 /** Returns the agent the module binds, awaiting its factory when it has one. */
@@ -124,14 +129,9 @@ export async function resolveAgentForEval(
 ): Promise<ResolvedAgent> {
   const moduleName = describeAgentModule(agentModule);
   const moduleExports: AgentModuleExports =
-    typeof agentModule === 'string' ? await import(agentModule) : agentModule;
-
-  if (!exposesAgent(agentModule, moduleExports)) {
-    throw new InputValidationError(
-      `Module ${moduleName} does not have a member named \`agent\` or the ` +
-        'name should end with `agent`.',
-    );
-  }
+    typeof agentModule === 'string'
+      ? await importAgentModule(agentModule)
+      : agentModule;
 
   const agentExports = moduleExports.agent ?? moduleExports;
   const rootAgent = await resolveRootAgent(agentExports, moduleName);

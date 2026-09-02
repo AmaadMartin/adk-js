@@ -144,14 +144,8 @@ export interface EvaluateEvalSetOptions {
 
   evalSet: EvalSet;
 
-  /**
-   * Thresholds by metric name.
-   *
-   * @deprecated Use {@link evalConfig}.
-   */
-  criteria?: Record<string, number>;
-
-  evalConfig?: EvalConfig;
+  /** The metrics to score, and the threshold each must reach. */
+  evalConfig: EvalConfig;
 
   /** Defaults to {@link NUM_RUNS}. */
   numRuns?: number;
@@ -587,18 +581,6 @@ async function seedEvalSetsManager(
   return evalSetsManager;
 }
 
-/** Maps deprecated `criteria` thresholds onto an eval config. */
-function criteriaToEvalConfig(criteria: Record<string, number>): EvalConfig {
-  return {
-    criteria: Object.fromEntries(
-      Object.entries(criteria).map(([metricName, threshold]) => [
-        metricName,
-        {threshold},
-      ]),
-    ),
-  };
-}
-
 /** An evaluator for agents, mainly intended for helping with test cases. */
 export class AgentEvaluator {
   /** Reads `test_config.json` from the folder holding the test file. */
@@ -612,7 +594,7 @@ export class AgentEvaluator {
    * Evaluates an agent against one eval set.
    *
    * @throws {InputValidationError} When the options are inconsistent, or when
-   *   neither `criteria` nor `evalConfig` is supplied.
+   *   the results manager comes without an app name.
    * @throws {EvalFailureError} When a metric's mean score falls below its
    *   threshold, or when a run produced no metric results at all. Results are
    *   persisted before this is thrown.
@@ -621,7 +603,7 @@ export class AgentEvaluator {
     const {
       agentModule,
       evalSet,
-      criteria,
+      evalConfig,
       numRuns = NUM_RUNS,
       agentName,
       printDetailedResults = true,
@@ -634,19 +616,6 @@ export class AgentEvaluator {
       throw new InputValidationError(
         'app_name is required when eval_set_results_manager is provided.',
       );
-    }
-
-    let evalConfig = options.evalConfig;
-    if (criteria && Object.keys(criteria).length > 0) {
-      logger.warn(
-        '`criteria` is deprecated and will be removed in a future release. ' +
-          'Its values are mapped onto `evalConfig` for now, but you should ' +
-          'move to the `evalConfig` option.',
-      );
-      evalConfig = criteriaToEvalConfig(criteria);
-    }
-    if (evalConfig === undefined) {
-      throw new InputValidationError('`evalConfig` is required.');
     }
 
     const {agent, app} = await resolveAgentForEval(agentModule, agentName);

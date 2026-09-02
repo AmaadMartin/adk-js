@@ -104,8 +104,8 @@ describe('resolveAgentForEval', () => {
 
   it('reports an object that exposes nothing the loader recognises', async () => {
     await expect(resolveAgentForEval({})).rejects.toThrowError(
-      'Module the agent module does not have a member named `agent` or the ' +
-        'name should end with `agent`.',
+      'Module the agent module does not have a rootAgent or getAgentAsync ' +
+        'method.',
     );
   });
 
