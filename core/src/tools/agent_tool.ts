@@ -15,11 +15,13 @@ import {
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
+import {RunConfig, StreamingMode} from '../agents/run_config.js';
 import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
 import {formatError} from '../utils/error_utils.js';
+import {stableJsonStringify} from '../utils/json_utils.js';
 import {
   parseWithSchema,
   SchemaLike,
@@ -166,6 +168,32 @@ const TASK_DELEGATION_WARNING =
   ' Do NOT call this tool in parallel with any other tools.';
 
 /**
+ * The run config the wrapped agent runs under: the caller's, with the two
+ * settings that cannot cross the boundary overridden.
+ *
+ * CFC (Compositional Function Calling) describes how the caller's own model
+ * executes. Handing it to another agent switches that agent onto the live API
+ * path, which only works if its model happens to support CFC. And only the
+ * last nested event's content becomes the tool result, so a streamed nested
+ * run could leave a partial chunk as the answer — the nested run is always
+ * unary.
+ *
+ * The caller's own config is never mutated: the overrides go on a copy. Both
+ * are applied unconditionally, because they are the values `createRunConfig`
+ * defaults to anyway when the caller left them unset.
+ */
+function nestedRunConfig(callerConfig?: RunConfig): RunConfig | undefined {
+  if (!callerConfig) {
+    return undefined;
+  }
+  return {
+    ...callerConfig,
+    supportCfc: false,
+    streamingMode: StreamingMode.NONE,
+  };
+}
+
+/**
  * A tool that wraps an agent.
  *
  * This tool allows an agent to be called as a tool within a larger
@@ -213,8 +241,8 @@ export class AgentTool extends BaseTool {
         ? toJsonSchema(inputSchema)
         : REQUEST_PARAMETERS_JSON_SCHEMA;
     } else {
-      // The agent's input schema is used as is; it is neither validated nor
-      // transformed, unlike the equivalent path in Python ADK.
+      // The declaration carries the agent's input schema as it stands. The
+      // arguments a call brings back are validated in `runAsync`.
       declaration.parameters =
         agentInputSchema(this.agent) ?? REQUEST_PARAMETERS;
     }
@@ -250,12 +278,14 @@ export class AgentTool extends BaseTool {
       parts: [
         {
           // With a schema the text must stay a bare JSON document: the wrapped
-          // agent re-validates it against that same schema.
+          // agent re-validates it against that same schema. Without one, and
+          // without a string `request`, the keys are sorted so that the same
+          // arguments always produce the same message.
           text: inputSchema
             ? JSON.stringify(parseWithSchema(inputSchema, args))
             : typeof request === 'string'
               ? request
-              : JSON.stringify(args),
+              : stableJsonStringify(args),
         },
       ],
     };
@@ -276,89 +306,97 @@ export class AgentTool extends BaseTool {
         toolContext.invocationContext.memoryService ??
         new InMemoryMemoryService(),
       credentialService: toolContext.invocationContext.credentialService,
-      // The caller keeps ownership of these plugins: adk-js has no plugin
-      // close lifecycle, so the sub-runner cannot tear them down.
+      // The caller keeps ownership of these plugins: the sub-runner releases
+      // its own toolsets and nothing else.
       plugins: this.includePlugins
         ? toolContext.invocationContext.pluginManager?.listPlugins()
         : undefined,
     });
 
-    const state = Object.fromEntries(
-      Object.entries(toolContext.state.toRecord()).filter(
-        ([key]) => !key.startsWith(ADK_INTERNAL_STATE_PREFIX),
-      ),
-    );
+    try {
+      const state = Object.fromEntries(
+        Object.entries(toolContext.state.toRecord()).filter(
+          ([key]) => !key.startsWith(ADK_INTERNAL_STATE_PREFIX),
+        ),
+      );
 
-    const session = await runner.sessionService.createSession({
-      appName: childAppName,
-      userId: toolContext.invocationContext.userId,
-      state,
-    });
+      const session = await runner.sessionService.createSession({
+        appName: childAppName,
+        userId: toolContext.invocationContext.userId,
+        state,
+      });
 
-    if (toolContext.abortSignal?.aborted) {
-      return '';
-    }
-
-    let lastContent: Content | undefined;
-    let lastErrorMessage: string | undefined;
-    let lastGroundingMetadata: GroundingMetadata | undefined;
-    for await (const event of runner.runAsync({
-      userId: session.userId,
-      sessionId: session.id,
-      newMessage: content,
-      abortSignal: toolContext.abortSignal,
-    })) {
       if (toolContext.abortSignal?.aborted) {
-        return;
+        return '';
       }
 
-      if (event.actions.stateDelta) {
-        const filteredDelta = Object.fromEntries(
-          Object.entries(event.actions.stateDelta).filter(
-            ([key]) => !key.startsWith(State.TEMP_PREFIX),
-          ),
-        );
-        if (Object.keys(filteredDelta).length > 0) {
-          toolContext.state.update(filteredDelta);
+      let lastContent: Content | undefined;
+      let lastErrorMessage: string | undefined;
+      let lastGroundingMetadata: GroundingMetadata | undefined;
+      for await (const event of runner.runAsync({
+        userId: session.userId,
+        sessionId: session.id,
+        newMessage: content,
+        runConfig: nestedRunConfig(toolContext.invocationContext.runConfig),
+        abortSignal: toolContext.abortSignal,
+      })) {
+        if (toolContext.abortSignal?.aborted) {
+          return;
+        }
+
+        if (event.actions.stateDelta) {
+          const filteredDelta = Object.fromEntries(
+            Object.entries(event.actions.stateDelta).filter(
+              ([key]) => !key.startsWith(State.TEMP_PREFIX),
+            ),
+          );
+          if (Object.keys(filteredDelta).length > 0) {
+            toolContext.state.update(filteredDelta);
+          }
+        }
+
+        if (event.errorMessage) {
+          lastErrorMessage = event.errorMessage;
+        }
+        if (event.content) {
+          lastContent = event.content;
+          lastGroundingMetadata = event.groundingMetadata;
         }
       }
 
-      if (event.errorMessage) {
-        lastErrorMessage = event.errorMessage;
+      if (!lastContent?.parts) {
+        return lastErrorMessage ?? '';
       }
-      if (event.content) {
-        lastContent = event.content;
-        lastGroundingMetadata = event.groundingMetadata;
+
+      // Exclude thoughts from the merged text.
+      const mergedText = lastContent.parts
+        .filter((part) => !part.thought)
+        .map(partToText)
+        .filter((text) => text)
+        .join('\n');
+      if (!mergedText && lastErrorMessage) {
+        return lastErrorMessage;
       }
+
+      const outputAgent = schemaAgent(this.agent, 'last');
+      const result = outputAgent?.outputSchema
+        ? outputAgent.validateOutput(JSON.parse(stripJsonCodeFence(mergedText)))
+        : mergedText;
+
+      if (this.propagateGroundingMetadata && lastGroundingMetadata) {
+        toolContext.state.set(
+          GROUNDING_METADATA_STATE_KEY,
+          lastGroundingMetadata,
+        );
+      }
+
+      return result;
+    } finally {
+      // Release the toolsets the wrapped agent holds, on every exit: a normal
+      // run, an abort, and a throw. The session service and the plugins belong
+      // to the caller, which is still using them.
+      await runner.closeToolsets();
     }
-
-    if (!lastContent?.parts) {
-      return lastErrorMessage ?? '';
-    }
-
-    // Exclude thoughts from the merged text.
-    const mergedText = lastContent.parts
-      .filter((part) => !part.thought)
-      .map(partToText)
-      .filter((text) => text)
-      .join('\n');
-    if (!mergedText && lastErrorMessage) {
-      return lastErrorMessage;
-    }
-
-    const outputAgent = schemaAgent(this.agent, 'last');
-    const result = outputAgent?.outputSchema
-      ? outputAgent.validateOutput(JSON.parse(stripJsonCodeFence(mergedText)))
-      : mergedText;
-
-    if (this.propagateGroundingMetadata && lastGroundingMetadata) {
-      toolContext.state.set(
-        GROUNDING_METADATA_STATE_KEY,
-        lastGroundingMetadata,
-      );
-    }
-
-    return result;
   }
 }
 

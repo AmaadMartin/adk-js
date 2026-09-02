@@ -751,8 +751,15 @@ export class Runner {
   /**
    * Closes every toolset the root declares, and reports no failure: a toolset
    * that throws must not hide the failure of the run that led here.
+   *
+   * `runAsync` calls this when its generator completes or is disposed. It is
+   * public so that a caller which builds a runner for one nested run — an
+   * `AgentTool` — can release those toolsets at a point it chooses, without
+   * closing the plugins and the session service it borrowed from its own
+   * caller. A runner is reusable across runs, so every call closes the
+   * toolsets again rather than latching after the first.
    */
-  private async closeToolsets(): Promise<void> {
+  async closeToolsets(): Promise<void> {
     const toolsets = isBaseAgent(this.agent) ? getAllToolsets(this.agent) : [];
     await Promise.allSettled(toolsets.map((t) => t.close()));
   }
