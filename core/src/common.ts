@@ -172,6 +172,7 @@ export {
   convertEventsToEvalInvocations,
   generateInferencesFromAgentModule,
   generateInferencesFromRootAgent,
+  generateInferencesFromRootAgentLive,
   generateResponses,
   generateResponsesFromSession,
   normalizeLiveTranscriptions,
@@ -180,6 +181,20 @@ export type {
   EvalCaseResponses,
   EvalRow,
 } from './evaluation/evaluation_generator.js';
+export {
+  CONSUME_TIMEOUT_MS,
+  EvalLiveSession,
+  LIVE_RUN_CONFIG,
+  LiveEventQueue,
+  WEBSOCKET_NORMAL_CLOSURE_CODE,
+  isNormalLiveClosure,
+  recordLlmRequestForAgent,
+} from './evaluation/live_session.js';
+export {
+  DEFAULT_HTTP_RETRY_ATTEMPTS,
+  EnsureRetryOptionsPlugin,
+  addDefaultRetryOptionsIfNotPresent,
+} from './evaluation/retry_options_utils.js';
 export {
   UserSimulatorStatus,
   validateNextUserMessage,

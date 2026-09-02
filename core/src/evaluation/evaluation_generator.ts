@@ -50,11 +50,20 @@ import {
   SessionInput,
 } from './eval_case.js';
 import {EvalSet} from './eval_set.js';
+import {EvalLiveSession, LiveEventQueue} from './live_session.js';
 import {RequestIntercepterPlugin} from './request_intercepter_plugin.js';
+import {EnsureRetryOptionsPlugin} from './retry_options_utils.js';
 import {
   UserSimulator,
   validateNextUserMessage,
 } from './simulation/user_simulator.js';
+
+/**
+ * Re-exported from `live_session.js`, which owns it: the live session drives
+ * the queue, and the module that defines the session cannot import the one
+ * that consumes it.
+ */
+export {LiveEventQueue} from './live_session.js';
 
 /** Author of the events the user contributed to a session. */
 const USER_AUTHOR = 'user';
@@ -70,6 +79,9 @@ const DEFAULT_EVAL_USER_ID = 'test_user_id';
 
 /** Name of the intercepter plugin installed on every eval `Runner`. */
 const REQUEST_INTERCEPTER_PLUGIN_NAME = 'request_intercepter_plugin';
+
+/** Name of the retry plugin installed on every eval `Runner`. */
+const ENSURE_RETRY_OPTIONS_PLUGIN_NAME = 'ensure_retry_options';
 
 /**
  * Bytes of audio sent per realtime message. Matches the chunk size the Live
@@ -461,11 +473,13 @@ export function buildEvalRunnerConfig(params: {
   // from an app takes its app name from `app.name`, and that is the name it
   // looks the session up under. adk-python's `Runner` prefers the explicit
   // `app_name` instead, and reaches the same session either way.
+  // Spread rather than field-by-field, so a configuration field added to `App`
+  // later is carried into the eval run instead of being silently dropped.
   const runnerApp = new App({
+    ...app,
     name: appName,
     rootAgent,
     plugins: [...app.plugins, ...internalEvalPlugins],
-    resumabilityConfig: app.resumabilityConfig,
   });
   return {app: runnerApp, appName, ...services};
 }
@@ -510,6 +524,77 @@ export async function* generateInferencesForSingleUserInvocation(params: {
   }
 }
 
+/** Everything a driver needs to run one eval conversation. */
+interface EvalRun {
+  runner: Runner;
+  session: Session;
+  requestIntercepter: RequestIntercepterPlugin;
+}
+
+/**
+ * Prepares the runner one eval conversation runs on.
+ *
+ * The live and non-live drivers share the service defaults, the session, the
+ * reset and the internal plugins; only the turn loop differs.
+ *
+ * @param params.rootAgent The agent under evaluation.
+ * @param params.resetFunc Clears agent-owned state; called once before the run.
+ * @param params.initialSession The session the conversation runs in.
+ * @param params.sessionId Id to create the session under when
+ *     `initialSession` pins none.
+ * @param params.sessionService Defaults to a fresh `InMemorySessionService`.
+ * @param params.artifactService Defaults to a fresh `InMemoryArtifactService`.
+ * @param params.memoryService Defaults to a fresh `InMemoryMemoryService`.
+ * @param params.app The app the agent belongs to, when there is one.
+ * @returns The runner, the session it runs in, and the request intercepter the
+ *     app details are read back from.
+ */
+async function prepareEvalRun(params: {
+  rootAgent: RunnableRoot;
+  resetFunc?: () => unknown;
+  initialSession?: SessionInput;
+  sessionId?: string;
+  sessionService?: BaseSessionService;
+  artifactService?: BaseArtifactService;
+  memoryService?: BaseMemoryService;
+  app?: App;
+}): Promise<EvalRun> {
+  const sessionService = params.sessionService ?? new InMemorySessionService();
+  const memoryService = params.memoryService ?? new InMemoryMemoryService();
+  const artifactService =
+    params.artifactService ?? new InMemoryArtifactService();
+
+  const session = await getOrCreateEvalSession(
+    sessionService,
+    params.initialSession,
+    params.sessionId,
+  );
+
+  params.resetFunc?.();
+
+  const requestIntercepter = new RequestIntercepterPlugin(
+    REQUEST_INTERCEPTER_PLUGIN_NAME,
+  );
+  const runner = new Runner(
+    buildEvalRunnerConfig({
+      rootAgent: params.rootAgent,
+      appName: session.appName,
+      app: params.app,
+      internalEvalPlugins: [
+        requestIntercepter,
+        // Model outages are common enough over a long eval run that a request
+        // without a retry policy fails the eval case rather than the agent.
+        new EnsureRetryOptionsPlugin(ENSURE_RETRY_OPTIONS_PLUGIN_NAME),
+      ],
+      sessionService,
+      artifactService,
+      memoryService,
+    }),
+  );
+
+  return {runner, session, requestIntercepter};
+}
+
 /**
  * Drives an agent through a whole simulated conversation and returns what it
  * did, ready to grade.
@@ -541,33 +626,7 @@ export async function generateInferencesFromRootAgent(params: {
   memoryService?: BaseMemoryService;
   app?: App;
 }): Promise<Invocation[]> {
-  const sessionService = params.sessionService ?? new InMemorySessionService();
-  const memoryService = params.memoryService ?? new InMemoryMemoryService();
-  const artifactService =
-    params.artifactService ?? new InMemoryArtifactService();
-
-  const session = await getOrCreateEvalSession(
-    sessionService,
-    params.initialSession,
-    params.sessionId,
-  );
-
-  params.resetFunc?.();
-
-  const requestIntercepter = new RequestIntercepterPlugin(
-    REQUEST_INTERCEPTER_PLUGIN_NAME,
-  );
-  const runner = new Runner(
-    buildEvalRunnerConfig({
-      rootAgent: params.rootAgent,
-      appName: session.appName,
-      app: params.app,
-      internalEvalPlugins: [requestIntercepter],
-      sessionService,
-      artifactService,
-      memoryService,
-    }),
-  );
+  const {runner, session, requestIntercepter} = await prepareEvalRun(params);
 
   const events: Event[] = [];
   for (;;) {
@@ -855,29 +914,6 @@ export function sendAudioToLive(
 }
 
 /**
- * Collects the events a live connection produces until the turn that asked for
- * them drains the queue.
- *
- * The live driver pushes events as they arrive, on its own schedule; the turn
- * generator takes whatever has arrived once the model reports the turn is
- * complete. This is the `asyncio.Queue` adk-python uses, in the form JS needs.
- */
-export class LiveEventQueue {
-  private events: Event[] = [];
-
-  push(event: Event): void {
-    this.events.push(event);
-  }
-
-  /** Returns every event queued so far and empties the queue. */
-  drain(): Event[] {
-    const drained = this.events;
-    this.events = [];
-    return drained;
-  }
-}
-
-/**
  * Waits for the model to finish its turn, or fails when the wait runs out.
  */
 async function waitForTurnComplete(
@@ -951,4 +987,95 @@ export async function* generateInferencesForSingleUserInvocationLive(params: {
       yield event;
     }
   }
+}
+
+/**
+ * Drives an agent over a live connection through a whole simulated
+ * conversation and returns what it did, ready to grade.
+ *
+ * The live counterpart of {@link generateInferencesFromRootAgent}. A
+ * native-audio model answers in audio and reports the words as a separate
+ * transcription, so the history the simulator sees is normalized to text
+ * before each turn, and again before the invocations are built.
+ *
+ * @param params.rootAgent The agent under evaluation.
+ * @param params.userSimulator The simulator playing the user.
+ * @param params.resetFunc Clears agent-owned state; called once before the run.
+ * @param params.initialSession The session the conversation runs in.
+ * @param params.sessionId Id to create the session under when
+ *     `initialSession` pins none.
+ * @param params.sessionService Defaults to a fresh `InMemorySessionService`.
+ * @param params.artifactService Defaults to a fresh `InMemoryArtifactService`.
+ * @param params.memoryService Defaults to a fresh `InMemoryMemoryService`.
+ * @param params.liveTimeoutSeconds How long one turn may take. Defaults to
+ *     `DEFAULT_LIVE_TIMEOUT_SECONDS`.
+ * @param params.app The app the agent belongs to, when there is one.
+ * @returns One invocation per turn of the conversation.
+ * @throws {Error} If the model does not complete a turn in time, or the live
+ *     connection fails with anything but a normal closure.
+ */
+export async function generateInferencesFromRootAgentLive(params: {
+  rootAgent: RunnableRoot;
+  userSimulator: UserSimulator;
+  resetFunc?: () => unknown;
+  initialSession?: SessionInput;
+  sessionId?: string;
+  sessionService?: BaseSessionService;
+  artifactService?: BaseArtifactService;
+  memoryService?: BaseMemoryService;
+  liveTimeoutSeconds?: number;
+  app?: App;
+}): Promise<Invocation[]> {
+  const {runner, session, requestIntercepter} = await prepareEvalRun(params);
+
+  const liveSession = new EvalLiveSession(
+    runner,
+    session,
+    session.userId,
+    session.id,
+  );
+  liveSession.start();
+
+  const events: Event[] = [];
+  try {
+    for (let turn = 1; ; turn++) {
+      const next = await params.userSimulator.getNextUserMessage(
+        normalizeLiveTranscriptions(copyEvents(events)),
+      );
+      validateNextUserMessage(next);
+      // The validator ties the two together: there is a message exactly when
+      // the status is SUCCESS, so no message means the conversation is over.
+      const userMessage = next.userMessage;
+      if (userMessage === undefined) {
+        break;
+      }
+
+      liveSession.startTurn();
+      logger.debug(`Waiting for model to complete turn ${turn}...`);
+      for await (const event of generateInferencesForSingleUserInvocationLive({
+        liveRequestQueue: liveSession.liveRequestQueue,
+        eventQueue: liveSession.eventQueue,
+        userMessage,
+        currentInvocationId: liveSession.currentInvocationId,
+        turnComplete: liveSession.turnComplete,
+        liveTimeoutSeconds: params.liveTimeoutSeconds,
+      })) {
+        events.push(event);
+      }
+
+      if (liveSession.isFinished) {
+        logger.debug('Live session finished signal detected.');
+        break;
+      }
+    }
+  } finally {
+    await liveSession.close();
+  }
+
+  // The app details are keyed off the raw events, whose ids the intercepter
+  // stamped; normalization rebuilds the events it rewrites.
+  return convertEventsToEvalInvocations(
+    normalizeLiveTranscriptions(events),
+    getAppDetailsByInvocationId(events, requestIntercepter),
+  );
 }
