@@ -191,6 +191,11 @@ async function getUserInput(prompt: string): Promise<string> {
 interface RunFromInputFileOptions {
   appName: string;
   userId: string;
+  /**
+   * The App the agent file exported. The Runner takes its plugins and its
+   * resumability config from here, so a replay run behaves like a live one.
+   */
+  app?: App;
   agent: RunnableRoot;
   artifactService: BaseArtifactService;
   sessionService: BaseSessionService;
@@ -400,6 +405,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
         (await runFromInputFile({
           appName,
           userId,
+          app,
           agent: rootAgent,
           artifactService,
           sessionService,
