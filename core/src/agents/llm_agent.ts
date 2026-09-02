@@ -77,7 +77,13 @@ import {
 } from './functions.js';
 
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
-import {InvocationContext, requireAgent} from './invocation_context.js';
+import {clearCanonicalToolsCache} from './canonical_tools.js';
+import {
+  drainInvocationEvents,
+  InvocationContext,
+  QueuedInvocationEvent,
+  requireAgent,
+} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {AutoFlow} from './processors/auto_flow.js';
@@ -1304,6 +1310,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
   ): AsyncGenerator<Event, void, void> {
+    // A tool set can change between steps, so the memo covers this step only.
+    clearCanonicalToolsCache(invocationContext);
+
     for (const processor of this.requestProcessors) {
       for await (const event of processor.runAsync(
         invocationContext,
@@ -1635,6 +1644,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   ): AsyncGenerator<Event, void, void> {
     const llmRequest = newLlmRequest(invocationContext);
 
+    // A tool set can change between steps, so the memo covers this step only.
+    clearCanonicalToolsCache(invocationContext);
+
     // =========================================================================
     // Preprocess before calling the LLM
     // =========================================================================
@@ -1852,7 +1864,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // so those events interleave into this agent's output stream. The tool runs
     // in a self-contained task that captures its result/error and always closes
     // the queue, so there is a single error path (no unhandled rejection).
-    const eventQueue = new AsyncQueue<Event>();
+    const eventQueue = new AsyncQueue<QueuedInvocationEvent>();
     invocationContext.eventQueue = eventQueue;
     const toolTask = (async (): Promise<{
       event: Event | null;
@@ -1873,9 +1885,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         eventQueue.close();
       }
     })();
-    for await (const queuedEvent of eventQueue) {
-      yield queuedEvent;
-    }
+    yield* drainInvocationEvents(eventQueue);
     const {event: functionResponseEvent, error: toolError} = await toolTask;
     invocationContext.eventQueue = undefined;
     if (toolError) {

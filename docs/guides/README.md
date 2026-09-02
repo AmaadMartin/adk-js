@@ -26,6 +26,11 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [SequentialAgent resumability](agents/sequential_agent/index.md) - Checkpointing a sequential pipeline so it resumes where it stopped, and pausing it on a human-in-the-loop call.
 - [Static instructions](agents/static_instruction/index.md) - Sending a fixed prompt prefix verbatim, and where the dynamic instruction goes instead.
 
+### Apps
+
+- [Events compaction](apps/events_compaction/index.md) - Declaring one
+  compaction policy for every agent in an app, and what it guarantees.
+
 ### Artifacts
 
 - [Artifact version metadata](artifacts/artifact_version/index.md) - The record

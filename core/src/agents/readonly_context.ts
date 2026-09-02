@@ -97,11 +97,16 @@ export class ReadonlyContext {
   /**
    * The credential resolved for `key` during this invocation, or `undefined`
    * when none was.
+   *
+   * @param key The credential key of the auth config that produced it.
+   * @returns The credential, or `undefined`.
    */
   getCredential(key: string): AuthCredential | undefined {
     const credentials = this.invocationContext.credentialByKey;
 
-    // A caller may supply the map as a `{}` literal, so guard inherited keys.
+    // `key` is attacker-influenced, and a caller may supply the map as a `{}`
+    // literal, so an inherited key such as `toString` would otherwise resolve
+    // to a function rather than to `undefined`.
     return Object.hasOwn(credentials, key) ? credentials[key] : undefined;
   }
 }

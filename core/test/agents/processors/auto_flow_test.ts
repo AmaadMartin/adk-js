@@ -8,6 +8,7 @@ import {
   AutoFlow,
   BaseContextCompactor,
   CONTENT_REQUEST_PROCESSOR,
+  ContextCompactorRequestProcessor,
   SingleFlow,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -36,16 +37,17 @@ describe('AutoFlow', () => {
 
   it('keeps compaction before the contents and transfer last', () => {
     const processors = new AutoFlow([stubCompactor]).requestProcessors;
-    const plain = new SingleFlow().requestProcessors;
-    const contentIndex = plain.indexOf(CONTENT_REQUEST_PROCESSOR);
+    const plain = new SingleFlow([stubCompactor]).requestProcessors;
+    const contentIndex = processors.indexOf(CONTENT_REQUEST_PROCESSOR);
 
+    // Agent transfer is the only thing AutoFlow adds, and it goes last.
     expect(processors).toEqual([
-      ...plain.slice(0, contentIndex),
-      processors[contentIndex],
-      ...plain.slice(contentIndex),
+      ...plain,
       AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
     ]);
-    expect(plain).not.toContain(processors[contentIndex]);
+    expect(processors[contentIndex - 1]).toBeInstanceOf(
+      ContextCompactorRequestProcessor,
+    );
   });
 
   it('adds nothing to the response processors', () => {

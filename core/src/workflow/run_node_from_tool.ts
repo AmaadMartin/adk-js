@@ -5,6 +5,9 @@
  */
 
 import {Context} from '../agents/context.js';
+import {InvocationContext} from '../agents/invocation_context.js';
+import {Event} from '../events/event.js';
+import {AsyncQueue} from '../utils/async_queue.js';
 
 import {BaseNode} from './base_node.js';
 import {createSubBranch} from './branch_path.js';
@@ -38,7 +41,7 @@ export interface RunNodeFromToolParams {
  * caller must therefore be an `LlmAgent` tool-call step, which is what supplies
  * that queue and the function-call id.
  */
-export function runNodeFromToolContext({
+export async function runNodeFromToolContext({
   toolContext,
   node,
   input,
@@ -48,8 +51,7 @@ export function runNodeFromToolContext({
 
   // A paused node's interrupt event must reach the session, so an event queue
   // is required; without one the pause would be a silent dead end.
-  const channel = ic.eventQueue;
-  if (!channel) {
+  if (!ic.eventQueue) {
     throw new Error(
       `Tool '${toolName}' requires an invocation event queue; ` +
         'it must be invoked from an LlmAgent tool-call step.',
@@ -76,6 +78,12 @@ export function runNodeFromToolContext({
   // on unbounded recursion; the clone carries the depth across agent runs.
   const childIc = ic.clone({nodeToolDepth: ic.nodeToolDepth + 1});
 
+  // The node pushes into a channel of its own; `forwardNodeEvents` hands each
+  // event to the invocation, which holds a non-partial one until the agent's
+  // drain loop has taken it.
+  const channel = new AsyncQueue<Event>();
+  const forwarding = forwardNodeEvents(channel, ic);
+
   const nodeCtx = new NodeContext({
     invocationContext: childIc,
     channel,
@@ -86,7 +94,7 @@ export function runNodeFromToolContext({
     resumeInputs: collectResumeInputs(toolContext),
   });
 
-  return executeChildNode({
+  const childCtx = await executeChildNode({
     parent: nodeCtx,
     node,
     input,
@@ -94,7 +102,41 @@ export function runNodeFromToolContext({
       runId,
       overrideBranch: createSubBranch(childIc.branch, {name: toolName, runId}),
     },
-  });
+  }).finally(() => channel.close());
+
+  const forwardError = await forwarding;
+  if (forwardError !== undefined) {
+    throw forwardError;
+  }
+  return childCtx;
+}
+
+/**
+ * Hands a node's events to the invocation, one at a time and in order.
+ *
+ * Returns the failure instead of rejecting, so a queue that dies while the node
+ * is still running does not leave a rejected promise unhandled; the caller
+ * surfaces it once the node has finished.
+ *
+ * @param channel The node's own event channel.
+ * @param ic The invocation the events belong to.
+ * @returns The error that stopped the forwarding, or `undefined`.
+ */
+async function forwardNodeEvents(
+  channel: AsyncQueue<Event>,
+  ic: InvocationContext,
+): Promise<unknown> {
+  try {
+    for await (const event of channel) {
+      await ic.enqueueEvent(event);
+    }
+    return undefined;
+  } catch (error) {
+    // Nothing is draining the channel any more, so stop the node pushing into
+    // it rather than letting it fill unbounded.
+    channel.close();
+    return error;
+  }
 }
 
 /**

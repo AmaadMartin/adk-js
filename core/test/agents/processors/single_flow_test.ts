@@ -62,6 +62,7 @@ describe('SingleFlow request processors', () => {
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       IDENTITY_LLM_REQUEST_PROCESSOR,
       INTERACTIONS_REQUEST_PROCESSOR,
+      expect.any(ContextCompactorRequestProcessor),
       CONTENT_REQUEST_PROCESSOR,
       CONTEXT_CACHE_REQUEST_PROCESSOR,
       NL_PLANNING_REQUEST_PROCESSOR,
@@ -94,15 +95,27 @@ describe('SingleFlow request processors', () => {
   it('inserts one compaction processor and keeps the rest of the order', () => {
     const plain = new SingleFlow().requestProcessors;
     const compacting = new SingleFlow([STUB_COMPACTOR]).requestProcessors;
-    const contentIndex = plain.indexOf(CONTENT_REQUEST_PROCESSOR);
-    const inserted = compacting[contentIndex];
 
-    expect(plain).not.toContain(inserted);
-    expect(compacting).toEqual([
-      ...plain.slice(0, contentIndex),
-      inserted,
-      ...plain.slice(contentIndex),
-    ]);
+    // Both flows carry exactly one compaction processor, at the same index,
+    // and the compactors it holds are the only difference between them.
+    const compactionIn = (processors: typeof plain) =>
+      processors.filter(
+        (processor) => processor instanceof ContextCompactorRequestProcessor,
+      );
+    expect(compactionIn(plain)).toHaveLength(1);
+    expect(compactionIn(compacting)).toHaveLength(1);
+    expect(compacting.indexOf(compactionIn(compacting)[0])).toBe(
+      plain.indexOf(compactionIn(plain)[0]),
+    );
+    expect(
+      compacting.filter(
+        (processor) => !(processor instanceof ContextCompactorRequestProcessor),
+      ),
+    ).toEqual(
+      plain.filter(
+        (processor) => !(processor instanceof ContextCompactorRequestProcessor),
+      ),
+    );
   });
 
   it('evaluates the supplied compactors through the inserted processor', async () => {
@@ -129,7 +142,10 @@ describe('SingleFlow request processors', () => {
     expect(asked).toBe(true);
   });
 
-  it('omits the compaction processor when no compactor is supplied', () => {
+  it('keeps the compaction processor when no compactor is supplied', () => {
+    // An agent that declares no compactors still honours the compaction policy
+    // its App declares, and that policy only reaches the processor per
+    // invocation. So the processor stays in the pipeline and does nothing.
     const withoutArgument = new SingleFlow();
     const withEmptyList = new SingleFlow([]);
 
@@ -138,9 +154,9 @@ describe('SingleFlow request processors', () => {
         flow.requestProcessors.some(
           (processor) => processor instanceof ContextCompactorRequestProcessor,
         ),
-      ).toBe(false);
+      ).toBe(true);
       expect(flow.requestProcessors).toHaveLength(
-        new SingleFlow([STUB_COMPACTOR]).requestProcessors.length - 1,
+        new SingleFlow([STUB_COMPACTOR]).requestProcessors.length,
       );
     }
   });

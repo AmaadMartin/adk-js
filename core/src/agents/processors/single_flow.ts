@@ -53,7 +53,10 @@ export class SingleFlow {
 
   /**
    * @param contextCompactors - Compactors to evaluate before the contents are
-   *   assembled. When empty, no compaction processor is inserted.
+   *   assembled. The compaction processor is always inserted, because an agent
+   *   that declares no compactors still honours the compaction policy its App
+   *   declares, and that policy only arrives per invocation. With neither, the
+   *   processor does nothing.
    */
   constructor(contextCompactors: BaseContextCompactor[] = []) {
     this.requestProcessors = [
@@ -71,9 +74,7 @@ export class SingleFlow {
       INTERACTIONS_REQUEST_PROCESSOR,
       // Compaction runs before contents so the compacted events reach the
       // model.
-      ...(contextCompactors.length > 0
-        ? [new ContextCompactorRequestProcessor(contextCompactors)]
-        : []),
+      new ContextCompactorRequestProcessor(contextCompactors),
       CONTENT_REQUEST_PROCESSOR,
       // Context caching reads the contents the previous processor assembled.
       CONTEXT_CACHE_REQUEST_PROCESSOR,

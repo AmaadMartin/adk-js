@@ -14,6 +14,7 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export {canonicalToolsFor} from './agents/canonical_tools.js';
 export {Context} from './agents/context.js';
 export type {ContextCacheConfig} from './agents/context_cache_config.js';
 export {
@@ -25,11 +26,16 @@ export {
   functionsExportedForTestingOnly,
   isToolNotFound,
 } from './agents/functions.js';
-export {InvocationContext, requireAgent} from './agents/invocation_context.js';
+export {
+  InvocationContext,
+  drainInvocationEvents,
+  requireAgent,
+} from './agents/invocation_context.js';
 export type {
   AgentState,
   AgentStateUpdate,
   InvocationContextParams,
+  QueuedInvocationEvent,
   SetAgentStateOptions,
   WorkflowInstructionScope,
 } from './agents/invocation_context.js';
@@ -104,6 +110,8 @@ export type {
   UserInputKind,
   UserInputRequest,
 } from './agents/user_input_request.js';
+export {createEventsCompactionConfig} from './apps/events_compaction_config.js';
+export type {EventsCompactionConfig} from './apps/events_compaction_config.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';
 export type {

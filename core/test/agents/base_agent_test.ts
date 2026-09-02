@@ -9,6 +9,7 @@ import {
   BaseAgent,
   BaseAgentConfig,
   BaseAgentState,
+  BaseContextCompactor,
   BasePlugin,
   ContextCompactorRequestProcessor,
   Event,
@@ -465,17 +466,21 @@ describe('BaseAgent', () => {
 
     it('accepts a config field the subclass folds away instead of storing', () => {
       const agent = new LlmAgent({name: 'original'});
-      const countCompactors = (a: LlmAgent) =>
-        a.requestProcessors.filter(
-          (p) => p instanceof ContextCompactorRequestProcessor,
-        ).length;
-      expect(countCompactors(agent)).toBe(0);
+      // The compaction processor is always in the pipeline, so the fold shows
+      // in the compactors it carries rather than in its presence.
+      const compactorsOf = (a: LlmAgent) =>
+        a.requestProcessors
+          .filter((p) => p instanceof ContextCompactorRequestProcessor)
+          .flatMap(
+            (p) =>
+              (p as unknown as {compactors: BaseContextCompactor[]}).compactors,
+          );
+      expect(compactorsOf(agent)).toEqual([]);
 
-      const clone = agent.clone({
-        contextCompactors: [new TruncatingContextCompactor({threshold: 5})],
-      });
+      const compactor = new TruncatingContextCompactor({threshold: 5});
+      const clone = agent.clone({contextCompactors: [compactor]});
 
-      expect(countCompactors(clone)).toBe(1);
+      expect(compactorsOf(clone)).toEqual([compactor]);
     });
 
     it('accepts a field the agent was constructed without', () => {

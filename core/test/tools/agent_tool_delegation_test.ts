@@ -10,10 +10,12 @@ import {
   Context,
   createEvent,
   createSession,
+  drainInvocationEvents,
   Event,
   InvocationContext,
   LlmAgent,
   PluginManager,
+  QueuedInvocationEvent,
   Session,
   SingleTurnAgentTool,
   TaskAgentTool,
@@ -66,8 +68,10 @@ class FailingAgent extends BaseAgent {
 
 interface ToolCallSetup {
   toolContext: Context;
-  queue: AsyncQueue<Event>;
+  queue: AsyncQueue<QueuedInvocationEvent>;
   session: Session;
+  /** Everything the child pushed onto the invocation's event queue. */
+  drain: () => Promise<Event[]>;
 }
 
 function createToolCall(
@@ -86,7 +90,7 @@ function createToolCall(
     withFunctionCallId = true,
     nodeToolDepth = 0,
   } = options;
-  const queue = new AsyncQueue<Event>();
+  const queue = new AsyncQueue<QueuedInvocationEvent>();
   const session = createSession({
     id: 'parent-session',
     appName: 'parent-app',
@@ -103,6 +107,14 @@ function createToolCall(
   if (withQueue) {
     invocationContext.eventQueue = queue;
   }
+  // The invocation holds a non-partial event until a consumer takes it, so the
+  // collector runs alongside the tool call, as `LlmAgent` does around one.
+  const collected: Event[] = [];
+  const collecting = (async () => {
+    for await (const event of drainInvocationEvents(queue)) {
+      collected.push(event);
+    }
+  })();
   return {
     toolContext: new Context({
       invocationContext,
@@ -110,17 +122,12 @@ function createToolCall(
     }),
     queue,
     session,
+    drain: async () => {
+      queue.close();
+      await collecting;
+      return collected;
+    },
   };
-}
-
-/** Everything the child pushed onto the invocation's event queue. */
-async function drain(queue: AsyncQueue<Event>): Promise<Event[]> {
-  queue.close();
-  const events: Event[] = [];
-  for await (const event of queue) {
-    events.push(event);
-  }
-  return events;
 }
 
 /** The text of the user turn the node run recorded in the session. */
@@ -132,7 +139,7 @@ function userTurnText(session: Session): string | undefined {
 describe('SingleTurnAgentTool', () => {
   it('runs the wrapped agent as a child node and returns its output', async () => {
     const agent = new EchoAgent({name: 'echo', description: 'echoes'});
-    const {toolContext, queue} = createToolCall(agent);
+    const {toolContext, drain} = createToolCall(agent);
 
     const result = await new SingleTurnAgentTool({agent}).runAsync({
       args: {request: 'hello'},
@@ -143,7 +150,7 @@ describe('SingleTurnAgentTool', () => {
     expect(agent.runCount).toBe(1);
     expect(agent.branches).toEqual(['parent.echo@fc-1']);
 
-    const events = await drain(queue);
+    const events = await drain();
     expect(events).toHaveLength(1);
     expect(events[0].branch).toBe('parent.echo@fc-1');
   });
