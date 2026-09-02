@@ -6,7 +6,11 @@
 
 import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {isLogLevelEnabled, resetLogger} from '../../src/utils/logger.js';
+import {
+  isLogLevelEnabled,
+  logger,
+  resetLogger,
+} from '../../src/utils/logger.js';
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -181,6 +185,6 @@ describe('isLogLevelEnabled', () => {
   it('delegates the probe on the logger facade to the current logger', () => {
     setLogger(null);
 
-    expect(getLogger().isEnabledFor?.(LogLevel.ERROR)).toBe(false);
+    expect(logger.isEnabledFor?.(LogLevel.ERROR)).toBe(false);
   });
 });

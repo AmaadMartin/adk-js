@@ -352,9 +352,7 @@ export class Gemini extends BaseLlm {
     }
 
     logger.debug(
-      `Connecting to live with model: ${modelVersion}, contents: ${
-        llmRequest.contents?.length ?? 0
-      }, response modalities: ${llmRequest.liveConnectConfig.responseModalities}`,
+      `Connecting to live with model: ${modelVersion}, contents: ${llmRequest.contents.length}, response modalities: ${llmRequest.liveConnectConfig.responseModalities}`,
     );
     if (isLogLevelEnabled(LogLevel.DEBUG)) {
       // Callers may put credentials in per-request headers, so the transport

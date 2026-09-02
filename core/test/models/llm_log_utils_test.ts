@@ -199,6 +199,39 @@ describe('buildRequestLog', () => {
     expect(section(log, 'System Instruction')).toContain('be brief');
     expect(section(log, 'Config')).not.toContain('be brief');
   });
+
+  it('renders a request with no config at all', () => {
+    const request: LlmRequest = {
+      model: 'gemini-2.5-flash',
+      contents: [],
+      liveConnectConfig: {},
+      toolsDict: {},
+    };
+
+    const log = buildRequestLog(request);
+
+    expect(log).toContain('LLM Request:');
+    expect(section(log, 'Config').trim()).toBe('Config:\n{}');
+  });
+
+  it('drops a null the model or the caller left in the schema', () => {
+    const request = createRequest({
+      tools: [
+        {
+          functionDeclarations: [
+            {
+              name: 'lookup',
+              parametersJsonSchema: {type: 'object', description: null},
+            },
+          ],
+        },
+      ],
+    });
+
+    const functionsSection = section(buildRequestLog(request), 'Functions');
+
+    expect(functionsSection).toContain('lookup: {"type":"object"}');
+  });
 });
 
 describe('buildResponseLog', () => {

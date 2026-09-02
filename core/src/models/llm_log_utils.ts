@@ -130,7 +130,7 @@ export function buildRequestLog(request: LlmRequest): string {
   const functionLogs = (declarationTool?.functionDeclarations ?? []).map(
     buildFunctionDeclarationLog,
   );
-  const contentLogs = (request.contents ?? []).map(buildContentLog);
+  const contentLogs = request.contents.map(buildContentLog);
 
   return `
 LLM Request:
