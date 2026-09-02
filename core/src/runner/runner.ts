@@ -7,6 +7,7 @@
 import {Content, createPartFromText, Modality, Part} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
+import {AgentOrigin, inferAgentOrigin} from '../agents/agent_origin.js';
 import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
 import {reservedFunctionCallName} from '../agents/framework_function_calls.js';
 import {findMatchingFunctionCall} from '../agents/functions.js';
@@ -18,6 +19,7 @@ import {
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
+import {canTransferBetweenAgents} from '../agents/transfer_utils.js';
 import {App, createUnvalidatedApp} from '../apps/app.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
@@ -28,6 +30,7 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
+import {SessionNotFoundError} from '../errors/session_not_found_error.js';
 import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -47,6 +50,7 @@ import {
   tracer,
 } from '../telemetry/tracing.js';
 import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
+import {AsyncQueue} from '../utils/async_queue.js';
 import {logger} from '../utils/logger.js';
 import {isGemini2OrAbove} from '../utils/model_name.js';
 import type {RunnableNode} from '../workflow/graph.js';
@@ -83,9 +87,27 @@ export interface RunnerConfig {
   agent?: RunnableNode;
 
   /**
+   * The node to run, when the root is a graph rather than an agent.
+   *
+   * `agent` accepts a node too, so this is the same root under the name
+   * adk-python gives it. It differs in one way, and that is why it exists: a
+   * `node` root with no `appName` names the app after itself, as adk-python's
+   * does. Mutually exclusive with `app` and `agent`.
+   */
+  node?: RunnableNode;
+
+  /**
    * An optional list of plugins to apply globally across all agents.
    */
   plugins?: BasePlugin[];
+
+  /**
+   * Whether to create a session that a run asks for and does not find.
+   *
+   * Defaults to false, so a run against a session id that does not exist
+   * reports it rather than silently starting an empty conversation.
+   */
+  autoCreateSession?: boolean;
 
   /**
    * An optional service for storing and retrieving artifacts.
@@ -116,7 +138,7 @@ export interface RunnerConfig {
 /**
  * Validates a runner's configuration and normalizes it to an {@link App}.
  *
- * Exactly one of `app` and `agent` is accepted. A bare agent or node is
+ * Exactly one of `app`, `agent` and `node` is accepted. A bare agent or node is
  * wrapped, so the rest of the runner has one shape to read from. Ported from
  * `google/adk-python` `runners.py::Runner._resolve_app`.
  *
@@ -125,22 +147,16 @@ export interface RunnerConfig {
  * name at all here: a missing `appName` is reported when the session lookup
  * fails, which is this repository's shipped contract.
  *
- * @throws {Error} If both `app` and `agent` are given, if neither is, or if
- *   `plugins` accompanies `app`.
+ * @throws {Error} If more than one root is given, if none is, or if `plugins`
+ *   accompanies `app`.
  */
 function resolveApp(input: RunnerConfig): App {
-  const {app, agent, plugins} = input;
-  if (app && agent) {
+  const {app, agent, node, plugins} = input;
+  const roots = describeRoots(input);
+  if (roots.length > 1) {
     throw new Error(
-      `Only one of app or agent may be provided, but got: ` +
-        `app=${typeName(app)}, agent=${typeName(agent)}. ` +
-        'Pass exactly one to Runner().',
-    );
-  }
-  if (!app && !agent) {
-    throw new Error(
-      'One of app or agent must be provided. Got none. ' +
-        'Pass exactly one to Runner().',
+      `Only one of app, agent, or node may be provided, but got: ` +
+        `${roots.join(', ')}. Pass exactly one to Runner().`,
     );
   }
 
@@ -161,11 +177,19 @@ function resolveApp(input: RunnerConfig): App {
     return app;
   }
 
-  const root = asRunnableRoot(agent!);
+  const rootInput = agent ?? node;
+  if (!rootInput) {
+    throw new Error(
+      'One of app, agent, or node must be provided. Got none. ' +
+        'Pass exactly one to Runner().',
+    );
+  }
+
+  const root = asRunnableRoot(rootInput);
   // A node root names the app when the caller did not, mirroring adk-python.
   // An agent root does not: adk-js reports a missing app name at session
   // lookup, and naming the app after the agent would hide that.
-  const fallbackName = isBaseAgent(root) ? '' : root.name;
+  const fallbackName = node || !isBaseAgent(root) ? root.name : '';
   return createUnvalidatedApp({
     name: input.appName ?? fallbackName,
     rootAgent: root,
@@ -173,9 +197,52 @@ function resolveApp(input: RunnerConfig): App {
   });
 }
 
+/** Lists the roots a configuration supplied, for a diagnostic that reports them. */
+function describeRoots(input: RunnerConfig): string[] {
+  const roots: string[] = [];
+  if (input.app) {
+    roots.push(`app=${typeName(input.app)}`);
+  }
+  if (input.agent) {
+    roots.push(`agent=${typeName(input.agent)}`);
+  }
+  if (input.node) {
+    roots.push(`node=${typeName(input.node)}`);
+  }
+  return roots;
+}
+
 /** Names a value's class, for a diagnostic that reports what was passed. */
 function typeName(value: object): string {
   return value.constructor?.name ?? typeof value;
+}
+
+/**
+ * The app names already warned about running agent transfer with no cache.
+ *
+ * Module-level, so the warning is raised once per app name per process rather
+ * than once per runner: a dev server builds a runner per request.
+ */
+const UNCACHED_TRANSFER_APPS = new Set<string>();
+
+/**
+ * Drives `source` into `events` as fast as it produces, then ends the queue.
+ *
+ * A failure ends the queue too, so a consumer sees the events that preceded it
+ * and then the error.
+ */
+async function drainInto(
+  source: AsyncGenerator<Event, void, undefined>,
+  events: AsyncQueue<Event>,
+): Promise<void> {
+  try {
+    for await (const event of source) {
+      events.push(event);
+    }
+    events.close();
+  } catch (error) {
+    events.fail(error);
+  }
 }
 
 /**
@@ -332,6 +399,12 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
   readonly resumabilityConfig?: ResumabilityConfig;
+  /** Whether a run creates a session it asks for and does not find. */
+  readonly autoCreateSession: boolean;
+  /** Where a loader found the root agent, when a loader supplied it. */
+  private readonly agentOrigin: AgentOrigin;
+  /** Explains an origin that disagrees with `appName`, when one does. */
+  private appNameAlignmentHint?: string;
 
   /**
    * Creates a new Runner instance.
@@ -351,6 +424,124 @@ export class Runner {
     this.credentialService = input.credentialService;
     this.resumabilityConfig =
       this.app.resumabilityConfig ?? input.resumabilityConfig;
+    this.autoCreateSession = input.autoCreateSession ?? false;
+    this.agentOrigin = inferAgentOrigin(this.agent);
+    this.enforceAppNameAlignment();
+    this.warnUncachedAgentTransfer();
+  }
+
+  /**
+   * Warns when the root agent was loaded from a directory that implies a
+   * different app name, and keeps the explanation for the session lookup.
+   *
+   * The two disagreeing is the usual reason a session that exists cannot be
+   * found: the dev server writes sessions under the directory name, and a
+   * runner built by hand under another name reads an empty conversation.
+   * Ported from `google/adk-python`
+   * `runners.py::Runner._enforce_app_name_alignment`.
+   */
+  private enforceAppNameAlignment(): void {
+    const originName = this.agentOrigin.appName;
+    // A `__`-prefixed directory is a loader's own scratch space, not an app.
+    if (
+      !originName ||
+      originName.startsWith('__') ||
+      originName === this.appName
+    ) {
+      return;
+    }
+    const originLocation = this.agentOrigin.path ?? originName;
+    const mismatch =
+      `The runner is configured with app name "${this.appName}", but the ` +
+      `root agent was loaded from "${originLocation}", which implies app ` +
+      `name "${originName}".`;
+    this.appNameAlignmentHint =
+      `${mismatch} Ensure the runner appName matches that directory or pass ` +
+      'appName explicitly when constructing the runner.';
+    logger.warn(`App name mismatch detected. ${mismatch}`);
+  }
+
+  /**
+   * Warns once per app name per process when the agent tree can transfer.
+   *
+   * adk-python gates this on `app.context_cache_config` and points the reader
+   * at it. adk-js has no context cache configuration, so there is no remedy to
+   * name and nothing to skip on; add both the guard and the remedy when
+   * context caching lands. Ported from `google/adk-python`
+   * `runners.py::Runner._warn_uncached_agent_transfer`.
+   */
+  private warnUncachedAgentTransfer(): void {
+    if (UNCACHED_TRANSFER_APPS.has(this.appName)) {
+      return;
+    }
+    if (!canTransferBetweenAgents(this.agent)) {
+      return;
+    }
+    UNCACHED_TRANSFER_APPS.add(this.appName);
+    logger.warn(
+      `App "${this.appName}" can transfer between agents but has no context ` +
+        'cache. Every transfer swaps the system instruction and the tool ' +
+        'set, so the request prefix changes and the whole prompt is re-sent ' +
+        'uncached after each transfer.',
+    );
+  }
+
+  /**
+   * Looks the session up, and creates it when the runner was asked to.
+   *
+   * Ported from `google/adk-python`
+   * `runners.py::Runner._get_or_create_session`.
+   *
+   * @throws {SessionNotFoundError} If the session does not exist and
+   *   `autoCreateSession` is not set.
+   */
+  private async getOrCreateSession(params: {
+    userId: string;
+    sessionId: string;
+  }): Promise<Session> {
+    const session = await this.sessionService.getSession({
+      appName: this.appName,
+      userId: params.userId,
+      sessionId: params.sessionId,
+    });
+    if (session) {
+      return session;
+    }
+    if (!this.appName) {
+      throw new Error(
+        `Session lookup failed: appName must be provided in runner constructor (or via app.name)`,
+      );
+    }
+    if (this.autoCreateSession) {
+      return this.sessionService.createSession({
+        appName: this.appName,
+        userId: params.userId,
+        sessionId: params.sessionId,
+      });
+    }
+    throw new SessionNotFoundError(
+      this.formatSessionNotFoundMessage(params.sessionId),
+    );
+  }
+
+  /**
+   * Explains a session that could not be found, naming an app-name mismatch
+   * when one was detected at construction.
+   *
+   * Ported from `google/adk-python`
+   * `runners.py::Runner._format_session_not_found_message`.
+   */
+  private formatSessionNotFoundMessage(sessionId: string): string {
+    const message = `Session not found: ${sessionId}`;
+    if (!this.appNameAlignmentHint) {
+      return message;
+    }
+    return (
+      `${message}. ${this.appNameAlignmentHint} ` +
+      'The mismatch prevents the runner from locating the session. ' +
+      'To automatically create a session when missing, set ' +
+      '`autoCreateSession: true` when constructing the runner.'
+    );
   }
 
   /**
@@ -390,6 +581,51 @@ export class Runner {
         userId: params.userId,
         sessionId,
       });
+    }
+  }
+
+  /**
+   * Runs the agent, letting the invocation get ahead of a slow caller.
+   *
+   * {@link runAsync} produces an event only when the caller pulls one, so an
+   * invocation runs at the speed of the `for await` that drains it. This
+   * method starts the invocation immediately and buffers into a queue, so the
+   * agent keeps working while the caller is busy with the event it already
+   * has. A failure is reported only after the events produced before it.
+   *
+   * That decoupling is what this ports. adk-python's `run` is a *synchronous*
+   * generator driven from a background thread; JavaScript has no synchronous
+   * generator that can await, so this one is still async. A caller who does
+   * not need the decoupling should use {@link runAsync}.
+   *
+   * A caller that stops iterating early leaves the invocation running to
+   * completion in the background, as adk-python does; the queue closes, so the
+   * events it produces after that are dropped rather than buffered.
+   *
+   * @param params.userId The user ID of the session.
+   * @param params.sessionId The session ID of the session.
+   * @param params.invocationId An invocation to resume.
+   * @param params.newMessage A new message to append to the session.
+   * @param params.stateDelta An optional state delta to apply to the session.
+   * @param params.runConfig The run config for the agent.
+   * @yields The events generated by the agent.
+   */
+  async *run(params: {
+    userId: string;
+    sessionId: string;
+    invocationId?: string;
+    newMessage?: Content;
+    stateDelta?: Record<string, unknown>;
+    runConfig?: RunConfig;
+    customMetadata?: Record<string, unknown>;
+  }): AsyncGenerator<Event, void, undefined> {
+    const events = new AsyncQueue<Event>();
+    void drainInto(this.runAsync(params), events);
+
+    try {
+      yield* events;
+    } finally {
+      events.close();
     }
   }
 
@@ -455,23 +691,10 @@ export class Runner {
         ctx,
         this,
         async function* () {
-          const session = await this.sessionService.getSession({
-            appName: this.appName,
-            userId,
-            sessionId,
-          });
+          const session = await this.getOrCreateSession({userId, sessionId});
 
           if (params.abortSignal?.aborted) {
             return;
-          }
-
-          if (!session) {
-            if (!this.appName) {
-              throw new Error(
-                `Session lookup failed: appName must be provided in runner constructor (or via app.name)`,
-              );
-            }
-            throw new Error(`Session not found: ${sessionId}`);
           }
 
           if (runConfig.supportCfc && isLlmAgent(this.agent)) {
@@ -944,8 +1167,7 @@ export class Runner {
         ctx,
         this,
         async function* () {
-          const session = await this.sessionService.getOrCreateSession({
-            appName: this.appName,
+          const session = await this.getOrCreateSession({
             userId: params.userId,
             sessionId: params.sessionId,
           });
