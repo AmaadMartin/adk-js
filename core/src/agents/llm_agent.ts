@@ -44,7 +44,6 @@ import {BaseToolset} from '../tools/base_toolset.js';
 
 import {copyHttpOptions} from '../utils/genai_config_utils.js';
 import {logger} from '../utils/logger.js';
-import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
 
 import {
@@ -1467,7 +1466,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     } else if (
       this.outputSchema &&
       allTools.length > 0 &&
-      !canUseOutputSchemaWithTools(this.canonicalModel.model)
+      !this.canonicalModel.capabilities.outputSchemaAndTools
     ) {
       const setModelResponseTool = new FunctionTool({
         name: 'set_model_response',

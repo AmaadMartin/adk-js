@@ -13,7 +13,6 @@ import {
   copyRequestScopedConfig,
 } from '../../utils/genai_config_utils.js';
 import {isGemini3xLive} from '../../utils/model_name.js';
-import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {LiveConnectConfigWithHistory, RunConfig} from '../run_config.js';
@@ -178,7 +177,7 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
       agent.outputSchema &&
       agent.mode !== 'task' &&
       (!agent.tools?.length ||
-        canUseOutputSchemaWithTools(agent.canonicalModel.model))
+        agent.canonicalModel.capabilities.outputSchemaAndTools)
     ) {
       setOutputSchema(llmRequest, agent.outputSchema);
     }
