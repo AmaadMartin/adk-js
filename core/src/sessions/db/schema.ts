@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Entity, JsonType, PrimaryKey, Property} from '@mikro-orm/core';
+import {
+  Entity,
+  EntityClass,
+  JsonType,
+  PrimaryKey,
+  Property,
+} from '@mikro-orm/core';
 import {
   Event,
   transformToCamelCaseEvent,
@@ -182,10 +188,14 @@ export class StorageEvent {
   [PrimaryKey.name]?: [string, string, string, string];
 }
 
-/*
- * Export entities for Mikro-ORM configuration
+/**
+ * The entity set `DatabaseSessionService` registers.
+ *
+ * A caller who builds their own `MikroORM` instance to hand to the service has
+ * to register these, because the service cannot change the entity set of an
+ * instance it did not open.
  */
-export const ENTITIES = [
+export const ENTITIES: Array<EntityClass<object>> = [
   StorageMetadata,
   StorageAppState,
   StorageUserState,
