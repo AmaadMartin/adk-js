@@ -12,6 +12,11 @@ const {StorageMock, storageMock, TIME_CREATED} = vi.hoisted(() => {
   /** The creation time the fake stamps on every object it writes. */
   const TIME_CREATED = '2026-01-01T00:00:00.000Z';
 
+  /** The shape the storage client rejects with for a missing object. */
+  class FakeNotFoundError extends Error {
+    code = 404;
+  }
+
   interface FakeSignedUrlConfig {
     action: string;
     expires: string | number | Date;
@@ -43,7 +48,7 @@ const {StorageMock, storageMock, TIME_CREATED} = vi.hoisted(() => {
     async download(): Promise<[Buffer]> {
       const file = this.bucket.files.get(this.name);
       if (!file) {
-        throw new Error(`File not found: ${this.name}`);
+        throw new FakeNotFoundError(`File not found: ${this.name}`);
       }
       return [file.data];
     }
@@ -57,9 +62,12 @@ const {StorageMock, storageMock, TIME_CREATED} = vi.hoisted(() => {
         },
       ]
     > {
+      if (this.bucket.metadataFailure) {
+        throw this.bucket.metadataFailure;
+      }
       const file = this.bucket.files.get(this.name);
       if (!file) {
-        throw new Error(`File not found: ${this.name}`);
+        throw new FakeNotFoundError(`File not found: ${this.name}`);
       }
       // GCS omits `metadata` entirely when an object carries none.
       const hasCustomMetadata = Object.keys(file.metadata).length > 0;
@@ -103,6 +111,8 @@ const {StorageMock, storageMock, TIME_CREATED} = vi.hoisted(() => {
 
     /** When set, every listing rejects, standing in for a storage failure. */
     listFailure?: Error;
+    /** When set, every metadata read rejects with this error. */
+    metadataFailure?: Error;
 
     constructor(
       public name: string,
@@ -1251,6 +1261,49 @@ describe('GcsArtifactService', () => {
       });
 
       expect(loaded?.text).toBe('bare content');
+    });
+
+    it.each([
+      [
+        'a permission failure',
+        Object.assign(new Error('forbidden'), {code: 403}),
+      ],
+      ['an error with no status', new Error('socket hang up')],
+    ])('propagates %s from the URL methods', async (_name, failure) => {
+      const service = createService();
+      await service.saveArtifact({
+        ...scope,
+        filename: 'notes.txt',
+        artifact: {text: 'v0'},
+      });
+      storageMock.bucket(bucketName).metadataFailure = failure;
+
+      await expect(
+        service.getAuthenticatedUrl({...scope, filename: 'notes.txt'}),
+      ).rejects.toThrow(failure.message);
+      await expect(
+        service.getSignedUrl({...scope, filename: 'notes.txt'}),
+      ).rejects.toThrow(failure.message);
+    });
+
+    it('reports no artifact when a metadata read fails inside loadArtifact', async () => {
+      const service = createService();
+      await service.saveArtifact({
+        ...scope,
+        filename: 'notes.txt',
+        artifact: {text: 'v0'},
+      });
+      storageMock.bucket(bucketName).metadataFailure = Object.assign(
+        new Error('forbidden'),
+        {code: 403},
+      );
+
+      await expect(
+        service.loadArtifact({...scope, filename: 'notes.txt'}),
+      ).resolves.toBeUndefined();
+      await expect(
+        service.getArtifactVersion({...scope, filename: 'notes.txt'}),
+      ).resolves.toBeUndefined();
     });
 
     it('honours the legacy file_uri metadata key on load', async () => {

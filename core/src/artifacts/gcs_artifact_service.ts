@@ -12,16 +12,13 @@ import type {
   StorageOptions,
 } from '@google-cloud/storage';
 import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
-import {
-  InputValidationError,
-  isInputValidationError,
-} from '../errors/input_validation_error.js';
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
 import {
   ArtifactScope,
-  isArtifactRef,
+  isArtifactUri,
   parseArtifactUri,
   ParsedArtifactUri,
   validateArtifactReferenceScope,
@@ -57,6 +54,9 @@ const USER_NAMESPACE_PREFIX = 'user:';
 
 const VERSION_LEAF_RE = /^[0-9]+$/;
 
+/** The status the storage client reports for an object that does not exist. */
+const OBJECT_NOT_FOUND_CODE = 404;
+
 /** The parameters for {@link GcsArtifactService.getAuthenticatedUrl}. */
 export interface GetAuthenticatedUrlRequest {
   /** The name of the application. */
@@ -78,12 +78,6 @@ export interface GetSignedUrlRequest extends GetAuthenticatedUrlRequest {
    * action and an expiry one hour out.
    */
   signingOptions?: Partial<GetSignedUrlConfig>;
-}
-
-/** The artifact an operation addresses. */
-interface ArtifactCoordinates extends ArtifactScope {
-  filename: string;
-  version?: number;
 }
 
 /** An object reached after following every `artifact://` reference. */
@@ -167,7 +161,7 @@ export class GcsArtifactService implements BaseArtifactService {
           'Artifact fileData must have a fileUri.',
         );
       }
-      if (isArtifactRef(request.artifact)) {
+      if (isArtifactUri(fileUri)) {
         referenceTarget(request, fileUri);
       }
       // Store the URI and mime_type (if any) as blob metadata; no content to upload.
@@ -229,7 +223,7 @@ export class GcsArtifactService implements BaseArtifactService {
         metadata.contentType!,
       );
     } catch (e) {
-      if (isInputValidationError(e)) {
+      if (e instanceof InputValidationError) {
         throw e;
       }
       logger.warn(
@@ -322,7 +316,7 @@ export class GcsArtifactService implements BaseArtifactService {
         createTime: parseCreateTime(metadata.timeCreated),
       };
     } catch (e) {
-      if (isInputValidationError(e)) {
+      if (e instanceof InputValidationError) {
         throw e;
       }
       logger.warn(
@@ -400,7 +394,7 @@ export class GcsArtifactService implements BaseArtifactService {
    *     caller's scope, or the chain is longer than the depth allows.
    */
   private async resolveObject(
-    coords: ArtifactCoordinates,
+    coords: GetAuthenticatedUrlRequest,
     depth = MAX_ARTIFACT_REFERENCE_DEPTH,
   ): Promise<ResolvedArtifactObject | undefined> {
     const version = await this.resolveVersion(coords);
@@ -416,7 +410,7 @@ export class GcsArtifactService implements BaseArtifactService {
     }
 
     const fileUri = getStoredFileUri(metadata);
-    if (fileUri === undefined || !isArtifactRef({fileData: {fileUri}})) {
+    if (fileUri === undefined || !isArtifactUri(fileUri)) {
       return {objectName, metadata, fileUri};
     }
     if (depth <= 0) {
@@ -434,7 +428,7 @@ export class GcsArtifactService implements BaseArtifactService {
    * @return The version, or undefined when the artifact has none.
    */
   private async resolveVersion(
-    coords: ArtifactCoordinates,
+    coords: GetAuthenticatedUrlRequest,
   ): Promise<number | undefined> {
     if (coords.version !== undefined) {
       return coords.version;
@@ -471,19 +465,31 @@ function referenceTarget(
  * Reads an object's metadata.
  *
  * @param file The object to read.
- * @return The metadata, or undefined when the object is not readable.
+ * @return The metadata, or undefined when the object does not exist.
+ * @throws The storage client's error when the read fails for any other
+ *     reason, so that a permission failure does not read as an absent
+ *     artifact.
  */
 async function readMetadata(file: File): Promise<FileMetadata | undefined> {
   try {
     const [metadata] = await file.getMetadata();
     return metadata;
   } catch (e) {
-    logger.debug(
-      `[GcsArtifactService] Object ${file.name} is not readable.`,
-      e,
-    );
-    return undefined;
+    if (isObjectNotFound(e)) {
+      return undefined;
+    }
+    throw e;
   }
+}
+
+/**
+ * Reports whether a storage error means the object does not exist.
+ *
+ * @param e The error the storage client rejected with.
+ * @return True when the error carries the not-found status.
+ */
+function isObjectNotFound(e: unknown): boolean {
+  return e instanceof Error && 'code' in e && e.code === OBJECT_NOT_FOUND_CODE;
 }
 
 /**
@@ -524,7 +530,7 @@ function parseCreateTime(timeCreated?: string): number | undefined {
  */
 async function listObjectVersions(
   bucket: Bucket,
-  coords: ArtifactCoordinates,
+  coords: GetAuthenticatedUrlRequest,
 ): Promise<number[]> {
   // The trailing slash keeps the listing to children of this artifact.
   const searchPrefix = `${getObjectPrefix(coords)}/`;
@@ -580,7 +586,7 @@ function getObjectPrefix({
   userId,
   sessionId,
   filename,
-}: ArtifactCoordinates): string {
+}: GetAuthenticatedUrlRequest): string {
   validatePathSegment(appName, 'appName');
   validatePathSegment(userId, 'userId');
 
