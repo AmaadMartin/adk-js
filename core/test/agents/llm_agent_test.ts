@@ -31,7 +31,7 @@ import {
   Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
-import {Content, Schema, Type} from '@google/genai';
+import {Content, ContentUnion, Schema, Type} from '@google/genai';
 import {
   afterEach,
   beforeEach,
@@ -1427,5 +1427,57 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+describe('LlmAgent staticInstruction', () => {
+  it('defaults to undefined', () => {
+    const agent = new LlmAgent({name: 'agent', model: 'gemini-2.5-flash'});
+
+    expect(agent.staticInstruction).toBeUndefined();
+  });
+
+  it('round-trips a Content unchanged', () => {
+    const staticInstruction: Content = {
+      role: 'user',
+      parts: [{text: 'Static text'}],
+    };
+
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'gemini-2.5-flash',
+      staticInstruction,
+    });
+
+    expect(agent.staticInstruction).toBe(staticInstruction);
+  });
+
+  it('round-trips a string, a Part, a string array and a Part array', () => {
+    const shapes: ContentUnion[] = [
+      'Static text',
+      {text: 'Static part'},
+      ['First', 'Second'],
+      [{text: 'First'}, {text: 'Second'}],
+    ];
+
+    for (const staticInstruction of shapes) {
+      const agent = new LlmAgent({
+        name: 'agent',
+        model: 'gemini-2.5-flash',
+        staticInstruction,
+      });
+
+      expect(agent.staticInstruction).toBe(staticInstruction);
+    }
+  });
+
+  it('keeps a placeholder in the static instruction literal', () => {
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'gemini-2.5-flash',
+      staticInstruction: 'Policy {policy_id} applies.',
+    });
+
+    expect(agent.staticInstruction).toBe('Policy {policy_id} applies.');
   });
 });
