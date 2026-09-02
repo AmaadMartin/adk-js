@@ -51,8 +51,12 @@ a URL and names the backend scheme to use instead.
 Every method connects on first use. Call `init()` during startup to pay that
 cost upfront instead. It is safe to call twice and safe to call concurrently.
 
-On sqlite, every pooled connection is opened with `PRAGMA foreign_keys = ON`.
-sqlite reads that pragma per connection and defaults it to off.
+On sqlite, every pooled connection is opened with `PRAGMA foreign_keys = ON`,
+because sqlite reads that pragma per connection and defaults it to off. It
+matters for a database adk-python created: that one gives `events` a foreign
+key to `sessions` with `ON DELETE CASCADE`, which sqlite ignores while the
+pragma is off. A database this SDK created declares no foreign key, so the
+pragma changes nothing there.
 
 Every other backend reaches the database over a socket, which a server, a proxy
 or a firewall can close while the connection sits idle in the pool. The pool

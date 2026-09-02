@@ -100,10 +100,17 @@ interface SqliteRawConnection {
 /**
  * Turns foreign key enforcement on for one pooled sqlite connection.
  *
- * sqlite reads `PRAGMA foreign_keys` per connection and defaults it to off, so
- * a pool that opens a second connection would enforce nothing on it.
- * adk-python applies the same pragma from SQLAlchemy's `connect` event, for
- * the same reason.
+ * The constraint it enforces is one adk-python wrote, not one declared here.
+ * Both of its schema versions give `events` a composite foreign key to
+ * `sessions` with `ON DELETE CASCADE`, while the entities in `schema.ts`
+ * declare none. On a database this SDK created the pragma is therefore inert;
+ * on one adk-python created it decides whether that cascade runs. Sharing a
+ * database between the two SDKs is what this service exists for, so the pragma
+ * is set rather than skipped.
+ *
+ * sqlite reads the pragma per connection and defaults it to off, so each
+ * connection needs it. adk-python applies it from SQLAlchemy's `connect`
+ * event, for the same reason.
  *
  * @param connection The connection knex has just opened.
  * @param done The callback knex waits on before it hands the connection out.
@@ -171,16 +178,6 @@ export async function connectionIsAlive(connection: unknown): Promise<boolean> {
   });
 }
 
-/** Why a connection URI is not one this service can open. */
-export enum DatabaseUriProblem {
-  /** The string carries no URI scheme at all. */
-  NOT_A_URI = 'NOT_A_URI',
-  /** The scheme names a backend with no driver here, such as `oracle`. */
-  UNSUPPORTED_BACKEND = 'UNSUPPORTED_BACKEND',
-  /** The scheme names a driver as well, the way SQLAlchemy URLs do. */
-  DRIVER_IN_SCHEME = 'DRIVER_IN_SCHEME',
-}
-
 /**
  * Splits the scheme of a connection URI into its backend and driver parts.
  *
@@ -209,41 +206,29 @@ export function namesSupportedDatabaseBackend(uri: string): boolean {
   return Object.hasOwn(DRIVER_LOADERS, schemeOf(uri).backend);
 }
 
-/** Returns the problem with a URI, or undefined when it is one we can open. */
-function classifyDatabaseUri(uri: string): DatabaseUriProblem | undefined {
+/**
+ * Says what is wrong with a connection URI, or nothing when it is usable.
+ *
+ * The three messages match the buckets adk-python distinguishes: a string that
+ * is not a URI, a backend with no driver here, and a scheme that names its
+ * driver the way a SQLAlchemy URL does. Each one masks the password.
+ */
+function describeDatabaseUriProblem(uri: string): string | undefined {
   const {backend, driver} = schemeOf(uri);
   if (!backend) {
-    return DatabaseUriProblem.NOT_A_URI;
+    return `Invalid database URL format or argument '${redactUriPassword(uri)}'.`;
   }
   if (!Object.hasOwn(DRIVER_LOADERS, backend)) {
-    return DatabaseUriProblem.UNSUPPORTED_BACKEND;
+    return `Unsupported database URI: ${redactUriPassword(uri)}`;
   }
   if (driver) {
-    return DatabaseUriProblem.DRIVER_IN_SCHEME;
+    return (
+      `Database URL '${redactUriPassword(uri)}' names the '${driver}' driver ` +
+      `in its scheme. adk-js selects its own driver, so use a ` +
+      `'${backend}://' URL instead.`
+    );
   }
   return undefined;
-}
-
-/** Builds the message for a rejected URI, with its password masked. */
-function describeDatabaseUriProblem(
-  uri: string,
-  problem: DatabaseUriProblem,
-): string {
-  const redacted = redactUriPassword(uri);
-  switch (problem) {
-    case DatabaseUriProblem.NOT_A_URI:
-      return `Invalid database URL format or argument '${redacted}'.`;
-    case DatabaseUriProblem.UNSUPPORTED_BACKEND:
-      return `Unsupported database URI: ${redacted}`;
-    case DatabaseUriProblem.DRIVER_IN_SCHEME: {
-      const {backend, driver} = schemeOf(uri);
-      return (
-        `Database URL '${redacted}' names the '${driver}' driver in its ` +
-        `scheme. adk-js selects its own driver, so use a '${backend}://' ` +
-        'URL instead.'
-      );
-    }
-  }
 }
 
 /**
@@ -253,9 +238,9 @@ function describeDatabaseUriProblem(
  * @throws Error naming what is wrong with the URI, its password masked.
  */
 export function assertSupportedDatabaseUri(uri: string): void {
-  const problem = classifyDatabaseUri(uri);
+  const problem = describeDatabaseUriProblem(uri);
   if (problem !== undefined) {
-    throw new Error(describeDatabaseUriProblem(uri, problem));
+    throw new Error(problem);
   }
 }
 
