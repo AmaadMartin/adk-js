@@ -61,7 +61,10 @@ export class GoogleSearchTool extends BuiltInTool {
       llmRequest.model = this.model;
     }
 
-    const modelCheckDisabled = isGeminiModelIdCheckDisabled();
+    if (!llmRequest.model && !llmRequest.isManagedAgent) {
+      return;
+    }
+
     const model = llmRequest.model ?? '';
 
     llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
@@ -83,7 +86,7 @@ export class GoogleSearchTool extends BuiltInTool {
 
     if (
       isGeminiModel(model) ||
-      modelCheckDisabled ||
+      isGeminiModelIdCheckDisabled() ||
       llmRequest.isManagedAgent
     ) {
       llmRequest.config.tools.push({

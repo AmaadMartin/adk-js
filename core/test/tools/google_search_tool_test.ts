@@ -48,18 +48,13 @@ function makeToolContext(): Context {
 
 describe('GoogleSearchTool', () => {
   describe('processLlmRequest', () => {
-    it('throws when model is not set', async () => {
+    it('returns early when model is not set', async () => {
       const tool = new GoogleSearchTool();
       const req = makeRequest(undefined);
-
-      await expect(
-        tool.processLlmRequest({
-          llmRequest: req,
-          toolContext: makeToolContext(),
-        }),
-      ).rejects.toThrow(
-        'Google search tool is not supported for model undefined',
-      );
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: makeToolContext(),
+      });
 
       expect(req.config?.tools).toEqual([]);
     });
@@ -304,16 +299,14 @@ describe('GoogleSearchTool', () => {
       );
     });
 
-    it('throws when the model is an empty string', async () => {
+    it('returns early when the model is an empty string', async () => {
       const tool = new GoogleSearchTool();
       const req = makeRequest('');
 
-      await expect(
-        tool.processLlmRequest({
-          llmRequest: req,
-          toolContext: makeToolContext(),
-        }),
-      ).rejects.toThrow('Google search tool is not supported for model');
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: makeToolContext(),
+      });
 
       expect(req.config!.tools).toEqual([]);
     });
@@ -375,16 +368,14 @@ describe('GoogleSearchTool', () => {
       expect(req.config!.tools).toEqual([{googleSearch: {}}]);
     });
 
-    it('applies an empty model option and then rejects it', async () => {
+    it('applies an empty model option and then returns early', async () => {
       const tool = new GoogleSearchTool({model: ''});
       const req = makeRequest('gemini-2.5-flash');
 
-      await expect(
-        tool.processLlmRequest({
-          llmRequest: req,
-          toolContext: makeToolContext(),
-        }),
-      ).rejects.toThrow('Google search tool is not supported for model');
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: makeToolContext(),
+      });
 
       expect(req.model).toBe('');
       expect(req.config!.tools).toEqual([]);
@@ -435,11 +426,9 @@ describe('GoogleSearchTool', () => {
   // `BuiltInTool` answers such a call rather than resolving to undefined, so
   // a model that returns the tool as a function call gets an answer.
   it('answers runAsync by telling the model it is not callable', async () => {
-    const {error} = (await new GoogleSearchTool().runAsync()) as {
-      error: string;
-    };
-
-    expect(error).toContain('google_search runs inside the model');
+    expect(await new GoogleSearchTool().runAsync()).toMatchObject({
+      error: expect.stringContaining('google_search runs inside the model'),
+    });
   });
 
   it('has a global instance GOOGLE_SEARCH', () => {

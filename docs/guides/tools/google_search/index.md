@@ -26,6 +26,10 @@ Three things open that gate:
 - The request carries `isManagedAgent: true`. See
   [Managed-agent requests](#managed-agent-requests).
 
+A request with no model reaches no model, so the tool leaves it alone and
+returns. Every built-in tool behaves this way. The managed-agent flag is the
+exception, because such a request has no model by design.
+
 ## Get started
 
 Add the shared `GOOGLE_SEARCH` instance to an agent's `tools`:
@@ -95,7 +99,7 @@ today. Set it yourself if you build a managed request in your own host.
 
 - The request names a model that is not Gemini, and neither the environment
   variable nor `isManagedAgent` applies. The message is `Google search tool is
-not supported for model <model>`. An unset model renders as `undefined`.
+not supported for model <model>`.
 - The request names a Gemini 1.x model, already carries another tool, and
   `bypassMultiToolsLimit` is false. The message is `Google search tool can not
 be used with other tools in Gemini 1.x.`
