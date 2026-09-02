@@ -422,14 +422,8 @@ export interface LlmAgentConfig extends BaseAgentConfig {
  * holding only function responses carries no answer at all.
  */
 function joinVisibleText(parts: Part[]): string | undefined {
-  let text: string | undefined = undefined;
-  for (const part of parts) {
-    if (part.thought || part.text === undefined) {
-      continue;
-    }
-    text = (text ?? '') + part.text;
-  }
-  return text;
+  const visible = parts.filter((p) => !p.thought && p.text !== undefined);
+  return visible.length ? visible.map((p) => p.text).join('') : undefined;
 }
 
 async function convertToolUnionToTools(
