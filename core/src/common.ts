@@ -6,6 +6,8 @@
 
 export {ActiveStreamingTool} from './agents/active_streaming_tool.js';
 export type {ActiveStreamingToolParams} from './agents/active_streaming_tool.js';
+export {getAgentOrigin, setAgentOrigin} from './agents/agent_origin.js';
+export type {AgentOrigin} from './agents/agent_origin.js';
 export {BaseAgent, isBaseAgent} from './agents/base_agent.js';
 export type {
   AfterAgentCallback,
@@ -230,7 +232,10 @@ export {
 export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
 export {GlobalInstructionPlugin} from './plugins/global_instruction_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
-export {PluginManager} from './plugins/plugin_manager.js';
+export {
+  DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS,
+  PluginManager,
+} from './plugins/plugin_manager.js';
 export {
   ADK_HANDLE_MODEL_ERROR_TOOL_NAME,
   RESERVED_TOOL_CALL_ERROR_TYPE,
