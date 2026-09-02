@@ -19,6 +19,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [ParallelAgent](agents/parallel_agent/index.md) - Running sub-agents
   concurrently on isolated branches, and how the fan-out ends.
 - [Per-run request configuration](agents/request_config/index.md) - How `RunConfig` and the agent's own `generateContentConfig` combine into one model request.
+- [ReadonlyContext](agents/readonly_context/index.md) - The read-only view of an invocation given to instruction providers, toolsets and plugins.
 - [SequentialAgent resumability](agents/sequential_agent/index.md) - Checkpointing a sequential pipeline so it resumes where it stopped, and pausing it on a human-in-the-loop call.
 
 ### Artifacts
