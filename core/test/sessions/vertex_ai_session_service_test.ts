@@ -6,6 +6,7 @@
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
+  AuthConfig,
   createEvent,
   isCompactedEvent,
   State,
@@ -2014,6 +2015,48 @@ describe('VertexAiSessionService', () => {
         ['alice', 'z'],
         ['bob', 'b'],
       ]);
+    });
+  });
+  describe('appendEvent requestedAuthConfigs', () => {
+    const authConfig: AuthConfig = {
+      credentialKey: 'weather-api',
+      authScheme: {type: 'apiKey', in: 'header', name: 'x-api-key'},
+      // An unset optional field must not reach the wire payload.
+      rawAuthCredential: undefined,
+    };
+
+    it('sends a detached plain-JSON copy and leaves the event untouched', async () => {
+      const session = {
+        id: 'auth-session',
+        appName: '12345',
+        userId: 'testUser',
+        events: [],
+        lastUpdateTime: 0,
+      } as unknown as Session;
+      const event = createEvent({
+        author: 'model',
+        timestamp: 1620000000000,
+        actions: {requestedAuthConfigs: {'call-1': authConfig}},
+      });
+
+      await service.appendEvent({session, event});
+
+      const sent = mockClient.events.append.mock.calls[0][0].config.actions
+        .requestedAuthConfigs as Record<string, unknown>;
+      expect(sent).toEqual({
+        'call-1': {
+          credentialKey: 'weather-api',
+          authScheme: {type: 'apiKey', in: 'header', name: 'x-api-key'},
+        },
+      });
+      expect(
+        Object.keys(sent['call-1'] as Record<string, unknown>),
+      ).not.toContain('rawAuthCredential');
+      expect(sent).not.toBe(event.actions.requestedAuthConfigs);
+      expect(sent['call-1']).not.toBe(authConfig);
+      expect(event.actions.requestedAuthConfigs).toEqual({
+        'call-1': authConfig,
+      });
     });
   });
 });

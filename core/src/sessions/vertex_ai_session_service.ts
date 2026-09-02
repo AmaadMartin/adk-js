@@ -691,6 +691,11 @@ function applyWorkflowMetadata(
  * API actually defines, mirroring what `_fromApiEvent` reads back and what
  * adk-python writes. Returns a new object: `partialCopy` is shallow, so
  * rewriting the event's own `actions` in place would mutate the caller's event.
+ *
+ * The requested auth configs go through a JSON round trip, so the request
+ * carries a plain snapshot instead of aliasing the caller's live `AuthConfig`
+ * objects onto the wire payload. This also drops `undefined`-valued optional
+ * fields, matching what adk-python serializes.
  */
 function toApiActions(
   actions: EventActions | undefined,
@@ -698,11 +703,19 @@ function toApiActions(
   if (!actions) {
     return undefined;
   }
-  const {transferToAgent, ...rest} = actions;
+  const {transferToAgent, requestedAuthConfigs, ...rest} = actions;
   return {
     ...rest,
     ...(transferToAgent !== undefined ? {transferAgent: transferToAgent} : {}),
+    requestedAuthConfigs: toPlainJson(requestedAuthConfigs),
   } as ApiEventActions;
+}
+
+/** Returns a detached, JSON-representable copy of `value`. */
+function toPlainJson(
+  value: Record<string, AuthConfig>,
+): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
 }
 
 /**
