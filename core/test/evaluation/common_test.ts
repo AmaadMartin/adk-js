@@ -4,15 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InputValidationError} from '@google/adk';
+import {evalModel, InputValidationError} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
-import {
-  arbitraryType,
-  evalAlias,
-  evalModel,
-} from '../../src/evaluation/common.js';
 
 const conversationScenario = evalModel(
   {
@@ -31,8 +26,8 @@ const evalCase = evalModel(
     caseId: z.string(),
     rootScenario: conversationScenario.schema,
     scenarios: z.array(conversationScenario.schema),
-    finalResponse: arbitraryType<Content>(isContent),
-    rawScore: arbitraryType<number>(),
+    finalResponse: z.custom<Content>(isContent),
+    rawScore: z.number(),
   },
   {name: 'EvalCase'},
 );
@@ -42,6 +37,11 @@ const evalCase = evalModel(
 const metricResult = evalModel(
   {metricName1: z.string()},
   {name: 'MetricResult', aliases: {metricName1: 'metric_name_1'}},
+);
+
+const derivedAliasMetricResult = evalModel(
+  {metricName1: z.string()},
+  {name: 'DerivedMetricResult'},
 );
 
 function evalCaseFixture(finalResponse: Content) {
@@ -162,12 +162,6 @@ describe('evalModel arbitrary types', () => {
     const parsed = evalCase.parse(evalCaseFixture(finalResponse));
 
     expect(parsed.finalResponse).toBe(finalResponse);
-  });
-
-  it('accepts an arbitrary-typed field that has no predicate', () => {
-    const parsed = evalCase.parse(evalCaseFixture(finalResponse));
-
-    expect(parsed.rawScore).toBe(0.5);
   });
 
   it('rejects a value its predicate refuses, naming the field', () => {
@@ -291,18 +285,19 @@ describe('evalModel dumping', () => {
   });
 });
 
-describe('evalAlias', () => {
-  it('derives the snake_case wire alias of a property', () => {
-    expect(evalAlias('startingPrompt')).toBe('starting_prompt');
-    expect(evalAlias('scenarios')).toBe('scenarios');
-  });
+describe('evalModel aliases', () => {
+  it('derives an alias that does not split a digit segment', () => {
+    expect(derivedAliasMetricResult.parse({metric_name1: 'safety'})).toEqual({
+      metricName1: 'safety',
+    });
 
-  it('does not split a digit segment, which is why overrides exist', () => {
-    expect(evalAlias('metricName1')).toBe('metric_name1');
+    const error = expectInputValidationError(() =>
+      derivedAliasMetricResult.parse({metric_name_1: 'safety'}),
+    );
+    expect(error.message).toContain('metric_name_1');
   });
 
   it('lets an explicit alias override the derived one', () => {
-    expect(metricResult.aliases.get('metricName1')).toBe('metric_name_1');
     expect(metricResult.parse({metric_name_1: 'safety'})).toEqual({
       metricName1: 'safety',
     });
@@ -347,7 +342,7 @@ describe('evalModel error reporting', () => {
   });
 
   it('returns an unrecognized_keys issue from safeParse instead of throwing', () => {
-    const result = conversationScenario.safeParse({
+    const result = conversationScenario.schema.safeParse({
       startingPrompt: 'hi',
       conversationPlan: 'chat',
       userPersonaa: 'EXPERT',
@@ -366,7 +361,7 @@ describe('evalModel error reporting', () => {
   });
 
   it('returns the parsed value from safeParse on success', () => {
-    const result = conversationScenario.safeParse({
+    const result = conversationScenario.schema.safeParse({
       starting_prompt: 'hi',
       conversation_plan: 'chat',
     });
