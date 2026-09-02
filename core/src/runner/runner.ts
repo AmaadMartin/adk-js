@@ -32,7 +32,10 @@ import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
-import {PluginManager} from '../plugins/plugin_manager.js';
+import {
+  DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS,
+  PluginManager,
+} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {CompositeSessionKey, Session} from '../sessions/session.js';
 import {
@@ -103,6 +106,13 @@ export interface RunnerConfig {
    * An optional resumability configuration applied to the runner.
    */
   resumabilityConfig?: ResumabilityConfig;
+
+  /**
+   * How long, in seconds, each plugin gets to finish its `close()` when
+   * {@link Runner.close} runs. Defaults to 5. A value of zero or less waits
+   * indefinitely.
+   */
+  pluginCloseTimeoutSeconds?: number;
 }
 
 /**
@@ -164,6 +174,10 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
   readonly resumabilityConfig?: ResumabilityConfig;
+  /** How long each plugin gets to close, in seconds. */
+  readonly pluginCloseTimeoutSeconds: number;
+
+  private closed = false;
 
   /**
    * Creates a new Runner instance.
@@ -184,7 +198,12 @@ export class Runner {
     this.agent = asRunnableRoot(agent);
     const appPlugins = input.app?.plugins ?? [];
     const configPlugins = input.plugins ?? [];
-    this.pluginManager = new PluginManager([...appPlugins, ...configPlugins]);
+    this.pluginCloseTimeoutSeconds =
+      input.pluginCloseTimeoutSeconds ?? DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS;
+    this.pluginManager = new PluginManager(
+      [...appPlugins, ...configPlugins],
+      this.pluginCloseTimeoutSeconds,
+    );
     this.artifactService = input.artifactService;
     this.sessionService = input.sessionService;
     this.memoryService = input.memoryService;
@@ -477,11 +496,36 @@ export class Runner {
       );
     } finally {
       span.end();
-      const toolsets = isBaseAgent(this.agent)
-        ? getAllToolsets(this.agent)
-        : [];
-      await Promise.allSettled(toolsets.map((t) => t.close()));
+      await this.closeToolsets();
     }
+  }
+
+  /**
+   * Closes every toolset the root declares, reporting no failure: a toolset
+   * that throws must not hide the outcome of the run that led here.
+   */
+  private async closeToolsets(): Promise<void> {
+    const toolsets = isBaseAgent(this.agent) ? getAllToolsets(this.agent) : [];
+    await Promise.allSettled(toolsets.map((t) => t.close()));
+  }
+
+  /**
+   * Releases the resources this runner holds: the toolsets its root declares,
+   * then the registered plugins.
+   *
+   * Call it when the runner is no longer needed. A second call does nothing,
+   * so each plugin closes exactly once.
+   *
+   * @throws An `AggregateError` naming every plugin that failed to close. The
+   *     toolsets are closed first and their failures stay swallowed.
+   */
+  async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    await this.closeToolsets();
+    await this.pluginManager.close();
   }
 
   /**
