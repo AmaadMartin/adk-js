@@ -8,6 +8,8 @@ import {
   BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
+  createEvent,
+  createSession,
   Event,
   EventActions,
   InvocationContext,
@@ -182,5 +184,92 @@ describe('ContentRequestProcessor', () => {
     expect(llmRequest.contents[0].parts?.[0]?.text).toContain('Summary 1-3');
     // Followed by message 4
     expect(llmRequest.contents[1].parts?.[0]?.text).toContain('New message 4');
+  });
+});
+
+describe('ContentRequestProcessor instruction contents', () => {
+  function createContext(
+    events: Event[],
+    includeContents: 'default' | 'none',
+  ): InvocationContext {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+      includeContents,
+    });
+    return new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: agent as BaseAgent,
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+        events,
+      }),
+      pluginManager: new PluginManager([]),
+    });
+  }
+
+  async function runProcessor(
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+  ): Promise<void> {
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // The processor only mutates the request; it emits no events.
+    }
+  }
+
+  const events = [
+    createEvent({
+      invocationId: 'inv1',
+      author: 'user',
+      content: {role: 'user', parts: [{text: 'older question'}]},
+    }),
+    createEvent({
+      invocationId: 'inv1',
+      author: 'test_agent',
+      content: {role: 'model', parts: [{text: 'older answer'}]},
+    }),
+    createEvent({
+      invocationId: 'inv2',
+      author: 'user',
+      content: {role: 'user', parts: [{text: 'question'}]},
+    }),
+  ];
+
+  it('keeps instruction contents ahead of the user turn with full history', async () => {
+    const llmRequest: LlmRequest = {
+      contents: [{role: 'user', parts: [{text: 'recalled memory'}]}],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    await runProcessor(createContext(events, 'default'), llmRequest);
+
+    expect(
+      llmRequest.contents.map((content) => content.parts?.[0]?.text),
+    ).toEqual([
+      'older question',
+      'older answer',
+      'recalled memory',
+      'question',
+    ]);
+  });
+
+  it('keeps instruction contents ahead of the user turn with current-turn contents', async () => {
+    const llmRequest: LlmRequest = {
+      contents: [{role: 'user', parts: [{text: 'recalled memory'}]}],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    await runProcessor(createContext(events, 'none'), llmRequest);
+
+    expect(
+      llmRequest.contents.map((content) => content.parts?.[0]?.text),
+    ).toEqual(['recalled memory', 'question']);
   });
 });
