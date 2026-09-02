@@ -1138,5 +1138,25 @@ describe('GcsArtifactService', () => {
         await service.loadArtifact({...scope, filename, version: 0}),
       ).toBeUndefined();
     });
+
+    it('raises a failed metadata read out of getAuthenticatedUrl', async () => {
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({...scope, filename, artifact: {text: 'v0'}});
+      failNextMetadataRead();
+
+      await expect(
+        service.getAuthenticatedUrl({...scope, filename, version: 0}),
+      ).rejects.toThrow('storage is unreachable');
+    });
+
+    it('raises a failed metadata read out of getSignedUrl', async () => {
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({...scope, filename, artifact: {text: 'v0'}});
+      failNextMetadataRead();
+
+      await expect(
+        service.getSignedUrl({...scope, filename, version: 0}),
+      ).rejects.toThrow('storage is unreachable');
+    });
   });
 });
