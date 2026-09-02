@@ -8,8 +8,10 @@ import {
   Context,
   InvocationContext,
   LoadSkillTool,
+  PluginManager,
   Skill,
   SkillToolset,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -76,5 +78,34 @@ describe('LoadSkillTool', () => {
       error: "Skill 'unknown-skill' not found.",
       error_code: 'SKILL_NOT_FOUND',
     });
+  });
+
+  it('refuses to record an activation for an invocation with no agent', async () => {
+    // This tool is the only writer of `_adk_activated_skill_<agentName>`, and
+    // it derives the name through requireAgent. SkillToolset reads the same
+    // key via ReadonlyContext.agentName, whose 'unknown' sentinel would
+    // otherwise merge every agentless invocation into one bucket. Because the
+    // write throws first, no `_unknown` bucket can exist to be read back.
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillTool(toolset);
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'inv-1',
+        session: createSession({
+          id: 'test-session',
+          appName: 'test-app',
+          userId: 'test-user',
+        }),
+        pluginManager: new PluginManager(),
+      }),
+    });
+
+    await expect(
+      tool.runAsync({args: {name: 'test-skill'}, toolContext}),
+    ).rejects.toThrow(/agent is not set/);
+
+    expect(
+      toolContext.state.get('_adk_activated_skill_unknown'),
+    ).toBeUndefined();
   });
 });

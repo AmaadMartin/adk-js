@@ -276,11 +276,7 @@ export class InvocationContext {
    * Credentials resolved during this invocation, keyed by the credential key
    * of the auth config that produced them. Held here rather than in session
    * state so a credential resolved for one invocation cannot leak into
-   * another, mirroring Python's `InvocationContext.credential_by_key`.
-   *
-   * Read through {@link ReadonlyContext.getCredential}. adk-js has no
-   * toolset-level credential resolution yet, so nothing populates this map
-   * today; a caller that resolves a credential itself may write to it.
+   * another.
    */
   readonly credentialByKey: Record<string, AuthCredential>;
 
