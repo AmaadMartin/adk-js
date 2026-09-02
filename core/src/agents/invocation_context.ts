@@ -18,6 +18,7 @@ import {Session} from '../sessions/session.js';
 import type {BaseTool} from '../tools/base_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import type {SchemaLike} from '../utils/schema.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
@@ -76,6 +77,8 @@ export interface InvocationContextParams {
   abortSignal?: AbortSignal;
   workflowInstructionScope?: WorkflowInstructionScope;
   isolationScope?: string;
+  /** The schema every state write in this invocation is checked against. */
+  stateSchema?: SchemaLike;
   /** The path of the workflow node this invocation runs, if any. */
   nodePath?: string;
   /** The app-level compaction policy that applies to this invocation. */
@@ -344,12 +347,22 @@ export class InvocationContext {
   canonicalToolsCache?: BaseTool[];
 
   /**
+   * The schema declaring which keys this invocation's state may hold, and
+   * their types. `Context` and `ReadonlyContext` hand it to the `State` they
+   * build, so a write of an undeclared key throws `StateSchemaError`. A node
+   * that declares its own schema uses that one instead. Mirrors
+   * `_state_schema` in `google/adk-python`.
+   */
+  readonly stateSchema?: SchemaLike;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
     this.artifactService = params.artifactService;
     this.sessionService = params.sessionService;
     this.memoryService = params.memoryService;
+    this.credentialService = params.credentialService;
     this.invocationId = params.invocationId;
     this.branch = params.branch;
     this.agent = params.agent;
@@ -363,6 +376,7 @@ export class InvocationContext {
     this.abortSignal = params.abortSignal;
     this.workflowInstructionScope = params.workflowInstructionScope;
     this.isolationScope = params.isolationScope;
+    this.stateSchema = params.stateSchema;
     this.nodePath = params.nodePath;
     this.credentialByKey = params.credentialByKey ?? Object.create(null);
     this.eventsCompactionConfig = params.eventsCompactionConfig;

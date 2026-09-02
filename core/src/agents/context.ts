@@ -57,6 +57,7 @@ export class Context extends ReadonlyContext {
     this._state = new State(
       options.invocationContext.session.state,
       this.eventActions.stateDelta,
+      options.invocationContext.stateSchema,
     );
     this.functionCallId = options.functionCallId;
     this.toolConfirmation = options.toolConfirmation;
