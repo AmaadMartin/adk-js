@@ -18,7 +18,7 @@ import {
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
-import {App} from '../apps/app.js';
+import {App, createUnvalidatedApp} from '../apps/app.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
@@ -106,6 +106,71 @@ export interface RunnerConfig {
 }
 
 /**
+ * Validates a runner's configuration and normalizes it to an {@link App}.
+ *
+ * Exactly one of `app` and `agent` is accepted. A bare agent or node is
+ * wrapped, so the rest of the runner has one shape to read from. Ported from
+ * `google/adk-python` `runners.py::Runner._resolve_app`.
+ *
+ * A wrapped root skips the strict app-name check, because the
+ * `{appName, agent}` form has always accepted any name. adk-js also allows no
+ * name at all here: a missing `appName` is reported when the session lookup
+ * fails, which is this repository's shipped contract.
+ *
+ * @throws {Error} If both `app` and `agent` are given, if neither is, or if
+ *   `plugins` accompanies `app`.
+ */
+function resolveApp(input: RunnerConfig): App {
+  const {app, agent, plugins} = input;
+  if (app && agent) {
+    throw new Error(
+      `Only one of app or agent may be provided, but got: ` +
+        `app=${typeName(app)}, agent=${typeName(agent)}. ` +
+        'Pass exactly one to Runner().',
+    );
+  }
+  if (!app && !agent) {
+    throw new Error(
+      'One of app or agent must be provided. Got none. ' +
+        'Pass exactly one to Runner().',
+    );
+  }
+
+  if (plugins?.length) {
+    if (app) {
+      throw new Error(
+        'When app is provided, plugins should not be provided and should be ' +
+          'provided in the app instead.',
+      );
+    }
+    logger.warn(
+      "The 'plugins' option is deprecated. Please use the 'app' option to " +
+        'provide plugins instead.',
+    );
+  }
+
+  if (app) {
+    return app;
+  }
+
+  const root = asRunnableRoot(agent!);
+  // A node root names the app when the caller did not, mirroring adk-python.
+  // An agent root does not: adk-js reports a missing app name at session
+  // lookup, and naming the app after the agent would hide that.
+  const fallbackName = isBaseAgent(root) ? '' : root.name;
+  return createUnvalidatedApp({
+    name: input.appName ?? fallbackName,
+    rootAgent: root,
+    plugins,
+  });
+}
+
+/** Names a value's class, for a diagnostic that reports what was passed. */
+function typeName(value: object): string {
+  return value.constructor?.name ?? typeof value;
+}
+
+/**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all Runner instances.
  */
@@ -154,6 +219,13 @@ export class Runner {
   readonly [RUNNER_SIGNATURE_SYMBOL] = true;
   readonly appName: string;
   /**
+   * The application this runner drives.
+   *
+   * A runner built from a bare `agent` gets an `App` wrapped around it, so
+   * every runner has one whichever way it was constructed.
+   */
+  readonly app: App;
+  /**
    * The root being run: an agent, or a bare node (a `Workflow`) that the
    * runner drives directly.
    */
@@ -171,26 +243,18 @@ export class Runner {
    * @param input The configuration for the runner.
    */
   constructor(input: RunnerConfig) {
-    const appName = input.app?.name ?? input.appName;
-    const agent = input.app?.rootAgent ?? input.agent;
-    if (!agent) {
-      throw new Error(
-        'agent must be provided in runner constructor (or via app.rootAgent)',
-      );
-    }
-    this.appName = appName!;
+    this.app = resolveApp(input);
+    this.appName = input.appName ?? this.app.name;
     // A workflow is kept as itself rather than wrapped: the runner drives a
     // node directly (see `runRoot`), so there is no agent to manufacture.
-    this.agent = asRunnableRoot(agent);
-    const appPlugins = input.app?.plugins ?? [];
-    const configPlugins = input.plugins ?? [];
-    this.pluginManager = new PluginManager([...appPlugins, ...configPlugins]);
+    this.agent = this.app.rootAgent;
+    this.pluginManager = new PluginManager(this.app.plugins);
     this.artifactService = input.artifactService;
     this.sessionService = input.sessionService;
     this.memoryService = input.memoryService;
     this.credentialService = input.credentialService;
     this.resumabilityConfig =
-      input.app?.resumabilityConfig ?? input.resumabilityConfig;
+      this.app.resumabilityConfig ?? input.resumabilityConfig;
   }
 
   /**
