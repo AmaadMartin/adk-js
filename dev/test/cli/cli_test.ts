@@ -5,10 +5,12 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import {CommanderError} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
+import {AgentType} from '../../src/cli/create_options.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
@@ -62,6 +64,29 @@ describe('CLI Entrypoint', () => {
     vi.restoreAllMocks();
   });
 
+  /**
+   * Runs the CLI expecting commander to reject the arguments, and returns the
+   * error it raised. Subcommands copy the exit override at creation time, so
+   * one installed on the program afterwards does not reach them.
+   */
+  const parseExpectingExit = async (
+    args: string[],
+  ): Promise<CommanderError> => {
+    for (const command of program.commands) {
+      command.exitOverride();
+    }
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
+    } catch (error: unknown) {
+      if (error instanceof CommanderError) {
+        return error;
+      }
+      throw error;
+    }
+    return expect.fail('expected the CLI to reject these arguments');
+  };
+
   const parse = async (args: string[]) => {
     try {
       process.argv = args;
@@ -109,9 +134,14 @@ describe('CLI Entrypoint', () => {
       expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
     });
 
-    it('falls back to INFO for an unrecognised --log_level', async () => {
-      await parse(['web', '--log_level', 'not-a-level']);
-      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.INFO);
+    it('refuses an unrecognised --log_level', async () => {
+      // This replaces an assertion that an unrecognised value silently fell
+      // back to INFO. --log_level is now a closed choice, as click's
+      // `LOG_LEVELS` is, so a typo is reported instead of ignored.
+      const error = await parseExpectingExit(['web', '--log_level', 'nope']);
+
+      expect(error.code).toBe('commander.invalidArgument');
+      expect(setLogLevel).not.toHaveBeenCalled();
     });
 
     it('should pass options to AdkApiServer', async () => {
@@ -232,6 +262,7 @@ describe('CLI Entrypoint', () => {
         project: 'proj',
         region: 'us-central1',
         language: 'ts',
+        agentType: AgentType.CODE,
       });
     });
   });
@@ -281,8 +312,6 @@ describe('CLI Entrypoint', () => {
         '--save_session',
         '--session_id',
         'sess-123',
-        '--replay',
-        'replay.json',
         '--resume',
         'resume.json',
         '--otel_to_cloud',
@@ -293,7 +322,6 @@ describe('CLI Entrypoint', () => {
           agentPath: 'agent.ts',
           saveSession: true,
           sessionId: 'sess-123',
-          inputFile: 'replay.json',
           savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
