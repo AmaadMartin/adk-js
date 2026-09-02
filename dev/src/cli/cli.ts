@@ -458,7 +458,7 @@ export function createProgram(): Command {
       ) => {
         // Before anything is resolved or loaded: the two options name two
         // different sessions, so the run cannot honour both.
-        validateExclusive(command, ['replay', 'resume']);
+        validateExclusive(command, 'replay', 'resume');
         applyFeatureOverrides(command);
         setAdkCoreLogLevel(getLogLevelFromOptions(options));
 

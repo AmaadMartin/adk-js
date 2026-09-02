@@ -7,6 +7,7 @@
 import {
   App,
   createGcsEvalManagersFromUri,
+  DEFAULT_EVAL_CONFIG,
   EvalSet,
   InMemoryEvalSetsManager,
   LlmAgent,
@@ -161,47 +162,23 @@ describe('parseAndGetEvalsToRun', () => {
 });
 
 describe('resolveEvalConfigFilePath', () => {
-  it('uses the path the caller gave', async () => {
-    const evalSets = parseAndGetEvalsToRun(['my_set']);
-
+  it('uses the path the caller gave', () => {
     expect(
-      await resolveEvalConfigFilePath('/tmp/explicit.json', evalSets),
+      resolveEvalConfigFilePath('/tmp/explicit.json', '/tmp/my.evalset.json'),
     ).toBe('/tmp/explicit.json');
   });
 
-  it('reads the config next to a single eval set file', async () => {
-    const evalSetFile = await writeAppFile(
-      `${EVAL_SET_ID}.evalset.json`,
-      ON_DISK_EVAL_SET,
-    );
-
+  it('reads the config next to the one eval set file', () => {
     expect(
-      await resolveEvalConfigFilePath(
+      resolveEvalConfigFilePath(
         undefined,
-        parseAndGetEvalsToRun([evalSetFile]),
+        path.join('evals', 'my.evalset.json'),
       ),
-    ).toBe(path.join(path.dirname(evalSetFile), 'test_config.json'));
+    ).toBe(path.join('evals', 'test_config.json'));
   });
 
-  it('uses the defaults for a single eval set id', async () => {
-    expect(
-      await resolveEvalConfigFilePath(
-        undefined,
-        parseAndGetEvalsToRun([EVAL_SET_ID]),
-      ),
-    ).toBeUndefined();
-  });
-
-  it('uses the defaults for two eval set files', async () => {
-    const first = await writeAppFile('a.evalset.json', ON_DISK_EVAL_SET);
-    const second = await writeAppFile('b.evalset.json', ON_DISK_EVAL_SET);
-
-    expect(
-      await resolveEvalConfigFilePath(
-        undefined,
-        parseAndGetEvalsToRun([first, second]),
-      ),
-    ).toBeUndefined();
+  it('uses the defaults when the run reads no single eval set file', () => {
+    expect(resolveEvalConfigFilePath(undefined, undefined)).toBeUndefined();
   });
 });
 
@@ -266,6 +243,63 @@ describe('runEvalCli', () => {
     expect(printed).toContain(
       `${EVAL_SET_ID}:\n  Tests passed: 1\n  Tests failed: 1`,
     );
+  });
+
+  it('reads the config next to a single eval set file', async () => {
+    const evalSetFile = await writeAppFile(
+      `${EVAL_SET_ID}.evalset.json`,
+      ON_DISK_EVAL_SET,
+    );
+    await writeAppFile('test_config.json', {
+      criteria: {response_match_score: 0.42},
+    });
+
+    await runEvalCli({
+      agentPath,
+      evalSetFileOrIds: [evalSetFile],
+      printDetailedResults: false,
+    });
+
+    expect(runtime.params?.evalConfig.criteria).toEqual({
+      response_match_score: 0.42,
+    });
+  });
+
+  it('uses the default criteria for an eval set id', async () => {
+    await writeAppFile(`${EVAL_SET_ID}.evalset.json`, ON_DISK_EVAL_SET);
+    await writeAppFile('test_config.json', {
+      criteria: {response_match_score: 0.42},
+    });
+
+    await runEvalCli({
+      agentPath,
+      evalSetFileOrIds: [EVAL_SET_ID],
+      printDetailedResults: false,
+    });
+
+    expect(runtime.params?.evalConfig).toEqual(DEFAULT_EVAL_CONFIG);
+  });
+
+  it('uses the default criteria for two eval set files', async () => {
+    const first = await writeAppFile('a.evalset.json', {
+      ...ON_DISK_EVAL_SET,
+      eval_set_id: 'a',
+    });
+    const second = await writeAppFile('b.evalset.json', {
+      ...ON_DISK_EVAL_SET,
+      eval_set_id: 'b',
+    });
+    await writeAppFile('test_config.json', {
+      criteria: {response_match_score: 0.42},
+    });
+
+    await runEvalCli({
+      agentPath,
+      evalSetFileOrIds: [first, second],
+      printDetailedResults: false,
+    });
+
+    expect(runtime.params?.evalConfig).toEqual(DEFAULT_EVAL_CONFIG);
   });
 
   it('runs an eval set id through the local eval sets manager', async () => {

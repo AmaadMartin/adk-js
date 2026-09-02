@@ -117,21 +117,21 @@ export function parseAndGetEvalsToRun(
  *
  * An explicit path wins. Otherwise a run over a single eval set *file* reads
  * the `test_config.json` next to it, and any other run uses the defaults.
+ *
+ * @param configFilePath The `--config_file_path` the user gave, if any.
+ * @param soleEvalSetFile The one eval set file this run reads, when it reads
+ *   exactly one; absent for a run over eval set ids or over several files.
  */
-export async function resolveEvalConfigFilePath(
+export function resolveEvalConfigFilePath(
   configFilePath: string | undefined,
-  evalSetFileOrIdToEvals: ReadonlyMap<string, string[]>,
-): Promise<string | undefined> {
+  soleEvalSetFile: string | undefined,
+): string | undefined {
   if (configFilePath) {
     return configFilePath;
   }
-  if (evalSetFileOrIdToEvals.size !== 1) {
-    return undefined;
-  }
-  const [firstEvalSet] = evalSetFileOrIdToEvals.keys();
-  return (await isFileExists(firstEvalSet))
-    ? path.join(path.dirname(firstEvalSet), DEFAULT_EVAL_CONFIG_FILE)
-    : undefined;
+  return soleEvalSetFile === undefined
+    ? undefined
+    : path.join(path.dirname(soleEvalSetFile), DEFAULT_EVAL_CONFIG_FILE);
 }
 
 /**
@@ -236,10 +236,18 @@ export async function runEvalCli(options: EvalCliOptions): Promise<void> {
   const evalSetFileOrIdToEvals = parseAndGetEvalsToRun(
     options.evalSetFileOrIds,
   );
+  // The first entry decides how the rest are read, matching adk-python: a run
+  // cannot mix eval set files with eval set ids.
+  const [firstEvalSet] = evalSetFileOrIdToEvals.keys();
+  const firstIsFile =
+    firstEvalSet !== undefined && (await isFileExists(firstEvalSet));
+
   const evalConfig = await getEvaluationCriteriaOrDefault(
-    await resolveEvalConfigFilePath(
+    resolveEvalConfigFilePath(
       options.configFilePath,
-      evalSetFileOrIdToEvals,
+      firstIsFile && evalSetFileOrIdToEvals.size === 1
+        ? firstEvalSet
+        : undefined,
     ),
   );
   const inferenceConfig = toInferenceConfig(evalConfig);
@@ -251,13 +259,7 @@ export async function runEvalCli(options: EvalCliOptions): Promise<void> {
     gcsManagers?.evalSetResultsManager ??
     new LocalEvalSetResultsManager(agentsDir);
 
-  // The first entry decides how the rest are read, matching adk-python: a run
-  // cannot mix eval set files with eval set ids.
-  const [firstEvalSet] = evalSetFileOrIdToEvals.keys();
-  const readsFiles =
-    !gcsManagers &&
-    firstEvalSet !== undefined &&
-    (await isFileExists(firstEvalSet));
+  const readsFiles = !gcsManagers && firstIsFile;
 
   let evalSetsManager: EvalSetsManager;
   let inferenceRequests: InferenceRequest[];

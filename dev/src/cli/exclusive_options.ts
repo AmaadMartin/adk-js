@@ -24,20 +24,23 @@ function wasSupplied(command: Command, name: string): boolean {
 }
 
 /**
- * Fails the command when the user supplied more than one of `names`.
+ * Fails the command when the user supplied both options.
  *
- * The message names the later option first, as adk-python does, because it
- * reports the option that conflicts with one already seen.
+ * The message names `second` first, as adk-python does, because it reports the
+ * option that conflicts with one already seen.
  *
  * @param command The command being parsed.
- * @param names The option names, in the order the command declares them.
+ * @param first The option the command declares first.
+ * @param second The option that conflicts with it.
  */
-export function validateExclusive(command: Command, names: string[]): void {
-  const supplied = names.filter((name) => wasSupplied(command, name));
-  if (supplied.length > 1) {
+export function validateExclusive(
+  command: Command,
+  first: string,
+  second: string,
+): void {
+  if (wasSupplied(command, first) && wasSupplied(command, second)) {
     command.error(
-      `error: Options '${supplied[1]}' and '${supplied[0]}' cannot be set ` +
-        `together.`,
+      `error: Options '${second}' and '${first}' cannot be set together.`,
       {code: 'commander.conflictingOption'},
     );
   }
