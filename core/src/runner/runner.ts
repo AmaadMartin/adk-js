@@ -179,6 +179,45 @@ function typeName(value: object): string {
 }
 
 /**
+ * Defaults a root `LlmAgent` to chat mode, and refuses a root in any other
+ * mode the runner cannot drive.
+ *
+ * `single_turn` describes an agent the graph runs once on a node input, so
+ * there is nothing for a root to be handed. Ported from `google/adk-python`
+ * `runners.py::Runner.run_async`, which mutates the agent the same way.
+ *
+ * @throws {Error} If a root `LlmAgent` declares a mode other than `chat` or
+ *   `task`.
+ */
+function normalizeRootMode(root: RunnableRoot): void {
+  if (!isLlmAgent(root)) {
+    return;
+  }
+  root.mode ??= 'chat';
+  if (root.mode !== 'chat' && root.mode !== 'task') {
+    throw new Error(
+      `LlmAgent as root agent must have mode='chat' or 'task', but got ` +
+        `mode='${root.mode}'.`,
+    );
+  }
+}
+
+/**
+ * Whether the root is a chat coordinator that delegates to a task-mode
+ * sub-agent.
+ *
+ * Such a root drives the delegation itself, so the resumption picker must not
+ * step past it onto the sub-agent it is coordinating.
+ */
+function coordinatesTaskSubAgent(root: BaseAgent): boolean {
+  return (
+    isLlmAgent(root) &&
+    root.mode === 'chat' &&
+    root.subAgents.some((sub) => isLlmAgent(sub) && sub.mode === 'task')
+  );
+}
+
+/**
  * Collects the agents that reported the end of their run within an invocation.
  *
  * An agent is keyed by its node path when it ran as a workflow node, and by its
@@ -371,6 +410,7 @@ export class Runner {
       newMessage.role = 'user';
     }
     rejectReservedFunctionCalls(newMessage);
+    normalizeRootMode(this.agent);
     if (!newMessage && !params.invocationId) {
       throw new Error(
         'Running an agent requires either a newMessage or an invocationId to ' +
@@ -576,10 +616,9 @@ export class Runner {
           // Only meaningful for an agent root: this resolves an event author
           // against the agent tree, and a node subtree is not in that tree.
           if (isBaseAgent(this.agent)) {
-            invocationContext.agent = this.determineAgentForResumption(
-              session,
-              this.agent,
-            );
+            invocationContext.agent = coordinatesTaskSubAgent(this.agent)
+              ? this.agent
+              : this.determineAgentForResumption(session, this.agent);
           }
 
           // An agent that already reported the end of its run in this
@@ -683,7 +722,9 @@ export class Runner {
    * Runs whatever this runner was given as its root.
    *
    * An agent is run through `runAsync`, as always. A bare node — a `Workflow`
-   * handed to the runner directly — is driven by {@link runNodeAsInvocation}.
+   * handed to the runner directly — is driven by {@link runNodeAsInvocation},
+   * and so is a task-mode root: the node runtime is what watches for
+   * `finish_task` and promotes the task's result onto the event stream.
    *
    * Only the execution differs. Everything around it (the run callbacks, event
    * persistence, cancellation) is shared, so the node path cannot drift from
@@ -694,11 +735,14 @@ export class Runner {
   private async *runRoot(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    if (isBaseAgent(this.agent)) {
-      yield* requireAgent(invocationContext).runAsync(invocationContext);
+    const runsAsNode =
+      !isBaseAgent(this.agent) ||
+      (isLlmAgent(this.agent) && this.agent.mode === 'task');
+    if (runsAsNode) {
+      yield* runNodeAsInvocation(this.agent, invocationContext);
       return;
     }
-    yield* runNodeAsInvocation(this.agent, invocationContext);
+    yield* requireAgent(invocationContext).runAsync(invocationContext);
   }
 
   /**

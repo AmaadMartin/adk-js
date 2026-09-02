@@ -40,8 +40,9 @@ import {NodeContext} from './node_context.js';
  * `BaseAgent.runImpl`, which is plain delegation to `runAsync` — an agent whose
  * input is its conversation has nothing to inject and no model text to promote.
  *
- * `single_turn` and `task` modes are ported; `chat` mode (task delegation via
- * `FinishTaskTool`, isolation scopes) is not yet supported.
+ * `single_turn` and `task` modes are ported. A `chat`-mode agent is run by the
+ * runner directly rather than as a node, so it does not reach here; one placed
+ * inside a graph is run for a single turn like any other node.
  */
 export async function* runLlmAgentAsNode(
   agent: LlmAgent,

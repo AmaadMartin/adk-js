@@ -348,14 +348,17 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   includeContents?: 'default' | 'none';
 
   /**
-   * The agent's execution mode when run as a workflow node.
+   * The agent's execution mode.
    *
-   * - `single_turn` (default): the agent runs once against the node input.
+   * - `chat`: the agent holds a conversation. This is the default for a root
+   *   agent, and the only other mode a root agent may use is `task`.
+   * - `single_turn` (the default as a workflow node): the agent runs once
+   *   against the node input.
    * - `task`: the agent is given a `finish_task` tool and runs a multi-round
    *   loop until it calls `finish_task`, whose arguments (conforming to
    *   `outputSchema`) become the node output. Mirrors Python's `Agent(mode=...)`.
    */
-  mode?: 'single_turn' | 'task';
+  mode?: 'chat' | 'single_turn' | 'task';
 
   /** The input schema when agent is used as a tool. */
   inputSchema?: LlmAgentSchema;
@@ -475,7 +478,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    * `'include_contents' in agent.model_fields_set`.
    */
   readonly includeContentsExplicit: boolean;
-  mode?: 'single_turn' | 'task';
+  mode?: 'chat' | 'single_turn' | 'task';
   inputSchema?: Schema;
   outputSchema?: Schema;
   /**
