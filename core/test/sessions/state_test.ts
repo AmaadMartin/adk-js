@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {State} from '../../src/sessions/state.js';
+import {isState, State} from '../../src/sessions/state.js';
 
 describe('State', () => {
   describe('update', () => {
@@ -39,5 +39,32 @@ describe('State', () => {
       expect(value['key1']).toBe('value1_updated');
       expect(value['key2']).toBe('value2');
     });
+  });
+});
+
+describe('isState', () => {
+  it('accepts a State', () => {
+    expect(isState(new State())).toBe(true);
+  });
+
+  it('accepts a duck-typed state-like object', () => {
+    const stateLike = {
+      get: () => undefined,
+      set: () => {},
+      has: () => false,
+    };
+
+    expect(isState(stateLike)).toBe(true);
+  });
+
+  it.each([
+    ['a plain object', {}],
+    ['an object missing has', {get: () => undefined, set: () => {}}],
+    ['null', null],
+    ['undefined', undefined],
+    ['a string', 'state'],
+    ['a number', 1],
+  ])('rejects %s', (_name, value) => {
+    expect(isState(value)).toBe(false);
   });
 });
