@@ -12,6 +12,7 @@ import {
 
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+import {parsePythonLiteral} from '../utils/python_literal_utils.js';
 
 import {
   finishReasonToErrorMessage,
@@ -218,9 +219,12 @@ export function quoteUnquotedJsonObjectKeys(value: string): string {
 /**
  * Parses the arguments of a tool call.
  *
- * Strict JSON is the primary path; only when that fails are unquoted object
- * keys repaired. When every attempt fails the original parse error is thrown,
- * because it describes the payload the provider actually sent.
+ * Strict JSON is the primary path. When that fails, the payload is read as a
+ * Python literal, because some providers finalize a streamed tool call whose
+ * argument payload is a Python dict literal. Unquoted object keys are repaired
+ * last, and the repaired text goes through both parsers again. When every
+ * attempt fails the original parse error is thrown, because it describes the
+ * payload the provider actually sent.
  *
  * @throws SyntaxError When the arguments are not parseable.
  */
@@ -235,12 +239,20 @@ export function parseToolCallArguments(args?: string): Record<string, unknown> {
     parseError = error;
   }
 
+  const literal = parsePythonLiteral(args);
+  if (literal !== undefined) {
+    return asArgsRecord(literal);
+  }
+
   const repaired = quoteUnquotedJsonObjectKeys(args);
   if (repaired !== args) {
     try {
       return asArgsRecord(JSON.parse(repaired));
     } catch {
-      // Fall through and report the original error.
+      const repairedLiteral = parsePythonLiteral(repaired);
+      if (repairedLiteral !== undefined) {
+        return asArgsRecord(repairedLiteral);
+      }
     }
   }
   throw parseError;
