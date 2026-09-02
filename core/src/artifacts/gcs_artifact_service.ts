@@ -182,16 +182,23 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async listArtifactKeys(request: ListArtifactKeysRequest): Promise<string[]> {
-    const sessionPrefix = `${request.appName}/${request.userId}/${request.sessionId}/`;
+    const sessionPrefix =
+      request.sessionId === undefined
+        ? undefined
+        : `${request.appName}/${request.userId}/${request.sessionId}/`;
     const usernamePrefix = `${request.appName}/${request.userId}/user/`;
     const bucket = await this.getBucket();
-    const [[sessionFiles], [userSessionFiles]] = await Promise.all([
-      bucket.getFiles({prefix: sessionPrefix}),
+    const [sessionKeys, [userSessionFiles]] = await Promise.all([
+      sessionPrefix === undefined
+        ? []
+        : bucket
+            .getFiles({prefix: sessionPrefix})
+            .then(([files]) => extractArtifactKeys(files, sessionPrefix)),
       bucket.getFiles({prefix: usernamePrefix}),
     ]);
 
     return [
-      ...extractArtifactKeys(sessionFiles, sessionPrefix),
+      ...sessionKeys,
       ...extractArtifactKeys(userSessionFiles, usernamePrefix, 'user:'),
     ].sort((a, b) => a.localeCompare(b));
   }

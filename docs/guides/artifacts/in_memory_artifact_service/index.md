@@ -11,16 +11,11 @@ stored outside the conversation history so that the payload does not travel
 through the model's context on every turn. Every save returns an integer
 version, starting at 0.
 
-`InMemoryArtifactService` implements that interface with a `Record` in memory.
-Nothing survives a process restart, and two processes never see each other's
-artifacts, so it is not a production store. Use `FileArtifactService` for a
-local directory, or `GcsArtifactService` for Google Cloud Storage; an agent's
-code does not change when you swap one for another, only the service you hand to
-the `Runner`.
-
-Two things separate it from the persistent implementations. The store is a
-public field, so a test can read or seed it directly. And a save never fails on
-I/O, so an artifact you just wrote is readable on the next line.
+Nothing this service stores survives a process restart, and two processes never
+see each other's artifacts, so it is not a production store. Use
+`FileArtifactService` for a local directory, or `GcsArtifactService` for Google
+Cloud Storage. An agent's code does not change when you swap one for another,
+only the service you hand to the `Runner`.
 
 ## Get started
 
@@ -47,11 +42,16 @@ const artifact = await service.loadArtifact({
 // artifact -> {text: 'first draft'}
 ```
 
-## Session scope and user scope
+## Listing filenames
 
-A filename that starts with `user:` is stored in the user namespace. It is
-shared by every session of that user. Any other filename belongs to the session
-you saved it under.
+A filename that starts with `user:` belongs to the user namespace, shared by
+every session of that user. Any other filename belongs to the session you saved
+it under.
+
+`listArtifactKeys` returns a sorted list of filenames, with the `user:` prefix
+preserved. Give it a `sessionId` to list that session plus the user namespace.
+Omit the `sessionId` to list the user namespace alone. Every artifact service
+follows this rule, not just the in-memory one.
 
 ```ts
 await service.saveArtifact({
@@ -61,23 +61,13 @@ await service.saveArtifact({
   filename: 'user:profile.txt',
   artifact: {text: 'profile'},
 });
-```
 
-## Listing filenames
-
-`listArtifactKeys` returns a sorted list of filenames, with the `user:` prefix
-preserved. Give it a `sessionId` to list that session plus the user namespace.
-Omit the `sessionId` to list the user namespace alone.
-
-```ts
-// Session artifacts plus user artifacts.
 await service.listArtifactKeys({
   appName: 'app0',
   userId: 'user0',
   sessionId: 's0',
 }); // -> ['note.txt', 'user:profile.txt']
 
-// Only what the user owns, across all sessions.
 await service.listArtifactKeys({appName: 'app0', userId: 'user0'});
 // -> ['user:profile.txt']
 ```
@@ -113,17 +103,15 @@ await service.loadArtifact({
 
 ## Reading and seeding the store
 
-The `artifacts` field is public. It maps a storage key to the list of stored
-versions, oldest first. Each entry holds the saved `Part` as `data` and the
-recorded metadata as `artifactVersion`.
+The `artifacts` field is public, so a test can assert on what was stored, or
+seed a version without a save. It maps a storage key to the stored versions,
+oldest first. Each entry holds the saved `Part` as `data` and its metadata as
+`artifactVersion`.
 
-The storage key is `session/<app>/<user>/<session>/<filename>` for a session
-artifact and `user/<app>/<user>/<filename>` for a user artifact. Every segment
-is encoded with `encodeURIComponent`, so `user:profile.txt` appears as
+The key is `session/<app>/<user>/<session>/<filename>` for a session artifact
+and `user/<app>/<user>/<filename>` for a user artifact. Every segment is encoded
+with `encodeURIComponent`, so `user:profile.txt` appears as
 `user%3Aprofile.txt`.
-
-Entries are live. A test can seed a version without a save, and the next read
-serves it.
 
 ```ts
 service.artifacts['user/app0/user0/user%3Aprofile.txt'] = [
@@ -138,6 +126,6 @@ await service.loadArtifact({
 }); // -> {text: 'seeded'}
 ```
 
-The field is public for parity with the Python implementation, where `artifacts`
-is a pydantic field. The other artifact services keep their storage private,
-because it lives in a bucket or on disk rather than in the object.
+Entries are live, so a mutation is visible to every later read. The other
+artifact services keep their storage private, because it lives in a bucket or on
+disk rather than in the object.

@@ -363,4 +363,58 @@ describe('GcsArtifactService', () => {
       expect(loaded?.inlineData?.displayName).toBe('photo.png');
     });
   });
+
+  describe('user-namespace listing', () => {
+    async function serviceWithBothScopes(): Promise<GcsArtifactService> {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'session.txt',
+        artifact: {text: '.'},
+      });
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'user:profile.txt',
+        artifact: {text: '.'},
+      });
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'undefined',
+        filename: 'decoy.txt',
+        artifact: {text: '.'},
+      });
+
+      return service;
+    }
+
+    it('lists only the user namespace when the session is omitted', async () => {
+      const service = await serviceWithBothScopes();
+
+      const keys = await service.listArtifactKeys({
+        appName: 'test-app',
+        userId: 'test-user',
+      });
+
+      expect(keys).toEqual(['user:profile.txt']);
+    });
+
+    it('still lists both scopes when the session is given', async () => {
+      const service = await serviceWithBothScopes();
+
+      const keys = await service.listArtifactKeys({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+      });
+
+      expect(keys).toEqual(['session.txt', 'user:profile.txt']);
+    });
+  });
 });

@@ -23,38 +23,21 @@ export function isInMemoryConnectionString(uri: string): boolean {
 }
 
 /**
- * One stored version of an artifact.
- */
-export interface InMemoryArtifactEntry {
-  /** The stored artifact. */
-  data: Part;
-  /** The metadata recorded for this version. */
-  artifactVersion: ArtifactVersion;
-}
-
-/**
- * The parameters for {@link InMemoryArtifactService.listArtifactKeys}.
- */
-export interface InMemoryListArtifactKeysRequest extends Omit<
-  ListArtifactKeysRequest,
-  'sessionId'
-> {
-  /** Omit to list only the artifacts in the user namespace. */
-  sessionId?: string;
-}
-
-/**
  * An in-memory implementation of the ArtifactService.
  */
 export class InMemoryArtifactService implements BaseArtifactService {
   /**
    * The stored artifact versions, keyed by storage key.
    *
-   * The store is public so that callers can inspect and seed it, matching the
-   * `artifacts` field of the Python implementation. The entries are live, so a
+   * The key is `session/<app>/<user>/<session>/<filename>` for a session
+   * artifact and `user/<app>/<user>/<filename>` for a user artifact, with every
+   * segment encoded by `encodeURIComponent`. The entries are live, so a
    * mutation is visible to every later read.
    */
-  readonly artifacts: Record<string, InMemoryArtifactEntry[]> = {};
+  readonly artifacts: Record<
+    string,
+    {data: Part; artifactVersion: ArtifactVersion}[]
+  > = {};
 
   saveArtifact({
     appName,
@@ -123,7 +106,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     appName,
     userId,
     sessionId,
-  }: InMemoryListArtifactKeysRequest): Promise<string[]> {
+  }: ListArtifactKeysRequest): Promise<string[]> {
     const sessionPrefix =
       sessionId === undefined
         ? undefined
@@ -221,19 +204,13 @@ export class InMemoryArtifactService implements BaseArtifactService {
 /**
  * Resolves a caller-supplied version to a stored index.
  *
- * A negative version counts from the end, as Python list indexing does, so -1
- * is the newest version. An omitted version is the newest version.
+ * A negative version counts from the end, as Python list indexing does, so the
+ * default of -1 is the newest version.
  *
- * @param length The number of stored versions.
- * @param version The requested version.
  * @return The index, or undefined when it falls outside the stored range.
  */
-function versionIndex(length: number, version?: number): number | undefined {
-  let index = version ?? -1;
-
-  if (index < 0) {
-    index += length;
-  }
+function versionIndex(length: number, version = -1): number | undefined {
+  const index = version < 0 ? version + length : version;
 
   return index >= 0 && index < length ? index : undefined;
 }
