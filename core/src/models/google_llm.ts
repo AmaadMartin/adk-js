@@ -14,7 +14,7 @@ import {
 } from '@google/genai';
 
 import {isBrowser, isEnterpriseModeEnabled} from '../utils/env_aware_utils.js';
-import {logger} from '../utils/logger.js';
+import {isLogLevelEnabled, logger, LogLevel} from '../utils/logger.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {AsyncQueue} from '../utils/async_queue.js';
@@ -23,6 +23,7 @@ import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
 import {GeminiLlmConnection} from './gemini_llm_connection.js';
 import {generateContentViaInteractions} from './interactions_utils.js';
+import {buildRequestLog, buildResponseLog} from './llm_log_utils.js';
 import {LlmRequest} from './llm_request.js';
 import {createLlmResponse, LlmResponse} from './llm_response.js';
 
@@ -166,8 +167,12 @@ export class Gemini extends BaseLlm {
     }
     this.preprocessRequest(llmRequest);
     this.maybeAppendUserContent(llmRequest);
+    const model = resolveModelName(llmRequest.model, this.model);
+    if (!model) {
+      throw new Error('Gemini requests require a model name.');
+    }
     logger.info(
-      `Sending out request, model: ${llmRequest.model ?? this.model}, backend: ${this.apiBackend}, stream: ${stream}`,
+      `Sending out request, model: ${model}, backend: ${this.apiBackend}, stream: ${stream}`,
     );
 
     if (!llmRequest.config) {
@@ -185,15 +190,22 @@ export class Gemini extends BaseLlm {
       llmRequest.config.abortSignal = abortSignal;
     }
 
+    if (isLogLevelEnabled(LogLevel.DEBUG)) {
+      logger.debug(buildRequestLog(llmRequest));
+    }
+
     if (stream) {
       const streamResult = await this.apiClient.models.generateContentStream({
-        model: llmRequest.model ?? this.model,
+        model,
         contents: llmRequest.contents,
         config: llmRequest.config,
       });
 
       const aggregator = new StreamingResponseAggregator();
       for await (const response of streamResult) {
+        if (isLogLevelEnabled(LogLevel.DEBUG)) {
+          logger.debug(buildResponseLog(response));
+        }
         for await (const llmResponse of aggregator.processResponse(response)) {
           yield llmResponse;
         }
@@ -204,10 +216,14 @@ export class Gemini extends BaseLlm {
       }
     } else {
       const response = await this.apiClient.models.generateContent({
-        model: llmRequest.model ?? this.model,
+        model,
         contents: llmRequest.contents,
         config: llmRequest.config,
       });
+      logger.info('Response received from the model.');
+      if (isLogLevelEnabled(LogLevel.DEBUG)) {
+        logger.debug(buildResponseLog(response));
+      }
       yield createLlmResponse(response);
     }
   }
@@ -288,6 +304,11 @@ export class Gemini extends BaseLlm {
    * @returns BaseLlmConnection, the connection to the Gemini model.
    */
   override async connect(llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    const modelVersion = resolveModelName(llmRequest.model, this.model);
+    if (!modelVersion) {
+      throw new Error('Live Gemini requests require a model name.');
+    }
+
     // add tracking headers to custom headers and set api_version given
     // the customized http options will override the one set in the api client
     // constructor
@@ -314,19 +335,38 @@ export class Gemini extends BaseLlm {
 
     llmRequest.liveConnectConfig.tools = llmRequest.config?.tools;
 
-    // Gemini API (AI Studio) rejects `sessionResumption.transparent`; it is a
-    // Vertex-only flag. Strip it so callers can set a uniform resumption config
-    // regardless of backend.
-    if (this.apiBackend === GoogleLLMVariant.GEMINI_API) {
-      const resumption = llmRequest.liveConnectConfig.sessionResumption as
-        | {transparent?: boolean}
-        | undefined;
-      if (resumption) {
-        delete resumption.transparent;
+    logger.info(
+      `Trying to connect to live model: ${modelVersion} with api backend: ${this.apiBackend}`,
+    );
+
+    const sessionResumption = llmRequest.liveConnectConfig.sessionResumption;
+    if (sessionResumption?.transparent) {
+      logger.debug(
+        `session resumption config: ${JSON.stringify(sessionResumption)}`,
+      );
+      if (this.apiBackend === GoogleLLMVariant.GEMINI_API) {
+        throw new Error(
+          'Transparent session resumption is only supported for Vertex AI backend. Please use Vertex AI backend.',
+        );
       }
     }
 
-    const modelVersion = llmRequest.model ?? this.model;
+    logger.debug(
+      `Connecting to live with model: ${modelVersion}, contents: ${
+        llmRequest.contents?.length ?? 0
+      }, response modalities: ${llmRequest.liveConnectConfig.responseModalities}`,
+    );
+    if (isLogLevelEnabled(LogLevel.DEBUG)) {
+      // Callers may put credentials in per-request headers, so the transport
+      // options never go to the log.
+      logger.debug(
+        `Live connect config: ${JSON.stringify({
+          ...llmRequest.liveConnectConfig,
+          httpOptions: undefined,
+        })}`,
+      );
+    }
+
     const messageQueue = new AsyncQueue<LiveServerMessage>();
 
     const liveSession = await this.liveApiClient.live.connect({
@@ -358,8 +398,12 @@ export class Gemini extends BaseLlm {
         for (const content of llmRequest.contents) {
           if (!content.parts) continue;
           for (const part of content.parts) {
-            removeDisplayNameIfPresent(part.inlineData);
-            removeDisplayNameIfPresent(part.fileData);
+            if (part.inlineData) {
+              part.inlineData = withoutDisplayName(part.inlineData);
+            }
+            if (part.fileData) {
+              part.fileData = withoutDisplayName(part.fileData);
+            }
           }
         }
       }
@@ -367,13 +411,29 @@ export class Gemini extends BaseLlm {
   }
 }
 
-function removeDisplayNameIfPresent(
-  dataObj: Blob | FileData | undefined,
-): void {
-  // display_name is not supported for Gemini API (non-vertex)
-  if (dataObj && (dataObj as FileData).displayName) {
-    (dataObj as FileData).displayName = undefined;
+/**
+ * Returns a copy without `displayName`, which the Gemini API (non-Vertex)
+ * backend does not support. The caller's object is left untouched.
+ */
+function withoutDisplayName<T extends Blob | FileData>(dataObj: T): T {
+  if (!dataObj.displayName) {
+    return dataObj;
   }
+  return {...dataObj, displayName: undefined};
+}
+
+/**
+ * Picks the model name to send: the request's own, else the instance default.
+ *
+ * Returns undefined when the resolved name is blank, so each caller can raise
+ * the error that fits its path.
+ */
+function resolveModelName(
+  requestModel: string | undefined,
+  fallbackModel: string,
+): string | undefined {
+  const model = requestModel ?? fallbackModel;
+  return model.trim() === '' ? undefined : model;
 }
 
 export function geminiInitParams({
