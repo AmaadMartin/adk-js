@@ -20,6 +20,14 @@ export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
 export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
 
 /**
+ * The function call the framework emits to record its own bookkeeping.
+ *
+ * It states what the framework did, not what the conversation said, so it is
+ * kept out of the LLM context.
+ */
+export const ADK_FRAMEWORK_FUNCTION_CALL_NAME = 'adk_framework';
+
+/**
  * Names reserved for the framework's own control-plane calls.
  *
  * These are questions the framework asks — approve this, authenticate that,
