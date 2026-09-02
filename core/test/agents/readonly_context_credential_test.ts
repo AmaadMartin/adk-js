@@ -7,10 +7,10 @@
 import {
   AuthCredential,
   AuthCredentialTypes,
+  createSession,
   InvocationContext,
   PluginManager,
   ReadonlyContext,
-  Session,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -25,14 +25,11 @@ function makeContext(
   return new ReadonlyContext(
     new InvocationContext({
       invocationId: 'inv-1',
-      session: {
+      session: createSession({
         id: 'session-1',
         appName: 'app',
         userId: 'user',
-        state: {},
-        events: [],
-        lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
       credentialByKey,
     }),
