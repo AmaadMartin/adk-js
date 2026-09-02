@@ -158,18 +158,15 @@ export class ToolboxToolset extends BaseToolset {
    * client.
    */
   private getClient(): Promise<ToolboxClient> {
-    this.clientPromise ??= loadOptionalPeer(
-      TOOLBOX_SDK,
-      () => import('@toolbox-sdk/core'),
-    ).then(
-      ({ToolboxClient}) =>
-        new ToolboxClient(
-          this.serverUrl,
-          null,
-          this.options.additionalHeaders,
-          this.options.protocol,
-        ),
-    );
+    this.clientPromise ??= loadOptionalPeer(TOOLBOX_SDK, async () => {
+      const {ToolboxClient} = await import('@toolbox-sdk/core');
+      return new ToolboxClient(
+        this.serverUrl,
+        null,
+        this.options.additionalHeaders,
+        this.options.protocol,
+      );
+    });
     return this.clientPromise;
   }
 
