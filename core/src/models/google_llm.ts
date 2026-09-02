@@ -13,13 +13,12 @@ import {
   HttpRetryOptions,
   LiveServerMessage,
   SpeechConfig,
-  ToolListUnion,
 } from '@google/genai';
 
 import {asResourceExhaustedError} from '../errors/resource_exhausted_error.js';
-import {asSafePartForLlm} from '../tools/load_artifacts_tool.js';
 import {isBrowser, isEnterpriseModeEnabled} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+import {asSafePartForLlm} from '../utils/part_utils.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {AsyncQueue} from '../utils/async_queue.js';
@@ -323,16 +322,12 @@ export class Gemini extends BaseLlm {
    * environment variable. A version embedded in `baseUrl` wins over both.
    */
   private configuredApiVersion(): string | undefined {
-    if (this.normalizedBaseUrl.apiVersion) {
-      return this.normalizedBaseUrl.apiVersion;
-    }
-    if (this.apiVersion) {
-      return this.apiVersion;
-    }
-    if (isBrowser()) {
-      return undefined;
-    }
-    return process.env[API_VERSION_ENV_VARIABLE_NAME] || undefined;
+    return (
+      this.normalizedBaseUrl.apiVersion ||
+      this.apiVersion ||
+      (isBrowser() ? undefined : process.env[API_VERSION_ENV_VARIABLE_NAME]) ||
+      undefined
+    );
   }
 
   /** Options ADK computes for both clients, before `clientKwargs`. */
@@ -520,8 +515,9 @@ export class Gemini extends BaseLlm {
     }
 
     if (
-      llmRequest.config?.tools &&
-      hasComputerUseTool(llmRequest.config.tools)
+      llmRequest.config?.tools?.some(
+        (tool) => 'computerUse' in tool && !!tool.computerUse,
+      )
     ) {
       llmRequest.config.systemInstruction = undefined;
     }
@@ -539,10 +535,6 @@ export class Gemini extends BaseLlm {
       }
     }
   }
-}
-
-function hasComputerUseTool(tools: ToolListUnion): boolean {
-  return tools.some((tool) => 'computerUse' in tool && !!tool.computerUse);
 }
 
 function removeDisplayNameIfPresent(

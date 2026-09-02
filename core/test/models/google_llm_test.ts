@@ -11,7 +11,6 @@ import {
   isResourceExhaustedError,
   LlmRequest,
   LlmResponse,
-  RESOURCE_EXHAUSTED_MITIGATION_MESSAGE,
   version,
 } from '@google/adk';
 import {
@@ -27,6 +26,8 @@ import {
   SafetySetting,
 } from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {RESOURCE_EXHAUSTED_MITIGATION_MESSAGE} from '../../src/errors/resource_exhausted_error.js';
+import {httpOptionsOf} from './http_options_test_utils.js';
 
 vi.mock('@google/genai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@google/genai')>();
@@ -79,11 +80,6 @@ const BLOCK_ONLY_HIGH: SafetySetting[] = [
     threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
   },
 ];
-
-/** Reads the http options the mocked client was constructed with. */
-function httpOptionsOf(client: GoogleGenAI): HttpOptions {
-  return client['apiClient']['clientOptions']['httpOptions'] as HttpOptions;
-}
 
 /** Reads the live connect config of the most recent connect call. */
 function connectConfig(llm: Gemini): LiveConnectConfig {

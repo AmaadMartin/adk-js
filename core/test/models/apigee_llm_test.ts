@@ -16,6 +16,8 @@ import {
   LlmRequest,
 } from '@google/adk';
 
+import {httpOptionsOf} from './http_options_test_utils.js';
+
 const geminiModelString = 'apigee/gemini/gemini-1.5-flash';
 const vertexModelString = 'apigee/vertex_ai/model-id';
 const defaultProxyUrl = 'https://proxy.example.com';
@@ -145,15 +147,8 @@ describe('ApigeeLlm', () => {
         baseUrl: 'https://generativelanguage.googleapis.com/v1alpha',
       });
 
-      const httpOptions = llm.apiClient['apiClient']['clientOptions'][
-        'httpOptions'
-      ] as HttpOptions;
-      const liveHttpOptions = llm.liveApiClient['apiClient']['clientOptions'][
-        'httpOptions'
-      ] as HttpOptions;
-
-      expect(httpOptions.baseUrl).toBe(defaultProxyUrl);
-      expect(liveHttpOptions.baseUrl).toBe(defaultProxyUrl);
+      expect(httpOptionsOf(llm.apiClient).baseUrl).toBe(defaultProxyUrl);
+      expect(httpOptionsOf(llm.liveApiClient).baseUrl).toBe(defaultProxyUrl);
     });
   });
 

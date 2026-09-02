@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  isResourceExhaustedError,
-  RESOURCE_EXHAUSTED_MITIGATION_MESSAGE,
-  ResourceExhaustedError,
-} from '@google/adk';
+import {isResourceExhaustedError, ResourceExhaustedError} from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {asResourceExhaustedError} from '../../src/errors/resource_exhausted_error.js';
+import {
+  asResourceExhaustedError,
+  RESOURCE_EXHAUSTED_MITIGATION_MESSAGE,
+} from '../../src/errors/resource_exhausted_error.js';
 
 function apiError(message: string, status: number): Error {
   return Object.assign(new Error(message), {status});
