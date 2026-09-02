@@ -104,6 +104,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [User state and temp state](sessions/user_and_temp_state/index.md) - Reading
   `user:` state without a session id, and how `temp:` state stays readable for
   one invocation without reaching storage.
+- [VertexAiSessionService](sessions/vertex_ai_session_service/index.md) -
+  Storing sessions in Vertex AI Agent Engine, its session-id rules, Express
+  Mode, and what it does not support.
 
 ### Tools
 
