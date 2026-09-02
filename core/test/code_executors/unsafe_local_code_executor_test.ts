@@ -1124,7 +1124,8 @@ describe('UnsafeLocalCodeExecutor', () => {
               'const {spawn} = require("node:child_process");',
               'const fs = require("node:fs");',
               'const grandchild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], {stdio: "ignore"});',
-              'fs.writeFileSync("grandchild.pid", String(grandchild.pid));',
+              // A `.txt` name so the harvested content is text, not base64.
+              'fs.writeFileSync("grandchild_pid.txt", String(grandchild.pid));',
               'setTimeout(() => {}, 60000);',
             ].join('\n'),
             language: CodeExecutionLanguage.JAVASCRIPT,
@@ -1137,12 +1138,14 @@ describe('UnsafeLocalCodeExecutor', () => {
         );
 
         const recorded = result.outputFiles?.find(
-          (file) => file.name === 'grandchild.pid',
+          (file) => file.name === 'grandchild_pid.txt',
         );
         if (!recorded) {
           expect.fail('the executed code never recorded a grandchild pid');
         }
         const grandchildPid = Number(recorded.content);
+        // Without this the assertion below passes on a pid that never parsed.
+        expect(Number.isInteger(grandchildPid)).toBe(true);
 
         const deadline = Date.now() + 10_000;
         while (Date.now() < deadline && isAlive(grandchildPid)) {
