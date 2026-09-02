@@ -7,11 +7,14 @@
 import {APIHubClient} from '@google/adk';
 import {GoogleAuth} from 'google-auth-library';
 import {Buffer} from 'node:buffer';
+import {EventEmitter} from 'node:events';
+import * as https from 'node:https';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   ApiHubResourceNames,
   extractResourceName,
 } from '../../../../src/tools/apihub_tool/clients/apihub_client.js';
+import {MtlsClientCerts} from '../../../../src/utils/mtls_utils.js';
 
 const {googleAuthMock, getAccessTokenMock} = vi.hoisted(() => {
   const getAccessTokenMock = vi.fn<() => Promise<string | null>>();
@@ -23,6 +26,31 @@ const {googleAuthMock, getAccessTokenMock} = vi.hoisted(() => {
 });
 
 vi.mock('google-auth-library', () => ({GoogleAuth: googleAuthMock}));
+
+const {httpsRequestMock, clientCertsToPresentMock} = vi.hoisted(() => ({
+  httpsRequestMock: vi.fn<FakeHttpsRequest>(),
+  clientCertsToPresentMock: vi.fn<() => Promise<MtlsClientCerts | undefined>>(),
+}));
+
+// `https.Agent` stays real, so the assertions read the certificate material the
+// client actually handed to Node.
+vi.mock('node:https', async (importOriginal) => {
+  const actual = await importOriginal<typeof https>();
+  return {
+    ...actual,
+    default: {...actual, request: httpsRequestMock},
+    request: httpsRequestMock,
+  };
+});
+
+// Only the certificate lookup is faked. The host rewrite and the mutual-TLS
+// transport stay real, so the assertions below pin what the client sends.
+vi.mock('../../../../src/utils/mtls_utils.js', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../../../../src/utils/mtls_utils.js')
+  >()),
+  clientCertsToPresent: clientCertsToPresentMock,
+}));
 
 const ROOT = 'https://apihub.googleapis.com/v1';
 const PROJECT = 'test-project';
@@ -886,5 +914,252 @@ describe('apihub_client', () => {
       expect(GoogleAuth).toHaveBeenCalledTimes(1);
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+/** The part of an outgoing request the client drives. */
+interface FakeRequest extends EventEmitter {
+  end(): void;
+  destroy(error?: Error): void;
+}
+
+/** The part of an incoming response the client reads. */
+interface FakeResponse extends EventEmitter {
+  /** Node leaves this unset when the response carries no status line. */
+  statusCode?: number;
+  setEncoding(encoding: string): void;
+}
+
+/** The request options the client passes to `https.request`. */
+interface FakeRequestOptions {
+  headers: Record<string, string>;
+  timeout: number;
+  agent: https.Agent;
+}
+
+type FakeHttpsRequest = (
+  url: string,
+  options: FakeRequestOptions,
+  onResponse: (response: FakeResponse) => void,
+) => FakeRequest;
+
+/** Builds a request that reports a `destroy()` as Node does, with an error. */
+function fakeRequest(end: () => void): FakeRequest {
+  const request: FakeRequest = Object.assign(new EventEmitter(), {
+    end,
+    destroy: (error?: Error) => {
+      request.emit('error', error);
+    },
+  });
+  return request;
+}
+
+/** Makes the mocked `https.request` answer with a JSON body. */
+function httpsRespondsWith(payload: unknown, status = 200): void {
+  httpsRequestMock.mockImplementation((_url, _options, onResponse) =>
+    fakeRequest(() => {
+      const response: FakeResponse = Object.assign(new EventEmitter(), {
+        statusCode: status,
+        setEncoding: () => {},
+      });
+      onResponse(response);
+      response.emit('data', JSON.stringify(payload));
+      response.emit('end');
+    }),
+  );
+}
+
+const CERTS = {cert: 'cert-pem', key: 'key-pem', passphrase: 'secret'};
+const APIS_URL = `${ROOT}/projects/${PROJECT}/locations/${LOCATION}/apis`;
+const MTLS_APIS_URL = APIS_URL.replace(
+  'apihub.googleapis.com',
+  'apihub.mtls.googleapis.com',
+);
+
+describe('APIHubClient over mutual TLS', () => {
+  let client: APIHubClient;
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    httpsRequestMock.mockReset();
+    clientCertsToPresentMock.mockResolvedValue(CERTS);
+    getAccessTokenMock.mockReset();
+    getAccessTokenMock.mockResolvedValue('adc_token');
+    vi.stubGlobal('fetch', fetchMock);
+    client = new APIHubClient({accessToken: 'mocked_token'});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('should route to the mTLS endpoint when a client certificate is available', async () => {
+    httpsRespondsWith(MOCK_API_LIST);
+
+    expect(await client.listApis(PROJECT, LOCATION)).toEqual(
+      MOCK_API_LIST.apis,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(httpsRequestMock).toHaveBeenCalledTimes(1);
+    expect(httpsRequestMock.mock.calls[0][0]).toBe(MTLS_APIS_URL);
+  });
+
+  it('should present the certificate and keep the headers and the deadline', async () => {
+    httpsRespondsWith(MOCK_API_LIST);
+
+    await client.listApis(PROJECT, LOCATION);
+
+    const options = httpsRequestMock.mock.calls[0][1];
+    expect(options.headers).toEqual(EXPECTED_HEADERS);
+    expect(options.timeout).toBe(30_000);
+    expect(options.agent.options).toMatchObject(CERTS);
+  });
+
+  it('should surface a non-2xx response from the mTLS endpoint', async () => {
+    httpsRespondsWith({error: 'forbidden'}, 403);
+
+    await expect(client.listApis(PROJECT, LOCATION)).rejects.toThrow(
+      'API Hub request failed with status 403: {"error":"forbidden"}',
+    );
+  });
+
+  it('should use the default endpoint when no client certificate is available', async () => {
+    clientCertsToPresentMock.mockResolvedValue(undefined);
+    alwaysRespondWith(MOCK_API_LIST);
+
+    expect(await client.listApis(PROJECT, LOCATION)).toEqual(
+      MOCK_API_LIST.apis,
+    );
+    expect(httpsRequestMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      APIS_URL,
+      expect.objectContaining(AUTHORIZED_GET),
+    );
+  });
+
+  it('should honour GOOGLE_API_USE_MTLS_ENDPOINT=never', async () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'never');
+    httpsRespondsWith(MOCK_API_LIST);
+
+    await client.listApis(PROJECT, LOCATION);
+
+    expect(httpsRequestMock.mock.calls[0][0]).toBe(APIS_URL);
+    expect(httpsRequestMock.mock.calls[0][1].agent.options).toMatchObject(
+      CERTS,
+    );
+  });
+});
+
+describe('APIHubClient payload validation', () => {
+  let client: APIHubClient;
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    getAccessTokenMock.mockReset();
+    getAccessTokenMock.mockResolvedValue('adc_token');
+    vi.stubGlobal('fetch', fetchMock);
+    client = new APIHubClient({accessToken: 'mocked_token'});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each<[string, unknown]>([
+    ['an array', [1, 2]],
+    ['a string', 'text'],
+    ['null', null],
+    ['a number', 42],
+  ])('should reject a JSON response that is %s', async (_name, payload) => {
+    alwaysRespondWith(payload);
+
+    await expect(client.getApi(API_NAME)).rejects.toThrow(
+      'API Hub returned a non-object JSON response.',
+    );
+  });
+
+  it.each<[string, object]>([
+    ['a list of numbers', {versions: [1]}],
+    ['a plain string', {versions: 'v1'}],
+    ['an object', {versions: {}}],
+  ])('should reject a versions field that is %s', async (_name, apiPayload) => {
+    alwaysRespondWith(apiPayload);
+
+    await expect(client.getSpecContent(API_NAME)).rejects.toThrow(
+      "API Hub field 'versions' must be a list of strings.",
+    );
+  });
+
+  it('should reject a specs field that is not a list of strings', async () => {
+    alwaysRespondWith({name: VERSION_NAME, specs: [{}]});
+
+    await expect(client.getSpecContent(VERSION_NAME)).rejects.toThrow(
+      "API Hub field 'specs' must be a list of strings.",
+    );
+  });
+
+  it.each<[string, object]>([
+    ['a list of strings', {apis: ['api1']}],
+    ['an object', {apis: {}}],
+  ])('should reject an apis field that is %s', async (_name, payload) => {
+    alwaysRespondWith(payload);
+
+    await expect(client.listApis(PROJECT, LOCATION)).rejects.toThrow(
+      "API Hub field 'apis' must be a list of objects.",
+    );
+  });
+
+  it('should reject a contents field that is not a string', async () => {
+    alwaysRespondWith({contents: 123});
+
+    await expect(client.getSpecContent(SPEC_NAME)).rejects.toThrow(
+      "API Hub field 'contents' must be a string.",
+    );
+  });
+
+  it.each(['"a string"', '[]'])(
+    'should reject a service account key that is %s',
+    async (serviceAccountJson) => {
+      await expect(
+        new APIHubClient({serviceAccountJson}).getApi(API_NAME),
+      ).rejects.toThrow('Service account JSON must contain an object.');
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('APIHubClient with an unresolvable path', () => {
+  let client: APIHubClient;
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    getAccessTokenMock.mockReset();
+    getAccessTokenMock.mockResolvedValue('adc_token');
+    vi.stubGlobal('fetch', fetchMock);
+    client = new APIHubClient({accessToken: 'mocked_token'});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('should reject when the API resolves to an empty version name', async () => {
+    alwaysRespondWith({name: API_NAME, versions: ['']});
+
+    await expect(client.getSpecContent(API_NAME)).rejects.toThrow(
+      `No API Hub resource found in path: ${API_NAME}`,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('should reject when the version resolves to an empty spec name', async () => {
+    alwaysRespondWith({name: VERSION_NAME, specs: ['']});
+
+    await expect(client.getSpecContent(VERSION_NAME)).rejects.toThrow(
+      `No API Hub resource found in path: ${VERSION_NAME}`,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

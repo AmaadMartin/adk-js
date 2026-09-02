@@ -6,6 +6,12 @@
 
 import {GoogleAuth, JWTInput} from 'google-auth-library';
 import {base64Decode} from '../../../utils/env_aware_utils.js';
+import {
+  TextResponse,
+  clientCertsToPresent,
+  effectiveGoogleapisEndpoint,
+  getWithClientCert,
+} from '../../../utils/mtls_utils.js';
 
 const APIHUB_ROOT_URL = 'https://apihub.googleapis.com/v1';
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -71,6 +77,38 @@ interface ApiHubApiList {
 interface ApiHubSpecContents {
   /** The base64-encoded spec text. */
   contents?: string;
+}
+
+/** Reports whether a value is a JSON object. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Validates an API Hub field that must be an array of strings.
+ *
+ * @throws If the field holds anything else.
+ */
+function requireStringList(value: unknown, field: string): void {
+  const isStringList =
+    Array.isArray(value) &&
+    value.every((item: unknown) => typeof item === 'string');
+  if (!isStringList) {
+    throw new Error(`API Hub field '${field}' must be a list of strings.`);
+  }
+}
+
+/** One authenticated GET over `globalThis.fetch`. */
+async function getWithFetch(
+  url: string,
+  headers: Record<string, string>,
+): Promise<TextResponse> {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  return {status: response.status, body: await response.text()};
 }
 
 /** Returns the segment that follows `keyword`, if the path has one. */
@@ -167,11 +205,16 @@ export function extractResourceName(urlOrPath: string): ApiHubResourceNames {
  * the failure only.
  */
 function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
+  let parsed: unknown;
   try {
-    return JSON.parse(serviceAccountJson) as JWTInput;
+    parsed = JSON.parse(serviceAccountJson);
   } catch {
     throw new Error('Invalid service account JSON: the key is not valid JSON.');
   }
+  if (!isRecord(parsed)) {
+    throw new Error('Service account JSON must contain an object.');
+  }
+  return parsed as JWTInput;
 }
 
 /** Reads APIs, API versions and API specs from the API Hub service. */
@@ -200,7 +243,11 @@ export class APIHubClient implements BaseAPIHubClient {
     const list = await this.get<ApiHubApiList>(
       `${APIHUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
     );
-    return list.apis ?? [];
+    const apis = list.apis ?? [];
+    if (!Array.isArray(apis) || !apis.every(isRecord)) {
+      throw new Error("API Hub field 'apis' must be a list of objects.");
+    }
+    return apis;
   }
 
   /**
@@ -237,6 +284,7 @@ export class APIHubClient implements BaseAPIHubClient {
     if (!apiVersionResourceName) {
       const versions =
         (await this.getApi(names.apiResourceName)).versions ?? [];
+      requireStringList(versions, 'versions');
       if (versions.length === 0) {
         throw new Error(
           `No versions found in API Hub resource: ${names.apiResourceName}`,
@@ -246,9 +294,10 @@ export class APIHubClient implements BaseAPIHubClient {
     }
 
     let apiSpecResourceName = names.apiSpecResourceName;
-    if (!apiSpecResourceName) {
+    if (apiVersionResourceName && !apiSpecResourceName) {
       const specs =
         (await this.getApiVersion(apiVersionResourceName)).specs ?? [];
+      requireStringList(specs, 'specs');
       if (specs.length === 0) {
         throw new Error(
           `No specs found in API Hub version: ${apiVersionResourceName}`,
@@ -257,28 +306,51 @@ export class APIHubClient implements BaseAPIHubClient {
       apiSpecResourceName = specs[0];
     }
 
+    if (!apiSpecResourceName) {
+      throw new Error(`No API Hub resource found in path: ${path}`);
+    }
+
     const {contents} = await this.get<ApiHubSpecContents>(
       `${APIHUB_ROOT_URL}/${apiSpecResourceName}:contents`,
     );
+    if (contents !== undefined && typeof contents !== 'string') {
+      throw new Error("API Hub field 'contents' must be a string.");
+    }
     return contents ? base64Decode(contents) : '';
   }
 
+  /**
+   * Sends one authenticated GET to API Hub.
+   *
+   * A configured client certificate is presented on the connection, and the
+   * request then goes to the mutual-TLS endpoint so that token binding is
+   * honoured. Without a certificate the host stays as it is: the mutual-TLS
+   * host rejects a connection that presents none.
+   */
   private async get<T>(url: string): Promise<T> {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'accept': 'application/json, text/plain, */*',
-        'Authorization': `Bearer ${await this.getAccessToken()}`,
-      },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(
-        `API Hub request failed with status ${response.status}: ${text}`,
-      );
+    const headers = {
+      'accept': 'application/json, text/plain, */*',
+      'Authorization': `Bearer ${await this.getAccessToken()}`,
+    };
+
+    const certs = await clientCertsToPresent();
+    const {status, body} = certs
+      ? await getWithClientCert(
+          effectiveGoogleapisEndpoint(url),
+          headers,
+          certs,
+          REQUEST_TIMEOUT_MS,
+        )
+      : await getWithFetch(url, headers);
+
+    if (status < 200 || status >= 300) {
+      throw new Error(`API Hub request failed with status ${status}: ${body}`);
     }
-    return (await response.json()) as T;
+    const payload: unknown = JSON.parse(body);
+    if (!isRecord(payload)) {
+      throw new Error('API Hub returned a non-object JSON response.');
+    }
+    return payload as T;
   }
 
   private async getAccessToken(): Promise<string> {
