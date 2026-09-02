@@ -11,6 +11,12 @@ import {
   writeTelemetryConsent,
 } from '../utils/telemetry_config.js';
 import {toMessage} from '../utils/value_utils.js';
+import {
+  elapsedMs,
+  recordCommandRun,
+  resolveCommandPath,
+  toErrorName,
+} from './cli_metrics.js';
 
 const CONSENT_QUESTION =
   'Help improve the ADK (CLI and Web UI) by allowing Google to collect' +
@@ -148,4 +154,50 @@ export async function maybePromptForTelemetryConsent(
       `Error: Failed to save telemetry settings: ${toMessage(error)}`,
     );
   }
+}
+
+/**
+ * Measures this invocation and queues one record when it ends.
+ *
+ * Nothing is measured, and no listener is registered, unless the user opted
+ * in. Help requests and the `telemetry` group itself are excluded, matching
+ * adk-python. Only `--help` counts as a help request: adk-js binds `-h` to
+ * `--host` on its subcommands.
+ *
+ * The record is written from an `exit` listener, and therefore synchronously:
+ * a command that calls `process.exit()` gives no chance to await anything.
+ * `uncaughtExceptionMonitor` observes a crash without changing what Node does
+ * about it, which is how the exception name reaches the record.
+ */
+export function installCommandMetrics(
+  program: Command,
+  argv: readonly string[],
+): void {
+  if (argv.includes('--help')) {
+    return;
+  }
+
+  const [command, subcommand] = resolveCommandPath(argv, program);
+  if (command === '' || command === 'telemetry') {
+    return;
+  }
+  if (readTelemetryConsent() !== true) {
+    return;
+  }
+
+  const startedAt = process.hrtime.bigint();
+  let exceptionType = '';
+
+  process.on('uncaughtExceptionMonitor', (error: unknown) => {
+    exceptionType = toErrorName(error);
+  });
+  process.on('exit', (exitCode: number) => {
+    recordCommandRun({
+      command,
+      subcommand,
+      exitCode,
+      durationMs: elapsedMs(startedAt),
+      exceptionType,
+    });
+  });
 }
