@@ -73,22 +73,14 @@ Agent description: ${targetAgent.description}
 `;
 }
 
-/**
- * Builds the transfer instruction text for `agent`.
- *
- * Returns an empty string for a `single_turn` or `task` agent: the graph, not
- * the model, decides where such an agent hands control next.
- */
+/** Builds the transfer instruction text for `agent`. */
 function buildTransferInstructions(
   agent: LlmAgent,
   targetAgents: BaseAgent[],
 ): string {
-  if (NON_TRANSFERABLE_MODES.includes(agent.mode)) {
-    return '';
-  }
-
-  const availableAgentNames = targetAgents.map((target) => target.name).sort();
-  const formattedAgentNames = availableAgentNames
+  const formattedAgentNames = targetAgents
+    .map((target) => target.name)
+    .sort()
     .map((name) => `\`${name}\``)
     .join(', ');
 
@@ -212,9 +204,12 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    const instructions = buildTransferInstructions(agent, transferTargets);
-    if (instructions) {
-      appendInstructions(llmRequest, [instructions]);
+    // A task or single_turn agent gets no instructions: the graph, not the
+    // model, decides where it hands control next. It still gets the tool.
+    if (!NON_TRANSFERABLE_MODES.includes(agent.mode)) {
+      appendInstructions(llmRequest, [
+        buildTransferInstructions(agent, transferTargets),
+      ]);
     }
 
     const toolContext = new Context({invocationContext});
