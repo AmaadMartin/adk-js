@@ -47,6 +47,18 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+// Node-only: the local managers read and write files, and the GCS managers
+// load the `@google-cloud/storage` client. So this barrel and not
+// `common.ts`, which `index_web.ts` re-exports wholesale.
+export {createGcsEvalManagersFromUri} from './evaluation/eval_managers.js';
+export type {EvalManagers} from './evaluation/eval_managers.js';
+export {GcsEvalSetResultsManager} from './evaluation/gcs_eval_set_results_manager.js';
+export {GcsEvalSetsManager} from './evaluation/gcs_eval_sets_manager.js';
+export {LocalEvalSetResultsManager} from './evaluation/local_eval_set_results_manager.js';
+export {
+  LocalEvalSetsManager,
+  loadEvalSetFromFile,
+} from './evaluation/local_eval_sets_manager.js';
 export {VertexAiExampleStore} from './examples/vertex_ai_example_store.js';
 export {getMemoryServiceFromUri} from './memory/registry.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
