@@ -16,6 +16,7 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
+  requiresUserInput,
   RunnableRoot,
   Runner,
   Session,
@@ -36,7 +37,7 @@ import {
 import {
   buildFunctionResponse,
   collectPendingFunctionCalls,
-  renderFunctionCallPrompt,
+  renderLongRunningPrompt,
 } from './hitl_prompt.js';
 
 const HOW_TO_ANSWER: Record<UserInputKind, string> = {
@@ -215,6 +216,7 @@ async function runFromInputFile(
   });
 
   const runner = new Runner(options);
+  let waitingOnUser = false;
 
   for (const query of fileContent.queries) {
     console.log(`[user]: ${query}`);
@@ -228,9 +230,20 @@ async function runFromInputFile(
       runConfig: {plainTextToolConfirmation: true},
     };
 
+    waitingOnUser = false;
     for await (const event of runner.runAsync(runOptions)) {
       printEvent(event);
+      // A scripted run has no prompt to answer at: whatever the pause asked
+      // for has to be the next query in the file.
+      waitingOnUser = requiresUserInput(event) || waitingOnUser;
     }
+  }
+
+  if (waitingOnUser) {
+    console.error(
+      'The run ended while still waiting for user input. ' +
+        'Add the answer as the next query in the input file.',
+    );
   }
 
   return session;
@@ -305,7 +318,9 @@ async function runInteractively(
         runConfig: {plainTextToolConfirmation: true},
       })) {
         turnEvents.push(event);
-        printEvent(event);
+        // A pause this turn will prompt for is announced by the prompt itself,
+        // so announcing it here as well would ask the same question twice.
+        printEvent(event, {announcePauses: !hasLongRunningCall(event)});
       }
     } catch (error) {
       console.error(
@@ -318,6 +333,24 @@ async function runInteractively(
 
     nextMessage = await answerPendingCalls(turnEvents);
   }
+}
+
+/** Whether the interactive loop will prompt for a call this event raised. */
+function hasLongRunningCall(event: Event): boolean {
+  return (event.longRunningToolIds?.length ?? 0) > 0;
+}
+
+/** Every request the turn described, keyed by the id that answers it. */
+function indexUserInputRequests(
+  events: Event[],
+): Map<string, UserInputRequest> {
+  const requests = new Map<string, UserInputRequest>();
+  for (const event of events) {
+    for (const request of getUserInputRequests(event)) {
+      requests.set(request.interruptId, request);
+    }
+  }
+  return requests;
 }
 
 /**
@@ -334,9 +367,13 @@ async function answerPendingCalls(
   events: Event[],
 ): Promise<Content | undefined> {
   const parts: Part[] = [];
+  const requests = indexUserInputRequests(events);
 
   for (const call of collectPendingFunctionCalls(events)) {
-    console.log(renderFunctionCallPrompt(call));
+    const request = requests.get(call.id);
+    console.log(
+      request ? renderUserInputRequest(request) : renderLongRunningPrompt(call),
+    );
     parts.push(buildFunctionResponse(call, await getUserInput('[user]: ')));
   }
 

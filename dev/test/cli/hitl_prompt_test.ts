@@ -4,23 +4,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '@google/adk';
+import {createEvent, Event} from '@google/adk';
+import {Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   buildFunctionResponse,
   collectPendingFunctionCalls,
   isPositiveResponse,
   PendingFunctionCall,
-  renderFunctionCallPrompt,
+  renderLongRunningPrompt,
 } from '../../src/cli/hitl_prompt.js';
 
 /** An event carrying the given parts, marking `longRunningToolIds` as given. */
-function event(parts: unknown[], longRunningToolIds?: string[]): Event {
-  return {
+function event(parts: Part[], longRunningToolIds?: string[]): Event {
+  return createEvent({
     author: 'agent',
     content: {role: 'model', parts},
     longRunningToolIds,
-  } as Event;
+  });
 }
 
 function call(
@@ -103,75 +104,16 @@ describe('isPositiveResponse', () => {
   });
 });
 
-describe('renderFunctionCallPrompt', () => {
-  it('prints the message of an input request', () => {
-    expect(
-      renderFunctionCallPrompt(
-        call('adk_request_input', {message: 'Enter a number:'}),
-      ),
-    ).toBe('[HITL input] Enter a number:');
-  });
-
-  it('names an input request that carries no message', () => {
-    expect(renderFunctionCallPrompt(call('adk_request_input'))).toBe(
-      '[HITL input] Input requested',
-    );
-  });
-
-  it('names an input request whose message is empty', () => {
-    expect(
-      renderFunctionCallPrompt(call('adk_request_input', {message: ''})),
-    ).toBe('[HITL input] Input requested');
-  });
-
-  it('adds the schema of an input request that declares one', () => {
-    expect(
-      renderFunctionCallPrompt(
-        call('adk_request_input', {
-          message: 'How many?',
-          response_schema: {type: 'integer'},
-        }),
-      ),
-    ).toBe('[HITL input] How many?\n  Schema: {"type":"integer"}');
-  });
-
-  it('prints the hint of a confirmation request', () => {
-    expect(
-      renderFunctionCallPrompt(
-        call('adk_request_confirmation', {
-          toolConfirmation: {hint: 'This reads patient records.'},
-        }),
-      ),
-    ).toBe(
-      '[HITL confirm] This reads patient records.\n' +
-        '  Type "yes" to confirm, anything else to reject.',
-    );
-  });
-
-  it('names the guarded tool when the confirmation carries no hint', () => {
-    expect(
-      renderFunctionCallPrompt(
-        call('adk_request_confirmation', {
-          toolConfirmation: {hint: ''},
-          originalFunctionCall: {name: 'find_orders'},
-        }),
-      ),
-    ).toBe(
-      '[HITL confirm] Confirm find_orders?\n' +
-        '  Type "yes" to confirm, anything else to reject.',
-    );
-  });
-
-  it('falls back to an unknown tool name', () => {
-    expect(renderFunctionCallPrompt(call('adk_request_confirmation'))).toBe(
-      '[HITL confirm] Confirm unknown?\n' +
-        '  Type "yes" to confirm, anything else to reject.',
-    );
-  });
-
-  it('reports any other long-running call with its arguments', () => {
-    expect(renderFunctionCallPrompt(call('slow_lookup', {city: 'SF'}))).toBe(
+describe('renderLongRunningPrompt', () => {
+  it('reports the call with its arguments', () => {
+    expect(renderLongRunningPrompt(call('slow_lookup', {city: 'SF'}))).toBe(
       '[HITL] Waiting for input for slow_lookup({"city":"SF"})',
+    );
+  });
+
+  it('reports a call that carries no arguments', () => {
+    expect(renderLongRunningPrompt(call('slow_lookup'))).toBe(
+      '[HITL] Waiting for input for slow_lookup({})',
     );
   });
 });

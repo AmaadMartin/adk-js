@@ -23,11 +23,18 @@ vi.mock('../../src/utils/file_utils.js', async (importOriginal) => ({
   saveToFile: vi.fn(),
 }));
 
-/** Events the mocked Runner yields for a turn; set per test. */
+/** What the mocked Runner does, and what it was asked to do; set per test. */
 const runnerState = vi.hoisted(() => ({
+  /** Events every turn yields, unless `turns` supplies its own. */
   events: [
     {author: 'model', content: {parts: [{text: 'Response from model'}]}},
   ] as unknown[],
+  /** Events for the first turns, in order; later turns fall back to `events`. */
+  turns: [] as unknown[][],
+  /** The message each turn was given, in order. */
+  messages: [] as unknown[],
+  /** Turn numbers, counted from 1, that throw instead of yielding. */
+  failingTurns: new Set<number>(),
 }));
 
 // Only the Runner and services are faked, so interrupt detection under test is
@@ -80,12 +87,19 @@ describe('cli_run', () => {
     runnerState.events = [
       {author: 'model', content: {parts: [{text: 'Response from model'}]}},
     ];
+    runnerState.turns = [];
+    runnerState.messages = [];
+    runnerState.failingTurns.clear();
 
     // `restoreAllMocks` in afterEach strips the implementation set in the
     // module factory, so re-establish it for every test.
     (Runner as unknown as Mock).mockImplementation(() => ({
-      runAsync: async function* () {
-        for (const event of runnerState.events) {
+      runAsync: async function* (options: {newMessage?: unknown} = {}) {
+        runnerState.messages.push(options.newMessage);
+        if (runnerState.failingTurns.has(runnerState.messages.length)) {
+          throw new Error('model unavailable');
+        }
+        for (const event of runnerState.turns.shift() ?? runnerState.events) {
           yield event;
         }
       },
@@ -629,7 +643,7 @@ describe('cli_run', () => {
       );
     });
 
-    it('announces a pause in a scripted run and adds no closing warning', async () => {
+    it('warns when a scripted run ends still waiting on the user', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       (loadFileData as Mock).mockResolvedValue({state: {}, queries: ['start']});
       runnerState.events = [savedInterrupt('interrupt-1')];
@@ -640,14 +654,12 @@ describe('cli_run', () => {
         sessionService: createMockSessionService(),
       });
 
-      const output = (console.log as Mock).mock.calls
-        .map((call) => call.join(' '))
-        .join('\n');
       const errors = (console.error as Mock).mock.calls
         .map((call) => call.join(' '))
         .join('\n');
-      expect(output).toContain('[step1] is waiting for your input');
-      expect(errors).toBe('');
+      expect(errors).toContain(
+        'The run ended while still waiting for user input.',
+      );
     });
 
     it('does not announce a pause for an unnamed function call', async () => {
@@ -742,21 +754,10 @@ describe('cli_run', () => {
       pausedEvents: unknown[],
       answers: string[],
     ): Promise<unknown[]> {
-      const messages: unknown[] = [];
-      let turn = 0;
-      (Runner as unknown as Mock).mockImplementation(() => ({
-        runAsync: async function* (options: {newMessage: unknown}) {
-          messages.push(options.newMessage);
-          turn++;
-          if (turn === 1) {
-            for (const event of pausedEvents) {
-              yield event;
-            }
-            return;
-          }
-          yield {author: 'model', content: {parts: [{text: 'resumed'}]}};
-        },
-      }));
+      runnerState.turns = [pausedEvents];
+      runnerState.events = [
+        {author: 'model', content: {parts: [{text: 'resumed'}]}},
+      ];
 
       for (const answer of ['start', ...answers, 'exit']) {
         (mockRl.question as Mock).mockImplementationOnce(
@@ -770,8 +771,11 @@ describe('cli_run', () => {
         sessionService: createMockSessionService(),
       });
 
-      return messages;
+      return runnerState.messages;
     }
+
+    const printed = () =>
+      (console.log as Mock).mock.calls.map((call) => call.join(' ')).join('\n');
 
     it('sends the answer back as a function response', async () => {
       const messages = await runPausedTurn(
@@ -800,22 +804,32 @@ describe('cli_run', () => {
       ]);
     });
 
-    it('prints the prompt the paused call asks for', async () => {
+    it('asks the question once, in the ADK pause format', async () => {
       await runPausedTurn(
         [
           longRunningCall('call-1', 'adk_request_confirmation', {
             toolConfirmation: {hint: 'This deletes the order.'},
+            originalFunctionCall: {name: 'delete_order'},
           }),
         ],
         ['yes'],
       );
 
-      const output = (console.log as Mock).mock.calls
-        .map((call) => call.join(' '))
-        .join('\n');
-      expect(output).toContain('[HITL confirm] This deletes the order.');
-      expect(output).toContain(
-        '  Type "yes" to confirm, anything else to reject.',
+      const output = printed();
+      expect(output).toContain('[agent] is waiting for confirmation');
+      expect(output).toContain('Tool: delete_order');
+      expect(output).toContain('This deletes the order.');
+      expect(output.match(/is waiting for confirmation/g)).toHaveLength(1);
+    });
+
+    it('describes a long-running call that asks for nothing recognised', async () => {
+      await runPausedTurn(
+        [longRunningCall('call-1', 'slow_lookup', {city: 'SF'})],
+        ['done'],
+      );
+
+      expect(printed()).toContain(
+        '[HITL] Waiting for input for slow_lookup({"city":"SF"})',
       );
     });
 
@@ -881,13 +895,7 @@ describe('cli_run', () => {
 
     it('asks nothing when the turn threw', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
-      const messages: unknown[] = [];
-      (Runner as unknown as Mock).mockImplementation(() => ({
-        runAsync: (options: {newMessage: unknown}) => {
-          messages.push(options.newMessage);
-          throw new Error('model unavailable');
-        },
-      }));
+      runnerState.failingTurns.add(1);
       for (const answer of ['start', 'exit']) {
         (mockRl.question as Mock).mockImplementationOnce(
           (_prompt: string, callback: (value: string) => void) =>
@@ -900,7 +908,7 @@ describe('cli_run', () => {
         sessionService: createMockSessionService(),
       });
 
-      expect(messages).toHaveLength(1);
+      expect(runnerState.messages).toHaveLength(1);
       expect((mockRl.question as Mock).mock.calls).toHaveLength(2);
     });
   });

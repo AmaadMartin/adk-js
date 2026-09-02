@@ -28,37 +28,28 @@ Nothing to configure. Run an agent whose tool pauses, and answer at the prompt:
 $ adk run ./agent.ts
 Running agent ask_twice, type exit to exit.
 [user]: start
-[HITL input] City?
-  Schema: {"type":"string"}
+--- [ask_twice] is waiting for your input ---
+City?
+Expected response: {"type":"string"}
+Type your reply at the next prompt to continue.
 [user]: Paris
-[HITL confirm] Send the order?
-  Type "yes" to confirm, anything else to reject.
+--- [ask_twice] is waiting for confirmation ---
+Tool: send_order
+Send the order?
+Reply 'yes' to approve or 'no' to reject.
 [user]: yes
 [ask_twice]: answers: ask-1={"result":"Paris"} ask-2={"confirmed":true}
 ```
 
 ## The prompts
 
-The prompt depends on the name of the call the agent raised.
+A pause is described by `getUserInputRequests`, the same reader the rest of ADK
+uses, so all three kinds read alike: an input request, a credential request, and
+a tool confirmation. Each one prints its message, and any payload, schema or
+auth scheme it carries, immediately before the `[user]:` prompt that answers it.
 
-`adk_request_input` prints the `message` argument, or `Input requested` when
-there is none. A `response_schema` argument is printed under it:
-
-```
-[HITL input] City?
-  Schema: {"type":"string"}
-```
-
-`adk_request_confirmation` prints the `hint` of the `toolConfirmation`
-argument. Without a hint it names the guarded tool from
-`originalFunctionCall`, or `unknown`:
-
-```
-[HITL confirm] Send the order?
-  Type "yes" to confirm, anything else to reject.
-```
-
-Any other long-running call is reported with its arguments:
+A long-running call that is not one of those three has nothing to describe, so
+it is reported with its arguments:
 
 ```
 [HITL] Waiting for input for slow_lookup({"city":"SF"})
@@ -83,7 +74,9 @@ and a line that is not JSON at all, travel under `result`:
 ## Limits
 
 - Only the interactive run prompts. A scripted run (`--replay`) has no prompt to
-  answer at, so the answer has to be the next query in the input file.
+  answer at, so the answer has to be the next query in the input file. That run
+  reports `The run ended while still waiting for user input.` when it finishes
+  with a pause open.
 - A call with no id or no name is skipped. A function response is addressed by
   both, so neither can be answered.
 - A turn that throws raises no prompt. The failure is reported and the session

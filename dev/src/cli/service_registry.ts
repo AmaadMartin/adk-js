@@ -98,34 +98,47 @@ export type ServiceRegistration =
   | SessionServiceRegistration
   | ArtifactServiceRegistration;
 
+/**
+ * A registration whose factory has not been checked yet.
+ *
+ * The YAML file names a class by string, so what it constructs is only known
+ * once the scheme is used. Every registration is stored this way, so the check
+ * in {@link createService} covers the module file too.
+ */
+interface UncheckedRegistration {
+  scheme: string;
+  type: ServiceKind;
+  create: (uri: string) => unknown;
+}
+
 /** The custom backends a run can resolve a service URI against. */
 export class ServiceRegistry {
   private readonly sessionFactories = new Map<
     string,
-    SessionServiceRegistration['create']
+    UncheckedRegistration['create']
   >();
   private readonly artifactFactories = new Map<
     string,
-    ArtifactServiceRegistration['create']
+    UncheckedRegistration['create']
   >();
 
   /** Adds a backend, replacing any backend already serving its scheme. */
-  register(registration: ServiceRegistration): void {
-    if (registration.type === 'session') {
-      this.sessionFactories.set(registration.scheme, registration.create);
-    } else {
-      this.artifactFactories.set(registration.scheme, registration.create);
-    }
+  register(registration: UncheckedRegistration): void {
+    const factories =
+      registration.type === 'session'
+        ? this.sessionFactories
+        : this.artifactFactories;
+    factories.set(registration.scheme, registration.create);
   }
 
   /** The custom session service for `uri`, or undefined for a scheme nobody registered. */
   createSessionService(uri: string): BaseSessionService | undefined {
-    return this.sessionFactories.get(schemeOf(uri))?.(uri);
+    return createService(this.sessionFactories, uri, isSessionService);
   }
 
   /** The custom artifact service for `uri`, or undefined for a scheme nobody registered. */
   createArtifactService(uri: string): BaseArtifactService | undefined {
-    return this.artifactFactories.get(schemeOf(uri))?.(uri);
+    return createService(this.artifactFactories, uri, isArtifactService);
   }
 }
 
@@ -165,6 +178,30 @@ export async function loadServicesModule(
   if (modulePath) {
     await registerFromModule(modulePath, registry);
   }
+}
+
+/**
+ * Builds the service a URI names, if any backend serves its scheme.
+ *
+ * The factory is user code, so what it returns is checked before the runner is
+ * handed it. Both registration paths go through here, so both get the check.
+ */
+function createService<T>(
+  factories: Map<string, UncheckedRegistration['create']>,
+  uri: string,
+  isService: (value: unknown) => value is T,
+): T | undefined {
+  const scheme = schemeOf(uri);
+  const factory = factories.get(scheme);
+  if (!factory) {
+    return undefined;
+  }
+
+  const service = factory(uri);
+  if (!isService(service)) {
+    throw new Error(`The backend registered for "${scheme}" is unusable.`);
+  }
+  return service;
 }
 
 /** The scheme of a URI, or the empty string when it has none. */
@@ -251,7 +288,7 @@ async function registerYamlEntry(
     return;
   }
 
-  registry.register(buildRegistration(scheme, kind, exported, source));
+  registry.register({scheme, type: kind, create: (uri) => new exported(uri)});
 }
 
 async function registerFromModule(
@@ -285,46 +322,6 @@ async function registerFromModule(
 
 /** A class named by a YAML entry, constructed with the URI it serves. */
 type ServiceConstructor = new (uri: string) => unknown;
-
-function buildRegistration(
-  scheme: string,
-  kind: ServiceKind,
-  constructor: ServiceConstructor,
-  source: string,
-): ServiceRegistration {
-  if (kind === 'session') {
-    return {
-      scheme,
-      type: kind,
-      create: (uri) => requireSessionService(new constructor(uri), source),
-    };
-  }
-  return {
-    scheme,
-    type: kind,
-    create: (uri) => requireArtifactService(new constructor(uri), source),
-  };
-}
-
-function requireSessionService(
-  value: unknown,
-  source: string,
-): BaseSessionService {
-  if (!isSessionService(value)) {
-    throw new Error(`${source} did not produce a session service.`);
-  }
-  return value;
-}
-
-function requireArtifactService(
-  value: unknown,
-  source: string,
-): BaseArtifactService {
-  if (!isArtifactService(value)) {
-    throw new Error(`${source} did not produce an artifact service.`);
-  }
-  return value;
-}
 
 /**
  * Whether `value` implements the named methods.

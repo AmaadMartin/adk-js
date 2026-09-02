@@ -5,21 +5,22 @@
  */
 
 /**
- * Turning a paused turn into questions, and the typed answers back into the
- * function responses that resume the run.
+ * Finding the calls a paused turn is waiting on, and turning the typed answers
+ * into the function responses that resume the run.
  *
- * The prompts and the response payloads follow adk-python's `cli.py`, so a
- * transcript of `adk run` reads the same in both languages. Nothing here reads
- * stdin: the caller supplies the answer, which is what makes it testable.
+ * The response payloads follow adk-python's `cli.py`, because they are what the
+ * agent receives. Nothing here reads stdin: the caller supplies the answer,
+ * which is what makes it testable.
  */
 
-import {Event, getFunctionCalls} from '@google/adk';
+import {
+  Event,
+  getFunctionCalls,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+} from '@google/adk';
 import {Part} from '@google/genai';
 
-import {asNonEmptyString, isRecord} from '../utils/value_utils.js';
-
-const REQUEST_INPUT = 'adk_request_input';
-const REQUEST_CONFIRMATION = 'adk_request_confirmation';
+import {isRecord} from '../utils/value_utils.js';
 
 const POSITIVE_ANSWERS = new Set(['y', 'yes', 'true', 'confirm']);
 
@@ -62,36 +63,14 @@ export function isPositiveResponse(value: string): boolean {
   return POSITIVE_ANSWERS.has(value.trim().toLowerCase());
 }
 
-/** What the CLI prints to ask for one pending call's answer. */
-export function renderFunctionCallPrompt(call: PendingFunctionCall): string {
-  switch (call.name) {
-    case REQUEST_INPUT: {
-      const message =
-        asNonEmptyString(call.args['message']) ?? 'Input requested';
-      const schema = call.args['response_schema'];
-      const lines = [`[HITL input] ${message}`];
-      if (schema) {
-        lines.push(`  Schema: ${JSON.stringify(schema)}`);
-      }
-      return lines.join('\n');
-    }
-    case REQUEST_CONFIRMATION: {
-      const confirmation = call.args['toolConfirmation'];
-      const hint = isRecord(confirmation)
-        ? asNonEmptyString(confirmation['hint'])
-        : undefined;
-      const original = call.args['originalFunctionCall'];
-      const originalName =
-        (isRecord(original) ? asNonEmptyString(original['name']) : undefined) ??
-        'unknown';
-      return [
-        `[HITL confirm] ${hint ?? `Confirm ${originalName}?`}`,
-        '  Type "yes" to confirm, anything else to reject.',
-      ].join('\n');
-    }
-    default:
-      return `[HITL] Waiting for input for ${call.name}(${JSON.stringify(call.args)})`;
-  }
+/**
+ * What the CLI prints for a long-running call it cannot describe.
+ *
+ * A recognised pause is rendered from its {@link UserInputRequest} instead;
+ * this covers a call that is long running for some other reason.
+ */
+export function renderLongRunningPrompt(call: PendingFunctionCall): string {
+  return `[HITL] Waiting for input for ${call.name}(${JSON.stringify(call.args)})`;
 }
 
 /** The part that answers one pending call with what the user typed. */
@@ -118,7 +97,7 @@ function buildResponsePayload(
   name: string,
   answer: string,
 ): Record<string, unknown> {
-  if (name === REQUEST_CONFIRMATION) {
+  if (name === REQUEST_CONFIRMATION_FUNCTION_CALL_NAME) {
     return {confirmed: isPositiveResponse(answer)};
   }
 

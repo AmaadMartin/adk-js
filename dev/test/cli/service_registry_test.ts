@@ -334,7 +334,7 @@ describe('service registry', () => {
       await loadServicesModule(agentRoot, registry);
 
       expect(() => registry.createSessionService('wrong://x')).toThrow(
-        'did not produce a session service',
+        'The backend registered for "wrong" is unusable.',
       );
     });
 
@@ -353,7 +353,7 @@ describe('service registry', () => {
       await loadServicesModule(agentRoot, registry);
 
       expect(() => registry.createArtifactService('wrong://x')).toThrow(
-        'did not produce an artifact service',
+        'The backend registered for "wrong" is unusable.',
       );
     });
   });
@@ -407,6 +407,22 @@ export const services = [
       await loadServicesModule(agentRoot, registry);
 
       expect(await sessionIdFor('fromts://demo')).toBe('fromts://demo');
+    });
+
+    it('reports a factory that does not produce the service it claims', async () => {
+      await write(
+        'services.js',
+        `export const services = [
+  {scheme: 'wrong', type: 'session', create: () => ({})},
+];
+`,
+      );
+
+      await loadServicesModule(agentRoot, registry);
+
+      expect(() => registry.createSessionService('wrong://x')).toThrow(
+        'The backend registered for "wrong" is unusable.',
+      );
     });
 
     it('keeps running when the module throws while loading', async () => {
