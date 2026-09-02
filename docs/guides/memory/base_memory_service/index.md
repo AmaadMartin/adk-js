@@ -26,11 +26,11 @@ instead. It never resolves without storing anything.
 
 This mirrors `BaseMemoryService` in
 [adk-python](https://github.com/google/adk-python/blob/main/src/google/adk/memory/base_memory_service.py),
-where the two paths are concrete methods that raise `NotImplementedError`.
-Python gets that default from an abstract base class. `BaseMemoryService` here
-is a structural interface, which object literals across the runner and the dev
-server implement, so the default lives in the exported functions instead of in
-a base class.
+where the two paths are concrete methods that raise `NotImplementedError`. A
+Python subclass inherits that default for free. A TypeScript interface cannot
+carry a method body, and adding required members to a published interface
+breaks every external implementer, so the default lives in the exported
+functions instead.
 
 ## Get started
 
@@ -101,10 +101,8 @@ service itself throws reaches you unchanged.
 To branch on support instead of catching, read the member:
 
 ```ts
-import type {BaseMemoryService, Event} from '@google/adk';
-
-function supportsEventDeltas(service: BaseMemoryService): boolean {
-  return service.addEventsToMemory !== undefined;
+if (service.addEventsToMemory) {
+  await service.addEventsToMemory(request);
 }
 ```
 

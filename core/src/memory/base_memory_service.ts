@@ -130,14 +130,6 @@ export interface BaseMemoryService {
   searchMemory(request: SearchMemoryRequest): Promise<SearchMemoryResponse>;
 }
 
-const EVENT_DELTAS_NOT_SUPPORTED_MESSAGE =
-  'This memory service does not support adding event deltas. ' +
-  'Call addSessionToMemory(session) to ingest the full session.';
-
-const DIRECT_WRITES_NOT_SUPPORTED_MESSAGE =
-  'This memory service does not support direct memory writes. ' +
-  'Call addEventsToMemory(...) or addSessionToMemory(session) instead.';
-
 /**
  * Adds an explicit list of events to the memory of any memory service.
  *
@@ -156,7 +148,10 @@ export async function addEventsToMemory(
   request: AddEventsToMemoryRequest,
 ): Promise<void> {
   if (!service.addEventsToMemory) {
-    throw new NotImplementedError(EVENT_DELTAS_NOT_SUPPORTED_MESSAGE);
+    throw new NotImplementedError(
+      'This memory service does not support adding event deltas. ' +
+        'Call addSessionToMemory(session) to ingest the full session.',
+    );
   }
   return service.addEventsToMemory(request);
 }
@@ -180,7 +175,10 @@ export async function addMemory(
   request: AddMemoryRequest,
 ): Promise<void> {
   if (!service.addMemory) {
-    throw new NotImplementedError(DIRECT_WRITES_NOT_SUPPORTED_MESSAGE);
+    throw new NotImplementedError(
+      'This memory service does not support direct memory writes. ' +
+        'Call addEventsToMemory(...) or addSessionToMemory(session) instead.',
+    );
   }
   return service.addMemory(request);
 }
