@@ -45,9 +45,17 @@ export function isInMemoryConnectionString(uri: string): boolean {
  * An in-memory implementation of the ArtifactService.
  */
 export class InMemoryArtifactService implements BaseArtifactService {
-  private readonly artifacts: Record<
+  /**
+   * The stored artifact versions, keyed by storage key.
+   *
+   * The key is `session/<app>/<user>/<session>/<filename>` for a session
+   * artifact and `user/<app>/<user>/<filename>` for a user artifact, with every
+   * segment encoded by `encodeURIComponent`. The entries are live, so a
+   * mutation is visible to every later read.
+   */
+  readonly artifacts: Record<
     string,
-    {part: Part; metadata: ArtifactVersion}[]
+    {data: Part; artifactVersion: ArtifactVersion}[]
   > = {};
 
   async saveArtifact(request: SaveArtifactRequest): Promise<number> {
@@ -81,7 +89,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
       );
     }
 
-    versions.push({part: artifact, metadata});
+    versions.push({data: artifact, artifactVersion: metadata});
     this.artifacts[path] = versions;
 
     return version;
@@ -104,14 +112,19 @@ export class InMemoryArtifactService implements BaseArtifactService {
   }: ListArtifactKeysRequest): Promise<string[]> {
     validatePathSegment(appName, 'appName');
     validatePathSegment(userId, 'userId');
-    validatePathSegment(sessionId, 'sessionId');
+    if (sessionId !== undefined) {
+      validatePathSegment(sessionId, 'sessionId');
+    }
 
-    const sessionPrefix = artifactPrefix('session', appName, userId, sessionId);
+    const sessionPrefix =
+      sessionId === undefined
+        ? undefined
+        : artifactPrefix('session', appName, userId, sessionId);
     const userPrefix = artifactPrefix('user', appName, userId);
     const filenames: string[] = [];
 
     for (const path in this.artifacts) {
-      if (path.startsWith(sessionPrefix)) {
+      if (sessionPrefix !== undefined && path.startsWith(sessionPrefix)) {
         filenames.push(decodeURIComponent(path.slice(sessionPrefix.length)));
       } else if (path.startsWith(userPrefix)) {
         filenames.push(decodeURIComponent(path.slice(userPrefix.length)));
@@ -160,7 +173,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return [];
     }
 
-    return artifacts.map((a) => a.metadata);
+    return artifacts.map((a) => a.artifactVersion);
   }
 
   async getArtifactVersion({
@@ -177,7 +190,13 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return undefined;
     }
 
-    return versions[version ?? versions.length - 1]?.metadata;
+    const index = versionIndex(versions.length, version);
+
+    if (index === undefined) {
+      return undefined;
+    }
+
+    return versions[index].artifactVersion;
   }
 
   /**
@@ -186,7 +205,8 @@ export class InMemoryArtifactService implements BaseArtifactService {
    *
    * @param scope The scope the caller operates in.
    * @param filename The name of the artifact file.
-   * @param version The version to load, or undefined for the latest one.
+   * @param version The version to load. A negative version counts from the
+   *     end, and undefined is the newest one.
    * @param depth The number of references already followed.
    * @return The artifact, or undefined when it is missing or has no content.
    */
@@ -203,15 +223,15 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return undefined;
     }
 
-    const entry = versions[version ?? versions.length - 1];
-    if (!entry) {
+    const index = versionIndex(versions.length, version);
+    if (index === undefined) {
       logger.warn(
         `[InMemoryArtifactService] loadArtifact: Artifact ${filename} version ${version} not found`,
       );
       return undefined;
     }
 
-    const part = entry.part;
+    const part = versions[index].data;
     if (isArtifactRef(part)) {
       const fileUri = part.fileData.fileUri;
       const target = referenceTarget(scope, fileUri);
@@ -295,6 +315,20 @@ function canonicalUri(
     return `memory://apps/${appName}/users/${userId}/artifacts/${filename}/versions/${version}`;
   }
   return `memory://apps/${appName}/users/${userId}/sessions/${sessionId}/artifacts/${filename}/versions/${version}`;
+}
+
+/**
+ * Resolves a caller-supplied version to a stored index.
+ *
+ * A negative version counts from the end, as Python list indexing does, so the
+ * default of -1 is the newest version.
+ *
+ * @return The index, or undefined when it falls outside the stored range.
+ */
+function versionIndex(length: number, version = -1): number | undefined {
+  const index = version < 0 ? version + length : version;
+
+  return index >= 0 && index < length ? index : undefined;
 }
 
 /**
