@@ -101,9 +101,7 @@ const TRANSFER_AGENT_DELAY_MS = 1000;
  * Delay before a live run returns after the model calls `task_completed`.
  * Gives the server-side model a moment to flush any pending audio for the
  * final turn before teardown. Mirrors `DEFAULT_TASK_COMPLETION_DELAY` (1.0s)
- * in the Python ADK live flow. It shares the transfer delay's value today but
- * is tuned independently, because the two events end a run for different
- * reasons.
+ * in the Python ADK live flow.
  */
 const TASK_COMPLETION_DELAY_MS = 1000;
 
@@ -453,25 +451,14 @@ const GROUNDING_SEARCH_AGENT_TOOL_NAME = 'google_search_agent';
 const GROUNDING_METADATA_STATE_KEY = 'temp:_adk_grounding_metadata';
 
 /**
- * Narrows a session state value to {@link GroundingMetadata}.
- *
- * Every field of `GroundingMetadata` is optional, so an object is the only
- * property a runtime check can establish. The framework writes this state key,
- * so the guard exists to keep the read typed, not to police a caller.
- */
-function isGroundingMetadata(value: unknown): value is GroundingMetadata {
-  return typeof value === 'object' && value !== null;
-}
-
-/**
  * Copies the search agent's grounding metadata onto the response the flow is
  * about to return, so a citation survives the hop from the nested search agent
  * to its parent.
  *
  * Mirrors `_maybe_add_grounding_metadata` in the Python ADK
  * `flows/llm_flows/base_llm_flow.py`. Python resolves the agent's tools when
- * the cache is empty; here both preprocess paths fill the cache before the
- * model is called, so a miss means no step ran and there is nothing to add.
+ * the cache is empty; here `runOneStepAsync` fills the cache before the model
+ * is called, so a miss means no step ran and there is nothing to add.
  *
  * @param invocationContext The invocation the response belongs to.
  * @param llmResponse The unmodified response from the model.
@@ -491,12 +478,14 @@ function maybeAddGroundingMetadata(
 
   const groundingMetadata =
     invocationContext.session.state[GROUNDING_METADATA_STATE_KEY];
-  if (!isGroundingMetadata(groundingMetadata)) {
+  if (typeof groundingMetadata !== 'object' || groundingMetadata === null) {
     return response;
   }
 
   const target = response ?? llmResponse;
-  target.groundingMetadata = groundingMetadata;
+  // Every field of GroundingMetadata is optional, so "is an object" is all a
+  // runtime check can establish about a value the framework itself writes.
+  target.groundingMetadata = groundingMetadata as GroundingMetadata;
   return target;
 }
 
@@ -1206,15 +1195,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         yield event;
       }
     }
-    const resolvedTools: BaseTool[] = [];
     for (const toolUnion of this.tools) {
       const toolContext = new Context({invocationContext});
-      const unionTools = await convertToolUnionToTools(
-        toolUnion,
-        new ReadonlyContext(invocationContext),
-      );
-      resolvedTools.push(...unionTools);
-      const tools = unionTools.filter(
+      const tools = (
+        await convertToolUnionToTools(
+          toolUnion,
+          new ReadonlyContext(invocationContext),
+        )
+      ).filter(
         (tool) =>
           !llmRequest.allowedTools ||
           llmRequest.allowedTools.includes(tool.name),
@@ -1226,7 +1214,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
-    invocationContext.canonicalToolsCache = resolvedTools;
   }
 
   private async runSendLoop(

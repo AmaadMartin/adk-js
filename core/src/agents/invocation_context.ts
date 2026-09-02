@@ -220,11 +220,12 @@ export class InvocationContext {
    * The tools the current agent resolved for the step in flight, flattened
    * across its tool unions.
    *
-   * The LLM flow refreshes this on every step, before it calls the model, so
-   * after-model processing can read the same resolution the request was built
-   * from. A toolset can return different tools between steps, so a stale cache
-   * would describe a request that was never sent. `undefined` means no step
-   * has resolved tools yet.
+   * The LLM flow refreshes this on every non-live step, before it calls the
+   * model, so after-model processing can read the same resolution the request
+   * was built from. A toolset can return different tools between steps, so a
+   * stale cache would describe a request that was never sent. `undefined`
+   * means no step has resolved tools yet; the live path does not run the
+   * after-model stage, so it leaves this alone.
    */
   canonicalToolsCache?: BaseTool[];
 
