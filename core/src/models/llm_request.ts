@@ -446,16 +446,30 @@ export function insertTransientUserContent(
   llmRequest.contents.splice(insertIndex, 0, ...contents);
 }
 
+/** Thrown by {@link setOutputSchema} when the caller supplies no schema. */
+export const MISSING_OUTPUT_SCHEMA_MESSAGE =
+  'setOutputSchema requires an outputSchema: the request would otherwise ask ' +
+  'the model for JSON with no schema to answer against.';
+
 /**
- * Sets the output schema for the request.
+ * Sets the output schema for the request and puts the model in JSON mode.
  *
- * @param schema The JSON Schema object to set as the output schema.
+ * `SchemaUnion` resolves to `unknown`, so the compiler accepts an explicit
+ * `undefined` or `null` for a required parameter. The guard runs before any
+ * mutation, so a rejected call leaves the request as it was.
+ *
+ * @param outputSchema The JSON Schema object the model must answer against.
+ * @throws Error if `outputSchema` is `undefined` or `null`.
  */
 export function setOutputSchema(
   llmRequest: LlmRequest,
-  schema: SchemaUnion,
+  outputSchema: SchemaUnion,
 ): void {
+  if (outputSchema == null) {
+    throw new Error(MISSING_OUTPUT_SCHEMA_MESSAGE);
+  }
+
   const config = ensureConfig(llmRequest);
-  config.responseSchema = schema;
+  config.responseSchema = outputSchema;
   config.responseMimeType = 'application/json';
 }

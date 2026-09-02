@@ -125,6 +125,12 @@ output. ADK treats the pair as one setting and always writes both. An agent
 that declares `outputSchema` gets both set for it, so you only set them by hand
 when you override the schema for one turn.
 
+Never set `responseMimeType` to `application/json` without a
+`responseSchema`. The model then answers in JSON with nothing to answer
+against, and you only find out from its reply. ADK's own writer rejects that
+combination: it throws before it touches the request, so a request that fails
+validation keeps the config it had.
+
 The request processor that reads `LlmAgent.outputSchema` skips the pair for a
 task-mode agent. That agent finishes through the `finish_task` tool, and
 function calling is incompatible with a JSON response mime type.
@@ -171,3 +177,5 @@ string array nor a `Content`.
 `config.systemInstruction` is typed `ContentUnion`, so it can already hold a
 `Content` or a `Part[]`. ADK cannot append text to those, so it leaves the
 value alone and logs a warning instead of stringifying it.
+
+`setOutputSchema` throws an `Error` when the caller supplies no schema.
