@@ -21,7 +21,6 @@ import {loadOptionalPeer} from '../utils/optional_peer.js';
 
 import {
   ensurePart,
-  isArtifactRef,
   parseArtifactUri,
   ParsedArtifactUri,
   validateArtifactReferenceScope,
@@ -51,8 +50,6 @@ const DEFAULT_SIGNED_URL_TTL_MS = 60 * 60 * 1000;
 const MAX_ARTIFACT_REFERENCE_DEPTH = 5;
 const NOT_FOUND_STATUS = 404;
 const VERSION_PATTERN = /^[0-9]+$/;
-/** Characters `encodeURIComponent` keeps but a GCS object path escapes. */
-const EXTRA_ESCAPE_PATTERN = /[!'()*]/g;
 
 /**
  * Identifies one artifact. The session is optional because a `user:` filename
@@ -159,7 +156,7 @@ export class GcsArtifactService implements BaseArtifactService {
           'Artifact fileData must have a fileUri.',
         );
       }
-      if (isArtifactRef(artifact)) {
+      if (fileUri.startsWith(ARTIFACT_URI_SCHEME)) {
         validateArtifactReferenceScope(request, parseReference(fileUri));
       }
       // Store the URI and mime_type (if any) as blob metadata; no content to upload.
@@ -353,24 +350,18 @@ export class GcsArtifactService implements BaseArtifactService {
     return versions.sort((a, b) => a - b);
   }
 
-  private async resolveVersion(
-    key: VersionedArtifactKey,
-  ): Promise<number | undefined> {
-    if (key.version !== undefined) {
-      return key.version;
-    }
-    const versions = await this.listVersionsOf(key);
-    return versions.length > 0 ? Math.max(...versions) : undefined;
-  }
-
   /** Reads the object holding one version, without following references. */
   private async readObject(
     key: VersionedArtifactKey,
   ): Promise<StoredObject | undefined> {
-    const version = await this.resolveVersion(key);
-    if (version === undefined) {
+    const versions =
+      key.version === undefined
+        ? await this.listVersionsOf(key)
+        : [key.version];
+    if (versions.length === 0) {
       return undefined;
     }
+    const version = Math.max(...versions);
 
     const objectName = getBlobName(key, version);
     const file = (await this.getBucket()).file(objectName);
@@ -492,15 +483,6 @@ function parseVersion(objectName: string, prefix: string): number | undefined {
   return Number(suffix);
 }
 
-function isNotFoundError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === NOT_FOUND_STATUS
-  );
-}
-
 /** Reads an object's metadata, reporting a 404 as an absent artifact. */
 async function getMetadataIfExists(
   file: File,
@@ -509,7 +491,12 @@ async function getMetadataIfExists(
     const [metadata] = await file.getMetadata();
     return metadata;
   } catch (e: unknown) {
-    if (isNotFoundError(e)) {
+    if (
+      typeof e === 'object' &&
+      e !== null &&
+      'code' in e &&
+      e.code === NOT_FOUND_STATUS
+    ) {
       return undefined;
     }
     throw e;
@@ -561,21 +548,18 @@ async function downloadPart(stored: StoredObject): Promise<Part> {
   );
 }
 
-/**
- * Percent-encodes an object name for a URL, keeping the `/` separators.
- *
- * `encodeURIComponent` keeps `!'()*` where a GCS object path escapes them, so
- * this escapes those too.
- */
+/** Percent-encodes an object name for a URL, keeping the `/` separators. */
 function encodeObjectName(objectName: string): string {
-  return objectName.split('/').map(encodeObjectNameSegment).join('/');
-}
-
-function encodeObjectNameSegment(segment: string): string {
-  return encodeURIComponent(segment).replace(
-    EXTRA_ESCAPE_PATTERN,
-    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
-  );
+  return objectName
+    .split('/')
+    .map((segment) =>
+      // encodeURIComponent keeps `!'()*` where a GCS object path escapes them.
+      encodeURIComponent(segment).replace(
+        /[!'()*]/g,
+        (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+      ),
+    )
+    .join('/');
 }
 
 function toEpochSeconds(timeCreated?: string): number | undefined {
