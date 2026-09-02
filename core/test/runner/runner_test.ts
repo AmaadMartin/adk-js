@@ -10,6 +10,7 @@ import {
   BasePlugin,
   BaseTool,
   BaseToolset,
+  ContextCacheConfig,
   createArtifactVersion,
   createEvent,
   createEventsCompactionConfig,
@@ -21,6 +22,7 @@ import {
   InMemorySessionService,
   InvocationContext,
   isRoutableLlmAgent,
+  LiveRequestQueue,
   LlmAgent,
   ResumabilityConfig,
   RunConfig,
@@ -425,6 +427,107 @@ describe('Runner.determineAgentForResumption', () => {
       // Drain the run.
     }
 
+    expect(seen).toEqual([undefined]);
+  });
+
+  it('should carry the app contextCacheConfig onto each runAsync invocation', async () => {
+    const contextCacheConfig: ContextCacheConfig = {
+      cacheIntervals: 5,
+      ttlSeconds: 600,
+      minTokens: 2048,
+    };
+    const app = new App({name: TEST_APP_ID, rootAgent, contextCacheConfig});
+    const appRunner = new Runner({app, sessionService, artifactService});
+    expect(appRunner.contextCacheConfig).toBe(contextCacheConfig);
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+    });
+    const seen: Array<ContextCacheConfig | undefined> = [];
+    vi.spyOn(rootAgent, 'runAsync').mockImplementation(async function* (
+      context: InvocationContext,
+    ) {
+      seen.push(context.contextCacheConfig);
+      yield createEvent({
+        author: rootAgent.name,
+        invocationId: context.invocationId,
+      });
+    });
+
+    for await (const _ of appRunner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the run.
+    }
+
+    expect(seen).toEqual([contextCacheConfig]);
+  });
+
+  it('should carry the app contextCacheConfig onto each runLive invocation', async () => {
+    const contextCacheConfig: ContextCacheConfig = {
+      cacheIntervals: 3,
+      ttlSeconds: 120,
+      minTokens: 512,
+    };
+    const app = new App({name: TEST_APP_ID, rootAgent, contextCacheConfig});
+    const appRunner = new Runner({app, sessionService, artifactService});
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+    });
+    const seen: Array<ContextCacheConfig | undefined> = [];
+    vi.spyOn(rootAgent, 'runLive').mockImplementation(async function* (
+      context: InvocationContext,
+    ) {
+      seen.push(context.contextCacheConfig);
+      yield createEvent({
+        author: rootAgent.name,
+        invocationId: context.invocationId,
+      });
+    });
+    const liveRequestQueue = new LiveRequestQueue();
+    liveRequestQueue.close();
+
+    for await (const _ of appRunner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: session.id,
+      liveRequestQueue,
+    })) {
+      // Drain the run.
+    }
+
+    expect(seen).toEqual([contextCacheConfig]);
+  });
+
+  it('should leave the invocation cache policy unset without an App policy', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+    });
+    const seen: Array<ContextCacheConfig | undefined> = [];
+    vi.spyOn(rootAgent, 'runAsync').mockImplementation(async function* (
+      context: InvocationContext,
+    ) {
+      seen.push(context.contextCacheConfig);
+      yield createEvent({
+        author: rootAgent.name,
+        invocationId: context.invocationId,
+      });
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the run.
+    }
+
+    expect(runner.contextCacheConfig).toBeUndefined();
     expect(seen).toEqual([undefined]);
   });
 

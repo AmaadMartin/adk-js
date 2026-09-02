@@ -11,9 +11,11 @@ import {
   BaseLlmConnection,
   BasePlugin,
   Context,
+  ContextCacheConfig,
   convertEventsToEvalInvocations,
   createEvent,
   CreateEventParams,
+  createEventsCompactionConfig,
   EvalCase,
   EvalRow,
   EvalSet,
@@ -837,6 +839,76 @@ describe('buildEvalRunnerConfig', () => {
 
     expect(config.app?.name).toBe('session_app');
   });
+
+  it('carries the context cache config onto the merged app', () => {
+    const rootAgent = createScriptedAgent('root_agent', ['hi']);
+    const contextCacheConfig: ContextCacheConfig = {
+      cacheIntervals: 5,
+      ttlSeconds: 600,
+      minTokens: 2048,
+    };
+    const app = new App({name: 'my_app', rootAgent, contextCacheConfig});
+
+    const config = buildEvalRunnerConfig({
+      rootAgent,
+      appName: 'session_app',
+      app,
+      internalEvalPlugins: [],
+      sessionService,
+    });
+
+    expect(config.app?.contextCacheConfig).toEqual(contextCacheConfig);
+  });
+
+  it('carries the compaction config onto the merged app', () => {
+    const rootAgent = createScriptedAgent('root_agent', ['hi']);
+    const eventsCompactionConfig = createEventsCompactionConfig({
+      tokenThreshold: 100,
+      eventRetentionSize: 2,
+    });
+    const app = new App({name: 'my_app', rootAgent, eventsCompactionConfig});
+
+    const config = buildEvalRunnerConfig({
+      rootAgent,
+      appName: 'session_app',
+      app,
+      internalEvalPlugins: [],
+      sessionService,
+    });
+
+    expect(config.app?.eventsCompactionConfig).toEqual(eventsCompactionConfig);
+  });
+
+  it('leaves both configs on the source app untouched', () => {
+    const rootAgent = createScriptedAgent('root_agent', ['hi']);
+    const contextCacheConfig: ContextCacheConfig = {
+      cacheIntervals: 5,
+      ttlSeconds: 600,
+      minTokens: 2048,
+    };
+    const eventsCompactionConfig = createEventsCompactionConfig({
+      tokenThreshold: 100,
+      eventRetentionSize: 2,
+    });
+    const app = new App({
+      name: 'my_app',
+      rootAgent,
+      contextCacheConfig,
+      eventsCompactionConfig,
+    });
+
+    buildEvalRunnerConfig({
+      rootAgent,
+      appName: 'session_app',
+      app,
+      internalEvalPlugins: [new SpyPlugin('eval_plugin')],
+      sessionService,
+    });
+
+    expect(app.contextCacheConfig).toBe(contextCacheConfig);
+    expect(app.eventsCompactionConfig).toBe(eventsCompactionConfig);
+    expect(app.plugins).toEqual([]);
+  });
 });
 
 describe('generateInferencesForSingleUserInvocation', () => {
@@ -1321,6 +1393,90 @@ describe('generateResponses', () => {
 
     expect(results[0].responses[0][0].finalResponse?.parts?.[0].text).toBe(
       'from the sub agent',
+    );
+  });
+
+  it('replays a static conversation with no simulator argument', async () => {
+    const results = await generateResponses({
+      evalSet: {
+        evalSetId: 'test_set',
+        creationTimestamp: 0,
+        evalCases: [
+          {
+            evalId: 'case_0',
+            creationTimestamp: 0,
+            conversation: [
+              {userContent: {role: 'user', parts: [{text: 'first turn'}]}},
+              {userContent: {role: 'user', parts: [{text: 'second turn'}]}},
+            ],
+          },
+        ],
+      },
+      agentModulePath: fixtureModulePath('root_agent.ts'),
+      repeatNum: 1,
+    });
+
+    expect(
+      results[0].responses[0].map(
+        (invocation) => invocation.userContent.parts?.[0].text,
+      ),
+    ).toEqual(['first turn', 'second turn']);
+  });
+
+  it('replays the conversation from the start on every repeat', async () => {
+    const results = await generateResponses({
+      evalSet: {
+        evalSetId: 'test_set',
+        creationTimestamp: 0,
+        evalCases: [
+          {
+            evalId: 'case_0',
+            creationTimestamp: 0,
+            conversation: [
+              {userContent: {role: 'user', parts: [{text: 'first turn'}]}},
+              {userContent: {role: 'user', parts: [{text: 'second turn'}]}},
+            ],
+          },
+        ],
+      },
+      agentModulePath: fixtureModulePath('root_agent.ts'),
+      repeatNum: 2,
+    });
+
+    const turnsPerRepeat = results[0].responses.map((invocations) =>
+      invocations.map(
+        (invocation) => invocation.userContent.parts?.[0].text ?? '',
+      ),
+    );
+    expect(turnsPerRepeat).toEqual([
+      ['first turn', 'second turn'],
+      ['first turn', 'second turn'],
+    ]);
+  });
+
+  it('rejects a case with no conversation and no simulator argument', async () => {
+    await expect(
+      generateResponses({
+        evalSet: buildEvalSet(['case_0']),
+        agentModulePath: fixtureModulePath('root_agent.ts'),
+        repeatNum: 1,
+      }),
+    ).rejects.toThrow(
+      'Neither static invocations nor conversation scenario provided in ' +
+        'EvalCase. Provide exactly one.',
+    );
+  });
+
+  it('runs a case with no conversation when given a simulator factory', async () => {
+    const results = await generateResponses({
+      evalSet: buildEvalSet(['case_0']),
+      agentModulePath: fixtureModulePath('root_agent.ts'),
+      repeatNum: 1,
+      createUserSimulator: () => new ScriptedUserSimulator(['hello']),
+    });
+
+    expect(results[0].responses[0][0].finalResponse?.parts?.[0].text).toBe(
+      'from the root agent',
     );
   });
 });

@@ -8,6 +8,7 @@ import {Content, createPartFromText, Modality, Part} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
+import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import {reservedFunctionCallName} from '../agents/framework_function_calls.js';
 import {findMatchingFunctionCall} from '../agents/functions.js';
 import {
@@ -338,6 +339,11 @@ export class Runner {
    * this runner starts.
    */
   readonly eventsCompactionConfig?: EventsCompactionConfig;
+  /**
+   * The context-caching policy the `App` declared, carried onto every
+   * invocation this runner starts.
+   */
+  readonly contextCacheConfig?: ContextCacheConfig;
 
   /**
    * Creates a new Runner instance.
@@ -358,6 +364,7 @@ export class Runner {
     this.resumabilityConfig =
       this.app.resumabilityConfig ?? input.resumabilityConfig;
     this.eventsCompactionConfig = this.app.eventsCompactionConfig;
+    this.contextCacheConfig = this.app.contextCacheConfig;
   }
 
   /**
@@ -577,6 +584,7 @@ export class Runner {
             runConfig,
             a2aMetadata: runConfig.a2aMetadata,
             eventsCompactionConfig: this.eventsCompactionConfig,
+            contextCacheConfig: this.contextCacheConfig,
             pluginManager: this.pluginManager,
             abortSignal: params.abortSignal,
             resumabilityConfig: this.resumabilityConfig,
@@ -1028,6 +1036,7 @@ export class Runner {
             runConfig,
             a2aMetadata: runConfig.a2aMetadata,
             eventsCompactionConfig: this.eventsCompactionConfig,
+            contextCacheConfig: this.contextCacheConfig,
             pluginManager: this.pluginManager,
             liveRequestQueue: params.liveRequestQueue,
             abortSignal: params.abortSignal,

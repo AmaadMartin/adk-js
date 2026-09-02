@@ -57,6 +57,7 @@ import {
   UserSimulator,
   validateNextUserMessage,
 } from './simulation/user_simulator.js';
+import {UserSimulatorProvider} from './simulation/user_simulator_provider.js';
 
 /** Author of the events the user contributed to a session. */
 const USER_AUTHOR = 'user';
@@ -462,15 +463,18 @@ export function buildEvalRunnerConfig(params: {
     };
   }
 
+  // Spreading `app` carries its whole configuration into the eval run, the way
+  // adk-python's `app.model_copy(update=...)` does.
+  //
   // The copy is named after the session, not after `app`: a `Runner` built
   // from an app takes its app name from `app.name`, and that is the name it
   // looks the session up under. adk-python's `Runner` prefers the explicit
   // `app_name` instead, and reaches the same session either way.
   const runnerApp = new App({
+    ...app,
     name: appName,
     rootAgent,
     plugins: [...app.plugins, ...internalEvalPlugins],
-    resumabilityConfig: app.resumabilityConfig,
   });
   return {app: runnerApp, appName, ...services};
 }
@@ -703,6 +707,8 @@ export async function generateInferencesFromAgentModule(params: {
  * @param params.createUserSimulator Builds the simulator that plays the user
  *     for one run of one case. It is called once per repeat, because a
  *     simulator is stateful across the turns of the conversation it drives.
+ *     Defaults to {@link UserSimulatorProvider}, which replays each case's
+ *     static conversation.
  * @returns One entry per eval case, holding the invocations of every repeat.
  */
 export async function generateResponses(params: {
@@ -710,10 +716,13 @@ export async function generateResponses(params: {
   agentModulePath: string;
   repeatNum?: number;
   agentName?: string;
-  createUserSimulator: (evalCase: EvalCase) => UserSimulator;
+  createUserSimulator?: (evalCase: EvalCase) => UserSimulator;
 }): Promise<EvalCaseResponses[]> {
   const repeatNum = params.repeatNum ?? DEFAULT_REPEAT_NUM;
   const results: EvalCaseResponses[] = [];
+  const provider = new UserSimulatorProvider();
+  const createUserSimulator =
+    params.createUserSimulator ?? ((evalCase) => provider.provide(evalCase));
 
   for (const evalCase of params.evalSet.evalCases) {
     const responses: Invocation[][] = [];
@@ -721,7 +730,7 @@ export async function generateResponses(params: {
       responses.push(
         await generateInferencesFromAgentModule({
           modulePath: params.agentModulePath,
-          userSimulator: params.createUserSimulator(evalCase),
+          userSimulator: createUserSimulator(evalCase),
           agentName: params.agentName,
           initialSession: evalCase.sessionInput,
         }),

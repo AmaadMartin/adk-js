@@ -6,6 +6,7 @@
 
 import {describe, expect, it} from 'vitest';
 import {BaseAgent} from '../../src/agents/base_agent.js';
+import {ContextCacheConfig} from '../../src/agents/context_cache_config.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {App, isApp, validateAppName} from '../../src/apps/app.js';
 import {createEventsCompactionConfig} from '../../src/apps/events_compaction_config.js';
@@ -176,5 +177,32 @@ describe('App eventsCompactionConfig', () => {
           eventsCompactionConfig: {tokenThreshold: 5},
         }),
     ).toThrowError(/carries no token trigger/);
+  });
+});
+
+describe('App contextCacheConfig', () => {
+  it('exposes the policy it was given', () => {
+    const contextCacheConfig: ContextCacheConfig = {
+      cacheIntervals: 5,
+      ttlSeconds: 600,
+      minTokens: 2048,
+    };
+
+    const app = new App({
+      name: 'cached_app',
+      rootAgent: new DummyAgent('root'),
+      contextCacheConfig,
+    });
+
+    expect(app.contextCacheConfig).toBe(contextCacheConfig);
+  });
+
+  it('leaves the policy unset when none is given', () => {
+    const app = new App({
+      name: 'plain_app',
+      rootAgent: new DummyAgent('root'),
+    });
+
+    expect(app.contextCacheConfig).toBeUndefined();
   });
 });
