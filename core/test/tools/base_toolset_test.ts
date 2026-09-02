@@ -381,6 +381,31 @@ describe('BaseToolset.getToolsWithPrefix function declarations', () => {
     );
   });
 
+  it('prefixes a declaration whose name does not come from tool.name', async () => {
+    // `MCPTool` builds its declaration from the server-advertised name rather
+    // than from `this.name`, so only the shadow can prefix it.
+    class FixedDeclarationTool extends BaseTool {
+      constructor(private readonly declaredName: string) {
+        super({name: declaredName, description: 'Fixed declaration'});
+      }
+      override _getDeclaration() {
+        return {name: this.declaredName, description: this.description};
+      }
+      async runAsync(): Promise<unknown> {
+        return 'ok';
+      }
+    }
+    const toolset = new PlainToolset(
+      [new FixedDeclarationTool('remote_search')],
+      'serverA',
+    );
+
+    const [copy] = await toolset.getToolsWithPrefix();
+
+    expect(copy.name).toBe('serverA_remote_search');
+    expect(copy._getDeclaration()?.name).toBe('serverA_remote_search');
+  });
+
   it('does not mutate the declaration of the original tool', async () => {
     const original = greetTool();
     const toolset = new PlainToolset([original], 'prefix');
@@ -388,6 +413,31 @@ describe('BaseToolset.getToolsWithPrefix function declarations', () => {
     await toolset.getToolsWithPrefix();
 
     expect(original._getDeclaration().name).toBe('greet');
+  });
+
+  it('does not corrupt a declaration the original tool reuses', async () => {
+    class MemoizingTool extends BaseTool {
+      private readonly declaration = {
+        name: 'memoized',
+        description: 'Reuses one declaration object',
+      };
+      constructor() {
+        super({name: 'memoized', description: 'Reuses one declaration object'});
+      }
+      override _getDeclaration() {
+        return this.declaration;
+      }
+      async runAsync(): Promise<unknown> {
+        return 'ok';
+      }
+    }
+    const original = new MemoizingTool();
+    const toolset = new PlainToolset([original], 'prefix');
+
+    const [copy] = await toolset.getToolsWithPrefix();
+
+    expect(copy._getDeclaration()?.name).toBe('prefix_memoized');
+    expect(original._getDeclaration().name).toBe('memoized');
   });
 
   it('gives each tool its own declaration', async () => {

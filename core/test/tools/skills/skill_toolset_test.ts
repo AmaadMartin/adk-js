@@ -360,6 +360,47 @@ describe('skill_toolset', () => {
 
       expect(tools.map((t) => t.name)).toContain('inner_nested_tool');
     });
+
+    it('lists newly activated skill tools within one invocation', async () => {
+      const skillWithTools: Skill = {
+        frontmatter: {
+          name: 'skill-with-tools',
+          description: 'desc',
+          metadata: {
+            adk_additional_tools: ['late_tool'],
+          },
+        },
+        instructions: 'instructions',
+      };
+
+      class LateTool extends BaseTool {
+        constructor() {
+          super({name: 'late_tool', description: 'Activated mid-invocation'});
+        }
+        async runAsync() {
+          return 'late';
+        }
+      }
+
+      const toolset = new SkillToolset([skillWithTools], {
+        additionalTools: [new LateTool()],
+      });
+
+      const activated: string[] = [];
+      const context = {
+        invocationId: 'inv-1',
+        agentName: 'test-agent',
+        state: {get: () => activated},
+      } as unknown as ReadonlyContext;
+
+      const before = await toolset.getToolsWithPrefix(context);
+      expect(before.map((t) => t.name)).not.toContain('late_tool');
+
+      activated.push('skill-with-tools');
+      const after = await toolset.getToolsWithPrefix(context);
+
+      expect(after.map((t) => t.name)).toContain('late_tool');
+    });
   });
 
   describe('script output directory', () => {

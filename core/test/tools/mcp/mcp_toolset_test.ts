@@ -73,6 +73,13 @@ describe('MCPToolset', () => {
     expect(tools[1].name).toBe('myprefix_other-tool');
   });
 
+  it('prefixes the function declaration of a discovered tool', async () => {
+    const toolset = new MCPToolset(stdioParams, [], 'myprefix');
+    const tools = await toolset.getToolsWithPrefix();
+
+    expect(tools[0]._getDeclaration()?.name).toBe('myprefix_test-tool');
+  });
+
   it('leaves getTools() names unprefixed when a prefix is set', async () => {
     const toolset = new MCPToolset(stdioParams, [], 'myprefix');
     const tools = await toolset.getTools();
