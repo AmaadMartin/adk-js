@@ -256,6 +256,13 @@ export type {
 } from './evaluation/evaluator.js';
 export {RougeEvaluator} from './evaluation/final_response_match_v1.js';
 export {
+  EVAL_SESSION_ID_PREFIX,
+  LocalEvalService,
+  createEvalSessionId,
+  generateFinalEvalStatus,
+} from './evaluation/local_eval_service.js';
+export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
+export {
   MetricEvaluatorRegistry,
   defaultMetricEvaluatorRegistry,
 } from './evaluation/metric_evaluator_registry.js';
