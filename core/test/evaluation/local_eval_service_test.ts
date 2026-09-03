@@ -523,6 +523,64 @@ describe('LocalEvalService.performInference', () => {
     expect(succeeded?.status).toBe(1);
   });
 
+  it('reports a case the simulator provider refuses to drive', async () => {
+    evalSetsManager.setEvalSet(EVAL_SET_ID, {
+      evalSetId: EVAL_SET_ID,
+      creationTimestamp: 0,
+      evalCases: [
+        // The shipped provider refuses a case with no static conversation.
+        {evalId: 'case1', conversationScenario: SCENARIO},
+        {evalId: 'case2', conversation: [invocation()]},
+      ],
+    });
+    const service = createService({
+      userSimulatorProvider: new UserSimulatorProvider(),
+    });
+
+    const results = await drain(
+      service.performInference({
+        appName: APP_NAME,
+        evalSetId: EVAL_SET_ID,
+        inferenceConfig: {useLive: false, parallelism: 2},
+      }),
+    );
+
+    expect(results).toHaveLength(2);
+    const refused = results.find((r) => r.evalCaseId === 'case1');
+    expect(refused?.status).toBe(2);
+    expect(refused?.errorMessage).toContain(
+      'Neither static invocations nor conversation scenario provided',
+    );
+    expect(results.find((r) => r.evalCaseId === 'case2')?.status).toBe(1);
+  });
+
+  it('generates a session id when the pinned one is empty', async () => {
+    evalSetsManager.setEvalSet(EVAL_SET_ID, {
+      evalSetId: EVAL_SET_ID,
+      creationTimestamp: 0,
+      evalCases: [
+        {
+          evalId: 'case1',
+          conversation: [invocation()],
+          sessionInput: {appName: APP_NAME, userId: 'u', sessionId: ''},
+        },
+      ],
+    });
+
+    const results = await drain(
+      createService({
+        sessionIdSupplier: () => 'generated_id',
+      }).performInference({
+        appName: APP_NAME,
+        evalSetId: EVAL_SET_ID,
+        inferenceConfig: {useLive: false},
+      }),
+    );
+
+    expect(results[0].sessionId).toBe('generated_id');
+    expect(generatorCalls[0].sessionId).toBe('generated_id');
+  });
+
   it('runs no more cases at a time than the parallelism allows', async () => {
     evalSetsManager.setEvalSet(
       EVAL_SET_ID,

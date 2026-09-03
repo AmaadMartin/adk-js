@@ -316,21 +316,23 @@ export class LocalEvalService implements BaseEvalService {
       appName,
       evalSetId,
       evalCaseId: evalCase.evalId,
-      sessionId: pinnedSessionId ?? generatedSessionId,
-    };
-
-    const params = {
-      rootAgent: this.rootAgent,
-      userSimulator: this.userSimulatorProvider.provide(evalCase),
-      initialSession,
-      sessionId: generatedSessionId,
-      sessionService: this.sessionService,
-      artifactService: this.artifactService,
-      memoryService: this.memoryService,
-      app: this.app,
+      // Python's truthiness test: an empty pinned id falls through as well.
+      sessionId: pinnedSessionId || generatedSessionId,
     };
 
     try {
+      // The provider rejects a case it cannot drive, so it runs here: that
+      // rejection is this case's failure, not the whole batch's.
+      const params = {
+        rootAgent: this.rootAgent,
+        userSimulator: this.userSimulatorProvider.provide(evalCase),
+        initialSession,
+        sessionId: generatedSessionId,
+        sessionService: this.sessionService,
+        artifactService: this.artifactService,
+        memoryService: this.memoryService,
+        app: this.app,
+      };
       const inferences = await runWithClientLabel(EVAL_CLIENT_LABEL, () =>
         inferenceConfig.useLive
           ? generateInferencesFromRootAgentLive({
