@@ -136,8 +136,8 @@ function messageToAdkEvent(
   msg: Message,
   invocationId: string,
   agentName: string,
-  branch?: string,
-  converter: A2APartToGenAIPartConverter = toGenAIPart,
+  branch: string | undefined,
+  converter: A2APartToGenAIPartConverter,
 ): AdkEvent {
   const parts = toGenAIParts(msg.parts, converter);
   const content =
@@ -162,8 +162,8 @@ function artifactUpdateToAdkEvent(
   a2aEvent: TaskArtifactUpdateEvent,
   invocationId: string,
   agentName: string,
-  branch?: string,
-  converter: A2APartToGenAIPartConverter = toGenAIPart,
+  branch: string | undefined,
+  converter: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const partsToConvert = a2aEvent.artifact?.parts || [];
   if (partsToConvert.length === 0) {
@@ -190,8 +190,8 @@ function finalTaskStatusUpdateToAdkEvent(
   a2aEvent: TaskStatusUpdateEvent,
   invocationId: string,
   agentName: string,
-  branch?: string,
-  converter: A2APartToGenAIPartConverter = toGenAIPart,
+  branch: string | undefined,
+  converter: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const partsToConvert = a2aEvent.status.message?.parts || [];
   if (partsToConvert.length === 0) {
@@ -220,8 +220,8 @@ function taskStatusUpdateToAdkEvent(
   a2aEvent: TaskStatusUpdateEvent,
   invocationId: string,
   agentName: string,
-  branch?: string,
-  converter: A2APartToGenAIPartConverter = toGenAIPart,
+  branch: string | undefined,
+  converter: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const msg = a2aEvent.status.message;
   if (!msg) {
@@ -248,8 +248,8 @@ function taskToAdkEvent(
   a2aTask: Task,
   invocationId: string,
   agentName: string,
-  branch?: string,
-  converter: A2APartToGenAIPartConverter = toGenAIPart,
+  branch: string | undefined,
+  converter: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const parts: GenAIPart[] = [];
   const longRunningToolIds: string[] = [];

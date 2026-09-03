@@ -29,7 +29,6 @@ import {MessageRole} from './a2a_event.js';
 import {
   buildAuthInterceptors,
   deriveCredentialKey,
-  namedCredentialKey,
   resolveAuthCredential,
 } from './a2a_remote_agent_auth.js';
 import {
@@ -40,7 +39,7 @@ import {
   executeBeforeRequestInterceptors,
   isA2AMessage,
   newIntegrationExtensionInterceptor,
-} from './a2a_remote_agent_config.js';
+} from './a2a_remote_agent_interceptors.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
 import {
   getUserFunctionCallAt,
@@ -267,7 +266,6 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         rawAuthCredential: a2aConfig.authCredential,
         credentialKey:
           a2aConfig.credentialKey ??
-          namedCredentialKey(a2aConfig.authScheme, a2aConfig.authCredential) ??
           deriveCredentialKey(
             a2aConfig.authScheme,
             a2aConfig.authCredential,

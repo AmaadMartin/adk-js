@@ -24,7 +24,7 @@ import {
 import {
   A2ACardRequestInterceptor,
   A2ARequestInterceptor,
-} from './a2a_remote_agent_config.js';
+} from './a2a_remote_agent_interceptors.js';
 
 /** Characters of a sha256 digest kept when building a credential key. */
 const CREDENTIAL_KEY_DIGEST_CHARS = 16;
@@ -33,28 +33,6 @@ const CREDENTIAL_KEY_DIGEST_CHARS = 16;
 export interface A2AAuthInterceptors {
   card: A2ACardRequestInterceptor;
   request: A2ARequestInterceptor;
-}
-
-/**
- * The credential key the scheme or the credential names itself, if either does.
- *
- * Neither type declares the field, so a caller who sets one is opting out of
- * the derived key and that choice is honoured.
- */
-export function namedCredentialKey(
-  authScheme: AuthScheme,
-  authCredential?: AuthCredential,
-): string | undefined {
-  for (const candidate of [authCredential, authScheme]) {
-    if (!candidate || !('credentialKey' in candidate)) {
-      continue;
-    }
-    const {credentialKey} = candidate;
-    if (typeof credentialKey === 'string' && credentialKey) {
-      return credentialKey;
-    }
-  }
-  return undefined;
 }
 
 /**

@@ -23,14 +23,14 @@ export type {
 export {
   NEW_A2A_ADK_INTEGRATION_EXTENSION,
   newIntegrationExtensionInterceptor,
-} from './a2a_remote_agent_config.js';
+} from './a2a_remote_agent_interceptors.js';
 export type {
   A2ABeforeRequestResult,
   A2ACardRequestConfig,
   A2ACardRequestInterceptor,
   A2ARequestInterceptor,
   A2ARequestParameters,
-} from './a2a_remote_agent_config.js';
+} from './a2a_remote_agent_interceptors.js';
 export {
   AgentCardResolutionError,
   getA2AAgentCard,

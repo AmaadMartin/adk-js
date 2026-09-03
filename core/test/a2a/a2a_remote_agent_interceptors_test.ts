@@ -8,9 +8,9 @@ import {HTTP_EXTENSION_HEADER, Message} from '@a2a-js/sdk';
 import {
   Event as AdkEvent,
   createEvent,
-  InvocationContext,
   NEW_A2A_ADK_INTEGRATION_EXTENSION,
   newIntegrationExtensionInterceptor,
+  Session,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
@@ -20,9 +20,22 @@ import {
   executeBeforeCardRequestInterceptors,
   executeBeforeRequestInterceptors,
   isA2AMessage,
-} from '../../src/a2a/a2a_remote_agent_config.js';
+} from '../../src/a2a/a2a_remote_agent_interceptors.js';
+import {InvocationContext} from '../../src/agents/invocation_context.js';
+import {PluginManager} from '../../src/plugins/plugin_manager.js';
 
-const CTX = {invocationId: 'inv-1'} as unknown as InvocationContext;
+const CTX = new InvocationContext({
+  invocationId: 'inv-1',
+  session: {
+    id: 'session-1',
+    appName: 'app',
+    userId: 'user',
+    state: {},
+    events: [],
+    lastUpdateTime: Date.now(),
+  } as Session,
+  pluginManager: new PluginManager(),
+});
 
 const REQUEST: Message = {
   kind: 'message',
