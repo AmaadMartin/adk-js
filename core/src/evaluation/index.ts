@@ -13,6 +13,7 @@
 
 export {getDeveloperInstructions, getToolsByAgentName} from './app_details.js';
 export type {AgentDetails, AppDetails} from './app_details.js';
+export type {ConversationScenario} from './conversation_scenarios.js';
 export {getAllToolCallsWithResponses, isInvocationEvents} from './eval_case.js';
 export type {
   IntermediateData,
@@ -26,22 +27,32 @@ export {
   DEFAULT_JUDGE_MODEL,
   DEFAULT_JUDGE_NUM_SAMPLES,
   DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
   PrebuiltMetrics,
+  ToolTrajectoryMatchType,
   getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
   parseRubricsBasedCriterion,
+  resolveJudgeModelOptions,
 } from './eval_metrics.js';
 export type {
   BaseCriterion,
   CriterionParser,
   EvalMetric,
+  EvalMetricCriterion,
+  HallucinationsCriterion,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
+  ToolTrajectoryCriterion,
 } from './eval_metrics.js';
 export {parseRubric, parseRubricScore} from './eval_rubrics.js';
 export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
 export {
+  BASE_CRITERION_TYPE,
   emptyEvaluationResult,
   getEvalStatus,
   getTextFromContent,
@@ -81,3 +92,7 @@ export type {
   RubricResponse,
 } from './rubric_based_evaluator.js';
 export {RubricBasedFinalResponseQualityV1Evaluator} from './rubric_based_final_response_quality_v1.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './simulation/user_simulator_personas.js';

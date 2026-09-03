@@ -6,10 +6,7 @@
 
 import {BaseLlm} from '../models/base_llm.js';
 import {experimental} from '../utils/experimental.js';
-import {
-  AppDetails,
-  getDeveloperInstructions,
-} from './app_details.js';
+import {AppDetails, getDeveloperInstructions} from './app_details.js';
 import {
   IntermediateDataType,
   Invocation,
