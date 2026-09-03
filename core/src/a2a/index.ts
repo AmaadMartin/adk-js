@@ -21,6 +21,7 @@ export type {
 export {getA2AAgentCard} from './agent_card.js';
 export {A2AAgentExecutor} from './agent_executor.js';
 export type {
+  AdkEventToA2AEventsConverter,
   AfterEventCallback,
   AfterExecuteCallback,
   AgentExecutorConfig,
