@@ -158,13 +158,19 @@ describe('BigtableCredentialsConfig', () => {
     expect(config.tokenCacheKey).toBe(BIGTABLE_TOKEN_CACHE_KEY);
   });
 
-  it('uses the Bigtable cache key', () => {
-    const config = new BigtableCredentialsConfig({
-      clientId: CLIENT_ID,
-      clientSecret: CLIENT_SECRET,
-    });
+  it('uses the Bigtable cache key in every credential mode', () => {
+    const modes = [
+      new BigtableCredentialsConfig({
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+      }),
+      new BigtableCredentialsConfig({credentials: createUserClient()}),
+      new BigtableCredentialsConfig({externalAccessTokenKey: 'host_token'}),
+    ];
 
-    expect(config.tokenCacheKey).toBe(BIGTABLE_TOKEN_CACHE_KEY);
+    for (const config of modes) {
+      expect(config.tokenCacheKey).toBe(BIGTABLE_TOKEN_CACHE_KEY);
+    }
   });
 
   it('gives each instance its own default scope array', () => {

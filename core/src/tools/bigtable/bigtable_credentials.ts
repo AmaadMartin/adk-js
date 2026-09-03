@@ -11,7 +11,7 @@ import {
 } from '../google_credentials.js';
 import {defaultCredentialKey} from '../google_tool_credentials.js';
 
-/** Session-state key the Bigtable tools cache their token under. */
+/** Session-state key every Bigtable credential is cached under. */
 export const BIGTABLE_TOKEN_CACHE_KEY = 'bigtable_token_cache';
 
 /** The scopes the Bigtable tools request when the caller names none. */
@@ -33,18 +33,21 @@ export type BigtableCredentialsConfigOptions = Omit<
 >;
 
 /**
- * How the Bigtable tools obtain credentials (Experimental).
+ * How a Cloud Bigtable tool obtains credentials (Experimental).
  *
  * It is {@link BaseGoogleCredentialsConfig} with the Bigtable admin and data
  * scopes as its default, and with its own token cache key so that a Bigtable
- * consent does not satisfy another Google toolset. The credential modes and
- * their validation are inherited unchanged.
+ * consent does not satisfy another Google toolset. Every credential mode and
+ * every validation rule is inherited unchanged.
  *
  * Please do not use this in production, as it may be deprecated later.
  */
 @experimental
 export class BigtableCredentialsConfig extends BaseGoogleCredentialsConfig {
+  /** Always set, unlike the inherited field. Defaults per instance. */
   declare readonly scopes: string[];
+  /** Always {@link BIGTABLE_TOKEN_CACHE_KEY}. The caller cannot change it. */
+  declare readonly tokenCacheKey: string;
 
   /**
    * The slot the ADK auth plumbing keeps the OAuth credential in.

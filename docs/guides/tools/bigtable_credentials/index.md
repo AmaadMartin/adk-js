@@ -92,6 +92,9 @@ const consent = new BigtableCredentialsConfig({
 });
 ```
 
+`scopes` is valid only alongside `clientId` and `clientSecret`. The other two
+modes carry their own grant, so a scope list there is rejected.
+
 ## Scopes
 
 `BIGTABLE_DEFAULT_SCOPE` is applied only when the resolved configuration carries
@@ -127,6 +130,10 @@ compile error. The entry written there is the JSON shape adk-python's
 `Credentials.to_json()` writes, so a session started by either SDK is readable
 by the other.
 
+`GoogleCredentialsManager` reads that key in the held-credential and OAuth2
+modes, and writes the granted credential back after a consent flow. It bypasses
+the cache when `externalAccessTokenKey` is set, and returns the host's token.
+
 ## Validation errors
 
 The base validator runs first and throws `InputValidationError`. The three
@@ -137,3 +144,6 @@ messages are:
 | `credentials` with any of `externalAccessTokenKey`, `clientId`, `clientSecret`, `scopes` | If credentials are provided, externalAccessTokenKey, clientId, clientSecret, and scopes must not be provided. |
 | `externalAccessTokenKey` with any of `clientId`, `clientSecret`, `scopes`                | If externalAccessTokenKey is provided, clientId, clientSecret, and scopes must not be provided.               |
 | No mode at all, or only one half of the client id and secret pair                        | Must provide one of credentials, externalAccessTokenKey, or clientId and clientSecret pair.                   |
+
+`GoogleCredentialsManager` throws `InputValidationError` at call time when
+`externalAccessTokenKey` names a session-state key that holds no token.

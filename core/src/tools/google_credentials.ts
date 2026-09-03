@@ -69,7 +69,8 @@ export interface BaseGoogleCredentialsConfigOptions {
   scopes?: string[];
   /**
    * Session-state key the resolved credential is cached under. Leave it unset
-   * and nothing is read from or written to the cache.
+   * and nothing is read from or written to the cache. A subclass that pins one
+   * key for its API sets it here and hides it from its own options type.
    */
   tokenCacheKey?: string;
 }
@@ -91,6 +92,7 @@ export class BaseGoogleCredentialsConfig {
   readonly clientId?: string;
   readonly clientSecret?: string;
   readonly scopes?: string[];
+  /** Session-state key the credential is cached under, if any. */
   readonly tokenCacheKey?: string;
 
   constructor(options: BaseGoogleCredentialsConfigOptions) {
