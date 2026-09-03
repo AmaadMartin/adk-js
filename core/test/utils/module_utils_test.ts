@@ -126,11 +126,17 @@ describe('resolveFullyQualifiedName', () => {
     );
   });
 
-  it('refuses an http: URL specifier', async () => {
-    await expect(
+  it('refuses an https: URL specifier before it is fetched', async () => {
+    const error = await rejectionOf(
       resolveFullyQualifiedName('https://example.test/evil.js#run'),
-    ).rejects.toThrow(
-      'Invalid fully qualified name: https://example.test/evil.js#run',
+    );
+
+    expect(error).toBeInstanceOf(InputValidationError);
+    expect(error).toHaveProperty(
+      'cause.message',
+      'Module specifier "https://example.test/evil.js" uses the "https:" ' +
+        'URL scheme. A configuration file can name a file path or a ' +
+        'package, nothing else.',
     );
   });
 
