@@ -5,6 +5,7 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
+import {ListAgentEngineSessionEventsResponse} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {
   createEvent,
   isCompactedEvent,
@@ -1761,6 +1762,387 @@ describe('VertexAiSessionService', () => {
       expect(session!.events[0].actions.transferToAgent).toBe(
         'legacy-specialist',
       );
+    });
+  });
+
+  // Ported from adk-python
+  // tests/unittests/sessions/test_vertex_ai_session_service.py at main. The
+  // it() strings keep the Python test names so a reviewer can grep them back.
+  describe('adk-python parity', () => {
+    const SESSION_NAME = 'reasoningEngines/12345/sessions/my-session-id';
+    const RETRY_DELAY_MS = 1000;
+
+    const appendSession = () =>
+      ({
+        id: 'append-session',
+        appName: '12345',
+        userId: 'testUser',
+        events: [],
+        lastUpdateTime: Date.now(),
+      }) as unknown as Session;
+
+    const helloEvent = () =>
+      createEvent({
+        timestamp: 1620000000000,
+        content: {role: 'user', parts: [{text: 'hello'}]},
+      });
+
+    /** A page of `count` events numbered from `start`. */
+    const eventPage = (start: number, count: number, nextPageToken?: string) =>
+      ({
+        sessionEvents: Array.from({length: count}, (_, index) => ({
+          name: `${SESSION_NAME}/events/e${start + index}`,
+          author: 'user',
+          invocationId: `invocation_${start + index}`,
+          timestamp: new Date(1600000000000 + start + index).toISOString(),
+        })),
+        ...(nextPageToken ? {nextPageToken} : {}),
+      }) satisfies ListAgentEngineSessionEventsResponse;
+
+    describe('429 retry on append', () => {
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it('test_append_event_retries_once_on_429', async () => {
+        vi.useFakeTimers();
+        mockClient.events.append
+          .mockRejectedValueOnce(new ApiError({message: 'quota', status: 429}))
+          .mockResolvedValueOnce({});
+
+        const pending = service.appendEvent({
+          session: appendSession(),
+          event: helloEvent(),
+        });
+
+        await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS - 1);
+        expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+        await expect(pending).resolves.toBeDefined();
+      });
+
+      it('retries a rate limit reported as a numeric code', async () => {
+        vi.useFakeTimers();
+        // gRPC transports report the status as `code`, not `status`.
+        mockClient.events.append
+          .mockRejectedValueOnce({code: 429, message: 'quota'})
+          .mockResolvedValueOnce({});
+
+        const pending = service.appendEvent({
+          session: appendSession(),
+          event: helloEvent(),
+        });
+
+        await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS);
+        await expect(pending).resolves.toBeDefined();
+        expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+      });
+
+      it('test_append_event_raises_after_retry_on_persistent_429', async () => {
+        vi.useFakeTimers();
+        const rateLimited = new ApiError({message: 'quota', status: 429});
+        mockClient.events.append.mockRejectedValue(rateLimited);
+
+        const pending = service.appendEvent({
+          session: appendSession(),
+          event: helloEvent(),
+        });
+
+        await Promise.all([
+          expect(pending).rejects.toBe(rateLimited),
+          vi.advanceTimersByTimeAsync(RETRY_DELAY_MS),
+        ]);
+
+        expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+        // The second attempt must not sleep before giving up.
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it('test_append_event_does_not_retry_on_read_timeout', async () => {
+        vi.useFakeTimers();
+        const timeout = new Error('socket hang up');
+        mockClient.events.append.mockRejectedValue(timeout);
+
+        await expect(
+          service.appendEvent({session: appendSession(), event: helloEvent()}),
+        ).rejects.toBe(timeout);
+
+        expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it('test_append_event_does_not_retry_on_non_429_client_error', async () => {
+        // Divergence from adk-python, which propagates a 400. adk-js retries a
+        // 400 once without `rawEvent`, because the Sessions API rejects a
+        // payload it does not model. A 503 is not retried at all.
+        vi.useFakeTimers();
+        const loggerSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+        mockClient.events.append
+          .mockRejectedValueOnce(
+            new ApiError({message: 'Unknown name', status: 400}),
+          )
+          .mockResolvedValueOnce({});
+
+        await expect(
+          service.appendEvent({session: appendSession(), event: helloEvent()}),
+        ).resolves.toBeDefined();
+
+        expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+        // The 400 fallback re-sends immediately; only a 429 waits.
+        expect(vi.getTimerCount()).toBe(0);
+        loggerSpy.mockRestore();
+
+        mockClient.events.append.mockClear();
+        const unavailable = new ApiError({message: 'try later', status: 503});
+        mockClient.events.append.mockRejectedValue(unavailable);
+
+        await expect(
+          service.appendEvent({session: appendSession(), event: helloEvent()}),
+        ).rejects.toBe(unavailable);
+
+        expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+      });
+
+      it('retries a 429 raised by the append that already dropped rawEvent', async () => {
+        vi.useFakeTimers();
+        const loggerSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+        mockClient.events.append
+          .mockRejectedValueOnce(
+            new ApiError({message: 'Unknown name', status: 400}),
+          )
+          .mockRejectedValueOnce(new ApiError({message: 'quota', status: 429}))
+          .mockResolvedValueOnce({});
+
+        const pending = service.appendEvent({
+          session: appendSession(),
+          event: helloEvent(),
+        });
+
+        await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS);
+        await expect(pending).resolves.toBeDefined();
+
+        expect(mockClient.events.append).toHaveBeenCalledTimes(3);
+        loggerSpy.mockRestore();
+      });
+    });
+
+    describe('getSession event pagination', () => {
+      it('test_get_session_pagination_keeps_client_open', async () => {
+        // The Python name refers to an async-context bug with no TypeScript
+        // analogue; the behaviour it pins -- every page is read -- is the same.
+        mockClient.events.listInternal
+          .mockResolvedValueOnce(eventPage(0, 100, 'token-1'))
+          .mockResolvedValueOnce(eventPage(100, 100, 'token-2'))
+          .mockResolvedValueOnce(eventPage(200, 50));
+
+        const session = await service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        });
+
+        expect(mockClient.events.listInternal).toHaveBeenCalledTimes(3);
+        expect(session?.events).toHaveLength(250);
+        expect(session?.events[0].invocationId).toBe('invocation_0');
+        expect(session?.events[249].invocationId).toBe('invocation_249');
+      });
+
+      it('test_get_session_with_page_token', async () => {
+        mockClient.events.listInternal
+          .mockResolvedValueOnce(eventPage(0, 2, 'token-1'))
+          .mockResolvedValueOnce(eventPage(2, 1));
+
+        await service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        });
+
+        expect(mockClient.events.listInternal).toHaveBeenNthCalledWith(1, {
+          name: SESSION_NAME,
+          config: {},
+        });
+        expect(mockClient.events.listInternal).toHaveBeenNthCalledWith(2, {
+          name: SESSION_NAME,
+          config: {pageToken: 'token-1'},
+        });
+      });
+
+      it('carries the afterTimestamp filter onto every page', async () => {
+        const afterTimestamp = 1600000000000;
+        const filter = `timestamp>="${new Date(afterTimestamp).toISOString()}"`;
+        mockClient.events.listInternal
+          .mockResolvedValueOnce(eventPage(0, 2, 'token-1'))
+          .mockResolvedValueOnce(eventPage(2, 1));
+
+        await service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+          config: {afterTimestamp},
+        });
+
+        expect(mockClient.events.listInternal).toHaveBeenNthCalledWith(2, {
+          name: SESSION_NAME,
+          config: {filter, pageToken: 'token-1'},
+        });
+      });
+
+      it('slices numRecentEvents across every page, not just the first', async () => {
+        mockClient.events.listInternal
+          .mockResolvedValueOnce(eventPage(0, 100, 'token-1'))
+          .mockResolvedValueOnce(eventPage(100, 100, 'token-2'))
+          .mockResolvedValueOnce(eventPage(200, 50));
+
+        const session = await service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+          config: {numRecentEvents: 5},
+        });
+
+        expect(session?.events.map((event) => event.invocationId)).toEqual([
+          'invocation_245',
+          'invocation_246',
+          'invocation_247',
+          'invocation_248',
+          'invocation_249',
+        ]);
+      });
+    });
+
+    describe('create-session options', () => {
+      it('test_create_session_with_custom_config', async () => {
+        await service.createSession({
+          appName: '12345',
+          userId: 'testUser',
+          displayName: 'Support chat',
+          labels: {team: 'support'},
+          waitForCompletion: true,
+        });
+
+        expect(mockClient.createInternal).toHaveBeenCalledWith({
+          name: 'reasoningEngines/12345',
+          userId: 'testUser',
+          config: {
+            displayName: 'Support chat',
+            labels: {team: 'support'},
+            waitForCompletion: true,
+          },
+        });
+      });
+
+      it('omits the options that were not supplied', async () => {
+        await service.createSession({appName: '12345', userId: 'testUser'});
+
+        expect(mockClient.createInternal).toHaveBeenCalledWith({
+          name: 'reasoningEngines/12345',
+          userId: 'testUser',
+          config: {},
+        });
+      });
+    });
+
+    describe('test_api_client_http_options_override', () => {
+      const httpOptions = {baseUrl: 'https://example.test', timeout: 42};
+
+      class OverridingService extends VertexAiSessionService {
+        protected override apiClientHttpOptionsOverride() {
+          return httpOptions;
+        }
+      }
+
+      const exerciseEveryCall = async (
+        subject: VertexAiSessionService,
+      ): Promise<void> => {
+        await subject.createSession({appName: '12345', userId: 'testUser'});
+        await subject.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        });
+        await subject.listSessions({appName: '12345', userId: 'testUser'});
+        await subject.deleteSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        });
+        await subject.appendEvent({
+          session: appendSession(),
+          event: helloEvent(),
+        });
+      };
+
+      it('sends no httpOptions by default', async () => {
+        await exerciseEveryCall(service);
+
+        expect(mockClient.createInternal).toHaveBeenCalledWith({
+          name: 'reasoningEngines/12345',
+          userId: 'testUser',
+          config: {},
+        });
+        expect(mockClient.getSessionOperationInternal).toHaveBeenCalledWith({
+          operationName: 'operations/test-operation-id',
+        });
+        expect(mockClient.get).toHaveBeenCalledWith({name: SESSION_NAME});
+        expect(mockClient.events.listInternal).toHaveBeenCalledWith({
+          name: SESSION_NAME,
+          config: {},
+        });
+        expect(mockClient.listInternal).toHaveBeenCalledWith({
+          name: 'reasoningEngines/12345',
+          config: {filter: 'user_id="testUser"'},
+        });
+        expect(mockClient.delete).toHaveBeenCalledWith({name: SESSION_NAME});
+        expect(mockClient.events.append).toHaveBeenCalledWith(
+          expect.objectContaining({
+            config: expect.not.objectContaining({
+              httpOptions: expect.anything(),
+            }),
+          }),
+        );
+      });
+
+      it('sends a subclass override on every request', async () => {
+        await exerciseEveryCall(
+          new OverridingService({
+            sessions: mockClient as unknown as Sessions,
+          }),
+        );
+
+        expect(mockClient.createInternal).toHaveBeenCalledWith({
+          name: 'reasoningEngines/12345',
+          userId: 'testUser',
+          config: {httpOptions},
+        });
+        expect(mockClient.getSessionOperationInternal).toHaveBeenCalledWith({
+          operationName: 'operations/test-operation-id',
+          config: {httpOptions},
+        });
+        expect(mockClient.get).toHaveBeenCalledWith({
+          name: SESSION_NAME,
+          config: {httpOptions},
+        });
+        expect(mockClient.events.listInternal).toHaveBeenCalledWith({
+          name: SESSION_NAME,
+          config: {httpOptions},
+        });
+        expect(mockClient.listInternal).toHaveBeenCalledWith({
+          name: 'reasoningEngines/12345',
+          config: {filter: 'user_id="testUser"', httpOptions},
+        });
+        expect(mockClient.delete).toHaveBeenCalledWith({
+          name: SESSION_NAME,
+          config: {httpOptions},
+        });
+        expect(mockClient.events.append).toHaveBeenCalledWith(
+          expect.objectContaining({
+            config: expect.objectContaining({httpOptions}),
+          }),
+        );
+      });
     });
   });
 });

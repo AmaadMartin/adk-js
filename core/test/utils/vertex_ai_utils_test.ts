@@ -6,7 +6,10 @@
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
-import {getExpressModeApiKey} from '../../src/utils/vertex_ai_utils.js';
+import {
+  createExpressModeApiClient,
+  getExpressModeApiKey,
+} from '../../src/utils/vertex_ai_utils.js';
 
 describe('vertex_ai_utils', () => {
   describe('getExpressModeApiKey', () => {
@@ -95,6 +98,28 @@ describe('vertex_ai_utils', () => {
       process.env['GOOGLE_API_KEY'] = 'env-api-key';
       const result = getExpressModeApiKey();
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('createExpressModeApiClient', () => {
+    it('targets Vertex AI with the key and without a project', () => {
+      const apiClient = createExpressModeApiClient('my-api-key');
+
+      expect(apiClient.getApiKey()).toBe('my-api-key');
+      expect(apiClient.isVertexAI()).toBe(true);
+      expect(apiClient.getProject()).toBeUndefined();
+      expect(apiClient.getLocation()).toBeUndefined();
+    });
+
+    it('signs a request with the key header and no bearer token', async () => {
+      const headers = new Headers();
+
+      await createExpressModeApiClient(
+        'my-api-key',
+      ).clientOptions.auth.addAuthHeaders(headers);
+
+      expect(headers.get('x-goog-api-key')).toBe('my-api-key');
+      expect(headers.get('Authorization')).toBeNull();
     });
   });
 });
