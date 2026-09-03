@@ -16,9 +16,6 @@ const DEPRECATION_REASON =
   'Config is now loaded via reflection so the separate config class is no ' +
   'longer needed.';
 
-/** The `agentClass` of a config document that names no agent class. */
-export const BASE_AGENT_CLASS = 'BaseAgent';
-
 /**
  * Schema of the config document of a base agent.
  *
@@ -27,11 +24,6 @@ export const BASE_AGENT_CLASS = 'BaseAgent';
  * camelCased at every depth before validation, so a document written in the
  * snake_case spelling adk-python uses and one written in camelCase produce the
  * same config.
- *
- * This is the config document, not the constructor options. The options object
- * an agent is built from is `BaseAgentConfig` in `base_agent.ts`, the way
- * `ToolArgsConfig` and `AgentToolConfig` divide the same two roles on the tool
- * side.
  *
  * @experimental
  * @deprecated Config is now loaded via reflection, not via a config class.
@@ -43,7 +35,7 @@ export const baseAgentYamlConfigSchema = z.preprocess(
      * The class of the agent. The value tells one agent class from another; a
      * value ADK does not own names a custom agent class.
      */
-    agentClass: z.string().default(BASE_AGENT_CLASS),
+    agentClass: z.string().default('BaseAgent'),
     /** The name of the agent. */
     name: z.string().min(1),
     /** The description of the agent. */

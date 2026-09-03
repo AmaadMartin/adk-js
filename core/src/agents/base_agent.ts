@@ -19,11 +19,6 @@ import type {NodeContext} from '../workflow/node_context.js';
 import {Context} from './context.js';
 import {InvocationContext} from './invocation_context.js';
 
-// The config document an agent is declared in, re-exported the way
-// `base_agent.py` re-exports its own config model. It is a different thing
-// from the `BaseAgentConfig` constructor options below.
-export type {BaseAgentYamlConfig} from './base_agent_config.js';
-
 /**
  * A single callback function for an agent.
  */
