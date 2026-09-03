@@ -8,10 +8,10 @@ import {randomUUID} from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {readJsonObject, removeQuietly} from '../../utils/fs_utils.js';
 import {AdkLogger} from '../../utils/logger.js';
+import {toMessage} from '../../utils/value_utils.js';
 import {version} from '../../version.js';
-import {QUEUE_FILE, TELEMETRY_SESSIONS_DIR} from './constants.js';
-import {readJsonObject, removeQuietly} from './safe_fs.js';
 
 const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
 
@@ -82,8 +82,14 @@ export class MetricsCollector {
   private sequenceNumber: number;
 
   constructor(options: MetricsCollectorOptions = {}) {
-    this.queueFile = options.queueFile ?? QUEUE_FILE;
-    this.sessionsDir = options.sessionsDir ?? TELEMETRY_SESSIONS_DIR;
+    // Resolved per instance, not at module load, so the home directory is read
+    // when the collector runs. The basenames match adk-python, so a machine
+    // with both SDKs shares one queue and one set of sessions.
+    const adkHome = path.join(os.homedir(), '.adk');
+    this.queueFile =
+      options.queueFile ?? path.join(adkHome, 'telemetry_queue.jsonl');
+    this.sessionsDir =
+      options.sessionsDir ?? path.join(adkHome, 'telemetry_sessions');
 
     const state = loadSessionState(this.sessionsDir);
     this.sessionId = state.sessionId;
@@ -121,7 +127,7 @@ export class MetricsCollector {
       fs.mkdirSync(path.dirname(this.queueFile), {recursive: true});
       fs.appendFileSync(this.queueFile, `${JSON.stringify(event)}\n`, 'utf-8');
     } catch (error: unknown) {
-      logger.debug(`Failed to record metric: ${String(error)}`);
+      logger.debug(`Failed to record metric: ${toMessage(error)}`);
     }
   }
 }
@@ -195,7 +201,7 @@ function writeSessionState(
     fs.writeFileSync(tempFile, JSON.stringify(info), 'utf-8');
     fs.renameSync(tempFile, sessionFile);
   } catch (error: unknown) {
-    logger.debug(`Failed to write the telemetry session: ${String(error)}`);
+    logger.debug(`Failed to write the telemetry session: ${toMessage(error)}`);
     removeQuietly(tempFile);
   }
 }

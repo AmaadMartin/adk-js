@@ -57,9 +57,9 @@ A session is keyed by the terminal's parent process id. It ends after an hour of
 
 ## What is never recorded
 
-`adk --help` and `adk <command> --help` append nothing, and neither does any `adk telemetry` invocation. `-h` is not treated as a help request, because the server commands bind it to `--host`.
+A help request appends nothing, and neither does any `adk telemetry` invocation. `--help` always asks for help. `-h` asks for help on every command except the server commands, which bind it to `--host` — so `adk create -h` records nothing and `adk web -h 0.0.0.0` records a run.
 
-A run you end with Ctrl-C is not recorded either. Node terminates on SIGINT without running exit handlers, and adk-js does not install a SIGINT handler, because that would change how the dev server and the interactive prompt shut down.
+Ctrl-C is recorded, and it is recorded as a clean shutdown. `adk web`, `adk api_server` and `adk run` install a SIGINT handler that calls `process.exit()`, so the record carries `exit_code: 0` and no `exception_type`. This matches adk-python, which treats an interrupt after a server has started as a normal end.
 
 ## Failure modes
 

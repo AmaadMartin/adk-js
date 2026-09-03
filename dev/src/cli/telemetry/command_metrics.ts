@@ -4,19 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Command, Option} from 'commander';
+import {Command} from 'commander';
 import {EventEmitter} from 'node:events';
 import {AdkLogger} from '../../utils/logger.js';
-import {readTelemetryConsent} from './consent.js';
+import {readTelemetryConsent} from '../../utils/telemetry_config.js';
+import {toMessage} from '../../utils/value_utils.js';
 import {MetricsCollector} from './metrics_collector.js';
 
 const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
 
+/** Always a help request, on every command. */
+const LONG_HELP_FLAG = '--help';
+
 /**
- * The only token treated as a help request. adk-js binds `-h` to `--host` on
- * its server subcommands, so `adk web -h 0.0.0.0` is a real run.
+ * A help request only where commander still owns it. adk-js rebinds `-h` to
+ * `--host` on its server commands, so `adk web -h 0.0.0.0` is a real run.
  */
-const HELP_FLAG = '--help';
+const SHORT_HELP_FLAG = '-h';
 
 /**
  * The group that manages consent, excluded because recording its own runs
@@ -57,11 +61,13 @@ export function instrumentCommandMetrics(
   argv: readonly string[],
   deps: CommandMetricsDeps = {},
 ): () => void {
-  if (argv.includes(HELP_FLAG)) {
+  const commandPath = resolveCommandPath(program, argv);
+  if (isHelpRequest(argv, commandPath[commandPath.length - 1])) {
     return noop;
   }
 
-  const [command, subcommand] = resolveCommandPath(program, argv);
+  const command = commandPath[0]?.name() ?? '';
+  const subcommand = commandPath[1]?.name() ?? '';
   if (command === '' || command === TELEMETRY_COMMAND) {
     return noop;
   }
@@ -82,7 +88,7 @@ export function instrumentCommandMetrics(
   });
 
   const onError = (error: unknown) => {
-    exceptionType = errorName(error);
+    exceptionType = error instanceof Error ? error.name : '';
   };
   const onExit = (exitCode: number) => {
     try {
@@ -96,7 +102,7 @@ export function instrumentCommandMetrics(
         exception_type: exceptionType,
       });
     } catch (error: unknown) {
-      logger.debug(`Failed to record the CLI invocation: ${String(error)}`);
+      logger.debug(`Failed to record the CLI invocation: ${toMessage(error)}`);
     }
   };
 
@@ -112,28 +118,52 @@ export function instrumentCommandMetrics(
 function noop(): void {}
 
 /**
- * Walks the arguments against the registered commands and returns the
- * `[command, subcommand]` pair they select. A token that names no command is
- * skipped, so a flag written before the command does not hide it.
+ * Walks the arguments against the registered commands and returns the chain
+ * they select, outermost first. A token that names no command is skipped, so a
+ * flag written before the command does not hide it.
  */
 function resolveCommandPath(
   program: Command,
   argv: readonly string[],
-): [string, string] {
-  const resolved: string[] = [];
+): Command[] {
+  const resolved: Command[] = [];
   let current = program;
   for (const arg of argv) {
     const next = current.commands.find((candidate) => candidate.name() === arg);
     if (next === undefined) {
       continue;
     }
-    resolved.push(arg);
+    resolved.push(next);
     if (next.commands.length === 0) {
       break;
     }
     current = next;
   }
-  return [resolved[0] ?? '', resolved[1] ?? ''];
+  return resolved;
+}
+
+/**
+ * Whether the user asked for help instead of running the command.
+ *
+ * `--help` always asks for it. `-h` asks for it only when the selected command
+ * leaves the short flag to commander, because the adk-js server commands bind
+ * it to `--host` instead.
+ */
+function isHelpRequest(
+  argv: readonly string[],
+  leaf: Command | undefined,
+): boolean {
+  if (argv.includes(LONG_HELP_FLAG)) {
+    return true;
+  }
+  return argv.includes(SHORT_HELP_FLAG) && !bindsShortHelpFlag(leaf);
+}
+
+/** Whether the command claims `-h` for an option of its own. */
+function bindsShortHelpFlag(command: Command | undefined): boolean {
+  return (
+    command?.options.some((option) => option.short === SHORT_HELP_FLAG) ?? false
+  );
 }
 
 /**
@@ -147,16 +177,7 @@ function gatherFlags(command: Command): string[] {
       (option) =>
         command.getOptionValueSource(option.attributeName()) === 'cli',
     )
-    .map(optionName);
+    .map((option) => option.long ?? option.flags);
   const supplied = command.registeredArguments.slice(0, command.args.length);
   return flags.concat(supplied.map((argument) => `<${argument.name()}>`));
-}
-
-/** The long flag of an option, or its declaration when it has no long form. */
-function optionName(option: Option): string {
-  return option.long ?? option.flags;
-}
-
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : '';
 }
