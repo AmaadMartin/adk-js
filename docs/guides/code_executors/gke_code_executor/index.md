@@ -107,7 +107,10 @@ new GkeCodeExecutor({
 
 `timeoutSeconds` bounds the whole wait for the Job, not one watch connection.
 The Kubernetes client caps a single watch connection at 30 seconds, so the
-executor re-establishes the watch until its own deadline passes.
+executor re-establishes the watch until its own deadline passes. It reopens a
+connection that closed cleanly or that hit the cap. It does not reopen one the
+API server refused: a Role without `watch` on `batch/jobs` is reported as a
+Kubernetes API error on the first attempt, not as a timeout.
 
 ## What you get back
 
@@ -142,9 +145,11 @@ new GkeCodeExecutor({
 
 The executor writes the code to `script.py` in the sandbox, runs
 `python3 script.py`, and releases the sandbox on both the success and the error
-path. Unlike job mode it throws: a `SandboxInfrastructureError` for a gateway
-or provisioning failure, and the original error for anything else. Only a
-timeout comes back as a `stderr` result. That asymmetry matches adk-python.
+path. The result carries the sandbox's `stdout`, `stderr` and `exitCode`, and
+`exitCode` is unset when the sandbox reports none. Unlike job mode it throws: a
+`SandboxInfrastructureError` for a gateway or provisioning failure, and the
+original error for anything else. Only a timeout comes back as a `stderr`
+result. That asymmetry matches adk-python.
 
 ADK ships `AgentSandboxClient`, which provisions the `Sandbox` resource and
 talks to the router. Pass `sandboxClientFactory` to substitute your own:
