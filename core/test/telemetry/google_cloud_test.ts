@@ -14,7 +14,10 @@ import {
   getGcpResource,
   OTelHooks,
 } from '@google/adk';
+import {OTLPLogExporter} from '@opentelemetry/exporter-logs-otlp-http';
 import {OTLPTraceExporter} from '@opentelemetry/exporter-trace-otlp-http';
+import {resourceFromAttributes} from '@opentelemetry/resources';
+import {LoggerProvider, ReadableLogRecord} from '@opentelemetry/sdk-logs';
 import {GoogleAuth} from 'google-auth-library';
 import {
   afterEach,
@@ -53,6 +56,12 @@ vi.mock('@opentelemetry/resource-detector-gcp', () => ({
 
 const PROJECT_ID = 'test-project';
 const PROJECT_NUMBER = '1234567890';
+
+/**
+ * `ExportResultCode.SUCCESS`. The enum lives in `@opentelemetry/core`, which
+ * this package does not depend on directly.
+ */
+const EXPORT_SUCCESS = 0;
 
 /** Every variable these tests read, cleared before each of them. */
 const MANAGED_ENV = [
@@ -290,6 +299,48 @@ describe('export authentication', () => {
     // is what schedules the refresh.
     await vi.waitFor(() =>
       expect(traceHeaders()?.['Authorization']).toBe('Bearer second-token'),
+    );
+    await shutdown(result);
+  });
+});
+
+describe('log record export', () => {
+  it('should hand a named, resource-tagged record to the exporter', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_AGENT_ENGINE_ID', PROJECT_NUMBER);
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'us-central1');
+    const exported: ReadableLogRecord[] = [];
+    vi.mocked(OTLPLogExporter.prototype.export).mockImplementation(
+      (records, resultCallback) => {
+        exported.push(...records);
+        resultCallback({code: EXPORT_SUCCESS});
+      },
+    );
+    const result = await getGcpExporters({
+      enableLogging: true,
+      googleAuth: {authClient: new FakeAuthClient(), projectId: PROJECT_ID},
+    });
+    const [processor] = result.logRecordProcessors ?? [];
+    if (!processor) {
+      expect.fail('getGcpExporters installed no log record processor');
+    }
+    const provider = new LoggerProvider({
+      resource: resourceFromAttributes({'service.version': '42'}),
+      processors: [processor],
+    });
+
+    provider.getLogger('guide').emit({body: 'a log line', eventName: 'a.b'});
+    await processor.forceFlush();
+
+    // The whole batching path runs: only the network call is stubbed.
+    expect(exported).toHaveLength(1);
+    expect(exported[0].attributes).toEqual({
+      'event.name': 'a.b',
+      'gcp.log_name': 'aiplatform.googleapis.com/reasoning_engine_stdout',
+      'service.version': '42',
+    });
+    expect(exported[0].body).toBe('a log line');
+    expect(exported[0].resource.attributes['reasoning_engine_id']).toBe(
+      PROJECT_NUMBER,
     );
     await shutdown(result);
   });
