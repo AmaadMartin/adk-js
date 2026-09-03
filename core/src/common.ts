@@ -327,6 +327,15 @@ export {
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {
+  createToolConfig,
+  validateToolConfigKeys,
+} from './tools/tool_configs.js';
+export type {
+  BaseToolConfig,
+  ToolArgsConfig,
+  ToolConfig,
+} from './tools/tool_configs.js';
+export {
   IntentMismatchError,
   ToolConfirmation,
   isIntentMismatchError,
