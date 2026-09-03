@@ -13,7 +13,6 @@ import {
   CreateAgentEngineSessionConfig,
   EventMetadata,
   ListAgentEngineSessionEventsConfig,
-  ListAgentEngineSessionEventsResponse,
   Session as VertexAiSession,
   SessionEvent as VertexAiSessionEvent,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
@@ -23,7 +22,6 @@ import {
   GroundingMetadata,
   HttpOptions,
 } from '@google/genai';
-import {ApiClient} from '@google/genai/vertex_internal';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
@@ -33,6 +31,7 @@ import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {
+  createAgentEngineSessions,
   createExpressModeApiClient,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
@@ -55,7 +54,6 @@ const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_TOO_MANY_REQUESTS = 429;
-const APPEND_MAX_ATTEMPTS = 2;
 const RATE_LIMIT_RETRY_DELAY_MS = 1000;
 
 /**
@@ -89,23 +87,6 @@ export function isVertexAiConnectionString(uri?: string): boolean {
 export function quoteFilterLiteral(value: string): string {
   const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `"${escaped}"`;
-}
-
-/**
- * Builds the Agent Engine `Sessions` client from an `ApiClient`.
- *
- * `@google-cloud/vertexai` bundles its own nested copy of `@google/genai`
- * (1.52.0) while the repo root resolves `@google/genai` to 2.9.0, so the
- * `ApiClient` here is a structurally distinct class (its private fields make
- * the two nominally incompatible) from the one `Sessions` declares. The
- * instances are interchangeable at runtime -- the mismatch is a
- * duplicate-dependency artifact, not a real API difference -- so the cast is
- * confined to this one boundary.
- */
-function createAgentEngineSessions(apiClient: ApiClient): Sessions {
-  return new Sessions(
-    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
-  );
 }
 
 export interface VertexAiSessionServiceOptions {
@@ -168,10 +149,7 @@ export class VertexAiSessionService extends BaseSessionService {
     // adk-python's `_get_api_client`.
     if (this.expressModeApiKey) {
       return createAgentEngineSessions(
-        createExpressModeApiClient(
-          this.expressModeApiKey,
-          this.apiClientHttpOptionsOverride(),
-        ),
+        createExpressModeApiClient(this.expressModeApiKey),
       );
     }
     if (this.projectId && this.location) {
@@ -191,9 +169,10 @@ export class VertexAiSessionService extends BaseSessionService {
    *
    * adk-python attaches the override when it builds the client. The
    * `@google-cloud/vertexai` `Client` constructor accepts no `httpOptions`, so
-   * the enterprise path attaches them per request instead. The SDK applies
-   * client-level and per-request options to the same request, so the two
-   * placements are observably equivalent.
+   * this service attaches them to each request instead, for both auth modes.
+   * Constructing the client cannot read the hook anyway: a subclass's field
+   * initializers run after `super()`, so an override reading a field would
+   * still be `undefined` there.
    */
   protected apiClientHttpOptionsOverride(): HttpOptions | undefined {
     return undefined;
@@ -231,27 +210,30 @@ export class VertexAiSessionService extends BaseSessionService {
     expireTime,
     config,
   }: VertexAiCreateSessionRequest): Promise<Session> {
-    // The API rejects both together; fail before the RPC.
-    if (ttl != null && expireTime != null) {
+    const httpOptions = this.apiClientHttpOptionsOverride();
+    const filteredState = state ? trimTempState(state) : undefined;
+    const requestConfig: CreateAgentEngineSessionConfig = {
+      ...(filteredState ? {sessionState: filteredState} : {}),
+      ...(sessionId ? {sessionId} : {}),
+      ...(ttl != null ? {ttl} : {}),
+      ...(expireTime != null ? {expireTime} : {}),
+      ...(httpOptions ? {httpOptions} : {}),
+      ...config,
+    };
+
+    // The API rejects both together; fail before the RPC. Checked on the
+    // merged config, so `config` cannot smuggle the second field past it.
+    if (requestConfig.ttl != null && requestConfig.expireTime != null) {
       throw new Error(
         "Cannot specify both 'ttl' and 'expireTime' simultaneously.",
       );
     }
 
-    const httpOptions = this.apiClientHttpOptionsOverride();
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    const filteredState = state ? trimTempState(state) : undefined;
     let apiResponse = await this.sessions.createInternal({
       name: `reasoningEngines/${reasoningEngineId}`,
       userId: userId,
-      config: {
-        ...(filteredState ? {sessionState: filteredState} : {}),
-        ...(sessionId ? {sessionId} : {}),
-        ...(ttl != null ? {ttl} : {}),
-        ...(expireTime != null ? {expireTime} : {}),
-        ...(httpOptions ? {httpOptions} : {}),
-        ...config,
-      },
+      config: requestConfig,
     });
 
     const operationName = apiResponse.name!;
@@ -336,7 +318,7 @@ export class VertexAiSessionService extends BaseSessionService {
             this.sessions,
             sessionResourceName,
             listConfig,
-            eventsRes,
+            eventsRes.nextPageToken,
           )),
         ];
       }
@@ -731,18 +713,16 @@ async function appendWithRateLimitRetry(
   sessions: Sessions,
   params: AppendAgentEngineSessionEventRequestParameters,
 ): Promise<void> {
-  for (let attempt = 0; attempt < APPEND_MAX_ATTEMPTS; attempt++) {
-    try {
-      await sessions.events.append(params);
-      return;
-    } catch (error) {
-      if (!isRateLimitError(error) || attempt === APPEND_MAX_ATTEMPTS - 1) {
-        throw error;
-      }
-      await new Promise((resolve) =>
-        setTimeout(resolve, RATE_LIMIT_RETRY_DELAY_MS),
-      );
+  try {
+    await sessions.events.append(params);
+  } catch (error) {
+    if (!isRateLimitError(error)) {
+      throw error;
     }
+    await new Promise((resolve) =>
+      setTimeout(resolve, RATE_LIMIT_RETRY_DELAY_MS),
+    );
+    await sessions.events.append(params);
   }
 }
 
@@ -758,10 +738,10 @@ async function listRemainingSessionEvents(
   sessions: Sessions,
   name: string,
   config: ListAgentEngineSessionEventsConfig,
-  firstResponse: ListAgentEngineSessionEventsResponse,
+  nextPageToken: string | undefined,
 ): Promise<VertexAiSessionEvent[]> {
   const events: VertexAiSessionEvent[] = [];
-  let pageToken = firstResponse.nextPageToken;
+  let pageToken = nextPageToken;
 
   while (pageToken) {
     const response = await sessions.events.listInternal({

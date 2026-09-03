@@ -113,19 +113,5 @@ describe('vertex_ai_utils', () => {
       const headers = await client.getAuthHeaders();
       expect(headers.get('x-goog-api-key')).toBe('my-api-key');
     });
-
-    it('should apply the given http options', () => {
-      const client = createExpressModeApiClient('my-api-key', {
-        baseUrl: 'https://sessions.example.com',
-      });
-
-      expect(client.getBaseUrl()).toBe('https://sessions.example.com');
-    });
-
-    it('should keep the default endpoint when http options are absent', () => {
-      const client = createExpressModeApiClient('my-api-key');
-
-      expect(client.getBaseUrl()).not.toBe('https://sessions.example.com');
-    });
   });
 });

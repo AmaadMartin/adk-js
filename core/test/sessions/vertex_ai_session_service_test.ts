@@ -461,6 +461,52 @@ describe('VertexAiSessionService', () => {
         });
       });
 
+      it.each([
+        [
+          'config supplies both',
+          {config: {ttl: '60s', expireTime: '2025-10-01T00:00:00Z'}},
+        ],
+        [
+          'config supplies expireTime against a named ttl',
+          {ttl: '7200s', config: {expireTime: '2025-10-01T00:00:00Z'}},
+        ],
+        [
+          'config supplies ttl against a named expireTime',
+          {expireTime: '2025-10-01T00:00:00Z', config: {ttl: '60s'}},
+        ],
+      ])(
+        'rejects ttl and expireTime together when %s',
+        async (_label, request) => {
+          await expect(
+            service.createSession({
+              appName: '12345',
+              userId: 'testUser',
+              ...request,
+            }),
+          ).rejects.toThrow(
+            "Cannot specify both 'ttl' and 'expireTime' simultaneously.",
+          );
+          expect(mockClient.createInternal).not.toHaveBeenCalled();
+        },
+      );
+
+      it('lets config replace ttl with expireTime', async () => {
+        await service.createSession({
+          appName: '12345',
+          userId: 'testUser',
+          ttl: '7200s',
+          config: {ttl: undefined, expireTime: '2025-10-01T00:00:00Z'},
+        });
+
+        expect(mockClient.createInternal).toHaveBeenCalledWith(
+          expect.objectContaining({
+            config: expect.objectContaining({
+              expireTime: '2025-10-01T00:00:00Z',
+            }),
+          }),
+        );
+      });
+
       it('changes nothing about the request when config is absent', async () => {
         await service.createSession({
           appName: '12345',
