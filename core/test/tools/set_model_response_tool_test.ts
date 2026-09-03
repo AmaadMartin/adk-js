@@ -397,6 +397,24 @@ describe('createSetModelResponseTool execution', () => {
     });
     expect(toolContext.actions.setModelResponse).toBeUndefined();
   });
+
+  it('reports an Error message without its class name', async () => {
+    const toolContext = createToolContext();
+    const throwingSchema = z4.object({name: z4.string()}).refine(() => {
+      throw new Error('schema backend unavailable');
+    });
+
+    const result = await createTool(throwingSchema).runAsync({
+      args: {name: 'Alice'},
+      toolContext,
+    });
+
+    expect(result).toEqual({
+      error: expect.stringContaining(
+        'Validation Error found:\nschema backend unavailable\n',
+      ),
+    });
+  });
 });
 
 describe('getStructuredModelResponse', () => {
