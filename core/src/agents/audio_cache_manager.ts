@@ -120,19 +120,20 @@ function totalDecodedBytes(cache: RealtimeCacheEntry[]): number {
 }
 
 /**
- * Saves `cache` as one artifact and returns the event that points at it.
+ * Saves the non-empty `cache` as one artifact and returns the event that
+ * points at it.
  *
- * Returns undefined when there is nothing to save, and when the save fails.
- * A live session must survive the loss of one turn's audio, so the failure is
- * logged rather than raised, and the caller keeps the cache.
+ * Returns undefined when there is no artifact service, and when the save
+ * fails. A live session must survive the loss of one turn's audio, so the
+ * failure is logged rather than raised, and the caller keeps the cache.
  */
 async function flushCacheToServices(
   ctx: InvocationContext,
   cache: RealtimeCacheEntry[],
   cacheLabel: AudioCacheLabel,
 ): Promise<Event | undefined> {
-  if (!ctx.artifactService || cache.length === 0) {
-    logger.debug('Skipping cache flush: no artifact service or empty cache');
+  if (!ctx.artifactService) {
+    logger.debug('Skipping cache flush: no artifact service');
     return undefined;
   }
 
