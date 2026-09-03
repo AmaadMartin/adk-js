@@ -78,16 +78,13 @@ function warnFailedLocations(
   resource: string,
   failedLocations: string[] | null | undefined,
 ): void {
-  if (
-    failedLocations !== undefined &&
-    failedLocations !== null &&
-    failedLocations.length > 0
-  ) {
-    logger.warn(
-      `Failed to list ${resource} from the following locations: ` +
-        failedLocations.join(', '),
-    );
+  if (!failedLocations?.length) {
+    return;
   }
+  logger.warn(
+    `Failed to list ${resource} from the following locations: ` +
+      failedLocations.join(', '),
+  );
 }
 
 /** The instance fields adk-python's instance tools report. */
