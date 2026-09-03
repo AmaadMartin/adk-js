@@ -213,6 +213,24 @@ default, so honouring them is your responsibility.
 **Screenshots are raw PNG bytes.** `ComputerState.screenshot` is a
 `Uint8Array`, not a base64 string. The consumer decides the encoding.
 
+## ComputerState
+
+Every action resolves to a `ComputerState`. Both properties are optional.
+
+| Property     | Type         | Meaning                            |
+| ------------ | ------------ | ---------------------------------- |
+| `screenshot` | `Uint8Array` | The current screen, in PNG format. |
+| `url`        | `string`     | The URL of the webpage on display. |
+
+An implementation that drives an environment with no URL omits `url`. One that
+cannot capture the screen omits `screenshot`.
+
+## Environments
+
+`ComputerEnvironment` names the kind of environment an implementation drives.
+`ENVIRONMENT_BROWSER` is a web browser. `ENVIRONMENT_UNSPECIFIED` means the
+implementation did not say, and a caller treats it as a browser.
+
 ## Coordinates
 
 The model works in a virtual 1000x1000 space. The toolset scales `x`, `y`,
@@ -306,6 +324,14 @@ The toolset owns the driver's lifecycle. It calls `initialize()` once, before
 the tools are built. It calls `prepare(toolContext)` before every action, which
 is where a driver that needs session state should read it. It calls `close()`
 when the toolset closes. All three default to doing nothing.
+
+| Hook               | When the toolset calls it      | What to put in it                                                                                                          |
+| ------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `initialize()`     | Once, before the first action. | Launch the browser or the virtual machine.                                                                                 |
+| `prepare(context)` | Before each tool invocation.   | Set up session-level resources, such as a sandbox or an access token. Use `context.state` to keep them across invocations. |
+| `close()`          | Once, when the toolset closes. | Release everything `initialize()` acquired.                                                                                |
+
+A driver you call yourself, without a toolset, follows the same order.
 
 ## Safety confirmation
 

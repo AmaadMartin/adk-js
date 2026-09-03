@@ -133,6 +133,17 @@ class LifecycleComputer extends MockComputer {
   }
 }
 
+/** A computer whose `currentState()` reports a caller-chosen state. */
+class StateComputer extends MockComputer {
+  constructor(private readonly state: ComputerState) {
+    super();
+  }
+
+  override async currentState(): Promise<ComputerState> {
+    return this.state;
+  }
+}
+
 function createContext(): Context {
   return new Context({
     invocationContext: new InvocationContext({
@@ -173,6 +184,50 @@ describe('ComputerState', () => {
     expect(clone.url).toBe(PAGE_URL);
     expect(clone.screenshot).toBeInstanceOf(Uint8Array);
     expect(clone.screenshot).toEqual(SCREENSHOT);
+  });
+
+  // Both properties are optional, so a backend reports any of the four
+  // combinations. These cases drive each one through a computer.
+  it('reports both properties absent', async () => {
+    const state = await new StateComputer({}).currentState();
+
+    expect(state.screenshot).toBeUndefined();
+    expect(state.url).toBeUndefined();
+  });
+
+  it('reports a screenshot on its own', async () => {
+    const state = await new StateComputer({
+      screenshot: SCREENSHOT,
+    }).currentState();
+
+    expect(state.screenshot).toEqual(SCREENSHOT);
+    expect(state.url).toBeUndefined();
+  });
+
+  it('reports a url on its own', async () => {
+    const state = await new StateComputer({url: PAGE_URL}).currentState();
+
+    expect(state.screenshot).toBeUndefined();
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('reports both properties together', async () => {
+    const state = await new StateComputer({
+      screenshot: SCREENSHOT,
+      url: PAGE_URL,
+    }).currentState();
+
+    expect(state.screenshot).toEqual(SCREENSHOT);
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('exposes no property beyond the two', async () => {
+    const state = await new StateComputer({
+      screenshot: SCREENSHOT,
+      url: PAGE_URL,
+    }).currentState();
+
+    expect(Object.keys(state).sort()).toEqual(['screenshot', 'url']);
   });
 });
 

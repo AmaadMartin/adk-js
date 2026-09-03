@@ -79,6 +79,13 @@ export function isComputerState(
  *
  * Coordinates are absolute pixel values, already scaled to the height and width
  * of the screen. An implementation never rescales them.
+ *
+ * A caller drives a computer in this order:
+ * 1. Construct the computer.
+ * 2. Call {@link initialize} before first use.
+ * 3. Call {@link prepare} before each tool invocation.
+ * 4. Call the actions.
+ * 5. Call {@link close} when done.
  */
 @experimental
 export abstract class BaseComputer {
