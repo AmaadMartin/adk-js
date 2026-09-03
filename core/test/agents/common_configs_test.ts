@@ -8,13 +8,12 @@ import {
   InputValidationError,
   parseAgentRefConfig,
   parseCodeConfig,
-  resolveAgentReference,
   resolveCodeReference,
 } from '@google/adk';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 
-import {fixtureAgent, staticProvider} from './fixtures/example_code_refs.js';
+import {staticProvider} from './fixtures/example_code_refs.js';
 
 /** Absolute path of the module the code references below name. */
 const FIXTURE_PATH = fileURLToPath(
@@ -190,55 +189,5 @@ describe('resolveCodeReference', () => {
     await expect(
       resolveCodeReference({name: `${FIXTURE_PATH}#absent`}),
     ).rejects.toThrow(`Invalid fully qualified name: ${FIXTURE_PATH}#absent`);
-  });
-});
-
-describe('resolveAgentReference', () => {
-  it('resolves a code reference to the agent it names', async () => {
-    await expect(
-      resolveAgentReference(
-        {code: './example_code_refs.ts#fixtureAgent'},
-        FIXTURE_SIBLING_PATH,
-      ),
-    ).resolves.toBe(fixtureAgent);
-  });
-
-  it('rejects a code reference to a value that is not an agent', async () => {
-    await expect(
-      resolveAgentReference(
-        {code: `${FIXTURE_PATH}#staticProvider`},
-        FIXTURE_SIBLING_PATH,
-      ),
-    ).rejects.toThrow(
-      `Agent reference \`${FIXTURE_PATH}#staticProvider\` does not resolve to an agent.`,
-    );
-  });
-
-  it('rejects a config file reference, which adk-js cannot load', async () => {
-    const error = await rejectionOf(
-      resolveAgentReference({configPath: 'sub.yaml'}, FIXTURE_SIBLING_PATH),
-    );
-
-    expect(error).toBeInstanceOf(InputValidationError);
-    expect(error).toHaveProperty(
-      'message',
-      'An agent reference by `configPath` is not supported: adk-js has no ' +
-        'agent config loader. Name the agent with `code` instead.',
-    );
-  });
-
-  it('rejects a hand-built reference that names both sources', async () => {
-    await expect(
-      resolveAgentReference(
-        {code: './agents.js#root', configPath: 'a.yaml'},
-        FIXTURE_SIBLING_PATH,
-      ),
-    ).rejects.toThrow('Only one of `code` or `configPath` should be provided');
-  });
-
-  it('rejects a hand-built reference that names neither source', async () => {
-    await expect(
-      resolveAgentReference({}, FIXTURE_SIBLING_PATH),
-    ).rejects.toThrow('Exactly one of `code` or `configPath` must be provided');
   });
 });

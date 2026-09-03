@@ -9,8 +9,6 @@ import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {resolveFullyQualifiedName} from '../utils/module_utils.js';
 
-import {BaseAgent, isBaseAgent} from './base_agent.js';
-
 /**
  * A reference to a variable, function, or class defined in code.
  *
@@ -60,11 +58,6 @@ const BOTH_SOURCES_MESSAGE =
 const NO_SOURCE_MESSAGE =
   'Exactly one of `code` or `configPath` must be provided';
 
-/** Reported for the agent config files adk-js cannot load. */
-const CONFIG_PATH_UNSUPPORTED_MESSAGE =
-  'An agent reference by `configPath` is not supported: adk-js has no agent ' +
-  'config loader. Name the agent with `code` instead.';
-
 const codeConfigSchema = z.strictObject({name: z.string()});
 
 /**
@@ -90,24 +83,6 @@ function normalizeAgentRefKeys(raw: unknown): unknown {
   return normalized;
 }
 
-/**
- * Returns the message for an agent reference that does not name exactly one
- * source, or `undefined` when it names one. Both the parser and
- * {@link resolveAgentReference} read this, so a hand-built object is held to
- * the rule a parsed document is held to.
- */
-function exactlyOneSourceError(ref: AgentRefConfig): string | undefined {
-  const hasCode = ref.code !== undefined;
-  const hasConfigPath = ref.configPath !== undefined;
-  if (hasCode && hasConfigPath) {
-    return BOTH_SOURCES_MESSAGE;
-  }
-  if (!hasCode && !hasConfigPath) {
-    return NO_SOURCE_MESSAGE;
-  }
-  return undefined;
-}
-
 const agentRefConfigSchema = z
   .preprocess(
     normalizeAgentRefKeys,
@@ -117,9 +92,12 @@ const agentRefConfigSchema = z
     }),
   )
   .superRefine((ref, ctx) => {
-    const message = exactlyOneSourceError(ref);
-    if (message !== undefined) {
-      ctx.addIssue({code: 'custom', message});
+    const hasCode = ref.code !== undefined;
+    const hasConfigPath = ref.configPath !== undefined;
+    if (hasCode && hasConfigPath) {
+      ctx.addIssue({code: 'custom', message: BOTH_SOURCES_MESSAGE});
+    } else if (!hasCode && !hasConfigPath) {
+      ctx.addIssue({code: 'custom', message: NO_SOURCE_MESSAGE});
     }
   });
 
@@ -200,41 +178,8 @@ export async function resolveCodeReference(
   config: CodeConfig,
   baseFilePath?: string,
 ): Promise<unknown> {
-  if (!config || !config.name) {
+  if (!config.name) {
     throw new InputValidationError('Invalid CodeConfig.');
   }
   return resolveFullyQualifiedName(config.name, baseFilePath);
-}
-
-/**
- * Resolves an {@link AgentRefConfig} to the agent it names.
- *
- * @experimental (Experimental, subject to change.)
- *
- * @param ref The reference to resolve.
- * @param referencingConfigPath Absolute path of the configuration file the
- *   reference came from.
- * @return The referenced agent.
- * @throws {InputValidationError} When the reference does not name exactly one
- *   source, names a config file, or does not resolve to an agent.
- */
-export async function resolveAgentReference(
-  ref: AgentRefConfig,
-  referencingConfigPath: string,
-): Promise<BaseAgent> {
-  const sourceError = exactlyOneSourceError(ref);
-  if (sourceError !== undefined) {
-    throw new InputValidationError(sourceError);
-  }
-  const code = ref.code;
-  if (code === undefined) {
-    throw new InputValidationError(CONFIG_PATH_UNSUPPORTED_MESSAGE);
-  }
-  const resolved = await resolveFullyQualifiedName(code, referencingConfigPath);
-  if (!isBaseAgent(resolved)) {
-    throw new InputValidationError(
-      `Agent reference \`${code}\` does not resolve to an agent.`,
-    );
-  }
-  return resolved;
 }

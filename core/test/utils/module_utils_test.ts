@@ -10,10 +10,7 @@ import {describe, expect, it} from 'vitest';
 
 import {resolveFullyQualifiedName} from '../../src/utils/module_utils.js';
 
-import {
-  fixtureAgent,
-  staticProvider,
-} from '../agents/fixtures/example_code_refs.js';
+import {staticProvider} from '../agents/fixtures/example_code_refs.js';
 
 /** Absolute path of the module the qualified names below name. */
 const FIXTURE_PATH = fileURLToPath(
@@ -48,10 +45,10 @@ describe('resolveFullyQualifiedName', () => {
   it('reads the named export of a relative specifier', async () => {
     await expect(
       resolveFullyQualifiedName(
-        './example_code_refs.ts#fixtureAgent',
+        './example_code_refs.ts#staticProvider',
         FIXTURE_SIBLING_PATH,
       ),
-    ).resolves.toBe(fixtureAgent);
+    ).resolves.toBe(staticProvider);
   });
 
   it('reads the named export of a parent-relative specifier', async () => {

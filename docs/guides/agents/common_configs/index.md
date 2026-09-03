@@ -15,17 +15,17 @@ name, plus the rules the name obeys.
 `CodeConfig` carries one required `name`, in the form
 `<module specifier>#<export>`. `resolveCodeReference` imports the module and
 reads the export. `AgentRefConfig` carries either `code`, a name of the same
-form, or `configPath`, a sibling config file. Exactly one of the two is set;
-the parser and `resolveAgentReference` both enforce that, so a hand-built
-object is held to the same rule as a parsed document.
-
-adk-js has no agent config loader yet, so `resolveAgentReference` rejects a
-`configPath` reference. Name the agent with `code` instead.
+form, or `configPath`, a sibling config file. Exactly one of the two is set,
+and `parseAgentRefConfig` enforces that.
 
 Both parsers reject an unknown key. This matches adk-python's `extra="forbid"`
 and turns a misspelled key into an error instead of a silently ignored setting.
 `parseAgentRefConfig` also accepts `config_path`, the key adk-python writes, and
 normalizes it to `configPath`.
+
+adk-js has no agent config loader yet, so nothing follows a `configPath` for
+you. The type is validated here so that a loader, and the code that reads these
+shapes today, agree on one definition.
 
 ## Get started
 
@@ -43,17 +43,24 @@ The second argument is the absolute path of the file the name came from. A
 `my-package#thing` resolves the way Node resolves any package, and an absolute
 path resolves directly, so neither needs a base path.
 
-Name a sub-agent that lives in code:
+Validate a reference to a sub-agent, then resolve the code it names:
 
 ```ts
-import {parseAgentRefConfig, resolveAgentReference} from '@google/adk';
+import {
+  isBaseAgent,
+  parseAgentRefConfig,
+  resolveCodeReference,
+} from '@google/adk';
 
 const ref = parseAgentRefConfig({code: './custom_agents.js#myCustomAgent'});
-const agent = await resolveAgentReference(ref, '/workspace/root_agent.yaml');
+const value = ref.code
+  ? await resolveCodeReference({name: ref.code}, '/workspace/root_agent.yaml')
+  : undefined;
+const agent = isBaseAgent(value) ? value : undefined;
 ```
 
-`resolveAgentReference` returns a `BaseAgent`. It throws when the name resolves
-to something that is not an agent.
+`resolveCodeReference` returns `unknown`, so narrow it with the target type's
+own guard. Use `isBaseAgent` for an agent, never `instanceof`.
 
 ## What a reference cannot do
 
@@ -81,8 +88,6 @@ unknown module, is attached as the error's `cause`.
 | Neither `code` nor `configPath`             | ``Exactly one of `code` or `configPath` must be provided``          |
 | Empty `name` at resolution                  | `Invalid CodeConfig.`                                               |
 | Built-in, unknown module, or missing export | `Invalid fully qualified name: <name>`                              |
-| `configPath` reference                      | adk-js has no agent config loader; use `code`                       |
-| `code` resolves to a non-agent              | ``Agent reference `<code>` does not resolve to an agent.``          |
 
 An empty `name` is a valid document. `parseCodeConfig({name: ''})` succeeds and
 `resolveCodeReference` is what rejects it, matching adk-python.

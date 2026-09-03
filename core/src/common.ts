@@ -16,7 +16,6 @@ export type {
 export {
   parseAgentRefConfig,
   parseCodeConfig,
-  resolveAgentReference,
   resolveCodeReference,
 } from './agents/common_configs.js';
 export type {AgentRefConfig, CodeConfig} from './agents/common_configs.js';
