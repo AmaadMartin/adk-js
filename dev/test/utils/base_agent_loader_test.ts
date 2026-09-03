@@ -4,29 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App, LlmAgent, RunnableRoot} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 import {AgentLoader} from '../../src/utils/agent_loader.js';
-import {BaseAgentLoader} from '../../src/utils/base_agent_loader.js';
-
-/** A loader that knows the names and nothing else. */
-class NamesOnlyLoader extends BaseAgentLoader {
-  constructor(private readonly names: string[]) {
-    super();
-  }
-
-  async loadAgent(agentName: string): Promise<RunnableRoot | App> {
-    return new LlmAgent({name: agentName});
-  }
-
-  async listAgents(): Promise<string[]> {
-    return this.names;
-  }
-}
+import type {BaseAgentLoader} from '../../src/utils/base_agent_loader.js';
 
 /**
  * An agent module that pulls in nothing.
@@ -42,28 +26,11 @@ function agentModuleSource(name: string): string {
 `;
 }
 
-describe('BaseAgentLoader', () => {
-  describe('listAgentsDetailed', () => {
-    it('reports one entry per name, with no metadata', async () => {
-      const loader = new NamesOnlyLoader(['beta', 'alpha']);
-
-      expect(await loader.listAgentsDetailed()).toEqual([
-        {name: 'beta', displayName: null, description: null, type: null},
-        {name: 'alpha', displayName: null, description: null, type: null},
-      ]);
-    });
-
-    it('reports nothing when the loader holds no agents', async () => {
-      const loader = new NamesOnlyLoader([]);
-
-      expect(await loader.listAgentsDetailed()).toEqual([]);
-    });
-  });
-});
-
 describe('AgentLoader as a BaseAgentLoader', () => {
   let agentsDir: string;
-  let loader: AgentLoader;
+  let agentLoader: AgentLoader;
+  /** The same loader seen through the contract, so only its methods are used. */
+  let contract: BaseAgentLoader;
 
   beforeEach(async () => {
     agentsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-base-loader-'));
@@ -78,34 +45,32 @@ describe('AgentLoader as a BaseAgentLoader', () => {
 
     // The fixtures need no transpiling, so the compile step stays off and the
     // loader imports them as they are.
-    loader = new AgentLoader(agentsDir, {compile: false, bundle: false});
+    agentLoader = new AgentLoader(agentsDir, {compile: false, bundle: false});
+    contract = agentLoader;
   });
 
   afterEach(async () => {
-    await loader.disposeAll();
+    await agentLoader.disposeAll();
     await fs.rm(agentsDir, {recursive: true, force: true});
   });
 
   it('loads the same root the agent file loads', async () => {
-    const viaContract = await loader.loadAgent('agent_one');
-    const viaAgentFile = await (await loader.getAgentFile('agent_one')).load();
+    const viaContract = await contract.loadAgent('agent_one');
+    const viaAgentFile = await (
+      await agentLoader.getAgentFile('agent_one')
+    ).load();
 
     expect(viaContract).toBe(viaAgentFile);
     expect(viaContract.name).toBe('agent_one');
   });
 
   it('reports the failure when the agent is unknown', async () => {
-    await expect(loader.loadAgent('missing')).rejects.toThrow(
+    await expect(contract.loadAgent('missing')).rejects.toThrow(
       /Agent 'missing' not found/,
     );
   });
 
-  it('inherits listAgentsDetailed from the contract', async () => {
-    const contract: BaseAgentLoader = loader;
-
-    expect(await contract.listAgentsDetailed()).toEqual([
-      {name: 'agent_one', displayName: null, description: null, type: null},
-      {name: 'agent_two', displayName: null, description: null, type: null},
-    ]);
+  it('lists every agent in the directory', async () => {
+    expect(await contract.listAgents()).toEqual(['agent_one', 'agent_two']);
   });
 });
