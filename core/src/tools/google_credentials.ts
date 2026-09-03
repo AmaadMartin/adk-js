@@ -13,6 +13,12 @@ import {AuthConfig} from '../auth/auth_tool.js';
 import {isTokenExpired} from '../auth/oauth2/oauth2_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
+import {
+  isRecord,
+  numberField,
+  parseJson,
+  stringField,
+} from '../utils/record_utils.js';
 
 /** Google's OAuth2 authorization endpoint. */
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/auth';
@@ -450,32 +456,4 @@ function mentionsInvalidGrant(error: Record<string, unknown>): boolean {
     stringField(error, 'error_description') ?? ''
   }`;
   return marker.includes(INVALID_GRANT);
-}
-
-function parseJson(json: string): unknown {
-  try {
-    return JSON.parse(json);
-  } catch {
-    return undefined;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function stringField(
-  record: Record<string, unknown>,
-  key: string,
-): string | undefined {
-  const value = record[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function numberField(
-  record: Record<string, unknown>,
-  key: string,
-): number | undefined {
-  const value = record[key];
-  return typeof value === 'number' ? value : undefined;
 }

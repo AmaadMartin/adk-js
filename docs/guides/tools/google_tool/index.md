@@ -17,11 +17,11 @@ call.
 the confirmation gate you already know. It adds three things:
 
 - A credential arrives as a third argument, next to the model's arguments and
-  the tool context.
+  the tool context. It never enters the schema, so the model can neither see it
+  nor supply one.
 - A failure comes back as `{status: 'ERROR', error_details}` instead of a thrown
   error, so the model can read it and retry.
-- `credentials` and `settings` never appear in the declaration the model sees,
-  and are stripped from the arguments the model sends.
+- The settings the owning toolset configured arrive on that same argument.
 
 Use `OpenAPIToolset` instead when you have an API spec and want tools generated
 from it. `GoogleTool` is for the handcrafted case.
@@ -98,9 +98,6 @@ This covers a failure from your function, from argument validation, and from
 resolving the credential. One case still propagates: if refreshing a token
 fails for a reason other than the token endpoint rejecting the grant, the
 manager rethrows, and `GoogleTool` turns that into the same error response.
-
-`detectErrorInResponse` reports `'TOOL_ERROR'` for such a response, so
-telemetry records the call as failed.
 
 ## Passing settings to your function
 

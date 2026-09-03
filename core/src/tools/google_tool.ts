@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Schema} from '@google/genai';
 import {AuthClient} from 'google-auth-library';
 
 import {Context} from '../agents/context.js';
@@ -15,6 +14,7 @@ import {RunAsyncToolRequest} from './base_tool.js';
 import {
   FunctionTool,
   ToolExecuteArgument,
+  ToolExecuteFunction,
   ToolInputParameters,
   ToolOptions,
 } from './function_tool.js';
@@ -22,15 +22,6 @@ import {
   BaseGoogleCredentialsConfig,
   GoogleCredentialsManager,
 } from './google_credentials.js';
-
-/**
- * The arguments a {@link GoogleTool} injects itself, and therefore never
- * advertises to the model nor accepts from it.
- */
-const IGNORED_PARAMS: readonly string[] = ['credentials', 'settings'];
-
-/** The telemetry error type reported for an in-band tool error. */
-const TOOL_ERROR = 'TOOL_ERROR';
 
 /** The Google-specific context handed to a {@link GoogleTool} function. */
 export interface GoogleToolExecuteContext<TSettings> {
@@ -127,45 +118,12 @@ export class GoogleTool<
     super({
       ...toolOptions,
       name,
-      execute: async (input, toolContext) => {
-        if (!credentialsManager) {
-          return execute(input, toolContext, {settings: toolSettings});
-        }
-        // `FunctionTool.runAsync` always supplies the tool context; the
-        // parameter is optional only so a wrapped function may omit it.
-        const credentials = await credentialsManager.getValidCredentials(
-          toolContext!,
-        );
-        if (!credentials) {
-          return authorizationRequiredMessage(name);
-        }
-        return execute(input, toolContext, {
-          credentials,
-          settings: toolSettings,
-        });
-      },
+      execute: withGoogleCredentials(execute, {
+        name,
+        credentialsManager,
+        toolSettings,
+      }),
     });
-  }
-
-  /**
-   * The declaration the model sees, with the injected parameters removed.
-   *
-   * @return The function declaration, carrying neither `credentials` nor
-   *     `settings`.
-   */
-  override _getDeclaration(): FunctionDeclaration {
-    const declaration = super._getDeclaration();
-    // `FunctionTool` always builds a parameters schema, even when the tool
-    // declares no parameters.
-    const {properties, required, ...schema} = declaration.parameters!;
-    return {
-      ...declaration,
-      parameters: {
-        ...schema,
-        properties: withoutIgnoredProperties(properties),
-        required: required?.filter((name) => !IGNORED_PARAMS.includes(name)),
-      },
-    };
   }
 
   /**
@@ -177,10 +135,7 @@ export class GoogleTool<
    */
   override async runAsync(req: RunAsyncToolRequest): Promise<unknown> {
     try {
-      return await super.runAsync({
-        ...req,
-        args: withoutIgnoredArgs(req.args),
-      });
+      return await super.runAsync(req);
     } catch (error: unknown) {
       const response: GoogleToolErrorResponse = {
         status: 'ERROR',
@@ -189,50 +144,53 @@ export class GoogleTool<
       return response;
     }
   }
+}
 
-  /**
-   * Telemetry hook: the error type carried by an in-band error response.
-   *
-   * @param response A value the tool returned.
-   * @return `'TOOL_ERROR'` when the response reports a failure, otherwise
-   *     `undefined`. It never throws, whatever it is given.
-   */
-  detectErrorInResponse(response: unknown): string | undefined {
-    const reportsError =
-      typeof response === 'object' &&
-      response !== null &&
-      'status' in response &&
-      response.status === 'ERROR';
-    return reportsError ? TOOL_ERROR : undefined;
-  }
+/** What {@link withGoogleCredentials} needs besides the caller's function. */
+interface GoogleCredentialsAdapterOptions<TSettings> {
+  /** The tool's name, used in the authorization prompt. */
+  name: string;
+  /** Resolves the credential, or `undefined` to run unauthenticated. */
+  credentialsManager?: GoogleCredentialsManager;
+  /** The settings handed to the caller's function. */
+  toolSettings?: TSettings;
+}
+
+/**
+ * Wraps the caller's function so a credential is resolved once per call and
+ * passed in as an argument, rather than held on the tool: two concurrent calls
+ * to one tool would otherwise cross their credentials.
+ *
+ * Exported so a test can drive it directly. {@link GoogleTool} is the public
+ * surface and this is not part of the package barrel.
+ */
+export function withGoogleCredentials<
+  TParameters extends ToolInputParameters,
+  TSettings,
+>(
+  execute: GoogleToolExecuteFunction<TParameters, TSettings>,
+  options: GoogleCredentialsAdapterOptions<TSettings>,
+): ToolExecuteFunction<TParameters> {
+  const {name, credentialsManager, toolSettings} = options;
+  return async (input, toolContext) => {
+    if (!credentialsManager) {
+      return execute(input, toolContext, {settings: toolSettings});
+    }
+    if (!toolContext) {
+      throw new Error(
+        `Tool '${name}' needs a tool context to resolve credentials.`,
+      );
+    }
+    const credentials =
+      await credentialsManager.getValidCredentials(toolContext);
+    if (!credentials) {
+      return authorizationRequiredMessage(name);
+    }
+    return execute(input, toolContext, {credentials, settings: toolSettings});
+  };
 }
 
 /** The message returned while the end user completes an OAuth flow. */
 function authorizationRequiredMessage(toolName: string): string {
   return `User authorization is required to access Google services for ${toolName}. Please complete the authorization flow.`;
-}
-
-/**
- * Drops the injected parameters from the model-supplied arguments, so a model
- * that hallucinates a `credentials` argument cannot reach the function with it.
- */
-function withoutIgnoredArgs(
-  args: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(args).filter(([name]) => !IGNORED_PARAMS.includes(name)),
-  );
-}
-
-/** Drops the injected parameters from a declared property map. */
-function withoutIgnoredProperties(
-  properties: Record<string, Schema> | undefined,
-): Record<string, Schema> | undefined {
-  return properties
-    ? Object.fromEntries(
-        Object.entries(properties).filter(
-          ([name]) => !IGNORED_PARAMS.includes(name),
-        ),
-      )
-    : properties;
 }

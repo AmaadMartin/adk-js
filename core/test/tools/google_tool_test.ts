@@ -15,10 +15,11 @@ import {
   PluginManager,
   createSession,
 } from '@google/adk';
-import {Type} from '@google/genai';
 import {AuthClient, OAuth2Client} from 'google-auth-library';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod/v3';
+// Not part of the package barrel: `GoogleTool` is the public surface.
+import {withGoogleCredentials} from '../../src/tools/google_tool.js';
 
 const CLIENT_ID = 'test_client_id';
 const CLIENT_SECRET = 'test_client_secret';
@@ -258,90 +259,42 @@ describe('GoogleTool', () => {
     expect(received).toBe(settings);
   });
 
-  it('keeps the injected parameters out of the declaration', () => {
+  it('declares only the parameters the caller asked for', () => {
     const tool = new GoogleTool({
       name: 'list_datasets',
       description: 'Lists BigQuery datasets.',
-      parameters: {
-        type: Type.OBJECT,
-        properties: {
-          requiredParam: {type: Type.STRING},
-          optionalParam: {type: Type.STRING},
-          credentials: {type: Type.STRING},
-          settings: {type: Type.STRING},
-        },
-        required: ['requiredParam', 'credentials', 'settings'],
-      },
+      parameters: z.object({projectId: z.string()}),
       credentialsConfig: credentialsConfig(),
+      toolSettings: {maxQueryResultRows: 50},
       execute: () => 'ok',
     });
 
     const {properties, required} = tool._getDeclaration().parameters ?? {};
 
-    expect(Object.keys(properties ?? {})).toEqual([
-      'requiredParam',
-      'optionalParam',
-    ]);
-    expect(required).toEqual(['requiredParam']);
+    expect(Object.keys(properties ?? {})).toEqual(['projectId']);
+    expect(required).toEqual(['projectId']);
   });
 
-  it('keeps a declaration without properties or required intact', () => {
-    const tool = new GoogleTool({
-      name: 'ping',
-      description: 'Pings the API.',
-      parameters: {type: Type.OBJECT},
-      execute: () => 'ok',
-    });
-
-    const parameters = tool._getDeclaration().parameters;
-
-    expect(parameters?.type).toBe(Type.OBJECT);
-    expect(parameters?.properties).toBeUndefined();
-    expect(parameters?.required).toBeUndefined();
-  });
-
-  it('strips injected parameters the model supplied', async () => {
+  it('ignores a credential the model invented', async () => {
     const client = authorizedClient();
     stubResolvedCredentials(client);
-    let receivedInput: unknown;
     let receivedCredentials: unknown;
     const tool = new GoogleTool({
       name: 'list_datasets',
       description: 'Lists BigQuery datasets.',
       credentialsConfig: credentialsConfig(),
-      execute: (input, _toolContext, google) => {
-        receivedInput = input;
+      execute: (_input, _toolContext, google) => {
         receivedCredentials = google?.credentials;
         return 'ok';
       },
     });
 
     await tool.runAsync({
-      args: {
-        requiredParam: 'x',
-        credentials: 'injected',
-        settings: 'injected',
-      },
+      args: {credentials: 'injected', settings: 'injected'},
       toolContext,
     });
 
-    expect(receivedInput).toEqual({requiredParam: 'x'});
     expect(receivedCredentials).toBe(client);
-  });
-
-  it('reports an error response to telemetry as TOOL_ERROR', () => {
-    const tool = new GoogleTool({
-      name: 'list_datasets',
-      description: 'Lists BigQuery datasets.',
-      execute: () => 'ok',
-    });
-
-    expect(tool.detectErrorInResponse({status: 'ERROR'})).toBe('TOOL_ERROR');
-    expect(tool.detectErrorInResponse({status: 'OK'})).toBeUndefined();
-    expect(tool.detectErrorInResponse({})).toBeUndefined();
-    expect(tool.detectErrorInResponse('ERROR')).toBeUndefined();
-    expect(tool.detectErrorInResponse(null)).toBeUndefined();
-    expect(tool.detectErrorInResponse(undefined)).toBeUndefined();
   });
 
   it('names the tool after the wrapped function when no name is given', () => {
@@ -370,5 +323,20 @@ describe('GoogleTool', () => {
           execute: anonymous,
         }),
     ).toThrow('Tool name cannot be empty');
+  });
+});
+
+describe('withGoogleCredentials', () => {
+  it('rejects a credentialed call that carries no tool context', async () => {
+    const execute = vi.fn(() => 'ok');
+    const adapter = withGoogleCredentials(execute, {
+      name: 'list_datasets',
+      credentialsManager: new GoogleCredentialsManager(credentialsConfig()),
+    });
+
+    await expect(adapter('', undefined)).rejects.toThrow(
+      "Tool 'list_datasets' needs a tool context to resolve credentials.",
+    );
+    expect(execute).not.toHaveBeenCalled();
   });
 });
