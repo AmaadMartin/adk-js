@@ -140,6 +140,10 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
 
     // Cross-turn resume: rehydrate this dynamic run from the events of the run
     // still in progress (a run that already completed must not be replayed).
+    // `Workflow.startNodeTask` is the static twin of this path: it makes the
+    // same `checkInterception` call, so a node fast-forwarded from a cached
+    // output, and a node handed its resolved resume value, behave the same
+    // whether the static graph scheduled it or `ctx.runNode()` did.
     const prior = reconstructNodeStatesByPath(
       eventsForCurrentRun(ctx.session?.events ?? [], ctx.invocationId),
     ).get(nodePath);
