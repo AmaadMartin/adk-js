@@ -72,6 +72,10 @@ describe('parseTestSpec', () => {
       expect(spec.initialState).toEqual({seed: 7});
     });
 
+    it('rejects a spec missing description', () => {
+      expect(() => parseTestSpec({agent: 'a'})).toThrow(/at description/);
+    });
+
     it('rejects an agent of the wrong type', () => {
       expect(() => parseTestSpec({description: 'd', agent: 42})).toThrow(
         /expected string, received number[\s\S]*at agent/,
