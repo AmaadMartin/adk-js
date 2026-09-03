@@ -146,15 +146,13 @@ describe('AuthenticatedFunctionTool without authentication', () => {
     ).resolves.toBe('no credential');
   });
 
-  it('warns that an authConfig without a scheme skips authentication', () => {
+  it('warns that a tool without an authConfig skips authentication', () => {
     const warn = vi.spyOn(logger, 'warn');
 
     new AuthenticatedFunctionTool({
       name: 'echo',
       description: 'Echoes the city.',
       execute: () => 'ok',
-      // A JavaScript caller can omit `authScheme`, which the type forbids.
-      authConfig: {credentialKey: 'k'} as AuthConfig,
     });
 
     expect(warn).toHaveBeenCalledWith(

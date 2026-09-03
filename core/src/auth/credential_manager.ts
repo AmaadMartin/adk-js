@@ -7,22 +7,15 @@
 import {cloneDeep} from 'lodash-es';
 
 import {Context} from '../agents/context.js';
-import {ServiceAccountCredentialExchanger} from '../tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
+import {AutoAuthCredentialExchanger} from '../tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 import {experimental} from '../utils/experimental.js';
 
 import {AuthCredential, AuthCredentialTypes} from './auth_credential.js';
 import {AuthScheme, OAuthGrantType} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
-import {BaseCredentialExchanger} from './exchanger/base_credential_exchanger.js';
-import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js';
+import {ExchangeResult} from './exchanger/base_credential_exchanger.js';
 import {OAuth2CredentialRefresher} from './oauth2/oauth2_credential_refresher.js';
 import {BaseCredentialRefresher} from './refresher/base_credential_refresher.js';
-
-/** A credential and whether the step that produced it changed anything. */
-interface CredentialStep {
-  credential: AuthCredential;
-  changed: boolean;
-}
 
 /**
  * Whether the credential is usable as it stands, with no exchange or refresh.
@@ -110,50 +103,26 @@ function validateAuthConfig(authConfig: AuthConfig): void {
   }
 }
 
-/** Turns a raw credential into a usable one, when the type needs it. */
-async function exchangeCredential(
-  credential: AuthCredential,
-  authScheme: AuthScheme,
-): Promise<CredentialStep> {
-  let exchanger: BaseCredentialExchanger;
-  switch (credential.authType) {
-    case AuthCredentialTypes.OAUTH2:
-    case AuthCredentialTypes.OPEN_ID_CONNECT:
-      exchanger = new OAuth2CredentialExchanger();
-      break;
-    case AuthCredentialTypes.SERVICE_ACCOUNT:
-      exchanger = new ServiceAccountCredentialExchanger();
-      break;
-    default:
-      return {credential, changed: false};
-  }
-  const result = await exchanger.exchange({
-    authCredential: credential,
-    authScheme,
-  });
-  return {credential: result.credential, changed: result.wasExchanged};
-}
-
 /** Renews an expired credential, when the type can expire. */
 async function refreshCredential(
   credential: AuthCredential,
   authScheme: AuthScheme,
-): Promise<CredentialStep> {
+): Promise<ExchangeResult> {
   if (
     credential.authType !== AuthCredentialTypes.OAUTH2 &&
     credential.authType !== AuthCredentialTypes.OPEN_ID_CONNECT
   ) {
-    return {credential, changed: false};
+    return {credential, wasExchanged: false};
   }
   // Typed as the interface, so both calls pass the scheme the contract
   // declares rather than binding to what this refresher happens to read.
   const refresher: BaseCredentialRefresher = new OAuth2CredentialRefresher();
   if (!(await refresher.isRefreshNeeded(credential, authScheme))) {
-    return {credential, changed: false};
+    return {credential, wasExchanged: false};
   }
   return {
     credential: await refresher.refresh(credential, authScheme),
-    changed: true,
+    wasExchanged: true,
   };
 }
 
@@ -226,14 +195,17 @@ export class CredentialManager {
       credential = cloneDeep(rawAuthCredential);
     }
 
-    const exchanged = await exchangeCredential(credential, authScheme);
+    const exchanged = await new AutoAuthCredentialExchanger().exchange({
+      authCredential: credential,
+      authScheme,
+    });
     // An exchange already produces a fresh token, so a refresh on top of it
     // would spend a second round trip for nothing.
-    const resolved = exchanged.changed
+    const resolved = exchanged.wasExchanged
       ? exchanged
       : await refreshCredential(exchanged.credential, authScheme);
 
-    if ((fromAuthResponse || resolved.changed) && !isServiceAccount) {
+    if ((fromAuthResponse || resolved.wasExchanged) && !isServiceAccount) {
       await credentialService?.saveCredential(
         {...this.authConfig, exchangedAuthCredential: resolved.credential},
         context,

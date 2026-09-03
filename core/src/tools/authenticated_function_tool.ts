@@ -36,8 +36,8 @@ export interface AuthenticatedFunctionToolOptions<
   TParameters extends ToolInputParameters,
 > extends ToolOptions<TParameters> {
   /**
-   * What the tool authenticates with. Without it, or without its `authScheme`,
-   * the tool skips authentication and runs the function.
+   * What the tool authenticates with. Without it the tool skips authentication
+   * and runs the function.
    */
   authConfig?: AuthConfig;
 
@@ -108,11 +108,11 @@ export class AuthenticatedFunctionTool<
     const {authConfig, responseForAuthRequired, ...toolOptions} = options;
     super(toolOptions);
 
-    if (authConfig?.authScheme) {
+    if (authConfig) {
       this.credentialManager = new CredentialManager(authConfig);
     } else {
       logger.warn(
-        `Tool '${this.name}' has no authConfig.authScheme, so it will skip ` +
+        `Tool '${this.name}' has no authConfig, so it will skip ` +
           'authentication. Use FunctionTool when no credential is required.',
       );
     }

@@ -20,7 +20,7 @@ import {
   createSession,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, assert, describe, expect, it, vi} from 'vitest';
 import {OAuth2CredentialRefresher} from '../../src/auth/oauth2/oauth2_credential_refresher.js';
 
 const API_KEY_SCHEME: AuthScheme = {
@@ -193,7 +193,7 @@ describe('CredentialManager ready credentials', () => {
         http: {scheme: 'bearer', credentials: {token: 'secret'}},
       },
     ],
-  ] as Array<[AuthCredentialTypes, AuthCredential]>)(
+  ] satisfies Array<[AuthCredentialTypes, AuthCredential]>)(
     'returns a %s credential without touching the credential service',
     async (_authType, rawAuthCredential) => {
       const credentialService = makeCredentialService();
@@ -224,8 +224,8 @@ describe('CredentialManager ready credentials', () => {
     });
 
     const credential = await manager.getAuthCredential(makeContext());
-    expect(credential).toBeDefined();
-    credential!.apiKey = 'tampered';
+    assert(credential);
+    credential.apiKey = 'tampered';
 
     expect(rawAuthCredential.apiKey).toBe('secret');
   });
