@@ -1865,12 +1865,14 @@ describe('VertexAiSessionService', () => {
         const timeout = new Error('socket hang up');
         mockClient.events.append.mockRejectedValue(timeout);
 
-        await expect(
+        const rejected = expect(
           service.appendEvent({session: appendSession(), event: helloEvent()}),
         ).rejects.toBe(timeout);
 
+        await vi.advanceTimersByTimeAsync(0);
         expect(mockClient.events.append).toHaveBeenCalledTimes(1);
         expect(vi.getTimerCount()).toBe(0);
+        await rejected;
       });
 
       it('test_append_event_does_not_retry_on_non_429_client_error', async () => {
@@ -1898,11 +1900,14 @@ describe('VertexAiSessionService', () => {
         const unavailable = new ApiError({message: 'try later', status: 503});
         mockClient.events.append.mockRejectedValue(unavailable);
 
-        await expect(
+        const rejected = expect(
           service.appendEvent({session: appendSession(), event: helloEvent()}),
         ).rejects.toBe(unavailable);
 
+        await vi.advanceTimersByTimeAsync(0);
         expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+        await rejected;
       });
 
       it('retries a 429 raised by the append that already dropped rawEvent', async () => {
