@@ -15,7 +15,7 @@ import {
   VertexAiMemoryBankServiceOptions,
 } from '@google/adk';
 import {Content, Language, Outcome, Part} from '@google/genai';
-import {ApiClientInitOptions} from '@google/genai/vertex_internal';
+import {ApiClient, ApiClientInitOptions} from '@google/genai/vertex_internal';
 import {OAuth2Client} from 'google-auth-library';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -24,6 +24,9 @@ const TEXT_EVENT = {content: {parts: [{text: 'event 1'}]} as Content} as Event;
 const clientConstructor = vi.hoisted(() => vi.fn());
 const apiClientOptions = vi.hoisted(() =>
   vi.fn<(options: ApiClientInitOptions) => void>(),
+);
+const memoriesConstructor = vi.hoisted(() =>
+  vi.fn<(apiClient: ApiClient) => void>(),
 );
 
 /** An event that survives the memory event filter. */
@@ -63,10 +66,20 @@ vi.mock('@google/genai/vertex_internal', async (importOriginal) => {
   };
 });
 
+// The credentialed path builds Memories itself instead of going through Client.
+vi.mock('@google-cloud/vertexai/build/src/genai/memories.js', () => ({
+  Memories: class {
+    constructor(apiClient: ApiClient) {
+      memoriesConstructor(apiClient);
+    }
+  },
+}));
+
 afterEach(() => {
   vi.unstubAllEnvs();
   clientConstructor.mockClear();
   apiClientOptions.mockClear();
+  memoriesConstructor.mockClear();
 });
 
 describe('VertexAiMemoryBankService', () => {
@@ -1823,6 +1836,38 @@ describe('VertexAiMemoryBankService', () => {
       const response = await search();
 
       expect(response.memories[0].customMetadata).toEqual({});
+    });
+  });
+
+  describe('credentials', () => {
+    it('builds the memories client from the given credentials', () => {
+      new VertexAiMemoryBankService({
+        agentEngineId: 'test-engine-id',
+        projectId: 'test-project',
+        location: 'us-central1',
+        credentials: {credentials: {client_email: 'a@b.c', private_key: 'k'}},
+      });
+
+      expect(clientConstructor).not.toHaveBeenCalled();
+      expect(memoriesConstructor).toHaveBeenCalledTimes(1);
+      const apiClient = memoriesConstructor.mock.calls[0][0];
+      expect(apiClient.isVertexAI()).toBe(true);
+      expect(apiClient.getProject()).toBe('test-project');
+      expect(apiClient.getLocation()).toBe('us-central1');
+    });
+
+    it('falls back to the default client when no credentials are given', () => {
+      new VertexAiMemoryBankService({
+        agentEngineId: 'test-engine-id',
+        projectId: 'test-project',
+        location: 'us-central1',
+      });
+
+      expect(clientConstructor).toHaveBeenCalledWith({
+        project: 'test-project',
+        location: 'us-central1',
+      });
+      expect(memoriesConstructor).not.toHaveBeenCalled();
     });
   });
 });

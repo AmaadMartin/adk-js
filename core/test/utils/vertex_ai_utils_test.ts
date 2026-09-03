@@ -142,6 +142,18 @@ describe('vertex_ai_utils', () => {
       expect(apiClient.clientOptions.apiKey).toBeUndefined();
     });
 
+    it('targets Vertex AI at the given project and location', () => {
+      const apiClient = createVertexApiClient({
+        project: 'my-project',
+        location: 'us-central1',
+      });
+
+      expect(apiClient.isVertexAI()).toBe(true);
+      expect(apiClient.getProject()).toBe('my-project');
+      expect(apiClient.getLocation()).toBe('us-central1');
+      expect(apiClient.getApiKey()).toBeUndefined();
+    });
+
     it('signs a request with the caller-supplied credentials', async () => {
       const authClient = new OAuth2Client();
       authClient.credentials = {access_token: 'token-from-caller'};
@@ -154,6 +166,23 @@ describe('vertex_ai_utils', () => {
       }).clientOptions.auth.addAuthHeaders(headers);
 
       expect(headers.get('Authorization')).toBe('Bearer token-from-caller');
+    });
+
+    it('authenticates with the given credentials', async () => {
+      const apiClient = createVertexApiClient({
+        project: 'my-project',
+        location: 'us-central1',
+        googleAuthOptions: {
+          credentials: {
+            client_email: 'test@example.iam.gserviceaccount.com',
+            private_key: 'not-a-real-private-key',
+          },
+        },
+      });
+
+      // The credentials reach google-auth-library, which rejects the
+      // unparseable key rather than falling back to other credentials.
+      await expect(apiClient.getAuthHeaders()).rejects.toThrow(/DECODER/);
     });
   });
 });

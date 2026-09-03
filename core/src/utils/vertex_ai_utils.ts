@@ -11,7 +11,6 @@ import {
   NodeUploader,
 } from '@google/genai/vertex_internal';
 import {GoogleAuthOptions} from 'google-auth-library';
-
 import {isEnterpriseModeEnabled} from './env_aware_utils.js';
 
 export const EXPRESS_MODE_UNSUPPORTED_MESSAGE =
@@ -77,6 +76,10 @@ export function createExpressModeApiClient(apiKey: string): ApiClient {
  * through it. `NodeAuth` accepts the `google-auth-library` options directly,
  * and falls back to Application Default Credentials when `googleAuthOptions`
  * is absent.
+ *
+ * @param options The project, location and google-auth-library options.
+ *     Application Default Credentials are used when the options are absent.
+ * @returns An API client for the Vertex AI endpoints.
  */
 export function createVertexApiClient(options: {
   project?: string;

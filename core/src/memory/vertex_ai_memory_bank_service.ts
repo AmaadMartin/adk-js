@@ -201,13 +201,15 @@ export interface VertexAiMemoryBankServiceOptions {
   location?: string;
   agentEngineId: string;
   expressModeApiKey?: string;
+
   client?: Client;
 
   /**
-   * Authentication options for the Memory Bank API, e.g. credentials obtained
-   * via Workload Identity Federation outside of GCP. Defaults to Application
-   * Default Credentials. Ignored in Express Mode, which authenticates with
-   * `expressModeApiKey` instead.
+   * Authentication options for the Memory Bank API, for example credentials
+   * obtained through Workload Identity Federation outside of Google Cloud.
+   * Defaults to Application Default Credentials. Ignored when `client` is
+   * given, because an injected client carries its own authentication, and
+   * ignored in Express Mode, which authenticates with `expressModeApiKey`.
    */
   credentials?: GoogleAuthOptions;
 }
