@@ -155,7 +155,9 @@ describe('RemoteA2AAgent task mode', () => {
         content: {role: 'user', parts: [{text: 'in scope'}]},
       });
 
-      await run(buildAgent(), contextFor([otherTask, triggerEvent(), inScope]));
+      // The other task sits between the trigger and this task's own events, so
+      // the backward walk has to step over it rather than stop at it.
+      await run(buildAgent(), contextFor([triggerEvent(), otherTask, inScope]));
 
       const texts = sentParts().map((part) =>
         part.kind === 'text' ? part.text : undefined,
@@ -233,6 +235,64 @@ describe('RemoteA2AAgent task mode', () => {
 
       const dataParts = sentParts().filter((part) => part.kind === 'data');
       expect(JSON.stringify(dataParts)).toContain('peer-fc');
+    });
+
+    it("ignores the peer's calls from another task", async () => {
+      const otherScopeCall = {
+        ...createEvent({
+          author: 'remote_agent',
+          content: {
+            role: 'model',
+            parts: [{functionCall: {id: 'old-fc', name: 'ask', args: {}}}],
+          },
+        }),
+        isolationScope: 'another-scope',
+      };
+      const answer = scopedEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {functionResponse: {id: 'old-fc', name: 'ask', response: {a: 1}}},
+          ],
+        },
+      });
+
+      // A trailing turn keeps the answer off the end of the session, where the
+      // resume short-circuit would forward it on its own.
+      const trailing = scopedEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'carry on'}]},
+      });
+
+      await run(
+        buildAgent(),
+        contextFor([triggerEvent(), otherScopeCall, answer, trailing]),
+      );
+
+      // The call belongs to another task, so its answer is flattened to text
+      // rather than forwarded as a resume the peer cannot match.
+      const texts = sentParts().map((part) =>
+        part.kind === 'text' ? part.text : '',
+      );
+      expect(texts).toContain('Tool ask returned: {"a":1}');
+    });
+
+    it('flattens a function response that carries no call id', async () => {
+      const idless = scopedEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [{functionResponse: {name: 'lookup', response: {a: 1}}}],
+        },
+      });
+
+      await run(buildAgent(), contextFor([triggerEvent(), idless]));
+
+      const texts = sentParts().map((part) =>
+        part.kind === 'text' ? part.text : '',
+      );
+      expect(texts).toContain('Tool lookup returned: {"a":1}');
     });
 
     it('marks user-authored parts as user input', async () => {
@@ -441,6 +501,27 @@ describe('RemoteA2AAgent task mode', () => {
       expect(
         events.find((event) => event.errorMessage)?.errorMessage,
       ).toContain('Task canceled');
+    });
+
+    it('keeps going while the remote task is still working', async () => {
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {
+          yield {
+            kind: 'task',
+            id: 'task-1',
+            contextId: 'ctx-1',
+            status: {state: 'working'},
+            artifacts: [
+              {artifactId: 'a-1', parts: [{kind: 'text', text: 'thinking'}]},
+            ],
+          } as Task;
+        })(),
+      );
+
+      const events = await run(buildAgent(), contextFor([triggerEvent()]));
+
+      expect(events.some((event) => event.errorMessage)).toBe(false);
+      expect(events[events.length - 1].actions.endOfAgent).toBeUndefined();
     });
 
     it('releases control when the send fails', async () => {
