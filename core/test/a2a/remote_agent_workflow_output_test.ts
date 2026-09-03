@@ -196,16 +196,6 @@ describe('RemoteA2AAgent as a workflow node', () => {
     expect(promoted[0].output).toBe('first');
   });
 
-  it('promotes nothing from an event whose content has no parts', () => {
-    const event = createEvent({
-      author: 'peer_agent',
-      content: {role: 'model'},
-    });
-
-    expect(promoteResponseToOutput(event, 'peer_agent')).toBe(false);
-    expect(event.output).toBeUndefined();
-  });
-
   it('skips a partial streaming chunk', async () => {
     const events = await runAsNode(
       agentFor({
@@ -242,5 +232,55 @@ describe('RemoteA2AAgent as a workflow node', () => {
     expect(events.find((event) => event.output !== undefined)?.output).toBe(
       'no metadata',
     );
+  });
+});
+
+/**
+ * The response metadata is whatever the peer sent, so its shape is not
+ * guaranteed. The client double is typed to the SDK, which is what a healthy
+ * server produces; these drive the narrowing directly with the shapes a
+ * buggy or hostile one can produce.
+ */
+describe('promoteResponseToOutput', () => {
+  function peerEvent(response?: unknown): Event {
+    return createEvent({
+      author: 'peer_agent',
+      content: {role: 'model', parts: [{text: 'the answer'}]},
+      customMetadata:
+        response === undefined ? undefined : {'a2a:response': response},
+    });
+  }
+
+  it('promotes when the task status is not an object', () => {
+    const event = peerEvent({status: 'completed', artifacts: []});
+
+    expect(promoteResponseToOutput(event, 'peer_agent')).toBe(true);
+    expect(event.output).toBe('the answer');
+  });
+
+  it('promotes when the response metadata is not an object', () => {
+    const event = peerEvent('not a task');
+
+    expect(promoteResponseToOutput(event, 'peer_agent')).toBe(true);
+  });
+
+  it('promotes when the task state is not a string', () => {
+    const event = peerEvent({status: {state: 42}});
+
+    expect(promoteResponseToOutput(event, 'peer_agent')).toBe(true);
+  });
+
+  it('skips a state the peer reports as still in progress', () => {
+    const event = peerEvent({status: {state: 'working'}});
+
+    expect(promoteResponseToOutput(event, 'peer_agent')).toBe(false);
+    expect(event.output).toBeUndefined();
+  });
+
+  it('promotes nothing from an event whose content has no parts', () => {
+    const event = createEvent({author: 'peer_agent', content: {role: 'model'}});
+
+    expect(promoteResponseToOutput(event, 'peer_agent')).toBe(false);
+    expect(event.output).toBeUndefined();
   });
 });
