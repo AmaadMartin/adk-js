@@ -9,7 +9,7 @@ import {EventEmitter} from 'node:events';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {instrumentCommandMetrics} from '../../../src/cli/telemetry/command_metrics.js';
 import {
   CommandRun,
@@ -331,7 +331,6 @@ describe('instrumentCommandMetrics with no dependency overrides', () => {
     process.env['HOME'] = home;
     process.env['USERPROFILE'] = home;
     fs.mkdirSync(path.join(home, '.adk'));
-    vi.resetModules();
   });
 
   afterEach(() => {
@@ -340,16 +339,14 @@ describe('instrumentCommandMetrics with no dependency overrides', () => {
     fs.rmSync(home, {recursive: true, force: true});
   });
 
-  it('reads the consent and writes the queue under ~/.adk', async () => {
+  it('reads the consent and writes the queue under ~/.adk', () => {
     fs.writeFileSync(
       path.join(home, '.adk', 'config.json'),
       JSON.stringify({telemetry: true}),
     );
-    const module =
-      await import('../../../src/cli/telemetry/command_metrics.js');
     const program = buildProgram();
 
-    const stop = module.instrumentCommandMetrics(program, [
+    const stop = instrumentCommandMetrics(program, [
       'create',
       '--model',
       'gemini-2.0',
@@ -376,12 +373,10 @@ describe('instrumentCommandMetrics with no dependency overrides', () => {
     );
   });
 
-  it('writes nothing under ~/.adk when the user never opted in', async () => {
-    const module =
-      await import('../../../src/cli/telemetry/command_metrics.js');
+  it('writes nothing under ~/.adk when the user never opted in', () => {
     const program = buildProgram();
 
-    const stop = module.instrumentCommandMetrics(program, ['create', 'my_app']);
+    const stop = instrumentCommandMetrics(program, ['create', 'my_app']);
     program.parse(['create', 'my_app'], {from: 'user'});
     process.emit('exit', 0);
     stop();

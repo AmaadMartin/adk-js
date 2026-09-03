@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Command, Option} from 'commander';
+import {Command} from 'commander';
 import {EventEmitter} from 'node:events';
 import {AdkLogger} from '../../utils/logger.js';
 import {readTelemetryConsent} from '../../utils/telemetry_config.js';
@@ -88,7 +88,7 @@ export function instrumentCommandMetrics(
   });
 
   const onError = (error: unknown) => {
-    exceptionType = errorName(error);
+    exceptionType = error instanceof Error ? error.name : '';
   };
   const onExit = (exitCode: number) => {
     try {
@@ -177,16 +177,7 @@ function gatherFlags(command: Command): string[] {
       (option) =>
         command.getOptionValueSource(option.attributeName()) === 'cli',
     )
-    .map(optionName);
+    .map((option) => option.long ?? option.flags);
   const supplied = command.registeredArguments.slice(0, command.args.length);
   return flags.concat(supplied.map((argument) => `<${argument.name()}>`));
-}
-
-/** The long flag of an option, or its declaration when it has no long form. */
-function optionName(option: Option): string {
-  return option.long ?? option.flags;
-}
-
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : '';
 }
