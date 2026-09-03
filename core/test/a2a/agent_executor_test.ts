@@ -322,7 +322,9 @@ describe('A2AAgentExecutor', () => {
     });
 
   const mockRunner = (
-    runAsync: (params: unknown) => AsyncGenerator<AdkEvent, void, undefined>,
+    runAsync: (params: {
+      abortSignal?: AbortSignal;
+    }) => AsyncGenerator<AdkEvent, void, undefined>,
   ) => {
     vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
       return {
@@ -372,6 +374,43 @@ describe('A2AAgentExecutor', () => {
 
   const publishedEvents = () =>
     mockEventBus.publish.mock.calls.map((call) => call[0]);
+
+  const publishedStates = () =>
+    publishedEvents()
+      .filter(
+        (event): event is TaskStatusUpdateEvent =>
+          event.kind === 'status-update',
+      )
+      .map((event) => event.status.state);
+
+  /**
+   * A run parked until the test releases it, so a cancellation lands while it
+   * is still in flight. The generator stops on an aborted signal, as the real
+   * runner does.
+   */
+  const parkedRun = () => {
+    let release: () => void = () => {};
+    const parked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started: () => void = () => {};
+    const runStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+
+    return {
+      runStarted,
+      release,
+      generator: async function* ({abortSignal}: {abortSignal?: AbortSignal}) {
+        started();
+        await parked;
+        if (abortSignal?.aborted) {
+          return;
+        }
+        yield modelEvent('done');
+      },
+    };
+  };
 
   describe('cancelTask', () => {
     it('publishes a canceled final status update for the running task', async () => {
@@ -445,6 +484,60 @@ describe('A2AAgentExecutor', () => {
 
       releaseRun();
       await running;
+    });
+
+    it('aborts the run it cancels', async () => {
+      mockSessionService.getSession.mockResolvedValue(testSession());
+      let runSignal: AbortSignal | undefined;
+      const run = parkedRun();
+      mockRunner(async function* (params) {
+        runSignal = params.abortSignal;
+        yield* run.generator(params);
+      });
+
+      const executor = createExecutor();
+      const running = executor.execute(createRequestContext(), mockEventBus);
+      await run.runStarted;
+      expect(runSignal?.aborted).toBe(false);
+
+      await executor.cancelTask('test-task', mockEventBus);
+      expect(runSignal?.aborted).toBe(true);
+
+      run.release();
+      await running;
+    });
+
+    it('publishes no terminal event of its own once the task is canceled', async () => {
+      mockSessionService.getSession.mockResolvedValue(testSession());
+      const run = parkedRun();
+      mockRunner(run.generator);
+
+      const executor = createExecutor();
+      const running = executor.execute(createRequestContext(), mockEventBus);
+      await run.runStarted;
+      await executor.cancelTask('test-task', mockEventBus);
+      run.release();
+      await running;
+
+      expect(publishedStates()).toEqual(['working', 'canceled']);
+    });
+
+    it('publishes no failed event when the canceled run throws', async () => {
+      mockSessionService.getSession.mockResolvedValue(testSession());
+      const run = parkedRun();
+      mockRunner(async function* (params) {
+        yield* run.generator(params);
+        throw new Error('the model client rejected the aborted request');
+      });
+
+      const executor = createExecutor();
+      const running = executor.execute(createRequestContext(), mockEventBus);
+      await run.runStarted;
+      await executor.cancelTask('test-task', mockEventBus);
+      run.release();
+      await running;
+
+      expect(publishedStates()).toEqual(['working', 'canceled']);
     });
   });
 
@@ -739,6 +832,85 @@ describe('A2AAgentExecutor', () => {
 
       const kinds = publishedEvents().map((event) => event.kind);
       expect(kinds).toEqual(['status-update', 'status-update']);
+    });
+
+    it('precedes the event the unanswered-request gate publishes', async () => {
+      const pendingCall = createEvent({
+        author: 'agent',
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                id: 'gate-1',
+                name: 'adk_request_confirmation',
+                args: {},
+              },
+            },
+          ],
+        },
+        longRunningToolIds: ['gate-1'],
+        actions: createEventActions(),
+      });
+      mockSessionService.getSession.mockResolvedValue(
+        createSession({
+          id: 'session-id',
+          userId: 'test-user',
+          appName: 'test-app',
+          events: [pendingCall],
+        }),
+      );
+      const runAsync = vi.fn();
+      vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync,
+      })) as unknown as () => Runner);
+
+      const executor = createExecutor();
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      // Without the leading task, the SDK's result manager drops the gate's
+      // status update as belonging to a task it has never seen.
+      expect(publishedEvents().map((event) => event.kind)).toEqual([
+        'task',
+        'status-update',
+      ]);
+      expect(publishedStates()).toEqual(['input-required']);
+      expect(runAsync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('streaming artifact ids', () => {
+    it('gives each execution its own partial artifact id', async () => {
+      mockSessionService.getSession.mockResolvedValue(testSession());
+      mockRunner(async function* () {
+        yield createEvent({
+          author: 'model',
+          content: {role: 'model', parts: [{text: 'chunk'}]},
+          partial: true,
+          actions: createEventActions(),
+        });
+      });
+
+      const executor = createExecutor();
+      await executor.execute(
+        createRequestContext({taskId: 'task-a', contextId: 'context-a'}),
+        mockEventBus,
+      );
+      await executor.execute(
+        createRequestContext({taskId: 'task-b', contextId: 'context-b'}),
+        mockEventBus,
+      );
+
+      const artifactIds = publishedEvents()
+        .filter(
+          (event): event is TaskArtifactUpdateEvent =>
+            event.kind === 'artifact-update',
+        )
+        .map((event) => event.artifact.artifactId);
+      expect(artifactIds).toHaveLength(2);
+      expect(artifactIds[0]).not.toBe(artifactIds[1]);
     });
   });
 
