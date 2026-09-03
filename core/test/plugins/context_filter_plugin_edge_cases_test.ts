@@ -4,9 +4,38 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, ContextFilterPlugin, LlmRequest} from '@google/adk';
+import {
+  BaseLlm,
+  BaseLlmConnection,
+  Context,
+  ContextFilterPlugin,
+  InMemoryRunner,
+  LlmAgent,
+  LlmRequest,
+  LlmResponse,
+} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+
+/** Records the contents of every request the runner sends. */
+class RecordingLlm extends BaseLlm {
+  readonly sentContents: Content[][] = [];
+
+  constructor() {
+    super({model: 'recording-llm'});
+  }
+
+  async *generateContentAsync(
+    request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    this.sentContents.push(request.contents);
+    yield {content: {role: 'model', parts: [{text: 'ack'}]}};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('Method not implemented.');
+  }
+}
 
 function createContent(role: string, text: string): Content {
   return {parts: [{text}], role};
@@ -181,5 +210,32 @@ describe('ContextFilterPlugin edge cases', () => {
 
     expect(contents).toHaveLength(6);
     expect(llmRequest.contents).toHaveLength(2);
+  });
+
+  it('trims the history a runner sends on the third turn', async () => {
+    const model = new RecordingLlm();
+    const runner = new InMemoryRunner({
+      agent: new LlmAgent({name: 'chat_agent', model}),
+      plugins: [new ContextFilterPlugin({numInvocationsToKeep: 1})],
+    });
+    const session = await runner.sessionService.createSession({
+      appName: runner.appName,
+      userId: 'test_user',
+    });
+
+    for (const text of ['turn one', 'turn two', 'turn three']) {
+      for await (const _event of runner.runAsync({
+        userId: 'test_user',
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: [{text}]},
+      })) {
+        // Drain the stream so the turn completes.
+      }
+    }
+
+    expect(model.sentContents).toHaveLength(3);
+    expect(model.sentContents[2].map((c) => c.parts?.[0].text)).toEqual([
+      'turn three',
+    ]);
   });
 });
