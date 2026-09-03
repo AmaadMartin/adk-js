@@ -13,6 +13,7 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export {codeConfigSchema} from './agents/common_configs.js';
 export type {CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
@@ -172,9 +173,13 @@ export type {
   UserSimulatorConfig,
 } from './evaluation/eval_config.js';
 export {
+  DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   PrebuiltMetrics,
   ToolTrajectoryMatchType,
   getConfigCustomFunctionPath,
+  normalizeToolTrajectoryMatchType,
   parseMetricInfo,
   setConfigCustomFunctionPath,
 } from './evaluation/eval_metrics.js';
