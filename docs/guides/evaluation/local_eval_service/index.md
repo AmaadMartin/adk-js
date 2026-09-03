@@ -94,6 +94,35 @@ order. Read `EvalCaseResult.finalEvalStatus` for the verdict on a case,
 `overallEvalMetricResults` for each metric aggregated over the case, and
 `evalMetricResultPerInvocation` for the score of each turn.
 
+## Using it through AgentEvaluator
+
+`AgentEvaluator` does not construct an eval service. It asks the installed
+`EvalRuntime` for one, and nothing is installed by default, so
+`AgentEvaluator.evaluateEvalSet` fails until you install one.
+`LocalEvalRuntime` is that runtime.
+
+```typescript
+import {AgentEvaluator, LocalEvalRuntime, setEvalRuntime} from '@google/adk';
+
+setEvalRuntime(new LocalEvalRuntime());
+
+await AgentEvaluator.evaluateEvalSet({
+  agentModule: {agent: {rootAgent}},
+  evalSet,
+  evalConfig: {criteria: {response_match_score: 0.8}},
+});
+```
+
+Installing is deliberately the caller's job. The runtime is a process-wide
+singleton, so importing `@google/adk` must not decide what a process runs its
+evals on. A test that installs one should uninstall it with
+`setEvalRuntime(undefined)` afterwards, or it leaks into unrelated test files.
+
+`evalConfig.customMetrics` is not honored: scoring a custom metric needs an
+evaluator that loads a scoring function from a module path, which this package
+does not have yet. Configuring one does not pass silently. The metric resolves
+to no evaluator, and the run fails reporting that metric as unmet.
+
 ## Sessions
 
 Each eval case runs in its own session. When the case pins

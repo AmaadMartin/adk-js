@@ -214,6 +214,23 @@ describe('AgentEvaluator over an installed LocalEvalRuntime', () => {
     ).rejects.toThrow(EvalFailureError);
   });
 
+  it('fails the run when a configured metric resolves to no evaluator', async () => {
+    await expect(
+      AgentEvaluator.evaluateEvalSet({
+        agentModule: agentModule(),
+        evalSet: matchingEvalSet(),
+        evalConfig: {
+          criteria: {my_custom_metric: 0.5},
+          customMetrics: {
+            my_custom_metric: {codeConfig: {name: 'not.importable:score'}},
+          },
+        },
+        numRuns: 1,
+        printDetailedResults: false,
+      }),
+    ).rejects.toThrow(/my_custom_metric.*Failed/);
+  });
+
   it('reports the missing runtime once it is uninstalled', async () => {
     setEvalRuntime(undefined);
 
