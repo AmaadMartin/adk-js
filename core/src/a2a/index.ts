@@ -42,6 +42,7 @@ export {
   executeBeforeAgentInterceptors,
 } from './executor_utils.js';
 export type {ExecuteInterceptor} from './executor_utils.js';
+export {toGenAIContent, toGenAIPart} from './part_converter_utils.js';
 export type {
   A2APartToGenAIPartConverter,
   GenAIPartToA2APartConverter,
