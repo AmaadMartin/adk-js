@@ -44,7 +44,6 @@ import {
   StorageUserState,
 } from '../../src/sessions/db/schema.js';
 import {logger} from '../../src/utils/logger.js';
-import {loadOptionalPeer} from '../../src/utils/optional_peer.js';
 
 /** Opens a service that records every statement MikroORM sends. */
 async function createLoggingService(): Promise<{
@@ -2341,21 +2340,6 @@ describe('describeOpenFailure', () => {
       "Failed to create database engine for URL 'postgres://user:***@localhost:5432/db'",
     );
     expect(described.message).not.toContain(password);
-    expect(described.cause).toBe(cause);
-  });
-
-  it('reports a missing driver package differently', async () => {
-    const absent = '@mikro-orm/definitely-not-installed';
-    const cause = await loadOptionalPeer(
-      {packageName: absent, feature: 'a test'},
-      () => import(/* @vite-ignore */ absent),
-    ).catch((error: unknown) => error);
-
-    const described = describeOpenFailure(cause, 'mysql://user:pw@host/db');
-
-    expect(described.message).toBe(
-      "Database related module not found for URL 'mysql://user:***@host/db'",
-    );
     expect(described.cause).toBe(cause);
   });
 

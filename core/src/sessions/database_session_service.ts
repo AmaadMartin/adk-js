@@ -18,7 +18,6 @@ import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {KeyedMutex} from '../utils/keyed_mutex.js';
 import {logger} from '../utils/logger.js';
-import {isMissingOptionalPeerError} from '../utils/optional_peer.js';
 import {redactUriPassword} from '../utils/redact_uri.js';
 import {
   AppendEventRequest,
@@ -144,22 +143,20 @@ function isMikroORM(source: MikroDBOptions | MikroORM): source is MikroORM {
 /**
  * Restates a failure to open the database, naming the URL it happened on.
  *
- * Mirrors the fallback branches of adk-python's engine construction: a driver
- * that is not installed reads differently from a database that refused the
- * connection, and neither should surface a raw driver stack trace. The URL is
+ * Mirrors the fallback branch of adk-python's engine construction, so a driver
+ * that refused the connection does not surface a raw stack trace. The URL is
  * redacted, and a caller who supplied a MikroORM instance or an options object
  * has no URL to name.
  *
- * @param error The failure MikroORM or the driver loader raised.
+ * @param error The failure MikroORM raised.
  * @param uri The connection string, if the caller gave one.
  */
 export function describeOpenFailure(error: unknown, uri?: string): Error {
   const target =
     uri === undefined ? 'the database' : `'${redactUriPassword(uri)}'`;
-  const reason = isMissingOptionalPeerError(error)
-    ? `Database related module not found for URL ${target}`
-    : `Failed to create database engine for URL ${target}`;
-  return new Error(reason, {cause: error});
+  return new Error(`Failed to create database engine for URL ${target}`, {
+    cause: error,
+  });
 }
 
 /** The exact storage revision a session row is currently at. */
@@ -355,8 +352,12 @@ export class DatabaseSessionService extends BaseSessionService {
   private async openOrm(
     entities: MikroDBOptions['entities'],
   ): Promise<MikroORM> {
+    // The driver load sits outside the wrapping: `loadOptionalPeer` already
+    // names the package and the command that installs it, which is more use
+    // than a redacted URL.
+    const options = await this.resolveOptions();
     try {
-      return await MikroORM.init({...(await this.resolveOptions()), entities});
+      return await MikroORM.init({...options, entities});
     } catch (error: unknown) {
       throw describeOpenFailure(error, this.connectionString);
     }

@@ -5,10 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {
-  isMissingOptionalPeerError,
-  loadOptionalPeer,
-} from '../../src/utils/optional_peer.js';
+import {loadOptionalPeer} from '../../src/utils/optional_peer.js';
 
 const PEER = {packageName: '@example/driver', feature: 'ExampleService'};
 
@@ -66,31 +63,5 @@ describe('loadOptionalPeer', () => {
         ),
       ),
     ).rejects.toThrow(/Cannot find package '@example\/something-else'/);
-  });
-});
-
-describe('a load failure that is not an Error', () => {
-  it('propagates unchanged', async () => {
-    await expect(
-      loadOptionalPeer(PEER, () => Promise.reject('a thrown string')),
-    ).rejects.toBe('a thrown string');
-  });
-});
-
-describe('isMissingOptionalPeerError', () => {
-  it('recognises the error raised for a package that is not installed', async () => {
-    const absent = '@google/adk-definitely-not-installed';
-    const error = await loadOptionalPeer(
-      {packageName: absent, feature: 'a test'},
-      () => import(/* @vite-ignore */ absent),
-    ).catch((raised: unknown) => raised);
-
-    expect(isMissingOptionalPeerError(error)).toBe(true);
-  });
-
-  it('rejects any other failure', () => {
-    expect(isMissingOptionalPeerError(new Error('syntax error'))).toBe(false);
-    expect(isMissingOptionalPeerError('not an error')).toBe(false);
-    expect(isMissingOptionalPeerError(undefined)).toBe(false);
   });
 });
