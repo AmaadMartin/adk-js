@@ -33,7 +33,6 @@ import {
 } from './event_processor_utils.js';
 import {createExecutorContext, ExecutorContext} from './executor_context.js';
 import {
-  activateNewVersionExtension,
   enqueueSubmittedSignal,
   executeAfterAgentInterceptors,
   executeAfterEventInterceptors,
@@ -135,18 +134,6 @@ export interface AgentExecutorConfig {
 
   /** Hooks that can rewrite the request, the events and the terminal event. */
   executeInterceptors?: ExecuteInterceptor[];
-
-  /** Serves every request on the legacy path, ignoring the extension. */
-  useLegacy?: boolean;
-
-  /** Serves every request on the new path, without waiting for the extension. */
-  forceNewVersion?: boolean;
-
-  /**
-   * The executor that serves the new ADK A2A integration. Without one, a
-   * request that asks for the new path is served by the legacy path.
-   */
-  newVersionExecutor?: AgentExecutor;
 }
 
 /**
@@ -168,16 +155,6 @@ export class A2AAgentExecutor implements AgentExecutor {
     ctx: RequestContext,
     eventBus: ExecutionEventBus,
   ): Promise<void> {
-    if (this.shouldUseNewVersion(ctx)) {
-      const newVersionExecutor = this.config.newVersionExecutor;
-      if (newVersionExecutor) {
-        return newVersionExecutor.execute(ctx, eventBus);
-      }
-      logger.debug(
-        'The new A2A integration was requested but no newVersionExecutor is registered; serving the request on the legacy path.',
-      );
-    }
-
     const reqCtx = await executeBeforeAgentInterceptors(
       ctx,
       this.config.executeInterceptors,
@@ -257,14 +234,6 @@ export class A2AAgentExecutor implements AgentExecutor {
         state: TaskState.CANCELED,
       }),
     );
-  }
-
-  private shouldUseNewVersion(ctx: RequestContext): boolean {
-    if (this.config.useLegacy) {
-      return false;
-    }
-
-    return this.config.forceNewVersion || activateNewVersionExtension(ctx);
   }
 
   private async runLegacy(

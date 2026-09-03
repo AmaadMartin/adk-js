@@ -13,7 +13,6 @@ import {
 } from '@a2a-js/sdk';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
-  A2A_NEW_INTEGRATION_EXTENSION,
   A2AAgentExecutor,
   A2AEvent,
   Event as AdkEvent,
@@ -446,91 +445,6 @@ describe('A2AAgentExecutor', () => {
 
       releaseRun();
       await running;
-    });
-  });
-
-  describe('new-version routing', () => {
-    const requestWithExtension = (activated: string[]) =>
-      createRequestContext({
-        context: {
-          requestedExtensions: [A2A_NEW_INTEGRATION_EXTENSION],
-          addActivatedExtension: (uri: string) => activated.push(uri),
-        },
-      });
-
-    it('routes to the new executor and activates the extension', async () => {
-      const activated: string[] = [];
-      const newVersionExecutor = {
-        execute: vi.fn(async () => {}),
-        cancelTask: vi.fn(async () => {}),
-      };
-
-      const executor = createExecutor({newVersionExecutor});
-      await executor.execute(requestWithExtension(activated), mockEventBus);
-
-      expect(newVersionExecutor.execute).toHaveBeenCalledTimes(1);
-      expect(activated).toEqual([A2A_NEW_INTEGRATION_EXTENSION]);
-      expect(mockEventBus.publish).not.toHaveBeenCalled();
-    });
-
-    it('stays on the legacy path when useLegacy is set', async () => {
-      mockSessionService.getSession.mockResolvedValue(testSession());
-      mockRunner(async function* () {});
-      const activated: string[] = [];
-      const newVersionExecutor = {
-        execute: vi.fn(async () => {}),
-        cancelTask: vi.fn(async () => {}),
-      };
-
-      const executor = createExecutor({newVersionExecutor, useLegacy: true});
-      await executor.execute(requestWithExtension(activated), mockEventBus);
-
-      expect(newVersionExecutor.execute).not.toHaveBeenCalled();
-      expect(activated).toEqual([]);
-      expect(mockEventBus.publish).toHaveBeenCalled();
-    });
-
-    it('routes to the new executor when forceNewVersion is set without the extension', async () => {
-      const newVersionExecutor = {
-        execute: vi.fn(async () => {}),
-        cancelTask: vi.fn(async () => {}),
-      };
-
-      const executor = createExecutor({
-        newVersionExecutor,
-        forceNewVersion: true,
-      });
-      await executor.execute(createRequestContext(), mockEventBus);
-
-      expect(newVersionExecutor.execute).toHaveBeenCalledTimes(1);
-      expect(mockEventBus.publish).not.toHaveBeenCalled();
-    });
-
-    it('stays on the legacy path without the extension or a flag', async () => {
-      mockSessionService.getSession.mockResolvedValue(testSession());
-      mockRunner(async function* () {});
-      const newVersionExecutor = {
-        execute: vi.fn(async () => {}),
-        cancelTask: vi.fn(async () => {}),
-      };
-
-      const executor = createExecutor({newVersionExecutor});
-      await executor.execute(createRequestContext(), mockEventBus);
-
-      expect(newVersionExecutor.execute).not.toHaveBeenCalled();
-      expect(mockEventBus.publish).toHaveBeenCalled();
-    });
-
-    it('falls back to the legacy path when no new executor is registered', async () => {
-      mockSessionService.getSession.mockResolvedValue(testSession());
-      mockRunner(async function* () {});
-      const activated: string[] = [];
-
-      const executor = createExecutor();
-      await executor.execute(requestWithExtension(activated), mockEventBus);
-
-      expect(activated).toEqual([A2A_NEW_INTEGRATION_EXTENSION]);
-      expect(mockEventBus.publish).toHaveBeenCalled();
     });
   });
 

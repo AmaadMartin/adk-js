@@ -111,13 +111,3 @@ right now: it remembers the context id of each in-flight execution and throws
 for a task id it does not hold. And the run itself is not interrupted, because
 adk-js cannot abort an in-flight invocation — the agent finishes and its own
 terminal event follows the cancellation.
-
-## Routing to the new integration
-
-A client can ask to be served by the new ADK A2A integration by requesting the
-`https://google.github.io/adk-docs/a2a/a2a-extension/` extension. The executor
-activates the extension on the call context and delegates to
-`config.newVersionExecutor`. Set `useLegacy` to refuse the extension, or
-`forceNewVersion` to take that path without it. With no `newVersionExecutor`
-registered, the request is served on the legacy path and the executor logs the
-fallback at debug level.
