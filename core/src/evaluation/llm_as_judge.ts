@@ -48,7 +48,6 @@ export abstract class LlmAsJudge implements Evaluator {
   protected readonly criterion: LlmAsAJudgeCriterion;
   protected readonly threshold: number;
   protected readonly judgeModel: BaseLlm;
-  private readonly judgeModelName: string;
   private readonly judgeModelConfig?: GenerateContentConfig;
   private readonly numSamples: number;
   private readonly parallelismLimit: number;
@@ -92,8 +91,8 @@ export abstract class LlmAsJudge implements Evaluator {
       );
     }
     this.judgeModelConfig = judgeModelOptions.judgeModelConfig;
-    this.judgeModelName = judgeModelOptions.judgeModel ?? DEFAULT_JUDGE_MODEL;
-    this.judgeModel = judgeModel ?? LLMRegistry.newLlm(this.judgeModelName);
+    const judgeModelName = judgeModelOptions.judgeModel ?? DEFAULT_JUDGE_MODEL;
+    this.judgeModel = judgeModel ?? LLMRegistry.newLlm(judgeModelName);
   }
 
   /** Returns the prompt that asks the judge to score this invocation. */
@@ -139,7 +138,7 @@ export abstract class LlmAsJudge implements Evaluator {
     for (const [index, actual] of actualInvocations.entries()) {
       const expected = expectedInvocations?.[index];
       const llmRequest: LlmRequest = {
-        model: this.judgeModelName,
+        model: this.judgeModel.model,
         contents: [
           {
             role: 'user',

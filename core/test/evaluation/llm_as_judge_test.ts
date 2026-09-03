@@ -21,7 +21,7 @@ import {beforeAll, describe, expect, it} from 'vitest';
 // The eval system keeps its retry policy internal, so this constant has no
 // public export to import it from.
 import {DEFAULT_RETRY_ATTEMPTS} from '../../src/evaluation/retry_options_utils.js';
-import {FakeJudgeLlm, JudgeReply} from './fake_judge_llm.js';
+import {FAKE_JUDGE_MODEL, FakeJudgeLlm, JudgeReply} from './fake_judge_llm.js';
 
 const VALID_CRITIQUE = '{"is_the_agent_response_valid": "valid"}';
 const INVALID_CRITIQUE = '{"is_the_agent_response_valid": "invalid"}';
@@ -216,13 +216,12 @@ describe('LlmAsJudge', () => {
 
   it('sends the judge model name, its config and a retry policy', async () => {
     const judgeModelConfig = {temperature: 0.25};
-    const [judgeModel] = await evaluate(
-      {judgeModel: 'a-named-judge', numSamples: 1, judgeModelConfig},
-      [{critique: VALID_CRITIQUE}],
-    );
+    const [judgeModel] = await evaluate({numSamples: 1, judgeModelConfig}, [
+      {critique: VALID_CRITIQUE},
+    ]);
 
     const request: LlmRequest = judgeModel.requests[0];
-    expect(request.model).toBe('a-named-judge');
+    expect(request.model).toBe(FAKE_JUDGE_MODEL);
     expect(request.config?.temperature).toBe(0.25);
     expect(request.config?.httpOptions?.retryOptions).toEqual({
       attempts: DEFAULT_RETRY_ATTEMPTS,
@@ -232,14 +231,15 @@ describe('LlmAsJudge', () => {
     );
   });
 
-  it('names the default judge model when the criterion names none', async () => {
-    const [judgeModel] = await evaluate({numSamples: 1}, [
-      {critique: VALID_CRITIQUE},
-    ]);
+  it('names the judge it calls, not the one the criterion names', async () => {
+    const [judgeModel] = await evaluate(
+      {judgeModel: 'a-model-that-is-not-called', numSamples: 1},
+      [{critique: VALID_CRITIQUE}],
+    );
 
-    // The literal, not the exported constant: this pins the value the judge
-    // defaults to, which adk-python also defaults to.
-    expect(judgeModel.requests[0].model).toBe('gemini-2.5-flash');
+    // The caller injected this judge, so the request must route to it rather
+    // than to the model the criterion names.
+    expect(judgeModel.requests[0].model).toBe(FAKE_JUDGE_MODEL);
   });
 
   it('resolves the judge model the criterion names through the registry', async () => {
