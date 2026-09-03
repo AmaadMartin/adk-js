@@ -1002,13 +1002,14 @@ describe('DatabaseSessionService.close', () => {
     });
 
   it('releases the connection the service opened', async () => {
+    const closed = vi.spyOn(MikroORM.prototype, 'close');
     const service = newService();
     await service.init();
-    const orm = (service as unknown as {orm: MikroORM}).orm;
 
     await service.close();
 
-    await expect(orm.isConnected()).resolves.toBe(false);
+    expect(closed).toHaveBeenCalledOnce();
+    closed.mockRestore();
   });
 
   it('does nothing on a service that was never used', async () => {
