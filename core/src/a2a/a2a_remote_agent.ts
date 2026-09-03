@@ -238,10 +238,6 @@ function releaseTaskControl(control: TaskControl, errorMessage: string): void {
   control.errorMessage = errorMessage;
 }
 
-/**
- * The failure text for a task that ended badly, or `undefined` when the task
- * has not failed.
- */
 /** A remote task that ended badly: which task, and why. */
 interface TaskFailure {
   taskId: string;
@@ -492,9 +488,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     } finally {
       if (control.release) {
         if (control.errorMessage !== undefined) {
-          yield this.finishTaskEvent(context, {
-            errorMessage: control.errorMessage,
-          });
+          yield this.finishTaskEvent(context, control.errorMessage);
         }
         yield createEvent({
           author: this.name,
@@ -799,7 +793,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   /** The `finish_task` response event that ends this agent's turn. */
   private finishTaskEvent(
     context: InvocationContext,
-    {errorMessage}: {errorMessage: string},
+    errorMessage: string,
   ): AdkEvent {
     return createEvent({
       author: this.name,
