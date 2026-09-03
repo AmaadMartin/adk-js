@@ -153,13 +153,19 @@ function secondsUntil(deadline: number): number {
   return Math.ceil((deadline - Date.now()) / 1000);
 }
 
+/** The subset of the options that says where the clients come from. */
+type ClientSource = Pick<
+  GkeCodeExecutorOptions,
+  'apiClients' | 'kubeconfigPath' | 'kubeconfigContext'
+>;
+
 /**
  * Loads cluster credentials in the order an explicit path, the in-cluster
  * service account, then the local default kubeconfig.
  */
 function loadKubeConfig(
   KubeConfigClass: typeof import('@kubernetes/client-node').KubeConfig,
-  options: GkeCodeExecutorOptions,
+  options: ClientSource,
 ): InstanceType<typeof KubeConfigClass> {
   const kc = new KubeConfigClass();
   if (options.kubeconfigPath) {
@@ -201,9 +207,7 @@ function loadKubeConfig(
  * from the package, because they carry the strategic-merge content type the
  * generated client does not default to.
  */
-async function resolveClients(
-  options: GkeCodeExecutorOptions,
-): Promise<ResolvedClients> {
+async function resolveClients(options: ClientSource): Promise<ResolvedClients> {
   const k8s = await loadOptionalPeer(
     {packageName: '@kubernetes/client-node', feature: 'GkeCodeExecutor'},
     () => import('@kubernetes/client-node'),
@@ -309,12 +313,12 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
   /** Opens a sandbox in sandbox mode. */
   readonly sandboxClientFactory: SandboxClientFactory;
 
-  private readonly options: GkeCodeExecutorOptions;
+  private readonly apiClients?: GkeApiClients;
   private clientsPromise?: Promise<ResolvedClients>;
 
   constructor(options: GkeCodeExecutorOptions = {}) {
     super();
-    this.options = options;
+    this.apiClients = options.apiClients;
     this.namespace = options.namespace ?? DEFAULT_NAMESPACE;
     this.image = options.image ?? DEFAULT_IMAGE;
     this.timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
@@ -346,7 +350,11 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
    * the clients, so concurrent executions share one load.
    */
   private getClients(): Promise<ResolvedClients> {
-    this.clientsPromise ??= resolveClients(this.options);
+    this.clientsPromise ??= resolveClients({
+      apiClients: this.apiClients,
+      kubeconfigPath: this.kubeconfigPath,
+      kubeconfigContext: this.kubeconfigContext,
+    });
     return this.clientsPromise;
   }
 
