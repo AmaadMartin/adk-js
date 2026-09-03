@@ -19,34 +19,178 @@ import {ReadonlyContext} from '../agents/readonly_context.js';
 import {isSequentialAgent} from '../agents/sequential_agent.js';
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {isBaseToolset} from '../tools/base_toolset.js';
+import {formatError, isFileNotFoundError} from '../utils/error_utils.js';
+import {quoteUntrusted} from '../utils/fencing_utils.js';
 import {logger} from '../utils/logger.js';
 import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {isWorkflow} from '../workflow/workflow.js';
 
 /**
+ * A card description fetched over the network is peer-controlled text that a
+ * parent agent puts in its own instruction, so it is capped before being fenced.
+ */
+const MAX_CARD_DESCRIPTION_CHARS = 1024;
+
+/**
+ * Marks a capped description as incomplete, so neither the model nor a reader
+ * takes the cut-off text for the whole description.
+ */
+const CARD_DESCRIPTION_TRUNCATION_SUFFIX = '... [truncated]';
+
+/** Raised when an agent card cannot be resolved or fails validation. */
+export class AgentCardResolutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentCardResolutionError';
+  }
+}
+
+/**
+ * Whether a thrown value is an {@link AgentCardResolutionError}.
+ *
+ * Matches on the error name rather than `instanceof`, so the check still holds
+ * when two copies of this package are loaded in one runtime.
+ */
+export function isAgentCardResolutionError(
+  err: unknown,
+): err is AgentCardResolutionError {
+  return err instanceof Error && err.name === 'AgentCardResolutionError';
+}
+
+/** Whether an agent card source names a location fetched over the network. */
+export function isRemoteCardSource(source: string): boolean {
+  return source.startsWith('http://') || source.startsWith('https://');
+}
+
+/** Per-request options for {@link resolveAgentCard}. */
+export interface ResolveAgentCardOptions {
+  /** Extra HTTP headers to send with the card fetch. */
+  headers?: Record<string, string>;
+  /** Milliseconds after which the card fetch is aborted. */
+  timeoutMs?: number;
+  /** The `fetch` implementation to use. Defaults to the global one. */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Returns the description to adopt from a resolved agent card.
+ *
+ * A parent agent interpolates a transfer target's description straight into its
+ * own instruction, so a description that arrived over the network is capped and
+ * fenced as quoted peer content. A card supplied directly or read from a local
+ * file is the caller's own text and is adopted unchanged.
+ *
+ * @param description The description the card carries.
+ * @param source The location the card came from, if it came from one.
+ * @return The description the agent adopts.
+ */
+export function adoptedCardDescription(
+  description: string,
+  source?: string,
+): string {
+  if (!source || !isRemoteCardSource(source)) {
+    return description;
+  }
+  let capped = description.slice(0, MAX_CARD_DESCRIPTION_CHARS);
+  if (capped.length < description.length) {
+    capped += CARD_DESCRIPTION_TRUNCATION_SUFFIX;
+  }
+  return quoteUntrusted(capped);
+}
+
+/**
  * Resolves the AgentCard from the provided source.
+ *
+ * @param agentCard A card object, a URL to fetch it from, or a file path.
+ * @param options Headers, timeout and `fetch` override for a URL source.
+ * @return The resolved card.
+ * @throws {AgentCardResolutionError} If the source cannot be read or parsed.
  */
 export async function resolveAgentCard(
   agentCard: AgentCard | string,
+  options: ResolveAgentCardOptions = {},
 ): Promise<AgentCard> {
   if (typeof agentCard === 'object') {
     return agentCard;
   }
 
-  const source = agentCard as string;
-  if (source.startsWith('http://') || source.startsWith('https://')) {
-    const resolver = new DefaultAgentCardResolver();
-    return await resolver.resolve(source);
+  const source = agentCard;
+  if (isRemoteCardSource(source)) {
+    const resolver = new DefaultAgentCardResolver({
+      fetchImpl: buildCardFetch(options),
+    });
+    try {
+      return await resolver.resolve(source);
+    } catch (err: unknown) {
+      throw new AgentCardResolutionError(
+        `Failed to resolve AgentCard from URL ${source}: ${formatError(err)}`,
+      );
+    }
   }
 
+  return readAgentCardFile(source);
+}
+
+/** Reads and parses an agent card from a local file. */
+async function readAgentCardFile(source: string): Promise<AgentCard> {
+  let content: string;
   try {
-    const content = await fs.readFile(source, 'utf-8');
-    return JSON.parse(content) as AgentCard;
+    content = await fs.readFile(source, 'utf-8');
   } catch (err: unknown) {
-    throw new Error(
-      `Failed to read agent card from file ${source}: ${(err as Error).message}`,
+    if (isFileNotFoundError(err)) {
+      throw new AgentCardResolutionError(
+        `Agent card file not found: ${source}`,
+      );
+    }
+    throw new AgentCardResolutionError(
+      `Failed to resolve AgentCard from file ${source}: ${formatError(err)}`,
     );
   }
+  try {
+    return JSON.parse(content) as AgentCard;
+  } catch (err: unknown) {
+    throw new AgentCardResolutionError(
+      `Invalid JSON in agent card file ${source}: ${formatError(err)}`,
+    );
+  }
+}
+
+/**
+ * Wraps `fetch` so the card request carries the caller's headers and is bounded
+ * by the caller's timeout. Returns the caller's implementation unchanged when
+ * there is nothing to add.
+ */
+function buildCardFetch(
+  options: ResolveAgentCardOptions,
+): typeof fetch | undefined {
+  const {headers, timeoutMs, fetchImpl} = options;
+  if (!headers && timeoutMs === undefined) {
+    return fetchImpl;
+  }
+  const baseFetch = fetchImpl ?? fetch;
+  return (input, init) => {
+    const merged = new Headers(init?.headers);
+    for (const [name, value] of Object.entries(headers ?? {})) {
+      merged.set(name, value);
+    }
+    return baseFetch(input, {
+      ...init,
+      headers: merged,
+      signal: withTimeout(init?.signal, timeoutMs),
+    });
+  };
+}
+
+/** Combines a caller-supplied abort signal with a timeout, if either exists. */
+function withTimeout(
+  signal: AbortSignal | null | undefined,
+  timeoutMs?: number,
+): AbortSignal | undefined {
+  if (timeoutMs === undefined) {
+    return signal ?? undefined;
+  }
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 /**
