@@ -112,11 +112,29 @@ reason and any grounding metadata. Tool-call fragments are accumulated across
 chunks, including providers that split one call's arguments over many deltas
 or that give every parallel call the same index.
 
+A tool call's arguments are read as strict JSON first. Some providers finalize
+a call whose payload is a Python dict literal, or whose object keys are
+unquoted, so both are accepted as fallbacks. When none of them parses, the
+error from the original JSON parse is thrown, because it names the position in
+the payload the provider actually sent.
+
+A Gemma 4 model reads tool results under the role `tool_responses` rather than
+`tool`. Its chat template does not recognise them under any other role, and the
+model then re-issues the same tool call. `LiteLlm` picks the role from the
+model name, so `ollama/gemma4:e2b` and `google/gemma-4-26B-A4B` need no
+configuration. Gemma 3 and earlier do not support tool use at all.
+
+`LiteLlm` reports `capabilities.outputSchemaAndTools` as `true` for every
+model. LiteLLM reconciles tools and `response_format` per provider: a provider
+with native support gets both passed through, and the rest are converted to a
+JSON tool call with `tool_choice` enforcement.
+
 ## Prompt caching
 
-Set `cacheConfig` on the request and `LiteLlm` asks the endpoint to cache the
-stable head of the prompt. It sends a `cache_control_injection_points` field
-naming two places to mark: the system message, and the last message.
+A provider that caches by marked prefix, such as Claude, caches only what the
+request marks. Set `cacheConfig` on the request and `LiteLlm` sends a
+`cache_control_injection_points` field naming two places to mark: the system
+message, and the last message.
 
 ```ts
 import {ContextCacheConfig, LiteLlm, LlmRequest} from '@google/adk';
@@ -170,7 +188,9 @@ A request to a Vertex AI or Gemini model carries `x-goog-api-client` and
 prefix. No other provider gets them.
 
 Your own value for one of those headers survives. The ADK labels come first and
-yours is appended, with no label repeated.
+yours is appended, with no label repeated. The `headers` you pass to the
+constructor join the same merge, so a Vertex AI or Gemini request carries them
+next to the ADK labels.
 
 ## Thought signatures
 

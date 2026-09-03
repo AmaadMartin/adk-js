@@ -318,4 +318,46 @@ describe('ContextCacheRequestProcessor', () => {
       ),
     ).rejects.toThrow('Active cache metadata must include invocations_used.');
   });
+
+  it('walks past another agent to the newest own token count', async () => {
+    const llmRequest = emptyRequest();
+    const events = [
+      createEvent({
+        author: AGENT_NAME,
+        invocationId: EARLIER_INVOCATION,
+        usageMetadata: {promptTokenCount: 6000},
+      }),
+      createEvent({
+        author: 'other_agent',
+        invocationId: EARLIER_INVOCATION,
+        usageMetadata: {promptTokenCount: 9000},
+      }),
+    ];
+
+    await run(
+      createContext({events, contextCacheConfig: CACHE_CONFIG}),
+      llmRequest,
+    );
+
+    expect(llmRequest.cacheableContentsTokenCount).toBe(6000);
+  });
+
+  it('skips an own turn that reports no prompt size', async () => {
+    const llmRequest = emptyRequest();
+    const events = [
+      createEvent({
+        author: AGENT_NAME,
+        invocationId: EARLIER_INVOCATION,
+        usageMetadata: {promptTokenCount: 6000},
+      }),
+      createEvent({author: AGENT_NAME, invocationId: EARLIER_INVOCATION}),
+    ];
+
+    await run(
+      createContext({events, contextCacheConfig: CACHE_CONFIG}),
+      llmRequest,
+    );
+
+    expect(llmRequest.cacheableContentsTokenCount).toBe(6000);
+  });
 });

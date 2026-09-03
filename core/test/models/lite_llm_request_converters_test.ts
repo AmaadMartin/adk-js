@@ -13,6 +13,7 @@ import {
 } from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
+import {getProviderFromModel} from '../../src/models/lite_llm_model_utils.js';
 import {
   appendFallbackUserContentIfMissing,
   buildRequestLog,
@@ -32,7 +33,11 @@ import {
   toLiteLlmResponseFormat,
   toLiteLlmRole,
 } from '../../src/models/lite_llm_request_converters.js';
-import {ChatMessage, JsonObject} from '../../src/models/lite_llm_types.js';
+import {
+  ChatMessage,
+  JsonObject,
+  JsonValue,
+} from '../../src/models/lite_llm_types.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
 
 const OPENAI: ProviderOptions = {provider: 'openai', model: 'openai/gpt-4o'};
@@ -41,6 +46,22 @@ const VERTEX_GEMINI: ProviderOptions = {
   provider: 'vertex_ai',
   model: 'vertex_ai/gemini-2.5-flash',
 };
+
+/** Narrows a JSON value to an object, failing the test when it is not one. */
+function asObject(value: JsonValue | undefined): JsonObject {
+  if (!isJsonObject(value)) {
+    return expect.fail(`expected an object, got ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+/** Narrows a JSON value to an array of objects, failing the test otherwise. */
+function asObjectArray(value: JsonValue | undefined): JsonObject[] {
+  if (!Array.isArray(value)) {
+    return expect.fail(`expected an array, got ${JSON.stringify(value)}`);
+  }
+  return value.map(asObject);
+}
 
 /** Encodes text the way `inlineData.data` carries it. */
 function base64(text: string): string {
@@ -611,6 +632,82 @@ describe('contentToMessageParam', () => {
   });
 });
 
+describe('contentToMessageParam tool result role', () => {
+  /** Builds a turn carrying one function response per call id. */
+  function responses(...callIds: string[]): Content {
+    return {
+      role: 'user',
+      parts: callIds.map((id) => ({
+        functionResponse: {id, name: 'get_weather', response: {status: 'ok'}},
+      })),
+    };
+  }
+
+  /** Converts a one-response turn on `model` and returns the role sent. */
+  function roleFor(model: string): string | undefined {
+    const converted = contentToMessageParam(responses('call_001'), {
+      provider: getProviderFromModel(model),
+      model,
+    });
+    return Array.isArray(converted) ? undefined : converted?.role;
+  }
+
+  it.each([
+    ['ollama/gemma4:e2b'],
+    ['google/gemma-4-26B-A4B'],
+    ['ollama/Gemma4:31b'],
+  ])('sends a tool result to %s as tool_responses', (model) => {
+    expect(roleFor(model)).toBe('tool_responses');
+  });
+
+  it.each([
+    ['ollama/llama3:8b'],
+    ['ollama/qwen2.5-coder:3b'],
+    ['anthropic/claude-3-opus'],
+    ['openai/gpt-4o'],
+    ['ollama/gemma3:4b'],
+    [''],
+  ])('sends a tool result to %s as tool', (model) => {
+    expect(roleFor(model)).toBe('tool');
+  });
+
+  it('changes only the role, not the call id or the content', () => {
+    expect(
+      contentToMessageParam(responses('my_call_123'), {
+        provider: 'ollama',
+        model: 'ollama/gemma4:e2b',
+      }),
+    ).toEqual({
+      role: 'tool_responses',
+      tool_call_id: 'my_call_123',
+      content: '{"status":"ok"}',
+    });
+  });
+
+  it('sends every response of a Gemma 4 turn as tool_responses', () => {
+    const converted = contentToMessageParam(
+      responses('call_a', 'call_b', 'call_c'),
+      {provider: 'ollama', model: 'ollama/gemma4:4b'},
+    );
+
+    expect(converted).toHaveLength(3);
+    expect(
+      Array.isArray(converted) && converted.map((message) => message.role),
+    ).toEqual(['tool_responses', 'tool_responses', 'tool_responses']);
+  });
+
+  it('sends every response of a non-Gemma turn as tool', () => {
+    const converted = contentToMessageParam(
+      responses('call_a', 'call_b'),
+      OPENAI,
+    );
+
+    expect(
+      Array.isArray(converted) && converted.map((message) => message.role),
+    ).toEqual(['tool', 'tool']);
+  });
+});
+
 describe('ensureToolResults', () => {
   const assistantCall: ChatMessage = {
     role: 'assistant',
@@ -623,14 +720,14 @@ describe('ensureToolResults', () => {
       assistantCall,
       {role: 'tool', tool_call_id: 'c1', content: '6'},
     ];
-    expect(ensureToolResults(messages)).toEqual(messages);
+    expect(ensureToolResults(messages, 'openai/gpt-4o')).toEqual(messages);
   });
 
   it('inserts a placeholder before the next non-tool message', () => {
-    const healed = ensureToolResults([
-      assistantCall,
-      {role: 'user', content: 'next'},
-    ]);
+    const healed = ensureToolResults(
+      [assistantCall, {role: 'user', content: 'next'}],
+      'openai/gpt-4o',
+    );
     expect(healed).toHaveLength(3);
     expect(healed[1]).toEqual({
       role: 'tool',
@@ -642,45 +739,71 @@ describe('ensureToolResults', () => {
   });
 
   it('appends a placeholder when the history ends unanswered', () => {
-    const healed = ensureToolResults([assistantCall]);
+    const healed = ensureToolResults([assistantCall], 'openai/gpt-4o');
     expect(healed).toHaveLength(2);
     expect(healed[1].role).toBe('tool');
   });
 
   it('inserts a placeholder only for the unanswered call', () => {
-    const healed = ensureToolResults([
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [
-          {type: 'function', id: 'c1', function: {name: 'a'}},
-          {type: 'function', id: 'c2', function: {name: 'b'}},
-        ],
-      },
-      {role: 'tool', tool_call_id: 'c1', content: '1'},
-    ]);
+    const healed = ensureToolResults(
+      [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {type: 'function', id: 'c1', function: {name: 'a'}},
+            {type: 'function', id: 'c2', function: {name: 'b'}},
+          ],
+        },
+        {role: 'tool', tool_call_id: 'c1', content: '1'},
+      ],
+      'openai/gpt-4o',
+    );
     expect(healed).toHaveLength(3);
     expect(healed[2].tool_call_id).toBe('c2');
   });
 
   it('leaves an assistant message with no tool calls alone', () => {
     const messages: ChatMessage[] = [{role: 'assistant', content: 'hi'}];
-    expect(ensureToolResults(messages)).toEqual(messages);
+    expect(ensureToolResults(messages, 'openai/gpt-4o')).toEqual(messages);
   });
 
   it('ignores tool calls with no id', () => {
-    const healed = ensureToolResults([
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [{type: 'function', function: {name: 'a'}}],
-      },
-    ]);
+    const healed = ensureToolResults(
+      [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{type: 'function', function: {name: 'a'}}],
+        },
+      ],
+      'openai/gpt-4o',
+    );
     expect(healed).toHaveLength(1);
   });
 
   it('returns an empty list unchanged', () => {
-    expect(ensureToolResults([])).toEqual([]);
+    expect(ensureToolResults([], 'openai/gpt-4o')).toEqual([]);
+  });
+
+  it('heals a Gemma 4 history with tool_responses placeholders', () => {
+    const healed = ensureToolResults([assistantCall], 'ollama/gemma4:e2b');
+
+    expect(healed[1]).toEqual({
+      role: 'tool_responses',
+      tool_call_id: 'c1',
+      content:
+        'Error: Missing tool result (tool execution may have been interrupted before a response was recorded).',
+    });
+  });
+
+  it('accepts a tool_responses message as answering a Gemma 4 call', () => {
+    const messages: ChatMessage[] = [
+      assistantCall,
+      {role: 'tool_responses', tool_call_id: 'c1', content: '6'},
+    ];
+
+    expect(ensureToolResults(messages, 'ollama/gemma4:e2b')).toEqual(messages);
   });
 });
 
@@ -694,6 +817,11 @@ describe('toJsonObject', () => {
 
   it('drops values JSON cannot represent', () => {
     expect(toJsonObject({a: undefined, b: () => 1, c: 1})).toEqual({c: 1});
+  });
+
+  it('returns an empty object for a value that is not one', () => {
+    expect(toJsonObject([1, 2])).toEqual({});
+    expect(toJsonObject(new Date(0))).toEqual({});
   });
 });
 
@@ -816,16 +944,16 @@ describe('enforceStrictOpenAiSchema', () => {
     };
     enforceStrictOpenAiSchema(schema);
 
-    const properties = schema['properties'] as JsonObject;
-    expect((properties['nested'] as JsonObject)['required']).toEqual(['x']);
-    const list = properties['list'] as JsonObject;
-    expect((list['items'] as JsonObject)['additionalProperties']).toBe(false);
-    const choice = properties['choice'] as JsonObject;
+    const properties = asObject(schema['properties']);
+    expect(asObject(properties['nested'])['required']).toEqual(['x']);
+    const list = asObject(properties['list']);
+    expect(asObject(list['items'])['additionalProperties']).toBe(false);
+    const choice = asObject(properties['choice']);
     expect(choice['default']).toBeNull();
-    expect((choice['anyOf'] as JsonObject[])[0]['required']).toEqual(['z']);
-    expect(
-      ((schema['$defs'] as JsonObject)['Extra'] as JsonObject)['required'],
-    ).toEqual(['w']);
+    expect(asObjectArray(choice['anyOf'])[0]['required']).toEqual(['z']);
+    expect(asObject(asObject(schema['$defs'])['Extra'])['required']).toEqual([
+      'w',
+    ]);
   });
 
   it('strips the siblings of a $ref', () => {
@@ -834,7 +962,7 @@ describe('enforceStrictOpenAiSchema', () => {
       properties: {ref: {$ref: '#/$defs/Extra', description: 'dropped'}},
     };
     enforceStrictOpenAiSchema(schema);
-    expect((schema['properties'] as JsonObject)['ref']).toEqual({
+    expect(asObject(schema['properties'])['ref']).toEqual({
       $ref: '#/$defs/Extra',
     });
   });
@@ -892,7 +1020,7 @@ describe('toLiteLlmResponseFormat', () => {
 
   it('defaults the schema name when the schema has no title', () => {
     const format = toLiteLlmResponseFormat({type: 'object'}, 'azure/gpt-4o');
-    expect((format?.['json_schema'] as JsonObject)['name']).toBe('response');
+    expect(asObject(format?.['json_schema'])['name']).toBe('response');
   });
 
   it('uses the gemini response_schema shape', () => {

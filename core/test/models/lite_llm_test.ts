@@ -5,10 +5,13 @@
  */
 
 import {
+  CacheControlInjectionPoint,
   CompletionArgs,
   ContextCacheConfig,
+  getLogger,
   LiteLlm,
   LiteLlmClient,
+  LiteLlmParams,
   LLMRegistry,
   LlmRequest,
   LlmResponse,
@@ -17,7 +20,7 @@ import {
   ToolCall,
 } from '@google/adk';
 import {FinishReason, FunctionCallingConfigMode, Part} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {getTrackingHeaders} from '../../src/utils/client_labels.js';
 
@@ -503,6 +506,228 @@ describe('LiteLlm', () => {
       expect(client.args?.num_retries).toBeUndefined();
       expect(client.args?.extra_headers).toBeUndefined();
       expect(client.args?.extra_body).toBeUndefined();
+    });
+  });
+
+  describe('tracking headers', () => {
+    /** Runs one non-streaming call and returns the headers sent. */
+    async function extraHeaders(
+      model: string,
+      params: Partial<LiteLlmParams> = {},
+      overrides: Partial<LlmRequest> = {},
+    ): Promise<Record<string, string> | undefined> {
+      const client = new RecordingClient(textResponse());
+      const litellm = new LiteLlm({model, client, ...params});
+
+      await collect(litellm.generateContentAsync(request(overrides)));
+
+      return client.args?.extra_headers;
+    }
+
+    it.each([['vertex_ai/test_model'], ['gemini/gemini-2.5-pro']])(
+      'attributes a call to %s to ADK',
+      async (model) => {
+        const headers = await extraHeaders(model);
+
+        expect(headers?.['x-goog-api-client']).toContain('google-adk/');
+        expect(headers?.['user-agent']).toBe(headers?.['x-goog-api-client']);
+      },
+    );
+
+    it('sends no tracking headers to another provider', async () => {
+      expect(await extraHeaders('openai/gpt-4o')).toBeUndefined();
+    });
+
+    it('keeps a constructor header alongside the tracking headers', async () => {
+      const headers = await extraHeaders('vertex_ai/test_model', {
+        headers: {custom: 'header'},
+      });
+
+      expect(headers?.['custom']).toBe('header');
+      expect(headers?.['x-goog-api-client']).toContain('google-adk/');
+    });
+
+    it('appends the ADK labels to a caller value without losing it', async () => {
+      const headers = await extraHeaders(
+        'vertex_ai/test_model',
+        {},
+        {
+          config: {
+            httpOptions: {headers: {'x-goog-api-client': 'my-client/1.0'}},
+          },
+        },
+      );
+
+      const parts = headers?.['x-goog-api-client']?.split(' ') ?? [];
+      expect(parts).toContain('my-client/1.0');
+      expect(parts.some((part) => part.startsWith('google-adk/'))).toBe(true);
+      expect(new Set(parts).size).toBe(parts.length);
+    });
+
+    it('does not duplicate a label the caller already carries', async () => {
+      const label = getTrackingHeaders()['x-goog-api-client'];
+      const headers = await extraHeaders(
+        'vertex_ai/test_model',
+        {},
+        {config: {httpOptions: {headers: {'x-goog-api-client': label}}}},
+      );
+
+      expect(headers?.['x-goog-api-client']).toBe(label);
+    });
+  });
+
+  describe('capabilities', () => {
+    it('pairs an output schema with tools on any provider', () => {
+      const warn = vi.spyOn(getLogger(), 'warn').mockImplementation(() => {});
+      const model = new LiteLlm({
+        model: 'openai/gpt-4o',
+        client: new RecordingClient(),
+      });
+
+      expect(model.capabilities.outputSchemaAndTools).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
+  describe('cache control injection points', () => {
+    const cacheConfig: ContextCacheConfig = {
+      cacheIntervals: 10,
+      ttlSeconds: 600,
+      minTokens: 0,
+    };
+
+    /** Runs one non-streaming call and returns the injection points sent. */
+    async function injectionPoints(
+      overrides: Partial<LlmRequest>,
+      additionalArgs?: Record<string, unknown>,
+    ): Promise<CacheControlInjectionPoint[] | undefined> {
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({
+        model: 'anthropic/claude-sonnet-4',
+        client,
+        additionalArgs,
+      });
+
+      await collect(model.generateContentAsync(request(overrides)));
+
+      return client.args?.cache_control_injection_points;
+    }
+
+    it('sends no points when the request carries no cache config', async () => {
+      expect(await injectionPoints({})).toBeUndefined();
+    });
+
+    it('marks the system instruction and the last message', async () => {
+      expect(await injectionPoints({cacheConfig})).toEqual([
+        {location: 'message', role: 'system', control: {type: 'ephemeral'}},
+        {location: 'message', index: -1, control: {type: 'ephemeral'}},
+      ]);
+    });
+
+    it.each([[300], [1800], [3599]])(
+      'asks for the default cache at a lifetime of %i seconds',
+      async (ttlSeconds) => {
+        const points = await injectionPoints({
+          cacheConfig: {...cacheConfig, ttlSeconds},
+        });
+
+        expect(points?.map((point) => point.control)).toEqual([
+          {type: 'ephemeral'},
+          {type: 'ephemeral'},
+        ]);
+      },
+    );
+
+    it.each([[3600], [86400]])(
+      'asks for the hour-long cache at a lifetime of %i seconds',
+      async (ttlSeconds) => {
+        const points = await injectionPoints({
+          cacheConfig: {...cacheConfig, ttlSeconds},
+        });
+
+        expect(points?.map((point) => point.control)).toEqual([
+          {type: 'ephemeral', ttl: '1h'},
+          {type: 'ephemeral', ttl: '1h'},
+        ]);
+      },
+    );
+
+    it('ignores the prompt size when the request carries no config', async () => {
+      expect(
+        await injectionPoints({cacheableContentsTokenCount: 10_000}),
+      ).toBeUndefined();
+    });
+
+    it('treats a prompt size of zero as a size, not an absent one', async () => {
+      expect(
+        await injectionPoints({
+          cacheConfig: {...cacheConfig, minTokens: 1},
+          cacheableContentsTokenCount: 0,
+        }),
+      ).toBeUndefined();
+    });
+
+    it('asks for the default cache at a lifetime of one second', async () => {
+      const points = await injectionPoints({
+        cacheConfig: {...cacheConfig, ttlSeconds: 1},
+      });
+
+      expect(points?.[0].control).toEqual({type: 'ephemeral'});
+    });
+
+    it('leaves the cache fields it read on the request untouched', async () => {
+      const config = {...cacheConfig, minTokens: 5000};
+      const llmRequest = request({
+        cacheConfig: config,
+        cacheableContentsTokenCount: 10,
+      });
+      const client = new RecordingClient(textResponse());
+      const model = new LiteLlm({model: 'anthropic/claude-sonnet-4', client});
+
+      await collect(model.generateContentAsync(llmRequest));
+
+      expect(llmRequest.cacheConfig).toEqual(config);
+      expect(llmRequest.cacheableContentsTokenCount).toBe(10);
+    });
+
+    it('sends no points below the configured minimum token count', async () => {
+      expect(
+        await injectionPoints({
+          cacheConfig: {...cacheConfig, minTokens: 5000},
+          cacheableContentsTokenCount: 4999,
+        }),
+      ).toBeUndefined();
+    });
+
+    it('sends points at the configured minimum token count', async () => {
+      expect(
+        await injectionPoints({
+          cacheConfig: {...cacheConfig, minTokens: 5000},
+          cacheableContentsTokenCount: 5000,
+        }),
+      ).toHaveLength(2);
+    });
+
+    it('sends points on a first turn, whose size is unknown', async () => {
+      expect(
+        await injectionPoints({
+          cacheConfig: {...cacheConfig, minTokens: 1000000},
+        }),
+      ).toHaveLength(2);
+    });
+
+    it('leaves points a caller named through additionalArgs alone', async () => {
+      const callerPoints: CacheControlInjectionPoint[] = [
+        {location: 'message', index: 0, control: {type: 'ephemeral'}},
+      ];
+
+      expect(
+        await injectionPoints(
+          {cacheConfig},
+          {cache_control_injection_points: callerPoints},
+        ),
+      ).toEqual(callerPoints);
     });
   });
 

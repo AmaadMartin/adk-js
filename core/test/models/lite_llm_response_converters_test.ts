@@ -31,6 +31,18 @@ import {
 } from '../../src/models/lite_llm_types.js';
 import {LlmResponse} from '../../src/models/llm_response.js';
 
+/** Returns the error `JSON.parse` raises for a source that is not JSON. */
+function jsonParseError(source: string): SyntaxError {
+  try {
+    JSON.parse(source);
+  } catch (error: unknown) {
+    if (error instanceof SyntaxError) {
+      return error;
+    }
+  }
+  return expect.fail(`expected ${source} to be rejected by JSON.parse`);
+}
+
 /** Collects the chunks a response yields, dropping the finish reasons. */
 function chunksOf(
   response: ModelResponse | ModelResponseStream,
@@ -132,6 +144,36 @@ describe('parseToolCallArguments', () => {
 
   it('throws the original parse error when the repair still fails', () => {
     expect(() => parseToolCallArguments('{a: }')).toThrow(SyntaxError);
+  });
+
+  it('accepts a Python dict literal', () => {
+    expect(parseToolCallArguments("{'query': 'MATCH (n) RETURN n'}")).toEqual({
+      query: 'MATCH (n) RETURN n',
+    });
+  });
+
+  it('accepts Python values a JSON parser rejects', () => {
+    expect(
+      parseToolCallArguments("{'a': True, 'b': None, 'c': (1, 2)}"),
+    ).toEqual({a: true, b: null, c: [1, 2]});
+  });
+
+  it('returns an empty object for a Python literal that is not a dict', () => {
+    expect(parseToolCallArguments("('a', 'b')")).toEqual({});
+  });
+
+  it('accepts unquoted keys with single-quoted values', () => {
+    expect(parseToolCallArguments("{query: 'MATCH (n)', limit: 5}")).toEqual({
+      query: 'MATCH (n)',
+      limit: 5,
+    });
+  });
+
+  it('throws the error from the payload the provider sent, not the repair', () => {
+    const original = jsonParseError('{a: }');
+    const repaired = jsonParseError('{"a": }');
+    expect(original.message).not.toBe(repaired.message);
+    expect(() => parseToolCallArguments('{a: }')).toThrow(original.message);
   });
 });
 
@@ -455,6 +497,30 @@ describe('extractGroundingMetadata', () => {
       extractGroundingMetadata({vertex_ai_grounding_metadata: 'nope'}),
     ).toBeUndefined();
   });
+
+  it.each([
+    ['webSearchQueries', {webSearchQueries: [1, 2]}],
+    ['imageSearchQueries', {imageSearchQueries: 'one'}],
+    ['retrievalQueries', {retrievalQueries: [{}]}],
+    ['googleMapsWidgetContextToken', {googleMapsWidgetContextToken: 7}],
+    ['groundingChunks', {groundingChunks: ['a']}],
+    ['groundingSupports', {groundingSupports: {}}],
+    ['sourceFlaggingUris', {sourceFlaggingUris: [null]}],
+    ['retrievalMetadata', {retrievalMetadata: []}],
+    ['searchEntryPoint', {searchEntryPoint: 'nope'}],
+  ])('drops a payload whose %s has the wrong shape', (_field, payload) => {
+    expect(
+      extractGroundingMetadata({vertex_ai_grounding_metadata: payload}),
+    ).toBeUndefined();
+  });
+
+  it('keeps a field the SDK type does not declare', () => {
+    expect(
+      extractGroundingMetadata({
+        vertex_ai_grounding_metadata: {webSearchQueries: ['a'], future: 1},
+      }),
+    ).toEqual({webSearchQueries: ['a'], future: 1});
+  });
 });
 
 describe('messageToGenerateContentResponse', () => {
@@ -500,6 +566,24 @@ describe('messageToGenerateContentResponse', () => {
         ],
       }).content?.parts?.[0].functionCall?.args,
     ).toEqual({a: 1});
+  });
+
+  it('accepts Python dict literal tool call arguments', () => {
+    expect(
+      messageToGenerateContentResponse({
+        role: 'assistant',
+        tool_calls: [
+          {
+            type: 'function',
+            id: 'c1',
+            function: {
+              name: 'run_query',
+              arguments: "{'query': 'MATCH (n) RETURN n'}",
+            },
+          },
+        ],
+      }).content?.parts?.[0].functionCall?.args,
+    ).toEqual({query: 'MATCH (n) RETURN n'});
   });
 
   it('skips a tool call that is not a function call', () => {

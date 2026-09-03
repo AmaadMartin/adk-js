@@ -5,9 +5,11 @@
  */
 
 import {
+  App,
   BaseTool,
   ContextCacheConfig,
   FunctionTool,
+  InMemoryRunner,
   LiteLlm,
   LlmAgent,
   LlmRequest,
@@ -186,6 +188,54 @@ async function runAgent(agent: LlmAgent, prompt: string): Promise<string> {
   return text;
 }
 
+/** Builds a one-turn request carrying nothing but the prompt. */
+function textRequest(text: string): LlmRequest {
+  return {
+    contents: [{role: 'user', parts: [{text}]}],
+    liveConnectConfig: {},
+    toolsDict: {},
+  };
+}
+
+/** Builds a history whose last turn answers a tool call. */
+function historyWithToolResult(): LlmRequest {
+  return {
+    contents: [
+      {role: 'user', parts: [{text: 'What is the weather in Paris?'}]},
+      {
+        role: 'model',
+        parts: [{functionCall: {id: 'call_1', name: 'get_weather', args: {}}}],
+      },
+      {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'call_1',
+              name: 'get_weather',
+              response: {report: 'It is sunny in Paris.'},
+            },
+          },
+        ],
+      },
+    ],
+    liveConnectConfig: {},
+    toolsDict: {},
+  };
+}
+
+/** Drains a non-streaming generation. */
+async function collectResponses(
+  model: LiteLlm,
+  llmRequest: LlmRequest,
+): Promise<LlmResponse[]> {
+  const responses: LlmResponse[] = [];
+  for await (const response of model.generateContentAsync(llmRequest)) {
+    responses.push(response);
+  }
+  return responses;
+}
+
 describe('LiteLlm against a local chat-completions endpoint', () => {
   it('answers a single turn', async () => {
     endpoint = await startEndpoint([textReply('Hello from the endpoint.')]);
@@ -319,6 +369,136 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
     ]);
     expect(endpoint.headers[0]['x-goog-api-client']).toContain('google-adk/');
     expect(endpoint.headers[0]['user-agent']).toContain('gl-typescript/');
+  });
+
+  it('sends a Gemma 4 tool result under the tool_responses role', async () => {
+    endpoint = await startEndpoint([textReply('It is sunny in Paris.')]);
+
+    const model = new LiteLlm({
+      model: 'ollama/gemma4:e2b',
+      apiBase: endpoint.apiBase,
+    });
+
+    await collectResponses(model, historyWithToolResult());
+
+    const messages = endpoint.requests[0]['messages'] as Array<
+      Record<string, unknown>
+    >;
+    const toolMessage = messages[messages.length - 1];
+    expect(toolMessage['role']).toBe('tool_responses');
+    expect(toolMessage['tool_call_id']).toBe('call_1');
+  });
+
+  it('sends a non-Gemma tool result under the tool role', async () => {
+    endpoint = await startEndpoint([textReply('It is sunny in Paris.')]);
+
+    const model = new LiteLlm({
+      model: 'openai/gpt-4o',
+      apiBase: endpoint.apiBase,
+    });
+
+    await collectResponses(model, historyWithToolResult());
+
+    const messages = endpoint.requests[0]['messages'] as Array<
+      Record<string, unknown>
+    >;
+    expect(messages[messages.length - 1]['role']).toBe('tool');
+  });
+
+  it('sends the cache control injection points in the body', async () => {
+    endpoint = await startEndpoint([textReply('Cached.')]);
+
+    const model = new LiteLlm({
+      model: 'anthropic/claude-sonnet-4',
+      apiBase: endpoint.apiBase,
+    });
+
+    await collectResponses(model, {
+      ...textRequest('Summarize the document.'),
+      cacheConfig: {cacheIntervals: 10, ttlSeconds: 3600, minTokens: 0},
+    });
+
+    expect(endpoint.requests[0]['cache_control_injection_points']).toEqual([
+      {
+        location: 'message',
+        role: 'system',
+        control: {type: 'ephemeral', ttl: '1h'},
+      },
+      {location: 'message', index: -1, control: {type: 'ephemeral', ttl: '1h'}},
+    ]);
+  });
+
+  it('sends the injection points an App configured', async () => {
+    endpoint = await startEndpoint([textReply('Cached.')]);
+
+    const app = new App({
+      name: 'cached_app',
+      rootAgent: new LlmAgent({
+        name: 'cached_agent',
+        model: new LiteLlm({
+          model: 'anthropic/claude-sonnet-4',
+          apiBase: endpoint.apiBase,
+        }),
+        instruction: 'You are a helpful assistant.',
+      }),
+      contextCacheConfig: {cacheIntervals: 10, ttlSeconds: 1800, minTokens: 0},
+    });
+    const runner = new InMemoryRunner({app, appName: app.name});
+    const session = await runner.sessionService.createSession({
+      appName: app.name,
+      userId: 'user',
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: 'user',
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'Summarize.'}]},
+    })) {
+      // Drain the run so the request reaches the endpoint.
+    }
+
+    expect(endpoint.requests[0]['cache_control_injection_points']).toEqual([
+      {location: 'message', role: 'system', control: {type: 'ephemeral'}},
+      {location: 'message', index: -1, control: {type: 'ephemeral'}},
+    ]);
+  });
+
+  it('sends no injection points when the App configures no cache', async () => {
+    endpoint = await startEndpoint([textReply('Hi.')]);
+
+    const text = await runAgent(agentFor(endpoint.apiBase), 'Say hello.');
+
+    expect(text).toBe('Hi.');
+    expect(endpoint.requests[0]).not.toHaveProperty(
+      'cache_control_injection_points',
+    );
+  });
+
+  it('sends the tracking headers as HTTP headers to a vertex model', async () => {
+    endpoint = await startEndpoint([textReply('Hi.')]);
+
+    const model = new LiteLlm({
+      model: 'vertex_ai/gemini-2.5-flash',
+      apiBase: endpoint.apiBase,
+    });
+
+    await collectResponses(model, textRequest('Say hi.'));
+
+    expect(endpoint.headers[0]['x-goog-api-client']).toContain('google-adk/');
+    expect(endpoint.requests[0]).not.toHaveProperty('extra_headers');
+  });
+
+  it('sends no tracking headers to another provider', async () => {
+    endpoint = await startEndpoint([textReply('Hi.')]);
+
+    const model = new LiteLlm({
+      model: 'openai/gpt-4o',
+      apiBase: endpoint.apiBase,
+    });
+
+    await collectResponses(model, textRequest('Say hi.'));
+
+    expect(endpoint.headers[0]['x-goog-api-client']).toBeUndefined();
   });
 
   it('reports an endpoint error', async () => {

@@ -55,12 +55,11 @@ const TYPE_NAMES: Record<string, string> = {
  * through, with `items`, `properties` and `anyOf` converted recursively.
  */
 export function genaiSchemaToJsonSchema(
-  schema: Schema,
+  schema: Schema | Record<string, unknown>,
 ): Record<string, unknown> {
-  const source = schema as Record<string, unknown>;
   const out: Record<string, unknown> = {};
 
-  for (const [key, value] of Object.entries(source)) {
+  for (const [key, value] of Object.entries(schema)) {
     if (value === undefined || NON_JSON_SCHEMA_KEYS.has(key)) {
       continue;
     }
@@ -102,10 +101,11 @@ export function genaiSchemaToJsonSchema(
     }
   }
 
+  const declaredType = schema['type'];
   const typeName =
-    typeof schema.type === 'string' ? TYPE_NAMES[schema.type] : undefined;
+    typeof declaredType === 'string' ? TYPE_NAMES[declaredType] : undefined;
   if (typeName) {
-    out['type'] = schema.nullable ? [typeName, 'null'] : typeName;
+    out['type'] = schema['nullable'] ? [typeName, 'null'] : typeName;
   }
 
   // genai sends every enum member as a string, even for a numeric field

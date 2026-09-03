@@ -73,7 +73,7 @@ export function getScriptLanguageByExtension(
 }
 
 /** The MIME type {@link getMimeTypeAndEncoding} returns for an unknown one. */
-const UNKNOWN_MIME_TYPE = 'application/octet-stream';
+export const UNKNOWN_MIME_TYPE = 'application/octet-stream';
 
 /** Major MIME types that name a kind of media. */
 const MEDIA_KIND_BY_MAJOR_MIME_TYPE: Record<string, 'image' | 'video'> = {

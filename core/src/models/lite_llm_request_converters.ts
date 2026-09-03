@@ -9,7 +9,6 @@ import {
   FunctionCallingConfigMode,
   FunctionDeclaration,
   Part,
-  Schema,
 } from '@google/genai';
 
 import {base64Decode} from '../utils/env_aware_utils.js';
@@ -19,6 +18,7 @@ import {
   inferMimeTypeFromUri,
   mediaKindFromMimeType,
   normalizeMimeType,
+  UNKNOWN_MIME_TYPE,
 } from '../utils/file_extension_utils.js';
 import {genaiSchemaToJsonSchema} from '../utils/genai_schema_to_json.js';
 import {logger} from '../utils/logger.js';
@@ -27,6 +27,7 @@ import {extractSystemInstruction} from './interactions_utils.js';
 import {
   getProviderFromModel,
   isFileUriSupported,
+  isGemma4Model,
   isHttpUrl,
   isLiteLlmGeminiModel,
   looksLikeOpenAiFileId,
@@ -40,6 +41,7 @@ import {
   JsonObject,
   JsonValue,
   MessageContent,
+  MessageRole,
   ToolCall,
   ToolChoice,
   ToolParam,
@@ -71,9 +73,6 @@ const MISSING_TOOL_RESULT_MESSAGE =
 /** The user text appended when a history has no usable user turn. */
 const FALLBACK_USER_TEXT =
   'Handle the requests as specified in the System Instruction.';
-
-/** The MIME type that names no format, which providers reject. */
-const UNKNOWN_MIME_TYPE = 'application/octet-stream';
 
 /** Options that select provider-specific request shaping. */
 export interface ProviderOptions {
@@ -120,8 +119,8 @@ export function toJsonValue(value: unknown): JsonValue | undefined {
  * return undefined, because an object always survives the round trip.
  */
 export function toJsonObject(value: object): JsonObject {
-  const parsed: JsonObject = JSON.parse(JSON.stringify(value));
-  return parsed;
+  const parsed = toJsonValue(value);
+  return isJsonObject(parsed) ? parsed : {};
 }
 
 /**
@@ -447,10 +446,21 @@ function assistantMessage(
 }
 
 /**
+ * Returns the role a tool result must carry to reach this model.
+ *
+ * Gemma 4's chat template only recognises `tool_responses`. Under the
+ * OpenAI-compatible `tool` role it does not see the result, and re-issues the
+ * same tool call.
+ */
+export function toolResultRole(model: string): MessageRole {
+  return isGemma4Model(model) ? 'tool_responses' : 'tool';
+}
+
+/**
  * Converts one genai `Content` into the chat message or messages it becomes.
  *
- * A turn carrying function responses becomes one `tool` message per response,
- * followed by any remaining parts as their own message.
+ * A turn carrying function responses becomes one tool-result message per
+ * response, followed by any remaining parts as their own message.
  *
  * @returns The messages, or undefined when the content has no parts.
  */
@@ -463,6 +473,7 @@ export function contentToMessageParam(
     return undefined;
   }
 
+  const toolRole = toolResultRole(options.model);
   const toolMessages: ChatMessage[] = [];
   const nonToolParts: Part[] = [];
   for (const part of parts) {
@@ -472,7 +483,7 @@ export function contentToMessageParam(
       continue;
     }
     toolMessages.push({
-      role: 'tool',
+      role: toolRole,
       tool_call_id: functionResponse.id ?? '',
       content: safeJsonSerialize(functionResponse.response),
     });
@@ -509,8 +520,15 @@ function turnMessage(
 /**
  * Inserts a placeholder tool result for every tool call the history left
  * unanswered, because providers reject such a history outright.
+ *
+ * The placeholders carry the role this model reads tool results under, so a
+ * Gemma 4 history is not healed with messages the model then ignores.
  */
-export function ensureToolResults(messages: ChatMessage[]): ChatMessage[] {
+export function ensureToolResults(
+  messages: ChatMessage[],
+  model: string,
+): ChatMessage[] {
+  const toolRole = toolResultRole(model);
   const healed: ChatMessage[] = [];
   let pendingToolCallIds: string[] = [];
 
@@ -520,7 +538,7 @@ export function ensureToolResults(messages: ChatMessage[]): ChatMessage[] {
     );
     for (const toolCallId of pendingToolCallIds) {
       healed.push({
-        role: 'tool',
+        role: toolRole,
         tool_call_id: toolCallId,
         content: MISSING_TOOL_RESULT_MESSAGE,
       });
@@ -529,14 +547,14 @@ export function ensureToolResults(messages: ChatMessage[]): ChatMessage[] {
   };
 
   for (const message of messages) {
-    if (pendingToolCallIds.length > 0 && message.role !== 'tool') {
+    if (pendingToolCallIds.length > 0 && message.role !== toolRole) {
       flushPending();
     }
     if (message.role === 'assistant') {
       pendingToolCallIds = (message.tool_calls ?? [])
         .map((toolCall) => toolCall.id)
         .filter((id): id is string => Boolean(id));
-    } else if (message.role === 'tool') {
+    } else if (message.role === toolRole) {
       pendingToolCallIds = pendingToolCallIds.filter(
         (id) => id !== message.tool_call_id,
       );
@@ -671,7 +689,7 @@ export function toLiteLlmResponseFormat(
   // names and stringified bounds no provider understands. A schema already
   // written as plain JSON Schema is left alone.
   const jsonSchema = isGenaiDialect(schema)
-    ? toJsonObject(genaiSchemaToJsonSchema(schema as Schema))
+    ? toJsonObject(genaiSchemaToJsonSchema(schema))
     : schema;
 
   if (isLiteLlmGeminiModel(model)) {
@@ -855,7 +873,7 @@ export function getCompletionInputs(
   const responseSchema = llmRequest.config?.responseSchema;
 
   return {
-    messages: ensureToolResults(messages),
+    messages: ensureToolResults(messages, model),
     tools,
     responseFormat:
       responseSchema === undefined

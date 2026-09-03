@@ -11,6 +11,7 @@ import {
   finishReasonToErrorMessage,
   getProviderFromModel,
   isFileUriSupported,
+  isGemma4Model,
   isHttpUrl,
   isLiteLlmGeminiModel,
   isLiteLlmVertexModel,
@@ -91,6 +92,9 @@ describe('litellm model classification', () => {
     expect(
       isLiteLlmGeminiModel('litellm_proxy/vertex_ai/gemini-2.5-flash'),
     ).toBe(true);
+    expect(
+      isLiteLlmGeminiModel('litellm_proxy/vertex_ai/gemini-2.0-flash'),
+    ).toBe(true);
     expect(isLiteLlmGeminiModel('litellm_proxy/gemini/gemini-2.5-pro')).toBe(
       true,
     );
@@ -102,6 +106,30 @@ describe('litellm model classification', () => {
     expect(isLiteLlmVertexModel('vertex_ai/claude-4')).toBe(true);
     expect(isLiteLlmVertexModel('litellm_proxy/vertex_ai/claude-4')).toBe(true);
     expect(isLiteLlmVertexModel('openai/gpt-4o')).toBe(false);
+  });
+
+  it.each([
+    ['vertex_ai/gemini-2.5-flash', true],
+    ['vertex_ai/claude-sonnet-4', true],
+    ['litellm_proxy/vertex_ai/claude-sonnet-4', true],
+    ['openai/gpt-4o', false],
+    ['gemini/gemini-2.5-pro', false],
+    ['', false],
+  ])('reports %s as a vertex model: %s', (model, expected) => {
+    expect(isLiteLlmVertexModel(model)).toBe(expected);
+  });
+
+  it.each([
+    ['ollama/gemma4:e2b', true],
+    ['google/gemma-4-26B-A4B', true],
+    ['ollama/Gemma4:31b', true],
+    ['ollama/gemma3:4b', false],
+    ['ollama/llama3:8b', false],
+    ['openai/gpt-4o', false],
+    ['anthropic/claude-3-opus', false],
+    ['', false],
+  ])('reports %s as a gemma 4 model: %s', (model, expected) => {
+    expect(isGemma4Model(model)).toBe(expected);
   });
 });
 

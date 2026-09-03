@@ -150,6 +150,19 @@ describe('client_labels', () => {
     });
   });
 
+  describe('getTrackingHeaders', () => {
+    it('sends the same joined labels under both header names', () => {
+      const headers = getTrackingHeaders();
+
+      expect(Object.keys(headers).sort()).toEqual([
+        'user-agent',
+        'x-goog-api-client',
+      ]);
+      expect(headers['user-agent']).toBe(getClientLabels().join(' '));
+      expect(headers['x-goog-api-client']).toBe(headers['user-agent']);
+    });
+  });
+
   describe('mergeTrackingHeaders', () => {
     it('returns exactly the tracking headers for an absent input', () => {
       expect(mergeTrackingHeaders()).toEqual(getTrackingHeaders());
@@ -193,6 +206,46 @@ describe('client_labels', () => {
       mergeTrackingHeaders(headers);
 
       expect(headers).toEqual({'x-goog-api-client': 'my-app/1.0'});
+    });
+
+    it.each([[undefined], [{}]])('adds both headers to %j', (headers) => {
+      expect(mergeTrackingHeaders(headers)).toEqual(getTrackingHeaders());
+    });
+
+    it('keeps a header it does not own', () => {
+      expect(mergeTrackingHeaders({custom: 'header'})['custom']).toBe('header');
+    });
+
+    it('never mutates the headers it was given', () => {
+      const headers = {custom: 'header'};
+
+      mergeTrackingHeaders(headers);
+
+      expect(headers).toEqual({custom: 'header'});
+    });
+
+    it('appends the tracking parts to a value a caller already set', () => {
+      const merged = mergeTrackingHeaders({'user-agent': 'my-client/1.0'});
+
+      const parts = merged['user-agent'].split(' ');
+      expect(parts).toContain('my-client/1.0');
+      expect(parts.slice(0, -1).join(' ')).toBe(
+        getTrackingHeaders()['user-agent'],
+      );
+    });
+
+    it('does not repeat a part the caller value already carries', () => {
+      const tracked = getTrackingHeaders()['user-agent'];
+
+      const merged = mergeTrackingHeaders({'user-agent': tracked});
+
+      expect(merged['user-agent']).toBe(tracked);
+    });
+
+    it('replaces an empty value rather than appending to it', () => {
+      expect(mergeTrackingHeaders({'user-agent': ''})).toEqual(
+        getTrackingHeaders(),
+      );
     });
   });
 });
