@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {ComputerUse, ToolUnion} from '@google/genai';
+
 import {Context} from '../../agents/context.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
@@ -85,6 +87,12 @@ export interface ComputerUseToolOptions {
    * Defaults to 1000x1000.
    */
   virtualScreenSize?: ScreenSize;
+  /**
+   * The computer-use configuration to attach to the outgoing request. Supplied
+   * by {@link ComputerUseToolset}; a tool built without one registers itself
+   * but puts the model into no particular mode.
+   */
+  computerUse?: ComputerUse;
 }
 
 /** Whether both dimensions are usable as a screen size. */
@@ -210,6 +218,11 @@ function toStateResponse(state: ComputerState): Record<string, unknown> {
   };
 }
 
+/** Whether a tool already on the request configures computer use. */
+function hasComputerUse(tool: ToolUnion): boolean {
+  return 'computerUse' in tool && !!tool.computerUse;
+}
+
 /**
  * Converts the action's return value into a function response, and records the
  * user's approval on it when there was one.
@@ -246,6 +259,9 @@ export class ComputerUseTool extends FunctionTool<ToolInputParameters> {
   /** The wrapped function, so that an adapter can compose over it. */
   readonly func: ComputerUseFunction;
 
+  /** The computer-use configuration this tool attaches to the request. */
+  readonly computerUse?: ComputerUse;
+
   constructor(options: ComputerUseToolOptions) {
     super({
       name: options.name,
@@ -257,6 +273,7 @@ export class ComputerUseTool extends FunctionTool<ToolInputParameters> {
     this.virtualScreenSize =
       options.virtualScreenSize ?? DEFAULT_VIRTUAL_SCREEN_SIZE;
     this.func = options.execute;
+    this.computerUse = options.computerUse;
 
     if (!isPositiveSize(this.screenSize)) {
       throw new Error('screenSize dimensions must be positive');
@@ -287,10 +304,27 @@ export class ComputerUseTool extends FunctionTool<ToolInputParameters> {
   }
 
   /**
-   * Adds nothing to the request: {@link ComputerUseToolset} registers every
-   * computer-use tool and its configuration in one place.
+   * Registers this tool and puts the model into computer-use mode.
+   *
+   * No function declaration is emitted, because the model already knows the
+   * predefined computer-use functions. Where adk-python registers the whole
+   * set from `ComputerUseToolset.process_llm_request`, adk-js reaches only
+   * `BaseTool.processLlmRequest` when an agent runs, so each tool registers
+   * itself and the first one to run attaches the shared configuration.
    */
-  override async processLlmRequest(
-    _request: ToolProcessLlmRequest,
-  ): Promise<void> {}
+  override async processLlmRequest({
+    llmRequest,
+  }: ToolProcessLlmRequest): Promise<void> {
+    llmRequest.toolsDict[this.name] = this;
+    if (!this.computerUse) {
+      return;
+    }
+    llmRequest.config = llmRequest.config ?? {};
+    llmRequest.config.tools = llmRequest.config.tools ?? [];
+    if (llmRequest.config.tools.some(hasComputerUse)) {
+      logger.debug('Computer use already configured in LLM request');
+      return;
+    }
+    llmRequest.config.tools.push({computerUse: this.computerUse});
+  }
 }

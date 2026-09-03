@@ -148,8 +148,9 @@ and no driver call, and returns:
 ```
 
 Set `allowPrivateNetworkAccess: true` when the agent is meant to drive a local
-development server. That skips the check entirely, so only use it against a host
-you control.
+development server. That skips both host checks together, so `localhost` and a
+loopback address behave the same way. The scheme and backslash checks still
+apply. Only use the flag against a host you control.
 
 ```ts
 new ComputerUseToolset({
@@ -157,6 +158,11 @@ new ComputerUseToolset({
   allowPrivateNetworkAccess: true,
 });
 ```
+
+The check is not a sandbox. The guard resolves the host, and then the browser
+resolves it again and follows any redirect, so a DNS rebind or a `302` to a
+private address still reaches the driver. Treat it as a guard against an obvious
+mistake, not as a network boundary.
 
 ## Restrict the action space
 

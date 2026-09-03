@@ -550,15 +550,35 @@ describe('navigate url safety', () => {
     expect(result).toMatchObject({url: MOCK_PAGE_URL});
   });
 
-  it('reaches loopback when private network access is allowed', async () => {
+  // `localhost` is the host a local dev server actually runs on, and it is
+  // rejected by the hostname check rather than by address resolution. Both
+  // checks have to be skipped together, or the escape hatch does not open.
+  it.each([
+    ['a loopback address', 'http://127.0.0.1:8000/'],
+    ['localhost', 'http://localhost:3000/'],
+    ['a localhost subdomain', 'http://dev.localhost/'],
+  ])(
+    'reaches %s when private network access is allowed',
+    async (_case, url) => {
+      const computer = new MockComputer();
+      const navigateTool = await navigateToolOver(computer, true);
+
+      const result = await navigateTool.func({url});
+
+      expect(computer.navigateCalls).toEqual([url]);
+      expect(result).toMatchObject({url});
+      expect(lookupMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('still refuses a non-http scheme when private network access is allowed', async () => {
     const computer = new MockComputer();
     const navigateTool = await navigateToolOver(computer, true);
 
-    const result = await navigateTool.func({url: 'http://127.0.0.1:8000/'});
+    const result = await navigateTool.func({url: 'file:///etc/passwd'});
 
-    expect(computer.navigateCalls).toEqual(['http://127.0.0.1:8000/']);
-    expect(result).toMatchObject({url: 'http://127.0.0.1:8000/'});
-    expect(lookupMock).not.toHaveBeenCalled();
+    expect(computer.navigateCalls).toEqual([]);
+    expect(result).toMatchObject({url: MOCK_PAGE_URL});
   });
 
   it('still prepares the computer for a permitted url', async () => {

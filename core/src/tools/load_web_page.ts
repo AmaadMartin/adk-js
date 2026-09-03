@@ -71,7 +71,7 @@ function failedToFetchMessage(url: string): string {
  * Returns `true` for `localhost` and any `*.localhost` name (case-insensitive,
  * ignoring a trailing dot), matching the Python `_is_blocked_hostname` helper.
  */
-function isBlockedHostname(hostname: string): boolean {
+export function isBlockedHostname(hostname: string): boolean {
   const normalized = hostname.replace(/\.+$/, '').toLowerCase();
   return normalized === 'localhost' || normalized.endsWith('.localhost');
 }
@@ -215,14 +215,23 @@ async function resolveHostAddresses(hostname: string): Promise<string[]> {
 }
 
 /**
- * Validates the URL's scheme and hostname up front (before any network access).
- * Throws for malformed URLs, disallowed schemes, and blocked hostnames.
+ * Parses `url` and throws unless its scheme is `http` or `https`. Callers that
+ * may allow a non-public host apply {@link isBlockedHostname} separately.
  */
-export function assertUrlAllowed(url: string): URL {
+export function assertSchemeAllowed(url: string): URL {
   const parsed = new URL(url);
   if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
     throw new Error(`Unsupported url scheme: ${url}`);
   }
+  return parsed;
+}
+
+/**
+ * Validates the URL's scheme and hostname up front (before any network access).
+ * Throws for malformed URLs, disallowed schemes, and blocked hostnames.
+ */
+function assertUrlAllowed(url: string): URL {
+  const parsed = assertSchemeAllowed(url);
   if (isBlockedHostname(parsed.hostname)) {
     throw new Error(`Blocked host: ${parsed.hostname}`);
   }

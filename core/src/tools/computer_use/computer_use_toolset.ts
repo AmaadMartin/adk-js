@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Environment} from '@google/genai';
+import {ComputerUse, Environment} from '@google/genai';
 
 import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
@@ -14,7 +14,8 @@ import {logger} from '../../utils/logger.js';
 import {BaseToolset} from '../base_toolset.js';
 import {ToolInputParameters} from '../function_tool.js';
 import {
-  assertUrlAllowed,
+  assertSchemeAllowed,
+  isBlockedHostname,
   normalizeHost,
   validateResolvedAddresses,
 } from '../load_web_page.js';
@@ -106,7 +107,7 @@ async function isNavigationAllowed(
 ): Promise<boolean> {
   let parsed: URL;
   try {
-    parsed = assertUrlAllowed(url);
+    parsed = assertSchemeAllowed(url);
   } catch {
     return false;
   }
@@ -116,8 +117,13 @@ async function isNavigationAllowed(
   if (rawAuthority(url).includes('\\')) {
     return false;
   }
+  // Both host checks are skipped together, so `localhost` and a loopback
+  // literal behave the same way once the caller opts in.
   if (allowPrivateNetworkAccess) {
     return true;
+  }
+  if (isBlockedHostname(parsed.hostname)) {
+    return false;
   }
   try {
     await validateResolvedAddresses(normalizeHost(parsed.hostname));
@@ -164,7 +170,15 @@ export class ComputerUseToolset extends BaseToolset {
     this.initialization ??= this.computer.initialize();
     await this.initialization;
 
-    const screenSize = await this.computer.screenSize();
+    const [screenSize, environment] = await Promise.all([
+      this.computer.screenSize(),
+      this.computer.environment(),
+    ]);
+    const computerUse: ComputerUse = {
+      environment:
+        GENAI_ENVIRONMENTS[environment] ?? Environment.ENVIRONMENT_BROWSER,
+      excludedPredefinedFunctions: this.excludedPredefinedFunctions,
+    };
     const excluded = new Set(this.excludedPredefinedFunctions ?? []);
     this.tools = PREDEFINED_COMPUTER_FUNCTIONS.filter(
       (predefined) => !excluded.has(predefined.name),
@@ -175,6 +189,7 @@ export class ComputerUseToolset extends BaseToolset {
           description: predefined.description,
           parameters: predefined.parameters,
           screenSize,
+          computerUse,
           execute: (args, toolContext) =>
             this.runPredefinedFunction(predefined, args, toolContext),
         }),
@@ -189,35 +204,20 @@ export class ComputerUseToolset extends BaseToolset {
   /**
    * Registers this toolset's tools and adds the computer-use configuration the
    * model needs in order to call them.
+   *
+   * An `LlmAgent` never reaches this method: it expands a toolset into its
+   * tools and calls `processLlmRequest` on each one. The work therefore lives
+   * in {@link ComputerUseTool.processLlmRequest} and this delegates to it, so
+   * the toolset hook that adk-python drives runs the same code.
    */
   override async processLlmRequest(
-    _toolContext: Context,
+    toolContext: Context,
     llmRequest: LlmRequest,
   ): Promise<void> {
     try {
       for (const tool of await this.getTools()) {
-        llmRequest.toolsDict[tool.name] = tool;
+        await tool.processLlmRequest({toolContext, llmRequest});
       }
-
-      llmRequest.config = llmRequest.config ?? {};
-      llmRequest.config.tools = llmRequest.config.tools ?? [];
-      if (
-        llmRequest.config.tools.some(
-          (tool) => 'computerUse' in tool && tool.computerUse,
-        )
-      ) {
-        logger.debug('Computer use already configured in LLM request');
-        return;
-      }
-
-      const environment = await this.computer.environment();
-      llmRequest.config.tools.push({
-        computerUse: {
-          environment:
-            GENAI_ENVIRONMENTS[environment] ?? Environment.ENVIRONMENT_BROWSER,
-          excludedPredefinedFunctions: this.excludedPredefinedFunctions,
-        },
-      });
     } catch (error: unknown) {
       logger.error('Error in ComputerUseToolset.processLlmRequest:', error);
       throw error;
@@ -269,6 +269,7 @@ export class ComputerUseToolset extends BaseToolset {
       execute: adapted.execute,
       screenSize: original.screenSize,
       virtualScreenSize: original.virtualScreenSize,
+      computerUse: original.computerUse,
     });
 
     delete llmRequest.toolsDict[methodName];

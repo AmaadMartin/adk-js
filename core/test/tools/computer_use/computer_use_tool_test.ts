@@ -12,6 +12,7 @@ import {
   ToolConfirmation,
   isComputerUseTool,
 } from '@google/adk';
+import {ComputerUse, Environment} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 import {MOCK_SCREENSHOT, createToolContext} from './computer_use_test_utils.js';
@@ -245,21 +246,87 @@ describe('ComputerUseTool response mapping', () => {
       tool.runAsync({args: {}, toolContext: createToolContext()}),
     ).rejects.toThrow("Error in tool 'current_state': driver crashed");
   });
+});
 
-  it('adds nothing to the request, because the toolset does that', async () => {
-    const tool = toolOver(async () => undefined);
-    const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-    };
+describe('ComputerUseTool.processLlmRequest', () => {
+  const COMPUTER_USE: ComputerUse = {
+    environment: Environment.ENVIRONMENT_BROWSER,
+  };
+
+  function emptyRequest(): LlmRequest {
+    return {contents: [], toolsDict: {}, liveConnectConfig: {}};
+  }
+
+  function configuredTool(computerUse?: ComputerUse): ComputerUseTool {
+    return new ComputerUseTool({
+      name: 'current_state',
+      description: 'Reads the page.',
+      screenSize: SCREEN_SIZE,
+      computerUse,
+      execute: async () => undefined,
+    });
+  }
+
+  function register(
+    tool: ComputerUseTool,
+    llmRequest: LlmRequest,
+  ): Promise<void> {
+    return tool.processLlmRequest({
+      toolContext: createToolContext(),
+      llmRequest,
+    });
+  }
+
+  it('registers itself so a call naming it can resolve', async () => {
+    const tool = configuredTool(COMPUTER_USE);
+    const llmRequest = emptyRequest();
 
     await tool.processLlmRequest({
       toolContext: createToolContext(),
       llmRequest,
     });
 
-    expect(llmRequest.toolsDict).toEqual({});
+    expect(llmRequest.toolsDict['current_state']).toBe(tool);
+  });
+
+  it('puts the model into computer-use mode', async () => {
+    const llmRequest = emptyRequest();
+
+    await register(configuredTool(COMPUTER_USE), llmRequest);
+
+    expect(llmRequest.config?.tools).toEqual([{computerUse: COMPUTER_USE}]);
+  });
+
+  it('declares no function, because the model knows the predefined set', async () => {
+    const llmRequest = emptyRequest();
+
+    await register(configuredTool(COMPUTER_USE), llmRequest);
+
+    expect(
+      (llmRequest.config?.tools ?? []).flatMap((entry) =>
+        'functionDeclarations' in entry
+          ? (entry.functionDeclarations ?? [])
+          : [],
+      ),
+    ).toEqual([]);
+  });
+
+  it('adds no second configuration to a request that already carries one', async () => {
+    const llmRequest = emptyRequest();
+    llmRequest.config = {tools: [{computerUse: COMPUTER_USE}]};
+
+    await register(configuredTool(COMPUTER_USE), llmRequest);
+
+    expect(llmRequest.config.tools).toHaveLength(1);
+    expect(llmRequest.toolsDict['current_state']).toBeDefined();
+  });
+
+  it('registers without configuring when it carries no configuration', async () => {
+    const llmRequest = emptyRequest();
+
+    await register(configuredTool(), llmRequest);
+
+    expect(llmRequest.toolsDict['current_state']).toBeDefined();
     expect(llmRequest.config).toBeUndefined();
   });
 });
