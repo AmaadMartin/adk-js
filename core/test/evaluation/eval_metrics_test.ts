@@ -135,12 +135,12 @@ describe('eval_metrics', () => {
       });
     });
 
-    it.each([['not an object'], [null], [42]])(
-      'rejects the payload %s, which is not an object',
+    it.each([['not an object'], [null], [42], [[{threshold: 0.5}]]])(
+      'rejects the payload %s, which is not a record',
       (raw) => {
         expect(() => parseToolTrajectoryCriterion(raw)).toThrow(
           new InputValidationError(
-            'A criterion of type `ToolTrajectoryCriterion` must be an object.',
+            'A tool trajectory criterion must be an object.',
           ),
         );
       },
@@ -151,8 +151,7 @@ describe('eval_metrics', () => {
       (raw) => {
         expect(() => parseToolTrajectoryCriterion(raw)).toThrow(
           new InputValidationError(
-            'A criterion of type `ToolTrajectoryCriterion` requires a numeric' +
-              ' `threshold`.',
+            'A tool trajectory criterion requires a numeric `threshold`.',
           ),
         );
       },
@@ -166,8 +165,8 @@ describe('eval_metrics', () => {
         }),
       ).toThrow(
         new InputValidationError(
-          'A criterion of type `ToolTrajectoryCriterion` accepts as' +
-            ' `matchType` one of EXACT, IN_ORDER, ANY_ORDER.',
+          'A tool trajectory criterion accepts as `matchType` one of EXACT,' +
+            ' IN_ORDER, ANY_ORDER.',
         ),
       );
     });
@@ -177,8 +176,7 @@ describe('eval_metrics', () => {
         parseToolTrajectoryCriterion({threshold: 0.5, ignoreArgs: 'yes'}),
       ).toThrow(
         new InputValidationError(
-          'A criterion of type `ToolTrajectoryCriterion` requires' +
-            ' `ignoreArgs` to be a boolean.',
+          'A tool trajectory criterion requires `ignoreArgs` to be a boolean.',
         ),
       );
     });

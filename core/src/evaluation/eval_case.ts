@@ -51,10 +51,7 @@ export interface Invocation {
 
 /**
  * A scenario for a conversation between a simulated user and the agent under
- * test.
- *
- * `google/adk-python` also carries a user persona on this model. It is omitted
- * here because it needs the user simulator, which adk-js does not carry yet.
+ * test. A multi-turn metric reads it; a per-invocation metric ignores it.
  */
 export interface ConversationScenario {
   /**

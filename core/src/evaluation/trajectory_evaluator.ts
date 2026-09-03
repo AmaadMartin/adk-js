@@ -7,6 +7,7 @@
 import type {FunctionCall} from '@google/genai';
 import {isEqual} from 'lodash-es';
 import {InputValidationError} from '../errors/input_validation_error.js';
+import {formatError} from '../utils/error_utils.js';
 import {
   getAllToolCalls,
   type ConversationScenario,
@@ -15,7 +16,6 @@ import {
 import {
   getMetricThreshold,
   parseToolTrajectoryCriterion,
-  TOOL_TRAJECTORY_CRITERION_NAME,
   ToolTrajectoryMatchType,
   type EvalMetric,
   type ParsedToolTrajectoryCriterion,
@@ -26,7 +26,6 @@ import {
   type CriterionType,
   type EvaluationResult,
   type Evaluator,
-  type PerInvocationResult,
 } from './evaluator.js';
 
 /**
@@ -44,7 +43,7 @@ export interface TrajectoryEvaluatorOptions {
 }
 
 /** Whether two tool calls count as the same call. */
-export type ToolCallEquality = (
+type ToolCallEquality = (
   actual: FunctionCall,
   expected: FunctionCall,
 ) => boolean;
@@ -71,7 +70,7 @@ function toolCallNamesEqual(
 }
 
 /** Whether both trajectories hold the same calls in the same order. */
-export function areToolCallsExactMatch(
+function areToolCallsExactMatch(
   actual: FunctionCall[],
   expected: FunctionCall[],
   equals: ToolCallEquality,
@@ -88,7 +87,7 @@ export function areToolCallsExactMatch(
  * Extra actual calls between the expected ones are tolerated, and an empty
  * expected trajectory matches anything.
  */
-export function areToolCallsInOrderMatch(
+function areToolCallsInOrderMatch(
   actual: FunctionCall[],
   expected: FunctionCall[],
   equals: ToolCallEquality,
@@ -109,7 +108,7 @@ export function areToolCallsInOrderMatch(
  * A matched call is consumed, so an expected call that repeats needs the
  * actual trajectory to hold it as many times.
  */
-export function areToolCallsAnyOrderMatch(
+function areToolCallsAnyOrderMatch(
   actual: FunctionCall[],
   expected: FunctionCall[],
   equals: ToolCallEquality,
@@ -139,16 +138,6 @@ const TOOL_CALL_MATCHERS: Record<ToolTrajectoryMatchType, ToolCallMatcher> = {
   [ToolTrajectoryMatchType.ANY_ORDER]: areToolCallsAnyOrderMatch,
 };
 
-/** The criterion type {@link TrajectoryEvaluator} accepts. */
-const TOOL_TRAJECTORY_CRITERION_TYPE: CriterionType<ParsedToolTrajectoryCriterion> =
-  {
-    name: TOOL_TRAJECTORY_CRITERION_NAME,
-    validate: parseToolTrajectoryCriterion,
-  };
-
-/** A per-invocation result this metric always scores. */
-type ScoredInvocationResult = PerInvocationResult & {score: number};
-
 /**
  * Scores an agent's tool use trajectory against a golden one.
  *
@@ -159,7 +148,10 @@ type ScoredInvocationResult = PerInvocationResult & {score: number};
 export class TrajectoryEvaluator implements Evaluator {
   /** The criterion type a metric must carry for this evaluator to read it. */
   static readonly criterionType: CriterionType<ParsedToolTrajectoryCriterion> =
-    TOOL_TRAJECTORY_CRITERION_TYPE;
+    {
+      name: 'ToolTrajectoryCriterion',
+      validate: parseToolTrajectoryCriterion,
+    };
 
   private readonly threshold: number;
   private readonly matches: ToolCallMatcher;
@@ -181,7 +173,7 @@ export class TrajectoryEvaluator implements Evaluator {
 
     let criterion: ParsedToolTrajectoryCriterion | undefined;
     if (evalMetric?.criterion !== undefined) {
-      criterion = readCriterion(evalMetric);
+      criterion = validateCriterion(evalMetric);
       this.threshold = criterion.threshold;
     } else if (evalMetric !== undefined) {
       this.threshold = getMetricThreshold(evalMetric);
@@ -221,8 +213,8 @@ export class TrajectoryEvaluator implements Evaluator {
     }
     validateInvocationLengths(actualInvocations, expectedInvocations);
 
-    const perInvocationResults: ScoredInvocationResult[] =
-      actualInvocations.map((actualInvocation, index) => {
+    const perInvocationResults = actualInvocations.map(
+      (actualInvocation, index) => {
         const expectedInvocation = expectedInvocations[index];
         const score = this.scoreInvocation(
           actualInvocation,
@@ -235,7 +227,8 @@ export class TrajectoryEvaluator implements Evaluator {
           score,
           evalStatus: this.getEvalStatus(score),
         };
-      });
+      },
+    );
 
     if (perInvocationResults.length === 0) {
       return {
@@ -278,17 +271,22 @@ export class TrajectoryEvaluator implements Evaluator {
 /**
  * Returns the criterion a metric carries, as the type this evaluator declares.
  *
+ * `InputValidationError` carries no cause, so the reason the criterion was
+ * rejected is appended to the message rather than chained onto it.
+ *
  * @throws {InputValidationError} Naming the metric, when the criterion is not
  *   of that type.
  */
-function readCriterion(evalMetric: EvalMetric): ParsedToolTrajectoryCriterion {
+function validateCriterion(
+  evalMetric: EvalMetric,
+): ParsedToolTrajectoryCriterion {
   const criterionType = TrajectoryEvaluator.criterionType;
   try {
     return criterionType.validate(evalMetric.criterion);
-  } catch {
+  } catch (error: unknown) {
     throw new InputValidationError(
       `\`${evalMetric.metricName}\` metric expects a criterion of type` +
-        ` \`${criterionType.name}\`.`,
+        ` \`${criterionType.name}\`. ${formatError(error)}`,
     );
   }
 }

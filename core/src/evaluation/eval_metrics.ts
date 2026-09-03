@@ -5,6 +5,7 @@
  */
 
 import {InputValidationError} from '../errors/input_validation_error.js';
+import {isRecord} from '../utils/record_utils.js';
 
 /** Base criterion to use for an eval metric. */
 export interface BaseCriterion {
@@ -81,10 +82,7 @@ export interface EvalMetric {
   criterion?: BaseCriterion | ToolTrajectoryCriterion;
 }
 
-/** The name reported for the criterion the tool trajectory metric accepts. */
-export const TOOL_TRAJECTORY_CRITERION_NAME = 'ToolTrajectoryCriterion';
-
-const CRITERION_PREFIX = `A criterion of type \`${TOOL_TRAJECTORY_CRITERION_NAME}\``;
+const CRITERION_PREFIX = 'A tool trajectory criterion';
 
 const MATCH_TYPES_BY_NAME = new Map<string, ToolTrajectoryMatchType>(
   Object.values(ToolTrajectoryMatchType).map((matchType) => [
@@ -134,10 +132,6 @@ export function getMetricThreshold(evalMetric: EvalMetric): number {
   throw new InputValidationError(
     `Evaluation metric '${evalMetric.metricName}' requires a threshold.`,
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 /**

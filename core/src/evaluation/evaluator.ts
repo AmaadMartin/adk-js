@@ -48,22 +48,15 @@ export interface EvaluationResult {
 }
 
 /**
- * The runtime handle for the criterion type a metric accepts.
- *
- * A criterion arrives untyped, from a user-authored eval config file. The
- * metric names the type it accepts, and that type turns the raw value into a
- * criterion or rejects it.
+ * The criterion type a metric accepts, which a metric class names in a
+ * `static readonly criterionType`. A criterion arrives untyped, from a
+ * user-authored eval config file.
  */
 export interface CriterionType<C extends BaseCriterion = BaseCriterion> {
   /** The type name reported when a criterion does not fit. */
   readonly name: string;
 
-  /**
-   * Returns the value as a criterion of this type.
-   *
-   * @throws {InputValidationError} When the value is not a criterion of this
-   *   type.
-   */
+  /** @throws {InputValidationError} When the value is not of this type. */
   validate(value: unknown): C;
 }
 

@@ -148,7 +148,8 @@ describe('TrajectoryEvaluator', () => {
       ).toThrow(
         new InputValidationError(
           `\`${METRIC_NAME}\` metric expects a criterion of type` +
-            ' `ToolTrajectoryCriterion`.',
+            ' `ToolTrajectoryCriterion`. A tool trajectory criterion requires' +
+            ' a numeric `threshold`.',
         ),
       );
     });
@@ -165,7 +166,8 @@ describe('TrajectoryEvaluator', () => {
       ).toThrow(
         new InputValidationError(
           `\`${METRIC_NAME}\` metric expects a criterion of type` +
-            ' `ToolTrajectoryCriterion`.',
+            ' `ToolTrajectoryCriterion`. A tool trajectory criterion accepts' +
+            ' as `matchType` one of EXACT, IN_ORDER, ANY_ORDER.',
         ),
       );
     });
