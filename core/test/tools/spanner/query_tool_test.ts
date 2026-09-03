@@ -8,7 +8,7 @@ import {
   QueryResultMode,
   SpannerToolset,
   SpannerToolSettings,
-} from '@google/adk';
+} from '@google/adk/tools/spanner';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   errorOf,

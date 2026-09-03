@@ -5,9 +5,9 @@
  */
 
 import {
-  resolveVectorStoreSettings,
   SpannerVectorStoreSettings,
-} from '@google/adk';
+  resolveVectorStoreSettings,
+} from '@google/adk/tools/spanner';
 import {describe, expect, it} from 'vitest';
 
 function vectorStore(

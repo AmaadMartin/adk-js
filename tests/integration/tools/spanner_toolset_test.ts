@@ -11,10 +11,12 @@ import {
   LlmAgent,
   LlmRequest,
   LlmResponse,
+} from '@google/adk';
+import {
   SpannerCredentialsConfig,
   SpannerToolset,
   SpannerVectorStoreSettings,
-} from '@google/adk';
+} from '@google/adk/tools/spanner';
 import {OAuth2Client} from 'google-auth-library';
 import {Readable} from 'node:stream';
 import {beforeEach, describe, expect, it, vi} from 'vitest';

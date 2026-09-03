@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {BaseTool, ReadonlyContext} from '@google/adk';
 import {
-  BaseTool,
   Capabilities,
-  ReadonlyContext,
-  SpannerToolset,
   SpannerToolSettings,
+  SpannerToolset,
   SpannerVectorStoreSettings,
-} from '@google/adk';
+} from '@google/adk/tools/spanner';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../../src/utils/logger.js';
 import {makeToolContext, testCredentialsConfig} from './spanner_test_utils.js';

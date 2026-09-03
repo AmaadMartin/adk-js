@@ -4,15 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {AuthCredential, AuthCredentialTypes, Context} from '@google/adk';
 import {
-  AuthCredential,
-  AuthCredentialTypes,
-  Context,
   SPANNER_DEFAULT_SCOPES,
   SPANNER_TOKEN_CACHE_KEY,
   SpannerCredentialsManager,
   validateSpannerCredentialsConfig,
-} from '@google/adk';
+} from '@google/adk/tools/spanner';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {SpannerAccessToken} from '../../../src/tools/spanner/client.js';

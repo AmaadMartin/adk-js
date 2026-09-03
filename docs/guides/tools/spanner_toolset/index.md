@@ -38,7 +38,11 @@ The simplest configuration gives every end user one identity, taken from
 Application Default Credentials:
 
 ```ts
-import {LlmAgent, SPANNER_DEFAULT_SCOPES, SpannerToolset} from '@google/adk';
+import {LlmAgent} from '@google/adk';
+import {
+  SPANNER_DEFAULT_SCOPES,
+  SpannerToolset,
+} from '@google/adk/tools/spanner';
 import {GoogleAuth} from 'google-auth-library';
 
 const authClient = await new GoogleAuth({
@@ -100,7 +104,11 @@ session state, so later calls in the same session go straight through.
 ## Settings
 
 ```ts
-import {Capabilities, QueryResultMode, SpannerToolset} from '@google/adk';
+import {
+  Capabilities,
+  QueryResultMode,
+  SpannerToolset,
+} from '@google/adk/tools/spanner';
 
 new SpannerToolset({
   credentialsConfig: {authClient},

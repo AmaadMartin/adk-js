@@ -6,7 +6,11 @@
 
 /**
  * `@google/adk/tools/spanner` subpath: the Spanner tools only, without the
- * full ADK barrel. Also re-exported from `@google/adk`.
+ * full ADK barrel.
+ *
+ * This is the only entry point. `@google/adk` does not re-export it, so an
+ * application that never reads Spanner does not carry `@google-cloud/spanner`
+ * in its bundle.
  */
 
 export {

@@ -22,12 +22,12 @@
 import {
   BaseToolset,
   Context,
-  createSession,
   InvocationContext,
   LlmAgent,
   PluginManager,
-  SpannerCredentialsConfig,
+  createSession,
 } from '@google/adk';
+import {SpannerCredentialsConfig} from '@google/adk/tools/spanner';
 import {OAuth2Client} from 'google-auth-library';
 import {Readable} from 'node:stream';
 import {expect} from 'vitest';

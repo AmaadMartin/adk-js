@@ -5,10 +5,10 @@
  */
 
 import {
-  SpannerToolset,
   SpannerToolSettings,
+  SpannerToolset,
   SpannerVectorStoreSettings,
-} from '@google/adk';
+} from '@google/adk/tools/spanner';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {getVectorStoreSimilaritySearchTool} from '../../../src/tools/spanner/search_tool.js';
 import {

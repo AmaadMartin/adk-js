@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {SpannerToolset} from '@google/adk';
+import {SpannerToolset} from '@google/adk/tools/spanner';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   errorOf,
