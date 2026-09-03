@@ -10,7 +10,12 @@ import {z as z4} from 'zod/v4';
 
 import {Context} from '../agents/context.js';
 import {Event, getFunctionResponses} from '../events/event.js';
-import {SchemaLike, SchemaShape, schemaShape} from '../utils/schema.js';
+import {
+  parseWithSchema,
+  SchemaLike,
+  SchemaShape,
+  schemaShape,
+} from '../utils/schema.js';
 import {
   isZodObject,
   isZodSchema,
@@ -24,10 +29,10 @@ import {FunctionTool} from './function_tool.js';
 export const SET_MODEL_RESPONSE_TOOL_NAME = 'set_model_response';
 
 /** The wrapper parameter for a list-of-object output schema. */
-export const SET_MODEL_RESPONSE_ITEMS_PARAMETER = 'items';
+const ITEMS_PARAMETER = 'items';
 
 /** The wrapper parameter for any other non-object output schema. */
-export const SET_MODEL_RESPONSE_VALUE_PARAMETER = 'response';
+const VALUE_PARAMETER = 'response';
 
 const TOOL_DESCRIPTION =
   'Call this tool to submit your final response conforming to the output ' +
@@ -56,13 +61,11 @@ const RETRY_INSTRUCTION =
  * Ported from adk-python `tools/set_model_response_tool.py`.
  *
  * @param outputSchema The agent's output schema, in the dialect it was
- *   supplied in.
- * @param validateOutput Returns the validated value, and throws when the value
- *   does not satisfy the schema.
+ *   supplied in. It is both what the model is shown and what its arguments are
+ *   checked against.
  */
 export function createSetModelResponseTool(
   outputSchema: SchemaLike,
-  validateOutput: (value: unknown) => unknown,
 ): FunctionTool<Schema> {
   const shape = parameterShape(outputSchema);
   return new FunctionTool<Schema>({
@@ -70,7 +73,7 @@ export function createSetModelResponseTool(
     description: TOOL_DESCRIPTION,
     parameters: declarationParameters(outputSchema, shape),
     execute: (args, toolContext) =>
-      submitModelResponse(args, toolContext, shape, validateOutput),
+      submitModelResponse(args, toolContext, shape, outputSchema),
   });
 }
 
@@ -128,9 +131,7 @@ function declarationParameters(
   }
   return wrapInObjectSchema(
     outputSchema,
-    shape === 'objectArray'
-      ? SET_MODEL_RESPONSE_ITEMS_PARAMETER
-      : SET_MODEL_RESPONSE_VALUE_PARAMETER,
+    shape === 'objectArray' ? ITEMS_PARAMETER : VALUE_PARAMETER,
   );
 }
 
@@ -188,7 +189,7 @@ function submitModelResponse(
   args: unknown,
   toolContext: Context | undefined,
   shape: SchemaShape,
-  validateOutput: (value: unknown) => unknown,
+  outputSchema: SchemaLike,
 ): unknown {
   if (!toolContext) {
     throw new Error(
@@ -197,7 +198,7 @@ function submitModelResponse(
   }
   let validated: unknown;
   try {
-    validated = validateOutput(submittedValue(args, shape));
+    validated = parseWithSchema(outputSchema, submittedValue(args, shape));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {error: `Validation Error found:\n${message}\n${RETRY_INSTRUCTION}`};
@@ -214,9 +215,9 @@ function submittedValue(args: unknown, shape: SchemaShape): unknown {
   }
   const record = isRecord(args) ? args : {};
   if (shape === 'objectArray') {
-    return record[SET_MODEL_RESPONSE_ITEMS_PARAMETER] ?? [];
+    return record[ITEMS_PARAMETER] ?? [];
   }
-  return record[SET_MODEL_RESPONSE_VALUE_PARAMETER];
+  return record[VALUE_PARAMETER];
 }
 
 /**

@@ -1493,7 +1493,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       allTools.push(
         createSetModelResponseTool(
           this.outputSchemaSource ?? this.outputSchema,
-          (value) => this.validateOutput(value),
         ),
       );
     }

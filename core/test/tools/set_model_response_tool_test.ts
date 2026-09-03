@@ -21,7 +21,6 @@ import {Schema, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
-import {parseWithSchema} from '../../src/utils/schema.js';
 
 function createToolContext(): Context {
   const agent = new LlmAgent({name: 'test_agent'});
@@ -39,14 +38,9 @@ function createToolContext(): Context {
   });
 }
 
-/**
- * Builds the tool the way `LlmAgent` does: over the schema as supplied, with
- * the validator `LlmAgent.validateOutput` uses.
- */
+/** Builds the tool the way `LlmAgent` does: over the schema as supplied. */
 function createTool(outputSchema: SchemaLike) {
-  return createSetModelResponseTool(outputSchema, (value) =>
-    parseWithSchema(outputSchema, value),
-  );
+  return createSetModelResponseTool(outputSchema);
 }
 
 const PERSON_SCHEMA = z4.object({
@@ -387,13 +381,16 @@ describe('createSetModelResponseTool execution', () => {
     expect(JSON.stringify(result)).toBe('"2026-01-02T03:04:05.000Z"');
   });
 
-  it('reports a validator that throws a non-Error value', async () => {
+  it('reports a schema check that throws a non-Error value', async () => {
     const toolContext = createToolContext();
-    const tool = createSetModelResponseTool(PERSON_GENAI_SCHEMA, () => {
+    const throwingSchema = z4.object({name: z4.string()}).refine(() => {
       throw 'schema backend unavailable';
     });
 
-    const result = await tool.runAsync({args: {name: 'Alice'}, toolContext});
+    const result = await createTool(throwingSchema).runAsync({
+      args: {name: 'Alice'},
+      toolContext,
+    });
 
     expect(result).toEqual({
       error: expect.stringContaining('schema backend unavailable'),
