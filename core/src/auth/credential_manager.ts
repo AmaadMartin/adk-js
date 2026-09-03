@@ -373,8 +373,8 @@ export class CredentialManager {
       credential = cloneDeep(rawAuthCredential);
     }
 
-    let wasExchanged: boolean;
-    [credential, wasExchanged] = await this.exchangeCredential(credential);
+    const [exchanged, wasExchanged] = await this.exchangeCredential(credential);
+    credential = exchanged;
 
     let wasRefreshed = false;
     if (!wasExchanged) {
