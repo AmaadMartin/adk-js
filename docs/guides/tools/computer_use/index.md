@@ -181,20 +181,3 @@ default, so honouring them is your responsibility.
 
 **Screenshots are raw PNG bytes.** `ComputerState.screenshot` is a
 `Uint8Array`, not a base64 string. The consumer decides the encoding.
-
-## Checking a result
-
-`isComputerState(value)` reports whether a value is a `ComputerState`. The check
-is exact: an object carrying any key beyond `screenshot` and `url` is rejected,
-so an error payload such as `{url, error}` is never read as a successful state.
-
-```ts
-import {isComputerState} from '@google/adk';
-
-function urlOf(result: unknown): string | undefined {
-  return isComputerState(result) ? result.url : undefined;
-}
-```
-
-`ComputerState` is a plain interface with no runtime identity, so use this guard
-rather than `instanceof`.

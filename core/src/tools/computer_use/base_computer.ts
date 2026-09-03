@@ -31,35 +31,6 @@ export interface ComputerState {
   url?: string;
 }
 
-const COMPUTER_STATE_KEYS: ReadonlySet<string> = new Set(['screenshot', 'url']);
-
-/**
- * Whether `value` is a {@link ComputerState}.
- *
- * The check is exact: an object carrying any key beyond `screenshot` and `url`
- * is rejected. Callers use the result to decide whether an action returned a
- * state or some other payload, such as an error object, so a loose check would
- * read an error as a successful state.
- */
-export function isComputerState(value: unknown): value is ComputerState {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  const candidate = value as Partial<Record<'screenshot' | 'url', unknown>>;
-  for (const key of Object.keys(candidate)) {
-    if (!COMPUTER_STATE_KEYS.has(key)) {
-      return false;
-    }
-  }
-  if (
-    candidate.screenshot !== undefined &&
-    !ArrayBuffer.isView(candidate.screenshot)
-  ) {
-    return false;
-  }
-  return candidate.url === undefined || typeof candidate.url === 'string';
-}
-
 /**
  * The interface an agent uses to drive a computer environment.
  *

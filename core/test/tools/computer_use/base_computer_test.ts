@@ -13,7 +13,6 @@ import {
   PluginManager,
   ScrollDirection,
   createSession,
-  isComputerState,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -155,58 +154,6 @@ describe('ComputerEnvironment', () => {
   });
 });
 
-describe('isComputerState', () => {
-  it('accepts an empty state', () => {
-    expect(isComputerState({})).toBe(true);
-  });
-
-  it('accepts a state carrying only a url', () => {
-    expect(isComputerState({url: PAGE_URL})).toBe(true);
-  });
-
-  it('accepts a state carrying only a screenshot', () => {
-    expect(isComputerState({screenshot: new Uint8Array([1, 2, 3])})).toBe(true);
-  });
-
-  it('accepts a state carrying both fields', () => {
-    expect(isComputerState({url: PAGE_URL, screenshot: SCREENSHOT})).toBe(true);
-  });
-
-  it('rejects null', () => {
-    expect(isComputerState(null)).toBe(false);
-  });
-
-  it('rejects undefined', () => {
-    expect(isComputerState(undefined)).toBe(false);
-  });
-
-  it('rejects a string', () => {
-    expect(isComputerState('state')).toBe(false);
-  });
-
-  it('rejects a number', () => {
-    expect(isComputerState(42)).toBe(false);
-  });
-
-  it('rejects an object carrying an extra key', () => {
-    // The downstream tool reports a refused URL as {error, url}. A loose check
-    // would read that error payload as a successful state.
-    expect(isComputerState({url: PAGE_URL, error: 'refused'})).toBe(false);
-  });
-
-  it('rejects a non-string url', () => {
-    expect(isComputerState({url: 5})).toBe(false);
-  });
-
-  it('rejects a string screenshot', () => {
-    expect(isComputerState({screenshot: 'base64string'})).toBe(false);
-  });
-
-  it('rejects an array screenshot', () => {
-    expect(isComputerState({screenshot: [1, 2, 3]})).toBe(false);
-  });
-});
-
 describe('ComputerState', () => {
   it('survives a structured clone with its bytes intact', () => {
     // structuredClone is the transport for the binary field; JSON.stringify
@@ -293,20 +240,20 @@ describe('BaseComputer', () => {
   it('opens the web browser', async () => {
     const state = await new MockComputer().openWebBrowser();
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
     expect(state.url).toBe(PAGE_URL);
   });
 
   it('clicks at a coordinate', async () => {
     const state = await new MockComputer().clickAt({x: 100, y: 200});
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
   });
 
   it('hovers at a coordinate', async () => {
     const state = await new MockComputer().hoverAt({x: 150, y: 250});
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
   });
 
   it('types text with the default press-enter and clear behaviour', async () => {
@@ -316,7 +263,7 @@ describe('BaseComputer', () => {
       text: 'Hello World',
     });
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
   });
 
   it('types text with press-enter and clear turned off', async () => {
@@ -328,7 +275,7 @@ describe('BaseComputer', () => {
       clearBeforeTyping: false,
     });
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
   });
 
   it('scrolls the document in every direction', async () => {
@@ -337,7 +284,7 @@ describe('BaseComputer', () => {
     for (const direction of SCROLL_DIRECTIONS) {
       const state = await computer.scrollDocument({direction});
 
-      expect(isComputerState(state)).toBe(true);
+      expect(state.url).toBe(PAGE_URL);
     }
   });
 
@@ -349,25 +296,25 @@ describe('BaseComputer', () => {
       magnitude: 5,
     });
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
   });
 
   it('waits for a number of seconds', async () => {
     const state = await new MockComputer().wait({seconds: 5});
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
   });
 
   it('navigates back', async () => {
     const state = await new MockComputer().goBack();
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
   });
 
   it('navigates forward', async () => {
     const state = await new MockComputer().goForward();
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
   });
 
   it('jumps to the search engine', async () => {
@@ -389,7 +336,7 @@ describe('BaseComputer', () => {
       keys: ['ctrl', 'c'],
     });
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
   });
 
   it('drags and drops', async () => {
@@ -400,7 +347,7 @@ describe('BaseComputer', () => {
       destinationY: 400,
     });
 
-    expect(isComputerState(state)).toBe(true);
+    expect(state.url).toBe(PAGE_URL);
   });
 
   it('reports the current state with a screenshot', async () => {

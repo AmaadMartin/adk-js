@@ -289,7 +289,6 @@ export {BuiltInTool} from './tools/built_in_tool.js';
 export {
   BaseComputer,
   ComputerEnvironment,
-  isComputerState,
 } from './tools/computer_use/base_computer.js';
 export type {
   ComputerState,
