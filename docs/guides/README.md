@@ -75,6 +75,9 @@ documentation, visit [adk.dev](https://adk.dev/).
   simulated conversation over a bidirectional audio connection, for an agent or
   a workflow root, and grading the transcript it produces.
 - [ResponseEvaluator](evaluation/response_evaluator/index.md) - Scoring an agent's final answer against a golden answer, or against the Vertex AI coherence metric.
+- [Running an eval locally](evaluation/local_eval_service/index.md) - Running an
+  agent over an eval set in your own process, scoring the invocations it
+  produced, and registering the metric that scores them.
 - [TrajectoryEvaluator](evaluation/tool_trajectory/index.md) - Scoring the tool
   calls an agent made against a golden trajectory.
 - [Choosing the user simulator](evaluation/user_simulator/index.md) - Replaying

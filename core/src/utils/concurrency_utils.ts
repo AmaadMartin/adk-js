@@ -40,9 +40,9 @@ export async function* mapConcurrent<T, R>(
       yield settled.result;
     }
   } finally {
-    // `Promise.race` already attaches a handler to every promise it races, so
-    // this is a backstop for tasks still in flight when the consumer stops
-    // early or another task rejects.
+    // A task started before `run` threw on the next item has not reached
+    // `Promise.race` yet, so nothing has claimed its rejection. `Promise.race`
+    // claims every task it does reach.
     for (const task of inFlight.values()) {
       task.catch(() => {});
     }

@@ -278,7 +278,10 @@ describe('parseEvalSet with rubrics', () => {
       eval_cases: [
         {
           eval_id: 'graded_case',
-          rubrics: [{rubric_content: {text_property: 'No id.'}}, 'not an object'],
+          rubrics: [
+            {rubric_content: {text_property: 'No id.'}},
+            'not an object',
+          ],
         },
       ],
     });
@@ -302,8 +305,6 @@ describe('serializeEvalSet with rubrics', () => {
   it('writes rubrics back to snake_case', () => {
     const evalSet = parseEvalSet(ON_DISK_WITH_RUBRICS);
 
-    expect(JSON.parse(serializeEvalSet(evalSet))).toEqual(
-      ON_DISK_WITH_RUBRICS,
-    );
+    expect(JSON.parse(serializeEvalSet(evalSet))).toEqual(ON_DISK_WITH_RUBRICS);
   });
 });

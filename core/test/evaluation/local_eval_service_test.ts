@@ -648,6 +648,24 @@ describe('LocalEvalService.evaluate', () => {
     expect(getEvaluator).not.toHaveBeenCalled();
   });
 
+  it('reports an unknown eval case even when the inference produced nothing', async () => {
+    const evalSetsManager = await managerWith([]);
+
+    await expect(
+      collect(
+        buildService({evalSetsManager}).evaluate({
+          inferenceResults: [
+            inferenceResult('ghost_case', {
+              inferences: undefined,
+              status: InferenceStatus.FAILURE,
+            }),
+          ],
+          evaluateConfig: {evalMetrics: [PAIRED_METRIC]},
+        }),
+      ),
+    ).rejects.toThrow(NotFoundError);
+  });
+
   it('scores every invocation and pairs it with its expected counterpart', async () => {
     const evalSetsManager = await managerWith([buildEvalCase('case1', 3)]);
     const expected = buildEvalCase('case1', 3).conversation ?? [];

@@ -158,6 +158,26 @@ describe('mapConcurrent', () => {
     expect(reasons).toEqual([]);
   });
 
+  it('swallows a running task when starting the next one throws', async () => {
+    const running = new Deferred<number>();
+
+    const reasons = await collectUnhandledRejections(async () => {
+      const results = collect(
+        mapConcurrent([0, 1], 2, (index: number) => {
+          if (index === 1) {
+            throw new Error('could not start');
+          }
+          return running.promise;
+        }),
+      );
+
+      await expect(results).rejects.toThrow('could not start');
+      running.reject(new Error('nobody is listening'));
+    });
+
+    expect(reasons).toEqual([]);
+  });
+
   it('stops starting tasks and swallows pending failures when the consumer breaks', async () => {
     const started: number[] = [];
     const failing = new Deferred<number>();
