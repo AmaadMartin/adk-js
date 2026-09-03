@@ -17,6 +17,8 @@ import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {
   ENTITIES,
+  EVENT_ACTIONS_COLUMN_NAME,
+  EVENT_DATA_COLUMN_NAME,
   EVENTS_TABLE_NAME,
   METADATA_TABLE_NAME,
   SCHEMA_VERSION_0_PICKLE,
@@ -97,18 +99,25 @@ export enum DatabaseUriProblem {
   DRIVER_IN_SCHEME = 'DRIVER_IN_SCHEME',
 }
 
+/** The backend, and the driver a SQLAlchemy-style scheme suffix names. */
+interface DatabaseUriScheme {
+  backend: string;
+  driver?: string;
+}
+
 /**
  * Splits the scheme of a connection URI into its backend and driver parts.
  *
  * `postgresql+asyncpg://host/db` yields `postgresql` and `asyncpg`. A string
- * carrying no `://` yields an empty backend, which no loader answers to.
+ * carrying no `://` yields an empty backend, which no loader answers to. The
+ * scheme is lowercased, so `POSTGRES://host/db` names the same backend.
  */
-function schemeOf(uri: string): {backend: string; driver?: string} {
+function schemeOf(uri: string): DatabaseUriScheme {
   const schemeEnd = uri.indexOf('://');
   if (schemeEnd <= 0) {
     return {backend: ''};
   }
-  const [backend, driver] = uri.slice(0, schemeEnd).split('+');
+  const [backend, driver] = uri.slice(0, schemeEnd).toLowerCase().split('+');
   return {backend, driver};
 }
 
@@ -175,6 +184,66 @@ export function assertSupportedDatabaseUri(uri: string): void {
   }
 }
 
+/** The part of a raw sqlite connection the foreign-key pragma needs. */
+interface SqliteRawConnection {
+  run(sql: string, callback: (error: Error | null) => void): void;
+}
+
+/** The part of a raw pooled connection the liveness probe needs. */
+interface QueryableRawConnection {
+  query(sql: string, callback: (error: Error | null) => void): void;
+}
+
+function isQueryable(
+  connection: unknown,
+): connection is QueryableRawConnection {
+  return (
+    typeof connection === 'object' &&
+    connection !== null &&
+    'query' in connection &&
+    typeof connection.query === 'function'
+  );
+}
+
+/**
+ * Turns foreign-key enforcement on for a freshly opened sqlite connection.
+ *
+ * sqlite reads `foreign_keys` per connection and defaults it off, so the
+ * `events -> sessions ON DELETE CASCADE` constraint adk-python declares does
+ * not fire without this. Installed as knex's `pool.afterCreate` hook, which
+ * runs for every connection the pool opens rather than only the first.
+ */
+export function enableSqliteForeignKeys(
+  connection: SqliteRawConnection,
+  done: (error: Error | null, connection: SqliteRawConnection) => void,
+): void {
+  connection.run('PRAGMA foreign_keys = ON', (error) =>
+    done(error, connection),
+  );
+}
+
+/**
+ * Reports whether a pooled connection still answers, before it is handed out.
+ *
+ * This is adk-python's `pool_pre_ping`, so an idle connection a firewall
+ * dropped is replaced rather than surfacing the driver's socket error. A
+ * connection with no `query` method — the `mssql` driver — is reported alive
+ * and left to knex's own check.
+ */
+export async function connectionIsAlive(connection: unknown): Promise<boolean> {
+  if (!isQueryable(connection)) {
+    return true;
+  }
+
+  return new Promise<boolean>((resolve) => {
+    try {
+      connection.query('select 1', (error) => resolve(!error));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 /**
  * Parses a database connection URI and returns MikroORM Options.
  *
@@ -206,9 +275,11 @@ async function deriveConnectionOptionsFromUri(
       entities: ENTITIES,
       dbName: isMemory ? ':memory:' : uri.substring(SQLITE_URI_PREFIX.length),
       driver,
+      driverOptions: {pool: {afterCreate: enableSqliteForeignKeys}},
       // Every connection to a SQLite in-memory database opens a separate,
       // empty database, so a pool wider than one connection loses the schema
-      // and the rows written through its siblings.
+      // and the rows written through its siblings. This is adk-python's
+      // `poolclass=StaticPool`.
       ...(isMemory ? {pool: {min: 1, max: 1}} : {}),
     } as MikroORMOptions;
   }
@@ -217,6 +288,7 @@ async function deriveConnectionOptionsFromUri(
     entities: ENTITIES,
     clientUrl: uri,
     driver,
+    driverOptions: {pool: {validate: connectionIsAlive}},
   } as MikroORMOptions;
 }
 
@@ -329,8 +401,8 @@ export async function detectDatabaseSchemaVersion(
   }
 
   const hasLegacyEventsTable =
-    (await selectSucceeds(orm, 'actions', EVENTS_TABLE_NAME)) &&
-    !(await selectSucceeds(orm, 'event_data', EVENTS_TABLE_NAME));
+    (await selectSucceeds(orm, EVENT_ACTIONS_COLUMN_NAME, EVENTS_TABLE_NAME)) &&
+    !(await selectSucceeds(orm, EVENT_DATA_COLUMN_NAME, EVENTS_TABLE_NAME));
   if (hasLegacyEventsTable) {
     logger.warn(
       'The database uses the legacy v0 session schema, which serializes ' +

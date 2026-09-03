@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Entity, JsonType, PrimaryKey, Property} from '@mikro-orm/core';
+import {
+  Entity,
+  EntityClass,
+  JsonType,
+  PrimaryKey,
+  Property,
+} from '@mikro-orm/core';
 import {
   Event,
   transformToCamelCaseEvent,
@@ -31,6 +37,11 @@ export const STORAGE_KEY_COLUMN_LENGTH = 191;
  * to hold what the caller wrote.
  */
 export const DATETIME_FRACTIONAL_DIGITS = 3;
+
+/** The events column only the current layout has. */
+export const EVENT_DATA_COLUMN_NAME = 'event_data';
+/** The events column only the legacy layout has. */
+export const EVENT_ACTIONS_COLUMN_NAME = 'actions';
 
 /**
  * Custom type for serializing and deserializing ADK Event objects.
@@ -199,10 +210,14 @@ export class StorageEvent {
   [PrimaryKey.name]?: [string, string, string, string];
 }
 
-/*
- * Export entities for Mikro-ORM configuration
+/**
+ * The entity set `DatabaseSessionService` registers.
+ *
+ * A caller who builds their own `MikroORM` instance to hand to the service has
+ * to register these, because the service cannot change the entity set of an
+ * instance it did not open.
  */
-export const ENTITIES = [
+export const ENTITIES: Array<EntityClass<object>> = [
   StorageMetadata,
   StorageAppState,
   StorageUserState,

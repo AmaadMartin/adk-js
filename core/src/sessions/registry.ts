@@ -24,6 +24,9 @@ export function getSessionServiceFromUri(uri: string): BaseSessionService {
     return new InMemorySessionService();
   }
 
+  // This claims a driver-suffixed URL such as `postgresql+asyncpg://` too, so
+  // the service explains the suffix rather than the registry reporting that no
+  // session service takes the URI.
   if (isDatabaseConnectionString(uri)) {
     return new DatabaseSessionService(uri);
   }

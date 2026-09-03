@@ -65,6 +65,7 @@ export {
 export {VertexAiExampleStore} from './examples/vertex_ai_example_store.js';
 export {getMemoryServiceFromUri} from './memory/registry.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
+export {ENTITIES as SESSION_STORAGE_ENTITIES} from './sessions/db/schema.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
 export type {
