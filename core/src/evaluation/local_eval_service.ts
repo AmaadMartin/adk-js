@@ -233,7 +233,9 @@ export class LocalEvalService implements BaseEvalService {
       );
     }
 
-    const evalCases = evalCaseIds
+    // An empty list reads as "unspecified", the way Python's truthiness test
+    // does, so it runs the whole set rather than nothing.
+    const evalCases = evalCaseIds?.length
       ? evalSet.evalCases.filter((evalCase) =>
           evalCaseIds.includes(evalCase.evalId),
         )

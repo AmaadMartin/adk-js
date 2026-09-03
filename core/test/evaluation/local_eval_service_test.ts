@@ -324,6 +324,27 @@ describe('LocalEvalService.performInference', () => {
     expect(generateAsync).toHaveBeenCalledTimes(2);
   });
 
+  it('reads an empty evalCaseIds as unspecified and runs the whole set', async () => {
+    const evalSetsManager = await managerWith([
+      buildEvalCase('case1'),
+      buildEvalCase('case2'),
+    ]);
+
+    const results = await collect(
+      buildService({evalSetsManager}).performInference({
+        appName: APP_NAME,
+        evalSetId: EVAL_SET_ID,
+        evalCaseIds: [],
+        inferenceConfig: {useLive: false},
+      }),
+    );
+
+    expect(results.map((result) => result.evalCaseId).sort()).toEqual([
+      'case1',
+      'case2',
+    ]);
+  });
+
   it('routes a live run to the live generator with its timeout', async () => {
     const evalSetsManager = await managerWith([buildEvalCase('case1')]);
 

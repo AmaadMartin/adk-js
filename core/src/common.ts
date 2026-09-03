@@ -347,6 +347,7 @@ export type {
 export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.js';
 export {convertLegacyEvalSet} from './evaluation/legacy_eval_set_converter.js';
 export type {LegacyEvalCase} from './evaluation/legacy_eval_set_converter.js';
+export {LocalEvalRuntime} from './evaluation/local_eval_runtime.js';
 export {LocalEvalService} from './evaluation/local_eval_service.js';
 export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
 export {

@@ -12,18 +12,24 @@
  */
 
 import {
+  AgentEvaluator,
   EvalCase,
   EvalCaseResult,
+  EvalFailureError,
+  EvalSet,
   EvalStatus,
   InferenceResult,
   InferenceStatus,
   InMemoryEvalSetsManager,
   InMemorySessionService,
   LlmAgent,
+  LocalEvalRuntime,
   LocalEvalService,
+  MISSING_EVAL_DEPENDENCIES_MESSAGE,
   PrebuiltMetrics,
+  setEvalRuntime,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 import {RecordingEvalSetResultsManager} from './stub_eval_service.js';
 import {ScriptedLlm} from './test_helpers.js';
@@ -126,5 +132,99 @@ describe('LocalEvalService over a scripted agent', () => {
     expect(caseResult.evalMetricResultPerInvocation).toHaveLength(2);
     expect(evalSetResultsManager.saved).toHaveLength(1);
     expect(evalSetResultsManager.saved[0].evalCaseResults).toEqual(caseResults);
+  });
+});
+
+/**
+ * Proves the `EvalRuntime` seam is closed rather than merely declared:
+ * `AgentEvaluator.evaluateEvalSet` reaches a real `LocalEvalService` only
+ * because `LocalEvalRuntime` is installed, and throws
+ * `MISSING_EVAL_DEPENDENCIES_MESSAGE` without it.
+ */
+describe('AgentEvaluator over an installed LocalEvalRuntime', () => {
+  /** An eval set whose golden answers are what the scripted model replies. */
+  function matchingEvalSet(): EvalSet {
+    return {
+      evalSetId: EVAL_SET_ID,
+      creationTimestamp: 0,
+      evalCases: [EVAL_CASE],
+    };
+  }
+
+  /** The same conversation, with golden answers the model does not give. */
+  function mismatchedEvalSet(): EvalSet {
+    return {
+      evalSetId: EVAL_SET_ID,
+      creationTimestamp: 0,
+      evalCases: [
+        {
+          ...EVAL_CASE,
+          conversation: EVAL_CASE.conversation?.map((invocation) => ({
+            ...invocation,
+            finalResponse: {
+              role: 'model',
+              parts: [{text: 'a completely unrelated answer'}],
+            },
+          })),
+        },
+      ],
+    };
+  }
+
+  function agentModule() {
+    return {
+      agent: {
+        rootAgent: new LlmAgent({
+          name: 'home_agent',
+          model: new ScriptedLlm(REPLIES),
+        }),
+      },
+    };
+  }
+
+  beforeEach(() => {
+    setEvalRuntime(new LocalEvalRuntime());
+  });
+
+  afterEach(() => {
+    setEvalRuntime(undefined);
+  });
+
+  it('scores an eval set end to end when the runtime is installed', async () => {
+    await expect(
+      AgentEvaluator.evaluateEvalSet({
+        agentModule: agentModule(),
+        evalSet: matchingEvalSet(),
+        evalConfig: {criteria: {response_match_score: 0.8}},
+        numRuns: 1,
+        printDetailedResults: false,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('fails the run when the golden answers are out of reach', async () => {
+    await expect(
+      AgentEvaluator.evaluateEvalSet({
+        agentModule: agentModule(),
+        evalSet: mismatchedEvalSet(),
+        evalConfig: {criteria: {response_match_score: 0.8}},
+        numRuns: 1,
+        printDetailedResults: false,
+      }),
+    ).rejects.toThrow(EvalFailureError);
+  });
+
+  it('reports the missing runtime once it is uninstalled', async () => {
+    setEvalRuntime(undefined);
+
+    await expect(
+      AgentEvaluator.evaluateEvalSet({
+        agentModule: agentModule(),
+        evalSet: matchingEvalSet(),
+        evalConfig: {criteria: {response_match_score: 0.8}},
+        numRuns: 1,
+        printDetailedResults: false,
+      }),
+    ).rejects.toThrow(MISSING_EVAL_DEPENDENCIES_MESSAGE);
   });
 });
