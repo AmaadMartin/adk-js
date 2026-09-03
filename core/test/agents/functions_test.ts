@@ -1009,6 +1009,27 @@ describe('handleFunctionCallList', () => {
     ).toBeUndefined();
   });
 
+  it('should carry scheduling through JSON serialisation', async () => {
+    const interruptTool = new SchedulingTool(
+      FunctionResponseScheduling.INTERRUPT,
+    );
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(interruptTool)],
+      toolsDict: {[SCHEDULING_TOOL_NAME]: interruptTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const serialised: unknown = JSON.parse(
+      JSON.stringify(event!.content!.parts![0].functionResponse),
+    );
+    expect(serialised).toMatchObject({
+      scheduling: FunctionResponseScheduling.INTERRUPT,
+    });
+  });
+
   async function responseFor(
     tool: BaseTool,
     afterToolCallbacks: SingleAfterToolCallback[] = [],
