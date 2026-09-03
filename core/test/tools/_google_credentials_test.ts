@@ -212,6 +212,9 @@ describe('BaseGoogleCredentialsConfig construction', () => {
 
   it('harvests nothing from a client that carries no OAuth identity', () => {
     const credentials = new Compute();
+    credentials.setCredentials({
+      scope: 'https://www.googleapis.com/auth/cloud-platform',
+    });
 
     const config = new BaseGoogleCredentialsConfig({credentials});
 
