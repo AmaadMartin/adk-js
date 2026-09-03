@@ -828,7 +828,11 @@ export {
   isGoogleSearchTool,
 } from './tools/google_search_tool.js';
 export type {GoogleSearchToolParams} from './tools/google_search_tool.js';
-export {GoogleTool} from './tools/google_tool.js';
+export {
+  GoogleTool,
+  GoogleToolStatus,
+  authorizationRequiredMessage,
+} from './tools/google_tool.js';
 export type {
   GoogleToolErrorResponse,
   GoogleToolExecuteContext,

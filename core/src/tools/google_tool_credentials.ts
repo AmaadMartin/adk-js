@@ -280,8 +280,14 @@ function validateCredentialsOptions(
   }
 }
 
-/** A slot name that is stable per client and scope set. */
-function defaultCredentialKey(
+/**
+ * A slot name that is stable per client and scope set.
+ *
+ * Exported so a config built on another port of this module can hand
+ * {@link BaseGoogleCredentialsConfig} the same key rather than restate the
+ * format.
+ */
+export function defaultCredentialKey(
   clientId: string | undefined,
   scopes: string[] | undefined,
 ): string {

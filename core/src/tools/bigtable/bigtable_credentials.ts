@@ -9,11 +9,12 @@ import {
   BaseGoogleCredentialsConfig,
   BaseGoogleCredentialsConfigOptions,
 } from '../google_credentials.js';
+import {defaultCredentialKey} from '../google_tool_credentials.js';
 
-/** Session-state key the resolved Bigtable credential is cached under. */
+/** Session-state key the Bigtable tools cache their token under. */
 export const BIGTABLE_TOKEN_CACHE_KEY = 'bigtable_token_cache';
 
-/** Scopes requested when the configuration names none of its own. */
+/** The scopes the Bigtable tools request when the caller names none. */
 export const BIGTABLE_DEFAULT_SCOPE = [
   'https://www.googleapis.com/auth/bigtable.admin',
   'https://www.googleapis.com/auth/bigtable.data',
@@ -32,11 +33,12 @@ export type BigtableCredentialsConfigOptions = Omit<
 >;
 
 /**
- * How a Bigtable tool obtains credentials (Experimental).
+ * How the Bigtable tools obtain credentials (Experimental).
  *
- * Adds the Bigtable scopes and token-cache key to
- * {@link BaseGoogleCredentialsConfig}; the credential modes and their
- * validation are inherited unchanged.
+ * It is {@link BaseGoogleCredentialsConfig} with the Bigtable admin and data
+ * scopes as its default, and with its own token cache key so that a Bigtable
+ * consent does not satisfy another Google toolset. The credential modes and
+ * their validation are inherited unchanged.
  *
  * Please do not use this in production, as it may be deprecated later.
  */
@@ -44,14 +46,27 @@ export type BigtableCredentialsConfigOptions = Omit<
 export class BigtableCredentialsConfig extends BaseGoogleCredentialsConfig {
   declare readonly scopes: string[];
 
+  /**
+   * The slot the ADK auth plumbing keeps the OAuth credential in.
+   *
+   * `GoogleTool` is built on a second port of the credentials module, whose
+   * config carries this key. It is the key that port derives by default, so a
+   * Bigtable tool shares one slot with any other tool that asks for the same
+   * client and scopes.
+   */
+  readonly credentialKey: string;
+
   constructor(options: BigtableCredentialsConfigOptions) {
     // The base validator rejects `scopes` alongside `credentials` or
     // `externalAccessTokenKey`, so the default can only be applied once it has
-    // run. adk-python applies it in the same order.
+    // run. adk-python applies it in the same order, which is why the default
+    // reaches every credential mode and not just a consent flow.
     super({...options, tokenCacheKey: BIGTABLE_TOKEN_CACHE_KEY});
 
     if (!this.scopes?.length) {
       this.scopes = [...BIGTABLE_DEFAULT_SCOPE];
     }
+
+    this.credentialKey = defaultCredentialKey(this.clientId, this.scopes);
   }
 }

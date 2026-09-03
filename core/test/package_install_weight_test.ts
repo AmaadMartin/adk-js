@@ -42,6 +42,7 @@ const pkg: CorePackageJson = JSON.parse(
  * that subsystem.
  */
 const OPTIONAL_SUBSYSTEM_PEERS = [
+  '@google-cloud/bigtable',
   '@google-cloud/opentelemetry-cloud-monitoring-exporter',
   '@google-cloud/opentelemetry-cloud-trace-exporter',
   '@google-cloud/storage',
@@ -74,6 +75,7 @@ describe('core/package.json install weight', () => {
   );
 
   it.each([
+    '@google-cloud/bigtable',
     '@google-cloud/opentelemetry-cloud-monitoring-exporter',
     '@google-cloud/opentelemetry-cloud-trace-exporter',
     '@google-cloud/storage',
@@ -115,6 +117,7 @@ describe('core/package.json subpath exports', () => {
       './artifacts/gcs',
       './sessions/database',
       './telemetry/gcp',
+      './tools/bigtable',
       './tools/crewai_tool',
       './tools/langchain_tool',
       './tools/mcp',

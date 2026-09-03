@@ -128,6 +128,16 @@ describe('BigtableCredentialsConfig', () => {
     expect(config.scopes).toEqual(BIGTABLE_DEFAULT_SCOPE);
   });
 
+  it('reads an empty scope list as unset', () => {
+    const config = new BigtableCredentialsConfig({
+      clientId: CLIENT_ID,
+      clientSecret: CLIENT_SECRET,
+      scopes: [],
+    });
+
+    expect(config.scopes).toEqual(BIGTABLE_DEFAULT_SCOPE);
+  });
+
   it('keeps caller-supplied scopes', () => {
     const config = new BigtableCredentialsConfig({
       clientId: CLIENT_ID,

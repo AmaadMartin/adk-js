@@ -13,6 +13,7 @@ import {
   overrideFeatureEnabled,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {DEFAULT_MAX_QUERY_RESULT_ROWS} from '../../../src/tools/bigtable/settings.js';
 import {logger} from '../../../src/utils/logger.js';
 
 const ENABLE_ENV_VAR = 'ADK_ENABLE_BIGTABLE_TOOL_SETTINGS';
@@ -125,5 +126,11 @@ describe('Bigtable tool settings', () => {
 
       expect(createBigtableToolSettings()).toEqual({maxQueryResultRows: 50});
     });
+  });
+});
+
+describe('DEFAULT_MAX_QUERY_RESULT_ROWS', () => {
+  it('caps a query at 50 rows, as adk-python does', () => {
+    expect(DEFAULT_MAX_QUERY_RESULT_ROWS).toBe(50);
   });
 });

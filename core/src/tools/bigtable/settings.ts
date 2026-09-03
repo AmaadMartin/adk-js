@@ -9,12 +9,15 @@ import {
   isFeatureEnabled,
 } from '../../features/feature_registry.js';
 
-/** Maximum number of rows a Bigtable query result returns by default. */
-const DEFAULT_MAX_QUERY_RESULT_ROWS = 50;
+/** How many rows a Bigtable query returns when the caller names no cap. */
+export const DEFAULT_MAX_QUERY_RESULT_ROWS = 50;
 
 /** Settings for Bigtable tools. */
 export interface BigtableToolSettings {
-  /** Maximum number of rows to return from a query result. Defaults to 50. */
+  /**
+   * Maximum number of rows to return from a query result. Defaults to
+   * {@link DEFAULT_MAX_QUERY_RESULT_ROWS}.
+   */
   maxQueryResultRows: number;
 }
 

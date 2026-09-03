@@ -8,6 +8,7 @@ import {
   Context,
   GoogleTool,
   GoogleToolExecuteContext,
+  GoogleToolStatus,
   InvocationContext,
   LlmAgent,
   PluginManager,
@@ -17,7 +18,10 @@ import {AuthClient, OAuth2Client} from 'google-auth-library';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod/v3';
 // Not part of the package barrel: `GoogleTool` is the public surface.
-import {withGoogleCredentials} from '../../src/tools/google_tool.js';
+import {
+  authorizationRequiredMessage,
+  withGoogleCredentials,
+} from '../../src/tools/google_tool.js';
 import {
   BaseGoogleCredentialsConfig,
   GoogleCredentialsManager,
@@ -94,9 +98,8 @@ describe('GoogleTool', () => {
 
     const result = await tool.runAsync({args: {}, toolContext});
 
-    expect(typeof result).toBe('string');
+    expect(result).toBe(authorizationRequiredMessage('list_datasets'));
     expect(String(result).toLowerCase()).toContain('authorization is required');
-    expect(String(result)).toContain('list_datasets');
     expect(execute).not.toHaveBeenCalled();
     expect(toolContext.eventActions.requestedAuthConfigs['fc-1']).toBeDefined();
   });
@@ -175,10 +178,10 @@ describe('GoogleTool', () => {
 
     const result = await tool.runAsync({args: {}, toolContext});
 
-    expect(result).toMatchObject({status: 'ERROR'});
-    expect(String((result as {error_details: string}).error_details)).toContain(
-      'Something went wrong',
-    );
+    expect(result).toEqual({
+      status: GoogleToolStatus.ERROR,
+      error_details: "Error in tool 'list_datasets': Something went wrong",
+    });
   });
 
   it('returns an error response when resolving the credential throws', async () => {
@@ -259,6 +262,22 @@ describe('GoogleTool', () => {
     await tool.runAsync({args: {}, toolContext});
 
     expect(received).toBe(settings);
+  });
+
+  it('hands the tool context to the wrapped function', async () => {
+    let received: Context | undefined;
+    const tool = new GoogleTool({
+      name: 'list_datasets',
+      description: 'Lists BigQuery datasets.',
+      execute: (_input, callContext) => {
+        received = callContext;
+        return 'ok';
+      },
+    });
+
+    await tool.runAsync({args: {}, toolContext});
+
+    expect(received?.userId).toBe('u1');
   });
 
   it('declares only the parameters the caller asked for', () => {

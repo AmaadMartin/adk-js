@@ -23,6 +23,18 @@ import {
   GoogleCredentialsManager,
 } from './google_tool_credentials.js';
 
+/**
+ * The `status` field a {@link GoogleTool} result carries.
+ *
+ * adk-python writes the two strings by hand. The members hold the same
+ * strings, so a tool that reports its own success shares one spelling with the
+ * failure {@link GoogleTool} reports for it.
+ */
+export enum GoogleToolStatus {
+  SUCCESS = 'SUCCESS',
+  ERROR = 'ERROR',
+}
+
 /** The Google-specific context handed to a {@link GoogleTool} function. */
 export interface GoogleToolExecuteContext<TSettings> {
   /** The resolved credential; `undefined` when no credentials config was set. */
@@ -64,7 +76,7 @@ export interface GoogleToolOptions<
 
 /** The structured error a {@link GoogleTool} returns instead of throwing. */
 export interface GoogleToolErrorResponse {
-  status: 'ERROR';
+  status: GoogleToolStatus.ERROR;
   /**
    * The failure message. The key crosses the language boundary — adk-python
    * emits the same one — so it stays snake_case.
@@ -138,7 +150,7 @@ export class GoogleTool<
       return await super.runAsync(req);
     } catch (error: unknown) {
       const response: GoogleToolErrorResponse = {
-        status: 'ERROR',
+        status: GoogleToolStatus.ERROR,
         error_details: formatError(error),
       };
       return response;
@@ -190,7 +202,11 @@ export function withGoogleCredentials<
   };
 }
 
-/** The message returned while the end user completes an OAuth flow. */
-function authorizationRequiredMessage(toolName: string): string {
+/**
+ * The message returned while the end user completes an OAuth flow.
+ *
+ * The model relays it, and the host drives the flow the tool started.
+ */
+export function authorizationRequiredMessage(toolName: string): string {
   return `User authorization is required to access Google services for ${toolName}. Please complete the authorization flow.`;
 }
