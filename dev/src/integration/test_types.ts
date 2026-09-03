@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, LlmResponse, Session} from '@google/adk';
+import {Session} from '@google/adk';
 import {
   Blob,
   CodeExecutionResult,
@@ -12,13 +12,12 @@ import {
   ExecutableCode,
   FileData,
   FinishReason,
-  FunctionCall,
-  FunctionResponse,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
   PartMediaResolution,
   VideoMetadata,
 } from '@google/genai';
+import {Recordings} from './recordings_schema.js';
 
 // The User message to replay. Either text or content will be filled in
 export interface UserMessage {
@@ -42,28 +41,14 @@ export interface TestSpec {
   userMessages?: UserMessage[];
 }
 
-export interface LlmRecording {
-  llmRequest?: LlmRequest;
-  llmResponse?: LlmResponse;
-}
-
-export interface ToolRecording {
-  toolCall?: FunctionCall;
-  toolResponse?: FunctionResponse;
-}
-
-export interface Recording {
-  userMessageIndex: number;
-  agentName: string;
-
-  // only one of these will be filled in
-  llmRecording?: LlmRecording;
-  toolRecording?: ToolRecording;
-}
-
-export interface Recordings {
-  recordings: Recording[];
-}
+// The recording format is declared once, as runtime schemas, in
+// recordings_schema.ts. These are the types inferred from them.
+export type {
+  LlmRecording,
+  Recording,
+  Recordings,
+  ToolRecording,
+} from './recordings_schema.js';
 
 export interface TestInfo {
   name: string;
