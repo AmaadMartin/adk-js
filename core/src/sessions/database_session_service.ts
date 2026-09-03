@@ -68,6 +68,18 @@ const STALE_SESSION_ERROR_MESSAGE =
   'The session has been modified in storage since it was loaded. ' +
   'Please reload the session before appending more events.';
 
+/**
+ * The message a write to a legacy database is refused with.
+ *
+ * It names the migration command, because that is the only way to make such a
+ * database writable from here.
+ */
+const LEGACY_SCHEMA_READ_ONLY_MESSAGE =
+  'This database uses the legacy v0 session schema, which stores event ' +
+  'actions as a Python pickle. adk-js can read such a database but cannot ' +
+  'write to it. Migrate it with the adk-python `adk migrate session` ' +
+  'command first.';
+
 /** Newest event first, with the id breaking a timestamp tie. */
 const NEWEST_EVENT_FIRST = {timestamp: 'DESC', id: 'DESC'} as const;
 
@@ -255,6 +267,9 @@ export class DatabaseSessionService extends BaseSessionService {
    * during startup to pay the cost upfront. It is safe to call more than once
    * and safe to call concurrently, and a failed attempt can be retried.
    *
+   * A database holding the legacy v0 schema is opened for reading only, and
+   * neither its tables nor its rows are altered.
+   *
    * @throws Error if the database holds the legacy v0 session schema and the
    *     caller supplied the MikroORM instance.
    */
@@ -347,15 +362,16 @@ export class DatabaseSessionService extends BaseSessionService {
     this.legacySchema = true;
   }
 
-  /** Throws when the open database is one adk-js can only read. */
+  /**
+   * Throws when the open database is one this service must not write to.
+   *
+   * A v0 database stores event actions as a Python pickle. TypeScript cannot
+   * produce a pickle that adk-python's restricted unpickler reads back, so an
+   * event written here would break the Python reader.
+   */
   private assertWritable(): void {
     if (this.legacySchema) {
-      throw new Error(
-        'This database uses the legacy v0 session schema, which stores event' +
-          ' actions as a Python pickle. adk-js can read such a database but' +
-          ' cannot write to it. Migrate it with the adk-python' +
-          ' `adk migrate session` command first.',
-      );
+      throw new Error(LEGACY_SCHEMA_READ_ONLY_MESSAGE);
     }
   }
 

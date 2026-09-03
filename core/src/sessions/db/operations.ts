@@ -89,16 +89,6 @@ const DRIVER_LOADERS: Record<string, () => Promise<unknown>> = {
   [SQLITE_BACKEND]: loadSqliteDriver,
 };
 
-/** Why a connection URI is not one this service can open. */
-export enum DatabaseUriProblem {
-  /** The string carries no URI scheme at all. */
-  NOT_A_URI = 'NOT_A_URI',
-  /** The scheme names a backend with no driver here, such as `oracle`. */
-  UNSUPPORTED_BACKEND = 'UNSUPPORTED_BACKEND',
-  /** The scheme names a driver as well, the way SQLAlchemy URLs do. */
-  DRIVER_IN_SCHEME = 'DRIVER_IN_SCHEME',
-}
-
 /** The backend, and the driver a SQLAlchemy-style scheme suffix names. */
 interface DatabaseUriScheme {
   backend: string;
@@ -134,41 +124,29 @@ export function namesSupportedDatabaseBackend(uri: string): boolean {
   return Object.hasOwn(DRIVER_LOADERS, schemeOf(uri).backend);
 }
 
-/** Returns the problem with a URI, or undefined when it is one we can open. */
-function classifyDatabaseUri(uri: string): DatabaseUriProblem | undefined {
+/**
+ * Says what is wrong with a connection URI, or nothing when it is usable.
+ *
+ * The three messages match the buckets adk-python distinguishes: a string that
+ * is not a URI, a backend with no driver here, and a scheme that names its
+ * driver the way a SQLAlchemy URL does. Each one masks the password.
+ */
+function describeDatabaseUriProblem(uri: string): string | undefined {
   const {backend, driver} = schemeOf(uri);
   if (!backend) {
-    return DatabaseUriProblem.NOT_A_URI;
+    return `Invalid database URL format or argument '${redactUriPassword(uri)}'.`;
   }
   if (!Object.hasOwn(DRIVER_LOADERS, backend)) {
-    return DatabaseUriProblem.UNSUPPORTED_BACKEND;
+    return `Unsupported database URI: ${redactUriPassword(uri)}`;
   }
   if (driver) {
-    return DatabaseUriProblem.DRIVER_IN_SCHEME;
+    return (
+      `Database URL '${redactUriPassword(uri)}' names the '${driver}' driver ` +
+      `in its scheme. adk-js selects its own driver, so use a ` +
+      `'${backend}://' URL instead.`
+    );
   }
   return undefined;
-}
-
-/** Builds the message for a rejected URI, with its password masked. */
-function describeDatabaseUriProblem(
-  uri: string,
-  problem: DatabaseUriProblem,
-): string {
-  const redacted = redactUriPassword(uri);
-  switch (problem) {
-    case DatabaseUriProblem.NOT_A_URI:
-      return `Invalid database URL format or argument '${redacted}'.`;
-    case DatabaseUriProblem.UNSUPPORTED_BACKEND:
-      return `Unsupported database URI: ${redacted}`;
-    case DatabaseUriProblem.DRIVER_IN_SCHEME: {
-      const {backend, driver} = schemeOf(uri);
-      return (
-        `Database URL '${redacted}' names the '${driver}' driver in its ` +
-        `scheme. adk-js selects its own driver, so use a '${backend}://' ` +
-        'URL instead.'
-      );
-    }
-  }
 }
 
 /**
@@ -178,9 +156,9 @@ function describeDatabaseUriProblem(
  * @throws Error naming what is wrong with the URI, its password masked.
  */
 export function assertSupportedDatabaseUri(uri: string): void {
-  const problem = classifyDatabaseUri(uri);
+  const problem = describeDatabaseUriProblem(uri);
   if (problem !== undefined) {
-    throw new Error(describeDatabaseUriProblem(uri, problem));
+    throw new Error(problem);
   }
 }
 
@@ -275,6 +253,8 @@ async function deriveConnectionOptionsFromUri(
       entities: ENTITIES,
       dbName: isMemory ? ':memory:' : uri.substring(SQLITE_URI_PREFIX.length),
       driver,
+      // knex reaches every connection it opens through this hook, while the
+      // `pool` option below stays free for the caller to replace.
       driverOptions: {pool: {afterCreate: enableSqliteForeignKeys}},
       // Every connection to a SQLite in-memory database opens a separate,
       // empty database, so a pool wider than one connection loses the schema
@@ -288,6 +268,8 @@ async function deriveConnectionOptionsFromUri(
     entities: ENTITIES,
     clientUrl: uri,
     driver,
+    // Every backend but sqlite reaches this service over a socket that can be
+    // closed while the connection sits idle in the pool.
     driverOptions: {pool: {validate: connectionIsAlive}},
   } as MikroORMOptions;
 }
@@ -406,8 +388,9 @@ export async function detectDatabaseSchemaVersion(
   if (hasLegacyEventsTable) {
     logger.warn(
       'The database uses the legacy v0 session schema, which serializes ' +
-        'event actions with Python pickle. This SDK cannot read it. Migrate ' +
-        'the database with the adk-python `adk migrate session` command.',
+        'event actions with Python pickle. This SDK opens it for reading ' +
+        'only. Migrate it with the adk-python `adk migrate session` command ' +
+        'to write to it.',
     );
     return SCHEMA_VERSION_0_PICKLE;
   }

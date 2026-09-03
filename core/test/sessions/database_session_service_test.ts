@@ -35,6 +35,7 @@ import {isDatabaseConnectionString} from '../../src/sessions/database_session_se
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
 import {
   ENTITIES,
+  METADATA_TABLE_NAME,
   StorageAppState,
   StorageSession,
   StorageUserState,
@@ -62,6 +63,19 @@ async function createLoggingService(): Promise<{
 /** Reports whether a logged statement reads the events table. */
 function readsEventsTable(query: string): boolean {
   return /select .* from .?events.?/.test(query);
+}
+
+/** Counts the rows left in a legacy database's events table. */
+async function countLegacyEvents(databaseFile: string): Promise<number> {
+  const orm = await MikroORM.init({
+    dbName: databaseFile,
+    driver: SqliteDriver,
+    entities: ENTITIES_V0,
+    pool: {min: 1, max: 1},
+  });
+  const remaining = await orm.em.fork().count(StorageEventV0, {});
+  await orm.close();
+  return remaining;
 }
 
 /** Appends `count` events, one millisecond apart, to an existing session. */
@@ -2499,5 +2513,219 @@ describe('DatabaseSessionService concurrent state rows', () => {
     await expect(
       service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
     ).rejects.toThrow(/app_states/);
+  });
+});
+
+describe('DatabaseSessionService v0 schema', () => {
+  const appName = 'legacy-app';
+  const userId = 'legacy-user';
+  const sessionId = 'legacy-session';
+  let directory: string;
+  let databaseFile: string;
+  let service: DatabaseSessionService;
+
+  /** Writes the tables and rows adk-python 1.19 to 1.21 left behind. */
+  async function writeLegacyDatabase(file: string): Promise<void> {
+    const orm = await MikroORM.init({
+      dbName: file,
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      pool: {min: 1, max: 1},
+    });
+    const connection = orm.em.getConnection();
+    await connection.execute(
+      'create table sessions (app_name text, user_id text, id text, ' +
+        'state text, create_time datetime, update_time datetime, ' +
+        'primary key (app_name, user_id, id))',
+    );
+    await connection.execute(
+      'create table app_states (app_name text primary key, state text, ' +
+        'update_time datetime)',
+    );
+    await connection.execute(
+      'create table user_states (app_name text, user_id text, state text, ' +
+        'update_time datetime, primary key (app_name, user_id))',
+    );
+    await connection.execute(
+      'create table events (id text, app_name text, user_id text, ' +
+        'session_id text, invocation_id text, author text, actions blob, ' +
+        'long_running_tool_ids_json text, branch text, timestamp datetime, ' +
+        'content text, grounding_metadata text, custom_metadata text, ' +
+        'usage_metadata text, citation_metadata text, partial boolean, ' +
+        'turn_complete boolean, error_code text, error_message text, ' +
+        'interrupted boolean, input_transcription text, ' +
+        'output_transcription text, primary key (app_name, user_id, ' +
+        'session_id, id))',
+    );
+    await connection.execute(
+      "insert into sessions values ('legacy-app', 'legacy-user', " +
+        '\'legacy-session\', \'{"topic":"pickles"}\', 1000, 2000)',
+    );
+    await connection.execute(
+      'insert into app_states values (\'legacy-app\', \'{"tier":"free"}\', 1000)',
+    );
+    await connection.execute(
+      "insert into user_states values ('legacy-app', 'legacy-user', " +
+        '\'{"locale":"en"}\', 1000)',
+    );
+    await connection.execute(
+      'insert into events (id, app_name, user_id, session_id, ' +
+        'invocation_id, author, actions, long_running_tool_ids_json, ' +
+        'branch, timestamp, content, partial, error_message) values ' +
+        "('e1', 'legacy-app', 'legacy-user', 'legacy-session', 'inv-1', " +
+        "'user', x'80049503', '[\"tool-a\"]', 'root.child', 1000, " +
+        '\'{"parts":[{"text":"hi"}],"role":"user"}\', 0, null)',
+    );
+    await connection.execute(
+      'insert into events (id, app_name, user_id, session_id, ' +
+        'invocation_id, author, actions, branch, timestamp, content, ' +
+        'partial, error_message) values ' +
+        "('e2', 'legacy-app', 'legacy-user', 'legacy-session', 'inv-1', " +
+        "'assistant', x'80049504', null, 2000, " +
+        '\'{"parts":[{"text":"hello"}],"role":"model"}\', 1, ' +
+        "'model stalled')",
+    );
+    await orm.close();
+  }
+
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'adk-legacy-db-'));
+    databaseFile = join(directory, 'legacy.db');
+    await writeLegacyDatabase(databaseFile);
+    service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+  });
+
+  afterEach(async () => {
+    await service.close();
+    await rm(directory, {recursive: true, force: true});
+  });
+
+  /** Reports whether the legacy database has gained a v1 artefact. */
+  async function inspectLegacyTables(): Promise<{
+    hasMetadataTable: boolean;
+    hasEventDataColumn: boolean;
+  }> {
+    const orm = await MikroORM.init({
+      dbName: databaseFile,
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      pool: {min: 1, max: 1},
+    });
+    const connection = orm.em.getConnection();
+    const tables: Array<{name: string}> = await connection.execute(
+      "select name from sqlite_master where type = 'table'",
+      [],
+      'all',
+    );
+    const columns: Array<{name: string}> = await connection.execute(
+      'pragma table_info(events)',
+      [],
+      'all',
+    );
+    await orm.close();
+    return {
+      hasMetadataTable: tables.some(
+        (table) => table.name === METADATA_TABLE_NAME,
+      ),
+      hasEventDataColumn: columns.some(
+        (column) => column.name === 'event_data',
+      ),
+    };
+  }
+
+  it('opens the database without altering it', async () => {
+    await service.init();
+
+    const inspected = await inspectLegacyTables();
+    expect(inspected.hasMetadataTable).toBe(false);
+    expect(inspected.hasEventDataColumn).toBe(false);
+  });
+
+  it('reads the stored events oldest first', async () => {
+    const session = await service.getSession({appName, userId, sessionId});
+    if (!session) {
+      expect.fail('the legacy session was not read');
+    }
+
+    expect(session.events.map((event) => event.id)).toEqual(['e1', 'e2']);
+    const [first, second] = session.events;
+    expect(first.author).toBe('user');
+    expect(first.branch).toBe('root.child');
+    expect(first.content?.parts?.[0].text).toBe('hi');
+    expect(first.longRunningToolIds).toEqual(['tool-a']);
+    expect(first.actions.stateDelta).toEqual({});
+    expect(second.partial).toBe(true);
+    expect(second.errorMessage).toBe('model stalled');
+    expect(second.timestamp).toBe(2000);
+  });
+
+  it('merges the app, user and session state', async () => {
+    const session = await service.getSession({appName, userId, sessionId});
+
+    expect(session?.state).toEqual({
+      'topic': 'pickles',
+      'app:tier': 'free',
+      'user:locale': 'en',
+    });
+  });
+
+  it('lists the legacy session', async () => {
+    const listed = await service.listSessions({appName, userId});
+
+    expect(listed.sessions.map((session) => session.id)).toEqual([sessionId]);
+    expect(listed.sessions[0].state['topic']).toBe('pickles');
+  });
+
+  it('deletes the session and its events', async () => {
+    await service.deleteSession({appName, userId, sessionId});
+
+    await expect(
+      service.getSession({appName, userId, sessionId}),
+    ).resolves.toBeUndefined();
+    const remaining = await countLegacyEvents(databaseFile);
+    expect(remaining).toBe(0);
+  });
+
+  it('refuses to create a session', async () => {
+    await expect(
+      service.createSession({appName, userId, sessionId: 'new-session'}),
+    ).rejects.toThrow('adk migrate session');
+  });
+
+  it('refuses to append an event', async () => {
+    const session = await service.getSession({appName, userId, sessionId});
+    if (!session) {
+      expect.fail('the legacy session was not read');
+    }
+
+    await expect(
+      service.appendEvent({session, event: createEvent({timestamp: 3000})}),
+    ).rejects.toThrow('adk migrate session');
+  });
+
+  it('warns once that the pickled actions are not recoverable', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    await service.getSession({appName, userId, sessionId});
+    await service.getSession({appName, userId, sessionId});
+
+    const actionWarnings = warn.mock.calls.filter(([message]) =>
+      String(message).includes('come back empty'),
+    );
+    expect(actionWarnings).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('cannot open a legacy database through a caller-supplied ORM', async () => {
+    const orm = await MikroORM.init({
+      dbName: databaseFile,
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      pool: {min: 1, max: 1},
+    });
+    const supplied = new DatabaseSessionService(orm);
+
+    await expect(supplied.init()).rejects.toThrow('legacy v0 session schema');
+    await orm.close();
   });
 });

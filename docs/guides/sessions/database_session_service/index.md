@@ -102,6 +102,14 @@ const service = new DatabaseSessionService('postgres://localhost/adk', {
 });
 ```
 
+Both hooks live under `driverOptions`, so replace that option to drop one:
+
+```ts
+const service = new DatabaseSessionService('postgres://localhost/adk', {
+  driverOptions: {pool: {}}, // no liveness check
+});
+```
+
 ## Reading a session
 
 `getSession` takes a config that trims the event history it loads:

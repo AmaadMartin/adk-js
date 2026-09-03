@@ -127,7 +127,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 - [DatabaseSessionService](sessions/database_session_service/index.md) -
   Storing sessions in SQL, the connection URLs it accepts, rejecting stale
-  writes, reading user state, and reading a database adk-python wrote.
+  writes, reading user state, and opening a legacy database adk-python wrote.
 - [Session state and its scopes](sessions/state/index.md) - Session state and
   the app:, user: and temp: prefixes that decide what is shared and what is
   stored.
