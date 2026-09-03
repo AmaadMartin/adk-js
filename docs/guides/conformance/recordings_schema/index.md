@@ -51,8 +51,8 @@ const recordings = RecordingsSchema.parse({
 ```
 
 `parse` returns a typed `Recordings` and throws a `ZodError` on anything else.
-`test_types.ts` re-exports the four inferred types, so an existing
-`import {Recording} from './test_types.js'` keeps working.
+`recordings_schema.ts` exports the four inferred types alongside the schemas:
+`Recordings`, `Recording`, `LlmRecording` and `ToolRecording`.
 
 ## The four models
 
