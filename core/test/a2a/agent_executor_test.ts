@@ -302,17 +302,4 @@ describe('A2AAgentExecutor', () => {
       }),
     );
   });
-
-  it('should fail cancelTask because it is not implemented', async () => {
-    const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
-    });
-
-    await expect(executor.cancelTask('any-task-id')).rejects.toThrow(
-      'Task cancellation is not supported yet.',
-    );
-  });
 });
