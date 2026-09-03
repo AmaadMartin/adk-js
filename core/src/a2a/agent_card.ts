@@ -19,6 +19,7 @@ import {ReadonlyContext} from '../agents/readonly_context.js';
 import {isSequentialAgent} from '../agents/sequential_agent.js';
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {isBaseToolset} from '../tools/base_toolset.js';
+import {createLinkedAbort} from '../utils/abort_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {quoteUntrusted} from '../utils/fencing_utils.js';
 import {logger} from '../utils/logger.js';
@@ -48,6 +49,8 @@ export interface ResolveAgentCardOptions {
   headers?: Record<string, string>;
   /** Abort the card request after this many milliseconds. */
   timeoutMs?: number;
+  /** Signal that cancels the card request, alongside the timeout. */
+  abortSignal?: AbortSignal;
   /** `fetch` implementation to use. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
 }
@@ -101,14 +104,13 @@ async function resolveAgentCardFromUrl(
   source: string,
   options: ResolveAgentCardOptions,
 ): Promise<AgentCard> {
-  const {headers, timeoutMs, fetchImpl = globalThis.fetch} = options;
-  const controller = new AbortController();
-  const timer =
-    timeoutMs === undefined
-      ? undefined
-      : setTimeout(() => {
-          controller.abort();
-        }, timeoutMs);
+  const {
+    headers,
+    timeoutMs,
+    abortSignal,
+    fetchImpl = globalThis.fetch,
+  } = options;
+  const abort = createLinkedAbort(abortSignal, timeoutMs);
   // The resolver owns how the well-known card path is derived from `source`;
   // the wrapper only adds the headers and the deadline it has no hook for.
   const resolver = new DefaultAgentCardResolver({
@@ -116,7 +118,7 @@ async function resolveAgentCardFromUrl(
       fetchImpl(input, {
         ...init,
         ...(headers ? {headers} : {}),
-        signal: controller.signal,
+        signal: abort.controller.signal,
       }),
   });
   try {
@@ -126,7 +128,7 @@ async function resolveAgentCardFromUrl(
       `Failed to resolve AgentCard from URL ${source}: ${formatError(err)}`,
     );
   } finally {
-    clearTimeout(timer);
+    abort.dispose();
   }
 }
 

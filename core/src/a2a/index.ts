@@ -36,6 +36,13 @@ export {
   newIntegrationExtensionInterceptor,
 } from './a2a_remote_agent_interceptors.js';
 export {
+  createEndOfAgentEvent,
+  createFinishTaskFailureEvent,
+  createTaskFailureEvents,
+  findFinishTaskArgsFromHistory,
+} from './a2a_remote_agent_task.js';
+export type {TaskFailureEventsParams} from './a2a_remote_agent_task.js';
+export {
   adoptedCardDescription,
   getA2AAgentCard,
   resolveAgentCard,

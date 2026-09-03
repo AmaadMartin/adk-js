@@ -188,6 +188,52 @@ const bookingAgent = new RemoteA2AAgent({
 });
 ```
 
+## Delegating a whole task
+
+`mode: 'task'` runs the agent as a task sub-agent: it owns the exchange with
+the peer until the peer says the task is done, then hands control back.
+
+```ts
+import {RemoteA2AAgent} from '@google/adk';
+import {Type} from '@google/genai';
+
+const bookingAgent = new RemoteA2AAgent({
+  name: 'booking_agent',
+  agentCard: 'https://booking.example.com',
+  mode: 'task',
+  outputSchema: {
+    type: Type.OBJECT,
+    properties: {reference: {type: Type.STRING}},
+    required: ['reference'],
+  },
+});
+```
+
+The peer must call the `finish_task` tool to signal completion. An ADK
+task-mode agent does that natively; a custom A2A server must return a function
+response named `finish_task` whose `result` is `'Task completed.'` or
+`'Task failed.'`. Set `outputSchema` to mirror the remote agent's, so the
+arguments are unwrapped the same way: an object schema puts them at the top
+level of `event.output`, and any other schema wraps the value under `result`.
+
+Three things change in this mode:
+
+* **History is scoped to the task.** When the invocation carries an isolation
+  scope, only events in that scope are forwarded, plus the coordinator's
+  function call whose id is the scope — that call carries the task's inputs.
+  A sibling call the coordinator aimed at another tool is dropped, and a
+  function response answering a call the peer never made is relayed as text,
+  because the peer has no invocation to resume for it. An isolation scope that
+  no function call opened is rejected: a workflow path scope is not a task
+  scope.
+* **The whole scope is sent every turn**, since the scope is new to the peer.
+* **Control always comes back.** Every terminating path — an auth failure, a
+  card that will not resolve, an empty message, a transport error, a task the
+  peer reported `failed` or `canceled` — emits a failing `finish_task`
+  response and then an event with `actions.endOfAgent`, so the coordinator is
+  never left waiting. A credential request is the exception: it is a pause, so
+  the task keeps its control and resumes on the next turn.
+
 ## As a workflow node
 
 Running a `RemoteA2AAgent` inside a `Workflow` promotes the peer's answer text
