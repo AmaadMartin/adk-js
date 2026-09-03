@@ -52,7 +52,8 @@ import {
 } from '../telemetry/tracing.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
-import {BaseAgent, BaseAgentConfig} from './base_agent.js';
+import {BaseAgent, BaseAgentConfig, isBaseAgent} from './base_agent.js';
+import {assertNoMisplacedGenerateContentKwargs} from './llm_agent_config_validation.js';
 import {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
@@ -414,10 +415,36 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   codeExecutor?: BaseCodeExecutor;
 }
 
+/**
+ * Rejects a value in `tools` that must not become a tool.
+ *
+ * `BaseAgent` extends `BaseNode`, so the agent check comes first. Without it an
+ * agent listed in `tools` is silently wrapped as a `NodeTool` rather than being
+ * reported as the misconfiguration it is.
+ *
+ * @param toolUnion One entry of an agent's `tools`.
+ * @throws Error naming the entry and what to do with it instead.
+ */
+function validateToolUnion(toolUnion: ToolUnion): void {
+  if (isBaseAgent(toolUnion)) {
+    throw new Error(
+      `Agent '${toolUnion.name}' cannot be wrapped as a NodeTool. Agents ` +
+        'should be invoked as sub-agents.',
+    );
+  }
+  if (isBaseNode(toolUnion) && !toolUnion.description) {
+    throw new Error(
+      `Workflow/Node '${toolUnion.name}' must have a description to be ` +
+        'wrapped as a tool.',
+    );
+  }
+}
+
 async function convertToolUnionToTools(
   toolUnion: ToolUnion,
   context?: ReadonlyContext,
 ): Promise<BaseTool[]> {
+  validateToolUnion(toolUnion);
   if (isBaseTool(toolUnion)) {
     return [toolUnion];
   }
@@ -503,6 +530,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   codeExecutor?: BaseCodeExecutor;
 
   constructor(config: LlmAgentConfig) {
+    assertNoMisplacedGenerateContentKwargs(config);
     // Node defaults for an agent used in a graph, matching adk-python's
     // `build_node`: an agent re-runs on resume (its turn is what the reply is
     // addressed to), and a task-mode agent holds the graph until it produces an
@@ -516,6 +544,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.instruction = config.instruction ?? '';
     this.globalInstruction = config.globalInstruction ?? '';
     this.tools = config.tools ?? [];
+    this.tools.forEach(validateToolUnion);
     this.generateContentConfig = config.generateContentConfig;
     this.disallowTransferToParent = config.disallowTransferToParent ?? false;
     this.disallowTransferToPeers = config.disallowTransferToPeers ?? false;
@@ -588,16 +617,31 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // Validate generateContentConfig.
     if (config.generateContentConfig) {
       if (config.generateContentConfig.tools) {
-        throw new Error('All tools must be set via LlmAgent.tools.');
+        throw new Error(
+          'All tools must be set via LlmAgent.tools, not via ' +
+            'generateContentConfig.tools. Move your tools to the ' +
+            'LlmAgent(tools=[...]) parameter.',
+        );
       }
       if (config.generateContentConfig.systemInstruction) {
         throw new Error(
-          'System instruction must be set via LlmAgent.instruction.',
+          'System instruction must be set via LlmAgent.instruction, not via ' +
+            'generateContentConfig.systemInstruction. Move your instruction ' +
+            'to LlmAgent(instruction="...").',
         );
       }
       if (config.generateContentConfig.responseSchema) {
         throw new Error(
-          'Response schema must be set via LlmAgent.output_schema.',
+          'Response schema must be set via LlmAgent.outputSchema, not via ' +
+            'generateContentConfig.responseSchema. Move your schema to ' +
+            'LlmAgent(outputSchema=...).',
+        );
+      }
+      if (config.generateContentConfig.httpOptions?.baseUrl) {
+        throw new Error(
+          'Base URL is a transport setting and must be set on the model or ' +
+            'its client, not via ' +
+            'LlmAgent.generateContentConfig.httpOptions.baseUrl.',
         );
       }
     } else {
