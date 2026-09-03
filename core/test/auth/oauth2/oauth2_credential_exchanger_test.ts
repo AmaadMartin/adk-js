@@ -630,6 +630,27 @@ describe('OAuth2CredentialExchanger', () => {
       ).rejects.toThrow('State mismatch detected');
     });
 
+    it('reports a state mismatch without the parse failure prefix', async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'https://callback?code=abc&state=wrong',
+          state: 'expected-state',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow(/^State mismatch detected\. Potential CSRF attack\.$/);
+    });
+
     it('throws CredentialExchangeError if authResponseUri carries no state at all', async () => {
       const authCredential = {
         oauth2: {
