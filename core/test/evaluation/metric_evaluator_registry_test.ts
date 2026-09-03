@@ -122,4 +122,13 @@ describe('MetricEvaluatorRegistry', () => {
       }),
     ).toThrow(InputValidationError);
   });
+
+  it('hands out one shared default registry, distinct from a fresh one', () => {
+    expect(defaultMetricEvaluatorRegistry()).toBe(
+      defaultMetricEvaluatorRegistry(),
+    );
+    expect(defaultMetricEvaluatorRegistry()).not.toBe(
+      new MetricEvaluatorRegistry(),
+    );
+  });
 });

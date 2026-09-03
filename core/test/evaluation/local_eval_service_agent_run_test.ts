@@ -231,6 +231,24 @@ describe('AgentEvaluator over an installed LocalEvalRuntime', () => {
     ).rejects.toThrow(/my_custom_metric.*Failed/);
   });
 
+  it('persists the results through the manager the caller supplied', async () => {
+    const evalSetResultsManager = new RecordingEvalSetResultsManager();
+
+    await AgentEvaluator.evaluateEvalSet({
+      agentModule: agentModule(),
+      evalSet: matchingEvalSet(),
+      evalConfig: {criteria: {response_match_score: 0.8}},
+      numRuns: 1,
+      printDetailedResults: false,
+      appName: APP_NAME,
+      evalSetResultsManager,
+    });
+
+    expect(evalSetResultsManager.saved).toHaveLength(1);
+    expect(evalSetResultsManager.saved[0].appName).toBe(APP_NAME);
+    expect(evalSetResultsManager.saved[0].evalCaseResults).toHaveLength(1);
+  });
+
   it('reports the missing runtime once it is uninstalled', async () => {
     setEvalRuntime(undefined);
 

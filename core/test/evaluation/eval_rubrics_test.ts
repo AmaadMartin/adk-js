@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {EvalCase, InputValidationError, Invocation, Rubric} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+
 import {
   addRubricsToInvocation,
   copyEvalCaseRubricsToActualInvocations,
   copyInvocationRubricsToActualInvocations,
-  EvalCase,
-  InputValidationError,
-  Invocation,
-  Rubric,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/evaluation/eval_rubrics.js';
 
 function invocation(id: string, rubrics?: Rubric[]): Invocation {
   return {
