@@ -10,13 +10,19 @@ import {
   AgentEngineMemoryConfig,
   GenerateAgentEngineMemoriesConfig,
   GenerateMemoriesRequestDirectContentsSourceEvent,
+  IngestEventsRequestParameters,
+  IngestionDirectContentsSourceEvent,
+  MemoryGenerationTriggerConfig,
   MemoryMetadataValue,
+  MemoryProfile,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
 import {Content, createUserContent} from '@google/genai';
+import {GoogleAuthOptions} from 'google-auth-library';
 import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {logger} from '../utils/logger.js';
 import {
+  createVertexApiClient,
   EXPRESS_MODE_UNSUPPORTED_MESSAGE,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
@@ -27,41 +33,149 @@ import {
 } from './base_memory_service.js';
 import {MemoryEntry} from './memory_entry.js';
 
-interface MemoryEntryWithMetadata extends MemoryEntry {
-  customMetadata?: Record<string, unknown>;
-}
-
-const GENERATE_MEMORIES_KNOWN_FIELDS = [
-  'disableConsolidation',
-  'waitForCompletion',
-  'revisionLabels',
-  'revisionExpireTime',
-  'revisionTtl',
-  'disableMemoryRevisions',
-  'metadataMergeStrategy',
+/** Keys `memories.generate` accepts as config fields. */
+const GENERATE_MEMORIES_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'allowedTopics',
-];
-
-const CREATE_MEMORY_KNOWN_FIELDS = [
-  'displayName',
-  'description',
-  'waitForCompletion',
-  'ttl',
-  'expireTime',
-  'revisionExpireTime',
-  'revisionTtl',
+  'disableConsolidation',
   'disableMemoryRevisions',
-  'topics',
+  'httpOptions',
+  'metadata',
+  'metadataMergeStrategy',
+  'revisionExpireTime',
+  'revisionLabels',
+  'revisionTtl',
+  'ttl',
+  'waitForCompletion',
+]);
+
+/** Keys `memories.create` accepts as config fields. */
+const CREATE_MEMORY_KNOWN_FIELDS: ReadonlySet<string> = new Set([
+  'description',
+  'disableMemoryRevisions',
+  'displayName',
+  'expireTime',
+  'httpOptions',
   'memoryId',
-];
+  'metadata',
+  'revisionExpireTime',
+  'revisionLabels',
+  'revisionTtl',
+  'topics',
+  'ttl',
+  'waitForCompletion',
+]);
+
+/** Keys `memories.ingestEvents` accepts. */
+const INGEST_EVENTS_KNOWN_FIELDS: ReadonlySet<string> = new Set([
+  'forceFlush',
+  'generationTriggerConfig',
+  'streamId',
+]);
+
+const VERTEX_METADATA_KEYS = [
+  'boolValue',
+  'doubleValue',
+  'stringValue',
+  'timestampValue',
+] as const;
 
 const ENABLE_CONSOLIDATION_KEY = 'enable_consolidation';
 const MAX_DIRECT_MEMORIES_PER_GENERATE_CALL = 5;
 
 function shouldFilterOutEvent(content?: Content): boolean {
   return !(content?.parts || []).some(
-    (p) => p.text || p.inlineData || p.fileData,
+    (p) =>
+      p.text ||
+      p.inlineData ||
+      p.fileData ||
+      p.functionCall ||
+      p.functionResponse ||
+      p.executableCode ||
+      p.codeExecutionResult ||
+      p.toolCall ||
+      p.toolResponse,
   );
+}
+
+/**
+ * Returns whether an event write should go to `memories.generate`.
+ *
+ * `memories.ingestEvents` is the default. A caller who passes a key that only
+ * `memories.generate` accepts gets the generate path instead; a key both
+ * accept, or a key neither accepts, keeps the default.
+ */
+function shouldUseGenerateMemories(
+  customMetadata?: Record<string, unknown>,
+): boolean {
+  return Object.keys(customMetadata ?? {}).some(
+    (key) =>
+      !INGEST_EVENTS_KNOWN_FIELDS.has(key) &&
+      GENERATE_MEMORIES_KNOWN_FIELDS.has(key),
+  );
+}
+
+/**
+ * Narrows a caller-supplied memory generation trigger configuration.
+ *
+ * Only the top level is checked. The nested rule belongs to the caller, and
+ * the Memory Bank API rejects a malformed one.
+ */
+function isGenerationTriggerConfig(
+  value: unknown,
+): value is MemoryGenerationTriggerConfig {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Builds the Memories module on an API client that carries the given
+ * credentials.
+ *
+ * The cast bridges two copies of `@google/genai` in the dependency tree:
+ * `@google-cloud/vertexai@1.12.0` resolves its own `@google/genai@1.52.0`,
+ * while this package resolves `@google/genai@2.9.0`. The two `ApiClient`
+ * classes each declare a private `customBaseUrl`, so TypeScript treats them as
+ * distinct types even though the instances are interchangeable at runtime.
+ */
+function createCredentialedMemories(options: {
+  project?: string;
+  location?: string;
+  googleAuthOptions: GoogleAuthOptions;
+}): Memories {
+  const apiClient = createVertexApiClient(options);
+  return new Memories(
+    apiClient as unknown as ConstructorParameters<typeof Memories>[0],
+  );
+}
+
+function toIngestionEvent(event: Event): IngestionDirectContentsSourceEvent {
+  const ingestionEvent: IngestionDirectContentsSourceEvent = {
+    content: event.content,
+    eventId: event.id,
+  };
+  if (Number.isFinite(event.timestamp)) {
+    ingestionEvent.eventTime = new Date(event.timestamp).toISOString();
+  }
+  return ingestionEvent;
+}
+
+function fromVertexMetadataValue(value: MemoryMetadataValue): unknown {
+  for (const key of VERTEX_METADATA_KEYS) {
+    if (value[key] !== undefined) {
+      return value[key];
+    }
+  }
+  return value;
+}
+
+/** Converts Vertex metadata values back to plain JavaScript values. */
+function fromVertexMetadata(
+  metadata?: Record<string, MemoryMetadataValue>,
+): Record<string, unknown> {
+  const plainMetadata: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(metadata ?? {})) {
+    plainMetadata[key] = fromVertexMetadataValue(value);
+  }
+  return plainMetadata;
 }
 
 function toVertexMetadataValue(
@@ -83,10 +197,7 @@ function toVertexMetadataValue(
   if (typeof value === 'object' && value !== null) {
     const v = value as Partial<MemoryMetadataValue>;
     if (
-      v.boolValue !== undefined ||
-      v.doubleValue !== undefined ||
-      v.stringValue !== undefined ||
-      v.timestampValue !== undefined
+      VERTEX_METADATA_KEYS.some((metadataKey) => v[metadataKey] !== undefined)
     ) {
       return v as MemoryMetadataValue;
     }
@@ -106,6 +217,15 @@ export interface VertexAiMemoryBankServiceOptions {
   location?: string;
   agentEngineId: string;
   expressModeApiKey?: string;
+
+  /**
+   * Authentication options for the Memory Bank API, for example credentials
+   * obtained through Workload Identity Federation outside of Google Cloud.
+   * Defaults to Application Default Credentials. Ignored when `client` is
+   * given, because an injected client carries its own authentication.
+   */
+  credentials?: GoogleAuthOptions;
+
   client?: Client;
 }
 
@@ -145,16 +265,27 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
 
     if (options.client) {
       this.memories = options.client.agentEnginesInternal.memories;
-    } else {
-      if (this.expressModeApiKey && (!this.projectId || !this.location)) {
-        throw new Error(EXPRESS_MODE_UNSUPPORTED_MESSAGE);
-      }
-      const client = new Client({
+      return;
+    }
+
+    if (this.expressModeApiKey && (!this.projectId || !this.location)) {
+      throw new Error(EXPRESS_MODE_UNSUPPORTED_MESSAGE);
+    }
+
+    if (options.credentials) {
+      this.memories = createCredentialedMemories({
         project: this.projectId,
         location: this.location,
+        googleAuthOptions: options.credentials,
       });
-      this.memories = client.agentEnginesInternal.memories;
+      return;
     }
+
+    const client = new Client({
+      project: this.projectId,
+      location: this.location,
+    });
+    this.memories = client.agentEnginesInternal.memories;
   }
 
   async addSessionToMemory(session: Session): Promise<void> {
@@ -220,19 +351,60 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     const memoryEvents: MemoryEntry[] = [];
     const retrievedMemories = retrievedMemoriesResponse.retrievedMemories || [];
 
-    for (const retrievedMemory of retrievedMemories) {
-      logger.debug(`Retrieved memory: ${JSON.stringify(retrievedMemory)}`);
-      if (retrievedMemory.memory && retrievedMemory.memory.fact) {
-        const content = createUserContent(retrievedMemory.memory.fact);
+    try {
+      for (const retrievedMemory of retrievedMemories) {
+        const memory = retrievedMemory.memory;
+        if (!memory) {
+          logger.warn('Skipping memory entry with missing memory object.');
+          continue;
+        }
+        if (!memory.fact) {
+          logger.warn('Skipping memory entry with empty or missing fact.');
+          continue;
+        }
         memoryEvents.push({
           author: 'user',
-          content: content,
-          timestamp: retrievedMemory.memory.updateTime,
+          content: createUserContent(memory.fact),
+          timestamp: memory.updateTime,
+          customMetadata: fromVertexMetadata(memory.metadata),
         });
       }
+    } catch (e: unknown) {
+      logger.error(
+        `Error while iterating memory results. Returning ` +
+          `${memoryEvents.length} partial results: ${e}`,
+      );
     }
 
     return {memories: memoryEvents};
+  }
+
+  /**
+   * Retrieves the structured profiles for a scope, one per registered schema.
+   *
+   * Profiles are a Vertex Memory Bank capability distinct from memory search:
+   * a scope-keyed lookup rather than a semantic query. It is not part of
+   * `BaseMemoryService`.
+   */
+  async retrieveProfiles(request: {
+    appName: string;
+    userId: string;
+  }): Promise<MemoryProfile[]> {
+    const response = await this.memories.retrieveProfiles({
+      name: `reasoningEngines/${this.agentEngineId}`,
+      scope: {
+        app_name: request.appName,
+        user_id: request.userId,
+      },
+    });
+
+    const profiles = Object.values(response.profiles ?? {});
+    logger.debug(
+      profiles.length > 0
+        ? `Retrieved ${profiles.length} memory profiles.`
+        : 'Retrieved no memory profiles.',
+    );
+    return profiles;
   }
 
   private async addEventsToMemoryFromEvents(request: {
@@ -241,6 +413,11 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     eventsToProcess: Event[];
     customMetadata?: Record<string, unknown>;
   }): Promise<void> {
+    if (!shouldUseGenerateMemories(request.customMetadata)) {
+      this.addEventsToMemoryViaIngest(request);
+      return;
+    }
+
     const directEvents: GenerateMemoriesRequestDirectContentsSourceEvent[] = [];
     for (const event of request.eventsToProcess) {
       if (shouldFilterOutEvent(event.content)) {
@@ -271,6 +448,57 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     }
   }
 
+  /**
+   * Adds events to Vertex AI Memory Bank via `memories.ingestEvents`.
+   *
+   * The request is dispatched without being awaited. IngestEvents takes about
+   * 800 ms to trigger and its response carries nothing the caller acts on, so
+   * awaiting it would only slow the caller down. A failure is logged.
+   */
+  private addEventsToMemoryViaIngest(request: {
+    appName: string;
+    userId: string;
+    eventsToProcess: Event[];
+    customMetadata?: Record<string, unknown>;
+  }): void {
+    const directEvents = request.eventsToProcess
+      .filter((event) => !shouldFilterOutEvent(event.content))
+      .map(toIngestionEvent);
+
+    const params: IngestEventsRequestParameters = {
+      name: `reasoningEngines/${this.agentEngineId}`,
+      scope: {
+        app_name: request.appName,
+        user_id: request.userId,
+      },
+    };
+
+    // An event-less request is valid: it updates the trigger configuration
+    // without flushing the stream.
+    if (directEvents.length > 0) {
+      params.directContentsSource = {events: directEvents};
+    }
+
+    const customMetadata = request.customMetadata ?? {};
+    const streamId = customMetadata['streamId'];
+    if (typeof streamId === 'string' && streamId) {
+      params.streamId = streamId;
+    }
+    const forceFlush = customMetadata['forceFlush'];
+    if (typeof forceFlush === 'boolean') {
+      params.config = {forceFlush};
+    }
+    const generationTriggerConfig = customMetadata['generationTriggerConfig'];
+    if (isGenerationTriggerConfig(generationTriggerConfig)) {
+      params.generationTriggerConfig = generationTriggerConfig;
+    }
+
+    void this.memories.ingestEventsInternal(params).catch((e: unknown) => {
+      logger.error(`Background ingestEvents request failed: ${e}`);
+    });
+    logger.debug('Ingest events request triggered.');
+  }
+
   private async addMemoriesViaCreate(request: {
     appName: string;
     userId: string;
@@ -283,8 +511,6 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       const memory = validatedMemories[index];
       const memoryFact = memoryEntryToFact(memory, index);
 
-      // We don't have customMetadata on MemoryEntry in JS yet, so we pass undefined or handle it if we extend it.
-      // For now, we assume it's not there as per the current interface.
       const memoryMetadata = mergeCustomMetadataForMemory({
         customMetadata: request.customMetadata,
         memory: memory,
@@ -294,6 +520,7 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       const config = buildCreateMemoryConfig({
         customMetadata: memoryMetadata,
         memoryRevisionLabels,
+        memoryId: memory.id,
       });
 
       const params = {
@@ -351,6 +578,7 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
 function buildCreateMemoryConfig(params: {
   customMetadata?: Record<string, unknown>;
   memoryRevisionLabels?: Record<string, string>;
+  memoryId?: string;
 }): AgentEngineMemoryConfig {
   const config: Record<string, unknown> = {waitForCompletion: false};
 
@@ -392,7 +620,7 @@ function buildCreateMemoryConfig(params: {
       continue;
     }
 
-    if (CREATE_MEMORY_KNOWN_FIELDS.includes(key)) {
+    if (CREATE_MEMORY_KNOWN_FIELDS.has(key)) {
       if (value !== null && value !== undefined) {
         config[key] = value;
       }
@@ -411,6 +639,11 @@ function buildCreateMemoryConfig(params: {
         ...buildVertexMetadata(metadataByKey),
       };
     }
+  }
+
+  // An explicit customMetadata["memoryId"] wins over the entry's own id.
+  if (params.memoryId !== undefined && config['memoryId'] === undefined) {
+    config['memoryId'] = params.memoryId;
   }
 
   const revisionLabels = {
@@ -502,7 +735,7 @@ function buildGenerateMemoriesConfig(
 
     // In JS we assume the fields are supported if they are in the type.
     // We just map them if they are known fields.
-    if (GENERATE_MEMORIES_KNOWN_FIELDS.includes(key)) {
+    if (GENERATE_MEMORIES_KNOWN_FIELDS.has(key)) {
       if (value !== null && value !== undefined) {
         config[key] = value;
       }
@@ -570,10 +803,8 @@ function mergeCustomMetadataForMemory(params: {
     Object.assign(mergedMetadata, params.customMetadata);
   }
 
-  // Check if memory has customMetadata (it might if passed by user, even if not in interface)
-  const memoryWithMetadata = params.memory as MemoryEntryWithMetadata;
-  if (memoryWithMetadata.customMetadata) {
-    Object.assign(mergedMetadata, memoryWithMetadata.customMetadata);
+  if (params.memory.customMetadata) {
+    Object.assign(mergedMetadata, params.memory.customMetadata);
   }
 
   if (Object.keys(mergedMetadata).length === 0) {

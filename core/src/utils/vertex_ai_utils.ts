@@ -4,6 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  ApiClient,
+  NodeAuth,
+  NodeDownloader,
+  NodeUploader,
+} from '@google/genai/vertex_internal';
+import {GoogleAuthOptions} from 'google-auth-library';
 import {isEnterpriseModeEnabled} from './env_aware_utils.js';
 
 export const EXPRESS_MODE_UNSUPPORTED_MESSAGE =
@@ -41,4 +48,30 @@ export function getExpressModeApiKey(
   }
 
   return undefined;
+}
+
+/**
+ * Builds a Vertex AI API client that authenticates with the given credentials.
+ *
+ * `Client` from `@google-cloud/vertexai` accepts no credentials, so a caller
+ * who must authenticate with something other than Application Default
+ * Credentials builds the underlying API client here instead.
+ *
+ * @param options The project, location and google-auth-library options.
+ *     Application Default Credentials are used when the options are absent.
+ * @returns An API client for the Vertex AI endpoints.
+ */
+export function createVertexApiClient(options: {
+  project?: string;
+  location?: string;
+  googleAuthOptions?: GoogleAuthOptions;
+}): ApiClient {
+  return new ApiClient({
+    auth: new NodeAuth({googleAuthOptions: options.googleAuthOptions}),
+    uploader: new NodeUploader(),
+    downloader: new NodeDownloader(),
+    project: options.project,
+    location: options.location,
+    vertexai: true,
+  });
 }
