@@ -119,12 +119,7 @@ export function base64Decode(data: string): string {
 export function base64DecodeBytes(data: string): Uint8Array {
   if (isBrowser()) {
     // `atob` yields one character per byte, so char codes are the bytes.
-    const binary = base64Decode(data);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
+    return Uint8Array.from(base64Decode(data), (c) => c.charCodeAt(0));
   }
 
   return new Uint8Array(Buffer.from(data, 'base64'));

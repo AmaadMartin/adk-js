@@ -91,8 +91,8 @@ leaves the cache untouched.
 
 ## Differences from adk-python
 
-This class ports `src/google/adk/flows/llm_flows/audio_cache_manager.py`. Two
-things differ, because the surrounding types differ:
+This class ports `src/google/adk/flows/llm_flows/audio_cache_manager.py`. Three
+things differ:
 
 - **Chunk data is base64 text**, since a `@google/genai` `Blob` carries a
   base64 `string` where a Python blob carries `bytes`. The byte totals from
@@ -100,10 +100,6 @@ things differ, because the surrounding types differ:
 - **Timestamps are epoch milliseconds**, matching adk-js event timestamps.
   adk-python stores epoch seconds and scales them for the filename, so the
   filenames agree.
-
-## Configuration
-
-`AudioCacheConfig` carries `maxCacheSizeBytes`, `maxCacheDurationSeconds` and
-`autoFlushThreshold`, defaulting to 10 MiB, 300 seconds and 100 chunks. No
-field is read yet: neither adk-js nor adk-python implements the automatic flush
-they describe, so every flush is one you ask for.
+- **There is no `AudioCacheConfig`.** adk-python has one, describing an
+  automatic flush that neither SDK implements and whose three fields nothing
+  reads. Every flush is one you ask for.

@@ -16,29 +16,6 @@ import {RealtimeCacheEntry} from './realtime_cache_entry.js';
 
 const DEFAULT_AUDIO_MIME_TYPE = 'audio/pcm';
 
-/**
- * Tuning values for audio caching.
- *
- * No field is read yet: neither adk-js nor adk-python implements the automatic
- * flush they describe. They are here so a future auto-flush has its
- * configuration, and so the ported reference tests can assert the defaults.
- */
-export interface AudioCacheConfig {
-  /** Maximum cache size in bytes before an automatic flush. */
-  maxCacheSizeBytes?: number;
-  /** Maximum time to hold data in the cache. */
-  maxCacheDurationSeconds?: number;
-  /** Number of chunks that triggers an automatic flush. */
-  autoFlushThreshold?: number;
-}
-
-/** The defaults an {@link AudioCacheManager} applies to an omitted field. */
-export const DEFAULT_AUDIO_CACHE_CONFIG: Required<AudioCacheConfig> = {
-  maxCacheSizeBytes: 10 * 1024 * 1024,
-  maxCacheDurationSeconds: 300,
-  autoFlushThreshold: 100,
-};
-
 /** Which cache a chunk belongs to. */
 export type AudioCacheType = 'input' | 'output';
 
@@ -103,14 +80,6 @@ function buildArtifactFilename(
   return `adk_live_audio_storage_${cacheLabel}_${Math.trunc(timestampMs)}.${extension}`;
 }
 
-function buildArtifactRef(
-  ctx: InvocationContext,
-  filename: string,
-  revisionId: number,
-): string {
-  return `artifact://${ctx.appName}/${ctx.userId}/${ctx.session.id}/_adk_live/${filename}#${revisionId}`;
-}
-
 function totalDecodedBytes(cache: RealtimeCacheEntry[]): number {
   return cache.reduce(
     (total, entry) =>
@@ -171,7 +140,7 @@ async function flushCacheToServices(
         parts: [
           {
             fileData: {
-              fileUri: buildArtifactRef(ctx, filename, revisionId),
+              fileUri: `artifact://${ctx.appName}/${ctx.userId}/${ctx.session.id}/_adk_live/${filename}#${revisionId}`,
               mimeType,
             },
           },
@@ -198,13 +167,6 @@ async function flushCacheToServices(
  * `src/google/adk/flows/llm_flows/audio_cache_manager.py`.
  */
 export class AudioCacheManager {
-  /** The configuration in force, with every default filled in. */
-  readonly config: Required<AudioCacheConfig>;
-
-  constructor(config: AudioCacheConfig = {}) {
-    this.config = {...DEFAULT_AUDIO_CACHE_CONFIG, ...config};
-  }
-
   /**
    * Appends one incoming user chunk or outgoing model chunk to its cache.
    *

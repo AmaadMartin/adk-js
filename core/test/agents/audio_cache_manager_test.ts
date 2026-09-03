@@ -9,7 +9,9 @@
  * `tests/unittests/flows/llm_flows/test_audio_cache_manager.py` @ main.
  *
  * Every `it(...)` keeps its Python test name verbatim, so a reader can grep
- * the reference file for it.
+ * the reference file for it. The reference's `TestAudioCacheConfig` class has
+ * no counterpart here, because this port does not carry `AudioCacheConfig`:
+ * nothing in either SDK reads its three fields.
  */
 
 import {
@@ -28,35 +30,6 @@ import {
   createTestContext,
   toBase64,
 } from './audio_cache_manager_test_utils.js';
-
-describe('TestAudioCacheConfig', () => {
-  it('test_default_values', () => {
-    const config = new AudioCacheManager().config;
-
-    expect(config.maxCacheSizeBytes).toBe(10 * 1024 * 1024);
-    expect(config.maxCacheDurationSeconds).toBe(300);
-    expect(config.autoFlushThreshold).toBe(100);
-  });
-
-  it('test_custom_values', () => {
-    const config = new AudioCacheManager({
-      maxCacheSizeBytes: 5 * 1024 * 1024,
-      maxCacheDurationSeconds: 120,
-      autoFlushThreshold: 50,
-    }).config;
-
-    expect(config.maxCacheSizeBytes).toBe(5 * 1024 * 1024);
-    expect(config.maxCacheDurationSeconds).toBe(120);
-    expect(config.autoFlushThreshold).toBe(50);
-
-    // adk-js takes an options object, so a partial config is expressible and
-    // must leave the other two defaults in place.
-    const partial = new AudioCacheManager({autoFlushThreshold: 7}).config;
-    expect(partial.autoFlushThreshold).toBe(7);
-    expect(partial.maxCacheSizeBytes).toBe(10 * 1024 * 1024);
-    expect(partial.maxCacheDurationSeconds).toBe(300);
-  });
-});
 
 describe('TestAudioCacheManager', () => {
   const manager = new AudioCacheManager();
