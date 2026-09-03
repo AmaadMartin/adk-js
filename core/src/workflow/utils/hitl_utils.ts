@@ -45,6 +45,9 @@ export {
  */
 const RESPONSE_SCHEMA_ARG = 'response_schema';
 
+/** The key `adk-js` wrote before it adopted the one above. Read only. */
+const LEGACY_RESPONSE_SCHEMA_ARG = 'responseSchema';
+
 /**
  * Creates an interrupt {@link Event} from a {@link RequestInput}. The event
  * carries an `adk_request_input` function call and marks the interrupt id as a
@@ -78,7 +81,25 @@ export function createRequestInputEvent(requestInput: RequestInput): Event {
 }
 
 /**
- * Collects the `responseSchema` each pending interrupt declared, keyed by
+ * Reads the JSON Schema an `adk_request_input` call declared, from either
+ * spelling of the arg key.
+ *
+ * `response_schema` is the canonical key both runtimes write today.
+ * `responseSchema` is the key `adk-js` wrote before this change, so a session
+ * paused by an older `adk-js` still resumes.
+ */
+export function readResponseSchemaArg(
+  args: Record<string, unknown> | undefined,
+): unknown {
+  return (
+    args?.[RESPONSE_SCHEMA_ARG] ??
+    args?.[LEGACY_RESPONSE_SCHEMA_ARG] ??
+    undefined
+  );
+}
+
+/**
+ * Collects the `response_schema` each pending interrupt declared, keyed by
  * interrupt id, as the JSON Schema recorded on its `adk_request_input` call.
  *
  * The original {@link RequestInput} is long gone by the time a reply arrives —
@@ -95,9 +116,9 @@ export function responseSchemasByInterruptId(
       if (fc?.name !== REQUEST_INPUT_FUNCTION_CALL_NAME || !fc.id) {
         continue;
       }
-      const schema = (fc.args as Record<string, unknown> | undefined)?.[
-        RESPONSE_SCHEMA_ARG
-      ];
+      const schema = readResponseSchemaArg(
+        fc.args as Record<string, unknown> | undefined,
+      );
       if (schema) {
         schemas.set(fc.id, schema);
       }

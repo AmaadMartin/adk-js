@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {resetIdProvider, setIdProvider} from '@google/adk';
 import type {Schema} from '@google/genai';
 import {Type} from '@google/genai';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -14,6 +13,7 @@ import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
 import type {AuthConfig} from '../../src/auth/auth_tool.js';
 import type {Event} from '../../src/events/event.js';
 import {createEvent} from '../../src/events/event.js';
+import {resetIdProvider, setIdProvider} from '../../src/index.js';
 import {State} from '../../src/sessions/state.js';
 import {toJsonSchema} from '../../src/utils/schema.js';
 import {
@@ -41,6 +41,28 @@ import {unwrapResponse} from '../../src/workflow/utils/rehydration_utils.js';
 /** Extracts the first function-call args from an event. */
 function firstFunctionCall(event: Event) {
   return event.content?.parts?.[0]?.functionCall;
+}
+
+/**
+ * An `adk_request_input` interrupt with hand-written args, for the arg
+ * spellings `createRequestInputEvent` no longer produces.
+ */
+function interruptEventWithArgs(args: Record<string, unknown>): Event {
+  return createEvent({
+    content: {
+      role: 'model',
+      parts: [
+        {
+          functionCall: {
+            name: REQUEST_INPUT_FUNCTION_CALL_NAME,
+            id: 'i1',
+            args,
+          },
+        },
+      ],
+    },
+    longRunningToolIds: ['i1'],
+  });
 }
 
 describe('RequestInput', () => {
@@ -151,6 +173,17 @@ describe('createRequestInputEvent', () => {
     });
   });
 
+  it('writes the schema under response_schema only', () => {
+    const ri = new RequestInput({
+      responseSchema: z4.object({answer: z4.string()}),
+    });
+
+    const args = firstFunctionCall(createRequestInputEvent(ri))?.args;
+
+    expect(args).toHaveProperty('response_schema');
+    expect(args).not.toHaveProperty('responseSchema');
+  });
+
   it('names the schema arg the way clients read it', () => {
     const args = firstFunctionCall(
       createRequestInputEvent(
@@ -158,6 +191,7 @@ describe('createRequestInputEvent', () => {
       ),
     )?.args as Record<string, unknown>;
 
+    // Every other key stays camelCase, as adk-python writes them.
     expect(Object.keys(args)).toEqual([
       'interruptId',
       'payload',
@@ -355,6 +389,51 @@ describe('responseSchemasByInterruptId', () => {
 
     expect(responseSchemasByInterruptId([event]).has('i1')).toBe(false);
   });
+
+  it('recovers the schema from an interrupt adk-python wrote', () => {
+    const event = interruptEventWithArgs({
+      interruptId: 'i1',
+      payload: null,
+      message: null,
+      response_schema: {type: 'object'},
+    });
+
+    expect(responseSchemasByInterruptId([event]).get('i1')).toEqual({
+      type: 'object',
+    });
+  });
+
+  it('recovers the schema from an interrupt an older adk-js wrote', () => {
+    const event = interruptEventWithArgs({
+      interruptId: 'i1',
+      responseSchema: {type: 'object'},
+    });
+
+    expect(responseSchemasByInterruptId([event]).get('i1')).toEqual({
+      type: 'object',
+    });
+  });
+
+  it('prefers response_schema when an event carries both keys', () => {
+    const event = interruptEventWithArgs({
+      interruptId: 'i1',
+      response_schema: {type: 'object'},
+      responseSchema: {type: 'string'},
+    });
+
+    expect(responseSchemasByInterruptId([event]).get('i1')).toEqual({
+      type: 'object',
+    });
+  });
+
+  it('omits an interrupt whose response_schema is null', () => {
+    const event = interruptEventWithArgs({
+      interruptId: 'i1',
+      response_schema: null,
+    });
+
+    expect(responseSchemasByInterruptId([event]).has('i1')).toBe(false);
+  });
 });
 
 describe('interruptResponseMismatch', () => {
@@ -421,6 +500,24 @@ describe('interruptResponseMismatch', () => {
         stringSchema,
       ),
     ).toBeUndefined();
+  });
+
+  it('lets {result: "21"} through a string schema as the scalar it became', () => {
+    const stringSchema = toJsonSchema(z4.string());
+
+    // Unwrapped without the schema, '21' parses to the number 21. A bare
+    // scalar is exempt here, so it reports nothing rather than the type error
+    // adk-python raises. The resume path passes the schema to unwrapResponse,
+    // which then keeps '21' a string for a string interrupt.
+    expect(
+      interruptResponseMismatch(
+        'i1',
+        unwrapResponse({result: '21'}),
+        stringSchema,
+      ),
+    ).toBeUndefined();
+    expect(unwrapResponse({result: '21'})).toBe(21);
+    expect(unwrapResponse({result: '21'}, stringSchema)).toBe('21');
   });
 });
 

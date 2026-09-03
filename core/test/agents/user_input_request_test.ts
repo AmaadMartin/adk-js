@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Session} from '@google/adk';
-import {
-  createEventActions,
-  InvocationContext,
-  LlmAgent,
-  llmAgentFunctionsExportedForTestingOnly,
-  PluginManager,
-} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   getPendingUserInputRequests,
@@ -21,6 +13,14 @@ import {
 import type {AuthConfig} from '../../src/auth/auth_tool.js';
 import type {Event} from '../../src/events/event.js';
 import {createEvent} from '../../src/events/event.js';
+import type {Session} from '../../src/index.js';
+import {
+  createEventActions,
+  InvocationContext,
+  LlmAgent,
+  llmAgentFunctionsExportedForTestingOnly,
+  PluginManager,
+} from '../../src/index.js';
 
 /** An `adk_request_input` interrupt, as raised by a workflow `RequestInput`. */
 function requestInputEvent(
@@ -76,6 +76,25 @@ describe('getUserInputRequests', () => {
       payload: {draft: 'hello'},
       responseSchema: {type: 'object'},
     });
+  });
+
+  it('reads the response_schema an adk-python interrupt declares', () => {
+    const [request] = getUserInputRequests(
+      requestInputEvent('i1', {response_schema: {type: 'object'}}),
+    );
+
+    expect(request.responseSchema).toEqual({type: 'object'});
+  });
+
+  it('prefers response_schema when an interrupt carries both keys', () => {
+    const [request] = getUserInputRequests(
+      requestInputEvent('i1', {
+        response_schema: {type: 'object'},
+        responseSchema: {type: 'string'},
+      }),
+    );
+
+    expect(request.responseSchema).toEqual({type: 'object'});
   });
 
   it('summarizes a request for a credential', () => {

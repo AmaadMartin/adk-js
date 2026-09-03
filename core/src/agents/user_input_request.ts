@@ -17,6 +17,7 @@
 import type {AuthConfig} from '../auth/auth_tool.js';
 import type {Event} from '../events/event.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
+import {readResponseSchemaArg} from '../workflow/utils/hitl_utils.js';
 import {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
@@ -107,7 +108,7 @@ export function getUserInputRequests(event: Event): UserInputRequest[] {
           kind: 'input',
           message: asString(args['message']),
           payload: args['payload'] ?? undefined,
-          responseSchema: args['response_schema'] ?? undefined,
+          responseSchema: readResponseSchemaArg(args),
         });
         break;
 

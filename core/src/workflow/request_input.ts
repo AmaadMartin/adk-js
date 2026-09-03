@@ -58,8 +58,10 @@ export interface RequestInputParams {
  *   {@link RequestInputParams.responseSchema} only, and coerced to it.
  * - **A `functionResponse`** named `adk_request_input`, carrying the interrupt
  *   id. Wrap a bare value as `{result: <value>}` — that envelope is unwrapped
- *   for you, and what it holds counts as plain text. Any other object is
- *   delivered to the node unchanged, so it must already match
+ *   for you, and what it holds counts as plain text. A wrapped string arrives
+ *   parsed when it parses as JSON and the schema does not accept a string.
+ *   Any other object is delivered to the node unchanged, so it must
+ *   already match
  *   {@link RequestInputParams.responseSchema} when one is set.
  *
  * Ported from `google/adk-python` `events/request_input.py`.
