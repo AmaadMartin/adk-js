@@ -507,7 +507,10 @@ export type {
   ToolInputParameters,
   ToolOptions,
 } from './tools/function_tool.js';
-export {getUserChoiceTool} from './tools/get_user_choice_tool.js';
+export {
+  getUserChoice,
+  getUserChoiceTool,
+} from './tools/get_user_choice_tool.js';
 export {
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,
