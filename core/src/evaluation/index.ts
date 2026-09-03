@@ -6,19 +6,32 @@
 
 /**
  * The ADK evaluation module (a parity port of `google/adk-python`'s
- * `google/adk/evaluation`). It currently covers the contract every metric
- * evaluator implements, the data types that contract names, and the
- * `ResponseEvaluator` that stands on it.
+ * `google/adk/evaluation`). It currently covers the eval case data model, the
+ * accessors that read a recorded trajectory, the contract every metric
+ * evaluator implements, and the `ResponseEvaluator` that stands on it.
  */
 
+export type {AgentDetails, AppDetails} from './app_details.js';
 export type {ConversationScenario} from './conversation_scenarios.js';
-export {isInvocationEvents} from './eval_case.js';
+export {
+  getAllToolCalls,
+  getAllToolCallsWithResponses,
+  getAllToolResponses,
+  isIntermediateData,
+  isInvocationEvents,
+  validateEvalCase,
+} from './eval_case.js';
 export type {
+  EvalCase,
   IntermediateData,
   IntermediateDataType,
   Invocation,
   InvocationEvent,
   InvocationEvents,
+  SessionInput,
+  SessionState,
+  StaticConversation,
+  ToolCallAndResponse,
 } from './eval_case.js';
 export {
   EvalStatus,
@@ -26,7 +39,7 @@ export {
   getMetricThreshold,
 } from './eval_metrics.js';
 export type {BaseCriterion, EvalMetric} from './eval_metrics.js';
-export type {RubricScore} from './eval_rubrics.js';
+export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
 export {
   BASE_CRITERION_TYPE,
   emptyEvaluationResult,

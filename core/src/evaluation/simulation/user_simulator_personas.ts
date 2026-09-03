@@ -6,6 +6,7 @@
 
 /** One behavior a simulated user follows. */
 export interface UserBehavior {
+  /** The name of the behavior. */
   name: string;
 
   /**
@@ -32,5 +33,6 @@ export interface UserPersona {
   /** What the persona is. Included in the user simulator's instructions. */
   description: string;
 
+  /** The behaviors that make up the persona. */
   behaviors: UserBehavior[];
 }
