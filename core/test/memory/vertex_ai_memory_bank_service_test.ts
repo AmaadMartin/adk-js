@@ -40,6 +40,8 @@ describe('VertexAiMemoryBankService', () => {
   let mockMemories: {
     createInternal: ReturnType<typeof vi.fn>;
     generateInternal: ReturnType<typeof vi.fn>;
+    ingestEventsInternal: ReturnType<typeof vi.fn>;
+    retrieveProfiles: ReturnType<typeof vi.fn>;
     retrieveInternal: ReturnType<typeof vi.fn>;
   };
 
@@ -51,6 +53,10 @@ describe('VertexAiMemoryBankService', () => {
       generateInternal: vi
         .fn()
         .mockResolvedValue({name: 'operations/generate-op', done: true}),
+      ingestEventsInternal: vi
+        .fn()
+        .mockResolvedValue({name: 'operations/ingest-op', done: true}),
+      retrieveProfiles: vi.fn().mockResolvedValue({profiles: {}}),
       retrieveInternal: vi.fn().mockResolvedValue({
         retrievedMemories: [
           {
@@ -154,7 +160,7 @@ describe('VertexAiMemoryBankService', () => {
   });
 
   describe('addSessionToMemory', () => {
-    it('calls generateInternal with events', async () => {
+    it('calls ingestEventsInternal with events', async () => {
       const session = createSession({
         id: 'test-session-id',
         appName: 'test-app',
@@ -172,12 +178,14 @@ describe('VertexAiMemoryBankService', () => {
 
       await service.addSessionToMemory(session);
 
-      expect(mockMemories.generateInternal).toHaveBeenCalledWith(
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'reasoningEngines/test-engine-id',
           scope: {app_name: 'test-app', user_id: 'test-user'},
           directContentsSource: {
-            events: [{content: {parts: [{text: 'event 1'}]}}],
+            events: [
+              expect.objectContaining({content: {parts: [{text: 'event 1'}]}}),
+            ],
           },
         }),
       );
@@ -202,6 +210,9 @@ describe('VertexAiMemoryBankService', () => {
       await service.addSessionToMemory(session);
 
       expect(mockMemories.generateInternal).not.toHaveBeenCalled();
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
+        expect.not.objectContaining({directContentsSource: expect.anything()}),
+      );
     });
   });
 
@@ -360,6 +371,8 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // revisionTtl routes this write to memories.generate.
+          revisionTtl: '3600s',
           myBool: true,
           myNumber: 42,
           myString: 'hello',
@@ -409,6 +422,8 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // revisionTtl routes this write to memories.generate.
+          revisionTtl: '3600s',
           myPreFormatted: {stringValue: 'already converted'},
         },
       });
@@ -447,6 +462,8 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // revisionTtl routes this write to memories.generate.
+          revisionTtl: '3600s',
           mySymbol: mySymbol,
         },
       });
@@ -556,7 +573,7 @@ describe('VertexAiMemoryBankService', () => {
         {
           content: {parts: [{text: 'fact 1'}]} as Content,
           customMetadata: {entryKey: 'entryValue'},
-        } as unknown as MemoryEntry, // cast to pass customMetadata
+        },
       ];
 
       await service.addMemory({
