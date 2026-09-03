@@ -144,13 +144,6 @@ function withAdoptedCardDescription(
  * uninitialized instance that re-resolves its client and card on first use.
  */
 export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
-  /**
-   * Redeclared as mutable: `BaseNode` fixes the description at construction,
-   * but a card fetched from a URL or a file only supplies one once the agent
-   * has resolved it, on the first run.
-   */
-  declare description: string;
-
   private client?: Client;
   private card?: AgentCard;
   private isInitialized = false;
