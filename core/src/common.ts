@@ -255,6 +255,11 @@ export type {
   PerInvocationResult,
 } from './evaluation/evaluator.js';
 export {RougeEvaluator} from './evaluation/final_response_match_v1.js';
+export {
+  MetricEvaluatorRegistry,
+  defaultMetricEvaluatorRegistry,
+} from './evaluation/metric_evaluator_registry.js';
+export type {MetricEvaluatorFactory} from './evaluation/metric_evaluator_registry.js';
 export {ResponseEvaluator} from './evaluation/response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './evaluation/rouge_scorer.js';
