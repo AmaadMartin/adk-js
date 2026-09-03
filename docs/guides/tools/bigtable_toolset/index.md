@@ -57,9 +57,9 @@ any project the credentials reach.
 | `get_cluster_info`  | one cluster, including its autoscaling limits       |
 | `execute_sql`       | the rows a GoogleSQL query returns                  |
 
-`getTools()` returns these names as they are. The toolset also carries the
-prefix `bigtable`, which matches `tool_name_prefix` in adk-python and is what
-the framework will prepend once it applies toolset prefixes itself.
+`getTools()` returns these names as they are, and that is what the model sees
+today. The toolset also carries the prefix `bigtable`, matching
+`tool_name_prefix` in adk-python, but nothing in adk-js reads it yet.
 
 Every tool answers with the same envelope. A success carries
 `{"status": "SUCCESS", ...}`, and a failure carries
@@ -87,31 +87,40 @@ so the model knows more rows match.
 through to the Bigtable client. Without `scopes` the toolset asks for the
 Bigtable admin and data scopes.
 
-## Scoping a query to the caller
+## Query parameters
 
-A model can put any value it likes into a query parameter, so a query that
-filters on `user_id` does not stop the model reading another user's rows.
-Bigtable answers this with a parameterized view, and `BigtableToolset` supplies
-the value the view filters on.
+Write a parameter into the query as `@name`, then give its value and its type:
 
-Create the view with `VIEW_PARAMETERS`:
-
-```sql
-SELECT * FROM purchases WHERE user_id = VIEW_PARAMETERS('user_id')
+```json
+{
+  "project_id": "my-project",
+  "instance_id": "my-instance",
+  "query": "SELECT * FROM purchases WHERE user_id = @user_id",
+  "parameters": {"user_id": "u-123"},
+  "parameter_types": {"user_id": "string"}
+}
 ```
 
-Then name the parameter on the toolset:
+Every name in `parameters` needs an entry in `parameter_types`, and the reverse.
+The Bigtable client builds each value from its declared type and rejects the
+whole query if the two disagree, so `execute_sql` checks it first and names the
+parameter at fault.
 
-```ts
-new BigtableToolset({viewParameterNames: ['user_id']});
-```
+The declarable types are `bool`, `bytes`, `float32`, `float64`, `int64` and
+`string`. A model emits JSON, so `execute_sql` converts on the way in: an
+`int64` may be a whole number or a decimal string, and `bytes` must be base64.
 
-This adds an eighth tool, `execute_sql_parameterized`. It takes the same
-arguments as `execute_sql`, and `user_id` is not one of them: the tool reads it
-from the invocation on every call, and merges it in after the model's own
-parameters, so a model-supplied `user_id` cannot win.
+GoogleSQL's `date` and `timestamp` are not declarable. The client builds them
+only from its own `BigtableDate` and `PreciseDate` instances, and neither class
+is reachable from the `@google-cloud/bigtable` entry point. Compare against a
+literal in the query text instead.
 
-A name is resolved from the invocation when it is `user_id`, `session_id`,
-`invocation_id` or `agent_name` — or their camelCase spellings. Any other name
-is read from session state. A name that resolves nowhere is left out, and the
-query then fails at Bigtable rather than running unfiltered.
+## What is not here
+
+adk-python's toolset has an eighth tool, `execute_sql_parameterized`, which
+scopes a [parameterized
+view](https://cloud.google.com/bigtable/docs/parameterized-views) to the caller
+by passing `view_parameters` to the client. `@google-cloud/bigtable` has no
+equivalent option, in 6.5.1 or in 7.2.0, so that tool is not ported. Binding the
+value as an ordinary query parameter would not stand in for it: the model writes
+the query text and can simply leave the predicate out.

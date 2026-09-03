@@ -4,21 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Buffer} from 'node:buffer';
 import {describe, expect, it, vi} from 'vitest';
 import {BaseTool} from '../../../src/tools/base_tool.js';
 import {BigtableClientCache} from '../../../src/tools/bigtable/client.js';
 import {
   convertSqlValue,
-  createParameterizedQueryTool,
   createQueryTool,
-  resolveViewParameters,
+  toQueryParameters,
 } from '../../../src/tools/bigtable/query_tool.js';
 import {BigtableToolSettings} from '../../../src/tools/bigtable/settings.js';
-import {logger} from '../../../src/utils/logger.js';
 import {
   createToolContext,
   FakeBigtable,
   FakeBigtableSetup,
+  FakeEncodedKeyMap,
   fakeRow,
   FakeRow,
 } from './bigtable_fakes.js';
@@ -131,22 +131,26 @@ describe('execute_sql', () => {
     expect(recordedInstance().destroyedStreams).toBe(1);
   });
 
-  it('passes the declared parameter types through to the SDK', async () => {
+  it('converts each parameter to the native value its declared type needs', async () => {
     const tool = queryToolFor([]);
 
     await run(tool, {
       project_id: PROJECT,
       instance_id: INSTANCE,
-      query: 'SELECT * FROM t WHERE id = @id AND live = @live',
-      parameters: {id: 7, live: true},
-      parameter_types: {id: 'int64', live: 'bool'},
+      query: 'SELECT * FROM t WHERE id = @id AND live = @live AND k = @k',
+      parameters: {id: 7, live: true, k: 'AQID'},
+      parameter_types: {id: 'int64', live: 'bool', k: 'bytes'},
     });
 
     expect(recordedInstance().queries).toEqual([
       {
-        query: 'SELECT * FROM t WHERE id = @id AND live = @live',
-        parameterTypes: {id: {type: 'int64'}, live: {type: 'bool'}},
-        parameters: {id: 7, live: true},
+        query: 'SELECT * FROM t WHERE id = @id AND live = @live AND k = @k',
+        parameterTypes: {
+          id: {type: 'int64'},
+          live: {type: 'bool'},
+          k: {type: 'bytes'},
+        },
+        parameters: {id: 7n, live: true, k: Buffer.from([1, 2, 3])},
       },
     ]);
   });
@@ -177,6 +181,22 @@ describe('execute_sql', () => {
       }),
     ).rejects.toThrow(/parameter_types/);
     expect(FakeBigtable.created).toHaveLength(0);
+  });
+
+  it('returns the ERROR envelope when a parameter has no declared type', async () => {
+    const tool = queryToolFor([]);
+
+    const result = await run(tool, {
+      project_id: PROJECT,
+      instance_id: INSTANCE,
+      query: 'SELECT * FROM t WHERE id = @id',
+      parameters: {id: 7},
+    });
+
+    expect(result).toMatchObject({status: 'ERROR'});
+    expect((result as {error_details: string}).error_details).toMatch(
+      /'id' has no entry in parameter_types/,
+    );
   });
 
   it('returns the ERROR envelope when the query fails', async () => {
@@ -256,6 +276,16 @@ describe('convertSqlValue', () => {
     ).toEqual({named: 'kept'});
   });
 
+  it('converts the SDK map, which implements Map without extending it', () => {
+    const map = new FakeEncodedKeyMap([
+      ['name', 'Alice'],
+      [7n, 'seven'],
+    ]);
+
+    expect(map instanceof Map).toBe(false);
+    expect(convertSqlValue(map)).toEqual({name: 'Alice', '7': 'seven'});
+  });
+
   it('falls back to the string form of a value it cannot convert', () => {
     class Opaque {
       toString(): string {
@@ -267,170 +297,142 @@ describe('convertSqlValue', () => {
   });
 });
 
-describe('resolveViewParameters', () => {
-  it('reads a name the invocation answers', async () => {
-    const context = await createToolContext({userId: 'test-user-123'});
-
-    expect(resolveViewParameters(['user_id'], context)).toEqual({
-      user_id: 'test-user-123',
-    });
-  });
-
-  it('reads the camelCase spelling of the same name', async () => {
-    const context = await createToolContext({userId: 'test-user-123'});
-
-    expect(resolveViewParameters(['userId'], context)).toEqual({
-      userId: 'test-user-123',
-    });
-  });
-
-  it('resolves the session, invocation and agent names', async () => {
-    const context = await createToolContext({agentName: 'bigtable_agent'});
-
-    const resolved = resolveViewParameters(
-      ['session_id', 'invocation_id', 'agent_name'],
-      context,
-    );
-
-    expect(resolved).toEqual({
-      session_id: context.sessionId,
-      invocation_id: 'invocation-1',
-      agent_name: 'bigtable_agent',
-    });
-  });
-
-  it('resolves the camelCase spellings of the same three names', async () => {
-    const context = await createToolContext({agentName: 'bigtable_agent'});
-
-    const resolved = resolveViewParameters(
-      ['sessionId', 'invocationId', 'agentName'],
-      context,
-    );
-
-    expect(resolved).toEqual({
-      sessionId: context.sessionId,
-      invocationId: 'invocation-1',
-      agentName: 'bigtable_agent',
-    });
-  });
-
-  it('falls back to session state for a name the invocation does not answer', async () => {
-    const context = await createToolContext({state: {tenant_id: 'tenant-xyz'}});
-
-    expect(resolveViewParameters(['tenant_id'], context)).toEqual({
-      tenant_id: 'tenant-xyz',
-    });
-  });
-
-  it('resolves several names from both sources at once', async () => {
-    const context = await createToolContext({
-      userId: 'user-123',
-      state: {tenant_id: 'tenant-xyz', agent_id: 'agent-123'},
-    });
-
+describe('toQueryParameters', () => {
+  it('accepts an int64 given as a decimal string', () => {
     expect(
-      resolveViewParameters(['user_id', 'tenant_id', 'agent_id'], context),
-    ).toEqual({
-      user_id: 'user-123',
-      tenant_id: 'tenant-xyz',
-      agent_id: 'agent-123',
-    });
-  });
-
-  it('skips a name that resolves nowhere', async () => {
-    const context = await createToolContext();
-
-    expect(resolveViewParameters(['unknown_name'], context)).toEqual({});
-  });
-
-  it('skips a state value Bigtable does not accept, and says so', async () => {
-    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-    const context = await createToolContext({state: {tenant_id: {id: 1}}});
-
-    expect(resolveViewParameters(['tenant_id'], context)).toEqual({});
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("Skipping view parameter 'tenant_id'"),
-    );
-    warn.mockRestore();
-  });
-
-  it('refuses to resolve anything without a context', () => {
-    expect(() => resolveViewParameters(['user_id'])).toThrow(
-      /needs a tool context/,
-    );
-  });
-});
-
-describe('execute_sql_parameterized', () => {
-  it('sends the value the invocation resolved, not one the model supplied', async () => {
-    FakeBigtable.reset({instances: {[INSTANCE]: {rows: []}}});
-    const tool = createParameterizedQueryTool(new BigtableClientCache(), [
-      'user_id',
-    ]);
-
-    await tool.runAsync({
-      args: {
+      toQueryParameters({
         project_id: PROJECT,
         instance_id: INSTANCE,
-        query: 'SELECT * FROM purchases',
-        parameters: {user_id: 'attacker', other: 'kept'},
-      },
-      toolContext: await createToolContext({userId: 'test-user-123'}),
-    });
-
-    expect(recordedInstance().queries[0].parameters).toEqual({
-      user_id: 'test-user-123',
-      other: 'kept',
-    });
-  });
-
-  it('reads the value at call time, so a login between calls is picked up', async () => {
-    FakeBigtable.reset({instances: {[INSTANCE]: {rows: []}}});
-    const tool = createParameterizedQueryTool(new BigtableClientCache(), [
-      'user_id',
-    ]);
-    const args = {
-      project_id: PROJECT,
-      instance_id: INSTANCE,
-      query: 'SELECT * FROM purchases',
-    };
-
-    await tool.runAsync({
-      args,
-      toolContext: await createToolContext({userId: 'anonymous'}),
-    });
-    await tool.runAsync({
-      args,
-      toolContext: await createToolContext({userId: 'authenticated-user-999'}),
-    });
-
-    expect(
-      recordedInstance().queries.map((recorded) => recorded.parameters),
-    ).toEqual([{user_id: 'anonymous'}, {user_id: 'authenticated-user-999'}]);
-  });
-
-  it('resolves several view parameters in one call', async () => {
-    FakeBigtable.reset({instances: {[INSTANCE]: {rows: []}}});
-    const tool = createParameterizedQueryTool(new BigtableClientCache(), [
-      'user_id',
-      'tenant_id',
-    ]);
-
-    await tool.runAsync({
-      args: {
-        project_id: PROJECT,
-        instance_id: INSTANCE,
-        query: 'SELECT * FROM purchases',
-      },
-      toolContext: await createToolContext({
-        userId: 'user-123',
-        state: {tenant_id: 'tenant-xyz'},
+        query: 'SELECT 1',
+        parameters: {id: '9007199254740993'},
+        parameter_types: {id: 'int64'},
       }),
-    });
+    ).toEqual({id: 9007199254740993n});
+  });
 
-    expect(recordedInstance().queries[0].parameters).toEqual({
-      user_id: 'user-123',
-      tenant_id: 'tenant-xyz',
-    });
+  it('rejects an int64 that is not a whole number', () => {
+    expect(() =>
+      toQueryParameters({
+        project_id: PROJECT,
+        instance_id: INSTANCE,
+        query: 'SELECT 1',
+        parameters: {id: 1.5},
+        parameter_types: {id: 'int64'},
+      }),
+    ).toThrow(/'id' is not a valid int64: 1.5 is not a whole number/);
+  });
+
+  it('rejects an int64 that is not a number at all', () => {
+    expect(() =>
+      toQueryParameters({
+        project_id: PROJECT,
+        instance_id: INSTANCE,
+        query: 'SELECT 1',
+        parameters: {id: true},
+        parameter_types: {id: 'int64'},
+      }),
+    ).toThrow(/'id' is not a valid int64: got a boolean/);
+  });
+
+  it('rejects bytes that are not canonical base64', () => {
+    expect(() =>
+      toQueryParameters({
+        project_id: PROJECT,
+        instance_id: INSTANCE,
+        query: 'SELECT 1',
+        parameters: {k: 'not base64!'},
+        parameter_types: {k: 'bytes'},
+      }),
+    ).toThrow(/'k' is not a valid bytes: expected canonical base64/);
+  });
+
+  it('rejects bytes that are not a string', () => {
+    expect(() =>
+      toQueryParameters({
+        project_id: PROJECT,
+        instance_id: INSTANCE,
+        query: 'SELECT 1',
+        parameters: {k: 3},
+        parameter_types: {k: 'bytes'},
+      }),
+    ).toThrow(/'k' is not a valid bytes: got a number/);
+  });
+
+  it.each([
+    ['bool', 'yes'],
+    ['string', 7],
+    ['float32', 'x'],
+    ['float64', 'x'],
+  ] as const)('rejects a %s built from the wrong JSON type', (type, value) => {
+    expect(() =>
+      toQueryParameters({
+        project_id: PROJECT,
+        instance_id: INSTANCE,
+        query: 'SELECT 1',
+        parameters: {v: value},
+        parameter_types: {v: type},
+      }),
+    ).toThrow(new RegExp(`'v' is not a valid ${type}: got a`));
+  });
+
+  it.each([
+    ['bool', true],
+    ['string', 'x'],
+    ['float32', 1.5],
+    ['float64', 1.5],
+  ] as const)('passes a %s through unchanged', (type, value) => {
+    expect(
+      toQueryParameters({
+        project_id: PROJECT,
+        instance_id: INSTANCE,
+        query: 'SELECT 1',
+        parameters: {v: value},
+        parameter_types: {v: type},
+      }),
+    ).toEqual({v: value});
+  });
+
+  it('keeps a null value, whatever its declared type', () => {
+    expect(
+      toQueryParameters({
+        project_id: PROJECT,
+        instance_id: INSTANCE,
+        query: 'SELECT 1',
+        parameters: {id: null},
+        parameter_types: {id: 'int64'},
+      }),
+    ).toEqual({id: null});
+  });
+
+  it('rejects a parameter with no declared type', () => {
+    expect(() =>
+      toQueryParameters({
+        project_id: PROJECT,
+        instance_id: INSTANCE,
+        query: 'SELECT 1',
+        parameters: {id: 7},
+      }),
+    ).toThrow(/'id' has no entry in parameter_types/);
+  });
+
+  it('rejects a declared type with no value', () => {
+    expect(() =>
+      toQueryParameters({
+        project_id: PROJECT,
+        instance_id: INSTANCE,
+        query: 'SELECT 1',
+        parameter_types: {id: 'int64'},
+      }),
+    ).toThrow(/'id' is declared in parameter_types but has no value/);
+  });
+
+  it('returns an empty bag when the query takes no parameters', () => {
+    expect(
+      toQueryParameters({
+        project_id: PROJECT,
+        instance_id: INSTANCE,
+        query: 'SELECT 1',
+      }),
+    ).toEqual({});
   });
 });

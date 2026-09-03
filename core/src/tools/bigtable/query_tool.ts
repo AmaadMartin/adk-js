@@ -8,8 +8,6 @@ import type {Instance, SqlTypes} from '@google-cloud/bigtable';
 import {Buffer} from 'node:buffer';
 import {z} from 'zod';
 
-import {ReadonlyContext} from '../../agents/readonly_context.js';
-import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {FunctionTool} from '../function_tool.js';
 
@@ -27,30 +25,42 @@ type QueryParameters = NonNullable<
   Parameters<Instance['createExecuteQueryStream']>[0]['parameters']
 >;
 
-/** The GoogleSQL scalar types a query parameter may be declared as. */
+/** One value in that bag. */
+type QueryParameterValue = QueryParameters[string];
+
+/** What a model can put in a query parameter, since it only emits JSON. */
+type JsonScalar = string | number | boolean | null;
+
+/** The same, once the `null` case has been handled by the caller. */
+type JsonValue = Exclude<JsonScalar, null>;
+
+/**
+ * The GoogleSQL types a query parameter may be declared as.
+ *
+ * GoogleSQL also has `date` and `timestamp`, which are left out: the SDK
+ * accepts them only as its own `BigtableDate` and `PreciseDate` instances, and
+ * neither class is reachable from the package entry point. Compare against a
+ * literal in the query text instead.
+ */
 const SCALAR_TYPE_NAMES = [
   'bool',
   'bytes',
-  'date',
   'float32',
   'float64',
   'int64',
   'string',
-  'timestamp',
 ] as const;
 
 type ScalarTypeName = (typeof SCALAR_TYPE_NAMES)[number];
 
-/** Maps each declarable scalar type name onto the SDK's type descriptor. */
+/** Maps each declarable type name onto the SDK's type descriptor. */
 const SQL_PARAMETER_TYPES: Record<ScalarTypeName, SqlTypes.Type> = {
   bool: {type: 'bool'},
   bytes: {type: 'bytes'},
-  date: {type: 'date'},
   float32: {type: 'float32'},
   float64: {type: 'float64'},
   int64: {type: 'int64'},
   string: {type: 'string'},
-  timestamp: {type: 'timestamp'},
 };
 
 /**
@@ -74,13 +84,16 @@ const querySchema = z.object({
     )
     .optional()
     .describe(
-      'Values for the query parameters, keyed by the name used in the query.',
+      'Values for the query parameters, keyed by the name used in the query. ' +
+        'Every name here must also appear in parameter_types. Give an int64 ' +
+        'as a decimal string or a whole number, and bytes as base64.',
     ),
   parameter_types: z
     .record(z.string(), z.enum(SCALAR_TYPE_NAMES))
     .optional()
     .describe(
-      'The GoogleSQL type of each query parameter, keyed by the name used in the query.',
+      'The GoogleSQL type of each query parameter, keyed by the name used in ' +
+        'the query. Required for every name in parameters.',
     ),
 });
 
@@ -90,6 +103,12 @@ type QueryArguments = z.infer<typeof querySchema>;
 interface NamedValues {
   values: unknown[];
   fieldMapping: {fieldNames: Array<string | null>};
+}
+
+/** The read side of the SDK's `MAP` value. */
+interface MapValues {
+  entries(): Iterable<[unknown, unknown]>;
+  readonly size: number;
 }
 
 /**
@@ -106,6 +125,18 @@ function isNamedValues(value: object): value is NamedValues {
     typeof value.fieldMapping === 'object' &&
     value.fieldMapping !== null &&
     'fieldNames' in value.fieldMapping
+  );
+}
+
+/**
+ * Returns whether `value` is a map.
+ *
+ * The SDK returns `EncodedKeyMap`, which implements `Map` without extending
+ * it, so `value instanceof Map` is false for every map a query returns.
+ */
+function isMapValues(value: object): value is MapValues {
+  return (
+    'entries' in value && typeof value.entries === 'function' && 'size' in value
   );
 }
 
@@ -150,7 +181,7 @@ export function convertSqlValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(convertSqlValue);
   }
-  if (value instanceof Map) {
+  if (isMapValues(value)) {
     return Object.fromEntries(
       [...value.entries()].map(([key, entry]) => [
         String(convertSqlValue(key)),
@@ -186,22 +217,144 @@ function namedValuesToRecord(named: NamedValues): Record<string, unknown> {
   return record;
 }
 
+/** Reports a value the declared GoogleSQL type cannot be built from. */
+function parameterError(
+  name: string,
+  type: ScalarTypeName,
+  reason: string,
+): Error {
+  return new Error(
+    `Query parameter '${name}' is not a valid ${type}: ${reason}`,
+  );
+}
+
+/** Rejects a value whose JavaScript type the declared type cannot accept. */
+function rejectParameter(
+  name: string,
+  type: ScalarTypeName,
+  value: JsonValue,
+): never {
+  throw parameterError(name, type, `got a ${typeof value}`);
+}
+
+/** Builds the `bigint` the SDK requires for an INT64 parameter. */
+function toInt64(name: string, value: JsonValue): bigint {
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return BigInt(value);
+  }
+  if (typeof value === 'string' && /^[+-]?\d+$/.test(value)) {
+    return BigInt(value);
+  }
+  if (typeof value === 'number' || typeof value === 'string') {
+    throw parameterError(name, 'int64', `${value} is not a whole number`);
+  }
+  return rejectParameter(name, 'int64', value);
+}
+
+/** Builds the byte array the SDK requires for a BYTES parameter. */
+function toBytes(name: string, value: JsonValue): Uint8Array {
+  if (typeof value !== 'string') {
+    return rejectParameter(name, 'bytes', value);
+  }
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.toString('base64') !== value) {
+    throw parameterError(name, 'bytes', 'expected canonical base64');
+  }
+  return decoded;
+}
+
+/** Passes a BOOL parameter through, once it really is one. */
+function toBool(name: string, value: JsonValue): boolean {
+  return typeof value === 'boolean'
+    ? value
+    : rejectParameter(name, 'bool', value);
+}
+
+/** Passes a STRING parameter through, once it really is one. */
+function toStringValue(name: string, value: JsonValue): string {
+  return typeof value === 'string'
+    ? value
+    : rejectParameter(name, 'string', value);
+}
+
+/** Passes a FLOAT32 parameter through, once it really is a number. */
+function toFloat32(name: string, value: JsonValue): number {
+  return typeof value === 'number'
+    ? value
+    : rejectParameter(name, 'float32', value);
+}
+
+/** Passes a FLOAT64 parameter through, once it really is a number. */
+function toFloat64(name: string, value: JsonValue): number {
+  return typeof value === 'number'
+    ? value
+    : rejectParameter(name, 'float64', value);
+}
+
+/** Builds the native value each declarable type needs from a JSON scalar. */
+const PARAMETER_CONVERTERS: Record<
+  ScalarTypeName,
+  (name: string, value: JsonValue) => QueryParameterValue
+> = {
+  bool: toBool,
+  bytes: toBytes,
+  float32: toFloat32,
+  float64: toFloat64,
+  int64: toInt64,
+  string: toStringValue,
+};
+
+/**
+ * Converts the model's parameters into the native values the SDK requires.
+ *
+ * The SDK builds each value from the type the prepared statement declared, and
+ * rejects a JSON scalar where it wants a `bigint` or a byte array. It also
+ * rejects the whole query when the two bags do not name the same parameters,
+ * so both mismatches are reported here by name instead.
+ *
+ * @param args The validated query arguments.
+ * @return The parameter bag to run the query with.
+ * @throws If a parameter has no declared type, a declared type has no value,
+ *     or a value cannot be converted to its declared type.
+ */
+export function toQueryParameters(args: QueryArguments): QueryParameters {
+  const values = args.parameters ?? {};
+  const types = args.parameter_types ?? {};
+  const converted: QueryParameters = {};
+  for (const [name, value] of Object.entries(values)) {
+    const type = types[name];
+    if (type === undefined) {
+      throw new Error(
+        `Query parameter '${name}' has no entry in parameter_types. Declare a type for every parameter.`,
+      );
+    }
+    converted[name] =
+      value === null ? null : PARAMETER_CONVERTERS[type](name, value);
+  }
+  for (const name of Object.keys(types)) {
+    if (!(name in values)) {
+      throw new Error(
+        `Query parameter '${name}' is declared in parameter_types but has no value in parameters.`,
+      );
+    }
+  }
+  return converted;
+}
+
 /**
  * Reads up to `maxRows` rows from a query, stopping the read at the cap.
  *
  * @param instance The Bigtable instance the query runs against.
  * @param args The validated query arguments.
- * @param parameters The parameter values, including any resolved view
- *     parameters.
  * @param maxRows The row cap.
  * @return The rows read, and whether the cap stopped the read.
  */
 async function readRows(
   instance: Instance,
   args: QueryArguments,
-  parameters: QueryParameters,
   maxRows: number,
 ): Promise<{rows: Array<Record<string, unknown>>; truncated: boolean}> {
+  const parameters = toQueryParameters(args);
   const [preparedStatement] = await instance.prepareStatement({
     query: args.query,
     parameterTypes: toParameterTypes(args.parameter_types),
@@ -246,83 +399,6 @@ function toParameterTypes(
 }
 
 /**
- * View parameter names the invocation itself answers.
- *
- * The map is explicit so that a name is only ever answered by the property it
- * names. Reading the context by dynamic property name would let an agent widen
- * its own access by writing, say, `user_id` into session state.
- */
-const CONTEXT_VIEW_PARAMETERS = new Map<
-  string,
-  (context: ReadonlyContext) => string
->([
-  ['user_id', (context) => context.userId],
-  ['userId', (context) => context.userId],
-  ['session_id', (context) => context.sessionId],
-  ['sessionId', (context) => context.sessionId],
-  ['invocation_id', (context) => context.invocationId],
-  ['invocationId', (context) => context.invocationId],
-  ['agent_name', (context) => context.agentName],
-  ['agentName', (context) => context.agentName],
-]);
-
-/** Returns whether a session state value may be sent as a query parameter. */
-function isQueryParameterValue(
-  value: unknown,
-): value is string | number | boolean {
-  return (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  );
-}
-
-/**
- * Resolves the trusted values a parameterized view filters on.
- *
- * A name the invocation answers wins; otherwise the value comes from session
- * state. A name that resolves nowhere is left out, so the query fails at
- * Bigtable rather than running unfiltered.
- *
- * @param names The view parameter names the toolset was configured with.
- * @param context The context of the tool call.
- * @return The resolved values, keyed by view parameter name.
- * @throws If there is no context, since the values cannot be trusted without
- *     one.
- */
-export function resolveViewParameters(
-  names: string[],
-  context?: ReadonlyContext,
-): QueryParameters {
-  if (context === undefined) {
-    throw new Error(
-      'execute_sql_parameterized needs a tool context to resolve its view parameters.',
-    );
-  }
-  const resolved: QueryParameters = {};
-  for (const name of names) {
-    const fromContext = CONTEXT_VIEW_PARAMETERS.get(name);
-    if (fromContext !== undefined) {
-      resolved[name] = fromContext(context);
-      continue;
-    }
-    const fromState = context.state.get(name);
-    if (fromState === undefined) {
-      continue;
-    }
-    if (!isQueryParameterValue(fromState)) {
-      logger.warn(
-        `Skipping view parameter '${name}': session state holds a ` +
-          `${typeof fromState}, which Bigtable does not accept as a query parameter.`,
-      );
-      continue;
-    }
-    resolved[name] = fromState;
-  }
-  return resolved;
-}
-
-/**
  * Runs a query and shapes the result the way adk-python's query tool does.
  *
  * `result_is_likely_truncated` is only present when the cap actually stopped
@@ -332,7 +408,6 @@ async function executeQuery(
   clients: BigtableClientCache,
   settings: BigtableToolSettings | undefined,
   args: QueryArguments,
-  viewParameters: QueryParameters,
 ): Promise<{
   rows: Array<Record<string, unknown>>;
   result_is_likely_truncated?: true;
@@ -342,9 +417,6 @@ async function executeQuery(
   const {rows, truncated} = await readRows(
     instance,
     args,
-    // The resolved view parameters go last, so a model-supplied parameter of
-    // the same name cannot forge the value the view filters on.
-    {...args.parameters, ...viewParameters},
     maxQueryResultRows(settings),
   );
   return truncated ? {rows, result_is_likely_truncated: true} : {rows};
@@ -367,41 +439,7 @@ export function createQueryTool(
     parameters: querySchema,
     execute: (args) =>
       runBigtableTool('execute_sql', () =>
-        executeQuery(clients, settings, args, {}),
-      ),
-  });
-}
-
-/**
- * Builds the query tool that scopes a parameterized view to the caller.
- *
- * The view parameter values come from the invocation, never from the model's
- * arguments, so a model cannot read another user's rows through a view
- * created as `SELECT * FROM purchases WHERE user_id = VIEW_PARAMETERS('user_id')`.
- *
- * @param clients The client cache the tool reads through.
- * @param viewParameterNames The names the tool resolves per call.
- * @param settings The row cap configuration.
- * @return The tool, with adk-python's unprefixed name.
- */
-export function createParameterizedQueryTool(
-  clients: BigtableClientCache,
-  viewParameterNames: string[],
-  settings?: BigtableToolSettings,
-): BaseTool {
-  return new FunctionTool({
-    name: 'execute_sql_parameterized',
-    description:
-      'Execute a GoogleSQL query from a Bigtable table using parameterized views to securely check permissions.',
-    parameters: querySchema,
-    execute: (args, context) =>
-      runBigtableTool('execute_sql_parameterized', () =>
-        executeQuery(
-          clients,
-          settings,
-          args,
-          resolveViewParameters(viewParameterNames, context),
-        ),
+        executeQuery(clients, settings, args),
       ),
   });
 }

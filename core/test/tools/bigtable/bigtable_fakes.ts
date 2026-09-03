@@ -82,6 +82,33 @@ export interface FakeRow {
   fieldMapping: {fieldNames: Array<string | null>};
 }
 
+/**
+ * A MAP column value, shaped like the SDK's `EncodedKeyMap`.
+ *
+ * The SDK's class *implements* `Map` rather than extending it, so
+ * `value instanceof Map` is false for every map a query returns. This fake
+ * reproduces that, which a native `Map` would not.
+ */
+export class FakeEncodedKeyMap {
+  private readonly pairs: Array<[unknown, unknown]>;
+
+  constructor(pairs: Array<[unknown, unknown]>) {
+    this.pairs = [...pairs];
+  }
+
+  get size(): number {
+    return this.pairs.length;
+  }
+
+  entries(): Iterable<[unknown, unknown]> {
+    return this.pairs.values();
+  }
+
+  get(key: unknown): unknown {
+    return this.pairs.find(([candidate]) => candidate === key)?.[1];
+  }
+}
+
 /** Builds a {@link FakeRow} from `[column name, value]` pairs. */
 export function fakeRow(columns: Array<[string | null, unknown]>): FakeRow {
   return {
@@ -245,11 +272,66 @@ class FakeInstance {
   }): Readable {
     const recorded = this.queries[this.queries.length - 1];
     recorded.parameters = options.parameters;
+    parseParameters(options.parameters ?? {}, recorded.parameterTypes ?? {});
     const stream = Readable.from(this.setup.rows ?? [], {objectMode: true});
     stream.on('close', () => {
       this.destroyedStreams++;
     });
     return stream;
+  }
+}
+
+/**
+ * The JavaScript type each declared GoogleSQL type is built from.
+ *
+ * Taken from `convertJsValueToValue` in the SDK's `parameterparsing.js`. DATE
+ * and TIMESTAMP are absent because the query tool does not declare them.
+ */
+const NATIVE_PARAMETER_TYPES: Record<string, (value: unknown) => boolean> = {
+  bool: (value) => typeof value === 'boolean',
+  bytes: (value) => value instanceof Uint8Array,
+  float32: (value) => typeof value === 'number',
+  float64: (value) => typeof value === 'number',
+  int64: (value) => typeof value === 'bigint',
+  string: (value) => typeof value === 'string',
+};
+
+/**
+ * Rejects a parameter bag the real SDK would reject.
+ *
+ * `Instance.createExecuteQueryStream` calls `parseParameters`, which throws
+ * when the two bags do not name the same parameters and when a value is not
+ * the native type its declared type is built from. The fake performs the same
+ * checks, so a test cannot pass on arguments the SDK would refuse.
+ */
+function parseParameters(
+  parameters: Record<string, unknown>,
+  parameterTypes: Record<string, {type: string}>,
+): void {
+  const names = Object.keys(parameters);
+  const declared = Object.keys(parameterTypes);
+  if (names.length !== declared.length) {
+    throw new Error(
+      `Number of parameters (${names.length}) does not match number of parameter types (${declared.length}).`,
+    );
+  }
+  for (const [name, value] of Object.entries(parameters)) {
+    const type = parameterTypes[name];
+    if (type === undefined) {
+      throw new Error(`Unrecognized parameter: ${name}`);
+    }
+    if (value === null) {
+      continue;
+    }
+    const accepts = NATIVE_PARAMETER_TYPES[type.type];
+    if (accepts === undefined) {
+      throw new Error(`Unsupported parameter type: ${type.type}`);
+    }
+    if (!accepts(value)) {
+      throw new Error(
+        `Value ${String(value)} cannot be converted to ${type.type}.`,
+      );
+    }
   }
 }
 

@@ -114,37 +114,22 @@ describe('BigtableToolset', () => {
     warn.mockRestore();
   });
 
-  it('adds no parameterized query tool by default', async () => {
+  it('builds exactly one query tool', async () => {
     const tools = await new BigtableToolset().getTools();
 
     expect(names(tools).filter((name) => name === 'execute_sql')).toHaveLength(
       1,
     );
-    expect(names(tools)).not.toContain('execute_sql_parameterized');
   });
 
-  it('adds the parameterized query tool when view parameters are configured', async () => {
-    const tools = await new BigtableToolset({
-      viewParameterNames: ['user_id'],
-    }).getTools();
-
-    expect(tools).toHaveLength(8);
-    expect(names(tools)).toContain('execute_sql_parameterized');
-  });
-
-  it('keeps the view parameters out of the schema the model sees', async () => {
-    const tools = await new BigtableToolset({
-      viewParameterNames: ['user_id'],
-    }).getTools();
-    const parameterized = tools.find(
-      (tool) => tool.name === 'execute_sql_parameterized',
-    );
-    if (parameterized === undefined) {
-      return expect.fail('the parameterized query tool was not built');
+  it('shows the model only the five query arguments', async () => {
+    const tools = await new BigtableToolset().getTools();
+    const query = tools.find((tool) => tool.name === 'execute_sql');
+    if (query === undefined) {
+      return expect.fail('the query tool was not built');
     }
 
-    const properties =
-      parameterized._getDeclaration()?.parameters?.properties ?? {};
+    const properties = query._getDeclaration()?.parameters?.properties ?? {};
 
     expect(Object.keys(properties).sort()).toEqual([
       'instance_id',
