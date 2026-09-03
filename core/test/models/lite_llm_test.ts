@@ -103,7 +103,7 @@ const THOUGHT_SIGNATURE = 'c2lnbmF0dXJl';
 function cacheConfig(
   overrides: Partial<ContextCacheConfig> = {},
 ): ContextCacheConfig {
-  return {cacheIntervals: 10, ttlSeconds: 1800, minTokens: 0, ...overrides};
+  return {ttlSeconds: 1800, minTokens: 0, ...overrides};
 }
 
 /** A non-streaming response carrying one tool call. */
@@ -568,11 +568,7 @@ describe('LiteLlm', () => {
   });
 
   describe('cache control injection points', () => {
-    const cacheConfig: ContextCacheConfig = {
-      cacheIntervals: 10,
-      ttlSeconds: 600,
-      minTokens: 0,
-    };
+    const cacheConfig: ContextCacheConfig = {ttlSeconds: 600, minTokens: 0};
 
     /** Runs one non-streaming call and returns the injection points sent. */
     async function injectionPoints(

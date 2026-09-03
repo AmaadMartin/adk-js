@@ -135,7 +135,6 @@ message, and the last message.
 import {ContextCacheConfig, LiteLlm, LlmRequest} from '@google/adk';
 
 const cacheConfig: ContextCacheConfig = {
-  cacheIntervals: 10,
   ttlSeconds: 3600,
   minTokens: 4096,
 };

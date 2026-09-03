@@ -377,11 +377,7 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
       model: 'vertex_ai/gemini-2.5-flash',
       apiBase: endpoint.apiBase,
     });
-    const cacheConfig: ContextCacheConfig = {
-      cacheIntervals: 10,
-      ttlSeconds: 3600,
-      minTokens: 0,
-    };
+    const cacheConfig: ContextCacheConfig = {ttlSeconds: 3600, minTokens: 0};
     const llmRequest: LlmRequest = {
       contents: [{role: 'user', parts: [{text: 'Say hello.'}]}],
       liveConnectConfig: {},
@@ -506,7 +502,7 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
 
     await collectResponses(model, {
       ...textRequest('Summarize the document.'),
-      cacheConfig: {cacheIntervals: 10, ttlSeconds: 3600, minTokens: 0},
+      cacheConfig: {ttlSeconds: 3600, minTokens: 0},
     });
 
     expect(endpoint.requests[0]['cache_control_injection_points']).toEqual([
