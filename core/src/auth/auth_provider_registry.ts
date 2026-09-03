@@ -32,4 +32,14 @@ export class AuthProviderRegistry {
   getProvider(authScheme: AuthScheme): BaseAuthProvider | undefined {
     return this.providers.get(authScheme.type);
   }
+
+  /**
+   * Get the provider instance for an auth scheme type.
+   *
+   * @param authSchemeType The auth scheme type to get provider for.
+   * @returns The provider instance if registered, undefined otherwise.
+   */
+  getProviderByType(authSchemeType: string): BaseAuthProvider | undefined {
+    return this.providers.get(authSchemeType);
+  }
 }
