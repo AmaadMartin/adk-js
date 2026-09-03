@@ -96,6 +96,7 @@ export interface InvocationContextParams {
   transcriptionCache?: TranscriptionEntry[];
   runConfig?: RunConfig;
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
+  canonicalToolsCache?: BaseTool[];
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
   workflowInstructionScope?: WorkflowInstructionScope;
@@ -446,6 +447,10 @@ export class InvocationContext {
    * The agent's tools as resolved for the current model step, or `undefined`
    * before anything resolved them. Read and written through
    * `canonicalToolsFor`; the empty array is a resolved set, not a miss.
+   *
+   * The LLM flow also writes it before it calls the model, so after-model
+   * processing reads the same resolution the request was built from. The live
+   * path does not run the after-model stage, so it leaves this alone.
    */
   canonicalToolsCache?: BaseTool[];
 
@@ -466,6 +471,7 @@ export class InvocationContext {
     this.transcriptionCache = params.transcriptionCache;
     this.runConfig = params.runConfig;
     this.activeStreamingTools = params.activeStreamingTools;
+    this.canonicalToolsCache = params.canonicalToolsCache;
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;
     this.workflowInstructionScope = params.workflowInstructionScope;
