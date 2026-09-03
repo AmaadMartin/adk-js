@@ -15,6 +15,7 @@ import {describe, expect, it} from 'vitest';
 
 import {getProviderFromModel} from '../../src/models/lite_llm_model_utils.js';
 import {
+  aggregateStreamingThoughtParts,
   appendFallbackUserContentIfMissing,
   buildRequestLog,
   contentToMessageParam,
@@ -30,7 +31,11 @@ import {
   toLiteLlmRole,
 } from '../../src/models/lite_llm_request_converters.js';
 import {messageToGenerateContentResponse} from '../../src/models/lite_llm_response_converters.js';
-import {ChatMessage} from '../../src/models/lite_llm_types.js';
+import {
+  ChatMessage,
+  ContentObject,
+  ThinkingBlock,
+} from '../../src/models/lite_llm_types.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
 import {
   isJsonObject,
@@ -44,6 +49,15 @@ const VERTEX_GEMINI: ProviderOptions = {
   provider: 'vertex_ai',
   model: 'vertex_ai/gemini-2.5-flash',
 };
+const CLAUDE_MODEL_ONLY: ProviderOptions = {
+  provider: '',
+  model: 'anthropic/claude-4-sonnet',
+};
+const ANTHROPIC_NO_MODEL: ProviderOptions = {provider: 'anthropic', model: ''};
+
+/** `thoughtSignature` carries base64 text, so fixtures spell it that way. */
+const SIG_ROUND_TRIP = 'c2lnX3JvdW5kX3RyaXA=';
+const SIG_A = 'c2lnX2E=';
 
 /** Narrows a JSON value to an object, failing the test when it is not one. */
 function asObject(value: JsonValue | undefined): JsonObject {
@@ -69,6 +83,38 @@ function base64(text: string): string {
 /** Builds a request carrying only the fields these converters read. */
 function request(overrides: Partial<LlmRequest> = {}): LlmRequest {
   return {contents: [], liveConnectConfig: {}, toolsDict: {}, ...overrides};
+}
+
+/** Returns true when the value is an Anthropic thinking block. */
+function isThinkingBlock(value: unknown): value is ThinkingBlock {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    value.type === 'thinking'
+  );
+}
+
+/** Narrows the provider-shaped `thinking_blocks` field to typed blocks. */
+function thinkingBlocks(message: ChatMessage): ThinkingBlock[] {
+  const blocks: unknown = message.thinking_blocks;
+  if (!Array.isArray(blocks) || !blocks.every(isThinkingBlock)) {
+    return expect.fail(
+      `expected thinking blocks, got ${JSON.stringify(blocks)}`,
+    );
+  }
+  return blocks;
+}
+
+/** Narrows a message content to the block list it must be. */
+function contentBlocks(message: ChatMessage): ContentObject[] {
+  const {content} = message;
+  if (!Array.isArray(content)) {
+    return expect.fail(
+      `expected a content list, got ${JSON.stringify(content)}`,
+    );
+  }
+  return content;
 }
 
 /** Narrows a converted content to the single message it produced. */
@@ -1262,5 +1308,340 @@ describe('buildRequestLog', () => {
       'add: {"a":{"type":"INTEGER"}} -> {"type":"INTEGER"}',
     );
     expect(log).toContain('ping: {} -> none');
+  });
+});
+
+describe('aggregateStreamingThoughtParts', () => {
+  it('rejoins the fragments of each streamed thinking block', () => {
+    const aggregated = aggregateStreamingThoughtParts([
+      {text: 'First block ', thought: true},
+      {text: 'text.', thought: true},
+      {text: '', thought: true, thoughtSignature: 'c2lnMQ=='},
+      {text: 'Second block', thought: true, thoughtSignature: 'c2lnMg=='},
+      {text: 'Trailing without sig', thought: true},
+    ]);
+
+    expect(aggregated).toStrictEqual([
+      {text: 'First block text.', thought: true, thoughtSignature: 'c2lnMQ=='},
+      {text: 'Second block', thought: true, thoughtSignature: 'c2lnMg=='},
+      {text: 'Trailing without sig', thought: true},
+    ]);
+  });
+
+  it('returns nothing for no parts', () => {
+    expect(aggregateStreamingThoughtParts([])).toStrictEqual([]);
+  });
+});
+
+describe('contentToMessageParam Anthropic thinking blocks', () => {
+  it('sends a Claude model its thinking as a top-level array', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {
+              text: 'deep thought',
+              thought: true,
+              thoughtSignature: SIG_ROUND_TRIP,
+            },
+            {text: 'Hello!'},
+          ],
+        },
+        CLAUDE_MODEL_ONLY,
+      ),
+    );
+
+    expect(thinkingBlocks(message)).toStrictEqual([
+      {type: 'thinking', thinking: 'deep thought', signature: SIG_ROUND_TRIP},
+    ]);
+    expect(message.reasoning_content).toBeUndefined();
+    expect(message.content).toBe('Hello!');
+  });
+
+  it('returns a parsed thinking block unchanged on the next turn', () => {
+    const response = messageToGenerateContentResponse({
+      role: 'assistant',
+      content: 'Final answer',
+      thinking_blocks: [
+        {type: 'thinking', thinking: 'Let me reason...', signature: SIG_A},
+      ],
+    });
+    const parts = response.content?.parts;
+    if (!parts) {
+      return expect.fail('expected the response to carry parts');
+    }
+
+    const message = singleMessage(
+      contentToMessageParam(
+        {role: 'model', parts},
+        {
+          provider: 'anthropic',
+          model: 'anthropic/claude-4-sonnet',
+        },
+      ),
+    );
+
+    expect(thinkingBlocks(message)).toStrictEqual([
+      {type: 'thinking', thinking: 'Let me reason...', signature: SIG_A},
+    ]);
+    expect(message.reasoning_content).toBeUndefined();
+  });
+
+  it('joins a thinking part and its trailing signature part', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {text: 'deep thought', thought: true},
+            {text: '', thought: true, thoughtSignature: SIG_ROUND_TRIP},
+            {text: 'Hello!'},
+          ],
+        },
+        CLAUDE_MODEL_ONLY,
+      ),
+    );
+
+    expect(thinkingBlocks(message)).toStrictEqual([
+      {type: 'thinking', thinking: 'deep thought', signature: SIG_ROUND_TRIP},
+    ]);
+    expect(message.reasoning_content).toBeUndefined();
+    expect(message.content).toBe('Hello!');
+  });
+
+  it('leaves a non-Anthropic model on reasoning_content', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [{text: 'thinking text', thought: true}, {text: 'Answer'}],
+        },
+        OPENAI,
+      ),
+    );
+
+    expect(message.reasoning_content).toBe('thinking text');
+    expect(message.thinking_blocks).toBeUndefined();
+  });
+
+  it('falls back to reasoning_content when no thought part is signed', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {text: 'thinking without sig', thought: true},
+            {text: 'Response'},
+          ],
+        },
+        CLAUDE_MODEL_ONLY,
+      ),
+    );
+
+    expect(message.reasoning_content).toBe('thinking without sig');
+    expect(message.thinking_blocks).toBeUndefined();
+  });
+
+  it('embeds the blocks in the content list when only the provider is known', () => {
+    const response = messageToGenerateContentResponse({
+      role: 'assistant',
+      content: 'Final answer',
+      thinking_blocks: [
+        {type: 'thinking', thinking: 'Let me reason...', signature: SIG_A},
+      ],
+    });
+    const parts = response.content?.parts;
+    if (!parts) {
+      return expect.fail('expected the response to carry parts');
+    }
+
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            ...parts,
+            {functionCall: {id: 'c1', name: 'add', args: {a: 1, b: 2}}},
+          ],
+        },
+        ANTHROPIC_NO_MODEL,
+      ),
+    );
+
+    expect(contentBlocks(message)).toStrictEqual([
+      {type: 'thinking', thinking: 'Let me reason...', signature: SIG_A},
+      {type: 'text', text: 'Final answer'},
+    ]);
+    expect(message.tool_calls).toHaveLength(1);
+    expect(message.tool_calls?.[0].function?.name).toBe('add');
+    expect(message.reasoning_content).toBeUndefined();
+  });
+
+  it('leaves a Bedrock Llama model on reasoning_content', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [{text: 'thinking text', thought: true}, {text: 'Answer'}],
+        },
+        {
+          provider: 'bedrock',
+          model: 'bedrock/meta.llama3-70b-instruct-v1:0',
+        },
+      ),
+    );
+
+    expect(message.reasoning_content).toBe('thinking text');
+    expect(message.thinking_blocks).toBeUndefined();
+    expect(message.content).toBe('Answer');
+  });
+
+  it('embeds an unsigned block for a Bedrock Claude model', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [{text: 'thinking text', thought: true}, {text: 'Answer'}],
+        },
+        {
+          provider: 'bedrock',
+          model: 'bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0',
+        },
+      ),
+    );
+
+    expect(contentBlocks(message)[0]).toStrictEqual({
+      type: 'thinking',
+      thinking: 'thinking text',
+    });
+    expect(message.reasoning_content).toBeUndefined();
+  });
+
+  it('leaves a Vertex AI Gemini model on reasoning_content', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [{text: 'thinking text', thought: true}, {text: 'Answer'}],
+        },
+        VERTEX_GEMINI,
+      ),
+    );
+
+    expect(message.reasoning_content).toBe('thinking text');
+    expect(message.thinking_blocks).toBeUndefined();
+    expect(message.content).toBe('Answer');
+  });
+
+  it('embeds an unsigned block for a Claude model rather than falling through', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [{text: 'thinking text', thought: true}, {text: 'Answer'}],
+        },
+        {provider: 'anthropic', model: 'anthropic/claude-3-5-sonnet'},
+      ),
+    );
+
+    expect(contentBlocks(message)[0]).toStrictEqual({
+      type: 'thinking',
+      thinking: 'thinking text',
+    });
+    expect(message.reasoning_content).toBeUndefined();
+  });
+
+  it('skips a thought part that carries no text', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {text: '', thought: true},
+            {text: 'thinking text', thought: true},
+            {text: 'Answer'},
+          ],
+        },
+        ANTHROPIC_NO_MODEL,
+      ),
+    );
+
+    expect(contentBlocks(message)).toStrictEqual([
+      {type: 'thinking', thinking: 'thinking text'},
+      {type: 'text', text: 'Answer'},
+    ]);
+  });
+
+  it('puts the blocks ahead of a multipart content list', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {text: 'thinking text', thought: true},
+            {text: 'look'},
+            {inlineData: {data: 'AAA', mimeType: 'image/png'}},
+          ],
+        },
+        ANTHROPIC_NO_MODEL,
+      ),
+    );
+
+    expect(contentBlocks(message)).toStrictEqual([
+      {type: 'thinking', thinking: 'thinking text'},
+      {type: 'text', text: 'look'},
+      {type: 'image_url', image_url: {url: 'data:image/png;base64,AAA'}},
+    ]);
+  });
+
+  it('sends null content when every thought part is text-less', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {text: '', thought: true, thoughtSignature: SIG_A},
+            {functionCall: {id: 'c1', name: 'add', args: {a: 1}}},
+          ],
+        },
+        ANTHROPIC_NO_MODEL,
+      ),
+    );
+
+    expect(message.content).toBeNull();
+    expect(message.tool_calls).toHaveLength(1);
+    expect(message.reasoning_content).toBeUndefined();
+  });
+
+  it('rejoins thinking split across streaming deltas', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {text: 'The user wants ', thought: true},
+            {text: 'GST research ', thought: true},
+            {text: 'on secondment.', thought: true},
+            {
+              text: '',
+              thought: true,
+              thoughtSignature: 'RXJFRENsc0lEQkFDR0FJZnVsbA==',
+            },
+            {functionCall: {id: 'c1', name: 'create_plan', args: {q: 'test'}}},
+          ],
+        },
+        CLAUDE_MODEL_ONLY,
+      ),
+    );
+
+    expect(thinkingBlocks(message)).toStrictEqual([
+      {
+        type: 'thinking',
+        thinking: 'The user wants GST research on secondment.',
+        signature: 'RXJFRENsc0lEQkFDR0FJZnVsbA==',
+      },
+    ]);
+    expect(message.reasoning_content).toBeUndefined();
   });
 });

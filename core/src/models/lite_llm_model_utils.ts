@@ -18,6 +18,16 @@ const FILE_ID_REQUIRED_PROVIDERS = new Set(['openai', 'azure']);
 const GEMMA4_MODEL_PATTERN = /gemma-?4/;
 
 /**
+ * Providers that can route to Anthropic. `bedrock` and `vertex_ai` are
+ * multi-model platforms, so {@link isAnthropicRoute} checks the model name for
+ * them as well.
+ */
+const ANTHROPIC_PROVIDERS = new Set(['anthropic', 'bedrock', 'vertex_ai']);
+
+/** Multi-model platforms whose model name decides the Anthropic route. */
+const MULTI_MODEL_ANTHROPIC_PROVIDERS = new Set(['bedrock', 'vertex_ai']);
+
+/**
  * Maps a chat-completions `finish_reason` onto a genai `FinishReason`.
  *
  * `tool_calls` and `function_call` map to `STOP` because there is no
@@ -100,6 +110,51 @@ export function isLiteLlmGeminiModel(model: string): boolean {
  */
 export function isGemma4Model(model: string): boolean {
   return GEMMA4_MODEL_PATTERN.test(model.toLowerCase());
+}
+
+/**
+ * Returns true when the model is an Anthropic Claude model reached through
+ * LiteLLM.
+ *
+ * The `anthropic/` prefix always qualifies. A `bedrock/` model qualifies when
+ * the remainder names `anthropic` or `claude`, and a `vertex_ai/` model when
+ * the remainder names `claude`; both platforms also host other families.
+ */
+export function isAnthropicModel(model: string): boolean {
+  const lower = stripProxyPrefix(model.toLowerCase());
+  if (lower.startsWith('anthropic/')) {
+    return true;
+  }
+  if (lower.startsWith('bedrock/')) {
+    const modelPart = lower.slice('bedrock/'.length);
+    return modelPart.includes('anthropic') || modelPart.includes('claude');
+  }
+  if (lower.startsWith('vertex_ai/')) {
+    return lower.slice('vertex_ai/'.length).includes('claude');
+  }
+  return false;
+}
+
+/** Returns true when the provider can route to an Anthropic model endpoint. */
+export function isAnthropicProvider(provider: string): boolean {
+  return ANTHROPIC_PROVIDERS.has(provider.toLowerCase());
+}
+
+/**
+ * Returns true only when a request actually reaches an Anthropic Claude model.
+ *
+ * Bedrock and Vertex AI also host Llama and Gemini, so for those platforms the
+ * model name must name a Claude model too. Formatting thinking blocks for a
+ * non-Claude model makes the provider reject the request with a 400.
+ */
+export function isAnthropicRoute(provider: string, model: string): boolean {
+  if (!isAnthropicProvider(provider)) {
+    return false;
+  }
+  if (MULTI_MODEL_ANTHROPIC_PROVIDERS.has(provider.toLowerCase())) {
+    return isAnthropicModel(model);
+  }
+  return true;
 }
 
 /** Maps a chat-completions `finish_reason` onto a genai `FinishReason`. */

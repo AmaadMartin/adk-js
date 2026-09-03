@@ -612,6 +612,7 @@ export type {
   RawUsage,
   StreamChoice,
   TextContentObject,
+  ThinkingBlock,
   ToolCall,
   ToolCallFunction,
   ToolChoice,

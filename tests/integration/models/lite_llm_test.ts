@@ -155,6 +155,46 @@ function toolCallReply(name: string, args: string): Reply {
   };
 }
 
+/** The base64 thought signature the fake Claude endpoint returns. */
+const CLAUDE_SIGNATURE = 'c2lnX2NsYXVkZQ==';
+
+/** A Claude reply carrying a signed thinking block and one tool call. */
+function claudeThinkingToolCallReply(): Reply {
+  return {
+    kind: 'json',
+    body: {
+      model: 'claude-sonnet-4',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: null,
+            thinking_blocks: [
+              {
+                type: 'thinking',
+                thinking: 'The user asks about Paris.',
+                signature: CLAUDE_SIGNATURE,
+              },
+            ],
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {
+                  name: 'get_weather',
+                  arguments: '{"location":"Paris"}',
+                },
+              },
+            ],
+          },
+          finish_reason: 'tool_calls',
+        },
+      ],
+    },
+  };
+}
+
 const getWeather = new FunctionTool({
   name: 'get_weather',
   description: 'Returns the weather for a location.',
@@ -576,5 +616,39 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
         }
       })(),
     ).rejects.toThrow('failed with status 500: no reply left');
+  });
+
+  it('resends a Claude turn its thinking blocks on the next request', async () => {
+    endpoint = await startEndpoint([
+      claudeThinkingToolCallReply(),
+      textReply('It is sunny in Paris.'),
+    ]);
+    const agent = new LlmAgent({
+      name: 'lite_llm_anthropic_agent',
+      model: new LiteLlm({
+        model: 'anthropic/claude-sonnet-4',
+        apiBase: endpoint.apiBase,
+      }),
+      instruction: 'You are a helpful assistant.',
+      tools: [getWeather],
+    });
+
+    await runAgent(agent, 'What is the weather in Paris?');
+
+    expect(endpoint.requests).toHaveLength(2);
+    const messages = endpoint.requests[1]['messages'] as Array<
+      Record<string, unknown>
+    >;
+    const assistant = messages.find(
+      (message) => message['role'] === 'assistant',
+    );
+    expect(assistant?.['thinking_blocks']).toEqual([
+      {
+        type: 'thinking',
+        thinking: 'The user asks about Paris.',
+        signature: CLAUDE_SIGNATURE,
+      },
+    ]);
+    expect(assistant?.['reasoning_content']).toBeUndefined();
   });
 });
