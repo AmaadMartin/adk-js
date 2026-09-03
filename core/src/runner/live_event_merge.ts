@@ -4,47 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InvocationContext} from '../agents/invocation_context.js';
 import {Event} from '../events/event.js';
 import {AsyncQueue} from '../utils/async_queue.js';
-import {logger} from '../utils/logger.js';
-import {BaseNode} from '../workflow/base_node.js';
-import {runNodeAsInvocation} from '../workflow/run_node_as_invocation.js';
-
-/**
- * Runs a node as the root of a live invocation.
- *
- * Ports `google/adk-python` `live/_runner_utils.py::run_node_live`. The node is
- * driven exactly as it is on the async path — the live delta is only that `ic`
- * carries a `liveRequestQueue` and that the node input is `undefined` — so this
- * delegates to {@link runNodeAsInvocation} instead of forking it.
- *
- * What it adds is the accounting `google/adk-python` does in
- * `runners.py::Runner._cleanup_root_task`: a node that stops because the caller
- * stopped reading is logged and produces no error, while a node that fails is
- * logged and rethrown after the events it already produced.
- */
-export async function* runNodeLive(
-  node: BaseNode,
-  ic: InvocationContext,
-): AsyncGenerator<Event, void, void> {
-  let settled = false;
-  try {
-    yield* runNodeAsInvocation(node, ic);
-    settled = true;
-  } catch (err: unknown) {
-    settled = true;
-    logger.error(`Live root node '${node.name}' failed.`, err);
-    throw err;
-  } finally {
-    if (!settled) {
-      logger.warn(
-        `Live root node '${node.name}' was stopped because the caller stopped ` +
-          'reading its events.',
-      );
-    }
-  }
-}
 
 /** Which of the two merged streams produced a pulled result. */
 type MergeSource = 'root' | 'queue';
@@ -134,16 +95,10 @@ export async function* mergeLiveEventStreams(
       // still runs, as soon as that pull resolves. Nothing reads either outcome
       // now, so both are marked handled to keep a late root failure from
       // surfacing as an unhandled rejection.
-      rootPull.catch(ignoreOutcomeAfterStop);
-      stopped.catch(ignoreOutcomeAfterStop);
+      rootPull.catch(() => {});
+      stopped.catch(() => {});
     } else {
       await stopped;
     }
   }
 }
-
-/**
- * Discards the outcome of a root pull or stop request that no longer has a
- * reader, so the discard reads as deliberate rather than as a swallowed error.
- */
-function ignoreOutcomeAfterStop(): void {}

@@ -81,16 +81,17 @@ creates that queue for the whole run and merges it with the root's own stream,
 so a tool's events reach the caller in the order they are produced:
 
 ```ts
-import {BaseLlm, LlmAgent, NodeTool} from '@google/adk';
+import {BaseLlm, LlmAgent, NodeTool, Workflow} from '@google/adk';
 
-// `liveModel` is any model whose `connect()` opens a live session.
+// Any model whose `connect()` opens a live session.
 declare const liveModel: BaseLlm;
+// The wrapped node must declare an `inputSchema`; NodeTool derives the tool's
+// parameter schema from it.
+declare const reviewWorkflow: Workflow;
 
-const agent = new LlmAgent({
+export const host = new LlmAgent({
   name: 'host',
   model: liveModel,
-  // The wrapped node must declare an `inputSchema`; NodeTool derives the
-  // tool's parameter schema from it.
   tools: [new NodeTool(reviewWorkflow)],
 });
 ```

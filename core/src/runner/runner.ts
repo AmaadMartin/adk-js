@@ -49,7 +49,7 @@ import {
   RunnableRoot,
   runNodeAsInvocation,
 } from '../workflow/run_node_as_invocation.js';
-import {mergeLiveEventStreams, runNodeLive} from './live_node_runner.js';
+import {mergeLiveEventStreams} from './live_event_merge.js';
 
 /**
  * The configuration parameters for the Runner.
@@ -760,7 +760,7 @@ export class Runner {
               eventQueue,
               agent
                 ? requireAgent(invocationContext).runLive(invocationContext)
-                : runNodeLive(this.agent, invocationContext),
+                : runNodeAsInvocation(this.agent, invocationContext),
             );
 
             for await (const event of rootEvents) {
