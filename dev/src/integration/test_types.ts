@@ -45,6 +45,13 @@ export interface TestSpec {
 export interface LlmRecording {
   llmRequest?: LlmRequest;
   llmResponse?: LlmResponse;
+  /**
+   * Every response the model produced for `llmRequest`, in arrival order. SSE
+   * delivers a turn as a run of partial responses, so a streaming recording
+   * needs a list; adk-python's `LlmRecording.llm_responses` is the same field.
+   * `llmResponse` stays for the fixtures and the replay path that predate it.
+   */
+  llmResponses?: LlmResponse[];
 }
 
 export interface ToolRecording {
