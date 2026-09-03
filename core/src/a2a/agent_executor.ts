@@ -97,6 +97,8 @@ export type AfterExecuteCallback = (
 
 /**
  * Converts one ADK event into the A2A events that represent it.
+ *
+ * Returning an empty array publishes nothing for that ADK event.
  */
 export type AdkEventToA2AEventsConverter = (
   adkEvent: AdkEvent,
@@ -114,10 +116,10 @@ export interface AgentExecutorConfig {
   afterEventCallback?: AfterEventCallback;
   afterExecuteCallback?: AfterExecuteCallback;
 
-  /** Converts an inbound A2A part. Defaults to `toGenAIPart`. */
+  /** Converts one inbound A2A part. Defaults to `toGenAIPart`. */
   a2aPartConverter?: A2APartToGenAIPartConverter;
 
-  /** Converts an outbound GenAI part. Defaults to `toA2APart`. */
+  /** Converts one outbound GenAI part. Defaults to `toA2APart`. */
   genAiPartConverter?: GenAIPartToA2APartConverter;
 
   /**
@@ -161,6 +163,11 @@ export class A2AAgentExecutor implements AgentExecutor {
     ctx: RequestContext,
     eventBus: ExecutionEventBus,
   ): Promise<void> {
+    // Validated before anything else runs: a request with no message, task id
+    // or context id names no task to report a failure against, so it has to
+    // reject rather than publish one.
+    requireRequestContext(ctx);
+
     const reqCtx = await executeBeforeAgentInterceptors(
       ctx,
       this.config.executeInterceptors,
@@ -178,15 +185,21 @@ export class A2AAgentExecutor implements AgentExecutor {
     let executorContext: ExecutorContext | undefined;
     try {
       const runner = await getAdkRunner(this.config.runner);
-      const runRequest = (
+      let runRequest = (
         this.config.requestConverter ?? convertA2aRequestToAgentRunRequest
       )(reqCtx, this.config.a2aPartConverter ?? toGenAIPart);
-      const session = await getAdkSession(
+      const {session, created} = await getAdkSession(
         runRequest.userId,
         runRequest.sessionId,
         runner.sessionService,
         runner.appName,
       );
+      if (created) {
+        // The service can assign an id of its own to a session it creates, and
+        // the run has to address the session that now exists rather than the
+        // one that was asked for.
+        runRequest = {...runRequest, sessionId: session.id};
+      }
       executorContext = createExecutorContext({
         session,
         userContent: runRequest.newMessage,
@@ -548,27 +561,33 @@ function toError(e: unknown): Error {
 
 /**
  * Gets or creates new ADK session.
+ *
+ * `created` reports which of the two happened, because only a created session
+ * can carry an id the service chose instead of the one that was requested.
  */
 async function getAdkSession(
   userId: string,
   sessionId: string,
   sessionService: BaseSessionService,
   appName: string,
-): Promise<Session> {
+): Promise<{session: Session; created: boolean}> {
   const session = await sessionService.getSession({
     appName,
     userId,
     sessionId,
   });
   if (session) {
-    return session;
+    return {session, created: false};
   }
 
-  return sessionService.createSession({
-    appName,
-    userId,
-    sessionId,
-  });
+  return {
+    session: await sessionService.createSession({
+      appName,
+      userId,
+      sessionId,
+    }),
+    created: true,
+  };
 }
 
 /**

@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Message, Task, TaskStatusUpdateEvent} from '@a2a-js/sdk';
-import {
-  DefaultExecutionEventBus,
-  RequestContext,
-  ServerCallContext,
-} from '@a2a-js/sdk/server';
+import {Task, TaskStatusUpdateEvent} from '@a2a-js/sdk';
 import {
   A2AEvent,
   createEvent,
@@ -27,6 +22,7 @@ import {
   ExecuteInterceptor,
   requireRequestContext,
 } from '../../src/a2a/executor_utils.js';
+import {createEventBus, createRequestContext} from './fixtures.js';
 
 const adkEvent = createEvent({
   author: 'model',
@@ -34,66 +30,17 @@ const adkEvent = createEvent({
   actions: createEventActions(),
 });
 
-const DEFAULT_MESSAGE: Message = {
-  kind: 'message',
-  messageId: 'message-1',
-  role: 'user',
-  parts: [{kind: 'text', text: 'hello'}],
-};
-
 const executorContext = createExecutorContext({
   session: createSession({id: 'session-1', appName: 'app-1', userId: 'user-1'}),
   userContent: {role: 'user', parts: [{text: 'hello'}]},
   requestContext: createRequestContext(),
 });
 
-function createRequestContext({
-  userMessage = DEFAULT_MESSAGE,
-  taskId = 'task-1',
-  contextId = 'context-1',
-  task,
-  context,
-}: {
-  userMessage?: Message;
-  taskId?: string;
-  contextId?: string;
-  task?: Task;
-  context?: ServerCallContext;
-} = {}): RequestContext {
-  return new RequestContext(
-    userMessage,
-    taskId,
-    contextId,
-    task,
-    undefined,
-    context,
-  );
-}
-
-/**
- * A request the SDK's own type forbids: `userMessage` is required there, and
- * the guard under test exists for the context that arrives without one.
- */
-function createMessagelessRequestContext(): RequestContext {
-  return new RequestContext(
-    undefined as unknown as Message,
-    'task-1',
-    'context-1',
-  );
-}
-
-function createEventBus() {
-  const eventBus = new DefaultExecutionEventBus();
-  const publish = vi.spyOn(eventBus, 'publish');
-
-  return {eventBus, publish};
-}
-
 function createStatusUpdate(state: TaskState): TaskStatusUpdateEvent {
   return {
     kind: 'status-update',
-    taskId: 'task-1',
-    contextId: 'context-1',
+    taskId: 'test-task',
+    contextId: 'test-context',
     final: false,
     status: {state, timestamp: '2026-01-01T00:00:00.000Z'},
   };
@@ -102,14 +49,14 @@ function createStatusUpdate(state: TaskState): TaskStatusUpdateEvent {
 describe('requireRequestContext', () => {
   it('returns the task id and context id', () => {
     expect(requireRequestContext(createRequestContext())).toEqual({
-      taskId: 'task-1',
-      contextId: 'context-1',
+      taskId: 'test-task',
+      contextId: 'test-context',
     });
   });
 
   it('throws when the message is missing', () => {
     expect(() =>
-      requireRequestContext(createMessagelessRequestContext()),
+      requireRequestContext(createRequestContext({userMessage: undefined})),
     ).toThrow('message not provided');
   });
 
@@ -128,33 +75,33 @@ describe('requireRequestContext', () => {
 
 describe('enqueueSubmittedSignal', () => {
   it('publishes a leading submitted task for a new task', () => {
-    const {eventBus, publish} = createEventBus();
+    const eventBus = createEventBus();
     const ctx = createRequestContext();
 
     enqueueSubmittedSignal(ctx, eventBus);
 
-    expect(publish).toHaveBeenCalledTimes(1);
-    const task = publish.mock.calls[0][0] as Task;
+    expect(eventBus.publish).toHaveBeenCalledTimes(1);
+    const task = eventBus.publish.mock.calls[0][0] as Task;
     expect(task.kind).toBe('task');
-    expect(task.id).toBe('task-1');
-    expect(task.contextId).toBe('context-1');
+    expect(task.id).toBe('test-task');
+    expect(task.contextId).toBe('test-context');
     expect(task.status.state).toBe(TaskState.SUBMITTED);
   });
 
   it('publishes nothing when the task already exists', () => {
-    const {eventBus, publish} = createEventBus();
+    const eventBus = createEventBus();
     const ctx = createRequestContext({
       task: {
         kind: 'task',
-        id: 'task-1',
-        contextId: 'context-1',
+        id: 'test-task',
+        contextId: 'test-context',
         status: {state: TaskState.WORKING},
       },
     });
 
     enqueueSubmittedSignal(ctx, eventBus);
 
-    expect(publish).not.toHaveBeenCalled();
+    expect(eventBus.publish).not.toHaveBeenCalled();
   });
 });
 
@@ -190,7 +137,7 @@ describe('executeBeforeAgentInterceptors', () => {
       interceptors,
     );
 
-    expect(seen).toEqual(['task-1', 'first']);
+    expect(seen).toEqual(['test-task', 'first']);
     expect(result).toBe(second);
   });
 });

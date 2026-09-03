@@ -3,7 +3,8 @@
 `A2AAgentExecutor` runs an ADK agent for one Agent2Agent (A2A) request and
 publishes the run as A2A events. Reach for it when you serve an agent over A2A
 and need to control how a request maps onto a user and a session, what the
-server publishes for each ADK event, or how the task terminates.
+server publishes for each ADK event, or how the task terminates. `toA2a` builds
+one for you with the defaults.
 
 ## Introduction
 
@@ -35,26 +36,75 @@ stream before the real result arrives.
 ## Get started
 
 ```ts
-import {A2AAgentExecutor, InMemorySessionService, LlmAgent} from '@google/adk';
+import {DefaultRequestHandler, InMemoryTaskStore} from '@a2a-js/sdk/server';
+import {
+  A2AAgentExecutor,
+  getA2AAgentCard,
+  InMemorySessionService,
+  LlmAgent,
+} from '@google/adk';
+
+const agent = new LlmAgent({
+  name: 'greeter',
+  model: 'gemini-2.0-flash',
+  instruction: 'Greet the caller.',
+});
 
 const executor = new A2AAgentExecutor({
   runner: {
-    agent: new LlmAgent({name: 'greeter', model: 'gemini-2.0-flash'}),
-    appName: 'greeter',
+    agent,
+    appName: agent.name,
     sessionService: new InMemorySessionService(),
   },
 });
+
+const agentCard = await getA2AAgentCard(agent, [
+  {url: 'http://localhost:8000/a2a/jsonrpc', transport: 'JSONRPC'},
+]);
+const handler = new DefaultRequestHandler(
+  agentCard,
+  new InMemoryTaskStore(),
+  executor,
+);
 ```
 
-Pass the executor to the `@a2a-js/sdk` request handler you already use. For the
-default wiring — an Express app, an agent card and an in-memory session service
-— call `toA2a(agent, {...})` instead and skip the executor entirely.
+`toA2a` does this for you and mounts the Express routes. Build the executor
+yourself when you need the configuration below, which `toA2a` does not expose.
+
+## The event stream
+
+For a task the client does not yet hold, `execute` publishes, in order:
+
+1. a `Task` with state `submitted`;
+2. a non-final `working` status update carrying the app, user and session ids;
+3. the converted events, each non-final and `working`;
+4. optionally one `TaskArtifactUpdateEvent` with `lastChunk: true`;
+5. exactly one status update with `final: true`.
+
+Step 4 happens when nothing settled the task and the aggregated status message
+has parts. Those parts are republished as the final artifact, so a client that
+reads only artifacts still receives the answer, and the task then closes as
+`completed`. When something did settle the task, no artifact update is
+published and the terminal event carries the settled state and its message.
+
+The terminal event's metadata carries the app, user and session ids, plus the
+last ADK event's invocation id, author and event id.
 
 ## Attribute runs to an authenticated principal
 
 Behind an authenticating A2A server, the default converter already uses
-`requestContext.context.user.userName`. Supply your own converter when the user
-or the session comes from somewhere else:
+`requestContext.context.user.userName`. Otherwise the run is anonymous:
+
+```ts
+import {getUserId} from '@google/adk';
+
+// `A2A_USER_<contextId>` when the server has no authentication wired up,
+// otherwise `requestContext.context.user.userName`.
+const userId = getUserId(requestContext);
+```
+
+Supply your own converter when the user or the session comes from somewhere
+else:
 
 ```ts
 import {A2AAgentExecutor, toGenAIContent} from '@google/adk';
@@ -69,8 +119,15 @@ const executor = new A2AAgentExecutor({
 });
 ```
 
-The converter's `runConfig` is merged over the executor's own `runConfig`, so it
-can raise or lower per-request limits.
+The converter's second argument is the configured `a2aPartConverter`, so a
+custom converter can still reuse the part conversion. The converter's
+`runConfig` is merged over the executor's own `runConfig`, so it can raise or
+lower per-request limits.
+
+The session id the converter returns is the session the executor gets or
+creates. When the executor has to create it, the service can assign an id of its
+own, and the run addresses the session that now exists rather than the one that
+was asked for.
 
 ## Rewrite what the server publishes
 
@@ -116,3 +173,16 @@ has already accepted.
 One limit is worth knowing. The executor can only cancel a task it is running
 right now. It holds one entry per in-flight execution, and throws for a task id
 it does not hold.
+
+## Failure handling
+
+A request with no message, task id or context id rejects the returned promise
+and publishes nothing: there is no task to report a failure against. The
+executor checks this before it runs a `beforeAgent` interceptor, and again on
+the context that interceptor returned.
+
+Every failure after that point — runner resolution, request conversion, session
+creation, the run, event conversion, an interceptor — is logged and published as
+a terminal `failed` status update whose text reads
+`Agent run failed: <message>`. A throwing `afterExecuteCallback` is logged and
+swallowed, and the terminal event is still published.

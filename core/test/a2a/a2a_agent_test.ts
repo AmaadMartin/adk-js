@@ -12,7 +12,6 @@ import {
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
 import {ClientFactory} from '@a2a-js/sdk/client';
-import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
   Event as AdkEvent,
@@ -32,6 +31,11 @@ import {
 import {Language, Outcome} from '@google/genai';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {A2AEvent} from '../../src/a2a/a2a_event.js';
+import {
+  createEventBus,
+  createRequestContext,
+  SpiedEventBus,
+} from './fixtures.js';
 
 vi.mock('@a2a-js/sdk/client', () => {
   const Client = vi.fn().mockImplementation(() => ({
@@ -74,7 +78,7 @@ class MockRunner extends Runner {
 
 describe('A2A Agent Executor', () => {
   let mockSessionService: BaseSessionService;
-  let mockEventBus: ExecutionEventBus;
+  let mockEventBus: SpiedEventBus;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -88,9 +92,7 @@ describe('A2A Agent Executor', () => {
       appendEvent: vi.fn(),
     } as unknown as BaseSessionService;
 
-    mockEventBus = {
-      publish: vi.fn(),
-    } as unknown as ExecutionEventBus;
+    mockEventBus = createEventBus();
 
     const mockSession = {
       id: 'session-id',
@@ -101,15 +103,6 @@ describe('A2A Agent Executor', () => {
     } as unknown as Session;
     (mockSessionService.getSession as Mock).mockResolvedValue(mockSession);
   });
-
-  const createRequestContext = (overrides = {}): RequestContext => {
-    return {
-      contextId: 'test-context',
-      taskId: 'test-task',
-      userMessage: {role: 'user', parts: [{kind: 'text', text: 'hello'}]},
-      ...overrides,
-    } as unknown as RequestContext;
-  };
 
   const runTest = async (remoteEvents: AdkEvent[]): Promise<A2AEvent[]> => {
     const executor = new A2AAgentExecutor({
@@ -125,7 +118,7 @@ describe('A2A Agent Executor', () => {
 
     const ctx = createRequestContext();
     await executor.execute(ctx, mockEventBus);
-    return (mockEventBus.publish as Mock).mock.calls.map(
+    return mockEventBus.publish.mock.calls.map(
       (call: unknown[]) => call[0] as A2AEvent,
     );
   };
