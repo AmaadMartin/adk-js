@@ -337,14 +337,14 @@ describe('A2AAgentExecutor', () => {
     }) as unknown as () => Runner);
   };
 
+  const runnerConfig = () =>
+    ({
+      appName: 'test-app',
+      sessionService: mockSessionService,
+    }) as unknown as RunnerConfig;
+
   const createExecutor = (config: Partial<AgentExecutorConfig> = {}) =>
-    new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
-      ...config,
-    });
+    new A2AAgentExecutor({runner: runnerConfig(), ...config});
 
   const modelEvent = (text: string): AdkEvent =>
     createEvent({
@@ -956,13 +956,7 @@ describe('A2AAgentExecutor', () => {
       const runAsync = vi.fn(async function* () {});
       mockRunner(runAsync);
 
-      const executor = new A2AAgentExecutor({
-        runner: () =>
-          ({
-            appName: 'test-app',
-            sessionService: mockSessionService,
-          }) as unknown as RunnerConfig,
-      });
+      const executor = new A2AAgentExecutor({runner: () => runnerConfig()});
       await executor.execute(createRequestContext(), mockEventBus);
 
       expect(runAsync).toHaveBeenCalledTimes(1);
@@ -974,11 +968,7 @@ describe('A2AAgentExecutor', () => {
       mockRunner(runAsync);
 
       const executor = new A2AAgentExecutor({
-        runner: async () =>
-          ({
-            appName: 'test-app',
-            sessionService: mockSessionService,
-          }) as unknown as RunnerConfig,
+        runner: async () => runnerConfig(),
       });
       await executor.execute(createRequestContext(), mockEventBus);
 
