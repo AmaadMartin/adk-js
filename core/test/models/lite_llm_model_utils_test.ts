@@ -10,6 +10,9 @@ import {describe, expect, it} from 'vitest';
 import {
   finishReasonToErrorMessage,
   getProviderFromModel,
+  isAnthropicModel,
+  isAnthropicProvider,
+  isAnthropicRoute,
   isFileUriSupported,
   isGemma4Model,
   isHttpUrl,
@@ -247,4 +250,54 @@ describe('redactFileUriForLog', () => {
       ),
     ).toBe('https://<redacted>/report.pdf');
   });
+});
+
+describe('isAnthropicProvider', () => {
+  it.each([
+    ['anthropic', true],
+    ['bedrock', true],
+    ['vertex_ai', true],
+    ['ANTHROPIC', true],
+    ['openai', false],
+    ['', false],
+  ])('reports %s as %s', (provider: string, expected: boolean) => {
+    expect(isAnthropicProvider(provider)).toBe(expected);
+  });
+});
+
+describe('isAnthropicModel', () => {
+  it.each([
+    ['anthropic/claude-4-sonnet', true],
+    ['anthropic/claude-3-5-sonnet-20241022', true],
+    ['Anthropic/Claude-4-Opus', true],
+    ['bedrock/anthropic.claude-3-5-sonnet', true],
+    ['bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0', true],
+    ['bedrock/claude-3-5-sonnet', true],
+    ['vertex_ai/claude-3-5-sonnet@20241022', true],
+    ['litellm_proxy/anthropic/claude-4-sonnet', true],
+    ['openai/gpt-4o', false],
+    ['gemini/gemini-2.5-pro', false],
+    ['vertex_ai/gemini-2.5-flash', false],
+    ['bedrock/amazon.titan-text-express-v1', false],
+  ])('reports %s as %s', (model: string, expected: boolean) => {
+    expect(isAnthropicModel(model)).toBe(expected);
+  });
+});
+
+describe('isAnthropicRoute', () => {
+  it.each([
+    ['anthropic', 'anthropic/claude-3-5-sonnet', true],
+    ['anthropic', '', true],
+    ['bedrock', 'bedrock/anthropic.claude-3-5-sonnet', true],
+    ['bedrock', 'bedrock/meta.llama3-70b-instruct-v1:0', false],
+    ['vertex_ai', 'vertex_ai/claude-3-5-sonnet@20241022', true],
+    ['vertex_ai', 'vertex_ai/gemini-2.5-flash', false],
+    ['openai', 'openai/gpt-4o', false],
+    ['', '', false],
+  ])(
+    'reports provider %s with model %s as %s',
+    (provider: string, model: string, expected: boolean) => {
+      expect(isAnthropicRoute(provider, model)).toBe(expected);
+    },
+  );
 });

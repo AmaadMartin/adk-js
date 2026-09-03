@@ -33,6 +33,8 @@ import {logger} from '../utils/logger.js';
 import {extractSystemInstruction} from './interactions_utils.js';
 import {
   getProviderFromModel,
+  isAnthropicModel,
+  isAnthropicRoute,
   isFileUriSupported,
   isGemma4Model,
   isHttpUrl,
@@ -47,6 +49,7 @@ import {
   GenerationParams,
   MessageContent,
   MessageRole,
+  ThinkingBlock,
   ToolCall,
   ToolChoice,
   ToolParam,
@@ -154,6 +157,36 @@ export function mergeReasoningTexts(parts: Part[]): string {
     }
   }
   return texts.join('');
+}
+
+/**
+ * Rejoins the streaming fragments of an Anthropic thinking block.
+ *
+ * Anthropic splits one thinking block across many deltas: text-only chunks,
+ * then a signature-only chunk at block stop. Text accumulates until a part
+ * carries a signature, which flushes the accumulated text as one part under
+ * that signature. Trailing text with no signature flushes as a final part.
+ */
+export function aggregateStreamingThoughtParts(parts: Part[]): Part[] {
+  const aggregated: Part[] = [];
+  let texts: string[] = [];
+  for (const part of parts) {
+    if (part.text) {
+      texts.push(part.text);
+    }
+    if (part.thoughtSignature) {
+      aggregated.push({
+        text: texts.join(''),
+        thought: true,
+        thoughtSignature: part.thoughtSignature,
+      });
+      texts = [];
+    }
+  }
+  if (texts.length > 0) {
+    aggregated.push({text: texts.join(''), thought: true});
+  }
+  return aggregated;
 }
 
 /** Maps a genai content role onto a chat-completions role. */
@@ -396,12 +429,67 @@ function assistantMessage(
   ) {
     content = content[0].text;
   }
+  const toolCallsField = toolCalls.length > 0 ? toolCalls : undefined;
+
+  // A Claude model takes its thinking as a top-level array. Only a block with
+  // both text and a signature survives Anthropic's multi-turn validation.
+  if (options.model && isAnthropicModel(options.model)) {
+    const thinkingBlocks: ThinkingBlock[] = [];
+    for (const part of aggregateStreamingThoughtParts(reasoningParts)) {
+      if (part.text && part.thoughtSignature) {
+        thinkingBlocks.push({
+          type: 'thinking',
+          thinking: part.text,
+          signature: part.thoughtSignature,
+        });
+      }
+    }
+    if (thinkingBlocks.length > 0) {
+      return {
+        role: 'assistant',
+        content: content ?? null,
+        tool_calls: toolCallsField,
+        thinking_blocks: thinkingBlocks,
+      };
+    }
+  }
+
+  // Any route that reaches Claude takes its thinking as leading content
+  // blocks: LiteLLM's Anthropic template drops the top-level reasoning field,
+  // so thinking would vanish from a multi-turn history.
+  if (
+    reasoningParts.length > 0 &&
+    isAnthropicRoute(options.provider, options.model)
+  ) {
+    const blocks: ContentObject[] = [];
+    for (const part of reasoningParts) {
+      if (!part.text) {
+        continue;
+      }
+      const block: ThinkingBlock = {type: 'thinking', thinking: part.text};
+      if (part.thoughtSignature) {
+        block.signature = part.thoughtSignature;
+      }
+      blocks.push(block);
+    }
+    if (Array.isArray(content)) {
+      blocks.push(...content);
+    } else if (content) {
+      blocks.push({type: 'text', text: content});
+    }
+    return {
+      role: 'assistant',
+      content: blocks.length > 0 ? blocks : null,
+      tool_calls: toolCallsField,
+    };
+  }
+
   const reasoningContent = mergeReasoningTexts(reasoningParts);
 
   return {
     role: 'assistant',
     content: content ?? null,
-    tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+    tool_calls: toolCallsField,
     reasoning_content: reasoningContent || undefined,
   };
 }

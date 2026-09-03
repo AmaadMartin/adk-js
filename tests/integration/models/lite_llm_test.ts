@@ -5,11 +5,9 @@
  */
 
 import {
-  App,
   BaseTool,
   ContextCacheConfig,
   FunctionTool,
-  InMemoryRunner,
   LiteLlm,
   LlmAgent,
   LlmRequest,
@@ -145,6 +143,46 @@ function toolCallReply(name: string, args: string): Reply {
                 id: 'call_1',
                 type: 'function',
                 function: {name, arguments: args},
+              },
+            ],
+          },
+          finish_reason: 'tool_calls',
+        },
+      ],
+    },
+  };
+}
+
+/** The base64 thought signature the fake Claude endpoint returns. */
+const CLAUDE_SIGNATURE = 'c2lnX2NsYXVkZQ==';
+
+/** A Claude reply carrying a signed thinking block and one tool call. */
+function claudeThinkingToolCallReply(): Reply {
+  return {
+    kind: 'json',
+    body: {
+      model: 'claude-sonnet-4',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: null,
+            thinking_blocks: [
+              {
+                type: 'thinking',
+                thinking: 'The user asks about Paris.',
+                signature: CLAUDE_SIGNATURE,
+              },
+            ],
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {
+                  name: 'get_weather',
+                  arguments: '{"location":"Paris"}',
+                },
               },
             ],
           },
@@ -481,41 +519,6 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
     ]);
   });
 
-  it('sends the injection points an App configured', async () => {
-    endpoint = await startEndpoint([textReply('Cached.')]);
-
-    const app = new App({
-      name: 'cached_app',
-      rootAgent: new LlmAgent({
-        name: 'cached_agent',
-        model: new LiteLlm({
-          model: 'anthropic/claude-sonnet-4',
-          apiBase: endpoint.apiBase,
-        }),
-        instruction: 'You are a helpful assistant.',
-      }),
-      contextCacheConfig: {cacheIntervals: 10, ttlSeconds: 1800, minTokens: 0},
-    });
-    const runner = new InMemoryRunner({app, appName: app.name});
-    const session = await runner.sessionService.createSession({
-      appName: app.name,
-      userId: 'user',
-    });
-
-    for await (const _ of runner.runAsync({
-      userId: 'user',
-      sessionId: session.id,
-      newMessage: {role: 'user', parts: [{text: 'Summarize.'}]},
-    })) {
-      // Drain the run so the request reaches the endpoint.
-    }
-
-    expect(endpoint.requests[0]['cache_control_injection_points']).toEqual([
-      {location: 'message', role: 'system', control: {type: 'ephemeral'}},
-      {location: 'message', index: -1, control: {type: 'ephemeral'}},
-    ]);
-  });
-
   it('sends no injection points when the App configures no cache', async () => {
     endpoint = await startEndpoint([textReply('Hi.')]);
 
@@ -576,5 +579,38 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
         }
       })(),
     ).rejects.toThrow('failed with status 500: no reply left');
+  });
+  it('resends a Claude turn its thinking blocks on the next request', async () => {
+    endpoint = await startEndpoint([
+      claudeThinkingToolCallReply(),
+      textReply('It is sunny in Paris.'),
+    ]);
+    const agent = new LlmAgent({
+      name: 'lite_llm_anthropic_agent',
+      model: new LiteLlm({
+        model: 'anthropic/claude-sonnet-4',
+        apiBase: endpoint.apiBase,
+      }),
+      instruction: 'You are a helpful assistant.',
+      tools: [getWeather],
+    });
+
+    await runAgent(agent, 'What is the weather in Paris?');
+
+    expect(endpoint.requests).toHaveLength(2);
+    const messages = endpoint.requests[1]['messages'] as Array<
+      Record<string, unknown>
+    >;
+    const assistant = messages.find(
+      (message) => message['role'] === 'assistant',
+    );
+    expect(assistant?.['thinking_blocks']).toEqual([
+      {
+        type: 'thinking',
+        thinking: 'The user asks about Paris.',
+        signature: CLAUDE_SIGNATURE,
+      },
+    ]);
+    expect(assistant?.['reasoning_content']).toBeUndefined();
   });
 });

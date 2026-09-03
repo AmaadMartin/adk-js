@@ -71,13 +71,25 @@ export interface FileContentObject {
   file: FileUrlObject;
 }
 
+/**
+ * An Anthropic thinking block. Claude reads these both as a top-level
+ * `thinking_blocks` array and as a block inside a message content list. The
+ * signature is required for a block to survive into a multi-turn history.
+ */
+export interface ThinkingBlock {
+  type: 'thinking';
+  thinking: string;
+  signature?: string;
+}
+
 /** One block of a multipart message content. */
 export type ContentObject =
   | TextContentObject
   | ImageContentObject
   | VideoContentObject
   | AudioContentObject
-  | FileContentObject;
+  | FileContentObject
+  | ThinkingBlock;
 
 /** A message content: a bare string, or a list of typed blocks. */
 export type MessageContent = string | ContentObject[];
