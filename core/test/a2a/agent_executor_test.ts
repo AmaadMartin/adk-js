@@ -685,6 +685,26 @@ describe('A2AAgentExecutor', () => {
         }),
       );
     });
+
+    it('seeds the run with the state delta the converter supplied', async () => {
+      mockSessionService.getSession.mockResolvedValue(testSession());
+      const runAsync = vi.fn(async function* () {});
+      mockRunner(runAsync);
+
+      const executor = createExecutor({
+        requestConverter: (request) => ({
+          userId: 'u',
+          sessionId: request.contextId,
+          newMessage: {role: 'user', parts: [{text: 'x'}]},
+          stateDelta: {tenant: 'acme'},
+        }),
+      });
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(runAsync).toHaveBeenCalledWith(
+        expect.objectContaining({stateDelta: {tenant: 'acme'}}),
+      );
+    });
   });
 
   describe('interceptors', () => {
