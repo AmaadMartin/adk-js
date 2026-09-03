@@ -222,6 +222,31 @@ export type AfterModelCallback =
   | SingleAfterModelCallback[];
 
 /**
+ * A callback that runs when a model call raises an error.
+ *
+ * @param params.context The current callback context.
+ * @param params.request The model request that failed.
+ * @param params.error The error the model call raised.
+ * @returns The response to return to the user. When present, the error is
+ *     ignored and this response is returned instead.
+ */
+export type SingleOnModelErrorCallback = (params: {
+  context: Context;
+  request: LlmRequest;
+  error: Error;
+}) => LlmResponse | undefined | Promise<LlmResponse | undefined>;
+
+/**
+ * A single callback or a list of callbacks.
+ *
+ * When a list of callbacks is provided, the callbacks will be called in the
+ * order they are listed until a callback does not return None.
+ */
+export type OnModelErrorCallback =
+  | SingleOnModelErrorCallback
+  | SingleOnModelErrorCallback[];
+
+/**
  * A callback that runs before a tool is called.
  *
  * @param params.tool The tool to be called.
@@ -277,6 +302,36 @@ export type SingleAfterToolCallback = (params: {
 export type AfterToolCallback =
   | SingleAfterToolCallback
   | SingleAfterToolCallback[];
+
+/**
+ * A callback that runs when a tool call raises an error.
+ *
+ * @param params.tool The tool that was called.
+ * @param params.args The arguments to the tool.
+ * @param params.context Context for the tool call.
+ * @param params.error The error the tool call raised.
+ * @returns The tool result to return. When present, the error is ignored and
+ *     this result answers the call instead.
+ */
+export type SingleOnToolErrorCallback = (params: {
+  tool: BaseTool;
+  args: Record<string, unknown>;
+  context: Context;
+  error: Error;
+}) =>
+  | Record<string, unknown>
+  | undefined
+  | Promise<Record<string, unknown> | undefined>;
+
+/**
+ * A single callback or a list of callbacks.
+ *
+ * When a list of callbacks is provided, the callbacks will be called in the
+ * order they are listed until a callback does not return None.
+ */
+export type OnToolErrorCallback =
+  | SingleOnToolErrorCallback
+  | SingleOnToolErrorCallback[];
 
 /** A list of examples or an example provider. */
 export type ExamplesUnion = Example[] | BaseExampleProvider;
@@ -384,6 +439,11 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   afterModelCallback?: AfterModelCallback;
 
   /**
+   * Callbacks to be called when a model call raises an error.
+   */
+  onModelErrorCallback?: OnModelErrorCallback;
+
+  /**
    * Callbacks to be called before calling the tool.
    */
   beforeToolCallback?: BeforeToolCallback;
@@ -392,6 +452,11 @@ export interface LlmAgentConfig extends BaseAgentConfig {
    * Callbacks to be called after calling the tool.
    */
   afterToolCallback?: AfterToolCallback;
+
+  /**
+   * Callbacks to be called when a tool call raises an error.
+   */
+  onToolErrorCallback?: OnToolErrorCallback;
 
   /**
    * Processors to run before the LLM request is sent.
@@ -602,8 +667,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   private _finishTaskTool?: FinishTaskTool;
   beforeModelCallback?: BeforeModelCallback;
   afterModelCallback?: AfterModelCallback;
+  onModelErrorCallback?: OnModelErrorCallback;
   beforeToolCallback?: BeforeToolCallback;
   afterToolCallback?: AfterToolCallback;
+  onToolErrorCallback?: OnToolErrorCallback;
   requestProcessors: BaseLlmRequestProcessor[];
   responseProcessors: BaseLlmResponseProcessor[];
   codeExecutor?: BaseCodeExecutor;
@@ -643,8 +710,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.outputKey = config.outputKey;
     this.beforeModelCallback = config.beforeModelCallback;
     this.afterModelCallback = config.afterModelCallback;
+    this.onModelErrorCallback = config.onModelErrorCallback;
     this.beforeToolCallback = config.beforeToolCallback;
     this.afterToolCallback = config.afterToolCallback;
+    this.onToolErrorCallback = config.onToolErrorCallback;
     this.codeExecutor = config.codeExecutor;
 
     // TODO - b/425992518: Define these processor arrays.
@@ -939,6 +1008,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   /**
+   * The resolved onModelErrorCallback field as a list of
+   * SingleOnModelErrorCallback.
+   *
+   * This method is only for use by Agent Development Kit.
+   */
+  get canonicalOnModelErrorCallbacks(): SingleOnModelErrorCallback[] {
+    return LlmAgent.normalizeCallbackArray(this.onModelErrorCallback);
+  }
+
+  /**
    * The resolved beforeToolCallback field as a list of
    * BeforeToolCallback.
    *
@@ -955,6 +1034,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    */
   get canonicalAfterToolCallbacks(): SingleAfterToolCallback[] {
     return LlmAgent.normalizeCallbackArray(this.afterToolCallback);
+  }
+
+  /**
+   * The resolved onToolErrorCallback field as a list of
+   * SingleOnToolErrorCallback.
+   *
+   * This method is only for use by Agent Development Kit.
+   */
+  get canonicalOnToolErrorCallbacks(): SingleOnToolErrorCallback[] {
+    return LlmAgent.normalizeCallbackArray(this.onToolErrorCallback);
   }
 
   /**
@@ -1626,6 +1715,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       toolsDict: llmRequest.toolsDict,
       beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
       afterToolCallbacks: this.canonicalAfterToolCallbacks,
+      onToolErrorCallbacks: this.canonicalOnToolErrorCallbacks,
     });
     if (!functionResponseEvent) {
       return;
@@ -1901,6 +1991,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           toolsDict: llmRequest.toolsDict,
           beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
           afterToolCallbacks: this.canonicalAfterToolCallbacks,
+          onToolErrorCallbacks: this.canonicalOnToolErrorCallbacks,
         });
         return {event};
       } catch (error) {
@@ -2139,6 +2230,47 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     return undefined;
   }
 
+  /**
+   * Offers a failed model call to the plugins, then to this agent's own
+   * on-model-error callbacks.
+   *
+   * @returns The first response offered, or undefined when none recovers the
+   *     error.
+   */
+  private async handleOnModelError(
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+    error: Error,
+    modelResponseEvent: Event,
+  ): Promise<LlmResponse | undefined> {
+    const callbackContext = new Context({
+      invocationContext,
+      eventActions: modelResponseEvent.actions,
+    });
+
+    const pluginResponse =
+      await invocationContext.pluginManager.runOnModelErrorCallback({
+        callbackContext,
+        llmRequest,
+        error,
+      });
+    if (pluginResponse) {
+      return pluginResponse;
+    }
+
+    for (const callback of this.canonicalOnModelErrorCallbacks) {
+      const callbackResponse = await callback({
+        context: callbackContext,
+        request: llmRequest,
+        error,
+      });
+      if (callbackResponse) {
+        return callbackResponse;
+      }
+    }
+    return undefined;
+  }
+
   protected async *runAndHandleError<T extends LlmResponse | Event>(
     responseGenerator: AsyncGenerator<T, void, void>,
     invocationContext: InvocationContext,
@@ -2156,20 +2288,15 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     } catch (modelError: unknown) {
       // Return an LlmResponse with error details.
       // Note: this will cause agent to work better if there's a loop.
-      const callbackContext = new Context({
-        invocationContext,
-        eventActions: modelResponseEvent.actions,
-      });
-
       // Wrapped LLM should throw Error-typed errors
       if (modelError instanceof Error) {
-        // Try plugins to recover from the error
-        const onModelErrorCallbackResponse =
-          await invocationContext.pluginManager.runOnModelErrorCallback({
-            callbackContext: callbackContext,
-            llmRequest: llmRequest,
-            error: modelError as Error,
-          });
+        // Try the plugins, then this agent's callbacks, to recover.
+        const onModelErrorCallbackResponse = await this.handleOnModelError(
+          invocationContext,
+          llmRequest,
+          modelError,
+          modelResponseEvent,
+        );
 
         if (onModelErrorCallbackResponse) {
           yield onModelErrorCallbackResponse as T;

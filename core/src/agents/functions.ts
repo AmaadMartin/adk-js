@@ -38,6 +38,7 @@ import {
 import {
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
+  SingleOnToolErrorCallback,
 } from './llm_agent.js';
 
 /**
@@ -280,6 +281,7 @@ export async function handleFunctionCallsAsync({
   toolsDict,
   beforeToolCallbacks,
   afterToolCallbacks,
+  onToolErrorCallbacks,
   filters,
   toolConfirmationDict,
   resumeInputsDict,
@@ -289,6 +291,7 @@ export async function handleFunctionCallsAsync({
   toolsDict: Record<string, BaseTool>;
   beforeToolCallbacks: SingleBeforeToolCallback[];
   afterToolCallbacks: SingleAfterToolCallback[];
+  onToolErrorCallbacks?: SingleOnToolErrorCallback[];
   filters?: Set<string>;
   toolConfirmationDict?: Record<string, ToolConfirmation>;
   resumeInputsDict?: Record<string, ResumeInputs>;
@@ -300,10 +303,57 @@ export async function handleFunctionCallsAsync({
     toolsDict: toolsDict,
     beforeToolCallbacks: beforeToolCallbacks,
     afterToolCallbacks: afterToolCallbacks,
+    onToolErrorCallbacks: onToolErrorCallbacks,
     filters: filters,
     toolConfirmationDict: toolConfirmationDict,
     resumeInputsDict: resumeInputsDict,
   });
+}
+
+/**
+ * Offers a failed tool call to the plugins, then to the agent's own
+ * on-tool-error callbacks.
+ *
+ * @returns The first result offered, or undefined when none answers the call.
+ */
+async function runOnToolErrorCallbacks({
+  invocationContext,
+  onToolErrorCallbacks,
+  tool,
+  functionArgs,
+  toolContext,
+  error,
+}: {
+  invocationContext: InvocationContext;
+  onToolErrorCallbacks: SingleOnToolErrorCallback[];
+  tool: BaseTool;
+  functionArgs: Record<string, unknown>;
+  toolContext: Context;
+  error: Error;
+}): Promise<Record<string, unknown> | undefined> {
+  const pluginResponse =
+    await invocationContext.pluginManager.runOnToolErrorCallback({
+      tool,
+      toolArgs: functionArgs,
+      toolContext,
+      error,
+    });
+  if (pluginResponse != null) {
+    return pluginResponse;
+  }
+
+  for (const callback of onToolErrorCallbacks) {
+    const callbackResponse = await callback({
+      tool,
+      args: functionArgs,
+      context: toolContext,
+      error,
+    });
+    if (callbackResponse != null) {
+      return callbackResponse;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -389,11 +439,13 @@ async function answerUnresolvableCall({
   functionCall,
   toolsDict,
   toolContext,
+  onToolErrorCallbacks,
 }: {
   invocationContext: InvocationContext;
   functionCall: FunctionCall;
   toolsDict: Record<string, BaseTool>;
   toolContext: Context;
+  onToolErrorCallbacks: SingleOnToolErrorCallback[];
 }): Promise<Event> {
   // The sibling path opens `execute_tool <name>` inside `callToolAsync`.
   // Without this an unresolvable call is the one tool interaction that
@@ -408,13 +460,14 @@ async function answerUnresolvableCall({
         );
         const tool = new ToolNotFoundPlaceholder(toolName, error);
 
-        const onToolErrorResponse =
-          await invocationContext.pluginManager.runOnToolErrorCallback({
-            tool,
-            toolArgs: functionCall.args ?? {},
-            toolContext,
-            error,
-          });
+        const onToolErrorResponse = await runOnToolErrorCallbacks({
+          invocationContext,
+          onToolErrorCallbacks,
+          tool,
+          functionArgs: functionCall.args ?? {},
+          toolContext,
+          error,
+        });
 
         if (onToolErrorResponse == null) {
           // Only an unhandled failure is the operator's problem; a plugin that
@@ -455,6 +508,7 @@ export async function handleFunctionCallList({
   toolsDict,
   beforeToolCallbacks,
   afterToolCallbacks,
+  onToolErrorCallbacks = [],
   filters,
   toolConfirmationDict,
   resumeInputsDict,
@@ -464,6 +518,12 @@ export async function handleFunctionCallList({
   toolsDict: Record<string, BaseTool>;
   beforeToolCallbacks: SingleBeforeToolCallback[];
   afterToolCallbacks: SingleAfterToolCallback[];
+  /**
+   * Callbacks the agent offers a failed tool call to, after the plugins
+   * declined it. Empty for a caller that runs tool calls outside an agent
+   * turn, such as an auth or confirmation processor.
+   */
+  onToolErrorCallbacks?: SingleOnToolErrorCallback[];
   filters?: Set<string>;
   toolConfirmationDict?: Record<string, ToolConfirmation>;
   /**
@@ -513,6 +573,7 @@ export async function handleFunctionCallList({
           functionCall,
           toolsDict,
           toolContext,
+          onToolErrorCallbacks,
         }),
       );
       continue;
@@ -560,13 +621,14 @@ export async function handleFunctionCallList({
         functionResponse = await callToolAsync(tool, functionArgs, toolContext);
       } catch (e: unknown) {
         if (e instanceof Error) {
-          const onToolErrorResponse =
-            await invocationContext.pluginManager.runOnToolErrorCallback({
-              tool: tool,
-              toolArgs: functionArgs,
-              toolContext: toolContext,
-              error: e,
-            });
+          const onToolErrorResponse = await runOnToolErrorCallbacks({
+            invocationContext,
+            onToolErrorCallbacks,
+            tool,
+            functionArgs,
+            toolContext,
+            error: e,
+          });
 
           // Set function response to the result of the error callback and
           // continue execution, do not shortcut

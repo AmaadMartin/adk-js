@@ -95,6 +95,8 @@ const LLM_AGENT_CONFIG_KEY_FLAGS = {
   mode: true,
   model: true,
   name: true,
+  onModelErrorCallback: true,
+  onToolErrorCallback: true,
   outputKey: true,
   outputSchema: true,
   parentAgent: true,
