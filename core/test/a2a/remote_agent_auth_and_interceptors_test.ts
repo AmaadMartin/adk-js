@@ -468,6 +468,59 @@ describe('RemoteA2AAgent authentication and interceptors', () => {
     });
   });
 
+  describe('failures', () => {
+    it('reports a send failure with the a2a error metadata', async () => {
+      vi.mocked(mockClient.sendMessageStream).mockImplementation(() => {
+        throw new Error('connection reset');
+      });
+      const agent = new RemoteA2AAgent({
+        name: 'remote_agent',
+        agentCard: CARD_URL,
+        clientFactory: mockClientFactory,
+      });
+
+      const {events} = await run(agent);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].errorMessage).toBe(
+        'A2A request failed: connection reset',
+      );
+      expect(events[0].customMetadata).toEqual({
+        'a2a:error': 'A2A request failed: connection reset',
+      });
+    });
+
+    it('records the status code an HTTP failure carries', async () => {
+      vi.mocked(mockClient.sendMessageStream).mockImplementation(() => {
+        throw Object.assign(new Error('forbidden'), {status: 403});
+      });
+      const agent = new RemoteA2AAgent({
+        name: 'remote_agent',
+        agentCard: CARD_URL,
+        clientFactory: mockClientFactory,
+      });
+
+      const {events} = await run(agent);
+
+      expect(events[0].customMetadata?.['a2a:status_code']).toBe(403);
+    });
+
+    it('ignores a status that is not a number', async () => {
+      vi.mocked(mockClient.sendMessageStream).mockImplementation(() => {
+        throw Object.assign(new Error('odd'), {status: 'teapot'});
+      });
+      const agent = new RemoteA2AAgent({
+        name: 'remote_agent',
+        agentCard: CARD_URL,
+        clientFactory: mockClientFactory,
+      });
+
+      const {events} = await run(agent);
+
+      expect(events[0].customMetadata?.['a2a:status_code']).toBeUndefined();
+    });
+  });
+
   describe('timeout and converters', () => {
     it('bounds the send with an abort signal', async () => {
       const agent = new RemoteA2AAgent({
@@ -481,6 +534,50 @@ describe('RemoteA2AAgent authentication and interceptors', () => {
 
       expect(sentOptions()?.signal).toBeInstanceOf(AbortSignal);
       expect(sentOptions()?.signal?.aborted).toBe(false);
+    });
+
+    it('streams from a client supplied without a card', async () => {
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {
+          yield {
+            kind: 'message',
+            messageId: 'm-1',
+            role: 'agent',
+            parts: [{kind: 'text', text: 'response'}],
+          } as Message;
+        })(),
+      );
+      const agent = new RemoteA2AAgent({
+        name: 'remote_agent',
+        client: mockClient,
+      });
+
+      const {events} = await run(agent);
+
+      expect(events[0].content?.parts?.[0].text).toBe('response');
+    });
+
+    it('sends without streaming when the card refuses it', async () => {
+      vi.mocked(mockResolver.resolve).mockResolvedValue({
+        ...CARD,
+        capabilities: {streaming: false},
+      });
+      vi.mocked(mockClient.sendMessage).mockResolvedValue({
+        kind: 'message',
+        messageId: 'm-1',
+        role: 'agent',
+        parts: [{kind: 'text', text: 'blocking'}],
+      } as Message);
+      const agent = new RemoteA2AAgent({
+        name: 'remote_agent',
+        agentCard: CARD_URL,
+        clientFactory: mockClientFactory,
+      });
+
+      const {events} = await run(agent);
+
+      expect(mockClient.sendMessageStream).not.toHaveBeenCalled();
+      expect(events[0].content?.parts?.[0].text).toBe('blocking');
     });
 
     it('uses a caller-supplied outgoing part converter', async () => {

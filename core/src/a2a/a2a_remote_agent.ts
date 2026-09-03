@@ -29,7 +29,7 @@ import {MessageRole} from './a2a_event.js';
 import {
   buildAuthInterceptors,
   deriveCredentialKey,
-  namesItsOwnCredentialKey,
+  namedCredentialKey,
   resolveAuthCredential,
 } from './a2a_remote_agent_auth.js';
 import {
@@ -55,7 +55,10 @@ import {
 } from './agent_card.js';
 import {validateAgentCard} from './agent_card_validation.js';
 import {toAdkEvent} from './event_converter_utils.js';
-import {getA2ASessionMetadata} from './metadata_converter_utils.js';
+import {
+  A2AErrorMetadataKeys,
+  getA2ASessionMetadata,
+} from './metadata_converter_utils.js';
 import {
   A2APartToGenAIPartConverter,
   GenAIPartToA2APartConverter,
@@ -190,6 +193,18 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
 }
 
 /**
+ * The HTTP status code a thrown value carries, when it carries one. A transport
+ * error from the A2A client reports the response status this way.
+ */
+function httpStatusCode(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null || !('status' in err)) {
+    return undefined;
+  }
+  const {status} = err;
+  return typeof status === 'number' ? status : undefined;
+}
+
+/**
  * Fills an empty description from a card supplied directly.
  *
  * A card object never goes through the resolution path, so it is adopted here
@@ -252,16 +267,12 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         rawAuthCredential: a2aConfig.authCredential,
         credentialKey:
           a2aConfig.credentialKey ??
-          (namesItsOwnCredentialKey(
+          namedCredentialKey(a2aConfig.authScheme, a2aConfig.authCredential) ??
+          deriveCredentialKey(
             a2aConfig.authScheme,
             a2aConfig.authCredential,
-          )
-            ? ''
-            : deriveCredentialKey(
-                a2aConfig.authScheme,
-                a2aConfig.authCredential,
-                a2aConfig.agentCard ?? this.name,
-              )),
+            a2aConfig.agentCard ?? this.name,
+          ),
       };
       // Appended last, so the credential wins over a caller's own header.
       const auth = buildAuthInterceptors(this.authConfig);
@@ -350,10 +361,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     }
 
     await this.init(context);
-    if (!this.client) {
-      throw new Error('No A2A client is available for this agent.');
-    }
-    return {client: this.client, card: this.card};
+    // The constructor rejects a config with neither a card nor a client, so
+    // init() always leaves one behind.
+    return {client: this.client!, card: this.card};
   }
 
   protected async *runAsyncImpl(
@@ -541,14 +551,21 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         }
       }
     } catch (e: unknown) {
-      const error = e as Error;
-      logger.error(`A2ARemoteAgent ${this.name} failed:`, error);
+      const errorMessage = `A2A request failed: ${formatError(e)}`;
+      logger.error(errorMessage);
+      const statusCode = httpStatusCode(e);
 
       yield createEvent({
         author: this.name,
         invocationId: context.invocationId,
-        errorMessage: error.message,
+        errorMessage,
         turnComplete: true,
+        customMetadata: {
+          [A2AErrorMetadataKeys.ERROR]: errorMessage,
+          ...(statusCode === undefined
+            ? {}
+            : {[A2AErrorMetadataKeys.STATUS_CODE]: statusCode}),
+        },
       });
     }
   }

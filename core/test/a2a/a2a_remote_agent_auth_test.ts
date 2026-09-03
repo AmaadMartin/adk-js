@@ -18,7 +18,7 @@ import {describe, expect, it, vi} from 'vitest';
 import {
   buildAuthInterceptors,
   deriveCredentialKey,
-  namesItsOwnCredentialKey,
+  namedCredentialKey,
   resolveAuthCredential,
 } from '../../src/a2a/a2a_remote_agent_auth.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
@@ -134,35 +134,36 @@ describe('deriveCredentialKey', () => {
   });
 });
 
-describe('namesItsOwnCredentialKey', () => {
-  it('is false when neither the scheme nor the credential names one', () => {
-    expect(namesItsOwnCredentialKey(API_KEY_SCHEME, API_KEY_CREDENTIAL)).toBe(
-      false,
-    );
+describe('namedCredentialKey', () => {
+  it('is undefined when neither the scheme nor the credential names one', () => {
+    expect(
+      namedCredentialKey(API_KEY_SCHEME, API_KEY_CREDENTIAL),
+    ).toBeUndefined();
   });
 
-  it('is true when the scheme names one', () => {
-    const scheme = {...API_KEY_SCHEME, credentialKey: 'named'};
+  it('returns the key the scheme names', () => {
+    const scheme = {...API_KEY_SCHEME, credentialKey: 'from-scheme'};
 
-    expect(namesItsOwnCredentialKey(scheme, API_KEY_CREDENTIAL)).toBe(true);
+    expect(namedCredentialKey(scheme, API_KEY_CREDENTIAL)).toBe('from-scheme');
   });
 
-  it('is true when the credential names one', () => {
-    const credential = {...API_KEY_CREDENTIAL, credentialKey: 'named'};
+  it('prefers the key the credential names', () => {
+    const scheme = {...API_KEY_SCHEME, credentialKey: 'from-scheme'};
+    const credential = {...API_KEY_CREDENTIAL, credentialKey: 'from-cred'};
 
-    expect(namesItsOwnCredentialKey(API_KEY_SCHEME, credential)).toBe(true);
+    expect(namedCredentialKey(scheme, credential)).toBe('from-cred');
   });
 
   it('ignores an empty credential key', () => {
     const scheme = {...API_KEY_SCHEME, credentialKey: ''};
 
-    expect(namesItsOwnCredentialKey(scheme, undefined)).toBe(false);
+    expect(namedCredentialKey(scheme, undefined)).toBeUndefined();
   });
 
   it('ignores a credential key that is not a string', () => {
     const scheme = {...API_KEY_SCHEME, credentialKey: 7};
 
-    expect(namesItsOwnCredentialKey(scheme, undefined)).toBe(false);
+    expect(namedCredentialKey(scheme, undefined)).toBeUndefined();
   });
 });
 

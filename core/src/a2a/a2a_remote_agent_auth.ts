@@ -32,24 +32,25 @@ export interface A2AAuthInterceptors {
 }
 
 /**
- * Whether the scheme or the credential already carries a caller-set credential
- * key. Neither type declares the field, so a caller who sets one is opting out
- * of the derived key and it is left alone.
+ * The credential key the scheme or the credential names itself, if either does.
+ *
+ * Neither type declares the field, so a caller who sets one is opting out of
+ * the derived key and that choice is honoured.
  */
-export function namesItsOwnCredentialKey(
+export function namedCredentialKey(
   authScheme: AuthScheme,
   authCredential?: AuthCredential,
-): boolean {
+): string | undefined {
   for (const candidate of [authCredential, authScheme]) {
     if (!candidate || !('credentialKey' in candidate)) {
       continue;
     }
     const {credentialKey} = candidate;
     if (typeof credentialKey === 'string' && credentialKey) {
-      return true;
+      return credentialKey;
     }
   }
-  return false;
+  return undefined;
 }
 
 /**
