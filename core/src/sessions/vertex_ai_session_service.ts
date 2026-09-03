@@ -11,6 +11,7 @@ import {
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
   EventMetadata,
+  ListAgentEngineSessionEventsConfig,
   Session as VertexAiSession,
   SessionEvent as VertexAiSessionEvent,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
@@ -299,14 +300,14 @@ export class VertexAiSessionService extends BaseSessionService {
           name: sessionResourceName,
         })) as VertexAiSession;
       } else {
-        const listConfig: Record<string, string> = {};
+        const listConfig: ListAgentEngineSessionEventsConfig = {};
         if (config && config.afterTimestamp) {
           listConfig.filter = `timestamp>="${new Date(
             config.afterTimestamp,
           ).toISOString()}"`;
         }
 
-        const [sessionRes, eventsRes] = await Promise.all([
+        const [sessionRes, firstPage] = await Promise.all([
           this.sessions.get({name: sessionResourceName}),
           this.sessions.events.listInternal({
             name: sessionResourceName,
@@ -314,9 +315,20 @@ export class VertexAiSessionService extends BaseSessionService {
           }),
         ]);
         getSessionResponse = sessionRes as VertexAiSession;
-        eventsIterator =
-          (eventsRes as {sessionEvents?: VertexAiSessionEvent[]})
-            .sessionEvents || [];
+
+        // The API returns events one page at a time and does not contract a
+        // page size, so a single call silently truncates the replayed
+        // conversation. Drain every page, as listSessions does.
+        eventsIterator = [...(firstPage.sessionEvents ?? [])];
+        let pageToken = firstPage.nextPageToken;
+        while (pageToken) {
+          const nextPage = await this.sessions.events.listInternal({
+            name: sessionResourceName,
+            config: {...listConfig, pageToken},
+          });
+          eventsIterator.push(...(nextPage.sessionEvents ?? []));
+          pageToken = nextPage.nextPageToken;
+        }
       }
 
       const sessionObj = getSessionResponse!;
