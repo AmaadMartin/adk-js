@@ -7,7 +7,6 @@
 
 import {LogLevel, setLogLevel as setAdkCoreLogLevel} from '@google/adk';
 import {Argument, Command, Option} from 'commander';
-import dotenv from 'dotenv';
 import * as path from 'node:path';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {
@@ -15,7 +14,7 @@ import {
   createApiServer,
 } from '../server/api_server_factory.js';
 import {FileModuleType, resolveAgentLocation} from '../utils/agent_loader.js';
-import {loadDotenvForAgent} from '../utils/envs.js';
+import {loadDotenvForAgent, loadDotenvFromCwd} from '../utils/envs.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {toMessage} from '../utils/value_utils.js';
@@ -49,7 +48,7 @@ import {
   USE_LOCAL_STORAGE_OPTION,
 } from './service_options.js';
 
-dotenv.config({quiet: true});
+loadDotenvFromCwd();
 
 const LOG_LEVEL_MAP: Record<string, LogLevel> = {
   'debug': LogLevel.DEBUG,

@@ -879,6 +879,34 @@ describe('cli_run', () => {
       expect(runnerOptions()[0].appName).toBe('custom_cli_app');
     });
 
+    it('gives the scripted run the App the agent file exports', async () => {
+      (loadFileData as Mock).mockResolvedValue({state: {}, queries: ['Hello']});
+      const app = {name: 'custom_cli_app', rootAgent: {name: 'assistant'}};
+      mockAgentFile.load = vi.fn().mockResolvedValue(app);
+      vi.mocked(isApp).mockReturnValue(true);
+
+      await runAgent({
+        agentPath: AGENT_PATH,
+        inputFile: 'input.json',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(runnerOptions()[0].app).toBe(app);
+    });
+
+    it('gives the scripted run no App when the file exports a bare agent', async () => {
+      (loadFileData as Mock).mockResolvedValue({state: {}, queries: ['Hello']});
+
+      await runAgent({
+        agentPath: AGENT_PATH,
+        inputFile: 'input.json',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(runnerOptions()[0].app).toBeUndefined();
+      expect(runnerOptions()[0].agent).toBe(mockRootAgent);
+    });
+
     it('saves the session beside the agent, not under the App name', async () => {
       mockAgentFile.load = vi.fn().mockResolvedValue({
         name: 'custom_cli_app',

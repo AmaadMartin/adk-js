@@ -121,6 +121,11 @@ async function getUserInput(prompt: string): Promise<string> {
 interface RunFromInputFileOptions {
   appName: string;
   userId: string;
+  /**
+   * The App the agent file exported. The Runner takes its plugins and its
+   * resumability config from here, so a replay run behaves like a live one.
+   */
+  app?: App;
   agent: RunnableRoot;
   artifactService: BaseArtifactService;
   sessionService: BaseSessionService;
@@ -146,7 +151,16 @@ async function runFromInputFile(
     state: fileContent.state,
   });
 
-  const runner = new Runner(options);
+  // The Runner takes exactly one of `app` and `agent`, so the App wins when
+  // the agent file exports one.
+  const runner = new Runner({
+    ...(options.app ? {app: options.app} : {agent: options.agent}),
+    appName: options.appName,
+    artifactService: options.artifactService,
+    sessionService: options.sessionService,
+    memoryService: options.memoryService,
+    credentialService: options.credentialService,
+  });
   let waitingOnUser = false;
 
   for (const query of fileContent.queries) {
@@ -358,6 +372,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
         (await runFromInputFile({
           appName,
           userId,
+          app,
           agent: rootAgent,
           artifactService,
           sessionService,
