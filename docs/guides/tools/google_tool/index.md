@@ -138,5 +138,6 @@ The model receives that as the tool response and can react to it, instead of the
 exception ending the turn. The `error_details` key is snake_case because
 adk-python emits the same key.
 
-`detectErrorInResponse` reports `'TOOL_ERROR'` for that shape, so telemetry
-counts an in-band error as a failure.
+`detectErrorInResponse` reports `'TOOL_ERROR'` for that shape. It is the
+telemetry hook adk-python's `_detect_error_in_response` provides. Nothing in
+adk-js calls it yet, so call it yourself to classify a tool result.

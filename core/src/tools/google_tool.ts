@@ -98,26 +98,6 @@ function withoutIgnoredParams(
   return {...declaration, parameters};
 }
 
-/** A copy of the call arguments without anything the model sent for an
- * injected parameter. */
-function withoutIgnoredArgs(
-  args: Record<string, unknown>,
-): Record<string, unknown> {
-  const kept = {...args};
-  for (const name of IGNORED_PARAMS) {
-    delete kept[name];
-  }
-  return kept;
-}
-
-/** What the tool returns while it waits for the end user to grant consent. */
-function authorizationRequiredMessage(toolName: string): string {
-  return (
-    'User authorization is required to access Google services for' +
-    ` ${toolName}. Please complete the authorization flow.`
-  );
-}
-
 /** Whether a tool response carries an in-band error. */
 function isToolErrorResponse(response: unknown): boolean {
   return (
@@ -192,7 +172,10 @@ export class GoogleTool<
           req.toolContext,
         );
         if (!credentials) {
-          return authorizationRequiredMessage(this.name);
+          return (
+            'User authorization is required to access Google services for' +
+            ` ${this.name}. Please complete the authorization flow.`
+          );
         }
       }
 
@@ -210,7 +193,9 @@ export class GoogleTool<
   }
 
   /**
-   * Telemetry hook reporting the error type of an in-band error response.
+   * Telemetry hook reporting the error type of an in-band error response, as
+   * adk-python's `_detect_error_in_response` does. No caller in adk-js reads
+   * it yet; a caller reaches it through the tool, so it carries no `override`.
    *
    * @param response The value {@link runAsync} returned.
    * @return `'TOOL_ERROR'` for a {@link GoogleToolErrorResponse}, otherwise
@@ -229,7 +214,10 @@ export class GoogleTool<
     args: Record<string, unknown>,
     credentials: AuthClient | undefined,
   ): Record<string, unknown> {
-    const argsToCall = withoutIgnoredArgs(args);
+    const argsToCall = {...args};
+    for (const name of IGNORED_PARAMS) {
+      delete argsToCall[name];
+    }
     if (this.declaresCredentials) {
       argsToCall[CREDENTIALS_PARAM] = credentials;
     }
