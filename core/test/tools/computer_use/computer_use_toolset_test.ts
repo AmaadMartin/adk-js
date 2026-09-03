@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {lookup} from 'node:dns/promises';
-
 import {
   ComputerEnvironment,
   ComputerUseTool,
@@ -15,7 +13,7 @@ import {
   isComputerUseTool,
 } from '@google/adk';
 import {Environment, Tool} from '@google/genai';
-import {Mock, beforeEach, describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
 import {
@@ -24,13 +22,11 @@ import {
   createToolContext,
 } from './computer_use_test_utils.js';
 
-vi.mock('node:dns/promises', () => ({
-  lookup: vi.fn(),
-}));
+// Hoisted so the mock factory and the assertions share one spy, rather than
+// casting the overloaded `lookup` signature back to a Mock.
+const {lookupMock} = vi.hoisted(() => ({lookupMock: vi.fn()}));
 
-// `lookup` is overloaded; treat the mock as a plain Mock so `mockResolvedValue`
-// accepts the `{all: true}` array-return shape used by the implementation.
-const lookupMock = lookup as unknown as Mock;
+vi.mock('node:dns/promises', () => ({lookup: lookupMock}));
 
 /** Every action the toolset exposes, in the order the model sees them. */
 const ALL_FUNCTION_NAMES = [
