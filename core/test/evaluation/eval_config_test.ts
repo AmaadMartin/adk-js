@@ -64,7 +64,12 @@ describe('parseEvalConfig', () => {
     });
     expect(config.userSimulatorConfig).toEqual({
       type: 'llm_backed',
+      model: 'gemini-2.5-flash',
+      modelConfiguration: {
+        thinkingConfig: {includeThoughts: true, thinkingBudget: 10240},
+      },
       maxAllowedInvocations: 4,
+      includeFunctionCalls: false,
     });
     expect(config.liveModelConfig).toEqual({timeoutSeconds: 30});
   });
