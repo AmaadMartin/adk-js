@@ -19,7 +19,9 @@ and fenced before the parent adopts it.
 The peer may require a credential. `authScheme` and `authCredential` describe
 one. The agent resolves it once per invocation and attaches it to both the card
 fetch and the message send. When it cannot resolve one, it pauses the invocation
-and asks the client, the same handshake an authenticated tool uses.
+and raises an `adk_request_credential` call for the client to answer. The agent
+reads that answer back itself on the next turn, because the shared auth
+preprocessor only honours a request the LLM agent running the flow raised.
 
 The peer may be stateful or not. A peer that returns a context id keeps its own
 history, so only new events are sent. A peer that returns none needs the whole
