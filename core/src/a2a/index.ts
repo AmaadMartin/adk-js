@@ -36,11 +36,6 @@ export {
 export type {A2aUserBuilder, ToA2aOptions} from './agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './auth.js';
 export type {ExecutorContext} from './executor_context.js';
-export {
-  executeAfterAgentInterceptors,
-  executeAfterEventInterceptors,
-  executeBeforeAgentInterceptors,
-} from './executor_utils.js';
 export type {ExecuteInterceptor} from './executor_utils.js';
 export type {
   A2APartToGenAIPartConverter,

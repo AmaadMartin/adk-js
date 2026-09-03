@@ -289,7 +289,6 @@ export class A2AAgentExecutor implements AgentExecutor {
 
     const aggregator = new TaskResultAggregator();
     const adkEvents: AdkEvent[] = [];
-    let lastAdkEvent: AdkEvent | undefined;
 
     for await (const adkEvent of runner.runAsync({
       userId: runRequest.userId,
@@ -306,7 +305,6 @@ export class A2AAgentExecutor implements AgentExecutor {
       },
     })) {
       adkEvents.push(adkEvent);
-      lastAdkEvent = adkEvent;
 
       for (const converted of this.convertAdkEvent(adkEvent, executorContext)) {
         const a2aEvents = await executeAfterEventInterceptors(
@@ -333,7 +331,7 @@ export class A2AAgentExecutor implements AgentExecutor {
       executorContext,
       finalMetadata: {
         ...getA2ASessionMetadata(executorContext),
-        ...(lastAdkEvent ? getLastEventMetadata(lastAdkEvent) : {}),
+        ...getLastEventMetadata(adkEvents.at(-1)),
       },
     });
     if (artifactUpdate) {
@@ -490,9 +488,16 @@ function buildRunResultEvents({
 /**
  * The invocation, author and event ids of the last ADK event a run produced, so
  * a client can tie the terminal event back to it. An absent value is left out
- * rather than written as `undefined`.
+ * rather than written as `undefined`, and a run that produced no event
+ * contributes nothing.
  */
-function getLastEventMetadata(adkEvent: AdkEvent): Record<string, unknown> {
+function getLastEventMetadata(
+  adkEvent: AdkEvent | undefined,
+): Record<string, unknown> {
+  if (!adkEvent) {
+    return {};
+  }
+
   const entries: Array<[string, unknown]> = [
     [A2AMetadataKeys.INVOCATION_ID, adkEvent.invocationId],
     [A2AMetadataKeys.AUTHOR, adkEvent.author],
