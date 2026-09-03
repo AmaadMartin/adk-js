@@ -264,6 +264,15 @@ export interface SpannerVectorStoreSettings {
   primaryKeyColumns?: string[];
 }
 
+/**
+ * {@link SpannerVectorStoreSettings} after
+ * {@link resolveVectorStoreSettings} has checked it and filled in the columns
+ * the search returns.
+ */
+export type ResolvedVectorStoreSettings = SpannerVectorStoreSettings & {
+  selectedColumns: string[];
+};
+
 /** Settings for Spanner tools. */
 export interface SpannerToolSettings {
   /**
@@ -294,6 +303,9 @@ export interface SpannerToolSettings {
   /** Settings for Spanner vector store and vector similarity search. */
   vectorStoreSettings?: SpannerVectorStoreSettings;
 }
+
+/** The row budget `spanner_execute_sql` uses when the setting is unusable. */
+export const DEFAULT_MAX_EXECUTED_QUERY_RESULT_ROWS = 50;
 
 /** Vector store fields that must carry a non-empty value at runtime. */
 const REQUIRED_VECTOR_STORE_FIELDS = [
@@ -401,6 +413,30 @@ export function createSpannerToolSettings(params: SpannerToolSettings = {}) {
       ? createSpannerVectorStoreSettings(params.vectorStoreSettings)
       : undefined,
   };
+}
+
+/**
+ * Checks the vector store settings and fills in the columns the search
+ * returns, matching adk-python's `SpannerVectorStoreSettings` validator.
+ *
+ * This is the check `SpannerToolset` runs. It is narrower than
+ * {@link createSpannerVectorStoreSettings}, which also applies the search
+ * defaults and validates the vector store setup fields.
+ *
+ * @param settings The settings as the developer wrote them.
+ * @return The settings with {@link SpannerVectorStoreSettings.selectedColumns}
+ *   set.
+ * @throws Error if the vector length is not positive.
+ */
+export function resolveVectorStoreSettings(
+  settings: SpannerVectorStoreSettings,
+): ResolvedVectorStoreSettings {
+  validateVectorLength(settings.vectorLength);
+
+  const selectedColumns = settings.selectedColumns?.length
+    ? settings.selectedColumns
+    : [settings.contentColumn];
+  return {...settings, selectedColumns};
 }
 
 function applyTableColumnDefaults(column: TableColumn) {

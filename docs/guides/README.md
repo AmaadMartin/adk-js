@@ -224,6 +224,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [RestApiTool request timeouts](tools/rest_api_tool_timeouts/index.md) - Bounding one REST API call, and the error a timeout returns to the model.
 - [SetModelResponseTool](tools/set_model_response/index.md) - Returning structured output on a model that cannot take an output schema and tools in one request.
 - [Spanner tool settings](tools/spanner_tool_settings/index.md) - Configuring what the Spanner tools may do, how they shape query results, and the vector store they search.
+- [SpannerToolset](tools/spanner_toolset/index.md) - Reading Spanner tables,
+  schemas and vector columns from an agent, with read-only access and
+  per-user credentials.
 - [ToolboxToolset](tools/toolbox_toolset/index.md) - Loading tools from an MCP
   Toolbox for Databases server, with named toolsets, bound parameters and
   authentication.

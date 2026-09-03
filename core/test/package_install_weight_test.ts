@@ -45,6 +45,7 @@ const OPTIONAL_SUBSYSTEM_PEERS = [
   '@google-cloud/bigtable',
   '@google-cloud/opentelemetry-cloud-monitoring-exporter',
   '@google-cloud/opentelemetry-cloud-trace-exporter',
+  '@google-cloud/spanner',
   '@google-cloud/storage',
   '@langchain/core',
   '@mikro-orm/mariadb',
@@ -78,6 +79,7 @@ describe('core/package.json install weight', () => {
     '@google-cloud/bigtable',
     '@google-cloud/opentelemetry-cloud-monitoring-exporter',
     '@google-cloud/opentelemetry-cloud-trace-exporter',
+    '@google-cloud/spanner',
     '@google-cloud/storage',
     '@langchain/core',
     '@mikro-orm/sqlite',
@@ -121,6 +123,7 @@ describe('core/package.json subpath exports', () => {
       './tools/crewai_tool',
       './tools/langchain_tool',
       './tools/mcp',
+      './tools/spanner',
     ]);
   });
 
