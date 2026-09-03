@@ -687,6 +687,8 @@ export {
   createTelemetryConfig,
 } from './telemetry/context.js';
 export type {TelemetryConfigParams} from './telemetry/context.js';
+export {BaseGoogleCredentialsConfig} from './tools/_google_credentials.js';
+export type {GoogleCredentialsConfigOptions} from './tools/_google_credentials.js';
 export {
   AgentTool,
   SingleTurnAgentTool,
@@ -936,6 +938,11 @@ export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
+export {
+  SPANNER_DEFAULT_SCOPE,
+  SPANNER_TOKEN_CACHE_KEY,
+  SpannerCredentialsConfig,
+} from './tools/spanner/spanner_credentials.js';
 
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
