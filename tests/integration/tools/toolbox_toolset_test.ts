@@ -16,6 +16,7 @@ import {
   createSession,
   InvocationContext,
   PluginManager,
+  ToolboxCredentialStrategy,
   ToolboxToolset,
 } from '@google/adk';
 import {
@@ -32,6 +33,8 @@ interface AdvertisedTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** Toolbox's MCP extension naming the auth services a parameter needs. */
+  _meta?: Record<string, unknown>;
 }
 
 const CITY_SCHEMA = {
@@ -50,6 +53,23 @@ const HOTEL_TOOLS: AdvertisedTool[] = [
     name: 'book_hotel',
     description: 'Books a hotel.',
     inputSchema: CITY_SCHEMA,
+  },
+];
+
+/** A tool whose `userId` parameter the server fills from an auth token. */
+const AUTH_TOOLS: AdvertisedTool[] = [
+  {
+    name: 'my_bookings',
+    description: 'Lists the bookings of the signed-in user.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        city: {type: 'string'},
+        userId: {type: 'string'},
+      },
+      required: ['city', 'userId'],
+    },
+    _meta: {'com.google.cloud/authParam': {userId: ['my-google-auth']}},
   },
 ];
 
@@ -88,6 +108,7 @@ const TOOLSETS: Record<string, AdvertisedTool[]> = {
   '': [...HOTEL_TOOLS, ...FLIGHT_TOOLS],
   'hotel-tools': HOTEL_TOOLS,
   'flight-tools': FLIGHT_TOOLS,
+  'auth-tools': AUTH_TOOLS,
 };
 
 /**
@@ -143,13 +164,14 @@ async function handle(
 let server: Server;
 let serverUrl: string;
 
-function toolContext(): Context {
+function toolContext(state?: Record<string, unknown>): Context {
   return new Context({
     invocationContext: new InvocationContext({
       invocationId: 'toolbox-integration',
-      session: createSession({id: 'session', appName: 'app'}),
+      session: createSession({id: 'session', appName: 'app', state}),
       pluginManager: new PluginManager(),
     }),
+    functionCallId: 'call-1',
   });
 }
 
@@ -292,6 +314,78 @@ describe('ToolboxToolset against a Toolbox server', () => {
     await expect(
       tool.runAsync({args: {city: 'Basel'}, toolContext: toolContext()}),
     ).rejects.toThrow('hotel service is down');
+    await toolset.close();
+  });
+
+  it('sends a manual token credential on every request', async () => {
+    const toolset = new ToolboxToolset(serverUrl, {
+      toolNames: ['book_hotel'],
+      credentials: ToolboxCredentialStrategy.manualToken('secret-token'),
+    });
+
+    const [tool] = await toolset.getTools();
+    await tool.runAsync({args: {city: 'Basel'}, toolContext: toolContext()});
+
+    expect(requests.map((request) => request.headers['authorization'])).toEqual(
+      ['Bearer secret-token', 'Bearer secret-token'],
+    );
+    await toolset.close();
+  });
+
+  it('sends an api key credential in its own header', async () => {
+    const toolset = new ToolboxToolset(serverUrl, {
+      toolNames: ['book_hotel'],
+      credentials: ToolboxCredentialStrategy.apiKey('secret-key', 'X-Api-Key'),
+    });
+
+    const [tool] = await toolset.getTools();
+    await tool.runAsync({args: {city: 'Basel'}, toolContext: toolContext()});
+
+    expect(requests.map((request) => request.headers['x-api-key'])).toEqual([
+      'secret-key',
+      'secret-key',
+    ]);
+    await toolset.close();
+  });
+
+  it('derives an auth token from the tool context of the invocation', async () => {
+    const toolset = new ToolboxToolset(serverUrl, {
+      toolsetName: 'auth-tools',
+      authTokenGetters: {
+        'my-google-auth': (context) => String(context.state.get('idToken')),
+      },
+    });
+    const context = toolContext({idToken: 'token-of-alice'});
+
+    const [tool] = await toolset.getTools();
+    await tool.runAsync({args: {city: 'Basel'}, toolContext: context});
+
+    // The auth-gated parameter is hidden from the model, and the SDK sends
+    // the token as `<service>_token`.
+    expect(tool._getDeclaration()?.parameters).toEqual({
+      type: 'OBJECT',
+      properties: {city: {type: 'STRING'}},
+      required: ['city'],
+    });
+    const call = requests.find((request) => request.method === 'tools/call');
+    expect(call?.headers['my-google-auth_token']).toBe('token-of-alice');
+    await toolset.close();
+  });
+
+  it('reports the client name and version it is configured with', async () => {
+    const toolset = new ToolboxToolset(serverUrl, {
+      toolNames: ['book_hotel'],
+      clientOptions: {clientName: 'my-agent', clientVersion: '9.9.9'},
+    });
+
+    await toolset.getTools();
+
+    // The SDK sends its identity in the request metadata, not a header.
+    const meta = requests[0].params['_meta'] as Record<string, unknown>;
+    expect(meta['io.modelcontextprotocol/clientInfo']).toEqual({
+      name: 'my-agent',
+      version: '9.9.9',
+    });
     await toolset.close();
   });
 
