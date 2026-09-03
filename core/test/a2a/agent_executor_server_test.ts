@@ -4,17 +4,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Task, TaskStatusUpdateEvent} from '@a2a-js/sdk';
+import {AgentCard, Task, TaskStatusUpdateEvent, TextPart} from '@a2a-js/sdk';
+import {InMemoryTaskStore, ServerCallContext} from '@a2a-js/sdk/server';
 import {
+  A2AAgentExecutor,
+  AdkDefaultRequestHandler,
   BaseAgent,
+  BaseSessionService,
   createEvent,
   createEventActions,
   Event,
   InvocationContext,
+  Runner,
+  RunnerConfig,
   toA2a,
 } from '@google/adk';
 import type {AddressInfo} from 'node:net';
 import {describe, expect, it} from 'vitest';
+import {MessageRole} from '../../src/a2a/a2a_event.js';
 
 /** How many events the agent emits when nothing cancels it. */
 const TOTAL_EVENTS = 20;
@@ -123,8 +130,55 @@ async function* streamedEvents(
   }
 }
 
-describe('A2A task cancellation over HTTP', () => {
-  it('settles the task as canceled and stops the run', async () => {
+describe('A2A executor behind the SDK request handler', () => {
+  it('returns a failed task when the session store is down', async () => {
+    const sessionService = {
+      getSession: async () => {
+        throw new Error('session store down');
+      },
+    } as unknown as BaseSessionService;
+    const handler = new AdkDefaultRequestHandler(
+      {
+        name: 'failing-card',
+        description: 'a card whose session store is down',
+        defaultInputModes: ['text'],
+        defaultOutputModes: ['text'],
+        capabilities: {},
+      } as unknown as AgentCard,
+      new InMemoryTaskStore(),
+      new A2AAgentExecutor({
+        runner: {
+          appName: 'test-app',
+          agent: new SlowAgent(),
+          sessionService,
+        } as unknown as Runner | RunnerConfig,
+      }),
+    );
+
+    // The result manager discards a status update for a task it has not seen,
+    // so a failure before the submitted signal leaves the caller with an
+    // internal error and no task at all.
+    const result = await handler.sendMessage(
+      {
+        message: {
+          kind: 'message',
+          messageId: 'failing-message',
+          role: MessageRole.USER,
+          parts: [{kind: 'text', text: 'hello'}],
+        },
+      },
+      undefined as unknown as ServerCallContext,
+    );
+
+    expect(result.kind).toBe('task');
+    const task = result as Task;
+    expect(task.status.state).toBe('failed');
+    expect((task.status.message?.parts[0] as TextPart).text).toContain(
+      'session store down',
+    );
+  });
+
+  it('settles a canceled task and stops the run', async () => {
     const agent = new SlowAgent();
     const app = await toA2a(agent, {allowUnauthenticated: true});
     const server = app.listen(0);

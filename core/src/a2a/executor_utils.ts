@@ -11,6 +11,13 @@ import {A2AEvent, createTask} from './a2a_event.js';
 import {ExecutorContext} from './executor_context.js';
 
 /**
+ * The extension a client requests to be served by the new ADK A2A integration
+ * rather than the legacy executor.
+ */
+export const NEW_A2A_ADK_INTEGRATION_EXTENSION =
+  'https://google.github.io/adk-docs/a2a/a2a-extension/';
+
+/**
  * Hooks that can observe and rewrite what an execution publishes.
  *
  * Unlike the executor's callbacks, an interceptor decides what reaches the
@@ -91,6 +98,28 @@ export function enqueueSubmittedSignal(
       message: ctx.userMessage,
     }),
   );
+}
+
+/**
+ * Activates the new-integration extension when the caller requested it.
+ *
+ * Activation is echoed to the client through the server call context, so the
+ * caller can tell which implementation served the request. Call this only when
+ * the request will actually be delegated: a server must not claim an extension
+ * it does not honour.
+ */
+export function activateNewVersionExtension(ctx: RequestContext): boolean {
+  const callContext = ctx.context;
+  if (
+    !callContext?.requestedExtensions?.includes(
+      NEW_A2A_ADK_INTEGRATION_EXTENSION,
+    )
+  ) {
+    return false;
+  }
+  callContext.addActivatedExtension(NEW_A2A_ADK_INTEGRATION_EXTENSION);
+
+  return true;
 }
 
 /**

@@ -116,3 +116,28 @@ has already accepted.
 One limit is worth knowing. The executor can only cancel a task it is running
 right now. It holds one entry per in-flight execution, and throws for a task id
 it does not hold.
+
+## Routing to the new integration
+
+A client asks to be served by the new ADK A2A integration by requesting the
+`NEW_A2A_ADK_INTEGRATION_EXTENSION` extension. Give the executor the delegate
+that serves it:
+
+```ts
+import {A2AAgentExecutor} from '@google/adk';
+
+const executor = new A2AAgentExecutor({
+  runner: myRunner,
+  newVersionExecutor: myNewIntegrationExecutor,
+});
+```
+
+The executor then activates the extension on the call context and delegates the
+request. Without a `newVersionExecutor` it activates nothing and serves the
+request itself, because a server must not tell a client it honoured an
+extension it ignored.
+
+Two flags override the extension. `useLegacy` refuses the new path for every
+request. `forceNewVersion` takes it without the extension, and throws when no
+`newVersionExecutor` is configured, rather than silently serving a request the
+caller asked to route elsewhere.

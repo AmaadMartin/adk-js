@@ -33,6 +33,7 @@ import {
 } from './event_processor_utils.js';
 import {createExecutorContext, ExecutorContext} from './executor_context.js';
 import {
+  activateNewVersionExtension,
   enqueueSubmittedSignal,
   executeAfterAgentInterceptors,
   executeAfterEventInterceptors,
@@ -134,6 +135,18 @@ export interface AgentExecutorConfig {
 
   /** Hooks that can rewrite the request, the events and the terminal event. */
   executeInterceptors?: ExecuteInterceptor[];
+
+  /** Serves every request on the legacy path, ignoring the extension. */
+  useLegacy?: boolean;
+
+  /** Serves every request on the new path, without waiting for the extension. */
+  forceNewVersion?: boolean;
+
+  /**
+   * The executor that serves the new ADK A2A integration. Without one, a
+   * request that asks for the new path is served on the legacy path.
+   */
+  newVersionExecutor?: AgentExecutor;
 }
 
 /**
@@ -161,6 +174,17 @@ export class A2AAgentExecutor implements AgentExecutor {
     ctx: RequestContext,
     eventBus: ExecutionEventBus,
   ): Promise<void> {
+    if (this.shouldUseNewVersion(ctx)) {
+      const newVersionExecutor = this.config.newVersionExecutor;
+      if (!newVersionExecutor) {
+        throw new Error(
+          'forceNewVersion is set but no newVersionExecutor is configured.',
+        );
+      }
+
+      return newVersionExecutor.execute(ctx, eventBus);
+    }
+
     const reqCtx = await executeBeforeAgentInterceptors(
       ctx,
       this.config.executeInterceptors,
@@ -168,6 +192,12 @@ export class A2AAgentExecutor implements AgentExecutor {
     const {taskId, contextId} = requireRequestContext(reqCtx);
     const abortController = new AbortController();
     this.inFlightExecutions.set(taskId, {contextId, abortController});
+
+    // The submitted signal precedes every event this execution publishes,
+    // including the terminal event of a run that failed while resolving the
+    // runner or the session. The SDK's result manager drops a status update
+    // for a task it has not seen, so the caller would receive no task at all.
+    enqueueSubmittedSignal(reqCtx, eventBus);
 
     let executorContext: ExecutorContext | undefined;
     try {
@@ -226,6 +256,26 @@ export class A2AAgentExecutor implements AgentExecutor {
   }
 
   /**
+   * Whether this request belongs to the new ADK A2A integration.
+   *
+   * The extension is activated only when a `newVersionExecutor` can serve it,
+   * so the server never claims an extension it goes on to ignore.
+   */
+  private shouldUseNewVersion(ctx: RequestContext): boolean {
+    if (this.config.useLegacy) {
+      return false;
+    }
+    if (this.config.forceNewVersion) {
+      return true;
+    }
+
+    return (
+      this.config.newVersionExecutor !== undefined &&
+      activateNewVersionExtension(ctx)
+    );
+  }
+
+  /**
    * Stops the running execution and publishes the terminal `canceled` status
    * update the A2A cancellation contract requires. The request handler drains
    * events until it sees one, so a cancellation that publishes nothing never
@@ -272,11 +322,6 @@ export class A2AAgentExecutor implements AgentExecutor {
     if (this.config.beforeExecuteCallback) {
       await this.config.beforeExecuteCallback(ctx, a2aMetadata);
     }
-
-    // The submitted signal precedes every other event, including the one the
-    // unanswered-request gate publishes: the SDK's result manager drops a
-    // status update for a task it has not seen yet.
-    enqueueSubmittedSignal(ctx, eventBus);
 
     const unansweredRequestEvent = getUnansweredRequestEvent({
       taskId,
