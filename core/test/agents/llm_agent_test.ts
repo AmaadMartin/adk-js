@@ -1575,6 +1575,31 @@ describe('LlmAgent set_model_response round trip', () => {
     });
   });
 
+  it('answers when the call arrives alongside another tool call', async () => {
+    const {events} = await run([
+      {
+        content: {
+          role: 'model',
+          parts: [
+            {functionCall: {id: 'call-1', name: 'some_tool', args: {}}},
+            {
+              functionCall: {
+                id: 'call-2',
+                name: 'set_model_response',
+                args: {name: 'Alice', age: 25},
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const finalEvent = events[events.length - 1];
+    expect(finalEvent.content?.parts?.[0].text).toBe(
+      JSON.stringify({name: 'Alice', age: 25}),
+    );
+  });
+
   it('yields no final model event for a failed call alone', async () => {
     const {events} = await run([
       setModelResponseCall('call-1', {name: 'Alice', age: 'twenty five'}),
