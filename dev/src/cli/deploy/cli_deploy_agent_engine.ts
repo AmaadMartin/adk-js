@@ -31,14 +31,12 @@ const DEFAULT_MAX_ATTEMPTS = 30;
 /**
  * Options for {@link deployToAgentEngine}.
  *
- * The app name is derived from `agentPath`: it names the agent directory in
- * the image and forms the Artifact Registry tag `agent-engine-<appName>`. Use
- * `displayName` to set the user-facing name of the Reasoning Engine.
+ * The app name names the agent directory in the image and forms the Artifact
+ * Registry tag `agent-engine-<appName>`. It defaults to the name derived from
+ * `agentPath`, and `appName` overrides that default. Use `displayName` to set
+ * the user-facing name of the Reasoning Engine.
  */
-export interface DeployToAgentEngineOptions extends Omit<
-  BaseDeployOptions,
-  'appName'
-> {
+export interface DeployToAgentEngineOptions extends BaseDeployOptions {
   displayName?: string;
   description?: string;
   stagingBucket?: string;
@@ -51,9 +49,11 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
   const agentDir = isFileProvided
     ? path.dirname(options.agentPath)
     : options.agentPath;
-  const appName = isFileProvided
-    ? path.parse(options.agentPath).name
-    : path.basename(options.agentPath);
+  const appName =
+    options.appName ||
+    (isFileProvided
+      ? path.parse(options.agentPath).name
+      : path.basename(options.agentPath));
 
   const displayName = options.displayName || appName;
 

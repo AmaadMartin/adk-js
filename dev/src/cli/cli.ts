@@ -269,6 +269,10 @@ export const WITH_UI_OPTION = new Option(
   '--with_ui [boolean]',
   'Optional. Deploy ADK Web UI if set. (default: deploy ADK API server only)',
 ).default(false);
+export const APP_NAME_OPTION = new Option(
+  '--app_name [string]',
+  'Optional. The app name to deploy the agent under. Defaults to the agent directory name, or the agent file name when a single agent file is given.',
+);
 export const DISPLAY_NAME_OPTION = new Option(
   '--display_name [string]',
   'Optional. The display name for the Reasoning Engine. Defaults to agent directory name.',
@@ -592,6 +596,7 @@ export function createProgram(): Command {
       .allowExcessArguments()
       .addOption(PROJECT_DEPLOY_OPTION)
       .addOption(REGION_DEPLOY_OPTION)
+      .addOption(APP_NAME_OPTION)
       .addOption(DISPLAY_NAME_OPTION)
       .addOption(DESCRIPTION_OPTION)
       .addOption(REPOSITORY_DEPLOY_OPTION)
@@ -618,6 +623,7 @@ export function createProgram(): Command {
             agentPath: getAbsolutePath(agentPath),
             project: options['project'],
             region: options['region'],
+            appName: options['app_name'],
             displayName: options['display_name'],
             description: options['description'],
             repository: options['repository'],
