@@ -13,12 +13,6 @@ export function resetDeprecationWarnings(): void {
   warnedItems.clear();
 }
 
-// `any[]` rather than `unknown[]`: a class whose constructor takes a typed
-// config (every agent) is not assignable to `new (...args: unknown[]) => …`,
-// so the stricter signature would reject exactly the classes this decorates.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above.
-type Constructor = new (...args: any[]) => any;
-
 /**
  * Marks a class as deprecated, logging `reason` once the first time it is
  * instantiated.
@@ -26,21 +20,29 @@ type Constructor = new (...args: any[]) => any;
  * The JSDoc `@deprecated` tag is what a reader and an editor see; this is what
  * someone running the code sees, so a deprecation is not silent to a caller who
  * never opens the source. Mirrors `typing_extensions.deprecated`, which
- * adk-python applies to the same classes, and follows the shape of
- * {@link experimental}: one warning per class, not per instance, so a hot loop
- * does not turn into a wall of logs.
+ * adk-python applies to the same classes, and follows the shape of the
+ * `experimental` decorator: one warning per class, not per instance, so a hot
+ * loop does not turn into a wall of logs.
  */
 export function deprecated(reason: string) {
-  return function <T extends Constructor>(target: T): T {
+  // `any[]` rather than `unknown[]`: a class whose constructor takes a typed
+  // config (every agent) is not assignable to `new (...args: unknown[]) => …`,
+  // so the stricter constraint would reject exactly the classes this
+  // decorates. Written out rather than aliased because this signature is
+  // public, and a documented signature may not name an unexported type.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above.
+  return function <T extends new (...args: any[]) => any>(target: T): T {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type -- Function is safe because we know it's a constructor
     const className = (target as Function).name;
-    const wrapped = class extends (target as Constructor) {
+    // A concrete base type: `class extends <type parameter>` would make this
+    // a mixin, which TypeScript only accepts with an `any[]` constructor.
+    const base: new (...args: unknown[]) => object = target;
+    const wrapped = class extends base {
       constructor(...args: unknown[]) {
         if (!warnedItems.has(className)) {
           logger.warn(reason);
           warnedItems.add(className);
         }
-        // eslint-disable-next-line constructor-super -- super is required, ESLint can't figure it out.
         super(...args);
       }
     };
