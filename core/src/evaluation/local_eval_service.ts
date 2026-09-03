@@ -38,7 +38,10 @@ import {
   EvalStatus,
 } from './eval_metrics.js';
 import {EvalCaseResult} from './eval_result.js';
-import {Rubric} from './eval_rubrics.js';
+import {
+  copyEvalCaseRubricsToActualInvocations,
+  copyInvocationRubricsToActualInvocations,
+} from './eval_rubrics.js';
 import {EvalSetResultsManager} from './eval_set_results_manager.js';
 import {EvalSetsManager} from './eval_sets_manager.js';
 import {
@@ -47,7 +50,7 @@ import {
 } from './evaluation_generator.js';
 import {emptyEvaluationResult, EvaluationResult} from './evaluator.js';
 import {
-  DEFAULT_METRIC_EVALUATOR_REGISTRY,
+  defaultMetricEvaluatorRegistry,
   MetricEvaluatorRegistry,
 } from './metric_evaluator_registry.js';
 import {UserSimulatorProvider} from './simulation/user_simulator_provider.js';
@@ -61,59 +64,6 @@ const DEFAULT_EVAL_USER_ID = 'test_user_id';
 /** Returns the id of a session an eval run owns. */
 export function createEvalSessionId(): string {
   return `${EVAL_SESSION_ID_PREFIX}${randomUUID()}`;
-}
-
-/**
- * Appends `rubricsToAdd` to the invocation's own rubrics.
- *
- * @throws {InputValidationError} If a rubric id is already on the invocation,
- *   or appears twice in `rubricsToAdd`.
- */
-export function addRubricsToInvocation(
-  invocation: Invocation,
-  rubricsToAdd: Rubric[],
-): void {
-  const rubrics = (invocation.rubrics ??= []);
-  const existingIds = new Set(rubrics.map((rubric) => rubric.rubricId));
-  for (const rubric of rubricsToAdd) {
-    if (existingIds.has(rubric.rubricId)) {
-      throw new InputValidationError(
-        `Rubric with rubric_id '${rubric.rubricId}' already exists.`,
-      );
-    }
-    rubrics.push(rubric);
-    existingIds.add(rubric.rubricId);
-  }
-}
-
-/** Copies the eval case's own rubrics onto every actual invocation. */
-export function copyEvalCaseRubricsToActualInvocations(
-  evalCase: EvalCase,
-  actualInvocations: Invocation[],
-): void {
-  if (!evalCase.rubrics?.length) {
-    return;
-  }
-  for (const invocation of actualInvocations) {
-    addRubricsToInvocation(invocation, evalCase.rubrics);
-  }
-}
-
-/** Copies each expected invocation's rubrics onto its actual counterpart. */
-export function copyInvocationRubricsToActualInvocations(
-  expectedInvocations: Invocation[] | undefined,
-  actualInvocations: Invocation[],
-): void {
-  if (!expectedInvocations) {
-    return;
-  }
-  const paired = Math.min(expectedInvocations.length, actualInvocations.length);
-  for (let index = 0; index < paired; index++) {
-    const rubrics = expectedInvocations[index].rubrics;
-    if (rubrics?.length) {
-      addRubricsToInvocation(actualInvocations[index], rubrics);
-    }
-  }
 }
 
 /**
@@ -156,7 +106,7 @@ export interface LocalEvalServiceOptions {
 
   evalSetsManager: EvalSetsManager;
 
-  /** Defaults to {@link DEFAULT_METRIC_EVALUATOR_REGISTRY}. */
+  /** Defaults to {@link defaultMetricEvaluatorRegistry}. */
   metricEvaluatorRegistry?: MetricEvaluatorRegistry;
 
   /** Defaults to a fresh `InMemorySessionService`. */
@@ -203,7 +153,7 @@ export class LocalEvalService implements BaseEvalService {
     this.app = options.app;
     this.evalSetsManager = options.evalSetsManager;
     this.metricEvaluatorRegistry =
-      options.metricEvaluatorRegistry ?? DEFAULT_METRIC_EVALUATOR_REGISTRY;
+      options.metricEvaluatorRegistry ?? defaultMetricEvaluatorRegistry();
     this.sessionService =
       options.sessionService ?? new InMemorySessionService();
     this.artifactService =
@@ -378,17 +328,22 @@ export class LocalEvalService implements BaseEvalService {
     }
 
     const userId = evalCase.sessionInput?.userId || DEFAULT_EVAL_USER_ID;
+    /** The fields both the failed and the scored result carry. */
+    const base = {
+      evalSetId,
+      evalId: evalCaseId,
+      sessionId: inferenceResult.sessionId ?? '',
+      sessionDetails: await this.getSessionDetails(inferenceResult, userId),
+      userId,
+    };
+
     const actualInvocations = inferenceResult.inferences;
     if (actualInvocations === undefined) {
       return {
-        evalSetId,
-        evalId: evalCaseId,
+        ...base,
         finalEvalStatus: EvalStatus.FAILED,
         overallEvalMetricResults: [],
         evalMetricResultPerInvocation: [],
-        sessionId: inferenceResult.sessionId ?? '',
-        sessionDetails: await this.getSessionDetails(inferenceResult, userId),
-        userId,
       };
     }
 
@@ -440,14 +395,10 @@ export class LocalEvalService implements BaseEvalService {
     }
 
     return {
-      evalSetId,
-      evalId: evalCaseId,
+      ...base,
       finalEvalStatus: generateFinalEvalStatus(overallEvalMetricResults),
       overallEvalMetricResults,
       evalMetricResultPerInvocation,
-      sessionId: inferenceResult.sessionId ?? '',
-      sessionDetails: await this.getSessionDetails(inferenceResult, userId),
-      userId,
     };
   }
 

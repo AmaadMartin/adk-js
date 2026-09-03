@@ -5,7 +5,7 @@
  */
 
 import {
-  DEFAULT_METRIC_EVALUATOR_REGISTRY,
+  defaultMetricEvaluatorRegistry,
   EvalMetric,
   EvalStatus,
   EvaluationResult,
@@ -46,8 +46,8 @@ const TRAJECTORY_METRIC: EvalMetric = {
 describe('MetricEvaluatorRegistry', () => {
   it('resolves the metrics that ship with ADK', () => {
     const trajectory =
-      DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator(TRAJECTORY_METRIC);
-    const responseMatch = DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator({
+      defaultMetricEvaluatorRegistry().getEvaluator(TRAJECTORY_METRIC);
+    const responseMatch = defaultMetricEvaluatorRegistry().getEvaluator({
       metricName: PrebuiltMetrics.RESPONSE_MATCH_SCORE,
       threshold: 0.8,
     });
@@ -58,16 +58,16 @@ describe('MetricEvaluatorRegistry', () => {
 
   it('returns a fresh evaluator on every call', () => {
     const first =
-      DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator(TRAJECTORY_METRIC);
+      defaultMetricEvaluatorRegistry().getEvaluator(TRAJECTORY_METRIC);
     const second =
-      DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator(TRAJECTORY_METRIC);
+      defaultMetricEvaluatorRegistry().getEvaluator(TRAJECTORY_METRIC);
 
     expect(first).not.toBe(second);
   });
 
   it('reports an unregistered metric as not found', () => {
     expect(() =>
-      DEFAULT_METRIC_EVALUATOR_REGISTRY.getEvaluator({
+      defaultMetricEvaluatorRegistry().getEvaluator({
         metricName: 'no_such_metric',
         threshold: 1.0,
       }),

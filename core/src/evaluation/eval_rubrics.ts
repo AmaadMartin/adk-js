@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {InputValidationError} from '../errors/input_validation_error.js';
+// Type-only: `eval_case.ts` imports `Rubric` from here, and erasing both
+// directions keeps the two modules out of a runtime import cycle.
+import type {EvalCase, Invocation} from './eval_case.js';
+
 /** The content of a rubric. */
 export interface RubricContent {
   /**
@@ -30,4 +35,57 @@ export interface Rubric {
    * `FINAL_RESPONSE_QUALITY`, `INSTRUCTION_ADHERENCE`.
    */
   type?: string;
+}
+
+/**
+ * Appends `rubricsToAdd` to the invocation's own rubrics.
+ *
+ * @throws {InputValidationError} If a rubric id is already on the invocation,
+ *   or appears twice in `rubricsToAdd`.
+ */
+export function addRubricsToInvocation(
+  invocation: Invocation,
+  rubricsToAdd: Rubric[],
+): void {
+  const rubrics = (invocation.rubrics ??= []);
+  const existingIds = new Set(rubrics.map((rubric) => rubric.rubricId));
+  for (const rubric of rubricsToAdd) {
+    if (existingIds.has(rubric.rubricId)) {
+      throw new InputValidationError(
+        `Rubric with rubric_id '${rubric.rubricId}' already exists.`,
+      );
+    }
+    rubrics.push(rubric);
+    existingIds.add(rubric.rubricId);
+  }
+}
+
+/** Copies the eval case's own rubrics onto every actual invocation. */
+export function copyEvalCaseRubricsToActualInvocations(
+  evalCase: EvalCase,
+  actualInvocations: Invocation[],
+): void {
+  if (!evalCase.rubrics?.length) {
+    return;
+  }
+  for (const invocation of actualInvocations) {
+    addRubricsToInvocation(invocation, evalCase.rubrics);
+  }
+}
+
+/** Copies each expected invocation's rubrics onto its actual counterpart. */
+export function copyInvocationRubricsToActualInvocations(
+  expectedInvocations: Invocation[] | undefined,
+  actualInvocations: Invocation[],
+): void {
+  if (!expectedInvocations) {
+    return;
+  }
+  const paired = Math.min(expectedInvocations.length, actualInvocations.length);
+  for (let index = 0; index < paired; index++) {
+    const rubrics = expectedInvocations[index].rubrics;
+    if (rubrics?.length) {
+      addRubricsToInvocation(actualInvocations[index], rubrics);
+    }
+  }
 }

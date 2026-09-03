@@ -13,7 +13,7 @@ import {
 } from '@google/genai';
 
 import {AppDetails} from './app_details.js';
-import {Rubric} from './eval_rubrics.js';
+import type {Rubric} from './eval_rubrics.js';
 
 /**
  * Intermediate data an agent produces on its way to a final answer.

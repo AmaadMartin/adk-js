@@ -79,5 +79,16 @@ function registerStandardMetrics(registry: MetricEvaluatorRegistry): void {
   );
 }
 
-/** The registry used when a caller supplies none. */
-export const DEFAULT_METRIC_EVALUATOR_REGISTRY = new MetricEvaluatorRegistry();
+let defaultRegistry: MetricEvaluatorRegistry | undefined;
+
+/**
+ * Returns the registry a {@link LocalEvalService} uses when given none.
+ *
+ * Built on first use rather than at module load. This module hangs off the
+ * package barrel, so constructing an `@experimental` class here would warn
+ * every consumer of `@google/adk` and consume the once-per-class warning slot
+ * before a caller who actually builds a registry can see it.
+ */
+export function defaultMetricEvaluatorRegistry(): MetricEvaluatorRegistry {
+  return (defaultRegistry ??= new MetricEvaluatorRegistry());
+}

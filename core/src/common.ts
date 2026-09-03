@@ -314,6 +314,11 @@ export type {
   ToolTrajectoryCriterion,
 } from './evaluation/eval_metrics.js';
 export type {EvalCaseResult} from './evaluation/eval_result.js';
+export {
+  addRubricsToInvocation,
+  copyEvalCaseRubricsToActualInvocations,
+  copyInvocationRubricsToActualInvocations,
+} from './evaluation/eval_rubrics.js';
 export type {Rubric, RubricContent} from './evaluation/eval_rubrics.js';
 export {getEvalRuntime, setEvalRuntime} from './evaluation/eval_runtime.js';
 export type {
@@ -351,8 +356,8 @@ export {LocalEvalRuntime} from './evaluation/local_eval_runtime.js';
 export {LocalEvalService} from './evaluation/local_eval_service.js';
 export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
 export {
-  DEFAULT_METRIC_EVALUATOR_REGISTRY,
   MetricEvaluatorRegistry,
+  defaultMetricEvaluatorRegistry,
 } from './evaluation/metric_evaluator_registry.js';
 export type {MetricEvaluatorFactory} from './evaluation/metric_evaluator_registry.js';
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';

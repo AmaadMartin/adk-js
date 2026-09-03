@@ -32,9 +32,6 @@ import {
   generateInferencesFromRootAgentLive,
 } from '../../src/evaluation/evaluation_generator.js';
 import {
-  addRubricsToInvocation,
-  copyEvalCaseRubricsToActualInvocations,
-  copyInvocationRubricsToActualInvocations,
   createEvalSessionId,
   EVAL_SESSION_ID_PREFIX,
   generateFinalEvalStatus,
@@ -1088,92 +1085,6 @@ describe('createEvalSessionId', () => {
 
     expect(first.startsWith(EVAL_SESSION_ID_PREFIX)).toBe(true);
     expect(first).not.toBe(second);
-  });
-});
-
-describe('addRubricsToInvocation', () => {
-  it('creates the rubric list when the invocation has none', () => {
-    const target = invocation('target');
-
-    addRubricsToInvocation(target, [rubric('a'), rubric('b')]);
-
-    expect(target.rubrics?.map((entry) => entry.rubricId)).toEqual(['a', 'b']);
-  });
-
-  it('appends to a list the invocation already carries', () => {
-    const target = invocation('target', [rubric('a')]);
-
-    addRubricsToInvocation(target, [rubric('b')]);
-
-    expect(target.rubrics?.map((entry) => entry.rubricId)).toEqual(['a', 'b']);
-  });
-
-  it('rejects a rubric id the invocation already carries', () => {
-    const target = invocation('target', [rubric('a')]);
-
-    expect(() => addRubricsToInvocation(target, [rubric('a')])).toThrow(
-      new InputValidationError("Rubric with rubric_id 'a' already exists."),
-    );
-  });
-
-  it('rejects a rubric id repeated inside the batch being added', () => {
-    const target = invocation('target');
-
-    expect(() =>
-      addRubricsToInvocation(target, [rubric('a'), rubric('a')]),
-    ).toThrow(
-      new InputValidationError("Rubric with rubric_id 'a' already exists."),
-    );
-  });
-});
-
-describe('copyEvalCaseRubricsToActualInvocations', () => {
-  it('copies the case rubrics onto every actual invocation', () => {
-    const actual = [invocation('a'), invocation('b')];
-
-    copyEvalCaseRubricsToActualInvocations(
-      buildEvalCase('case1', 1, {rubrics: [rubric('shared')]}),
-      actual,
-    );
-
-    for (const target of actual) {
-      expect(target.rubrics?.map((entry) => entry.rubricId)).toEqual([
-        'shared',
-      ]);
-    }
-  });
-
-  it('does nothing when the case carries no rubrics', () => {
-    const actual = [invocation('a')];
-
-    copyEvalCaseRubricsToActualInvocations(buildEvalCase('case1'), actual);
-
-    expect(actual[0].rubrics).toBeUndefined();
-  });
-});
-
-describe('copyInvocationRubricsToActualInvocations', () => {
-  it('copies each expected invocation rubric onto its actual counterpart', () => {
-    const actual = [invocation('a'), invocation('b')];
-    const expected = [
-      invocation('expected-a', [rubric('first')]),
-      invocation('expected-b'),
-    ];
-
-    copyInvocationRubricsToActualInvocations(expected, actual);
-
-    expect(actual[0].rubrics?.map((entry) => entry.rubricId)).toEqual([
-      'first',
-    ]);
-    expect(actual[1].rubrics).toBeUndefined();
-  });
-
-  it('does nothing when there are no expected invocations', () => {
-    const actual = [invocation('a')];
-
-    copyInvocationRubricsToActualInvocations(undefined, actual);
-
-    expect(actual[0].rubrics).toBeUndefined();
   });
 });
 
