@@ -360,8 +360,8 @@ export type {SchemaLike} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
 export type {
   ClosableDispatcher,
+  DispatcherRequestInit,
   HttpDispatcher,
-  SslVerify,
 } from './utils/ssl_utils.js';
 export {Task} from './utils/task.js';
 export type {TaskExecutable} from './utils/task.js';

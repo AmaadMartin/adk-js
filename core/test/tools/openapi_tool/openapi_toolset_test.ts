@@ -458,7 +458,7 @@ describe('OpenApiSpecParser', () => {
   });
 });
 
-describe('OpenAPIToolset sslVerify', () => {
+describe('OpenAPIToolset dispatcher', () => {
   const spec: OpenAPIV3.Document = {
     openapi: '3.0.0',
     info: {title: 'Test API', version: '1.0.0'},
@@ -517,7 +517,7 @@ describe('OpenAPIToolset sslVerify', () => {
 
   it('sends the dispatcher the toolset was built with', async () => {
     const init = await runTool(
-      new OpenAPIToolset({specDict: spec, sslVerify: dispatcher}),
+      new OpenAPIToolset({specDict: spec, dispatcher}),
     );
 
     expect(init).toHaveProperty('dispatcher', dispatcher);

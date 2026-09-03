@@ -10,11 +10,7 @@ import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
-import {
-  DispatcherRequestInit,
-  resolveSslDispatcher,
-  SslVerify,
-} from '../../utils/ssl_utils.js';
+import {DispatcherRequestInit, HttpDispatcher} from '../../utils/ssl_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
 import {
@@ -31,8 +27,11 @@ export interface RestApiToolOptions {
   headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   credentialKey?: string;
 
-  /** TLS transport setting for the request. */
-  sslVerify?: SslVerify;
+  /**
+   * Dispatcher the request is sent on, such as one carrying a client
+   * certificate. Omitted, the request goes out on Node's default agent.
+   */
+  dispatcher?: HttpDispatcher;
 }
 
 @experimental
@@ -42,7 +41,7 @@ export class RestApiTool extends BaseTool {
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
   private defaultHeaders: Record<string, string> = {};
-  private readonly sslVerify?: SslVerify;
+  private readonly dispatcher?: HttpDispatcher;
 
   constructor(
     name: string,
@@ -58,7 +57,7 @@ export class RestApiTool extends BaseTool {
     this.authCredential = authCredential;
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
-    this.sslVerify = options.sslVerify;
+    this.dispatcher = options.dispatcher;
     this.operationParser = new OperationParser(operation, options);
   }
 
@@ -177,9 +176,8 @@ export class RestApiTool extends BaseTool {
       // eslint-disable-next-line no-undef
       body: body as BodyInit,
     };
-    const dispatcher = await resolveSslDispatcher(this.sslVerify);
-    if (dispatcher) {
-      init.dispatcher = dispatcher;
+    if (this.dispatcher) {
+      init.dispatcher = this.dispatcher;
     }
 
     try {

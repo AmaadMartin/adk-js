@@ -276,7 +276,7 @@ export class GoogleApiToolset extends BaseToolset {
       specDict: spec,
       prefix: this.prefix,
       authScheme: googleOidcAuthScheme(spec, this.additionalScopes),
-      sslVerify: this.mtlsDispatcher,
+      dispatcher: this.mtlsDispatcher,
     });
   }
 
