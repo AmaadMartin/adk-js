@@ -120,6 +120,15 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
 }
 
 export async function deployToCloudRun(options: DeployToCloudRunOptions) {
+  // Emitted before any work starts, so a later failure cannot swallow it.
+  // The text is adk-python's, verbatim.
+  if (options.withUi) {
+    console.warn(
+      'WARNING: ADK Web is for development purposes. It has access to all' +
+        ' data and should not be used in production.',
+    );
+  }
+
   const project =
     options.project || (await resolveDefaultFromGcloudConfig('project'));
   if (!project || project === '(unset)') {
