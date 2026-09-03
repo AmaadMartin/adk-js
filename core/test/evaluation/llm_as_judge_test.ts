@@ -7,7 +7,6 @@
 import {
   BaseLlm,
   BaseLlmConnection,
-  DEFAULT_JUDGE_MODEL,
   EvalStatus,
   FinalResponseMatchV2Evaluator,
   InputValidationError,
@@ -238,7 +237,9 @@ describe('LlmAsJudge', () => {
       {critique: VALID_CRITIQUE},
     ]);
 
-    expect(judgeModel.requests[0].model).toBe(DEFAULT_JUDGE_MODEL);
+    // The literal, not the exported constant: this pins the value the judge
+    // defaults to, which adk-python also defaults to.
+    expect(judgeModel.requests[0].model).toBe('gemini-2.5-flash');
   });
 
   it('resolves the judge model the criterion names through the registry', async () => {
