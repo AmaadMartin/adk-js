@@ -9,11 +9,14 @@ import {
   BaseLlm,
   BaseLlmConnection,
   Event,
+  InMemorySessionService,
   InvocationContext,
+  LiveRequestQueue,
   LlmAgent,
   LLMRegistry,
   LlmRequest,
   LlmResponse,
+  Runner,
 } from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
@@ -26,6 +29,25 @@ class FakeLlm extends BaseLlm {
 
   async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
     throw new Error('not used');
+  }
+}
+
+/** A model that records the requests a live run connects it with. */
+class RecordingLiveLlm extends FakeLlm {
+  readonly connectedWith: LlmRequest[] = [];
+
+  override async connect(llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    this.connectedWith.push(llmRequest);
+    return {
+      sendHistory: async () => {},
+      sendContent: async () => {},
+      sendRealtime: async () => {},
+      // eslint-disable-next-line require-yield
+      receive: async function* () {
+        return;
+      },
+      close: async () => {},
+    };
   }
 }
 
@@ -271,6 +293,46 @@ describe('LlmAgent.canonicalLiveModel', () => {
     expect(child.canonicalLiveModel.model).toBe(
       'gemini-live-2.5-flash-native-audio',
     );
+  });
+});
+
+describe('a live run', () => {
+  afterEach(() => {
+    LlmAgent.setDefaultModel(LlmAgent.DEFAULT_MODEL);
+    LlmAgent.setDefaultLiveModel(LlmAgent.DEFAULT_LIVE_MODEL);
+  });
+
+  it('connects with the live model, not the turn-by-turn one', async () => {
+    const liveLlm = new RecordingLiveLlm({model: 'live-model'});
+    const turnLlm = new RecordingLiveLlm({model: 'turn-model'});
+    LlmAgent.setDefaultModel(turnLlm);
+    LlmAgent.setDefaultLiveModel(liveLlm);
+
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: 'test_app',
+      agent: new LlmAgent({name: 'live_agent'}),
+      sessionService,
+    });
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+    });
+    const queue = new LiveRequestQueue();
+    queue.close();
+
+    for await (const _event of runner.runLive({
+      userId: session.userId,
+      sessionId: session.id,
+      liveRequestQueue: queue,
+    })) {
+      // Drain the stream; the queue is already closed.
+    }
+
+    expect(liveLlm.connectedWith.map((request) => request.model)).toEqual([
+      'live-model',
+    ]);
+    expect(turnLlm.connectedWith).toHaveLength(0);
   });
 });
 
