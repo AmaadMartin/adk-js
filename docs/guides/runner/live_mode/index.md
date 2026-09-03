@@ -111,11 +111,9 @@ Three things can end a live run, and each is accounted for:
 - **The root finishes.** The event queue is closed, whatever is left in it
   drains, and the generator ends.
 - **The caller stops reading** — a `break` out of the `for await`. The runner
-  asks the root to stop, and nothing is thrown. A node root logs a warning
-  naming the node.
+  asks the root to stop, and nothing is thrown.
 - **The root fails.** The events it already produced are delivered first, then
-  the failure is thrown to the caller. A node root logs the failure before
-  rethrowing it.
+  the failure is thrown to the caller.
 
 `runLive` returns to you straight away in every case. When the root is torn down
 does depend on which event you stopped on. Stopping after an event the root
