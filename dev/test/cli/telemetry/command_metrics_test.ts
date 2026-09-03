@@ -10,11 +10,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {instrumentCommandMetrics} from '../../../src/cli/_telemetry/command_metrics.js';
+import {instrumentCommandMetrics} from '../../../src/cli/telemetry/command_metrics.js';
 import {
   CommandRun,
   MetricsCollector,
-} from '../../../src/cli/_telemetry/metrics_collector.js';
+} from '../../../src/cli/telemetry/metrics_collector.js';
 
 interface QueuedEvent {
   source_extension_json: string;
@@ -334,7 +334,7 @@ describe('instrumentCommandMetrics with no dependency overrides', () => {
       JSON.stringify({telemetry: true}),
     );
     const module =
-      await import('../../../src/cli/_telemetry/command_metrics.js');
+      await import('../../../src/cli/telemetry/command_metrics.js');
     const program = buildProgram();
 
     const stop = module.instrumentCommandMetrics(program, [
@@ -366,7 +366,7 @@ describe('instrumentCommandMetrics with no dependency overrides', () => {
 
   it('writes nothing under ~/.adk when the user never opted in', async () => {
     const module =
-      await import('../../../src/cli/_telemetry/command_metrics.js');
+      await import('../../../src/cli/telemetry/command_metrics.js');
     const program = buildProgram();
 
     const stop = module.instrumentCommandMetrics(program, ['create', 'my_app']);

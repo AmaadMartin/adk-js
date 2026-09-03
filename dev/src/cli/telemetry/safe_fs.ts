@@ -4,17 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * Every filesystem call the CLI telemetry path makes, and the one rule they
+ * share: none of them throws. Telemetry must never change what the CLI does,
+ * so a read-only home directory or a corrupt file becomes a debug log.
+ */
+
 import * as fs from 'node:fs';
 import {AdkLogger} from '../../utils/logger.js';
 
 const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
 
 /**
- * Reads a JSON object from disk.
- *
- * Returns `undefined` when the file is missing, unreadable, not valid JSON, or
- * holds anything other than a JSON object. Telemetry must never fail because
- * of a bad file on disk, so no caller has to handle an error here.
+ * Reads a JSON object from disk. Returns `undefined` when the file is missing,
+ * unreadable, not valid JSON, or holds anything other than a JSON object.
  */
 export function readJsonObject(
   file: string,

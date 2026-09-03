@@ -4,8 +4,8 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {instrumentCommandMetrics} from './cli/_telemetry/command_metrics.js';
 import {createProgram} from './cli/cli.js';
+import {instrumentCommandMetrics} from './cli/telemetry/command_metrics.js';
 
 try {
   const program = createProgram();

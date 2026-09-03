@@ -12,7 +12,7 @@ import {
   CommandRun,
   MetricsCollector,
   TelemetryEnvironment,
-} from '../../../src/cli/_telemetry/metrics_collector.js';
+} from '../../../src/cli/telemetry/metrics_collector.js';
 import {version} from '../../../src/version.js';
 
 interface QueuedEvent {
@@ -38,7 +38,7 @@ const CLEAN_RUN: CommandRun = {
 let root: string;
 let queueFile: string;
 let sessionsDir: string;
-let originalIsTty: boolean | undefined;
+let originalIsTty: boolean;
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-metrics-'));
@@ -48,7 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.stdout.isTTY = originalIsTty as boolean;
+  process.stdout.isTTY = originalIsTty;
   fs.rmSync(root, {recursive: true, force: true});
 });
 

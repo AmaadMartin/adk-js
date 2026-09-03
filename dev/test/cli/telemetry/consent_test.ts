@@ -8,7 +8,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {readTelemetryConsent} from '../../../src/cli/_telemetry/consent.js';
+import {readTelemetryConsent} from '../../../src/cli/telemetry/consent.js';
 
 describe('readTelemetryConsent', () => {
   let home: string;

@@ -18,7 +18,11 @@ const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
  */
 const HELP_FLAG = '--help';
 
-/** The group that manages consent. Recording its own runs would be circular. */
+/**
+ * The group that manages consent, excluded because recording its own runs
+ * would be circular. It is registered on the branch this change merges into,
+ * not on the one it is cut from.
+ */
 const TELEMETRY_COMMAND = 'telemetry';
 
 /** Injection points. Every one defaults to the real thing the CLI uses. */
@@ -67,7 +71,7 @@ export function instrumentCommandMetrics(
     return noop;
   }
 
-  const now = deps.now ?? defaultNow;
+  const now = deps.now ?? (() => performance.now());
   const events = deps.events ?? process;
   const startedAt = now();
   let flags: string[] = [];
@@ -106,10 +110,6 @@ export function instrumentCommandMetrics(
 }
 
 function noop(): void {}
-
-function defaultNow(): number {
-  return performance.now();
-}
 
 /**
  * Walks the arguments against the registered commands and returns the

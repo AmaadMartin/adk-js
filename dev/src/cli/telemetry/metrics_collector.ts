@@ -114,10 +114,8 @@ export class MetricsCollector {
     };
 
     try {
-      if (
-        fs.existsSync(this.queueFile) &&
-        fs.statSync(this.queueFile).size > MAX_QUEUE_SIZE_BYTES
-      ) {
+      const queued = fs.statSync(this.queueFile, {throwIfNoEntry: false});
+      if ((queued?.size ?? 0) > MAX_QUEUE_SIZE_BYTES) {
         return;
       }
       fs.mkdirSync(path.dirname(this.queueFile), {recursive: true});
