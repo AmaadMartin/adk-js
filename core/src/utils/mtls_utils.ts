@@ -35,20 +35,19 @@ export interface ClientCertSource {
 const USE_MTLS_ENDPOINT_ENV = 'GOOGLE_API_USE_MTLS_ENDPOINT';
 const USE_CLIENT_CERTIFICATE_ENV = 'GOOGLE_API_USE_CLIENT_CERTIFICATE';
 
+const CERT_PROVIDER_COMMAND_KEY = 'cert_provider_command';
+
 /**
- * Where gcloud writes the context-aware access metadata.
+ * Returns where gcloud writes the context-aware access metadata.
  *
  * The path and the `cert_provider_command` key are the contract
  * google-auth-library-python reads in
  * `google/auth/transport/_mtls_helper.py`; this module is the Node side of the
  * same contract.
  */
-const CONTEXT_AWARE_METADATA_PATH = join(
-  homedir(),
-  '.secureConnect',
-  'context_aware_metadata.json',
-);
-const CERT_PROVIDER_COMMAND_KEY = 'cert_provider_command';
+function contextAwareMetadataPath(): string {
+  return join(homedir(), '.secureConnect', 'context_aware_metadata.json');
+}
 
 const CERTIFICATE_PATTERN =
   /-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/;
@@ -130,9 +129,10 @@ function isStringArray(value: unknown): value is string[] {
  * because the caller asked for a certificate and will not get one.
  */
 async function readCertProviderCommand(): Promise<string[] | undefined> {
+  const metadataPath = contextAwareMetadataPath();
   let contents: string;
   try {
-    contents = await readFile(CONTEXT_AWARE_METADATA_PATH, 'utf8');
+    contents = await readFile(metadataPath, 'utf8');
   } catch (_e: unknown) {
     return undefined;
   }
@@ -147,7 +147,7 @@ async function readCertProviderCommand(): Promise<string[] | undefined> {
       )?.value;
     }
   } catch (e: unknown) {
-    logger.warn(`Failed to parse ${CONTEXT_AWARE_METADATA_PATH}.`, e);
+    logger.warn(`Failed to parse ${metadataPath}.`, e);
     return undefined;
   }
 
@@ -155,8 +155,7 @@ async function readCertProviderCommand(): Promise<string[] | undefined> {
     return command;
   }
   logger.warn(
-    `${CONTEXT_AWARE_METADATA_PATH} does not name a ` +
-      `\`${CERT_PROVIDER_COMMAND_KEY}\`.`,
+    `${metadataPath} does not name a \`${CERT_PROVIDER_COMMAND_KEY}\`.`,
   );
   return undefined;
 }

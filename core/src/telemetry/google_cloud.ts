@@ -259,32 +259,19 @@ async function getGcpSpanExporter(
   );
 }
 
-/**
- * Builds the push metric exporter that any metric reader can drain.
- *
- * @param googleAuth Credentials to export with. Application Default
- *   Credentials are resolved when this is omitted.
- */
-async function getGcpOtlpMetricExporter(
-  googleAuth?: GoogleAuthConfig,
-): Promise<OTLPMetricExporter> {
-  const authClient =
-    googleAuth?.authClient ?? (await new GoogleAuth().getClient());
-  return new OTLPMetricExporter(
+/** Builds the periodic reader that drains the OTLP metric exporter. */
+async function getGcpMetricsExporter(
+  authClient: AuthClient,
+): Promise<MetricReader> {
+  const exporter = new OTLPMetricExporter(
     await createOtlpExporterConfig(
       authClient,
       DEFAULT_TELEMETRY_METRICS_ENDPOINT,
       DEFAULT_MTLS_TELEMETRY_METRICS_ENDPOINT,
     ),
   );
-}
-
-/** Builds the periodic reader that drains the OTLP metric exporter. */
-async function getGcpMetricsExporter(
-  googleAuth: GoogleAuthConfig,
-): Promise<MetricReader> {
   return new PeriodicExportingMetricReader({
-    exporter: await getGcpOtlpMetricExporter(googleAuth),
+    exporter,
     exportIntervalMillis: MIN_EXPORT_INTERVAL_MS,
   });
 }
@@ -517,7 +504,7 @@ export async function getGcpExporters(
   return {
     spanProcessors: enableTracing ? [await getGcpSpanExporter(authClient)] : [],
     metricReaders: enableMetrics
-      ? [await getGcpMetricsExporter({authClient, projectId})]
+      ? [await getGcpMetricsExporter(authClient)]
       : [],
     logRecordProcessors: enableLogging
       ? [await getGcpLogsExporter(authClient, projectId)]
