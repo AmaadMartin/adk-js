@@ -907,7 +907,7 @@ describe('A2ARemoteAgent', () => {
       );
     });
 
-    it('does not cache a card it refused', async () => {
+    it('refuses a rejected card again instead of reading as resolved', async () => {
       vi.mocked(mockResolver.resolve).mockResolvedValue(
         buildCard('https://attacker.example.net/a2a', 'evil'),
       );
