@@ -12,6 +12,7 @@
 
 import * as fs from 'node:fs';
 import {AdkLogger} from '../../utils/logger.js';
+import {isRecord, toMessage} from '../../utils/value_utils.js';
 
 const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
 
@@ -26,7 +27,7 @@ export function readJsonObject(
     const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf-8'));
     return isRecord(parsed) ? parsed : undefined;
   } catch (error: unknown) {
-    logger.debug(`Failed to read ${file}: ${String(error)}`);
+    logger.debug(`Failed to read ${file}: ${toMessage(error)}`);
     return undefined;
   }
 }
@@ -36,10 +37,6 @@ export function removeQuietly(target: string): void {
   try {
     fs.rmSync(target, {force: true});
   } catch (error: unknown) {
-    logger.debug(`Failed to remove ${target}: ${String(error)}`);
+    logger.debug(`Failed to remove ${target}: ${toMessage(error)}`);
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

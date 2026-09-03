@@ -9,6 +9,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {AdkLogger} from '../../utils/logger.js';
+import {toMessage} from '../../utils/value_utils.js';
 import {version} from '../../version.js';
 import {QUEUE_FILE, TELEMETRY_SESSIONS_DIR} from './constants.js';
 import {readJsonObject, removeQuietly} from './safe_fs.js';
@@ -121,7 +122,7 @@ export class MetricsCollector {
       fs.mkdirSync(path.dirname(this.queueFile), {recursive: true});
       fs.appendFileSync(this.queueFile, `${JSON.stringify(event)}\n`, 'utf-8');
     } catch (error: unknown) {
-      logger.debug(`Failed to record metric: ${String(error)}`);
+      logger.debug(`Failed to record metric: ${toMessage(error)}`);
     }
   }
 }
@@ -195,7 +196,7 @@ function writeSessionState(
     fs.writeFileSync(tempFile, JSON.stringify(info), 'utf-8');
     fs.renameSync(tempFile, sessionFile);
   } catch (error: unknown) {
-    logger.debug(`Failed to write the telemetry session: ${String(error)}`);
+    logger.debug(`Failed to write the telemetry session: ${toMessage(error)}`);
     removeQuietly(tempFile);
   }
 }

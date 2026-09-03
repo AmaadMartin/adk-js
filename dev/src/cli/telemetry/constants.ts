@@ -9,9 +9,6 @@ import * as path from 'node:path';
 
 const ADK_HOME = path.join(os.homedir(), '.adk');
 
-/** Local file holding the user's CLI preferences, including telemetry consent. */
-export const CONFIG_FILE = path.join(ADK_HOME, 'config.json');
-
 /** Local JSONL file where command metric records are queued. */
 export const QUEUE_FILE = path.join(ADK_HOME, 'telemetry_queue.jsonl');
 
