@@ -11,13 +11,14 @@ import {
   TextPart as A2ATextPart,
 } from '@a2a-js/sdk';
 import {Part as GenAIPart, Language, Outcome} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
   toA2ADataPart,
   toA2AFilePart,
   toA2APart,
   toA2AParts,
   toA2ATextPart,
+  toGenAIContent,
   toGenAIPart,
   toGenAIPartData,
   toGenAIPartFile,
@@ -580,6 +581,64 @@ describe('part_converter_utils', () => {
         metadata: {'adk_type': 'code_execution_result'},
       };
       expect(toA2APart(toGenAIPart(a2aPart))).toEqual(a2aPart);
+    });
+  });
+
+  describe('injected part converters', () => {
+    it('toA2AParts uses the supplied converter and forwards the tool ids', () => {
+      const partConverter = vi.fn(
+        (part: GenAIPart, longRunningToolIDs?: string[]): A2APart => ({
+          kind: 'text',
+          text: `${part.text}:${longRunningToolIDs?.join(',')}`,
+        }),
+      );
+
+      expect(toA2AParts([{text: 'a'}], ['fc-1'], partConverter)).toEqual([
+        {kind: 'text', text: 'a:fc-1'},
+      ]);
+      expect(partConverter).toHaveBeenCalledWith({text: 'a'}, ['fc-1']);
+    });
+
+    it('toGenAIParts expands a converter that returns an array', () => {
+      const partConverter = (): GenAIPart[] => [{text: 'x'}, {text: 'y'}];
+
+      expect(toGenAIParts([{kind: 'text', text: 'a'}], partConverter)).toEqual([
+        {text: 'x'},
+        {text: 'y'},
+      ]);
+    });
+
+    it('toGenAIParts drops a converter that returns undefined', () => {
+      const partConverter = (part: A2APart): GenAIPart | undefined =>
+        (part as A2ATextPart).text === 'a' ? undefined : {text: 'b'};
+
+      expect(
+        toGenAIParts(
+          [
+            {kind: 'text', text: 'a'},
+            {kind: 'text', text: 'b'},
+          ],
+          partConverter,
+        ),
+      ).toEqual([{text: 'b'}]);
+    });
+
+    it('toGenAIContent uses the supplied converter and keeps the message role', () => {
+      const partConverter = (part: A2APart): GenAIPart => ({
+        text: `seen:${(part as A2ATextPart).text}`,
+      });
+
+      expect(
+        toGenAIContent(
+          {
+            kind: 'message',
+            messageId: 'm1',
+            role: 'agent',
+            parts: [{kind: 'text', text: 'a'}],
+          },
+          partConverter,
+        ),
+      ).toEqual({role: 'model', parts: [{text: 'seen:a'}]});
     });
   });
 });
