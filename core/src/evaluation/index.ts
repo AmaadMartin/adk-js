@@ -8,8 +8,9 @@
  * The ADK evaluation module (a parity port of `google/adk-python`'s
  * `google/adk/evaluation`). It currently covers the eval case data model, the
  * accessors that read a recorded trajectory, the contract every metric
- * evaluator implements, and the `ResponseEvaluator`, `LlmAsJudge` and
- * `SafetyEvaluatorV1` evaluators that stand on it.
+ * evaluator implements, and the `ResponseEvaluator`, `LlmAsJudge`,
+ * `FinalResponseMatchV2Evaluator` and `SafetyEvaluatorV1` evaluators that
+ * stand on it.
  */
 
 export type {AgentDetails, AppDetails} from './app_details.js';
@@ -36,6 +37,8 @@ export type {
 } from './eval_case.js';
 export {
   DEFAULT_JUDGE_MODEL,
+  DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_JUDGE_PARALLELISM_LIMIT,
   EvalStatus,
   PrebuiltMetrics,
   getMetricThreshold,
@@ -48,6 +51,7 @@ export type {
   EvalMetric,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
+  LlmAsAJudgeMetric,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
 } from './eval_metrics.js';
@@ -69,8 +73,19 @@ export type {
   PerInvocationResult,
 } from './evaluator.js';
 export {RougeEvaluator} from './final_response_match_v1.js';
+export {
+  FinalResponseMatchV2Evaluator,
+  formatAutoRaterPrompt,
+  parseCritique,
+} from './final_response_match_v2.js';
+export type {AutoRaterPromptValues} from './final_response_match_v2.js';
 export {LlmAsJudge} from './llm_as_judge.js';
 export type {AutoRaterScore, LlmAsJudgeOptions} from './llm_as_judge.js';
+export {
+  Label,
+  PARTIALLY_VALID_LABELS,
+  getTextFromInvocation,
+} from './llm_as_judge_utils.js';
 export {ResponseEvaluator} from './response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './rouge_scorer.js';

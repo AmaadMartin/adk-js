@@ -307,6 +307,16 @@ export interface EvalMetric {
   customFunctionPath?: string;
 }
 
+/**
+ * An {@link EvalMetric} that an LLM-as-a-judge metric scores.
+ *
+ * It narrows the criterion, so that a criterion written inline keeps its
+ * `judgeModelOptions` instead of failing the excess-property check.
+ */
+export interface LlmAsAJudgeMetric extends EvalMetric {
+  criterion?: LlmAsAJudgeCriterion;
+}
+
 /** Supporting detail a metric reports alongside its score. */
 export interface EvalMetricResultDetails {
   /** The scores obtained by applying the criterion's rubrics. */

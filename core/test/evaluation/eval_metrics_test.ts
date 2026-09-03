@@ -1003,3 +1003,32 @@ describe('the rubric re-exports', () => {
     expect(criterion.rubrics?.[0]).toBe(rubric);
   });
 });
+
+describe('the final_response_match_v2 threshold', () => {
+  it('prefers the criterion threshold over the metric one', () => {
+    expect(
+      getMetricThreshold({
+        metricName: PrebuiltMetrics.FINAL_RESPONSE_MATCH_V2,
+        threshold: 0.8,
+        criterion: {threshold: 0.5},
+      }),
+    ).toBe(0.5);
+  });
+
+  it('falls back to the deprecated metric threshold', () => {
+    expect(
+      getMetricThreshold({
+        metricName: PrebuiltMetrics.FINAL_RESPONSE_MATCH_V2,
+        threshold: 0.8,
+      }),
+    ).toBe(0.8);
+  });
+
+  it('rejects a metric that carries no threshold at all', () => {
+    expect(() =>
+      getMetricThreshold({
+        metricName: PrebuiltMetrics.FINAL_RESPONSE_MATCH_V2,
+      }),
+    ).toThrow(InputValidationError);
+  });
+});

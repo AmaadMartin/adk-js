@@ -271,7 +271,10 @@ export abstract class LlmAsJudge<
     for (const [invocationIndex, actual] of actualInvocations.entries()) {
       const expected = expectedInvocations?.[invocationIndex];
       const llmRequest: LlmRequest = {
-        model: this.judgeModelOptions.judgeModel,
+        // The model that answers, not the one the criterion names: `Gemini`
+        // binds the outgoing call to `llmRequest.model` ahead of its own, so a
+        // caller-supplied judge would otherwise be sent to the wrong model.
+        model: this.judgeModel.model,
         contents: [
           {
             role: 'user',
