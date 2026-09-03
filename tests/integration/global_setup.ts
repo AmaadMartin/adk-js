@@ -48,10 +48,14 @@ async function findFixtureProjects(dir: string): Promise<string[]> {
  * and for the shared `~/.npm` cache lock. `stdio: 'inherit'` reports npm's own
  * progress and diagnostics, the only output a run produces before the workers
  * start.
+ *
+ * Fixture deps are `file:` links to core/dev whose transitive deps are already
+ * in `~/.npm` from the job-level install, so `--prefer-offline` resolves from
+ * that cache instead of revalidating against the registry.
  */
 export async function setup(): Promise<void> {
   for (const project of await findFixtureProjects(INTEGRATION_ROOT)) {
-    execSync('npm install --no-audit --no-fund', {
+    execSync('npm install --prefer-offline --no-audit --no-fund', {
       cwd: project,
       stdio: 'inherit',
     });

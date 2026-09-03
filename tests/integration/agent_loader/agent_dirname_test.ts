@@ -12,6 +12,12 @@ import {assertWorkspaceAdkCliAvailable} from '../workspace_cli.js';
 
 const dirname = process.cwd();
 
+// Each test body spawns `npm run start`, which esbuild-bundles and minifies the
+// whole @google/adk graph before the agent answers. This replaces the project's
+// 60s testTimeout rather than raising it, and it states the same budget
+// `build_setup_test.ts` states for that same `npm run start` work.
+const TEST_EXECUTION_TIMEOUT = 120_000;
+
 describe.each(['__dirname', '__filename', 'import_meta_url', 'dependency_url'])(
   'Agent with %s',
   (testCaseName: string) => {
@@ -28,19 +34,22 @@ describe.each(['__dirname', '__filename', 'import_meta_url', 'dependency_url'])(
       await assertWorkspaceAdkCliAvailable();
     });
 
-    // No test budget: the 60s project testTimeout already bounds this.
-    it('should run agent and load params from file nearby via package.json script', async () => {
-      const childProcess = spawn('npm', ['run', 'start'], {
-        cwd: projectPath,
-        shell: true,
-      });
+    it(
+      'should run agent and load params from file nearby via package.json script',
+      async () => {
+        const childProcess = spawn('npm', ['run', 'start'], {
+          cwd: projectPath,
+          shell: true,
+        });
 
-      let response = await sendInput(childProcess, 'Tell me a joke.\n');
+        let response = await sendInput(childProcess, 'Tell me a joke.\n');
 
-      expect(response.toString()).toContain("I'm stubby model response!");
+        expect(response.toString()).toContain("I'm stubby model response!");
 
-      response = await sendInput(childProcess, 'exit\n');
-      expect(response.toString()).toContain('');
-    });
+        response = await sendInput(childProcess, 'exit\n');
+        expect(response.toString()).toContain('');
+      },
+      TEST_EXECUTION_TIMEOUT,
+    );
   },
 );

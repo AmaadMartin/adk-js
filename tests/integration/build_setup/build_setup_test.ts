@@ -13,7 +13,8 @@ const execAsync = promisify(exec);
 const dirname = process.cwd();
 
 // `tests/integration/global_setup.ts` installs the fixture; the hook below only
-// builds it. Each test then runs a short command inside the built fixture.
+// builds it. Each test then spawns `npm run start`, which esbuild-bundles and
+// minifies the whole @google/adk graph before the agent answers.
 // Per-test budget, not a build budget: don't raise it for hook flakes, because
 // the hooks are on the project's hookTimeout. It replaces the project's 60s
 // testTimeout, because Windows CI is slow enough to need the wide margin.
