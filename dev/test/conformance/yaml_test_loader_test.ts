@@ -6,6 +6,7 @@
 
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
+import {Readable} from 'node:stream';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
 
@@ -157,9 +158,9 @@ describe('batchLoadYamlTestDefs', () => {
 
   it('should reject a spec whose key is misspelled', async () => {
     const rootDir = '/root/tests';
-    (fg.stream as unknown as Mock).mockReturnValue([
-      '/root/tests/t1/spec.yaml',
-    ]);
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/tests/t1/spec.yaml']),
+    );
     // The typo is snake_case in the file, so this also pins the order: the
     // loader camelCases the spec first, then validates it.
     (fs.readFile as Mock).mockResolvedValue(
