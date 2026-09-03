@@ -10,7 +10,7 @@ import {Context} from '../../agents/context.js';
 import {base64Encode} from '../../utils/env_aware_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {RunAsyncToolRequest} from '../base_tool.js';
+import {RunAsyncToolRequest, ToolProcessLlmRequest} from '../base_tool.js';
 import {FunctionTool} from '../function_tool.js';
 import {ComputerState, isComputerState} from './base_computer.js';
 
@@ -296,5 +296,7 @@ export class ComputerUseTool extends FunctionTool<Schema> {
    * request, and the API supplies the declarations of the predefined
    * functions. Sending our own would duplicate them.
    */
-  override async processLlmRequest(): Promise<void> {}
+  override async processLlmRequest(
+    _request: ToolProcessLlmRequest,
+  ): Promise<void> {}
 }

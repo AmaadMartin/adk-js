@@ -208,6 +208,11 @@ describe('normalizeCoordinate', () => {
     expect(normalizeCoordinate(1500, 1000, 1080)).toBe(1079);
   });
 
+  it('truncates a fractional result rather than rounding it', () => {
+    expect(normalizeCoordinate(999, 1000, 1080)).toBe(1078);
+    expect(normalizeCoordinate(3, 1000, 1919)).toBe(5);
+  });
+
   it('scales against a 2000x2000 virtual space', () => {
     expect(normalizeCoordinate(1000, 2000, 1920)).toBe(960);
     expect(normalizeCoordinate(2000, 2000, 1920)).toBe(1919);
