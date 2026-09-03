@@ -6,6 +6,7 @@
 
 export {AdkApiClient} from './server/adk_api_client.js';
 export {AdkApiServer} from './server/adk_api_server.js';
+export {AdkWebServer} from './server/adk_web_server.js';
 export {
   createApiServer,
   createApiServerApp,

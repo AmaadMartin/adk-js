@@ -857,6 +857,7 @@ export {
   getClientLabels,
   runWithClientLabel,
 } from './utils/client_labels.js';
+export {deprecated} from './utils/deprecated.js';
 export {getBooleanEnvVar} from './utils/env_aware_utils.js';
 export {getHttpDebugInfo} from './utils/http_debug_utils.js';
 export type {HttpDebugRecord, HttpExchange} from './utils/http_debug_utils.js';
