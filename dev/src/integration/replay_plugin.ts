@@ -14,7 +14,7 @@ import {
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
-import {Content, FunctionCall} from '@google/genai';
+import {Content} from '@google/genai';
 import {isDeepStrictEqual} from 'node:util';
 import {loadRecordings} from '../conformance/recordings_loader.js';
 import {ReplayConfigError, ReplayVerificationError} from './replay_errors.js';
@@ -24,9 +24,6 @@ export {ReplayConfigError, ReplayVerificationError} from './replay_errors.js';
 
 /** Session state key carrying the replay configuration. */
 const REPLAY_CONFIG_STATE_KEY = '_adk_replay_config';
-
-/** The built-in tool whose only effect is an agent transfer. */
-const TRANSFER_TO_AGENT_TOOL_NAME = 'transfer_to_agent';
 
 const logger = getLogger();
 
@@ -90,32 +87,15 @@ function agentToolRecordings(
   );
 }
 
-/** Takes the agent's next tool recording and advances its replay index. */
-function takeNextToolRecording(
-  state: InvocationReplayState,
-  agentName: string,
-): ToolRecording {
-  const index = state.agentToolReplayIndices.get(agentName) ?? 0;
-  const recordings = agentToolRecordings(state, agentName);
-  if (index >= recordings.length) {
-    throw new ReplayVerificationError(
-      `Runtime sent more tool requests than expected for agent '${agentName}'` +
-        ` at user_message_index ${state.userMessageIndex}.` +
-        ` Expected ${recordings.length}, but got request at index ${index}`,
-    );
-  }
-  state.agentToolReplayIndices.set(agentName, index + 1);
-  return recordings[index];
-}
-
-/** Fails unless the live tool call is the one that was recorded. */
-function verifyToolCall(
-  recordedCall: FunctionCall | undefined,
+/** The recorded response for a live call that matches `recording`. */
+function verifiedToolResponse(
+  recording: ToolRecording,
   toolName: string,
   toolArgs: Record<string, unknown>,
   agentName: string,
   agentIndex: number,
-): void {
+): Record<string, unknown> {
+  const recordedCall = recording.toolCall;
   if (recordedCall?.name !== toolName) {
     throw new ReplayVerificationError(
       `Tool name mismatch for agent '${agentName}' at index ${agentIndex}:
@@ -131,19 +111,46 @@ recorded: ${JSON.stringify(recordedArgs)}
 current: ${JSON.stringify(toolArgs)}`,
     );
   }
+  const recordedResponse = recording.toolResponse?.response;
+  if (!recordedResponse) {
+    throw new ReplayVerificationError(
+      `Tool recording for agent '${agentName}' at index ${agentIndex} holds` +
+        ` no response for '${toolName}'`,
+    );
+  }
+  return recordedResponse;
 }
 
-/** Verifies the live tool call against the agent's next recording. */
-function verifyAndTakeNextToolRecording(
+/**
+ * Verifies the live call against the agent's next recording and returns its
+ * recorded response.
+ *
+ * The agent's replay index advances even when verification fails, so a run
+ * that already diverged does not re-offer the same recording.
+ */
+function takeVerifiedToolResponse(
   state: InvocationReplayState,
   agentName: string,
   toolName: string,
   toolArgs: Record<string, unknown>,
-): ToolRecording {
-  const agentIndex = state.agentToolReplayIndices.get(agentName) ?? 0;
-  const recording = takeNextToolRecording(state, agentName);
-  verifyToolCall(recording.toolCall, toolName, toolArgs, agentName, agentIndex);
-  return recording;
+): Record<string, unknown> {
+  const index = state.agentToolReplayIndices.get(agentName) ?? 0;
+  const recordings = agentToolRecordings(state, agentName);
+  if (index >= recordings.length) {
+    throw new ReplayVerificationError(
+      `Runtime sent more tool requests than expected for agent '${agentName}'` +
+        ` at user_message_index ${state.userMessageIndex}.` +
+        ` Expected ${recordings.length}, but got request at index ${index}`,
+    );
+  }
+  state.agentToolReplayIndices.set(agentName, index + 1);
+  return verifiedToolResponse(
+    recordings[index],
+    toolName,
+    toolArgs,
+    agentName,
+    index,
+  );
 }
 
 /**
@@ -257,7 +264,7 @@ export class ReplayPlugin extends BasePlugin {
     }
 
     const agentName = toolContext.agentName;
-    const recording = verifyAndTakeNextToolRecording(
+    const response = takeVerifiedToolResponse(
       state,
       agentName,
       tool.name,
@@ -265,19 +272,17 @@ export class ReplayPlugin extends BasePlugin {
     );
 
     if (!isAgentTool(tool)) {
-      // An AgentTool would re-drive its sub-agent, whose own requests and
-      // responses this plugin does not replay.
+      // Only the response is substituted: the tool still runs, so one that
+      // mutates EventActions behaves as it did during recording. An AgentTool
+      // is the exception, because running it re-drives a sub-agent whose own
+      // requests and responses this plugin does not replay.
       await tool.runAsync({args: toolArgs, toolContext});
-    }
-
-    if (tool.name === TRANSFER_TO_AGENT_TOOL_NAME) {
-      toolContext.actions.transferToAgent = toolArgs['agentName'] as string;
     }
 
     logger.debug(
       `Replaying tool response for agent ${agentName}: tool=${tool.name}`,
     );
-    return recording.toolResponse!.response;
+    return response;
   }
 
   /** Builds this invocation's replay state, or `undefined` if replay is off. */

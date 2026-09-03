@@ -11,6 +11,8 @@
 
 import {
   AgentTool,
+  AgentTransferLlmRequestProcessor,
+  BaseAgent,
   BaseTool,
   Context,
   createSession,
@@ -99,16 +101,41 @@ function llmRecording(text: string, agentName = 'agent_a'): Recording {
   };
 }
 
-function makeContext(agentName = 'agent_a'): Context {
+function makeContext(
+  agentName = 'agent_a',
+  subAgents: BaseAgent[] = [],
+): Context {
   const session = createSession({id: 'test-session', appName: 'test-app'});
   return new Context({
     invocationContext: new InvocationContext({
       invocationId: 'test-invocation',
-      agent: new LlmAgent({name: agentName}),
+      agent: new LlmAgent({name: agentName, subAgents}),
       session,
       pluginManager: new PluginManager([]),
     }),
   });
+}
+
+/** The `transfer_to_agent` tool the framework itself registers on a request. */
+async function realTransferTool(
+  invocationContext: InvocationContext,
+): Promise<BaseTool> {
+  const llmRequest: LlmRequest = {
+    contents: [],
+    liveConnectConfig: {},
+    toolsDict: {},
+  };
+  for await (const event of new AgentTransferLlmRequestProcessor().runAsync(
+    invocationContext,
+    llmRequest,
+  )) {
+    expect.fail(`the processor yielded an unexpected event: ${event.id}`);
+  }
+  const tool = llmRequest.toolsDict['transfer_to_agent'];
+  if (!tool) {
+    expect.fail('the processor did not register the transfer tool');
+  }
+  return tool;
 }
 
 const EMPTY_LLM_REQUEST: LlmRequest = {
@@ -189,6 +216,38 @@ describe('ReplayPlugin injected recordings', () => {
     expect(String(error)).toContain('recorded: {}\ncurrent: {"sides":6}');
   });
 
+  it('should reject a recording that holds no response', async () => {
+    const plugin = new ReplayPlugin(
+      [
+        {
+          userMessageIndex: 0,
+          agentName: 'agent_a',
+          toolRecording: {toolCall: {name: 'roll_die', args: {sides: 6}}},
+        },
+      ],
+      {userMessageIndex: 0},
+    );
+    const context = makeContext();
+
+    await plugin.beforeRunCallback({
+      invocationContext: context.invocationContext,
+    });
+    const error = await plugin
+      .beforeToolCallback({
+        tool: new SpyTool(),
+        toolArgs: {sides: 6},
+        toolContext: context,
+      })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ReplayVerificationError);
+    expect(error).toHaveProperty(
+      'message',
+      "Tool recording for agent 'agent_a' at index 0 holds no response for" +
+        " 'roll_die'",
+    );
+  });
+
   it('should still transfer to the recorded agent', async () => {
     const plugin = new ReplayPlugin(
       [
@@ -200,17 +259,20 @@ describe('ReplayPlugin injected recordings', () => {
       ],
       {userMessageIndex: 0},
     );
-    const context = makeContext();
+    const context = makeContext('agent_a', [new LlmAgent({name: 'agent_b'})]);
+    const transferTool = await realTransferTool(context.invocationContext);
 
     await plugin.beforeRunCallback({
       invocationContext: context.invocationContext,
     });
     await plugin.beforeToolCallback({
-      tool: new SpyTool('transfer_to_agent'),
+      tool: transferTool,
       toolArgs: {agentName: 'agent_b'},
       toolContext: context,
     });
 
+    // The plugin holds no transfer special case: running the real tool is what
+    // sets the action.
     expect(context.actions.transferToAgent).toBe('agent_b');
   });
 

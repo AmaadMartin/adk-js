@@ -10,8 +10,8 @@ import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {RecordingsSchema} from '../integration/recordings_schema.js';
 import {TestInfo, TestSpec} from '../integration/test_types.js';
+import {loadRecordings} from './recordings_loader.js';
 
 /**
  * batchLoadYamlTestDefs will recursively search the directory given
@@ -65,18 +65,7 @@ export async function batchLoadYamlTestDefs(
     }) as Session;
 
     // Recordings file
-    const recordingsFile = path.posix.join(
-      baseDir,
-      'generated-recordings.yaml',
-    );
-    const recordingsContent = await fs.readFile(recordingsFile, 'utf-8');
-    const parsedRecordings = yaml.load(recordingsContent);
-    if (typeof parsedRecordings !== 'object' || parsedRecordings === null) {
-      throw new Error('Recording file must be a YAML mapping');
-    }
-    const recordings = RecordingsSchema.parse(
-      camelcaseKeys(parsedRecordings, {deep: true}),
-    );
+    const recordings = await loadRecordings(baseDir, 'none');
 
     // Make test names unique by including relative file path from given root dir
     const normalizedDir = directory.replaceAll('\\', '/');
