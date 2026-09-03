@@ -17,12 +17,10 @@ import {
   MemoryProfile,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
 import {Content, createUserContent} from '@google/genai';
-import {GoogleAuthOptions} from 'google-auth-library';
 import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {logger} from '../utils/logger.js';
 import {
-  createVertexApiClient,
   EXPRESS_MODE_UNSUPPORTED_MESSAGE,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
@@ -126,27 +124,6 @@ function isGenerationTriggerConfig(
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Builds the Memories module on an API client that carries the given
- * credentials.
- *
- * The cast bridges two copies of `@google/genai` in the dependency tree:
- * `@google-cloud/vertexai@1.12.0` resolves its own `@google/genai@1.52.0`,
- * while this package resolves `@google/genai@2.9.0`. The two `ApiClient`
- * classes each declare a private `customBaseUrl`, so TypeScript treats them as
- * distinct types even though the instances are interchangeable at runtime.
- */
-function createCredentialedMemories(options: {
-  project?: string;
-  location?: string;
-  googleAuthOptions: GoogleAuthOptions;
-}): Memories {
-  const apiClient = createVertexApiClient(options);
-  return new Memories(
-    apiClient as unknown as ConstructorParameters<typeof Memories>[0],
-  );
-}
-
 function toIngestionEvent(event: Event): IngestionDirectContentsSourceEvent {
   const ingestionEvent: IngestionDirectContentsSourceEvent = {
     content: event.content,
@@ -209,15 +186,6 @@ export interface VertexAiMemoryBankServiceOptions {
   location?: string;
   agentEngineId: string;
   expressModeApiKey?: string;
-
-  /**
-   * Authentication options for the Memory Bank API, for example credentials
-   * obtained through Workload Identity Federation outside of Google Cloud.
-   * Defaults to Application Default Credentials. Ignored when `client` is
-   * given, because an injected client carries its own authentication.
-   */
-  credentials?: GoogleAuthOptions;
-
   client?: Client;
 }
 
@@ -262,15 +230,6 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
 
     if (this.expressModeApiKey && (!this.projectId || !this.location)) {
       throw new Error(EXPRESS_MODE_UNSUPPORTED_MESSAGE);
-    }
-
-    if (options.credentials) {
-      this.memories = createCredentialedMemories({
-        project: this.projectId,
-        location: this.location,
-        googleAuthOptions: options.credentials,
-      });
-      return;
     }
 
     const client = new Client({

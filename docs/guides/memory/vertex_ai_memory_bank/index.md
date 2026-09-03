@@ -133,24 +133,6 @@ An explicit `customMetadata.memoryId` wins over `MemoryEntry.id`.
 `customMetadata`, so the `{stringValue: 'onboarding'}` that Memory Bank holds
 comes back as `'onboarding'`.
 
-## Authenticate with your own credentials
-
-The service uses Application Default Credentials. Pass `credentials` to
-authenticate with something else, for example a credential obtained through
-Workload Identity Federation outside Google Cloud.
-
-```ts
-const memoryService = new VertexAiMemoryBankService({
-  projectId: 'my-project',
-  location: 'us-central1',
-  agentEngineId: '456',
-  credentials: {keyFilename: '/path/to/key.json'},
-});
-```
-
-The value is a `GoogleAuthOptions` from `google-auth-library`. An injected
-`client` ignores it, because that client carries its own authentication.
-
 ## Failure modes
 
 `searchMemory` never throws because of one bad entry. It warns and skips an

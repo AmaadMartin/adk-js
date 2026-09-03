@@ -6,10 +6,7 @@
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
-import {
-  createVertexApiClient,
-  getExpressModeApiKey,
-} from '../../src/utils/vertex_ai_utils.js';
+import {getExpressModeApiKey} from '../../src/utils/vertex_ai_utils.js';
 
 describe('vertex_ai_utils', () => {
   describe('getExpressModeApiKey', () => {
@@ -98,37 +95,6 @@ describe('vertex_ai_utils', () => {
       process.env['GOOGLE_API_KEY'] = 'env-api-key';
       const result = getExpressModeApiKey();
       expect(result).toBeUndefined();
-    });
-  });
-
-  describe('createVertexApiClient', () => {
-    it('targets Vertex AI at the given project and location', () => {
-      const apiClient = createVertexApiClient({
-        project: 'my-project',
-        location: 'us-central1',
-      });
-
-      expect(apiClient.isVertexAI()).toBe(true);
-      expect(apiClient.getProject()).toBe('my-project');
-      expect(apiClient.getLocation()).toBe('us-central1');
-      expect(apiClient.getApiKey()).toBeUndefined();
-    });
-
-    it('authenticates with the given credentials', async () => {
-      const apiClient = createVertexApiClient({
-        project: 'my-project',
-        location: 'us-central1',
-        googleAuthOptions: {
-          credentials: {
-            client_email: 'test@example.iam.gserviceaccount.com',
-            private_key: 'not-a-real-private-key',
-          },
-        },
-      });
-
-      // The credentials reach google-auth-library, which rejects the
-      // unparseable key rather than falling back to other credentials.
-      await expect(apiClient.getAuthHeaders()).rejects.toThrow(/DECODER/);
     });
   });
 });
