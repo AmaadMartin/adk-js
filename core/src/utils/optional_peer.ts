@@ -23,24 +23,6 @@ const MODULE_NOT_FOUND_CODES = new Set([
   'MODULE_NOT_FOUND',
 ]);
 
-/**
- * Brand marking the error raised for a package that is not installed.
- *
- * A caller that wants to report a missing peer in its own words has to tell
- * that case apart from every other load failure. Registered globally, so the
- * check still holds when two copies of this package share a runtime.
- */
-const MISSING_PEER_SYMBOL = Symbol.for('google.adk.missingOptionalPeer');
-
-/**
- * Reports whether an error says an optional peer dependency is not installed.
- *
- * @param error The error to classify.
- */
-export function isMissingOptionalPeerError(error: unknown): boolean {
-  return error instanceof Error && MISSING_PEER_SYMBOL in error;
-}
-
 /** Describes the optional peer dependency a feature is asking for. */
 export interface OptionalPeer {
   /** The npm package name, e.g. `@google-cloud/storage`. */
@@ -100,7 +82,7 @@ export async function loadOptionalPeer<T>(
     if (!isMissingModule(err, peer.packageName)) {
       throw err;
     }
-    const missing = new Error(
+    throw new Error(
       `${peer.feature} requires the optional peer dependency ` +
         `"${peer.packageName}", which is not installed. It is optional so ` +
         `that applications that do not use ${peer.feature} are not made to ` +
@@ -108,7 +90,5 @@ export async function loadOptionalPeer<T>(
         `  npm install ${peer.packageName}\n`,
       {cause: err},
     );
-    Object.defineProperty(missing, MISSING_PEER_SYMBOL, {value: true});
-    throw missing;
   }
 }

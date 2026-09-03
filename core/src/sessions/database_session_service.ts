@@ -191,13 +191,6 @@ function writeLock(enabled: boolean): {lockMode?: LockMode} {
   return enabled ? {lockMode: LockMode.PESSIMISTIC_WRITE} : {};
 }
 
-/** The rows one `appendEvent` takes a row-level write lock on. */
-export interface LockedRows {
-  session: boolean;
-  appState: boolean;
-  userState: boolean;
-}
-
 /**
  * Decides which rows `appendEvent` locks, mirroring adk-python.
  *
@@ -208,11 +201,12 @@ export interface LockedRows {
  *
  * @param backend The backend name, as `databaseBackendOf` reports it.
  * @param delta The event's state delta, split by scope.
+ * @returns Whether the session, app-state and user-state rows are locked.
  */
 export function rowsToLock(
   backend: string,
   delta: ScopedStateDelta,
-): LockedRows {
+): {session: boolean; appState: boolean; userState: boolean} {
   const enabled = supportsRowLevelLocking(backend);
   return {
     session: enabled,
