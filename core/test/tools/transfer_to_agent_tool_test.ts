@@ -324,92 +324,15 @@ describe('TransferToAgentTool with a transfer reason', () => {
   });
 });
 
-describe('TransferToAgentTool on a JSON-Schema declaration', () => {
+describe('TransferToAgentTool on an unusual base declaration', () => {
   function mockBaseDeclaration(declaration: FunctionDeclaration): void {
     vi.spyOn(FunctionTool.prototype, '_getDeclaration').mockReturnValue(
       declaration,
     );
   }
 
-  const jsonSchemaDeclaration: FunctionDeclaration = {
-    name: TRANSFER_TO_AGENT_TOOL_NAME,
-    description: 'Transfer the question to another agent.',
-    parametersJsonSchema: {
-      type: 'object',
-      properties: {
-        agentName: {type: 'string'},
-        transferReason: {type: 'string'},
-      },
-      required: ['agentName'],
-    },
-  };
-
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  it('constrains the agent name and drops the reason', () => {
-    mockBaseDeclaration(structuredClone(jsonSchemaDeclaration));
-    const tool = new TransferToAgentTool({agentNames: ['agent_a', 'agent_b']});
-
-    expect(tool._getDeclaration().parametersJsonSchema).toEqual({
-      type: 'object',
-      properties: {agentName: {type: 'string', enum: ['agent_a', 'agent_b']}},
-      required: ['agentName'],
-    });
-  });
-
-  it('keeps the reason when the tool asks for one', () => {
-    mockBaseDeclaration(structuredClone(jsonSchemaDeclaration));
-    const tool = new TransferToAgentTool({
-      agentNames: ['agent_a'],
-      includeTransferReason: true,
-    });
-
-    expect(tool._getDeclaration().parametersJsonSchema).toEqual({
-      type: 'object',
-      properties: {
-        agentName: {type: 'string', enum: ['agent_a']},
-        transferReason: {type: 'string'},
-      },
-      required: ['agentName'],
-    });
-  });
-
-  it('drops the reason when the schema declares no agent name', () => {
-    mockBaseDeclaration({
-      name: TRANSFER_TO_AGENT_TOOL_NAME,
-      parametersJsonSchema: {
-        type: 'object',
-        properties: {transferReason: {type: 'string'}},
-      },
-    });
-    const tool = new TransferToAgentTool({agentNames: ['agent_a']});
-
-    expect(tool._getDeclaration().parametersJsonSchema).toEqual({
-      type: 'object',
-      properties: {},
-    });
-  });
-
-  it('leaves a declaration without JSON-Schema properties alone', () => {
-    mockBaseDeclaration({
-      name: TRANSFER_TO_AGENT_TOOL_NAME,
-      parametersJsonSchema: 'not a schema',
-    });
-    const tool = new TransferToAgentTool({agentNames: ['agent_a']});
-
-    expect(tool._getDeclaration().parametersJsonSchema).toBe('not a schema');
-
-    mockBaseDeclaration({
-      name: TRANSFER_TO_AGENT_TOOL_NAME,
-      parametersJsonSchema: {type: 'object'},
-    });
-
-    expect(
-      new TransferToAgentTool({agentNames: ['agent_a']})._getDeclaration()
-        .parametersJsonSchema,
-    ).toEqual({type: 'object'});
   });
 
   it('drops the reason when the parameters declare no agent name', () => {
@@ -423,5 +346,14 @@ describe('TransferToAgentTool on a JSON-Schema declaration', () => {
     const tool = new TransferToAgentTool({agentNames: ['agent_a']});
 
     expect(tool._getDeclaration().parameters?.properties).toEqual({});
+  });
+
+  it('returns a declaration that has no parameters unchanged', () => {
+    mockBaseDeclaration({name: TRANSFER_TO_AGENT_TOOL_NAME});
+    const tool = new TransferToAgentTool({agentNames: ['agent_a']});
+
+    expect(tool._getDeclaration()).toEqual({
+      name: TRANSFER_TO_AGENT_TOOL_NAME,
+    });
   });
 });

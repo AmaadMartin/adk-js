@@ -46,25 +46,6 @@ export interface TransferToAgentToolConfig {
   includeTransferReason?: boolean;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Returns the `properties` map of a declaration's JSON Schema, or `undefined`
- * when it has none. `@google/genai` types `parametersJsonSchema` as `unknown`,
- * so it has to be narrowed before use.
- */
-function getJsonSchemaProperties(
-  parametersJsonSchema: unknown,
-): Record<string, unknown> | undefined {
-  if (!isRecord(parametersJsonSchema)) {
-    return undefined;
-  }
-  const properties = parametersJsonSchema['properties'];
-  return isRecord(properties) ? properties : undefined;
-}
-
 /**
  * Hands off control to another agent.
  *
@@ -129,27 +110,16 @@ export class TransferToAgentTool extends FunctionTool<
     const declaration = super._getDeclaration();
 
     const properties = declaration.parameters?.properties;
-    if (properties) {
-      const agentNameSchema = properties[AGENT_NAME_PARAMETER];
-      if (agentNameSchema) {
-        agentNameSchema.enum = [...this.agentNames];
-      }
-      if (!this.includeTransferReason) {
-        delete properties[TRANSFER_REASON_PARAMETER];
-      }
+    if (!properties) {
+      return declaration;
     }
 
-    const jsonSchemaProperties = getJsonSchemaProperties(
-      declaration.parametersJsonSchema,
-    );
-    if (jsonSchemaProperties) {
-      const agentNameSchema = jsonSchemaProperties[AGENT_NAME_PARAMETER];
-      if (isRecord(agentNameSchema)) {
-        agentNameSchema['enum'] = [...this.agentNames];
-      }
-      if (!this.includeTransferReason) {
-        delete jsonSchemaProperties[TRANSFER_REASON_PARAMETER];
-      }
+    const agentNameSchema = properties[AGENT_NAME_PARAMETER];
+    if (agentNameSchema) {
+      agentNameSchema.enum = [...this.agentNames];
+    }
+    if (!this.includeTransferReason) {
+      delete properties[TRANSFER_REASON_PARAMETER];
     }
 
     return declaration;
