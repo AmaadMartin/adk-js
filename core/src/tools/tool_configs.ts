@@ -13,9 +13,13 @@ import {InputValidationError} from '../errors/input_validation_error.js';
  * constructor accepts, so no key is rejected and no key is renamed; only the
  * container is checked.
  *
+ * Structural (`object`) rather than an index signature on purpose: a tool that
+ * narrows its own config to a TypeScript interface must stay assignable to
+ * this type, and an interface is not assignable to an index-signature type.
+ *
  * @experimental (Experimental, subject to change)
  */
-export type ToolArgsConfig = Record<string, unknown>;
+export type ToolArgsConfig = object;
 
 /**
  * The configuration for a tool, as declared in a configuration file.

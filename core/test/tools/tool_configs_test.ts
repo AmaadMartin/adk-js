@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InputValidationError, createToolConfig} from '@google/adk';
+import {
+  InputValidationError,
+  ToolArgsConfig,
+  createToolConfig,
+} from '@google/adk';
 import yaml from 'js-yaml';
 import {describe, expect, it} from 'vitest';
 
@@ -21,7 +25,23 @@ args:
   searchEngineId: projects/my-project/locations/us-central1/collections/my-collection/engines/my-engine
 `;
 
+/** The args a tool declares for itself, as a tool narrows them. */
+interface SearchToolArgsConfig {
+  searchEngineId: string;
+}
+
 describe('createToolConfig', () => {
+  it('accepts a tool-specific args interface', () => {
+    const searchArgs: SearchToolArgsConfig = {searchEngineId: 'engines/e'};
+    // An interface is not assignable to an index-signature type, so this
+    // annotation stops ToolArgsConfig from growing one.
+    const args: ToolArgsConfig = searchArgs;
+
+    const config = createToolConfig({name: 'VertexAiSearchTool', args});
+
+    expect(config.args).toEqual({searchEngineId: 'engines/e'});
+  });
+
   it('round-trips a YAML tool declaration with nested args', () => {
     const config = createToolConfig(yaml.load(VERTEX_AI_SEARCH_YAML));
 
