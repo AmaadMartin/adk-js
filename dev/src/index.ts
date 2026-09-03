@@ -12,3 +12,4 @@ export {
   createApiServerApp,
 } from './server/api_server_factory.js';
 export type {ApiServerOptions} from './server/api_server_factory.js';
+export type {BaseAgentLoader} from './utils/base_agent_loader.js';
