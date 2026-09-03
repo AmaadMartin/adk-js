@@ -824,7 +824,11 @@ export {
 } from './tools/set_model_response_tool.js';
 export {runWithSyncCallableRunner} from './tools/sync_callable_runner.js';
 export type {SyncCallableRunner} from './tools/sync_callable_runner.js';
-export {toolArgsConfigSchema, toolConfigSchema} from './tools/tool_configs.js';
+export {
+  createToolConfig,
+  toolArgsConfigSchema,
+  toolConfigSchema,
+} from './tools/tool_configs.js';
 export type {ToolArgsConfig, ToolConfig} from './tools/tool_configs.js';
 export {
   IntentMismatchError,
