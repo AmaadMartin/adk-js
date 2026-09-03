@@ -79,12 +79,23 @@ export type {
   UserBehavior,
   UserPersona,
 } from './simulation/user_simulator_personas.js';
-export {SingleTurnVertexAiEvalFacade} from './vertex_ai_eval_facade.js';
+export {
+  MultiTurnVertexAiEvalFacade,
+  SingleTurnVertexAiEvalFacade,
+  VertexAiEvalFacade,
+  resolveVertexAiEvalClientConfig,
+} from './vertex_ai_eval_facade.js';
 export type {
+  VertexAgentConfig,
+  VertexAgentData,
+  VertexAgentEvent,
   VertexAggregatedMetricResult,
   VertexAiEvalClient,
+  VertexAiEvalClientConfig,
   VertexAiEvalFacadeOptions,
   VertexAiEvalRequest,
+  VertexConversationTurn,
+  VertexEvalCase,
   VertexEvalCaseRow,
   VertexEvalMetricSpec,
   VertexEvaluationDataset,

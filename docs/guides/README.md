@@ -94,6 +94,7 @@ documentation, visit [adk.dev](https://adk.dev/).
   calls an agent made against a golden trajectory.
 - [Choosing the user simulator](evaluation/user_simulator/index.md) - Replaying
   an eval case's static conversation, and driving a case that has none.
+- [Vertex AI eval facades](evaluation/vertex_ai_eval_facade/index.md) - Scoring one invocation, or a whole conversation, with a metric of the Vertex AI Gen AI evaluation service.
 
 ### Events
 
