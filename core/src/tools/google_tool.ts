@@ -106,10 +106,8 @@ export class GoogleTool<
       name: options.name,
       description: options.description,
       parameters: options.parameters,
-      // A plain function tool's callback takes an optional context, but
-      // `RunAsyncToolRequest` requires one, so every call carries it.
       execute: (input, toolContext) =>
-        this.executeWithCredentials(input, toolContext!),
+        this.executeWithCredentials(input, toolContext),
     });
     this.googleExecute = options.execute;
     this.credentialsManager = options.credentialsConfig
@@ -135,11 +133,21 @@ export class GoogleTool<
     }
   }
 
-  /** Resolves credentials, then runs the API call. */
+  /**
+   * Resolves credentials, then runs the API call.
+   *
+   * A function tool's callback declares its context optional, while
+   * {@link RunAsyncToolRequest} requires one. A call that reaches here
+   * without a context fails rather than running unauthenticated, because a
+   * credentials config resolves its credentials out of that context.
+   */
   private async executeWithCredentials(
     input: ToolExecuteArgument<TParameters>,
-    toolContext: Context,
+    toolContext?: Context,
   ): Promise<unknown> {
+    if (!toolContext) {
+      throw new Error(`${this.name} was called without a tool context.`);
+    }
     if (!this.credentialsManager) {
       return this.googleExecute(input, {toolContext});
     }
