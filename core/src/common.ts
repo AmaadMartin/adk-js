@@ -556,6 +556,8 @@ export {
   REASONING_TAG,
   REPLANNING_TAG,
 } from './planners/plan_re_act_planner.js';
+export {createThread, setThreadFactory} from './platform/thread.js';
+export type {Thread, ThreadFactory, ThreadTarget} from './platform/thread.js';
 export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
