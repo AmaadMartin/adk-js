@@ -13,11 +13,14 @@ import {
   MemoryMetadataValue,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
 import {Content, createUserContent} from '@google/genai';
+import {ApiClient} from '@google/genai/vertex_internal';
+import {GoogleAuthOptions} from 'google-auth-library';
 import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {logger} from '../utils/logger.js';
 import {
-  EXPRESS_MODE_UNSUPPORTED_MESSAGE,
+  createExpressModeApiClient,
+  createVertexApiClient,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
 import {
@@ -107,6 +110,14 @@ export interface VertexAiMemoryBankServiceOptions {
   agentEngineId: string;
   expressModeApiKey?: string;
   client?: Client;
+
+  /**
+   * Authentication options for the Memory Bank API, e.g. credentials obtained
+   * via Workload Identity Federation outside of GCP. Defaults to Application
+   * Default Credentials. Ignored in Express Mode, which authenticates with
+   * `expressModeApiKey` instead.
+   */
+  credentials?: GoogleAuthOptions;
 }
 
 /**
@@ -143,18 +154,14 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       );
     }
 
-    if (options.client) {
-      this.memories = options.client.agentEnginesInternal.memories;
-    } else {
-      if (this.expressModeApiKey && (!this.projectId || !this.location)) {
-        throw new Error(EXPRESS_MODE_UNSUPPORTED_MESSAGE);
-      }
-      const client = new Client({
-        project: this.projectId,
-        location: this.location,
-      });
-      this.memories = client.agentEnginesInternal.memories;
-    }
+    this.memories = options.client
+      ? options.client.agentEnginesInternal.memories
+      : createMemoriesClient({
+          projectId: this.projectId,
+          location: this.location,
+          expressModeApiKey: this.expressModeApiKey,
+          credentials: options.credentials,
+        });
   }
 
   async addSessionToMemory(session: Session): Promise<void> {
@@ -347,6 +354,57 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
 }
 
 // Standalone utility functions
+
+/**
+ * Builds the Agent Engine `Memories` client for the configured credentials.
+ *
+ * A project and location win over an Express Mode key, so an ambient
+ * `GOOGLE_API_KEY` never switches a configured caller to key authentication.
+ * Python prefers the key; this divergence is shared with
+ * `VertexAiSessionService`.
+ */
+function createMemoriesClient(options: {
+  projectId?: string;
+  location?: string;
+  expressModeApiKey?: string;
+  credentials?: GoogleAuthOptions;
+}): Memories {
+  if (options.credentials && options.projectId && options.location) {
+    return createAgentEngineMemories(
+      createVertexApiClient({
+        project: options.projectId,
+        location: options.location,
+        googleAuthOptions: options.credentials,
+      }),
+    );
+  }
+
+  if (options.expressModeApiKey && !(options.projectId && options.location)) {
+    return createAgentEngineMemories(
+      createExpressModeApiClient(options.expressModeApiKey),
+    );
+  }
+
+  return new Client({project: options.projectId, location: options.location})
+    .agentEnginesInternal.memories;
+}
+
+/**
+ * Builds the Agent Engine `Memories` client from an `ApiClient`.
+ *
+ * `@google-cloud/vertexai` bundles its own nested copy of `@google/genai`
+ * while the repo root resolves `@google/genai` to 2.9.0, so the `ApiClient`
+ * here is a structurally distinct class (its private fields make the two
+ * nominally incompatible) from the one `Memories` declares. The instances are
+ * interchangeable at runtime -- the mismatch is a duplicate-dependency
+ * artifact, not a real API difference -- so the cast is confined to this one
+ * boundary.
+ */
+function createAgentEngineMemories(apiClient: ApiClient): Memories {
+  return new Memories(
+    apiClient as unknown as ConstructorParameters<typeof Memories>[0],
+  );
+}
 
 function buildCreateMemoryConfig(params: {
   customMetadata?: Record<string, unknown>;
