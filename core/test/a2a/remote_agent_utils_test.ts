@@ -658,6 +658,134 @@ describe('remote_agent_utils', () => {
       expect(JSON.stringify(result.parts)).toContain('NO_ARGS_KEPT');
     });
 
+    it('stops at a peer reply when fullHistoryWhenStateless is off', () => {
+      const session = {
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'OLD_TURN'}]},
+          }),
+          createEvent({author: 'test-agent'}),
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'NEW_TURN'}]},
+          }),
+        ],
+      } as unknown as Session;
+
+      const dumped = JSON.stringify(
+        toMissingRemoteSessionParts(mockCtx, session).parts,
+      );
+
+      expect(dumped).not.toContain('OLD_TURN');
+      expect(dumped).toContain('NEW_TURN');
+    });
+
+    it('sends the whole session when the peer is stateless', () => {
+      const session = {
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'OLD_TURN'}]},
+          }),
+          createEvent({author: 'test-agent'}),
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'NEW_TURN'}]},
+          }),
+        ],
+      } as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session, {
+        fullHistoryWhenStateless: true,
+      });
+      const dumped = JSON.stringify(result.parts);
+
+      expect(dumped).toContain('OLD_TURN');
+      expect(dumped).toContain('NEW_TURN');
+      expect(result.contextId).toBeUndefined();
+    });
+
+    it('sends only the unseen turns when the peer returned a context id', () => {
+      const session = {
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'OLD_TURN'}]},
+          }),
+          createEvent({
+            author: 'test-agent',
+            customMetadata: {[AdkMetadataKeys.CONTEXT_ID]: 'ctx-1'},
+          }),
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'NEW_TURN'}]},
+          }),
+        ],
+      } as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session, {
+        fullHistoryWhenStateless: true,
+      });
+      const dumped = JSON.stringify(result.parts);
+
+      expect(dumped).not.toContain('OLD_TURN');
+      expect(dumped).toContain('NEW_TURN');
+      expect(result.contextId).toBe('ctx-1');
+    });
+
+    it('stamps parts from a user event as user input', () => {
+      const session = {
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'typed by a person'}]},
+          }),
+        ],
+      } as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session);
+
+      expect(result.parts[0].metadata).toMatchObject({is_user_input: true});
+    });
+
+    it('does not stamp relayed agent content as user input', () => {
+      const session = {
+        events: [
+          createEvent({
+            author: 'other_agent',
+            content: {role: 'model', parts: [{text: 'from another agent'}]},
+          }),
+        ],
+      } as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session);
+
+      expect(result.parts.length).toBeGreaterThan(0);
+      for (const part of result.parts) {
+        expect(part.metadata?.['is_user_input']).toBeUndefined();
+      }
+    });
+
+    it('uses the converter the caller supplied for outbound parts', () => {
+      const session = {
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'original'}]},
+          }),
+        ],
+      } as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session, {
+        converter: () => ({kind: 'text', text: 'converted'}),
+      });
+
+      expect(result.parts).toEqual([
+        {kind: 'text', text: 'converted', metadata: {is_user_input: true}},
+      ]);
+    });
+
     it('keeps a response whose result envelope holds a plain value', () => {
       const plainResponse = createEvent({
         author: 'user',

@@ -88,7 +88,14 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
   readonly [BASE_NODE_SIGNATURE_SYMBOL] = true;
 
   readonly name: string;
-  readonly description: string;
+  /**
+   * Human-readable description.
+   *
+   * Mutable because a node can learn it after construction: `RemoteA2AAgent`
+   * adopts the description carried by the agent card it resolves, which
+   * adk-python also does.
+   */
+  description: string;
   readonly rerunOnResume: boolean;
   readonly waitForOutput: boolean;
   readonly retryConfig?: RetryConfig;

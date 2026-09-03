@@ -13,7 +13,10 @@ import {Session} from '../sessions/session.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {logger} from '../utils/logger.js';
 import {AdkMetadataKeys} from './metadata_converter_utils.js';
-import {toA2AParts} from './part_converter_utils.js';
+import {
+  GenAIPartToA2APartConverter,
+  toA2AParts,
+} from './part_converter_utils.js';
 
 export interface UserFunctionCall {
   response: AdkEvent;
@@ -287,12 +290,28 @@ export function toForwardableA2AParts(
   content: Content | undefined,
   longRunningToolIds: string[] | undefined,
   peerRequestedIds: ReadonlySet<string>,
+  converter?: GenAIPartToA2APartConverter,
 ): A2APart[] {
   const scrubbed = withoutCredentialParts(content, peerRequestedIds);
   if (!scrubbed?.parts) {
     return [];
   }
-  return toA2AParts(scrubbed.parts, longRunningToolIds);
+  return toA2AParts(scrubbed.parts, longRunningToolIds, converter);
+}
+
+/** Marks a part that carries what the end user typed, not agent output. */
+const IS_USER_INPUT_METADATA_KEY = 'is_user_input';
+
+/** Options for {@link toMissingRemoteSessionParts}. */
+export interface MissingRemoteSessionPartsOptions {
+  /**
+   * Send the whole session on every request when the peer is stateless, that
+   * is when it has never returned a context id. A peer that returned one keeps
+   * the history itself, so only what it has not seen is sent either way.
+   */
+  fullHistoryWhenStateless?: boolean;
+  /** Converter for a single outbound part. */
+  converter?: GenAIPartToA2APartConverter;
 }
 
 /**
@@ -302,23 +321,31 @@ export function toForwardableA2AParts(
  * @param ctx - The current invocation context, used to identify the remote
  *   agent's authored events.
  * @param session - The local session whose event history to diff.
+ * @param options - History policy and part converter.
  * @returns An object with the missing `parts` and an optional `contextId`.
  */
 export function toMissingRemoteSessionParts(
   ctx: InvocationContext,
   session: Session,
+  options: MissingRemoteSessionPartsOptions = {},
 ): {parts: A2APart[]; contextId?: string} {
   const events = session.events;
   const peerName = requireAgent(ctx).name;
   let contextId: string | undefined = undefined;
-  let lastRemoteResponseIndex = -1;
+  let startIndex = 0;
 
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
-    if (event.author === peerName) {
-      lastRemoteResponseIndex = i;
-      const metadata = event.customMetadata || {};
-      contextId = metadata[AdkMetadataKeys.CONTEXT_ID] as string;
+    if (event.author !== peerName) {
+      continue;
+    }
+    if (event.customMetadata) {
+      contextId = event.customMetadata[AdkMetadataKeys.CONTEXT_ID] as
+        | string
+        | undefined;
+    }
+    if (!options.fullHistoryWhenStateless || contextId) {
+      startIndex = i + 1;
       break;
     }
   }
@@ -326,8 +353,9 @@ export function toMissingRemoteSessionParts(
   const peerRequestedIds = peerRequestedCallIds(events, peerName);
   const missingParts: A2APart[] = [];
 
-  for (let i = lastRemoteResponseIndex + 1; i < events.length; i++) {
+  for (let i = startIndex; i < events.length; i++) {
     let event = events[i];
+    const fromUser = event.author === 'user';
 
     // Scrub before presentAsUserMessage, not after: it renders a
     // function_call/function_response as text with its arguments inlined,
@@ -340,7 +368,7 @@ export function toMissingRemoteSessionParts(
       event = {...event, content: scrubbedContent};
     }
 
-    if (event.author !== 'user' && event.author !== peerName) {
+    if (!fromUser && event.author !== peerName) {
       event = presentAsUserMessage(ctx, event);
     }
 
@@ -352,13 +380,25 @@ export function toMissingRemoteSessionParts(
       continue;
     }
 
-    const parts = toA2AParts(event.content.parts, event.longRunningToolIds);
-    missingParts.push(...parts);
+    const parts = toA2AParts(
+      event.content.parts,
+      event.longRunningToolIds,
+      options.converter,
+    );
+    missingParts.push(...(fromUser ? parts.map(markAsUserInput) : parts));
   }
 
   return {
     parts: missingParts,
     contextId,
+  };
+}
+
+/** Stamps a part the end user authored, so the peer can tell it apart. */
+function markAsUserInput(part: A2APart): A2APart {
+  return {
+    ...part,
+    metadata: {...part.metadata, [IS_USER_INPUT_METADATA_KEY]: true},
   };
 }
 

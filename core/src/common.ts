@@ -105,7 +105,11 @@ export type {
 } from './auth/auth_credential.js';
 export {AuthHandler} from './auth/auth_handler.js';
 export {buildAuthHeaders} from './auth/auth_headers.js';
-export {AUTH_PREPROCESSOR, AuthPreprocessor} from './auth/auth_preprocessor.js';
+export {
+  AUTH_PREPROCESSOR,
+  AuthPreprocessor,
+  TOOLSET_AUTH_CREDENTIAL_ID_PREFIX,
+} from './auth/auth_preprocessor.js';
 export {AuthProviderRegistry} from './auth/auth_provider_registry.js';
 export {OAuthGrantType} from './auth/auth_schemes.js';
 export type {AuthScheme, OpenIdConnectWithConfig} from './auth/auth_schemes.js';
@@ -343,6 +347,8 @@ export type {
   VertexAiSearchToolParams,
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
+export {createLinkedAbort} from './utils/abort_utils.js';
+export type {LinkedAbort} from './utils/abort_utils.js';
 export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {
