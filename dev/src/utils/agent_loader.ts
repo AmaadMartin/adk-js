@@ -13,6 +13,7 @@ import {createRequire} from 'node:module';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
+import {BaseAgentLoader} from './base_agent_loader.js';
 import {
   createTempDir,
   isFile,
@@ -376,7 +377,7 @@ export class AgentFile {
  * Agent/App file should have export of the rootAgent as instance of BaseAgent
  * (or a Workflow, which is adapted into one) or app/rootApp as instance of App.
  */
-export class AgentLoader {
+export class AgentLoader extends BaseAgentLoader {
   private agentsAlreadyPreloaded = false;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private readonly loadFailures: Record<string, AgentLoadFailure> = {};
@@ -387,6 +388,8 @@ export class AgentLoader {
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
     private readonly watchForChanges = false,
   ) {
+    super();
+
     // Do cleanups on exit
     const exitHandler = async ({
       exit,
@@ -476,6 +479,12 @@ export class AgentLoader {
     await this.preloadAgents();
 
     return Object.keys(this.preloadedAgents).sort();
+  }
+
+  async loadAgent(agentName: string): Promise<RunnableRoot | App> {
+    const agentFile = await this.getAgentFile(agentName);
+
+    return agentFile.load();
   }
 
   async listApps(): Promise<string[]> {
