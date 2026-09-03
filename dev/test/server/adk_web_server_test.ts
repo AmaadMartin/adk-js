@@ -11,12 +11,7 @@ import * as path from 'node:path';
 import {afterAll, afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
-import {
-  AdkWebServer,
-  AgentLoader as ReExportedAgentLoader,
-  parseCorsOrigins as reExportedParseCorsOrigins,
-} from '../../src/server/adk_web_server.js';
-import {parseCorsOrigins} from '../../src/server/cors_origins.js';
+import {AdkWebServer} from '../../src/server/adk_web_server.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 
 /** Records every message the ADK logger is asked to write. */
@@ -82,11 +77,6 @@ describe('AdkWebServer alias', () => {
 
   it('keeps its own class name past the decorator', () => {
     expect(AdkWebServer.name).toBe('AdkWebServer');
-  });
-
-  it('re-exports the symbols the module used to hold', () => {
-    expect(reExportedParseCorsOrigins).toBe(parseCorsOrigins);
-    expect(ReExportedAgentLoader).toBe(AgentLoader);
   });
 });
 

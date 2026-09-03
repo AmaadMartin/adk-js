@@ -40,14 +40,8 @@ export interface ParsedCorsOrigins {
 export function parseCorsOrigins(
   allowOrigins: string | readonly string[] | undefined,
 ): ParsedCorsOrigins {
-  let entries: readonly string[];
-  if (allowOrigins === undefined) {
-    entries = [];
-  } else if (typeof allowOrigins === 'string') {
-    entries = [allowOrigins];
-  } else {
-    entries = allowOrigins;
-  }
+  const entries =
+    typeof allowOrigins === 'string' ? [allowOrigins] : (allowOrigins ?? []);
 
   const origins: string[] = [];
   const patterns: string[] = [];

@@ -55,20 +55,6 @@ await server.start();
 - An entry of exactly `regex:` holds no pattern and is dropped.
 - An invalid pattern throws a `SyntaxError` when the server starts.
 
-`parseCorsOrigins` performs the split, and is exported for a caller that builds
-its own middleware:
-
-```ts
-import {parseCorsOrigins} from '@google/adk-devtools';
-
-const {origins, originRegex} = parseCorsOrigins([
-  'https://example.com',
-  'regex:https://.*\\.myapp\\.com',
-]);
-// origins    -> ['https://example.com']
-// originRegex -> /^(?:https:\/\/.*\.myapp\.com)$/
-```
-
 ## The AdkWebServer alias
 
 `AdkWebServer` is the former name of `AdkApiServer`. It still constructs a
