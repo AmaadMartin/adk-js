@@ -386,3 +386,45 @@ describe('isLogLevelEnabled', () => {
     expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
   });
 });
+
+describe('isLogLevelEnabled', () => {
+  beforeEach(resetLogger);
+  afterEach(resetLogger);
+
+  it('reports debug as disabled at the default level', () => {
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
+    expect(isLogLevelEnabled(LogLevel.ERROR)).toBe(true);
+  });
+
+  it('reports debug as enabled once the level is lowered', () => {
+    setLogLevel(LogLevel.DEBUG);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(true);
+  });
+
+  it('reports every level as disabled for the no-op logger', () => {
+    setLogger(null);
+
+    expect(isLogLevelEnabled(LogLevel.ERROR)).toBe(false);
+  });
+
+  it('reports every level as disabled for a logger without the probe', () => {
+    const customLogger: Logger = {
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    };
+    setLogger(customLogger);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
+  });
+
+  it('delegates the probe on the logger facade to the current logger', () => {
+    setLogger(null);
+
+    expect(logger.isEnabledFor?.(LogLevel.ERROR)).toBe(false);
+  });
+});

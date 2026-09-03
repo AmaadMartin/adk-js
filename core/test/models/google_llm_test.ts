@@ -12,11 +12,17 @@ import {
   isResourceExhaustedError,
   LlmRequest,
   LlmResponse,
+  Logger,
+  LogLevel,
+  setLogLevel,
   version,
 } from '@google/adk';
 import {
   Behavior,
+  Blob,
   Environment,
+  FileData,
+  FinishReason,
   FunctionDeclaration,
   FunctionResponseScheduling,
   GenerateContentResponse,
@@ -29,8 +35,17 @@ import {
   Part,
   SafetySetting,
 } from '@google/genai';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {RESOURCE_EXHAUSTED_MITIGATION_MESSAGE} from '../../src/errors/resource_exhausted_error.js';
+import {logger, resetLogger} from '../../src/utils/logger.js';
 import {httpOptionsOf} from './http_options_test_utils.js';
 
 vi.mock('@google/genai', async (importOriginal) => {
@@ -101,6 +116,16 @@ function makeRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
   };
 }
 
+function createRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
+  return {
+    contents: [],
+    config: {},
+    liveConnectConfig: {},
+    toolsDict: {},
+    ...overrides,
+  };
+}
+
 /** Drains a response stream and returns whatever it threw, or `undefined`. */
 async function captureError(
   generator: AsyncGenerator<LlmResponse, void>,
@@ -127,6 +152,47 @@ async function runRequest(llm: Gemini, request: LlmRequest): Promise<void> {
   expect(await captureError(llm.generateContentAsync(request, false))).toBe(
     undefined,
   );
+}
+
+function createResponse(): GenerateContentResponse {
+  const response = new GenerateContentResponse();
+  response.candidates = [
+    {
+      content: {role: 'model', parts: [{text: 'hi'}]},
+      finishReason: FinishReason.STOP,
+    },
+  ];
+  return response;
+}
+
+/** Makes the mocked SDK client answer a non-streaming call. */
+function mockGenerateContent(llm: Gemini) {
+  const generateContent = vi.mocked(llm.apiClient.models.generateContent);
+  generateContent.mockResolvedValue(createResponse());
+  return generateContent;
+}
+
+/** Makes the mocked SDK client answer a streaming call with one chunk. */
+function mockGenerateContentStream(llm: Gemini) {
+  const generateContentStream = vi.mocked(
+    llm.apiClient.models.generateContentStream,
+  );
+  generateContentStream.mockImplementation(async () =>
+    (async function* () {
+      yield createResponse();
+    })(),
+  );
+  return generateContentStream;
+}
+
+async function collectFrom(
+  responses: AsyncGenerator<LlmResponse, void>,
+): Promise<LlmResponse[]> {
+  const collected: LlmResponse[] = [];
+  for await (const response of responses) {
+    collected.push(response);
+  }
+  return collected;
 }
 
 describe('GoogleLlm', () => {
@@ -784,7 +850,7 @@ describe('GoogleLlm', () => {
       );
     });
 
-    it('strips sessionResumption.transparent on the Gemini API backend', async () => {
+    it('rejects sessionResumption.transparent on the Gemini API backend', async () => {
       const llm = new TestGemini({
         apiKey: 'test-key',
         model: 'gemini-2.5-flash',
@@ -799,15 +865,10 @@ describe('GoogleLlm', () => {
         toolsDict: {},
       };
 
-      await llm.connect(request);
-
-      expect(llm.liveApiClient.live.connect).toHaveBeenCalledWith(
-        expect.objectContaining({
-          config: expect.objectContaining({
-            sessionResumption: {handle: 'h-1'},
-          }),
-        }),
+      await expect(llm.connect(request)).rejects.toThrow(
+        'Transparent session resumption is only supported for Vertex AI backend. Please use Vertex AI backend.',
       );
+      expect(llm.liveApiClient.live.connect).not.toHaveBeenCalled();
     });
   });
 
@@ -1498,6 +1559,296 @@ describe('GoogleLlm', () => {
       await runRequest(llm, request);
 
       expect(request.config?.httpOptions?.apiVersion).toBeUndefined();
+    });
+  });
+
+  describe('model name guard', () => {
+    it('rejects a blank model on generateContentAsync', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await expect(
+        collectFrom(llm.generateContentAsync(createRequest({model: '  '}))),
+      ).rejects.toThrow('Gemini requests require a model name.');
+    });
+
+    it('rejects a blank model on connect', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await expect(llm.connect(createRequest({model: ''}))).rejects.toThrow(
+        'Live Gemini requests require a model name.',
+      );
+    });
+
+    it('falls back to the instance model when the request has none', async () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        model: 'gemini-2.5-flash',
+      });
+      const generateContent = mockGenerateContent(llm);
+
+      await collectFrom(llm.generateContentAsync(createRequest({})));
+
+      expect(generateContent).toHaveBeenCalledWith(
+        expect.objectContaining({model: 'gemini-2.5-flash'}),
+      );
+    });
+  });
+
+  describe('transparent session resumption', () => {
+    it('rejects the request on the Gemini API backend', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = createRequest({
+        liveConnectConfig: {
+          sessionResumption: {handle: 'h-1', transparent: true},
+        },
+      });
+
+      await expect(llm.connect(request)).rejects.toThrow(
+        'Transparent session resumption is only supported for Vertex AI backend. Please use Vertex AI backend.',
+      );
+    });
+
+    it('passes the flag through on the Vertex AI backend', async () => {
+      const llm = new TestGemini({
+        model: 'gemini-2.5-flash',
+        vertexai: true,
+        project: 'p',
+        location: 'us-central1',
+      });
+
+      await llm.connect(
+        createRequest({
+          liveConnectConfig: {
+            sessionResumption: {handle: 'h-1', transparent: true},
+          },
+        }),
+      );
+
+      expect(llm.liveApiClient.live.connect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            sessionResumption: {handle: 'h-1', transparent: true},
+          }),
+        }),
+      );
+    });
+
+    it('leaves a non-transparent resumption config alone', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await llm.connect(
+        createRequest({
+          liveConnectConfig: {sessionResumption: {handle: 'h-2'}},
+        }),
+      );
+
+      expect(llm.liveApiClient.live.connect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({sessionResumption: {handle: 'h-2'}}),
+        }),
+      );
+    });
+  });
+
+  describe('preprocessRequest copy-on-write', () => {
+    it('leaves the caller inline blob untouched', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const inlineData: Blob = {
+        mimeType: 'image/png',
+        displayName: 'shot.png',
+        data: 'Ynl0ZXM=',
+      };
+      const part: Part = {inlineData};
+      const request = createRequest({
+        contents: [{role: 'user', parts: [part]}],
+      });
+      mockGenerateContent(llm);
+
+      await collectFrom(llm.generateContentAsync(request));
+
+      expect(inlineData.displayName).toBe('shot.png');
+      expect(part.inlineData).not.toBe(inlineData);
+      expect(part.inlineData?.displayName).toBeUndefined();
+      expect(part.inlineData?.data).toBe('Ynl0ZXM=');
+    });
+
+    it('leaves the caller file data untouched', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const fileData: FileData = {
+        fileUri: 'gs://bucket/file.pdf',
+        displayName: 'file.pdf',
+      };
+      const part: Part = {fileData};
+      const request = createRequest({
+        contents: [{role: 'user', parts: [part]}],
+      });
+      mockGenerateContent(llm);
+
+      await collectFrom(llm.generateContentAsync(request));
+
+      expect(fileData.displayName).toBe('file.pdf');
+      expect(part.fileData).not.toBe(fileData);
+      expect(part.fileData?.displayName).toBeUndefined();
+    });
+
+    it('keeps the same object when there is no display name', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const inlineData: Blob = {mimeType: 'image/png', data: 'Ynl0ZXM='};
+      const part: Part = {inlineData};
+      const request = createRequest({
+        contents: [{role: 'user', parts: [part]}],
+      });
+      mockGenerateContent(llm);
+
+      await collectFrom(llm.generateContentAsync(request));
+
+      expect(part.inlineData).toBe(inlineData);
+    });
+  });
+
+  describe('debug logging', () => {
+    let debugSpy: MockInstance<Logger['debug']>;
+
+    beforeEach(() => {
+      debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      debugSpy.mockRestore();
+      resetLogger();
+    });
+
+    /** Every string the code under test passed to logger.debug. */
+    const debugOutput = () => debugSpy.mock.calls.flat().join('\n');
+
+    for (const level of [LogLevel.INFO, LogLevel.WARN]) {
+      it(`builds no request or response log at ${LogLevel[level]}`, async () => {
+        setLogLevel(level);
+        const llm = new TestGemini({apiKey: 'test-key'});
+        mockGenerateContent(llm);
+
+        await collectFrom(
+          llm.generateContentAsync(createRequest({model: 'gemini-2.5-flash'})),
+        );
+
+        expect(debugOutput()).not.toContain('LLM Request:');
+        expect(debugOutput()).not.toContain('LLM Response:');
+      });
+
+      it(`builds no streaming response log at ${LogLevel[level]}`, async () => {
+        setLogLevel(level);
+        const llm = new TestGemini({apiKey: 'test-key'});
+        mockGenerateContentStream(llm);
+
+        await collectFrom(
+          llm.generateContentAsync(
+            createRequest({model: 'gemini-2.5-flash'}),
+            true,
+          ),
+        );
+
+        expect(debugOutput()).not.toContain('LLM Response:');
+      });
+    }
+
+    it('logs the request and the response at DEBUG', async () => {
+      setLogLevel(LogLevel.DEBUG);
+      const llm = new TestGemini({apiKey: 'test-key'});
+      mockGenerateContent(llm);
+
+      await collectFrom(
+        llm.generateContentAsync(createRequest({model: 'gemini-2.5-flash'})),
+      );
+
+      expect(debugOutput()).toContain('LLM Request:');
+      expect(debugOutput()).toContain('LLM Response:');
+    });
+
+    it('logs a response for every streamed chunk at DEBUG', async () => {
+      setLogLevel(LogLevel.DEBUG);
+      const llm = new TestGemini({apiKey: 'test-key'});
+      mockGenerateContentStream(llm);
+
+      await collectFrom(
+        llm.generateContentAsync(
+          createRequest({model: 'gemini-2.5-flash'}),
+          true,
+        ),
+      );
+
+      expect(debugOutput()).toContain('LLM Response:');
+    });
+
+    it('sends the authorization header but never logs it', async () => {
+      setLogLevel(LogLevel.DEBUG);
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContent = mockGenerateContent(llm);
+      const request = createRequest({
+        model: 'gemini-2.5-flash',
+        config: {
+          httpOptions: {headers: {Authorization: 'Bearer header-sentinel'}},
+        },
+      });
+
+      await collectFrom(llm.generateContentAsync(request));
+
+      expect(generateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            httpOptions: expect.objectContaining({
+              headers: expect.objectContaining({
+                Authorization: 'Bearer header-sentinel',
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(debugOutput()).toContain('LLM Request:');
+      expect(debugOutput()).not.toContain('header-sentinel');
+    });
+
+    it('sends the live authorization header but never logs it', async () => {
+      setLogLevel(LogLevel.DEBUG);
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = createRequest({
+        model: 'gemini-2.5-flash',
+        liveConnectConfig: {
+          httpOptions: {headers: {Authorization: 'Bearer live-sentinel'}},
+          responseModalities: [Modality.AUDIO],
+        },
+      });
+
+      await llm.connect(request);
+
+      expect(llm.liveApiClient.live.connect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            httpOptions: expect.objectContaining({
+              headers: expect.objectContaining({
+                Authorization: 'Bearer live-sentinel',
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(debugOutput()).toContain('Live connect config:');
+      expect(debugOutput()).toContain('gemini-2.5-flash');
+      expect(debugOutput()).toContain(Modality.AUDIO);
+      expect(debugOutput()).not.toContain('live-sentinel');
+    });
+
+    it('logs the session resumption config it rejects', async () => {
+      setLogLevel(LogLevel.DEBUG);
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = createRequest({
+        model: 'gemini-2.5-flash',
+        liveConnectConfig: {sessionResumption: {transparent: true}},
+      });
+
+      await expect(llm.connect(request)).rejects.toThrow(
+        'Transparent session resumption',
+      );
+      expect(debugOutput()).toContain('session resumption config:');
     });
   });
 });

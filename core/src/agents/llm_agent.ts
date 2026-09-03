@@ -42,6 +42,7 @@ import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
 import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
 import {BaseLlmConnection} from '../models/base_llm_connection.js';
+import {isGemini} from '../models/google_llm.js';
 import {
   finalizeDynamicInstructions,
   LlmRequest,
@@ -70,6 +71,7 @@ import {
   stripJsonCodeFence,
 } from '../utils/schema.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
+import {GoogleLLMVariant} from '../utils/variant_utils.js';
 import {BaseAgent, BaseAgentConfig} from './base_agent.js';
 import {TASK_COMPLETED_FUNCTION_CALL_NAME} from './framework_function_calls.js';
 import {
@@ -1265,10 +1267,18 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       const handle = invocationContext.liveSessionResumptionHandle;
       if (handle) {
         llmRequest.liveConnectConfig ??= {};
-        llmRequest.liveConnectConfig.sessionResumption = {
-          handle,
-          transparent: true,
-        };
+        const sessionResumption =
+          (llmRequest.liveConnectConfig.sessionResumption ??= {});
+        sessionResumption.handle = handle;
+        // The Gemini API backend rejects transparent resumption, so ask for it
+        // only on Vertex AI.
+        if (
+          isGemini(llm) &&
+          llm.apiBackend === GoogleLLMVariant.VERTEX_AI &&
+          sessionResumption.transparent === undefined
+        ) {
+          sessionResumption.transparent = true;
+        }
       }
 
       let connection: BaseLlmConnection;
