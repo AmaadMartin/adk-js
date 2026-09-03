@@ -135,9 +135,13 @@ describe('LlmAgent misplaced generation settings', () => {
 
   it('applies the same rejection to a subclass', () => {
     class ChildAgent extends LlmAgent {}
+    const config: LlmAgentConfig & Record<string, unknown> = {
+      name: 'test_agent',
+      temperature: 0.1,
+    };
 
     expect(() => {
-      new ChildAgent({name: 'test_agent', temperature: 0.1} as LlmAgentConfig);
+      new ChildAgent(config);
     }).toThrow(/temperature is a GenerateContentConfig field/);
   });
 });

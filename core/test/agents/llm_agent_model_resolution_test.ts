@@ -42,9 +42,8 @@ class RecordingLiveLlm extends FakeLlm {
       sendHistory: async () => {},
       sendContent: async () => {},
       sendRealtime: async () => {},
-      // eslint-disable-next-line require-yield
       receive: async function* () {
-        return;
+        yield* [];
       },
       close: async () => {},
     };
