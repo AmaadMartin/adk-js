@@ -21,7 +21,6 @@ import {
   vi,
 } from 'vitest';
 import {
-  createInputMissingErrorEvent,
   createTask,
   createTaskArtifactUpdateEvent,
   createTaskCanceledEvent,
@@ -541,9 +540,9 @@ describe('a2a_event', () => {
       });
     });
 
-    it('createInputMissingErrorEvent', () => {
+    it('createTaskInputRequiredEvent carries validation-error parts through', () => {
       expect(
-        createInputMissingErrorEvent({
+        createTaskInputRequiredEvent({
           parts: [
             {kind: 'text', text: 'valid input'},
             {
@@ -582,8 +581,8 @@ describe('a2a_event', () => {
       });
     });
 
-    it('createInputMissingErrorEvent keeps an explicit paused state', () => {
-      const event = createInputMissingErrorEvent({
+    it('createTaskInputRequiredEvent keeps an explicit paused state', () => {
+      const event = createTaskInputRequiredEvent({
         parts: [{kind: 'text', text: 'no input provided'}],
         taskId: 't1',
         contextId: 'c1',
@@ -644,11 +643,12 @@ describe('a2a_event', () => {
       expect(event.status.message?.messageId).toBe(PROVIDER_ID);
     });
 
-    it('createInputMissingErrorEvent takes its messageId from the provider', () => {
-      const event = createInputMissingErrorEvent({
+    it('createTaskInputRequiredEvent takes its messageId from the provider for a paused state', () => {
+      const event = createTaskInputRequiredEvent({
         taskId: 't1',
         contextId: 'c1',
         parts: [{kind: 'text', text: 'valid input'}],
+        state: 'auth-required',
       });
 
       expect(event.status.message?.messageId).toBe(PROVIDER_ID);

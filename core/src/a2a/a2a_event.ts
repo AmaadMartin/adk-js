@@ -40,7 +40,10 @@ export enum TaskState {
  * A2A event.
  */
 export type A2AEvent =
-  Task | Message | TaskStatusUpdateEvent | TaskArtifactUpdateEvent;
+  | Task
+  | Message
+  | TaskStatusUpdateEvent
+  | TaskArtifactUpdateEvent;
 
 /**
  * Checks if the event is an A2A TaskStatusUpdateEvent.
@@ -358,53 +361,27 @@ export function createTaskFailedEvent({
 }
 
 /**
- * Creates an input required event.
+ * Creates an input-required status update.
+ *
+ * A2A has one `input-required` state, so every reason an agent can pause for a
+ * human produces the same status update: a long-running tool asking for input,
+ * and a client message that left an earlier request unanswered. What separates
+ * them travels in `parts` — a validation failure carries a text part marked
+ * `validation_error` — not in the shape of the event, so both go through here.
+ *
+ * A task that paused for a credential stays in `auth-required`, so a caller
+ * that knows the state the task paused in passes it in `state`.
  */
 export function createTaskInputRequiredEvent({
   taskId,
   contextId,
   parts,
   metadata,
-}: {
-  taskId: string;
-  contextId: string;
-  parts: A2APart[];
-  metadata?: Record<string, unknown>;
-}): TaskStatusUpdateEvent {
-  return {
-    kind: 'status-update',
-    taskId,
-    contextId,
-    final: true,
-    status: {
-      state: TaskState.INPUT_REQUIRED,
-      message: {
-        kind: 'message',
-        messageId: newUuid(),
-        role: 'agent',
-        taskId,
-        contextId,
-        parts,
-      },
-      timestamp: new Date().toISOString(),
-    },
-    metadata,
-  };
-}
-
-/**
- * Creates an error message for missing input for a function call.
- */
-export function createInputMissingErrorEvent({
-  taskId,
-  contextId,
-  parts,
-  metadata,
   state = TaskState.INPUT_REQUIRED,
 }: {
-  parts: A2APart[];
   taskId: string;
   contextId: string;
+  parts: A2APart[];
   metadata?: Record<string, unknown>;
   /** The paused state to keep the task in. */
   state?: A2ATaskState;
