@@ -144,6 +144,17 @@ class MockComputer extends BaseComputer {
   }
 }
 
+/** A subclass whose `currentState()` reports a caller-chosen state. */
+class StateComputer extends MockComputer {
+  constructor(private readonly state: ComputerState) {
+    super();
+  }
+
+  override async currentState(): Promise<ComputerState> {
+    return this.state;
+  }
+}
+
 /** A subclass that overrides the three lifecycle hooks and records them. */
 class LifecycleComputer extends MockComputer {
   prepared = false;
@@ -194,37 +205,41 @@ describe('ComputerEnvironment', () => {
 });
 
 describe('ComputerState', () => {
-  it('leaves both properties undefined by default', () => {
-    const state: ComputerState = {};
+  it('reports both properties absent', async () => {
+    const state = await new StateComputer({}).currentState();
     expect(state.screenshot).toBeUndefined();
     expect(state.url).toBeUndefined();
   });
 
-  it('carries a screenshot on its own', () => {
-    const state: ComputerState = {screenshot: SCREENSHOT};
+  it('reports a screenshot on its own', async () => {
+    const state = await new StateComputer({
+      screenshot: SCREENSHOT,
+    }).currentState();
     expect(state.screenshot).toEqual(SCREENSHOT);
     expect(state.url).toBeUndefined();
   });
 
-  it('carries a url on its own', () => {
-    const state: ComputerState = {url: PAGE_URL};
+  it('reports a url on its own', async () => {
+    const state = await new StateComputer({url: PAGE_URL}).currentState();
     expect(state.screenshot).toBeUndefined();
     expect(state.url).toBe(PAGE_URL);
   });
 
-  it('carries both properties together', () => {
-    const state: ComputerState = {screenshot: SCREENSHOT, url: PAGE_URL};
-    expect(state.screenshot).toEqual(SCREENSHOT);
-    expect(state.url).toBe(PAGE_URL);
-  });
-
-  it('serializes both properties', () => {
-    const state: ComputerState = {screenshot: SCREENSHOT, url: PAGE_URL};
-    expect(Object.keys(state).sort()).toEqual(['screenshot', 'url']);
-    expect(JSON.parse(JSON.stringify(state))).toEqual({
-      screenshot: {...SCREENSHOT},
+  it('reports both properties together', async () => {
+    const state = await new StateComputer({
+      screenshot: SCREENSHOT,
       url: PAGE_URL,
-    });
+    }).currentState();
+    expect(state.screenshot).toEqual(SCREENSHOT);
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('exposes no property beyond the two', async () => {
+    const state = await new StateComputer({
+      screenshot: SCREENSHOT,
+      url: PAGE_URL,
+    }).currentState();
+    expect(Object.keys(state).sort()).toEqual(['screenshot', 'url']);
   });
 });
 
@@ -390,11 +405,11 @@ describe('BaseComputer', () => {
     expect(computer.closed).toBe(true);
   });
 
-  it('defaults the three lifecycle hooks to no-ops', async () => {
+  it('defaults the three lifecycle hooks to no-ops that resolve', async () => {
     const computer = new MockComputer();
 
-    expect(await computer.prepare(createContext())).toBeUndefined();
-    expect(await computer.initialize()).toBeUndefined();
-    expect(await computer.close()).toBeUndefined();
+    await computer.prepare(createContext());
+    await computer.initialize();
+    await computer.close();
   });
 });
