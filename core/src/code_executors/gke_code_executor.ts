@@ -185,6 +185,21 @@ function isApiException(error: unknown): error is ApiException<unknown> {
 }
 
 /**
+ * Returns whether `error` is a non-200 response reported by `Watch`, which
+ * raises a plain `Error` carrying the status code instead of an
+ * {@link ApiException}. Its message is already the reason, e.g. `'Forbidden'`.
+ */
+function isWatchHttpError(
+  error: unknown,
+): error is Error & {statusCode: number} {
+  return (
+    error instanceof Error &&
+    'statusCode' in error &&
+    typeof error.statusCode === 'number'
+  );
+}
+
+/**
  * Extracts a human-readable reason from a Kubernetes API error.
  *
  * `ApiException` carries no `reason` of its own, unlike Python's client. The
@@ -415,11 +430,11 @@ function errorResult(stderr: string): CodeExecutionResult {
 }
 
 /**
- * Returns whether `error` should be treated as a sandbox execution timeout.
+ * Returns whether `error` should be treated as an execution timeout.
  *
  * Covers both the explicit {@link SandboxTimeoutError} and standard Node
  * timeouts, such as `AbortSignal.timeout`, whose error is named
- * `'TimeoutError'`.
+ * `'TimeoutError'`. `Watch` reports its own connection cap as the latter.
  */
 function isTimeoutError(error: unknown): error is Error {
   return (
@@ -595,6 +610,9 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
       if (isApiException(err)) {
         return errorResult(`Kubernetes API error: ${getApiErrorReason(err)}`);
       }
+      if (isWatchHttpError(err)) {
+        return errorResult(`Kubernetes API error: ${err.message}`);
+      }
       const message = err instanceof Error ? err.message : String(err);
       return errorResult(`An unexpected executor error occurred: ${message}`);
     }
@@ -630,8 +648,17 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
   /**
    * Watches the Job over one connection.
    *
+   * `Watch` ends a connection three ways, and only two of them are worth
+   * retrying. A clean close and the client's own connection cap both mean the
+   * Job is simply still running. Anything else -- a 403 from a ServiceAccount
+   * without `watch` on `batch/jobs`, a 5xx, a refused connection -- is a real
+   * failure that returns in milliseconds, so retrying it spins against the API
+   * server and hides the cause behind a timeout. Those are thrown instead, and
+   * reported the way adk-python reports them.
+   *
    * @return The terminal state the Job reached, or undefined when the
    *   connection closed before it reached one.
+   * @throws The error `Watch` ended the connection with, when it failed.
    */
   private async watchOnce(
     watcher: GkeJobWatcher,
@@ -639,6 +666,7 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
     timeoutSeconds: number,
   ): Promise<JobOutcome | undefined> {
     let outcome: JobOutcome | undefined;
+    let failure: unknown;
     let stop = () => {};
     const stopped = new Promise<void>((resolve) => {
       stop = resolve;
@@ -653,12 +681,18 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
           stop();
         }
       },
-      stop,
+      (err) => {
+        failure = err;
+        stop();
+      },
     );
     try {
       await stopped;
     } finally {
       controller.abort();
+    }
+    if (!outcome && failure && !isTimeoutError(failure)) {
+      throw failure;
     }
     return outcome;
   }

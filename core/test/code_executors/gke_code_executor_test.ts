@@ -124,6 +124,31 @@ function makeWatcher(connections: V1Job[][]): FakeWatcher {
   };
 }
 
+/** Attempts a failing watcher allows before it forces the deadline to pass. */
+const MAX_FAILING_ATTEMPTS = 5;
+
+/**
+ * Builds a watcher whose every connection ends with `error` and no Job event.
+ * After {@link MAX_FAILING_ATTEMPTS} it pushes the clock past a one-second
+ * deadline, so a regression that retries a failing watch ends the test with a
+ * failed assertion rather than spinning until the runner gives up.
+ */
+function makeFailingWatcher(error: unknown): FakeWatcher {
+  let attempts = 0;
+  return {
+    watch: vi
+      .fn<GkeJobWatcher['watch']>()
+      .mockImplementation(async (_path, _query, _callback, done) => {
+        attempts += 1;
+        if (attempts >= MAX_FAILING_ATTEMPTS) {
+          vi.advanceTimersByTime(2_000);
+        }
+        done(error);
+        return new AbortController();
+      }),
+  };
+}
+
 const SUCCEEDED_JOB: V1Job = {status: {succeeded: 1}};
 const FAILED_JOB: V1Job = {status: {failed: 1}};
 const RUNNING_JOB: V1Job = {status: {active: 1}};
@@ -601,6 +626,55 @@ describe('GkeCodeExecutor', () => {
       expect(result.stdout).toBe('hello world');
       expect(result.stderr).toBe('');
       expect(watcher.watch).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps watching when the client closes a connection at its cap', async () => {
+      let attempt = 0;
+      watcher.watch.mockImplementation(
+        async (_path, _query, callback, done) => {
+          if (attempt++ === 0) {
+            vi.advanceTimersByTime(WATCH_CONNECTION_MS);
+            done(
+              new DOMException(
+                'The operation was aborted due to timeout',
+                'TimeoutError',
+              ),
+            );
+          } else {
+            callback('MODIFIED', SUCCEEDED_JOB);
+          }
+          return new AbortController();
+        },
+      );
+
+      const result = await executeWith(newExecutor({timeoutSeconds: 300}));
+
+      expect(result.stdout).toBe('hello world');
+      expect(watcher.watch).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports a watch the API server rejects, without retrying', async () => {
+      watcher = makeFailingWatcher(
+        Object.assign(new Error('Forbidden'), {statusCode: 403}),
+      );
+
+      const result = await executeWith(newExecutor({timeoutSeconds: 1}));
+
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe('Kubernetes API error: Forbidden');
+      expect(result.exitCode).toBeUndefined();
+      expect(watcher.watch).toHaveBeenCalledOnce();
+    });
+
+    it('reports a watch that cannot reach the API server', async () => {
+      watcher = makeFailingWatcher(new Error('fetch failed'));
+
+      const result = await executeWith(newExecutor({timeoutSeconds: 1}));
+
+      expect(result.stderr).toBe(
+        'An unexpected executor error occurred: fetch failed',
+      );
+      expect(watcher.watch).toHaveBeenCalledOnce();
     });
 
     it('ignores non-terminal Job events on the same connection', async () => {
