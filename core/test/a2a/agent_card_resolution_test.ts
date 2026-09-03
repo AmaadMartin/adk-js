@@ -91,15 +91,15 @@ describe('resolveAgentCard', () => {
   });
 
   it('sends no headers when the caller supplied none', async () => {
-    let sent: Headers | undefined;
+    let sent: HeadersInit | undefined;
     const fetchImpl: typeof fetch = async (_input, init) => {
-      sent = new Headers(init?.headers);
+      sent = init?.headers;
       return jsonResponse(CARD);
     };
 
     await resolveAgentCard('https://peer.example.com', {fetchImpl});
 
-    expect([...(sent?.keys() ?? [])]).toEqual([]);
+    expect(sent).toBeUndefined();
   });
 
   it('reports an http error status as a resolution error', async () => {
