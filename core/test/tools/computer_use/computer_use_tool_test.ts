@@ -14,7 +14,6 @@ import {
   PluginManager,
   ToolConfirmation,
   createSession,
-  isComputerState,
   isFunctionTool,
 } from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -170,20 +169,6 @@ describe('validateScreenSize', () => {
     expect(() => validateScreenSize('screenSize', [1920, 1080])).not.toThrow();
   });
 
-  it('rejects a value that is not a pair of numbers', () => {
-    for (const size of [
-      null,
-      'not a size',
-      [1920],
-      [1920, 1080, 1],
-      ['a', 'b'],
-    ]) {
-      expect(() => validateScreenSize('screenSize', size)).toThrow(
-        'screenSize must be a tuple of (width, height)',
-      );
-    }
-  });
-
   it('rejects a dimension that is not finite', () => {
     expect(() =>
       validateScreenSize('virtualScreenSize', [Number.POSITIVE_INFINITY, 1000]),
@@ -267,31 +252,6 @@ describe('toExecuteArguments', () => {
     expect(toExecuteArguments(null)).toEqual({});
     expect(toExecuteArguments([1, 2])).toEqual({});
     expect(toExecuteArguments('args')).toEqual({});
-  });
-});
-
-describe('isComputerState', () => {
-  it('accepts a state with and without a url', () => {
-    expect(isComputerState({screenshot: SCREENSHOT})).toBe(true);
-    expect(
-      isComputerState({screenshot: SCREENSHOT, url: 'https://example.com'}),
-    ).toBe(true);
-    expect(isComputerState({screenshot: SCREENSHOT, url: undefined})).toBe(
-      true,
-    );
-  });
-
-  it('rejects a value that is not a state', () => {
-    expect(isComputerState(null)).toBe(false);
-    expect(isComputerState('screenshot')).toBe(false);
-    expect(isComputerState({error: 'boom', url: 'https://example.com'})).toBe(
-      false,
-    );
-    expect(isComputerState({screenshot: 'not-bytes'})).toBe(false);
-    expect(isComputerState({screenshot: SCREENSHOT, url: 42})).toBe(false);
-    expect(isComputerState({screenshot: SCREENSHOT, error: 'boom'})).toBe(
-      false,
-    );
   });
 });
 

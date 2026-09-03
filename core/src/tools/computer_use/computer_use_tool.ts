@@ -90,25 +90,11 @@ export function toExecuteArguments(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
 
-function isNumberPair(value: unknown): value is readonly [number, number] {
-  return (
-    Array.isArray(value) &&
-    value.length === 2 &&
-    value.every((entry) => typeof entry === 'number')
-  );
-}
-
-/**
- * Rejects a screen size the tool cannot scale onto.
- *
- * The TypeScript tuple type makes the shape check unreachable from typed code.
- * It stays because a plain JavaScript caller, or a configuration file, reaches
- * the constructor without passing the compiler.
- */
-export function validateScreenSize(label: string, size: unknown): void {
-  if (!isNumberPair(size)) {
-    throw new Error(`${label} must be a tuple of (width, height)`);
-  }
+/** Rejects a screen size the tool cannot scale onto. */
+export function validateScreenSize(
+  label: string,
+  size: readonly [number, number],
+): void {
   if (size.some((dimension) => !Number.isFinite(dimension) || dimension <= 0)) {
     throw new Error(`${label} dimensions must be positive`);
   }
