@@ -453,22 +453,6 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 }
 
 /**
- * Returns the validated structured output a `set_model_response` call produced,
- * or `undefined` when the event carries no such call or the call failed
- * validation.
- *
- * Mirrors Python
- * `flows/llm_flows/_output_schema_processor.get_structured_model_response`,
- * returning the value rather than a pre-stringified payload.
- */
-function getStructuredModelResponse(functionResponseEvent: Event): unknown {
-  const responded = getFunctionResponses(functionResponseEvent).some(
-    (response) => response.name === SET_MODEL_RESPONSE_TOOL_NAME,
-  );
-  return responded ? functionResponseEvent.actions.setModelResponse : undefined;
-}
-
-/**
  * An agent that uses a large language model to generate responses.
  */
 export class LlmAgent extends BaseAgent<LlmAgentConfig> {
@@ -1765,9 +1749,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // the final model event from it, as adk-python's base_llm_flow does. A
     // failed call sets nothing, so the error reaches the model as a function
     // response and the loop runs another step -- that is the retry path.
-    const structuredResponse = getStructuredModelResponse(
-      functionResponseEvent,
-    );
+    const structuredResponse = functionResponseEvent.actions.setModelResponse;
     if (structuredResponse !== undefined) {
       yield createEvent({
         invocationId: invocationContext.invocationId,
