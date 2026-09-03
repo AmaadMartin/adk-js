@@ -90,6 +90,8 @@ documentation, visit [adk.dev](https://adk.dev/).
   invocations with a judge model, and how sampling, parallelism and a failed
   sample are handled.
 - [ResponseEvaluator](evaluation/response_evaluator/index.md) - Scoring an agent's final answer against a golden answer, or against the Vertex AI coherence metric.
+- [SafetyEvaluatorV1](evaluation/safety_evaluator/index.md) - Scoring how
+  harmless an agent's answer is, with the Vertex AI safety metric.
 - [TrajectoryEvaluator](evaluation/tool_trajectory/index.md) - Scoring the tool
   calls an agent made against a golden trajectory.
 - [Choosing the user simulator](evaluation/user_simulator/index.md) - Replaying

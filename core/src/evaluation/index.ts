@@ -8,8 +8,8 @@
  * The ADK evaluation module (a parity port of `google/adk-python`'s
  * `google/adk/evaluation`). It currently covers the eval case data model, the
  * accessors that read a recorded trajectory, the contract every metric
- * evaluator implements, and the `ResponseEvaluator` and `LlmAsJudge`
- * evaluators that stand on it.
+ * evaluator implements, and the `ResponseEvaluator`, `LlmAsJudge` and
+ * `SafetyEvaluatorV1` evaluators that stand on it.
  */
 
 export type {AgentDetails, AppDetails} from './app_details.js';
@@ -75,6 +75,8 @@ export {ResponseEvaluator} from './response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './rouge_scorer.js';
 export type {RougeScore} from './rouge_scorer.js';
+export {SafetyEvaluatorV1} from './safety_evaluator.js';
+export type {SafetyEvaluatorV1Options} from './safety_evaluator.js';
 export type {
   UserBehavior,
   UserPersona,
