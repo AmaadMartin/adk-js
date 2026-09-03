@@ -114,7 +114,7 @@ describe('createToolConfig', () => {
 
   it('rejects an unknown top-level key', () => {
     expect(() => createToolConfig({name: 'google_search', arg: {}})).toThrow(
-      /unknown key\(s\): arg\./,
+      /ToolConfig: Unrecognized key: "arg"/,
     );
   });
 
@@ -123,24 +123,26 @@ describe('createToolConfig', () => {
       createToolConfig({name: 'google_search', arg: {}, nmae: 'x'});
 
     expect(declare).toThrow(InputValidationError);
-    expect(declare).toThrow('ToolConfig received unknown key(s): arg, nmae.');
+    expect(declare).toThrow('ToolConfig: Unrecognized keys: "arg", "nmae"');
   });
 
   it('rejects a key that only Object.prototype declares', () => {
     const declared = JSON.parse('{"name": "google_search", "toString": 1}');
 
     expect(() => createToolConfig(declared)).toThrow(
-      /unknown key\(s\): toString\./,
+      /ToolConfig: Unrecognized key: "toString"/,
     );
   });
 
   it('rejects a declaration without a name', () => {
-    expect(() => createToolConfig({args: {}})).toThrow(/`name` is required/);
+    expect(() => createToolConfig({args: {}})).toThrow(
+      /name: Invalid input: expected string, received undefined/,
+    );
   });
 
   it('rejects a name that is not a string', () => {
     expect(() => createToolConfig({name: 123})).toThrow(
-      /`name` must be a string/,
+      /name: Invalid input: expected string, received number/,
     );
   });
 
@@ -156,7 +158,7 @@ describe('createToolConfig', () => {
     ['a function', () => 'google_search'],
   ])('rejects %s as a declaration', (_label, declared) => {
     expect(() => createToolConfig(declared)).toThrow(
-      /ToolConfig must be a non-null object/,
+      /ToolConfig: Invalid input: expected object, received/,
     );
   });
 
@@ -165,7 +167,7 @@ describe('createToolConfig', () => {
     ['an array', []],
   ])('rejects %s as args', (_label, args) => {
     expect(() => createToolConfig({name: 'VertexAiSearchTool', args})).toThrow(
-      /`args` must be an object/,
+      /args: Invalid input: expected object, received/,
     );
   });
 });
