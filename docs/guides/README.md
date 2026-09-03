@@ -30,6 +30,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [ParallelAgent config documents](agents/parallel_agent_config/index.md) - Validating a ParallelAgent configuration document, with the same verdict ADK Python gives.
 - [Per-run request configuration](agents/request_config/index.md) - How `RunConfig` and the agent's own `generateContentConfig` combine into one model request.
 - [ReadonlyContext](agents/readonly_context/index.md) - The read-only view of an invocation given to instruction providers, toolsets and plugins.
+- [SequentialAgent config documents](agents/sequential_agent_config/index.md) -
+  Validating a `SequentialAgent` configuration document before it reaches your
+  code.
 - [SequentialAgent resumability](agents/sequential_agent/index.md) - Checkpointing a sequential pipeline so it resumes where it stopped, and pausing it on a human-in-the-loop call.
 - [SingleFlow](agents/single_flow/index.md) - The standard request and response processor pipeline an LlmAgent runs, and how to extend it.
 - [Static instructions](agents/static_instruction/index.md) - Sending a fixed prompt prefix verbatim, and where the dynamic instruction goes instead.

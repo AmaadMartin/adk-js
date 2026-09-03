@@ -147,6 +147,11 @@ export type {
 } from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {SequentialAgentState} from './agents/sequential_agent.js';
+// As with the LlmAgent and ParallelAgent loaders above: the deprecated
+// `agents/agent_config.ts` already exports `SequentialAgentYamlConfig` into
+// this flat barrel, so the declarative loader takes a distinct name here.
+export {parseSequentialAgentYamlConfig} from './agents/sequential_agent_config.js';
+export type {SequentialAgentYamlConfig as DeclarativeSequentialAgentConfig} from './agents/sequential_agent_config.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
 export {getTransferTargets} from './agents/transfer_utils.js';
 export {
