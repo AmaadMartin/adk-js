@@ -52,9 +52,8 @@ export interface ToolTrajectoryCriterion extends BaseCriterion {
 }
 
 /**
- * A {@link ToolTrajectoryCriterion} that {@link parseToolTrajectoryCriterion}
- * has validated, so its match type is a member of the enum and its
- * `ignoreArgs` is set.
+ * A {@link ToolTrajectoryCriterion} that has been validated, so its match type
+ * is a member of the enum and its `ignoreArgs` is set.
  */
 export interface ParsedToolTrajectoryCriterion extends ToolTrajectoryCriterion {
   matchType: ToolTrajectoryMatchType;
