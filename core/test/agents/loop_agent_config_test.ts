@@ -7,13 +7,11 @@
 import {
   FeatureName,
   InputValidationError,
+  loopAgentYamlConfigSchema,
   parseLoopAgentYamlConfig,
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-// The schema stays out of the package surface, so the test reaches for it
-// here: it skips the guards that the parse entry point applies.
-import {loopAgentYamlConfigSchema} from '../../src/agents/loop_agent_config.js';
 import {resetDeprecationWarnings} from '../../src/utils/deprecated.js';
 import {logger} from '../../src/utils/logger.js';
 

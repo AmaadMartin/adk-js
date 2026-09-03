@@ -9,45 +9,13 @@ import {InputValidationError} from '../errors/input_validation_error.js';
 import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {warnDeprecatedOnce} from '../utils/deprecated.js';
+import {agentRefConfigSchema, codeConfigSchema} from './common_configs.js';
 
 /** Wording taken from the `@deprecated` decorator on the Python class. */
 const DEPRECATION_MESSAGE =
   'LoopAgentConfig is deprecated and will be removed in future versions. ' +
   'Config is now loaded via reflection so the separate config class is no ' +
   'longer needed.';
-
-/**
- * Ports `CodeConfig`: a variable, function or class referenced by its fully
- * qualified name.
- */
-const codeRefSchema = z.strictObject({name: z.string()});
-
-/**
- * Ports `AgentRefConfig`: a sub-agent named either by config file or by code
- * reference, never both.
- */
-const agentRefSchema = z
-  .strictObject({
-    configPath: z.string().optional(),
-    code: z.string().optional(),
-  })
-  .check((ctx) => {
-    const hasCode = ctx.value.code !== undefined;
-    const hasConfigPath = ctx.value.configPath !== undefined;
-    if (hasCode && hasConfigPath) {
-      ctx.issues.push({
-        code: 'custom',
-        input: ctx.value,
-        message: 'Only one of `code` or `config_path` should be provided',
-      });
-    } else if (!hasCode && !hasConfigPath) {
-      ctx.issues.push({
-        code: 'custom',
-        input: ctx.value,
-        message: 'Exactly one of `code` or `config_path` must be provided',
-      });
-    }
-  });
 
 /**
  * Validates a `LoopAgent` config document.
@@ -61,6 +29,10 @@ const agentRefSchema = z
  * camelCase; both validate to the same camelCase config. Unknown keys are
  * rejected, which is what adk-python's `extra="forbid"` does.
  *
+ * The schema validates and nothing else. {@link parseLoopAgentYamlConfig} is
+ * the entry point that also warns the deprecation and checks the
+ * `AGENT_CONFIG` feature.
+ *
  * @experimental
  * @deprecated Config is now loaded via reflection, so the separate config
  *   schema is no longer needed.
@@ -72,39 +44,24 @@ export const loopAgentYamlConfigSchema = z.preprocess(
     name: z.string(),
     description: z.string().default(''),
     maxIterations: z.int().optional(),
-    subAgents: z.array(agentRefSchema).optional(),
-    beforeAgentCallbacks: z.array(codeRefSchema).optional(),
-    afterAgentCallbacks: z.array(codeRefSchema).optional(),
+    subAgents: z.array(agentRefConfigSchema).optional(),
+    beforeAgentCallbacks: z.array(codeConfigSchema).optional(),
+    afterAgentCallbacks: z.array(codeConfigSchema).optional(),
   }),
 );
 
 /**
  * A validated `LoopAgent` config document.
  *
- * Declared rather than inferred, so the package surface does not depend on the
- * schema. {@link parseLoopAgentYamlConfig} returns what the schema produced as
- * this type, so a field the schema drops or retypes fails to compile.
+ * `agentClass` and `description` always carry a value, because the schema
+ * defaults them. Every other optional key is absent when the document omits
+ * it.
  *
  * @experimental
  * @deprecated Config is now loaded via reflection, so the separate config
  *   schema is no longer needed.
  */
-export interface LoopAgentYamlConfig {
-  /** Identifies the class. `'LoopAgent'` when the document omits it. */
-  agentClass: string;
-  /** The name of the agent. */
-  name: string;
-  /** The description of the agent. `''` when the document omits it. */
-  description: string;
-  /** How many times the agent repeats its sub-agents. */
-  maxIterations?: number;
-  /** The sub-agents, each named by config file or by code reference. */
-  subAgents?: Array<{configPath?: string; code?: string}>;
-  /** Callbacks to run before the agent, each by fully qualified name. */
-  beforeAgentCallbacks?: Array<{name: string}>;
-  /** Callbacks to run after the agent, each by fully qualified name. */
-  afterAgentCallbacks?: Array<{name: string}>;
-}
+export type LoopAgentYamlConfig = z.infer<typeof loopAgentYamlConfigSchema>;
 
 /**
  * Validates an already-parsed `LoopAgent` config document.
