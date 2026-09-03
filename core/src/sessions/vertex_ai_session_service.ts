@@ -49,6 +49,10 @@ const DEFAULT_MAX_ATTEMPTS = 30;
 const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
 const HTTP_BAD_REQUEST = 400;
+const HTTP_TOO_MANY_REQUESTS = 429;
+const APPEND_MAX_ATTEMPTS = 2;
+const APPEND_RETRY_DELAY_MS = 1000;
+const CREATE_POLL_DELAY_MS = 1000;
 
 /**
  * `eventMetadata.customMetadata` key carrying the workflow fields of an
@@ -81,6 +85,51 @@ export function isVertexAiConnectionString(uri?: string): boolean {
 export function quoteFilterLiteral(value: string): string {
   const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `"${escaped}"`;
+}
+
+/** Resolves after `ms` milliseconds. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * True when the service rejected the request for exceeding its quota, which is
+ * transient and safe to retry.
+ *
+ * Matched structurally on `status` and `code`, for the reason given in
+ * getSession's catch.
+ */
+function isRateLimitError(error: unknown): boolean {
+  const err = error as {code?: number; status?: number} | null;
+  return (
+    err?.status === HTTP_TOO_MANY_REQUESTS ||
+    err?.code === HTTP_TOO_MANY_REQUESTS
+  );
+}
+
+/**
+ * Appends an event, retrying once after {@link APPEND_RETRY_DELAY_MS} when the
+ * service answers 429.
+ *
+ * Only a quota rejection is retried: any other failure may already have
+ * persisted the event, so re-appending would store it twice. The delay runs on
+ * the failure path only, so a successful append is never slowed down.
+ */
+async function appendWithRateLimitRetry(
+  sessions: Sessions,
+  params: AppendAgentEngineSessionEventRequestParameters,
+): Promise<void> {
+  for (let attempt = 1; attempt <= APPEND_MAX_ATTEMPTS; attempt++) {
+    try {
+      await sessions.events.append(params);
+      return;
+    } catch (error: unknown) {
+      if (!isRateLimitError(error) || attempt === APPEND_MAX_ATTEMPTS) {
+        throw error;
+      }
+      await delay(APPEND_RETRY_DELAY_MS);
+    }
+  }
 }
 
 export interface VertexAiSessionServiceOptions {
@@ -205,7 +254,7 @@ export class VertexAiSessionService extends BaseSessionService {
         this.sessions.getSessionOperationInternal({
           operationName: operationName,
         }),
-        new Promise((resolve) => setTimeout(resolve, 1000)),
+        delay(CREATE_POLL_DELAY_MS),
       ]);
       apiResponse = nextResponse;
       attempts++;
@@ -495,7 +544,7 @@ export class VertexAiSessionService extends BaseSessionService {
     };
 
     try {
-      await this.sessions.events.append(params);
+      await appendWithRateLimitRetry(this.sessions, params);
     } catch (error) {
       // Only a rejected payload (400) is safe to retry without `rawEvent`. Any
       // other failure may already have persisted the event, so re-appending
@@ -510,7 +559,7 @@ export class VertexAiSessionService extends BaseSessionService {
         error,
       );
       delete config.rawEvent;
-      await this.sessions.events.append(params);
+      await appendWithRateLimitRetry(this.sessions, params);
     }
 
     return event;
