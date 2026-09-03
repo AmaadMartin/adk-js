@@ -471,7 +471,8 @@ describe('MultiTurnVertexAiEvalFacade', () => {
         response: 'r2',
         intermediateData: {
           invocationEvents: [
-            {author: 'agent1', content: {parts: [{text: 'intermediate'}]}},
+            {author: 'agent1', content: {parts: [{text: 'intermediate 1'}]}},
+            {author: 'agent2', content: {parts: [{text: 'intermediate 2'}]}},
           ],
         },
         agentDetails: {agent1: {name: 'agent1', instructions: 'instructions1'}},
@@ -518,7 +519,8 @@ describe('MultiTurnVertexAiEvalFacade', () => {
     expect(agentData?.turns.map((t) => t.turnIndex)).toEqual([0, 1]);
     expect(agentData?.turns[1].events).toEqual([
       {author: 'user', content: {parts: [{text: 'q2'}]}},
-      {author: 'agent1', content: {parts: [{text: 'intermediate'}]}},
+      {author: 'agent1', content: {parts: [{text: 'intermediate 1'}]}},
+      {author: 'agent2', content: {parts: [{text: 'intermediate 2'}]}},
       {author: 'agent', content: {parts: [{text: 'r2'}]}},
     ]);
   });
