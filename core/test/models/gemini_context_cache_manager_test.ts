@@ -785,6 +785,27 @@ describe('GeminiContextCacheManager.handleContextCaching', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('keeps the recorded prefix when the current one is shorter', async () => {
+    const client = geminiClient();
+    stubCreate(client, {name: 'cachedContents/unused'});
+    const manager = new GeminiContextCacheManager(client);
+    // Every content is a user content, so the current cacheable prefix is
+    // empty while the recorded one covers two.
+    const llmRequest = createLlmRequest({contentsCount: 5});
+    llmRequest.cacheMetadata = {
+      fingerprint: await fingerprintOf(client, llmRequest, 2),
+      contentsCount: 2,
+    };
+
+    const metadata = await manager.handleContextCaching(llmRequest);
+
+    expect(findCountOfContentsToCache(llmRequest.contents)).toBe(0);
+    expect(metadata?.contentsCount).toBe(2);
+    expect(metadata?.fingerprint).toBe(
+      await fingerprintOf(client, llmRequest, 2),
+    );
+  });
+
   it('never shrinks the prefix when the grown one fails to cache', async () => {
     const client = geminiClient();
     stubCreate(client, {name: 'cachedContents/unused'});
