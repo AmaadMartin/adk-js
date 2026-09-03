@@ -323,14 +323,17 @@ export function toMissingRemoteSessionParts(
 
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
-    if (event.author === peerName) {
-      const metadata = event.customMetadata || {};
-      contextId = metadata[AdkMetadataKeys.CONTEXT_ID] as string;
-      if (!fullHistoryWhenStateless || contextId) {
-        lastRemoteResponseIndex = i;
-      }
+    if (event.author !== peerName) {
+      continue;
+    }
+    const metadata = event.customMetadata || {};
+    contextId = metadata[AdkMetadataKeys.CONTEXT_ID] as string | undefined;
+    if (!fullHistoryWhenStateless || contextId) {
+      lastRemoteResponseIndex = i;
       break;
     }
+    // The peer reported no context id for this turn, so it may not hold the
+    // history. An older turn of its own may still have reported one.
   }
 
   const peerRequestedIds = peerRequestedCallIds(events, peerName);

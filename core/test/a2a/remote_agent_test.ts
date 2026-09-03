@@ -25,6 +25,7 @@ import {
   Session,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {createSession} from '../../src/sessions/session.js';
 import {
   QUOTED_CONTENT_BEGIN,
   QUOTED_CONTENT_END,
@@ -190,6 +191,56 @@ describe('A2ARemoteAgent', () => {
       /Failed to initialize remote A2A agent: .*must have the same origin/,
     );
     expect(mockClientFactory.createFromAgentCard).not.toHaveBeenCalled();
+  });
+
+  it('takes the context id from an older peer turn that reported one', async () => {
+    vi.mocked(mockResolver.resolve).mockResolvedValue(peerCard());
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: 'https://example.com/card.json',
+      clientFactory: mockClientFactory,
+      fullHistoryWhenStateless: true,
+    });
+    let sentContextId: string | undefined;
+    vi.mocked(mockClient.sendMessageStream).mockImplementation((params) => {
+      sentContextId = params.message.contextId;
+      return (async function* () {})();
+    });
+
+    const statefulTurn = createEvent({
+      author: 'test-agent',
+      content: {role: 'model', parts: [{text: 'earlier'}]},
+      customMetadata: {'a2a:context_id': 'ctx-old'},
+    });
+    const statelessTurn = createEvent({
+      author: 'test-agent',
+      content: {role: 'model', parts: [{text: 'later'}]},
+    });
+    const context = createMockContext({
+      session: createSession({
+        id: 'test-session',
+        userId: 'test-user',
+        appName: 'test-app',
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello'}]},
+          }),
+          statefulTurn,
+          statelessTurn,
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'follow up'}]},
+          }),
+        ],
+      }),
+    });
+
+    for await (const _ of agent.runAsync(context)) {
+      // drain
+    }
+
+    expect(sentContextId).toBe('ctx-old');
   });
 
   it('re-validates a rejected card on every call instead of caching it', async () => {

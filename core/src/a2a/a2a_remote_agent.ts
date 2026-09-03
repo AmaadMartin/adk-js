@@ -507,6 +507,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         ctx,
       ),
       timeoutMs: this.timeoutMs,
+      signal: this.lifetime.signal,
       fetchImpl: this.a2aConfig.fetchImpl,
     });
   }
