@@ -13,6 +13,7 @@ import {
 } from '@google/genai';
 
 import {AppDetails} from './app_details.js';
+import {Rubric} from './eval_rubrics.js';
 
 /**
  * Intermediate data an agent produces on its way to a final answer.
@@ -76,6 +77,9 @@ export interface Invocation {
 
   /** Details about the app that served this invocation. */
   appDetails?: AppDetails;
+
+  /** Rubrics applicable to this invocation only. */
+  rubrics?: Rubric[];
 }
 
 /** Values that initialize the session an eval case runs in. */
@@ -111,6 +115,9 @@ export interface EvalCase {
 
   /** The expected session state at the end of the conversation. */
   finalSessionState?: Record<string, unknown>;
+
+  /** Rubrics applicable to every invocation of this eval case. */
+  rubrics?: Rubric[];
 }
 
 /** Returns true when the intermediate data is a list of invocation events. */

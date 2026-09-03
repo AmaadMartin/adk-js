@@ -25,6 +25,7 @@ import {
   InvocationEvent,
   SessionInput,
 } from './eval_case.js';
+import {Rubric} from './eval_rubrics.js';
 import {EvalSet} from './eval_set.js';
 
 /**
@@ -136,7 +137,36 @@ function parseEvalCase(raw: unknown): EvalCase {
     finalSessionState: isRecord(raw['finalSessionState'])
       ? raw['finalSessionState']
       : undefined,
+    rubrics: parseRubrics(raw['rubrics']),
   };
+}
+
+/**
+ * Reads a list of rubrics, dropping any entry that carries no `rubric_id`.
+ *
+ * A rubric is addressed by its id when it is scored and when it is copied onto
+ * an invocation, so an entry without one cannot be used at all.
+ */
+function parseRubrics(value: unknown): Rubric[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const rubrics: Rubric[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw) || typeof raw['rubricId'] !== 'string') {
+      continue;
+    }
+    const rubricContent = raw['rubricContent'];
+    rubrics.push({
+      rubricId: raw['rubricId'],
+      rubricContent: isRecord(rubricContent)
+        ? {textProperty: optionalString(rubricContent['textProperty'])}
+        : {},
+      description: optionalString(raw['description']),
+      type: optionalString(raw['type']),
+    });
+  }
+  return rubrics;
 }
 
 function parseSessionInput(raw: unknown): SessionInput | undefined {
@@ -167,6 +197,7 @@ function parseInvocation(raw: unknown): Invocation {
     finalResponse: asContent(raw['finalResponse']),
     intermediateData: asIntermediateData(raw['intermediateData']),
     creationTimestamp: numberOrZero(raw['creationTimestamp']),
+    rubrics: parseRubrics(raw['rubrics']),
   };
 }
 

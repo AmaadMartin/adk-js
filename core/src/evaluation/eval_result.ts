@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Session} from '../sessions/session.js';
 import {
   EvalMetricResult,
   EvalMetricResultPerInvocation,
@@ -32,4 +33,17 @@ export interface EvalCaseResult {
   overallEvalMetricResults?: EvalMetricResult[];
 
   evalMetricResultPerInvocation: EvalMetricResultPerInvocation[];
+
+  /**
+   * The inference session this result was produced in, empty when there was
+   * none. adk-python makes the field required and the two SDKs read each
+   * other's result files, so an eval service always sets it.
+   */
+  sessionId?: string;
+
+  /** The session as it stood after inference, when the service could load it. */
+  sessionDetails?: Session;
+
+  /** The user id inference ran under. */
+  userId?: string;
 }
